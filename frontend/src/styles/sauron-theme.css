@@ -1,0 +1,31 @@
+/**
+ * SAURON VISION — Dark Hacker Theme
+ * TODO: Implement full dark UI with particle backgrounds
+ */
+
+:root {
+  --sauron-bg-primary: #0a0a0f;
+  --sauron-bg-secondary: #12121a;
+  --sauron-bg-card: #1a1a25;
+  --sauron-border: #2a2a3a;
+  --sauron-text-primary: #e0e0e8;
+  --sauron-text-secondary: #8888a0;
+  --sauron-accent-red: #ff3333;
+  --sauron-accent-green: #33ff88;
+  --sauron-accent-gold: #ffaa33;
+  --sauron-accent-blue: #3388ff;
+  --sauron-glow: 0 0 20px rgba(255, 51, 51, 0.3);
+}
+
+body {
+  background-color: var(--sauron-bg-primary);
+  color: var(--sauron-text-primary);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  margin: 0;
+  padding: 0;
+}
+
+.sauron-app {
+  min-height: 100vh;
+  position: relative;
+}

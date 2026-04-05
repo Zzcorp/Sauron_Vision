@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}News & Sentiment — Sauron Vision{% endblock %}
+{% block page_title %}▤ NEWS & SENTIMENT{% endblock %}
+
+{% block content %}
+<div class="card fade-in-up">
+    <div class="card-header">
+        <span class="card-title">News Feed</span>
+    </div>
+    {% if articles %}
+    <div class="table-wrapper">
+    <table>
+        <thead><tr><th>Time</th><th>Source</th><th>Title</th><th>Sentiment</th><th>Urgency</th><th>Instruments</th></tr></thead>
+        <tbody>
+        {% for a in articles %}
+        <tr>
+            <td style="font-size: 11px; color: var(--text-muted); white-space: nowrap;">{{ a.published_at|date:"M d H:i" }}</td>
+            <td style="font-size: 12px;">{{ a.source }}</td>
+            <td><a href="{{ a.url }}" target="_blank" style="color: var(--text-primary); text-decoration: none;">{{ a.title|truncatechars:70 }}</a></td>
+            <td>
+                {% if a.ai_sentiment_score != None %}
+                <span style="font-family: var(--font-mono); color: {% if a.ai_sentiment_score > 0.2 %}var(--accent-green){% elif a.ai_sentiment_score < -0.2 %}var(--accent-red){% else %}var(--text-secondary){% endif %};">
+                    {{ a.ai_sentiment_score|floatformat:2 }}
+                </span>
+                {% else %}<span style="color: var(--text-muted);">—</span>{% endif %}
+            </td>
+            <td>{% if a.ai_urgency %}<span class="badge badge-{{ a.ai_urgency }}">{{ a.ai_urgency }}</span>{% else %}—{% endif %}</td>
+            <td style="font-family: var(--font-mono); font-size: 11px;">
+                {% for inst in a.ai_affected_instruments.all %}{{ inst.symbol }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">▤</div>
+        <p>NO NEWS — Scraper fetches news every 3 minutes during market hours</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

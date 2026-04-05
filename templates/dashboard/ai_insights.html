@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}AI Insights — Sauron Vision{% endblock %}
+{% block page_title %}◬ AI INTELLIGENCE{% endblock %}
+
+{% block content %}
+<div class="grid grid-4" style="margin-bottom: 24px;">
+    <div class="stat-box fade-in-up delay-1">
+        <div class="stat-label">Total Tasks (24h)</div>
+        <div class="stat-value">{{ tasks_24h|default:"0" }}</div>
+    </div>
+    <div class="stat-box fade-in-up delay-2">
+        <div class="stat-label">Success Rate</div>
+        <div class="stat-value" style="color: var(--accent-green);">{{ success_rate|default:"0" }}%</div>
+    </div>
+    <div class="stat-box fade-in-up delay-3">
+        <div class="stat-label">API Cost (24h)</div>
+        <div class="stat-value">${{ cost_24h|default:"0.00" }}</div>
+    </div>
+    <div class="stat-box fade-in-up delay-4">
+        <div class="stat-label">Avg Response</div>
+        <div class="stat-value">{{ avg_duration|default:"0.0" }}s</div>
+    </div>
+</div>
+
+<!-- Latest Briefing -->
+<div class="card fade-in-up delay-3" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Latest AI Briefing</span></div>
+    {% if latest_briefing %}
+    <div style="font-size: 14px; line-height: 1.8; white-space: pre-wrap;">{{ latest_briefing.structured_output.review|default:latest_briefing.response_summary|truncatechars:2000 }}</div>
+    {% else %}
+    <div class="empty-state" style="padding: 30px;">
+        <p>NO BRIEFING YET — Daily briefing generates at 06:00 UTC</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Recent Agent Tasks -->
+<div class="card fade-in-up delay-4">
+    <div class="card-header">
+        <span class="card-title">Recent Agent Tasks</span>
+        <a href="{% url 'ai_tasks_list' %}" class="btn btn-sm">View All →</a>
+    </div>
+    {% if recent_tasks %}
+    <div class="table-wrapper">
+    <table>
+        <thead><tr><th>Time</th><th>Agent</th><th>Provider</th><th>Model</th><th>Status</th><th>Duration</th><th>Tokens</th><th>Cost</th></tr></thead>
+        <tbody>
+        {% for t in recent_tasks %}
+        <tr>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ t.created_at|date:"M d H:i" }}</td>
+            <td style="font-family: var(--font-mono);">{{ t.agent }}</td>
+            <td>{{ t.provider }}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ t.model|truncatechars:25 }}</td>
+            <td>{% if t.success %}<span style="color: var(--accent-green);">● OK</span>{% else %}<span style="color: var(--accent-red);">● FAIL</span>{% endif %}</td>
+            <td style="font-family: var(--font-mono);">{{ t.duration_seconds|floatformat:1 }}s</td>
+            <td style="font-family: var(--font-mono); font-size: 11px;">{{ t.input_tokens }}→{{ t.output_tokens }}</td>
+            <td style="font-family: var(--font-mono);">${{ t.cost_usd }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding: 30px;"><p>NO AI TASKS YET</p></div>
+    {% endif %}
+</div>
+{% endblock %}

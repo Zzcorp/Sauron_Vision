@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ strategy.name }} — Sauron Vision{% endblock %}
+{% block page_title %}⬡ STRATEGY DETAIL{% endblock %}
+
+{% block content %}
+<div class="detail-header fade-in-up">
+    <div>
+        <h2>{{ strategy.name }}</h2>
+        <div class="detail-meta">
+            <span class="badge badge-{{ strategy.status }}">{{ strategy.status }}</span>
+            <span class="badge badge-medium">{{ strategy.time_horizon }}</span>
+            <span>Created {{ strategy.created_at|date:"M d, Y H:i" }}</span>
+        </div>
+    </div>
+    <a href="{% url 'strategies_list' %}" class="btn">← Back</a>
+</div>
+
+<div class="grid grid-2" style="margin-bottom: 24px;">
+    <div class="card fade-in-up delay-1">
+        <div class="card-header"><span class="card-title">Thesis</span></div>
+        <p style="font-size: 14px; line-height: 1.7;">{{ strategy.description }}</p>
+        {% if strategy.ai_reasoning %}
+        <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border);">
+            <div style="font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); letter-spacing: 2px; margin-bottom: 8px;">AI REASONING</div>
+            <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.7;">{{ strategy.ai_reasoning|truncatechars:500 }}</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card fade-in-up delay-2">
+        <div class="card-header"><span class="card-title">Performance & Risk</span></div>
+        <ul class="kv-list">
+            <li><span class="label">P&L</span><span class="value" style="color: {% if strategy.pnl >= 0 %}var(--accent-green){% else %}var(--accent-red){% endif %};">€{{ strategy.pnl }} ({{ strategy.pnl_pct|floatformat:2 }}%)</span></li>
+            <li><span class="label">Max Drawdown</span><span class="value" style="color: var(--accent-red);">{{ strategy.max_drawdown|floatformat:2 }}%</span></li>
+            <li><span class="label">Sharpe Ratio</span><span class="value">{{ strategy.sharpe_ratio|default:"-" }}</span></li>
+            <li><span class="label">Max Allocation</span><span class="value">{{ strategy.max_portfolio_allocation_pct }}%</span></li>
+            <li><span class="label">Max Loss</span><span class="value">{{ strategy.max_loss_pct }}%</span></li>
+        </ul>
+    </div>
+</div>
+
+<!-- Strategy Legs -->
+<div class="card fade-in-up delay-3">
+    <div class="card-header"><span class="card-title">Strategy Legs</span></div>
+    {% if strategy.legs.all %}
+    <div class="table-wrapper">
+    <table>
+        <thead><tr><th>Instrument</th><th>Action</th><th>Weight</th><th>Entry</th><th>Stop Loss</th><th>Take Profit</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for leg in strategy.legs.all %}
+        <tr>
+            <td style="font-family: var(--font-display); font-size: 13px;">{{ leg.instrument.symbol }}</td>
+            <td><span class="badge badge-{% if leg.action == 'long' %}bullish{% elif leg.action == 'short' %}bearish{% else %}neutral{% endif %}">{{ leg.action }}</span></td>
+            <td>{{ leg.weight|floatformat:0 }}%</td>
+            <td style="font-family: var(--font-mono);">{{ leg.entry_price|default:"-" }}</td>
+            <td style="font-family: var(--font-mono); color: var(--accent-red);">{{ leg.stop_loss|default:"-" }}</td>
+            <td style="font-family: var(--font-mono); color: var(--accent-green);">{{ leg.take_profit|default:"-" }}</td>
+            <td>{% if leg.is_entered %}<span class="badge badge-active">ENTERED</span>{% else %}<span class="badge badge-proposed">PENDING</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding: 30px;"><p>NO LEGS DEFINED</p></div>
+    {% endif %}
+</div>
+{% endblock %}

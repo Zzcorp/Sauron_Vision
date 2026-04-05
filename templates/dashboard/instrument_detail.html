@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}{{ instrument.symbol }} — Sauron Vision{% endblock %}
+{% block page_title %}{{ instrument.symbol }} — {{ instrument.name }}{% endblock %}
+
+{% block content %}
+<div class="detail-header fade-in-up">
+    <div>
+        <h2>{{ instrument.symbol }}</h2>
+        <div class="detail-meta">
+            <span class="badge badge-{{ instrument.asset_class }}">{{ instrument.asset_class }}</span>
+            <span>{{ instrument.exchange }}</span>
+            <span>{{ instrument.name }}</span>
+        </div>
+    </div>
+    <a href="{% url 'instruments_list' %}" class="btn">← Back</a>
+</div>
+
+<!-- TradingView Lightweight Chart -->
+<div class="card fade-in-up delay-1" style="margin-bottom:20px;">
+    <div class="card-header"><span class="card-title">Price Chart</span></div>
+    <div id="tv-chart" style="height:400px;"></div>
+</div>
+
+<div class="grid grid-2" style="margin-bottom:20px;">
+    <!-- Latest Quote -->
+    <div class="card fade-in-up delay-2">
+        <div class="card-header"><span class="card-title">Latest Quote</span></div>
+        {% if quote %}
+        <ul class="kv-list">
+            <li><span class="label">LAST</span><span class="value" style="font-size:18px;font-weight:700;">{{ quote.last }}</span></li>
+            <li><span class="label">CHANGE</span><span class="value" style="color:{% if quote.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{{ quote.change_pct }}%</span></li>
+            <li><span class="label">BID / ASK</span><span class="value">{{ quote.bid|default:"-" }} / {{ quote.ask|default:"-" }}</span></li>
+            <li><span class="label">VOLUME</span><span class="value">{{ quote.volume|default:"-" }}</span></li>
+            <li><span class="label">SOURCE</span><span class="value">{{ quote.source }}</span></li>
+            <li><span class="label">UPDATED</span><span class="value">{{ quote.updated_at|timesince }} ago</span></li>
+        </ul>
+        {% else %}
+        <div class="empty-state" style="padding:30px;"><p>NO QUOTE DATA YET</p></div>
+        {% endif %}
+    </div>
+
+    <!-- Technical Indicators -->
+    <div class="card fade-in-up delay-3">
+        <div class="card-header"><span class="card-title">Technical Indicators</span></div>
+        {% if technicals %}
+        <ul class="kv-list">
+            <li><span class="label">RSI (14)</span><span class="value" style="color:{% if technicals.rsi_14 and technicals.rsi_14 < 30 %}var(--accent){% elif technicals.rsi_14 and technicals.rsi_14 > 70 %}var(--accent-red){% else %}var(--text-primary){% endif %}">{{ technicals.rsi_14|default:"-"|floatformat:2 }}</span></li>
+            <li><span class="label">MACD</span><span class="value">{{ technicals.macd_line|default:"-"|floatformat:4 }}</span></li>
+            <li><span class="label">MACD Signal</span><span class="value">{{ technicals.macd_signal|default:"-"|floatformat:4 }}</span></li>
+            <li><span class="label">SMA 20</span><span class="value">{{ technicals.sma_20|default:"-" }}</span></li>
+            <li><span class="label">SMA 50</span><span class="value">{{ technicals.sma_50|default:"-" }}</span></li>
+            <li><span class="label">SMA 200</span><span class="value">{{ technicals.sma_200|default:"-" }}</span></li>
+            <li><span class="label">ATR (14)</span><span class="value">{{ technicals.atr_14|default:"-" }}</span></li>
+            <li><span class="label">Bollinger Upper</span><span class="value">{{ technicals.bollinger_upper|default:"-" }}</span></li>
+            <li><span class="label">Bollinger Lower</span><span class="value">{{ technicals.bollinger_lower|default:"-" }}</span></li>
+        </ul>
+        {% else %}
+        <div class="empty-state" style="padding:30px;"><p>NO INDICATOR DATA</p></div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Recent Signals -->
+<div class="card fade-in-up delay-4" style="margin-bottom:20px;">
+    <div class="card-header"><span class="card-title">Recent Signals for {{ instrument.symbol }}</span></div>
+    {% if signals %}
+    <div class="table-wrapper">
+    <table>
+        <thead><tr><th>Time</th><th>Direction</th><th>Type</th><th>Title</th><th>Score</th></tr></thead>
+        <tbody>
+        {% for s in signals %}
+        <tr>
+            <td style="font-size:11px;color:var(--text-muted);">{{ s.created_at|date:"M d H:i" }}</td>
+            <td><span class="badge badge-{{ s.direction }}">{{ s.direction }}</span></td>
+            <td>{{ s.signal_type }}</td>
+            <td>{{ s.title|truncatechars:60 }}</td>
+            <td>{{ s.score|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding:30px;"><p>NO SIGNALS FOR THIS INSTRUMENT</p></div>
+    {% endif %}
+</div>
+
+<!-- Related News -->
+<div class="card fade-in-up delay-5">
+    <div class="card-header"><span class="card-title">Related News</span></div>
+    {% if news %}
+    {% for a in news %}
+    <div style="padding:8px 0;border-bottom:1px solid rgba(19,48,32,0.3);">
+        <a href="{{ a.url }}" target="_blank" style="color:var(--text-primary);text-decoration:none;font-size:13px;">{{ a.title|truncatechars:80 }}</a>
+        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">{{ a.source }} · {{ a.published_at|timesince }} ago</div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state" style="padding:30px;"><p>NO RELATED NEWS</p></div>
+    {% endif %}
+</div>
+
+{% block extra_js %}
+<!-- TradingView Lightweight Charts -->
+<script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+(function() {
+    const chartContainer = document.getElementById('tv-chart');
+    if (!chartContainer) return;
+
+    const isDark = document.body.classList.contains('light-mode') === false;
+    const chart = LightweightCharts.createChart(chartContainer, {
+        width: chartContainer.clientWidth,
+        height: 400,
+        layout: {
+            background: { color: isDark ? '#0a1a14' : '#ffffff' },
+            textColor: isDark ? '#5a8a6a' : '#4a6a4a',
+        },
+        grid: {
+            vertLines: { color: isDark ? '#133020' : '#e0e8e0' },
+            horzLines: { color: isDark ? '#133020' : '#e0e8e0' },
+        },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+        timeScale: { borderColor: isDark ? '#133020' : '#c0d0c0' },
+    });
+
+    const candleSeries = chart.addCandlestickSeries({
+        upColor: '#00e868',
+        downColor: '#e83030',
+        borderUpColor: '#00e868',
+        borderDownColor: '#e83030',
+        wickUpColor: '#00e868',
+        wickDownColor: '#e83030',
+    });
+
+    // Load price data from JSON
+    const priceData = {{ price_data_json|safe }};
+    if (priceData && priceData.length > 0) {
+        candleSeries.setData(priceData);
+        chart.timeScale().fitContent();
+    }
+
+    // Resize handler
+    window.addEventListener('resize', () => {
+        chart.applyOptions({ width: chartContainer.clientWidth });
+    });
+})();
+</script>
+{% endblock %}
+{% endblock %}

@@ -1,0 +1,112 @@
+# SAURON VISION — Render.com Blueprint
+databases:
+  - name: sauron-db
+    plan: starter
+    databaseName: sauron_vision
+    user: sauron
+
+services:
+  # Django Web
+  - type: web
+    name: sauron-web
+    runtime: python
+    plan: starter
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120"
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        value: ".onrender.com"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sauron-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: sauron-redis
+          type: redis
+          property: connectionString
+      - key: PYTHON_VERSION
+        value: "3.12.3"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false
+      - key: FRED_API_KEY
+        sync: false
+      - key: ETORO_PUBLIC_KEY
+        sync: false
+      - key: ETORO_USER_KEY
+        sync: false
+      - key: SCRAPER_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+
+  # Celery Fast Worker (prices, news, signals)
+  - type: worker
+    name: sauron-worker-fast
+    runtime: python
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "celery -A config worker -l info -Q fast,default -c 4 --max-tasks-per-child=100"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sauron-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: sauron-redis
+          type: redis
+          property: connectionString
+      - fromGroup: sauron-env
+
+  # Celery Slow Worker (AI agents)
+  - type: worker
+    name: sauron-worker-slow
+    runtime: python
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "celery -A config worker -l info -Q slow,ai -c 2 --max-tasks-per-child=50"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sauron-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: sauron-redis
+          type: redis
+          property: connectionString
+      - fromGroup: sauron-env
+
+  # Celery Beat Scheduler
+  - type: worker
+    name: sauron-beat
+    runtime: python
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sauron-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: sauron-redis
+          type: redis
+          property: connectionString
+      - fromGroup: sauron-env
+
+  # Redis
+  - type: redis
+    name: sauron-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru

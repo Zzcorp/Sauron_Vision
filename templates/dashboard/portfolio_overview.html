@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Portfolio — Sauron Vision{% endblock %}
+{% block page_title %}◎ PORTFOLIO{% endblock %}
+
+{% block content %}
+<div class="grid grid-4" style="margin-bottom: 24px;">
+    <div class="stat-box fade-in-up delay-1">
+        <div class="stat-label">Total Value</div>
+        <div class="stat-value">€{{ portfolio.current_value|default:"10,000" }}</div>
+    </div>
+    <div class="stat-box fade-in-up delay-2">
+        <div class="stat-label">Cash Available</div>
+        <div class="stat-value">€{{ portfolio.cash_available|default:"10,000" }}</div>
+    </div>
+    <div class="stat-box fade-in-up delay-3">
+        <div class="stat-label">Open Positions</div>
+        <div class="stat-value">{{ open_positions_count|default:"0" }}</div>
+    </div>
+    <div class="stat-box fade-in-up delay-4">
+        <div class="stat-label">Max Daily Loss</div>
+        <div class="stat-value" style="color: var(--accent-red);">{{ portfolio.max_daily_loss_pct|default:"3.0" }}%</div>
+    </div>
+</div>
+
+<div class="grid grid-2">
+    <div class="card fade-in-up delay-3">
+        <div class="card-header"><span class="card-title">Risk Limits</span></div>
+        <ul class="kv-list">
+            <li><span class="label">Max Total Exposure</span><span class="value">{{ portfolio.max_total_exposure_pct|default:"100" }}%</span></li>
+            <li><span class="label">Max Single Position</span><span class="value">{{ portfolio.max_single_position_pct|default:"10" }}%</span></li>
+            <li><span class="label">Max Sector Exposure</span><span class="value">{{ portfolio.max_sector_exposure_pct|default:"30" }}%</span></li>
+            <li><span class="label">Correlation Threshold</span><span class="value">{{ portfolio.max_correlation_threshold|default:"0.7" }}</span></li>
+            <li><span class="label">Base Currency</span><span class="value">{{ portfolio.currency|default:"EUR" }}</span></li>
+        </ul>
+    </div>
+    <div class="card fade-in-up delay-4">
+        <div class="card-header"><span class="card-title">Performance History</span></div>
+        {% if snapshots %}
+        <div class="table-wrapper">
+        <table>
+            <thead><tr><th>Date</th><th>Value</th><th>Daily P&L</th><th>Cumulative</th></tr></thead>
+            <tbody>
+            {% for snap in snapshots %}
+            <tr>
+                <td>{{ snap.date|date:"M d" }}</td>
+                <td style="font-family: var(--font-mono);">€{{ snap.total_value }}</td>
+                <td style="color: {% if snap.daily_pnl_pct >= 0 %}var(--accent-green){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ snap.daily_pnl_pct|floatformat:2 }}%</td>
+                <td style="font-family: var(--font-mono);">{{ snap.cumulative_pnl_pct|floatformat:2 }}%</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="empty-state" style="padding: 30px;"><p>NO SNAPSHOTS YET</p></div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Positions — Sauron Vision{% endblock %}
+{% block page_title %}▣ OPEN POSITIONS{% endblock %}
+
+{% block content %}
+<div class="card fade-in-up">
+    <div class="card-header">
+        <span class="card-title">Current Positions</span>
+    </div>
+    {% if positions %}
+    <div class="table-wrapper">
+    <table>
+        <thead><tr><th>Symbol</th><th>Direction</th><th>Qty</th><th>Entry</th><th>Current</th><th>Stop</th><th>Target</th><th>P&L</th><th>P&L %</th><th>Strategy</th><th>Opened</th></tr></thead>
+        <tbody>
+        {% for p in positions %}
+        <tr>
+            <td style="font-family: var(--font-display); font-size: 13px;">{{ p.instrument.symbol }}</td>
+            <td><span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ p.direction }}</span></td>
+            <td style="font-family: var(--font-mono);">{{ p.quantity }}</td>
+            <td style="font-family: var(--font-mono);">{{ p.entry_price }}</td>
+            <td style="font-family: var(--font-mono); font-weight: 600;">{{ p.current_price }}</td>
+            <td style="font-family: var(--font-mono); color: var(--accent-red);">{{ p.stop_loss|default:"-" }}</td>
+            <td style="font-family: var(--font-mono); color: var(--accent-green);">{{ p.take_profit|default:"-" }}</td>
+            <td style="color: {% if p.unrealized_pnl >= 0 %}var(--accent-green){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">€{{ p.unrealized_pnl }}</td>
+            <td style="color: {% if p.unrealized_pnl_pct >= 0 %}var(--accent-green){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ p.unrealized_pnl_pct|floatformat:2 }}%</td>
+            <td style="font-size: 12px;">{{ p.strategy.name|default:"-"|truncatechars:20 }}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ p.opened_at|date:"M d H:i" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">▣</div>
+        <p>NO OPEN POSITIONS</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

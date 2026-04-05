@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}Sauron Vision — Dashboard{% endblock %}
+{% block page_title %}⬡ COMMAND CENTER{% endblock %}
+
+{% block content %}
+<!-- ── Row 1: Portfolio KPIs ──────────────────────────── -->
+<div class="section-label fade-in-up">Portfolio Overview</div>
+<div class="grid grid-6" style="margin-bottom: 20px;">
+    <div class="stat-box fade-in-up delay-1">
+        <div class="stat-label">Portfolio Value</div>
+        <div class="stat-value">€{{ portfolio.current_value|default:"10,000" }}</div>
+        <div class="stat-change positive">▲ {{ daily_pnl_pct|default:"+0.00" }}% today</div>
+    </div>
+    <div class="stat-box fade-in-up delay-2">
+        <div class="stat-label">Cash Available</div>
+        <div class="stat-value">€{{ portfolio.cash_available|default:"10,000" }}</div>
+        <div class="stat-sub">{{ cash_pct|default:"100" }}% of portfolio</div>
+    </div>
+    <div class="stat-box fade-in-up delay-3">
+        <div class="stat-label">Unrealized P&L</div>
+        <div class="stat-value" style="color:{% if total_unrealized_pnl >= 0 %}var(--success){% else %}var(--accent-red){% endif %}">€{{ total_unrealized_pnl|default:"0.00" }}</div>
+        <div class="stat-sub">{{ open_positions_count|default:"0" }} open positions</div>
+    </div>
+    <div class="stat-box fade-in-up delay-4">
+        <div class="stat-label">Total Exposure</div>
+        <div class="stat-value">{{ total_exposure_pct|default:"0" }}%</div>
+        <div class="stat-sub">limit: {{ portfolio.max_total_exposure_pct|default:"100" }}%</div>
+    </div>
+    <div class="stat-box fade-in-up delay-5">
+        <div class="stat-label">Max Drawdown</div>
+        <div class="stat-value" style="color: var(--accent-red);">{{ max_drawdown|default:"0.00" }}%</div>
+        <div class="stat-sub">limit: {{ portfolio.max_daily_loss_pct|default:"3.0" }}%</div>
+    </div>
+    <div class="stat-box fade-in-up delay-6">
+        <div class="stat-label">Sharpe Ratio</div>
+        <div class="stat-value">{{ sharpe_ratio|default:"—" }}</div>
+        <div class="stat-sub">risk-adjusted return</div>
+    </div>
+</div>
+
+<!-- ── Row 2: Market & Intelligence KPIs ─────────────── -->
+<div class="section-label fade-in-up">Markets & Intelligence</div>
+<div class="grid grid-6" style="margin-bottom: 20px;">
+    <div class="stat-box fade-in-up delay-1">
+        <div class="stat-label">Instruments</div>
+        <div class="stat-value">{{ instruments_count|default:"0" }}</div>
+        <div class="stat-sub">{{ watchlist_count|default:"0" }} on watchlist</div>
+    </div>
+    <div class="stat-box fade-in-up delay-2">
+        <div class="stat-label">Active Signals</div>
+        <div class="stat-value" style="color: var(--accent);">{{ active_signals_count|default:"0" }}</div>
+        <div class="stat-sub">{{ bullish_count|default:"0" }}▲ {{ bearish_count|default:"0" }}▼</div>
+    </div>
+    <div class="stat-box fade-in-up delay-3">
+        <div class="stat-label">Avg Signal Score</div>
+        <div class="stat-value">{{ avg_signal_score|default:"—" }}</div>
+        <div class="stat-sub">composite confidence</div>
+    </div>
+    <div class="stat-box fade-in-up delay-4">
+        <div class="stat-label">Strategies</div>
+        <div class="stat-value">{{ active_strategies_count|default:"0" }}</div>
+        <div class="stat-sub">{{ proposed_strategies|default:"0" }} proposed</div>
+    </div>
+    <div class="stat-box fade-in-up delay-5">
+        <div class="stat-label">News (24h)</div>
+        <div class="stat-value">{{ news_24h|default:"0" }}</div>
+        <div class="stat-sub">avg sentiment: {{ avg_news_sentiment|default:"—" }}</div>
+    </div>
+    <div class="stat-box fade-in-up delay-6">
+        <div class="stat-label">Econ Events</div>
+        <div class="stat-value">{{ upcoming_events|default:"0" }}</div>
+        <div class="stat-sub">{{ high_impact_events|default:"0" }} high impact</div>
+    </div>
+</div>
+
+<!-- ── Row 3: AI KPIs ────────────────────────────────── -->
+<div class="section-label fade-in-up">AI Agents</div>
+<div class="grid grid-5" style="margin-bottom: 24px;">
+    <div class="stat-box fade-in-up delay-1">
+        <div class="stat-label">AI Tasks (24h)</div>
+        <div class="stat-value">{{ ai_tasks_24h|default:"0" }}</div>
+        <div class="stat-sub">{{ ai_success_rate|default:"0" }}% success</div>
+    </div>
+    <div class="stat-box fade-in-up delay-2">
+        <div class="stat-label">AI Cost (24h)</div>
+        <div class="stat-value">{{ ai_cost_24h|default:"$0.00" }}</div>
+        <div class="stat-sub">{{ ai_cost_mtd|default:"$0.00" }} this month</div>
+    </div>
+    <div class="stat-box fade-in-up delay-3">
+        <div class="stat-label">Avg Response</div>
+        <div class="stat-value">{{ ai_avg_duration|default:"0.0" }}s</div>
+        <div class="stat-sub">avg latency</div>
+    </div>
+    <div class="stat-box fade-in-up delay-4">
+        <div class="stat-label">Tokens (24h)</div>
+        <div class="stat-value">{{ ai_tokens_24h|default:"0" }}</div>
+        <div class="stat-sub">in + out combined</div>
+    </div>
+    <div class="stat-box fade-in-up delay-5">
+        <div class="stat-label">Last Agent Run</div>
+        <div class="stat-value" style="font-size: 14px;">{{ last_agent_name|default:"—" }}</div>
+        <div class="stat-sub">{{ last_agent_time|default:"—" }}</div>
+    </div>
+</div>
+
+<!-- ── Row 4: Exposure Breakdown ─────────────────────── -->
+<div class="section-label fade-in-up">Exposure Breakdown</div>
+<div class="grid grid-4" style="margin-bottom: 24px;">
+    <div class="stat-box fade-in-up delay-1">
+        <div class="stat-label">Stocks</div>
+        <div class="stat-value" style="color: var(--accent-blue);">{{ exposure.stock|default:"0" }}%</div>
+        <div class="score-bar"><div class="score-bar-fill" style="width:{{ exposure.stock|default:0 }}%; background: var(--accent-blue);"></div></div>
+    </div>
+    <div class="stat-box fade-in-up delay-2">
+        <div class="stat-label">Forex</div>
+        <div class="stat-value" style="color: var(--accent-gold);">{{ exposure.forex|default:"0" }}%</div>
+        <div class="score-bar"><div class="score-bar-fill" style="width:{{ exposure.forex|default:0 }}%; background: var(--accent-gold);"></div></div>
+    </div>
+    <div class="stat-box fade-in-up delay-3">
+        <div class="stat-label">Commodities</div>
+        <div class="stat-value" style="color: var(--accent-red);">{{ exposure.commodity|default:"0" }}%</div>
+        <div class="score-bar"><div class="score-bar-fill" style="width:{{ exposure.commodity|default:0 }}%; background: var(--accent-red);"></div></div>
+    </div>
+    <div class="stat-box fade-in-up delay-4">
+        <div class="stat-label">Cash</div>
+        <div class="stat-value" style="color: var(--accent);">{{ exposure.cash|default:"100" }}%</div>
+        <div class="score-bar"><div class="score-bar-fill" style="width:{{ exposure.cash|default:100 }}%; background: var(--accent);"></div></div>
+    </div>
+</div>
+
+<!-- ── Row 5: Main content grid ──────────────────────── -->
+<div class="grid grid-sidebar">
+    <div>
+        <!-- Active Signals -->
+        <div class="card fade-in-up delay-3" style="margin-bottom: 20px;">
+            <div class="card-header">
+                <span class="card-title">⚡ Active Signals</span>
+                <a href="{% url 'signals_list' %}" class="btn btn-sm">View All →</a>
+            </div>
+            {% if recent_signals %}
+                {% for signal in recent_signals %}
+                <div class="signal-item">
+                    <div class="signal-header">
+                        <span>
+                            <span class="signal-symbol">{{ signal.instrument.symbol }}</span>
+                            <span class="badge badge-{{ signal.direction }}">{{ signal.direction }}</span>
+                            <span class="badge badge-{{ signal.urgency }}">{{ signal.urgency }}</span>
+                        </span>
+                        <span style="font-family:var(--font-display);font-size:13px;">{{ signal.score|floatformat:2 }}</span>
+                    </div>
+                    <div class="signal-desc">{{ signal.title }}</div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state"><div class="empty-icon">⚡</div><p>NO ACTIVE SIGNALS — MARKETS SCANNING</p></div>
+            {% endif %}
+        </div>
+
+        <!-- Strategies -->
+        <div class="card fade-in-up delay-4">
+            <div class="card-header">
+                <span class="card-title">⬡ Active Strategies</span>
+                <a href="{% url 'strategies_list' %}" class="btn btn-sm">View All →</a>
+            </div>
+            {% if active_strategies %}
+            <div class="table-wrapper"><table>
+                <thead><tr><th>Strategy</th><th>Horizon</th><th>Status</th><th>P&L</th></tr></thead>
+                <tbody>
+                {% for s in active_strategies %}
+                <tr>
+                    <td>{{ s.name|truncatechars:40 }}</td>
+                    <td><span class="badge badge-medium">{{ s.time_horizon }}</span></td>
+                    <td><span class="badge badge-active">{{ s.status }}</span></td>
+                    <td style="color:{% if s.pnl >= 0 %}var(--success){% else %}var(--accent-red){% endif %}">{{ s.pnl_pct|floatformat:2 }}%</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table></div>
+            {% else %}
+                <div class="empty-state"><div class="empty-icon">⬡</div><p>NO ACTIVE STRATEGIES</p></div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div>
+        <!-- News -->
+        <div class="card fade-in-up delay-2" style="margin-bottom: 20px;">
+            <div class="card-header">
+                <span class="card-title">▤ Latest News</span>
+                <a href="{% url 'news_feed' %}" class="btn btn-sm">All →</a>
+            </div>
+            {% if recent_news %}
+                {% for article in recent_news %}
+                <div style="padding:8px 0;border-bottom:1px solid rgba(19,48,32,0.4);">
+                    <div style="font-size:13px;margin-bottom:3px;">{{ article.title|truncatechars:80 }}</div>
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
+                        {{ article.source }} · {{ article.published_at|timesince }} ago
+                        {% if article.ai_sentiment_score != None %}
+                        · <span style="color:{% if article.ai_sentiment_score > 0 %}var(--success){% elif article.ai_sentiment_score < 0 %}var(--accent-red){% else %}var(--text-secondary){% endif %}">{{ article.ai_sentiment_score|floatformat:2 }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state" style="padding:30px;"><p>NO NEWS YET</p></div>
+            {% endif %}
+        </div>
+
+        <!-- Recent AI Tasks -->
+        <div class="card fade-in-up delay-3" style="margin-bottom: 20px;">
+            <div class="card-header">
+                <span class="card-title">◬ AI Agents</span>
+                <a href="{% url 'ai_insights' %}" class="btn btn-sm">Details →</a>
+            </div>
+            {% if recent_ai_tasks %}
+                {% for task in recent_ai_tasks %}
+                <div style="padding:6px 0;border-bottom:1px solid rgba(19,48,32,0.3);font-size:12px;">
+                    <span style="color:{% if task.success %}var(--success){% else %}var(--accent-red){% endif %}">●</span>
+                    <span style="font-family:var(--font-mono);color:var(--text-secondary);">{{ task.agent }}</span>
+                    <span style="float:right;color:var(--text-muted);font-family:var(--font-mono);font-size:10px;">{{ task.created_at|timesince }} ago</span>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state" style="padding:30px;"><p>NO AI TASKS YET</p></div>
+            {% endif %}
+        </div>
+
+        <!-- Market Sessions -->
+        <div class="card fade-in-up delay-4">
+            <div class="card-header"><span class="card-title">◎ Market Sessions</span></div>
+            <ul class="kv-list">
+                <li><span class="label">FOREX</span><span class="value" style="color:{% if forex_open %}var(--success){% else %}var(--accent-red){% endif %}">{% if forex_open %}OPEN{% else %}CLOSED{% endif %}</span></li>
+                <li><span class="label">US MARKETS</span><span class="value" style="color:{% if us_open %}var(--success){% else %}var(--accent-red){% endif %}">{% if us_open %}OPEN{% else %}CLOSED{% endif %}</span></li>
+                <li><span class="label">EU MARKETS</span><span class="value" style="color:{% if eu_open %}var(--success){% else %}var(--accent-red){% endif %}">{% if eu_open %}OPEN{% else %}CLOSED{% endif %}</span></li>
+                <li><span class="label">MODE</span><span class="value">{% if is_weekend %}WEEKEND{% else %}LIVE{% endif %}</span></li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

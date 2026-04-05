@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Setup — Sauron Vision{% endblock %}
+{% block page_title %}⚙ ACCOUNT SETUP{% endblock %}
+
+{% block content %}
+{% if messages %}
+<div style="margin-bottom: 20px;">
+    {% for msg in messages %}
+    <div class="card" style="border-color: {% if msg.tags == 'success' %}var(--accent){% else %}var(--accent-red){% endif %}; padding: 12px 20px; margin-bottom: 8px;">
+        <span style="font-family: var(--font-mono); font-size: 13px;">
+            {% if msg.tags == 'success' %}✓{% else %}⚠{% endif %} {{ msg }}
+        </span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="grid grid-2" style="margin-bottom: 24px;">
+    <!-- Portfolio Capital -->
+    <div class="card fade-in-up delay-1">
+        <div class="card-header"><span class="card-title">◎ Portfolio Capital</span></div>
+        <form method="post" action="{% url 'setup' %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="update_capital">
+            <div style="margin-bottom: 16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">INITIAL CAPITAL (€)</label>
+                <input type="number" step="0.01" name="initial_capital" value="{{ portfolio.initial_capital }}"
+                    style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+            </div>
+            <div style="margin-bottom: 16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">CURRENT VALUE (€)</label>
+                <input type="number" step="0.01" name="current_value" value="{{ portfolio.current_value }}"
+                    style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+            </div>
+            <div style="margin-bottom: 16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">CASH AVAILABLE (€)</label>
+                <input type="number" step="0.01" name="cash_available" value="{{ portfolio.cash_available }}"
+                    style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+            </div>
+            <div style="margin-bottom: 16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">BASE CURRENCY</label>
+                <select name="currency" style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;">
+                    <option value="EUR" {% if portfolio.currency == "EUR" %}selected{% endif %}>EUR</option>
+                    <option value="USD" {% if portfolio.currency == "USD" %}selected{% endif %}>USD</option>
+                    <option value="GBP" {% if portfolio.currency == "GBP" %}selected{% endif %}>GBP</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width:100%;">Save Capital Settings</button>
+        </form>
+    </div>
+
+    <!-- Risk Limits -->
+    <div class="card fade-in-up delay-2">
+        <div class="card-header"><span class="card-title">⚠ Risk Limits</span></div>
+        <form method="post" action="{% url 'setup' %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="update_risk">
+            <div style="margin-bottom: 16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX TOTAL EXPOSURE (%)</label>
+                <input type="number" step="1" name="max_exposure" value="{{ portfolio.max_total_exposure_pct }}"
+                    style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+            </div>
+            <div style="margin-bottom: 16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX SINGLE POSITION (%)</label>
+                <input type="number" step="1" name="max_position" value="{{ portfolio.max_single_position_pct }}"
+                    style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+            </div>
+            <div style="margin-bottom: 16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX DAILY LOSS (%)</label>
+                <input type="number" step="0.1" name="max_daily_loss" value="{{ portfolio.max_daily_loss_pct }}"
+                    style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+            </div>
+            <div style="margin-bottom: 16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX CORRELATION THRESHOLD</label>
+                <input type="number" step="0.05" name="max_correlation" value="{{ portfolio.max_correlation_threshold }}"
+                    style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+            </div>
+            <button type="submit" class="btn btn-primary" style="width:100%;">Save Risk Limits</button>
+        </form>
+    </div>
+</div>
+
+<!-- eToro Connection -->
+<div class="card fade-in-up delay-3" style="margin-bottom: 24px;">
+    <div class="card-header">
+        <span class="card-title">🔗 eToro Integration</span>
+        {% if etoro_connected %}
+        <span class="badge badge-active">CONNECTED</span>
+        {% else %}
+        <span class="badge badge-low">NOT CONNECTED</span>
+        {% endif %}
+    </div>
+    <p style="color:var(--text-secondary);margin-bottom:16px;font-size:14px;">
+        Connect your eToro account to automatically sync positions, balance, and P&L into Sauron Vision.
+    </p>
+    <form method="post" action="{% url 'setup' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="connect_etoro">
+        <div style="margin-bottom: 16px;">
+            <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">ETORO API KEY</label>
+            <input type="password" name="etoro_api_key" value="{{ etoro_key_masked }}" placeholder="Paste your eToro API key"
+                style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
+                Get your key: eToro Web → Settings → API → Generate API Key
+                (<a href="https://api-portal.etoro.com" target="_blank" style="color:var(--accent);">docs</a>)
+            </div>
+        </div>
+        <div style="display:flex;gap:12px;">
+            <button type="submit" class="btn btn-primary">Save & Connect</button>
+            {% if etoro_connected %}
+            <button type="submit" name="action" value="sync_etoro" class="btn">⟳ Sync Positions Now</button>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+<!-- Manual Position Entry -->
+<div class="card fade-in-up delay-4" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">▣ Add Manual Position</span></div>
+    <form method="post" action="{% url 'setup' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_position">
+        <div class="grid grid-4" style="margin-bottom: 16px;">
+            <div>
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">SYMBOL</label>
+                <input type="text" name="symbol" placeholder="AAPL" required
+                    style="width:100%;padding:10px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+            </div>
+            <div>
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">DIRECTION</label>
+                <select name="direction" style="width:100%;padding:10px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;">
+                    <option value="long">LONG</option>
+                    <option value="short">SHORT</option>
+                </select>
+            </div>
+            <div>
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">QUANTITY</label>
+                <input type="number" step="0.0001" name="quantity" placeholder="10" required
+                    style="width:100%;padding:10px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+            </div>
+            <div>
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">ENTRY PRICE</label>
+                <input type="number" step="0.0001" name="entry_price" placeholder="150.00" required
+                    style="width:100%;padding:10px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+            </div>
+        </div>
+        <div class="grid grid-3" style="margin-bottom: 16px;">
+            <div>
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">STOP LOSS (optional)</label>
+                <input type="number" step="0.0001" name="stop_loss" placeholder=""
+                    style="width:100%;padding:10px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+            </div>
+            <div>
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">TAKE PROFIT (optional)</label>
+                <input type="number" step="0.0001" name="take_profit" placeholder=""
+                    style="width:100%;padding:10px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+            </div>
+            <div>
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">ASSET CLASS</label>
+                <select name="asset_class" style="width:100%;padding:10px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;">
+                    <option value="stock">Stock</option>
+                    <option value="forex">Forex</option>
+                    <option value="commodity">Commodity</option>
+                    <option value="crypto">Crypto</option>
+                    <option value="etf">ETF</option>
+                </select>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Add Position</button>
+    </form>
+</div>
+
+<!-- API Keys Status -->
+<div class="card fade-in-up delay-5">
+    <div class="card-header"><span class="card-title">🔑 API Keys Status</span></div>
+    <div class="table-wrapper">
+    <table>
+        <thead><tr><th>Service</th><th>Status</th><th>Where to Get</th></tr></thead>
+        <tbody>
+        {% for key in api_keys %}
+        <tr>
+            <td>{{ key.name }}</td>
+            <td>{% if key.configured %}<span style="color:var(--accent);">● CONFIGURED</span>{% else %}<span style="color:var(--text-muted);">○ NOT SET</span>{% endif %}</td>
+            <td><a href="{{ key.url }}" target="_blank" style="color:var(--accent);font-size:12px;">{{ key.url_label }}</a></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div style="margin-top:16px;font-family:var(--font-mono);font-size:12px;color:var(--text-muted);">
+        Set keys in your <code>.env</code> file or Render Environment tab. <a href="{% url 'getting_started' %}" style="color:var(--accent);">See Getting Started guide →</a>
+    </div>
+</div>
+{% endblock %}

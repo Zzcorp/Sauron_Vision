@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Backtesting — Sauron Vision{% endblock %}
+{% block page_title %}BACKTESTING ENGINE{% endblock %}
+
+{% block content %}
+<div class="card fade-in-up">
+    <div class="card-header">
+        <span class="card-title">Backtest History</span>
+    </div>
+    {% if runs %}
+    <div class="table-wrapper">
+    <table>
+        <thead><tr><th>Name</th><th>Strategy</th><th>Status</th><th>Return</th><th>Sharpe</th><th>Win Rate</th><th>Trades</th><th>Max DD</th><th>Date</th></tr></thead>
+        <tbody>
+        {% for r in runs %}
+        <tr>
+            <td>{{ r.name }}</td>
+            <td><span class="badge badge-medium">{{ r.strategy_type }}</span></td>
+            <td><span class="badge badge-{% if r.status == 'completed' %}active{% else %}proposed{% endif %}">{{ r.status }}</span></td>
+            <td style="color:{% if r.total_return_pct and r.total_return_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};font-family:var(--font-mono);">{{ r.total_return_pct|default:"-"|floatformat:1 }}%</td>
+            <td style="font-family:var(--font-mono);">{{ r.sharpe_ratio|default:"-"|floatformat:2 }}</td>
+            <td style="font-family:var(--font-mono);">{{ r.win_rate|default:"-"|floatformat:0 }}%</td>
+            <td>{{ r.total_trades }}</td>
+            <td style="color:var(--accent-red);font-family:var(--font-mono);">{{ r.max_drawdown_pct|default:"-"|floatformat:1 }}%</td>
+            <td style="font-size:11px;color:var(--text-muted);">{{ r.created_at|date:"M d" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">&#x25A1;</div>
+        <p>NO BACKTESTS YET — Run via Django shell or API</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

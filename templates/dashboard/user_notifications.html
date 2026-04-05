@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Notifications — Sauron Vision{% endblock %}
+{% block page_title %}NOTIFICATION SETTINGS{% endblock %}
+
+{% block content %}
+{% if messages %}
+<div style="margin-bottom:16px;">{% for msg in messages %}<div class="card" style="border-color:var(--accent);padding:10px 16px;margin-bottom:6px;"><span style="font-family:var(--font-mono);font-size:12px;">{{ msg }}</span></div>{% endfor %}</div>
+{% endif %}
+
+<div class="grid grid-2" style="margin-bottom:24px;">
+    <!-- Channel Setup -->
+    <div class="card fade-in-up">
+        <div class="card-header"><span class="card-title">Notification Channels</span></div>
+        <form method="post">{% csrf_token %}<input type="hidden" name="action" value="save_prefs">
+            <div style="margin-bottom:14px;"><label class="form-label">TELEGRAM CHAT ID</label><input type="text" name="telegram_chat_id" value="{{ prefs.telegram_chat_id }}" placeholder="Your Telegram chat ID" class="form-input"><div class="form-hint">Message @userinfobot on Telegram to get your ID</div></div>
+            <div style="margin-bottom:14px;"><label class="form-label">WHATSAPP NUMBER</label><input type="text" name="whatsapp_number" value="{{ prefs.whatsapp_number }}" placeholder="+33 6 00 00 00 00" class="form-input"><div class="form-hint">International format with country code</div></div>
+            <div style="margin-bottom:14px;"><label class="form-label">SMS NUMBER</label><input type="text" name="sms_number" value="{{ prefs.sms_number }}" placeholder="+33 6 00 00 00 00" class="form-input"></div>
+            <div style="margin-bottom:14px;"><label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" name="email_notifications" {% if prefs.email_notifications %}checked{% endif %}> Email notifications (uses your profile email)</label></div>
+            <div class="section-label" style="margin-top:20px;">What to receive</div>
+            <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+                <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_signals" {% if prefs.receive_signals %}checked{% endif %}> Trading signals</label>
+                <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_strategies" {% if prefs.receive_strategies %}checked{% endif %}> Strategy proposals</label>
+                <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_news_alerts" {% if prefs.receive_news_alerts %}checked{% endif %}> Critical news alerts</label>
+                <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_portfolio_alerts" {% if prefs.receive_portfolio_alerts %}checked{% endif %}> Portfolio alerts</label>
+                <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_weekly_newsletter" {% if prefs.receive_weekly_newsletter %}checked{% endif %}> Weekly newsletter</label>
+                <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_monthly_newsletter" {% if prefs.receive_monthly_newsletter %}checked{% endif %}> Monthly newsletter</label>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width:100%;">Save Preferences</button>
+        </form>
+    </div>
+
+    <!-- Custom Alert Rules -->
+    <div class="card fade-in-up delay-2">
+        <div class="card-header"><span class="card-title">Custom Alert Rules</span></div>
+        <form method="post" style="margin-bottom:20px;">{% csrf_token %}<input type="hidden" name="action" value="add_rule">
+            <div style="margin-bottom:10px;"><label class="form-label">RULE NAME</label><input type="text" name="rule_name" placeholder="Oil above 120" class="form-input" required></div>
+            <div class="grid grid-2" style="margin-bottom:10px;">
+                <div><label class="form-label">SYMBOL (optional)</label><input type="text" name="rule_symbol" placeholder="WTIUSD" class="form-input"></div>
+                <div><label class="form-label">ASSET CLASS</label><select name="rule_asset_class" class="form-input"><option value="">All</option><option value="stock">Stocks</option><option value="forex">Forex</option><option value="commodity">Commodities</option><option value="crypto">Crypto</option></select></div>
+            </div>
+            <div class="grid grid-2" style="margin-bottom:10px;">
+                <div><label class="form-label">MIN SCORE</label><input type="number" step="0.1" name="rule_min_score" value="0.5" class="form-input"></div>
+                <div><label class="form-label">DIRECTION</label><select name="rule_direction" class="form-input"><option value="">Both</option><option value="bullish">Bullish only</option><option value="bearish">Bearish only</option></select></div>
+            </div>
+            <div style="display:flex;gap:12px;margin-bottom:12px;">
+                <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="rule_telegram" checked> Telegram</label>
+                <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="rule_email"> Email</label>
+                <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="rule_whatsapp"> WhatsApp</label>
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">Add Rule</button>
+        </form>
+        {% for rule in rules %}
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--border);">
+            <div>
+                <span style="font-weight:600;font-size:13px;">{{ rule.name }}</span>
+                <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-left:8px;">{{ rule.instrument_symbol|default:"ALL" }} | score>{{ rule.min_score }}</span>
+            </div>
+            <form method="post" style="display:inline;">{% csrf_token %}<input type="hidden" name="action" value="delete_rule"><input type="hidden" name="rule_id" value="{{ rule.id }}"><button type="submit" class="btn btn-sm btn-danger">X</button></form>
+        </div>
+        {% empty %}
+        <div style="text-align:center;padding:20px;color:var(--text-muted);font-size:12px;">No custom rules yet</div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

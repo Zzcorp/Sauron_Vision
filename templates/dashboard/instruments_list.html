@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Instruments — Sauron Vision{% endblock %}
+{% block page_title %}Instruments{% endblock %}
+
+{% block content %}
+<div class="card fade-in-up">
+    <div class="card-header">
+        <span class="card-title">Tracked Instruments ({{ instruments|length }})</span>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <a href="?filter=watchlist" class="btn btn-sm {% if filter == 'watchlist' %}btn-primary{% endif %}">Watchlist</a>
+            <a href="?filter=stock" class="btn btn-sm {% if filter == 'stock' %}btn-primary{% endif %}">Stocks</a>
+            <a href="?filter=forex" class="btn btn-sm {% if filter == 'forex' %}btn-primary{% endif %}">Forex</a>
+            <a href="?filter=commodity" class="btn btn-sm {% if filter == 'commodity' %}btn-primary{% endif %}">Commodities</a>
+            <a href="?filter=index" class="btn btn-sm {% if filter == 'index' %}btn-primary{% endif %}">Indices</a>
+            <a href="?filter=etf" class="btn btn-sm {% if filter == 'etf' %}btn-primary{% endif %}">ETFs</a>
+            <a href="?filter=crypto" class="btn btn-sm {% if filter == 'crypto' %}btn-primary{% endif %}">Crypto</a>
+            <a href="{% url 'instruments_list' %}" class="btn btn-sm">All</a>
+        </div>
+    </div>
+    <div class="table-wrapper">
+    <table>
+        <thead><tr><th>Symbol</th><th>Name</th><th>Class</th><th>Exchange</th><th>Watchlist</th><th>Active</th></tr></thead>
+        <tbody>
+        {% for inst in instruments %}
+        <tr class="instrument-row" data-instrument="{{ inst.symbol }}" onclick="window.location='{% url 'instrument_detail' inst.symbol %}'" style="cursor:pointer;">
+            <td>
+                <a href="{% url 'instrument_detail' inst.symbol %}" style="font-family:var(--font-display);font-size:13px;color:var(--accent);text-decoration:none;font-weight:700;" data-instrument="{{ inst.symbol }}">{{ inst.symbol }}</a>
+            </td>
+            <td>{{ inst.name }}</td>
+            <td><span class="badge badge-{{ inst.asset_class }}">{{ inst.asset_class }}</span></td>
+            <td style="color:var(--text-secondary);">{{ inst.exchange }}</td>
+            <td>{% if inst.is_watchlist %}<span style="color:var(--accent-gold);">&#x2605;</span>{% else %}<span style="color:var(--text-muted);">&#x2606;</span>{% endif %}</td>
+            <td>{% if inst.is_active %}<span style="color:var(--accent);">&#x25CF;</span>{% else %}<span style="color:var(--text-muted);">&#x25CB;</span>{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6"><div class="empty-state"><p>NO INSTRUMENTS — Run: python manage.py init_platform</p></div></td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}

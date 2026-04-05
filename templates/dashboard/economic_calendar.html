@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Economic Calendar — Sauron Vision{% endblock %}
+{% block page_title %}◇ ECONOMIC CALENDAR{% endblock %}
+
+{% block content %}
+<div class="card fade-in-up">
+    <div class="card-header">
+        <span class="card-title">Upcoming Events</span>
+    </div>
+    {% if events %}
+    <div class="table-wrapper">
+    <table>
+        <thead><tr><th>Date/Time</th><th>Impact</th><th>Country</th><th>Event</th><th>Forecast</th><th>Previous</th><th>Actual</th></tr></thead>
+        <tbody>
+        {% for ev in events %}
+        <tr>
+            <td style="font-size: 12px;">{{ ev.datetime|date:"M d, H:i" }}</td>
+            <td><span class="badge badge-{{ ev.impact }}">{{ ev.impact }}</span></td>
+            <td>{{ ev.country }}</td>
+            <td>{{ ev.title }}</td>
+            <td>{{ ev.forecast|default:"-" }}</td>
+            <td>{{ ev.previous|default:"-" }}</td>
+            <td style="font-weight: 600;">{{ ev.actual|default:"-" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">◇</div>
+        <p>NO ECONOMIC EVENTS — Scraper will populate this automatically</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

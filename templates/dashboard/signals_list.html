@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Signals — Sauron Vision{% endblock %}
+{% block page_title %}⚡ SIGNAL INTELLIGENCE{% endblock %}
+
+{% block content %}
+<div class="grid grid-4" style="margin-bottom: 24px;">
+    <div class="stat-box fade-in-up delay-1">
+        <div class="stat-label">Active Signals</div>
+        <div class="stat-value">{{ active_count|default:"0" }}</div>
+    </div>
+    <div class="stat-box fade-in-up delay-2">
+        <div class="stat-label">Bullish</div>
+        <div class="stat-value" style="color: var(--accent-green);">{{ bullish_count|default:"0" }}</div>
+    </div>
+    <div class="stat-box fade-in-up delay-3">
+        <div class="stat-label">Bearish</div>
+        <div class="stat-value" style="color: var(--accent-red);">{{ bearish_count|default:"0" }}</div>
+    </div>
+    <div class="stat-box fade-in-up delay-4">
+        <div class="stat-label">Avg Score</div>
+        <div class="stat-value">{{ avg_score|default:"0.00" }}</div>
+    </div>
+</div>
+
+<div class="card fade-in-up delay-3">
+    <div class="card-header">
+        <span class="card-title">All Signals</span>
+        <div>
+            <a href="?active=1" class="btn btn-sm {% if active_only %}btn-primary{% endif %}">Active Only</a>
+            <a href="{% url 'signals_list' %}" class="btn btn-sm">All</a>
+        </div>
+    </div>
+    {% if signals %}
+    <div class="table-wrapper">
+    <table>
+        <thead><tr><th>Time</th><th>Symbol</th><th>Type</th><th>Direction</th><th>Urgency</th><th>Title</th><th>Score</th><th>Entry</th><th>Stop</th><th>Target</th><th>R:R</th></tr></thead>
+        <tbody>
+        {% for s in signals %}
+        <tr>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ s.created_at|date:"M d H:i" }}</td>
+            <td style="font-family: var(--font-display); font-size: 12px;">{{ s.instrument.symbol }}</td>
+            <td><span class="badge badge-medium">{{ s.signal_type }}</span></td>
+            <td><span class="badge badge-{{ s.direction }}">{{ s.direction }}</span></td>
+            <td><span class="badge badge-{{ s.urgency }}">{{ s.urgency }}</span></td>
+            <td>{{ s.title|truncatechars:50 }}</td>
+            <td>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span>{{ s.score|floatformat:2 }}</span>
+                    <div class="score-bar" style="width: 50px;">
+                        <div class="score-bar-fill" style="width: {{ s.score|floatformat:0 }}%; background: {% if s.score >= 0.7 %}var(--accent-green){% elif s.score >= 0.4 %}var(--accent-gold){% else %}var(--accent-red){% endif %};"></div>
+                    </div>
+                </div>
+            </td>
+            <td style="font-family: var(--font-mono); font-size: 12px;">{{ s.suggested_entry|default:"-" }}</td>
+            <td style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-red);">{{ s.suggested_stop|default:"-" }}</td>
+            <td style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-green);">{{ s.suggested_target|default:"-" }}</td>
+            <td>{{ s.risk_reward_ratio|default:"-" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">⚡</div>
+        <p>NO SIGNALS DETECTED — Signal engine scans every 15 minutes</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

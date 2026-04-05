@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#030806"/>
+  <g transform="translate(200,135) scale(1,1.1)">
+    <path d="M 0,200 Q 120,20 260,60 Q 370,30 400,40 Q 430,30 540,60 Q 680,20 800,200 Q 680,380 540,340 Q 430,370 400,360 Q 370,370 260,340 Q 120,380 0,200Z" fill="none" stroke="#00e868" stroke-width="2" opacity="0.5"/>
+    <circle cx="400" cy="200" r="155" fill="none" stroke="#00e868" stroke-width="1" opacity="0.3"/>
+    <ellipse cx="400" cy="200" rx="50" ry="155" fill="none" stroke="#00e868" stroke-width="0.6" opacity="0.3"/>
+    <ellipse cx="400" cy="200" rx="100" ry="155" fill="none" stroke="#00e868" stroke-width="0.5" opacity="0.2"/>
+    <line x1="245" y1="120" x2="555" y2="120" stroke="#00e868" stroke-width="0.4" opacity="0.15"/>
+    <line x1="245" y1="200" x2="555" y2="200" stroke="#00e868" stroke-width="0.5" opacity="0.2"/>
+    <line x1="245" y1="280" x2="555" y2="280" stroke="#00e868" stroke-width="0.4" opacity="0.15"/>
+    <circle cx="400" cy="200" r="55" fill="none" stroke="#00e868" stroke-width="2" opacity="0.5"/>
+    <circle cx="400" cy="200" r="8" fill="#00e868" opacity="0.3"/>
+  </g>
+  <text x="600" y="510" text-anchor="middle" font-family="sans-serif" font-size="48" font-weight="900" letter-spacing="12" fill="#00e868">SAURON VISION</text>
+  <text x="600" y="550" text-anchor="middle" font-family="monospace" font-size="16" letter-spacing="4" fill="#2a5038">TRADING INTELLIGENCE PLATFORM</text>
+</svg>

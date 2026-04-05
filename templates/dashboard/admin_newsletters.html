@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Newsletters — Sauron Vision{% endblock %}
+{% block page_title %}NEWSLETTER MANAGEMENT{% endblock %}
+
+{% block content %}
+{% if messages %}
+<div style="margin-bottom:16px;">{% for msg in messages %}<div class="card" style="border-color:{% if msg.tags == 'success' %}var(--accent){% else %}var(--accent-red){% endif %};padding:10px 16px;margin-bottom:6px;"><span style="font-family:var(--font-mono);font-size:12px;">{{ msg }}</span></div>{% endfor %}</div>
+{% endif %}
+
+<!-- Create Newsletter -->
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Create Newsletter</span></div>
+    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="create">
+        <div class="grid grid-3" style="margin-bottom:16px;">
+            <div><label class="form-label">TITLE</label><input type="text" name="title" value="Weekly Market Report" class="form-input"></div>
+            <div><label class="form-label">FREQUENCY</label><select name="frequency" class="form-input"><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="adhoc">Ad-hoc</option></select></div>
+            <div><label class="form-label">CHANNELS</label><div style="display:flex;gap:12px;margin-top:8px;"><label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="send_telegram" checked> Telegram</label><label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="send_email" checked> Email</label><label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="send_whatsapp"> WhatsApp</label></div></div>
+        </div>
+        <button type="submit" class="btn btn-primary">Generate with AI</button>
+    </form>
+</div>
+
+<!-- Existing Newsletters -->
+<div class="card fade-in-up delay-2">
+    <div class="card-header"><span class="card-title">Newsletters</span></div>
+    {% for nl in newsletters %}
+    <div style="border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <div>
+                <span style="font-family:var(--font-display);font-size:14px;font-weight:700;">{{ nl.title }}</span>
+                <span class="badge badge-{% if nl.status == 'sent' %}active{% elif nl.status == 'approved' %}bullish{% elif nl.status == 'ai_generated' %}high{% else %}neutral{% endif %}" style="margin-left:8px;">{{ nl.status|upper }}</span>
+            </div>
+            <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">{{ nl.created_at|date:"M d, H:i" }}</span>
+        </div>
+        {% if nl.content_markdown %}
+        <details style="margin-bottom:10px;">
+            <summary style="cursor:pointer;font-size:12px;color:var(--accent);font-family:var(--font-mono);">Preview content</summary>
+            <pre style="background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);padding:12px;font-size:11px;color:var(--text-secondary);white-space:pre-wrap;margin-top:8px;max-height:300px;overflow-y:auto;">{{ nl.content_markdown }}</pre>
+        </details>
+        {% endif %}
+        <div style="display:flex;gap:8px;">
+            {% if nl.status == 'ai_generated' %}
+            <form method="post" style="display:inline;">{% csrf_token %}<input type="hidden" name="action" value="approve"><input type="hidden" name="newsletter_id" value="{{ nl.id }}"><button type="submit" class="btn btn-primary btn-sm">Approve</button></form>
+            {% endif %}
+            {% if nl.status == 'approved' %}
+            <form method="post" style="display:inline;">{% csrf_token %}<input type="hidden" name="action" value="send"><input type="hidden" name="newsletter_id" value="{{ nl.id }}"><button type="submit" class="btn btn-primary btn-sm">Send Now</button></form>
+            {% endif %}
+            <form method="post" style="display:inline;">{% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="newsletter_id" value="{{ nl.id }}"><button type="submit" class="btn btn-sm btn-danger">Delete</button></form>
+        </div>
+    </div>
+    {% empty %}
+    <div class="empty-state" style="padding:30px;"><p>NO NEWSLETTERS YET</p></div>
+    {% endfor %}
+</div>
+{% endblock %}

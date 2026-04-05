@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Live Quotes — Sauron Vision{% endblock %}
+{% block page_title %}◆ LIVE QUOTES{% endblock %}
+
+{% block content %}
+<div class="card fade-in-up">
+    <div class="card-header">
+        <span class="card-title">Real-Time Market Data</span>
+        <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">Auto-refresh: 60s</span>
+    </div>
+    {% if quotes %}
+    <div class="table-wrapper">
+    <table>
+        <thead><tr><th>Symbol</th><th>Last</th><th>Bid</th><th>Ask</th><th>Change %</th><th>Volume</th><th>Updated</th><th>Source</th></tr></thead>
+        <tbody>
+        {% for q in quotes %}
+        <tr>
+            <td style="font-family: var(--font-display); font-size: 13px;">{{ q.instrument.symbol }}</td>
+            <td style="font-weight: 600;">{{ q.last }}</td>
+            <td>{{ q.bid|default:"-" }}</td>
+            <td>{{ q.ask|default:"-" }}</td>
+            <td style="color: {% if q.change_pct > 0 %}var(--accent-green){% elif q.change_pct < 0 %}var(--accent-red){% else %}var(--text-secondary){% endif %};">
+                {% if q.change_pct > 0 %}▲{% elif q.change_pct < 0 %}▼{% endif %} {{ q.change_pct|floatformat:2 }}%
+            </td>
+            <td>{{ q.volume|default:"-" }}</td>
+            <td style="color: var(--text-muted); font-size: 11px;">{{ q.updated_at|timesince }} ago</td>
+            <td style="color: var(--text-muted);">{{ q.source }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">◆</div>
+        <p>NO LIVE QUOTES — Waiting for data adapters to fetch prices</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

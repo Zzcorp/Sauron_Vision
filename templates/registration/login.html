@@ -1,0 +1,111 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZD0iTTIsMzIgUTE2LDggMzIsMTQgUTQ4LDggNjIsMzIgUTQ4LDU2IDMyLDUwIFExNiw1NiAyLDMyWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjIuNSIvPjxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjEyIiBmaWxsPSJub25lIiBzdHJva2U9IiMwMGU4NjgiIHN0cm9rZS13aWR0aD0iMiIvPjxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjUiIGZpbGw9IiMwMGU4NjgiLz48ZWxsaXBzZSBjeD0iMzIiIGN5PSIzMiIgcng9IjQiIHJ5PSIxMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjAuOCIgb3BhY2l0eT0iMC41Ii8+PGVsbGlwc2UgY3g9IjMyIiBjeT0iMzIiIHJ4PSI5IiByeT0iMTIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwZTg2OCIgc3Ryb2tlLXdpZHRoPSIwLjUiIG9wYWNpdHk9IjAuMyIvPjwvc3ZnPg==">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sauron Vision — Access</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHBhdGggZD0iTTIsMzIgUTE2LDggMzIsMTQgUTQ4LDggNjIsMzIgUTQ4LDU2IDMyLDUwIFExNiw1NiAyLDMyWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjIuNSIvPgogIDxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjEyIiBmaWxsPSJub25lIiBzdHJva2U9IiMwMGU4NjgiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjUiIGZpbGw9IiMwMGU4NjgiLz4KICA8ZWxsaXBzZSBjeD0iMzIiIGN5PSIzMiIgcng9IjQiIHJ5PSIxMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjAuOCIgb3BhY2l0eT0iMC41Ii8+CiAgPGVsbGlwc2UgY3g9IjMyIiBjeT0iMzIiIHJ4PSI5IiByeT0iMTIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwZTg2OCIgc3Ryb2tlLXdpZHRoPSIwLjUiIG9wYWNpdHk9IjAuMyIvPgo8L3N2Zz4=">
+    <meta property="og:title" content="Sauron Vision — Trading Intelligence">
+    <meta property="og:image" content="{% static 'og-image.svg' %}">
+    <meta name="theme-color" content="#00e868">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{background:#030806;color:#c8e8d8;font-family:'Rajdhani',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
+        .grid-bg{position:fixed;top:-50%;left:-50%;width:200%;height:200%;z-index:0;background-image:linear-gradient(rgba(0,232,104,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(0,232,104,0.04) 1px,transparent 1px);background-size:60px 60px;animation:gridMove 25s linear infinite}
+        @keyframes gridMove{0%{transform:translate(0,0)}100%{transform:translate(60px,60px)}}
+
+        /* Globe-eye: static eye, spinning globe */
+        .globe-eye-login{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:110vmin;height:110vmin;z-index:1;pointer-events:none;opacity:0.035}
+        .globe-eye-login .globe-spin{transform-origin:400px 400px;animation:globeSpin 60s linear infinite}
+        @keyframes globeSpin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+
+        canvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:2}
+        .scan-line{position:fixed;top:0;left:0;bottom:0;width:3px;z-index:3;animation:scanRTL 8s linear infinite}
+        .scan-line::before{content:'';position:absolute;top:0;left:-40px;bottom:0;width:80px;background:linear-gradient(90deg,transparent,rgba(0,232,104,0.06),transparent)}
+        .scan-line::after{content:'';position:absolute;top:0;left:0;bottom:0;width:3px;background:linear-gradient(180deg,transparent 10%,rgba(0,232,104,0.4) 50%,transparent 90%);box-shadow:0 0 15px rgba(0,232,104,0.3),0 0 40px rgba(0,232,104,0.1)}
+        @keyframes scanRTL{0%{left:100%}100%{left:-80px}}
+
+        .login-container{position:relative;z-index:10;width:380px;animation:fadeInUp .8s ease}
+        @keyframes fadeInUp{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:translateY(0)}}
+        .login-eye{width:64px;height:64px;margin:0 auto 20px}
+        .login-title{font-family:'Orbitron',sans-serif;font-size:24px;font-weight:900;letter-spacing:6px;color:#00e868;text-align:center;margin-bottom:4px;text-shadow:0 0 30px rgba(0,232,104,0.2)}
+        .login-subtitle{font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:3px;color:#2a5038;text-align:center;margin-bottom:32px}
+        .login-card{background:rgba(10,26,20,0.9);border:1px solid #133020;border-radius:12px;padding:32px;backdrop-filter:blur(20px);box-shadow:0 4px 40px rgba(0,0,0,0.5),0 0 60px rgba(0,232,104,0.03)}
+        .form-group{margin-bottom:20px}
+        .form-group label{display:block;font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:3px;color:#5a8a6a;text-transform:uppercase;margin-bottom:8px}
+        .form-group input{width:100%;padding:12px 16px;background:#060e0a;border:1px solid #133020;border-radius:6px;color:#c8e8d8;font-family:'Share Tech Mono',monospace;font-size:14px;outline:none;transition:all .2s}
+        .form-group input:focus{border-color:#00e868;box-shadow:0 0 15px rgba(0,232,104,0.1)}
+        .btn-login{width:100%;padding:14px;background:linear-gradient(135deg,#0a5028,#00e868);border:none;border-radius:6px;color:#020804;font-family:'Orbitron',sans-serif;font-size:13px;font-weight:700;letter-spacing:4px;cursor:pointer;transition:all .3s;text-transform:uppercase}
+        .btn-login:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,232,104,0.25)}
+        .errors{background:rgba(232,48,48,0.08);border:1px solid rgba(232,48,48,0.25);border-radius:6px;padding:12px;margin-bottom:20px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#e83030}
+    </style>
+</head>
+<body>
+    <div class="grid-bg"></div>
+
+    <!-- Static eye, rotating globe -->
+    <svg class="globe-eye-login" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+        <g class="eye-static">
+            <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="2"/>
+            <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.4"/>
+            <circle cx="400" cy="400" r="160" fill="none" stroke="#00e868" stroke-width="1.5"/>
+            <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="2"/>
+            <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.12"/>
+            <path d="M 10,400 Q 200,100 400,160 Q 600,100 790,400" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
+            <path d="M 10,400 Q 200,700 400,640 Q 600,700 790,400" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
+        </g>
+        <g class="globe-spin">
+            <ellipse cx="400" cy="400" rx="50" ry="140" fill="none" stroke="#00e868" stroke-width="0.5" opacity="0.35"/>
+            <ellipse cx="400" cy="400" rx="100" ry="140" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.25"/>
+            <ellipse cx="400" cy="400" rx="140" ry="50" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.25"/>
+            <line x1="260" y1="340" x2="540" y2="340" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
+            <line x1="260" y1="400" x2="540" y2="400" stroke="#00e868" stroke-width="0.5" opacity="0.3"/>
+            <line x1="260" y1="460" x2="540" y2="460" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
+            <ellipse cx="400" cy="400" rx="30" ry="140" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.2" transform="rotate(25 400 400)"/>
+            <ellipse cx="400" cy="400" rx="120" ry="140" fill="none" stroke="#00e868" stroke-width="0.3" opacity="0.15" transform="rotate(-20 400 400)"/>
+        </g>
+    </svg>
+
+    <canvas id="particles-canvas"></canvas>
+    <div class="scan-line"></div>
+
+    <div class="login-container">
+        <!-- Eye logo on login -->
+        <svg class="login-eye" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+            <path d="M2,32 Q16,8 32,14 Q48,8 62,32 Q48,56 32,50 Q16,56 2,32Z" fill="none" stroke="#00e868" stroke-width="2.5">
+                <animate attributeName="stroke-opacity" values="0.4;1;0.4" dur="3s" repeatCount="indefinite"/>
+            </path>
+            <circle cx="32" cy="32" r="12" fill="none" stroke="#00e868" stroke-width="2"/>
+            <circle cx="32" cy="32" r="5" fill="#00e868" opacity="0.8">
+                <animate attributeName="r" values="4;6;4" dur="3s" repeatCount="indefinite"/>
+            </circle>
+            <ellipse cx="32" cy="32" rx="4" ry="12" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.5">
+                <animateTransform attributeName="transform" type="rotate" from="0 32 32" to="360 32 32" dur="30s" repeatCount="indefinite"/>
+            </ellipse>
+        </svg>
+        <h1 class="login-title">SAURON VISION</h1>
+        <p class="login-subtitle">AUTHENTICATE TO PROCEED</p>
+        <div class="login-card">
+            {% if form.errors %}<div class="errors">⚠ AUTHENTICATION FAILED — INVALID CREDENTIALS</div>{% endif %}
+            <form method="post" action="{% url 'login' %}">
+                {% csrf_token %}
+                <div class="form-group"><label for="id_username">Operator ID</label><input type="text" name="username" id="id_username" autofocus autocomplete="username" required></div>
+                <div class="form-group"><label for="id_password">Access Key</label><input type="password" name="password" id="id_password" autocomplete="current-password" required></div>
+                <input type="hidden" name="next" value="{{ next }}">
+                <button type="submit" class="btn-login">Initialize Session</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    const canvas=document.getElementById('particles-canvas');const ctx=canvas.getContext('2d');let particles=[];
+    function resize(){canvas.width=window.innerWidth;canvas.height=window.innerHeight}resize();window.addEventListener('resize',resize);
+    class P{constructor(){this.reset()}reset(){this.x=Math.random()*canvas.width;this.y=Math.random()*canvas.height;this.vx=(Math.random()-.5)*.35;this.vy=(Math.random()-.5)*.35;this.s=Math.random()*1.5+.3;this.a=Math.random()*.2+.04}update(){this.x+=this.vx;this.y+=this.vy;if(this.x<0||this.x>canvas.width||this.y<0||this.y>canvas.height)this.reset()}draw(){ctx.beginPath();ctx.arc(this.x,this.y,this.s,0,Math.PI*2);ctx.fillStyle=`rgba(0,232,104,${this.a})`;ctx.fill()}}
+    for(let i=0;i<60;i++)particles.push(new P());
+    function animate(){ctx.clearRect(0,0,canvas.width,canvas.height);particles.forEach(p=>{p.update();p.draw()});for(let i=0;i<particles.length;i++)for(let j=i+1;j<particles.length;j++){const d=Math.hypot(particles[i].x-particles[j].x,particles[i].y-particles[j].y);if(d<120){ctx.beginPath();ctx.moveTo(particles[i].x,particles[i].y);ctx.lineTo(particles[j].x,particles[j].y);ctx.strokeStyle=`rgba(0,232,104,${.04*(1-d/120)})`;ctx.stroke()}}requestAnimationFrame(animate)}animate();
+    </script>
+</body>
+</html>

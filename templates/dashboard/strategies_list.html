@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Strategies — Sauron Vision{% endblock %}
+{% block page_title %}⬡ STRATEGY ENGINE{% endblock %}
+
+{% block content %}
+<div class="card fade-in-up">
+    <div class="card-header">
+        <span class="card-title">Trading Strategies</span>
+        <div>
+            <a href="?status=active" class="btn btn-sm">Active</a>
+            <a href="?status=proposed" class="btn btn-sm">Proposed</a>
+            <a href="{% url 'strategies_list' %}" class="btn btn-sm">All</a>
+        </div>
+    </div>
+    {% if strategies %}
+    <div class="table-wrapper">
+    <table>
+        <thead><tr><th>Strategy</th><th>Horizon</th><th>Status</th><th>Instruments</th><th>P&L</th><th>Max DD</th><th>Created</th></tr></thead>
+        <tbody>
+        {% for s in strategies %}
+        <tr>
+            <td><a href="{% url 'strategy_detail' s.pk %}" style="color: var(--text-primary); text-decoration: none;">{{ s.name|truncatechars:50 }}</a></td>
+            <td><span class="badge badge-medium">{{ s.time_horizon }}</span></td>
+            <td><span class="badge badge-{{ s.status }}">{{ s.status }}</span></td>
+            <td style="font-family: var(--font-mono); font-size: 12px;">{{ s.legs.count }} legs</td>
+            <td style="color: {% if s.pnl_pct >= 0 %}var(--accent-green){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ s.pnl_pct|floatformat:2 }}%</td>
+            <td style="color: var(--accent-red); font-family: var(--font-mono);">{{ s.max_drawdown|floatformat:2 }}%</td>
+            <td style="color: var(--text-muted); font-size: 12px;">{{ s.created_at|date:"M d" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">⬡</div>
+        <p>NO STRATEGIES — AI advisor proposes strategies from active signals</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

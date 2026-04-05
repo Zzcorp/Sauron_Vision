@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% load sauron_tags %}
+{% block title %}Admin — Sauron Vision{% endblock %}
+{% block page_title %}ADMIN CONTROL CENTER{% endblock %}
+
+{% block content %}
+{% if messages %}
+<div style="margin-bottom:20px;">
+    {% for msg in messages %}
+    <div class="card" style="border-color:{% if msg.tags == 'success' %}var(--accent){% else %}var(--accent-red){% endif %};padding:12px 20px;margin-bottom:8px;">
+        <span style="font-family:var(--font-mono);font-size:13px;">{% if msg.tags == 'success' %}OK{% else %}ERR{% endif %} {{ msg }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Master Switch -->
+<div class="card fade-in-up" style="margin-bottom:24px;border-color:{% if master_enabled %}var(--accent){% else %}var(--accent-red){% endif %};">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+            <div style="font-family:var(--font-display);font-size:18px;font-weight:700;letter-spacing:2px;color:{% if master_enabled %}var(--accent){% else %}var(--accent-red){% endif %};">
+                {% if master_enabled %}PLATFORM ACTIVE{% else %}PLATFORM STOPPED{% endif %}
+            </div>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:4px;">Master switch — all automated tasks</div>
+        </div>
+        <form method="post" action="{% url 'admin_toggle_component' %}">{% csrf_token %}<input type="hidden" name="key" value="platform_master">
+            {% if master_enabled %}
+            <button type="submit" class="btn btn-danger" style="font-size:14px;padding:12px 32px;letter-spacing:2px;">STOP ALL</button>
+            {% else %}
+            <button type="submit" class="btn btn-primary" style="font-size:14px;padding:12px 32px;letter-spacing:2px;">START PLATFORM</button>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="grid grid-4" style="margin-bottom:24px;">
+    <form method="post" action="{% url 'admin_bulk_toggle' %}">{% csrf_token %}<input type="hidden" name="category" value="scraper"><input type="hidden" name="action" value="enable"><button type="submit" class="btn" style="width:100%;">Start All Scrapers</button></form>
+    <form method="post" action="{% url 'admin_bulk_toggle' %}">{% csrf_token %}<input type="hidden" name="category" value="scraper"><input type="hidden" name="action" value="disable"><button type="submit" class="btn btn-danger" style="width:100%;">Stop All Scrapers</button></form>
+    <form method="post" action="{% url 'admin_bulk_toggle' %}">{% csrf_token %}<input type="hidden" name="category" value="agent"><input type="hidden" name="action" value="enable"><button type="submit" class="btn" style="width:100%;">Start All Agents</button></form>
+    <form method="post" action="{% url 'admin_bulk_toggle' %}">{% csrf_token %}<input type="hidden" name="category" value="agent"><input type="hidden" name="action" value="disable"><button type="submit" class="btn btn-danger" style="width:100%;">Stop All Agents</button></form>
+</div>
+
+<!-- Component Controls -->
+{% for cat_name, cat_components in components_by_category.items %}
+<div class="section-label fade-in-up">{{ cat_name|upper }}</div>
+<div class="card fade-in-up" style="margin-bottom:20px;">
+    <div class="table-wrapper"><table>
+        <thead><tr><th>Component</th><th>Status</th><th>Last Run</th><th>Result</th><th>Runs</th><th>Errors</th><th>Action</th></tr></thead>
+        <tbody>
+        {% for c in cat_components %}
+        <tr>
+            <td><div style="font-weight:600;">{{ c.name }}</div><div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);">{{ c.description }}</div></td>
+            <td>{% if c.is_enabled %}<span style="color:var(--accent);font-family:var(--font-mono);font-size:12px;">RUNNING</span>{% else %}<span style="color:var(--text-muted);font-family:var(--font-mono);font-size:12px;">STOPPED</span>{% endif %}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{% if c.last_run_at %}{{ c.last_run_at|timesince }} ago{% else %}Never{% endif %}</td>
+            <td>{% if c.last_status == "success" %}<span style="color:var(--accent);">OK</span>{% elif c.last_status == "error" %}<span style="color:var(--accent-red);">ERR</span>{% else %}<span style="color:var(--text-muted);">---</span>{% endif %}</td>
+            <td style="font-family:var(--font-mono);font-size:12px;">{{ c.run_count }}</td>
+            <td style="font-family:var(--font-mono);font-size:12px;color:{% if c.error_count > 0 %}var(--accent-red){% else %}var(--text-muted){% endif %};">{{ c.error_count }}</td>
+            <td><form method="post" action="{% url 'admin_toggle_component' %}" style="display:inline;">{% csrf_token %}<input type="hidden" name="key" value="{{ c.key }}">
+                {% if c.is_enabled %}<button type="submit" class="btn btn-sm btn-danger">STOP</button>
+                {% else %}<button type="submit" class="btn btn-sm btn-primary">START</button>{% endif %}
+            </form></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+</div>
+{% endfor %}
+
+<!-- System Overview -->
+<div class="section-label fade-in-up">System Overview</div>
+<div class="grid grid-5" style="margin-bottom:20px;">
+    <div class="stat-box fade-in-up delay-1"><div class="stat-label">Total Users</div><div class="stat-value">{{ total_users }}</div><div class="stat-sub">{{ active_users }} active</div></div>
+    <div class="stat-box fade-in-up delay-2"><div class="stat-label">Instruments</div><div class="stat-value">{{ total_instruments }}</div><div class="stat-sub">{{ watchlist_instruments }} watched</div></div>
+    <div class="stat-box fade-in-up delay-3"><div class="stat-label">Active Signals</div><div class="stat-value" style="color:var(--accent);">{{ active_signals }}</div></div>
+    <div class="stat-box fade-in-up delay-4"><div class="stat-label">AI Tasks (24h)</div><div class="stat-value">{{ ai_tasks_24h }}</div><div class="stat-sub">${{ ai_cost_24h }} cost</div></div>
+    <div class="stat-box fade-in-up delay-5"><div class="stat-label">News Articles</div><div class="stat-value">{{ total_news }}</div><div class="stat-sub">{{ unprocessed_news }} unprocessed</div></div>
+</div>
+
+<!-- Users with ADD popup -->
+<div class="section-label fade-in-up">Users</div>
+<div class="card fade-in-up delay-5" style="margin-bottom:24px;">
+    <div class="card-header">
+        <span class="card-title">Registered Users</span>
+        <button class="btn btn-primary btn-sm" onclick="document.getElementById('addUserModal').classList.add('active')">+ Add User</button>
+    </div>
+    <div class="table-wrapper"><table>
+        <thead><tr><th>Username</th><th>Email</th><th>Name</th><th>Staff</th><th>Active</th><th>Joined</th><th>Last Login</th></tr></thead>
+        <tbody>
+        {% for u in users %}
+        <tr>
+            <td style="font-family:var(--font-display);font-size:12px;">{{ u.username }}</td>
+            <td style="font-size:12px;">{{ u.email|default:"-" }}</td>
+            <td>{{ u.first_name }} {{ u.last_name }}</td>
+            <td>{% if u.is_staff %}<span style="color:var(--accent);">yes</span>{% else %}no{% endif %}</td>
+            <td>{% if u.is_active %}<span style="color:var(--accent);">yes</span>{% else %}<span style="color:var(--accent-red);">no</span>{% endif %}</td>
+            <td style="font-size:11px;color:var(--text-muted);">{{ u.date_joined|date:"M d, Y" }}</td>
+            <td style="font-size:11px;color:var(--text-muted);">{{ u.last_login|date:"M d H:i"|default:"-" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+</div>
+
+<!-- Data Health -->
+<div class="section-label fade-in-up">Data Pipeline Health</div>
+<div class="card fade-in-up delay-6">
+    <div class="card-header"><span class="card-title">Data Sources</span></div>
+    <div class="table-wrapper"><table>
+        <thead><tr><th>Source</th><th>Records</th><th>Last Updated</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for src in data_sources %}
+        <tr>
+            <td>{{ src.name }}</td>
+            <td style="font-family:var(--font-mono);">{{ src.count }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ src.last_updated|default:"Never" }}</td>
+            <td>{% if src.count > 0 %}<span style="color:var(--accent);">HAS DATA</span>{% else %}<span style="color:var(--text-muted);">EMPTY</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+</div>
+
+<!-- ── ADD USER MODAL ─────────────────────────── -->
+<div class="modal-overlay" id="addUserModal">
+    <div class="modal">
+        <button class="modal-close" onclick="document.getElementById('addUserModal').classList.remove('active')">&times;</button>
+        <div class="modal-title">CREATE NEW USER</div>
+        <form method="post" action="{% url 'admin_create_user' %}">
+            {% csrf_token %}
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">USERNAME</label>
+                <input type="text" name="username" required style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:13px;outline:none;">
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">EMAIL</label>
+                <input type="email" name="email" style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:13px;outline:none;">
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">PASSWORD</label>
+                <input type="password" name="password" required style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:13px;outline:none;">
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">FIRST NAME</label>
+                <input type="text" name="first_name" style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:13px;outline:none;">
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">LAST NAME</label>
+                <input type="text" name="last_name" style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:13px;outline:none;">
+            </div>
+            <div style="margin-bottom:20px;display:flex;gap:16px;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" name="is_staff"> Staff</label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" name="is_superuser"> Superuser</label>
+            </div>
+            <div style="display:flex;gap:12px;">
+                <button type="submit" class="btn btn-primary" style="flex:1;">Create User</button>
+                <button type="button" class="btn" onclick="document.getElementById('addUserModal').classList.remove('active')">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

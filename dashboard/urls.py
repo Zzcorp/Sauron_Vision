@@ -1,0 +1,48 @@
+"""Sauron Vision — Dashboard URL Configuration."""
+from django.urls import path
+from . import views
+from .api import market_views, signal_views, strategy_views, portfolio_views, ai_views
+
+urlpatterns = [
+    # ── Frontend Pages ──────────────────────────────────────
+    path("", views.dashboard, name="dashboard"),
+    path("instruments/", views.instruments_list, name="instruments_list"),
+    path("instruments/<str:symbol>/", views.instrument_detail, name="instrument_detail"),
+    path("api/instrument-preview/<str:symbol>/", views.instrument_preview_api, name="instrument_preview_api"),
+    path("quotes/", views.market_quotes, name="market_quotes"),
+    path("calendar/", views.economic_calendar, name="economic_calendar"),
+    path("signals/", views.signals_list, name="signals_list"),
+    path("strategies/", views.strategies_list, name="strategies_list"),
+    path("strategies/<int:pk>/", views.strategy_detail, name="strategy_detail"),
+    path("news/", views.news_feed, name="news_feed"),
+    path("portfolio/", views.portfolio_overview, name="portfolio_overview"),
+    path("positions/", views.positions_list, name="positions_list"),
+    path("ai/", views.ai_insights, name="ai_insights"),
+    path("ai/tasks/", views.ai_tasks_list, name="ai_tasks_list"),
+    path("backtest/", views.backtest_list, name="backtest_list"),
+    path("profile/", views.profile, name="profile"),
+    path("setup/", views.setup, name="setup"),
+    path("getting-started/", views.getting_started, name="getting_started"),
+    path("toggle-theme/", views.toggle_theme, name="toggle_theme"),
+    path("admin-dashboard/", views.admin_dashboard, name="admin_dashboard"),
+    path("admin-dashboard/toggle/", views.admin_toggle_component, name="admin_toggle_component"),
+    path("admin-dashboard/bulk-toggle/", views.admin_bulk_toggle, name="admin_bulk_toggle"),
+    path("admin-dashboard/create-user/", views.admin_create_user, name="admin_create_user"),
+    path("admin-dashboard/toggle-market/", views.admin_toggle_market, name="admin_toggle_market"),
+    path("admin-dashboard/newsletters/", views.admin_newsletters, name="admin_newsletters"),
+    path("notifications/", views.user_notifications, name="user_notifications"),
+
+    # ── API Endpoints ───────────────────────────────────────
+    path("api/instruments/", market_views.InstrumentListView.as_view(), name="api-instrument-list"),
+    path("api/quotes/", market_views.LiveQuoteListView.as_view(), name="api-live-quotes"),
+    path("api/calendar/", market_views.EconomicCalendarView.as_view(), name="api-economic-calendar"),
+    path("api/signals/", signal_views.SignalListView.as_view(), name="api-signal-list"),
+    path("api/signals/active/", signal_views.ActiveSignalListView.as_view(), name="api-active-signals"),
+    path("api/strategies/", strategy_views.StrategyListView.as_view(), name="api-strategy-list"),
+    path("api/strategies/<int:pk>/", strategy_views.StrategyDetailView.as_view(), name="api-strategy-detail"),
+    path("api/portfolio/", portfolio_views.PortfolioView.as_view(), name="api-portfolio"),
+    path("api/portfolio/positions/", portfolio_views.PositionListView.as_view(), name="api-positions"),
+    path("api/portfolio/snapshots/", portfolio_views.SnapshotListView.as_view(), name="api-snapshots"),
+    path("api/ai/tasks/", ai_views.AgentTaskListView.as_view(), name="api-ai-tasks"),
+    path("api/ai/briefing/", ai_views.DailyBriefingView.as_view(), name="api-daily-briefing"),
+]
