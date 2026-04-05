@@ -24,7 +24,7 @@ RSS_FEEDS = {
     "marketwatch": "https://feeds.marketwatch.com/marketwatch/topstories/",
     "bloomberg_markets": "https://feeds.bloomberg.com/markets/news.rss",
     "seeking_alpha": "https://seekingalpha.com/market_currents.xml",
-]
+}
 
 
 def fetch_rss_news(max_per_feed=10):

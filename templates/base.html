@@ -143,7 +143,7 @@
         .logout-btn:hover { color: var(--accent); }
 
         /* ── Main ────────────────────────────────── */
-        .main-content { margin-left: var(--sidebar-width); flex: 1; min-height: 100vh; }
+        .main-content { margin-left: var(--sidebar-width); flex: 1; min-height: 100vh; max-width: calc(100vw - var(--sidebar-width)); overflow-x: hidden; }
         .topbar {
             height: var(--topbar-height);
             background: rgba(6, 14, 10, 0.85); backdrop-filter: blur(12px);
@@ -155,7 +155,7 @@
         .topbar-right { display: flex; align-items: center; gap: 16px; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); }
         .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
         .status-dot.online { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-        .page-content { padding: 28px; }
+        .page-content { padding: 28px; max-width: 100%; box-sizing: border-box; }
 
         /* ── Cards ────────────────────────────────── */
         .card {
@@ -382,7 +382,7 @@
         .sidebar.mini .sidebar-footer a::after { content: '\2699'; font-size: 16px; }
         .sidebar.mini .sidebar-footer .logout-btn::after { content: '\23FB'; font-size: 16px; }
 
-        body:has(.sidebar.mini) .main-content { margin-left: 68px; }
+        body:has(.sidebar.mini) .main-content { margin-left: 68px; max-width: calc(100vw - 68px); }
 
 
         /* ── Exchange Dropdown (fixed) ───────────── */
@@ -562,6 +562,160 @@
             color: var(--text-muted); margin-top: 4px; letter-spacing: 0.5px;
         }
 
+
+        /* ── Ticker Bar ──────────────────────────── */
+        .ticker-bar {
+            height: 34px; background: var(--bg-primary);
+            border-bottom: 1px solid var(--border);
+            overflow: hidden; position: sticky; top: var(--topbar-height);
+            z-index: 45; white-space: nowrap;
+        }
+        .ticker-track {
+            display: inline-flex; gap: 0;
+            animation: tickerScroll 60s linear infinite;
+        }
+        .ticker-bar:hover .ticker-track { animation-duration: 300s; }
+        @keyframes tickerScroll {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        .ticker-item {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 0 18px; height: 32px; font-family: var(--font-mono);
+            font-size: 11px; cursor: pointer; border-right: 1px solid var(--border);
+            position: relative; transition: background 0.15s;
+            text-decoration: none; color: var(--text-secondary);
+        }
+        .ticker-item:hover { background: var(--bg-card); }
+        .ticker-item .t-sym { font-weight: 700; color: var(--text-primary); letter-spacing: 0.5px; }
+        .ticker-item .t-price { color: var(--text-primary); }
+        .ticker-item .t-change { font-size: 10px; }
+        .ticker-item .t-change.up { color: var(--accent); }
+        .ticker-item .t-change.down { color: var(--accent-red); }
+        .ticker-item .t-badge {
+            font-size: 8px; letter-spacing: 1px; padding: 1px 5px;
+            border-radius: 8px; font-weight: 700; text-transform: uppercase;
+        }
+        .ticker-item .t-badge.signal { background: var(--accent-dim); color: var(--accent); }
+        .ticker-item .t-badge.news { background: rgba(48,160,232,0.12); color: var(--accent-blue); }
+        .ticker-item .t-badge.strat { background: rgba(136,64,208,0.12); color: var(--accent-purple); }
+        /* Ticker popup on hover */
+        .ticker-popup {
+            display: none; position: absolute; top: 36px; left: 0;
+            min-width: 240px; background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 12px; z-index: 250;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5); font-size: 11px;
+            white-space: normal; animation: previewFadeIn 0.15s ease;
+        }
+        .ticker-item:hover .ticker-popup { display: block; }
+        .ticker-popup .tp-title { font-family: var(--font-display); font-size: 13px; font-weight: 700; margin-bottom: 6px; color: var(--accent); }
+        .ticker-popup .tp-row { display: flex; justify-content: space-between; padding: 3px 0; }
+        .ticker-popup .tp-row .lbl { color: var(--text-muted); }
+
+        /* ── Info Panel (collapsible + expandable) ── */
+        .info-panel-wrap {
+            position: sticky; top: calc(var(--topbar-height) + 34px);
+            z-index: 44; background: var(--bg-primary);
+        }
+        .info-panel {
+            background: var(--bg-primary); border-bottom: 1px solid var(--border);
+            overflow: hidden; transition: max-height 0.4s ease, padding 0.3s ease;
+            max-height: 80px; padding: 8px 20px;
+        }
+        .info-panel.expanded { max-height: 400px; padding: 12px 20px; }
+        .info-panel.collapsed { max-height: 0; padding: 0 20px; border-bottom: none; }
+        .info-panel-toggle {
+            position: absolute; bottom: -14px; left: 50%; transform: translateX(-50%);
+            z-index: 60; background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 0 0 8px 8px; padding: 2px 16px; cursor: pointer;
+            font-size: 10px; color: var(--text-muted); transition: all 0.2s;
+            font-family: var(--font-mono);
+        }
+        .info-panel-toggle:hover { color: var(--accent); border-color: var(--accent-dim); }
+        .info-panel-inner {
+            display: flex; gap: 0; overflow-x: auto;
+            scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+        }
+        .info-panel-inner::-webkit-scrollbar { height: 3px; }
+        .info-panel-inner::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+        .info-card {
+            flex-shrink: 0; display: flex; flex-direction: column; gap: 2px;
+            padding: 6px 16px; border-right: 1px solid var(--border); min-width: 120px;
+        }
+        .info-card:last-child { border-right: none; }
+        .info-card .ic-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px; color: var(--text-muted); text-transform: uppercase; }
+        .info-card .ic-value { font-family: var(--font-display); font-size: 16px; font-weight: 700; color: var(--text-primary); }
+        .info-card .ic-sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); }
+
+        /* ── Notification Bell ───────────────────── */
+        .notif-bell {
+            position: relative; cursor: pointer;
+            width: 34px; height: 34px; border-radius: 50%;
+            border: 1px solid var(--border); background: var(--bg-card);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 15px; transition: all 0.2s; color: var(--text-secondary);
+        }
+        .notif-bell:hover { border-color: var(--accent); color: var(--accent); }
+        .notif-badge {
+            position: absolute; top: -4px; right: -4px;
+            min-width: 16px; height: 16px; border-radius: 8px;
+            background: var(--accent-red); color: #fff; font-size: 9px;
+            font-family: var(--font-mono); font-weight: 700;
+            display: flex; align-items: center; justify-content: center;
+            padding: 0 4px;
+        }
+        .notif-dropdown {
+            display: none; position: absolute; top: 42px; right: 0;
+            width: 340px; max-height: 400px; overflow-y: auto;
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+            z-index: 300; padding: 0;
+        }
+        .notif-bell.open .notif-dropdown { display: block; }
+        .notif-header {
+            padding: 12px 16px; border-bottom: 1px solid var(--border);
+            font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px;
+            color: var(--text-muted); text-transform: uppercase;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .notif-item {
+            padding: 10px 16px; border-bottom: 1px solid rgba(19,48,32,0.15);
+            cursor: pointer; transition: background 0.15s;
+        }
+        .notif-item:hover { background: var(--bg-card-hover); }
+        .notif-item:last-child { border-bottom: none; }
+        .notif-item .ni-title { font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+        .notif-item .ni-body { font-size: 11px; color: var(--text-secondary); }
+        .notif-item .ni-time { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); margin-top: 3px; }
+        .notif-item.unread { border-left: 3px solid var(--accent); }
+        .notif-empty { padding: 30px; text-align: center; color: var(--text-muted); font-size: 12px; }
+
+        /* ── Preview Popup — position fix ────────── */
+        .instrument-preview {
+            display: none; position: absolute; left: 0;
+            width: 320px; background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+            padding: 16px; z-index: 400; pointer-events: none;
+            animation: previewFadeIn 0.2s ease;
+        }
+        .instrument-preview.show { display: block; }
+        .instrument-preview.pos-above { bottom: calc(100% + 8px); top: auto; }
+        .instrument-preview.pos-below { top: calc(100% + 8px); bottom: auto; }
+
+        /* ── Sidebar expand arrow (when mini) ────── */
+        .sidebar-expand-tab {
+            display: none; position: fixed; top: 50%; left: 68px;
+            transform: translateY(-50%); z-index: 110;
+            width: 16px; height: 48px; background: var(--bg-card);
+            border: 1px solid var(--border); border-left: none;
+            border-radius: 0 6px 6px 0; cursor: pointer;
+            align-items: center; justify-content: center;
+            color: var(--text-muted); transition: all 0.2s;
+        }
+        .sidebar-expand-tab:hover { color: var(--accent); border-color: var(--accent-dim); width: 20px; }
+        .sidebar-expand-tab svg { width: 10px; height: 10px; }
+        body:has(.sidebar.mini) .sidebar-expand-tab { display: flex; }
+
     </style>{% block extra_css %}{% endblock %}
 </head>
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}">
@@ -635,12 +789,13 @@
             <div class="nav-section">AI Agents</div>
             <a href="{% url 'ai_insights' %}" class="nav-link {% if page_id == 'ai' %}active{% endif %}"><span class="icon">◬</span> <span class="label-text">AI Insights</span></a>
             <a href="{% url 'ai_tasks_list' %}" class="nav-link {% if page_id == 'ai_tasks' %}active{% endif %}"><span class="icon">▸</span> <span class="label-text">Agent Tasks</span></a>
+            <a href="{% url 'ai_chat' %}" class="nav-link {% if page_id == 'ai_chat' %}active{% endif %}"><span class="icon">&#x25C7;</span> <span class="label-text">AI Chat</span></a>
             {% if request.user.is_superuser %}<div class="nav-section">Admin</div>
             <a href="{% url 'admin_dashboard' %}" class="nav-link {% if page_id == 'admin_dashboard' %}active{% endif %}"><span class="icon">⬢</span> <span class="label-text">Admin Panel</span></a>
-            <a href="{% url 'admin_newsletters' %}" class="nav-link {% if page_id == 'admin_newsletters' %}active{% endif %}"><span class="icon">&#x2709;</span> <span class="label-text">Newsletters</span></a>
+            <a href="{% url 'admin_newsletters' %}" class="nav-link {% if page_id == 'admin_newsletters' %}active{% endif %}"><span class="icon">&#x25A3;</span> <span class="label-text">Newsletters</span></a>
             {% endif %}<div class="nav-section">System</div>
             <a href="{% url 'profile' %}" class="nav-link {% if page_id == 'profile' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Profile</span></a>
-            <a href="{% url 'user_notifications' %}" class="nav-link {% if page_id == 'notifications' %}active{% endif %}"><span class="icon">&#x1F514;</span> <span class="label-text">Notifications</span></a>
+            <a href="{% url 'user_notifications' %}" class="nav-link {% if page_id == 'notifications' %}active{% endif %}"><span class="icon">&#x25C9;</span> <span class="label-text">Notifications</span></a>
             <a href="{% url 'setup' %}" class="nav-link {% if page_id == 'setup' %}active{% endif %}"><span class="icon">⚙</span> <span class="label-text">Setup</span></a>
             <a href="{% url 'getting_started' %}" class="nav-link {% if page_id == 'getting_started' %}active{% endif %}"><span class="icon">📡</span> <span class="label-text">Getting Started</span></a>
         </nav>
@@ -681,13 +836,153 @@
                         {% endfor %}
                     </div>
                 </div>
+                <!-- Notification Bell -->
+                <div class="notif-bell" onclick="this.classList.toggle('open')" id="notifBell">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><path d="M8 1C5.8 1 4 2.8 4 5v3l-1 2h10l-1-2V5c0-2.2-1.8-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="8" cy="14" r="1.5" fill="currentColor"/></svg>
+                    {% if notification_count %}<span class="notif-badge">{{ notification_count }}</span>{% endif %}
+                    <div class="notif-dropdown" onclick="event.stopPropagation()">
+                        <div class="notif-header">
+                            <span>Notifications</span>
+                            <div style="display:flex;gap:10px;">
+                                <a href="{% url 'mark_all_notifications_read' %}" style="color:var(--text-muted);font-size:9px;text-decoration:none;">Mark all read</a>
+                                <a href="{% url 'user_notifications' %}" style="color:var(--accent);font-size:10px;text-decoration:none;">Settings</a>
+                            </div>
+                        </div>
+                        {% for n in recent_notifications %}
+                        <div class="notif-item {% if not n.read %}unread{% endif %}" onclick="window.location='{{ n.url }}'">
+                            <div class="ni-title">{{ n.title }}</div>
+                            <div class="ni-body">{{ n.body|truncatechars:80 }}</div>
+                            <div class="ni-time">{{ n.created_at|timesince }} ago</div>
+                        </div>
+                        {% empty %}
+                        <div class="notif-empty">No notifications yet</div>
+                        {% endfor %}
+                    </div>
+                </div>
                 <span>{% get_display_name as uname %}{{ uname }}</span>
             </div>
         </header>
+
+        <!-- Ticker Bar (not on dashboard) -->
+        {% if page_id != "dashboard" %}
+        <div class="ticker-bar" id="tickerBar">
+            <div class="ticker-track" id="tickerTrack">
+                {% for item in ticker_items %}
+                <a href="{{ item.url }}" class="ticker-item">
+                    {% if item.type == "quote" %}
+                    <span class="t-sym">{{ item.symbol }}</span>
+                    <span class="t-price">{{ item.price }}</span>
+                    <span class="t-change {% if item.change >= 0 %}up{% else %}down{% endif %}">{{ item.change_display }}</span>
+                    {% elif item.type == "signal" %}
+                    <span class="t-badge signal">SIG</span>
+                    <span class="t-sym">{{ item.symbol }}</span>
+                    <span>{{ item.direction }}</span>
+                    {% elif item.type == "news" %}
+                    <span class="t-badge news">NEWS</span>
+                    <span>{{ item.title|truncatechars:50 }}</span>
+                    {% elif item.type == "strategy" %}
+                    <span class="t-badge strat">STRAT</span>
+                    <span>{{ item.title|truncatechars:40 }}</span>
+                    {% endif %}
+                    <div class="ticker-popup">
+                        <div class="tp-title">{{ item.symbol|default:item.title }}</div>
+                        {% if item.type == "quote" %}
+                        <div class="tp-row"><span class="lbl">Price</span><span>{{ item.price }}</span></div>
+                        <div class="tp-row"><span class="lbl">Change</span><span style="color:{% if item.change >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{{ item.change_display }}</span></div>
+                        {% elif item.type == "signal" %}
+                        <div class="tp-row"><span class="lbl">Score</span><span>{{ item.score }}</span></div>
+                        <div class="tp-row"><span class="lbl">Urgency</span><span>{{ item.urgency }}</span></div>
+                        {% elif item.type == "news" %}
+                        <div style="font-size:11px;color:var(--text-secondary);">{{ item.summary|truncatechars:120 }}</div>
+                        {% endif %}
+                    </div>
+                </a>
+                {% endfor %}
+                {% for item in ticker_items %}
+                <a href="{{ item.url }}" class="ticker-item">
+                    {% if item.type == "quote" %}<span class="t-sym">{{ item.symbol }}</span><span class="t-price">{{ item.price }}</span><span class="t-change {% if item.change >= 0 %}up{% else %}down{% endif %}">{{ item.change_display }}</span>
+                    {% elif item.type == "signal" %}<span class="t-badge signal">SIG</span><span class="t-sym">{{ item.symbol }}</span>
+                    {% elif item.type == "news" %}<span class="t-badge news">NEWS</span><span>{{ item.title|truncatechars:50 }}</span>
+                    {% endif %}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Info Panel -->
+        <div class="info-panel-wrap">
+            <div class="info-panel" id="infoPanel">
+                <!-- Row 1: Key metrics -->
+                <div class="info-panel-inner">
+                    <div class="info-card"><span class="ic-label">Portfolio</span><span class="ic-value">&euro;{{ panel_portfolio_value|default:"—" }}</span><span class="ic-sub" style="color:{% if panel_daily_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{{ panel_daily_pnl_display|default:"+0.00%" }}</span></div>
+                    <div class="info-card"><span class="ic-label">Cash</span><span class="ic-value">&euro;{{ panel_cash|default:"—" }}</span><span class="ic-sub">{{ panel_cash_pct|default:"100" }}% free</span></div>
+                    <div class="info-card"><span class="ic-label">Positions</span><span class="ic-value">{{ panel_positions|default:"0" }}</span><span class="ic-sub">{{ panel_exposure|default:"0" }}% exposure</span></div>
+                    <div class="info-card"><span class="ic-label">Signals</span><span class="ic-value" style="color:var(--accent);">{{ panel_signals|default:"0" }}</span><span class="ic-sub">{{ panel_bullish|default:"0" }}&#x25B2; {{ panel_bearish|default:"0" }}&#x25BC;</span></div>
+                    <div class="info-card"><span class="ic-label">Strategies</span><span class="ic-value">{{ panel_strategies|default:"0" }}</span><span class="ic-sub">{{ panel_proposed|default:"0" }} pending</span></div>
+                    <div class="info-card"><span class="ic-label">News 24h</span><span class="ic-value">{{ panel_news|default:"0" }}</span><span class="ic-sub">sentiment: {{ panel_sentiment|default:"—" }}</span></div>
+                    <div class="info-card"><span class="ic-label">Drawdown</span><span class="ic-value" style="color:var(--accent-red);">{{ panel_drawdown|default:"0" }}%</span><span class="ic-sub">limit: {{ panel_max_dd|default:"3" }}%</span></div>
+                    <div class="info-card"><span class="ic-label">Watchlist</span><span class="ic-value">{{ panel_watchlist|default:"0" }}</span><span class="ic-sub">tracked</span></div>
+                    <div class="info-card" style="cursor:pointer;" onclick="window.location='/ai/chat/'"><span class="ic-label">Sauron AI</span><span class="ic-value" style="color:var(--accent);font-size:13px;">READY</span><span class="ic-sub" style="color:var(--accent);">Ask &#x25B8;</span></div>
+                </div>
+                <!-- Row 2: Expanded detail (visible when expanded) -->
+                <div class="info-expanded" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+                        <!-- Active Signals Summary -->
+                        <div style="font-size:11px;">
+                            <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">ACTIVE SIGNALS</div>
+                            {% for s in panel_recent_signals %}
+                            <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(19,48,32,0.2);">
+                                <span style="font-weight:600;color:var(--accent);">{{ s.instrument.symbol }}</span>
+                                <span class="badge badge-{{ s.direction }}" style="font-size:8px;">{{ s.direction }}</span>
+                                <span style="color:var(--text-muted);">{{ s.score|floatformat:2 }}</span>
+                            </div>
+                            {% empty %}
+                            <div style="color:var(--text-muted);font-size:10px;">No active signals</div>
+                            {% endfor %}
+                        </div>
+                        <!-- Open Positions -->
+                        <div style="font-size:11px;">
+                            <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">OPEN POSITIONS</div>
+                            {% for p in panel_recent_positions %}
+                            <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(19,48,32,0.2);">
+                                <span style="font-weight:600;">{{ p.instrument.symbol }}</span>
+                                <span style="font-size:10px;color:var(--text-muted);">{{ p.direction }}</span>
+                                <span style="color:{% if p.unrealized_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{{ p.unrealized_pnl_pct|floatformat:1 }}%</span>
+                            </div>
+                            {% empty %}
+                            <div style="color:var(--text-muted);font-size:10px;">No open positions</div>
+                            {% endfor %}
+                        </div>
+                        <!-- Latest News -->
+                        <div style="font-size:11px;">
+                            <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">LATEST NEWS</div>
+                            {% for n in panel_recent_news %}
+                            <div style="padding:3px 0;border-bottom:1px solid rgba(19,48,32,0.2);">
+                                <div style="font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">{{ n.title|truncatechars:60 }}</div>
+                                <div style="font-size:8px;color:var(--text-muted);">{{ n.source }}</div>
+                            </div>
+                            {% empty %}
+                            <div style="color:var(--text-muted);font-size:10px;">No news yet</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <button class="info-panel-toggle" onclick="toggleInfoPanel()" id="infoPanelToggle">&#x25BC; expand</button>
+        </div>
+        {% endif %}
+
         <div class="page-content fade-in">
             {% block content %}{% endblock %}
         </div>
     </main>
+</div>
+
+<!-- Sidebar expand tab (visible when menu is minimized) -->
+<div class="sidebar-expand-tab" onclick="toggleSidebar()" title="Expand menu">
+    <svg viewBox="0 0 10 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M2 2L8 8L2 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
 </div>
 {% endblock %}
 
@@ -759,7 +1054,11 @@
     function showPreview(anchor, symbol) {
         if (previewEl) previewEl.remove();
         previewEl = document.createElement('div');
-        previewEl.className = 'instrument-preview show';
+        // Determine if popup should go above or below
+        const rect = anchor.getBoundingClientRect();
+        const viewH = window.innerHeight;
+        const posClass = rect.top > viewH / 2 ? 'pos-above' : 'pos-below';
+        previewEl.className = 'instrument-preview show ' + posClass;
         previewEl.innerHTML = `
             <div class="preview-header">
                 <span class="preview-symbol">${symbol}</span>
@@ -811,6 +1110,80 @@ function toggleSidebar() {
         if (sb) sb.classList.add('mini');
     }
 })();
+</script>
+
+
+<script>
+function toggleInfoPanel() {
+    const panel = document.getElementById('infoPanel');
+    const btn = document.getElementById('infoPanelToggle');
+    const expanded = panel.querySelector('.info-expanded');
+    
+    if (panel.classList.contains('collapsed')) {
+        // collapsed → normal
+        panel.classList.remove('collapsed');
+        if (expanded) expanded.style.display = 'none';
+        btn.innerHTML = '&#x25BC; expand';
+        localStorage.setItem('sauron_info_panel', 'normal');
+    } else if (panel.classList.contains('expanded')) {
+        // expanded → collapsed
+        panel.classList.remove('expanded');
+        panel.classList.add('collapsed');
+        if (expanded) expanded.style.display = 'none';
+        btn.innerHTML = '&#x25B2; show';
+        localStorage.setItem('sauron_info_panel', 'collapsed');
+    } else {
+        // normal → expanded
+        panel.classList.add('expanded');
+        panel.style.maxHeight = '400px';
+        if (expanded) expanded.style.display = 'block';
+        btn.innerHTML = '&#x25B2; collapse';
+        localStorage.setItem('sauron_info_panel', 'expanded');
+    }
+}
+// Restore info panel state
+(function() {
+    const state = localStorage.getItem('sauron_info_panel');
+    const panel = document.getElementById('infoPanel');
+    const btn = document.getElementById('infoPanelToggle');
+    const expanded = panel ? panel.querySelector('.info-expanded') : null;
+    if (panel && state === 'collapsed') {
+        panel.classList.add('collapsed');
+        if (btn) btn.innerHTML = '&#x25B2; show';
+    } else if (panel && state === 'expanded') {
+        panel.classList.add('expanded');
+        panel.style.maxHeight = '400px';
+        if (expanded) expanded.style.display = 'block';
+        if (btn) btn.innerHTML = '&#x25B2; collapse';
+    }
+})();
+// Ticker mouse wheel horizontal scroll
+(function() {
+    const ticker = document.getElementById('tickerBar');
+    if (ticker) {
+        ticker.addEventListener('wheel', function(e) {
+            e.preventDefault();
+            const track = ticker.querySelector('.ticker-track');
+            if (track) {
+                const current = parseFloat(getComputedStyle(track).transform.split(',')[4]) || 0;
+                const delta = e.deltaY > 0 ? -80 : 80;
+                track.style.animation = 'none';
+                track.style.transform = `translateX(${current + delta}px)`;
+                // Resume animation after 2s
+                clearTimeout(ticker._resumeTimer);
+                ticker._resumeTimer = setTimeout(() => {
+                    track.style.transform = '';
+                    track.style.animation = '';
+                }, 2000);
+            }
+        });
+    }
+})();
+// Close notification dropdown on outside click
+document.addEventListener('click', function(e) {
+    const bell = document.getElementById('notifBell');
+    if (bell && !bell.contains(e.target)) { bell.classList.remove('open'); }
+});
 </script>
 
 {% block extra_js %}{% endblock %}

@@ -873,3 +873,99 @@ def user_notifications(request):
         "prefs": prefs,
         "rules": rules,
     })
+
+
+@login_required
+def mark_notification_read(request, notif_id):
+    """Mark a single notification as read."""
+    from alerts.models import Notification
+    from django.http import JsonResponse
+    Notification.objects.filter(id=notif_id, user=request.user).update(read=True)
+    return JsonResponse({"status": "ok"})
+
+
+@login_required
+def mark_all_notifications_read(request):
+    """Mark all notifications as read."""
+    from alerts.models import Notification
+    from django.shortcuts import redirect
+    Notification.objects.filter(user=request.user, read=False).update(read=True)
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        from django.http import JsonResponse
+        return JsonResponse({"status": "ok"})
+    return redirect(request.META.get("HTTP_REFERER", "dashboard"))
+
+
+@login_required
+def ai_chat_api(request):
+    """AI chat endpoint — send question to Claude, get response."""
+    from django.http import JsonResponse
+    import json, os
+
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        message = data.get("message", "")
+    except Exception:
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    if not message:
+        return JsonResponse({"error": "Empty message"}, status=400)
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return JsonResponse({"response": "Anthropic API key not configured. Add ANTHROPIC_API_KEY to your .env file."})
+
+    # Build context
+    context_parts = [f"User: {request.user.username}"]
+    try:
+        from signals.models import Signal
+        from portfolio.services import get_or_create_default_portfolio
+        portfolio = get_or_create_default_portfolio(user=request.user)
+        context_parts.append(f"Portfolio: {portfolio.currency} {portfolio.current_value}")
+        active = Signal.objects.filter(is_active=True).count()
+        context_parts.append(f"Active signals: {active}")
+    except Exception:
+        pass
+
+    system_prompt = f"""You are Sauron Vision AI, a trading intelligence assistant.
+You help traders analyze markets, review signals, and make informed decisions.
+Current user context: {'; '.join(context_parts)}
+Be concise, data-driven, and professional. Use markdown formatting."""
+
+    try:
+        import requests as req
+        resp = req.post("https://api.anthropic.com/v1/messages", headers={
+            "x-api-key": api_key,
+            "content-type": "application/json",
+            "anthropic-version": "2023-06-01",
+        }, json={
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 1024,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": message}],
+        }, timeout=30)
+        resp.raise_for_status()
+        result = resp.json()
+        ai_text = result.get("content", [{}])[0].get("text", "No response")
+        return JsonResponse({"response": ai_text})
+    except Exception as e:
+        return JsonResponse({"response": f"AI request failed: {str(e)}"})
+
+
+@login_required
+def ai_chat_page(request):
+    """AI chat page."""
+    from ai_agents.models import AgentTask
+    from django.utils import timezone
+    from datetime import timedelta
+    now = timezone.now()
+    day_ago = now - timedelta(hours=24)
+    ai_24h = AgentTask.objects.filter(created_at__gte=day_ago)
+    return render(request, "dashboard/ai_chat.html", {
+        "page_id": "ai_chat",
+        "ai_tasks_24h": ai_24h.count(),
+        "ai_cost_24h": "{:.2f}".format(sum(float(t.cost_usd) for t in ai_24h)),
+    })

@@ -19,6 +19,8 @@ urlpatterns = [
     path("positions/", views.positions_list, name="positions_list"),
     path("ai/", views.ai_insights, name="ai_insights"),
     path("ai/tasks/", views.ai_tasks_list, name="ai_tasks_list"),
+    path("ai/chat/", views.ai_chat_page, name="ai_chat"),
+    path("api/ai-chat/", views.ai_chat_api, name="ai_chat_api"),
     path("backtest/", views.backtest_list, name="backtest_list"),
     path("profile/", views.profile, name="profile"),
     path("setup/", views.setup, name="setup"),
@@ -31,6 +33,8 @@ urlpatterns = [
     path("admin-dashboard/toggle-market/", views.admin_toggle_market, name="admin_toggle_market"),
     path("admin-dashboard/newsletters/", views.admin_newsletters, name="admin_newsletters"),
     path("notifications/", views.user_notifications, name="user_notifications"),
+    path("notifications/read/<int:notif_id>/", views.mark_notification_read, name="mark_notification_read"),
+    path("notifications/read-all/", views.mark_all_notifications_read, name="mark_all_notifications_read"),
 
     # ── API Endpoints ───────────────────────────────────────
     path("api/instruments/", market_views.InstrumentListView.as_view(), name="api-instrument-list"),

@@ -105,3 +105,58 @@ class UserNotificationPrefs(models.Model):
 
     def __str__(self):
         return f"{self.user.username} notification prefs"
+
+
+class Notification(models.Model):
+    """In-app notification for the bell dropdown."""
+    TYPES = [
+        ("signal", "New Signal"),
+        ("strategy", "Strategy Update"),
+        ("news", "Breaking News"),
+        ("portfolio", "Portfolio Alert"),
+        ("system", "System Message"),
+        ("newsletter", "Newsletter"),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
+    notification_type = models.CharField(max_length=20, choices=TYPES)
+    title = models.CharField(max_length=200)
+    body = models.TextField(blank=True)
+    url = models.CharField(max_length=200, blank=True)  # Link to the relevant page
+    read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"[{'READ' if self.read else 'NEW'}] {self.title}"
+
+    @classmethod
+    def create_for_all(cls, notification_type, title, body="", url=""):
+        """Create a notification for all active users."""
+        from django.contrib.auth.models import User as U
+        notifs = []
+        for user in U.objects.filter(is_active=True):
+            notifs.append(cls(
+                user=user, notification_type=notification_type,
+                title=title, body=body, url=url,
+            ))
+        cls.objects.bulk_create(notifs)
+        return len(notifs)
+
+    @classmethod
+    def create_for_user(cls, user, notification_type, title, body="", url=""):
+        """Create a notification for a specific user."""
+        return cls.objects.create(
+            user=user, notification_type=notification_type,
+            title=title, body=body, url=url,
+        )
+
+    @classmethod
+    def unread_count(cls, user):
+        return cls.objects.filter(user=user, read=False).count()
+
+    @classmethod
+    def recent(cls, user, limit=15):
+        return cls.objects.filter(user=user).order_by("-created_at")[:limit]

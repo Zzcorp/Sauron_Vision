@@ -9,6 +9,10 @@ logger = logging.getLogger(__name__)
 @shared_task
 @guarded_task("scraper_news")
 def fetch_breaking_news():
+    # After AI processes news, notify on critical items:
+    # from alerts.notify import notify_critical_news
+    # for article in critical_articles:
+    #     notify_critical_news(article)
     """Tier 1: Fetch news from RSS feeds and APIs."""
     from scraping.scrapers.news_aggregator import fetch_rss_news, fetch_marketaux_news
 

@@ -31,22 +31,7 @@ services:
           property: connectionString
       - key: PYTHON_VERSION
         value: "3.12.3"
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: ALPHA_VANTAGE_API_KEY
-        sync: false
-      - key: FRED_API_KEY
-        sync: false
-      - key: ETORO_PUBLIC_KEY
-        sync: false
-      - key: ETORO_USER_KEY
-        sync: false
-      - key: SCRAPER_API_KEY
-        sync: false
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_CHAT_ID
-        sync: false
+      - fromGroup: sauron-env
 
   # Celery Fast Worker (prices, news, signals)
   - type: worker
@@ -110,3 +95,4 @@ services:
     name: sauron-redis
     plan: free
     maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
