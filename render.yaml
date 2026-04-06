@@ -1,7 +1,7 @@
-# SAURON VISION — Render.com Blueprint (Pro Plus — 4 CPU)
+# SAURON VISION — Render.com Blueprint (Pro)
 databases:
   - name: sauron-db
-    plan: pro-8gb
+    plan: pro-4gb
     databaseName: sauron_vision
     user: sauron
 
@@ -10,9 +10,9 @@ services:
   - type: web
     name: sauron-web
     runtime: python
-    plan: pro_plus
+    plan: pro
     buildCommand: "./build.sh"
-    startCommand: "gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 8 --timeout 120"
+    startCommand: "gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 4 --timeout 120"
     envVars:
       - key: SECRET_KEY
         generateValue: true
@@ -33,13 +33,13 @@ services:
         value: "3.12.3"
       - fromGroup: sauron-env
 
-  # Celery Fast Worker (prices, news, signals)
+  # Celery Fast Worker
   - type: worker
     name: sauron-worker-fast
     runtime: python
-    plan: pro_plus
+    plan: pro
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "celery -A config worker -l info -Q fast,default -c 8 --max-tasks-per-child=100"
+    startCommand: "celery -A config worker -l info -Q fast,default -c 4 --max-tasks-per-child=100"
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -56,9 +56,9 @@ services:
   - type: worker
     name: sauron-worker-slow
     runtime: python
-    plan: pro_plus
+    plan: pro
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "celery -A config worker -l info -Q slow,ai -c 4 --max-tasks-per-child=50"
+    startCommand: "celery -A config worker -l info -Q slow,ai -c 2 --max-tasks-per-child=50"
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -90,7 +90,7 @@ services:
           property: connectionString
       - fromGroup: sauron-env
 
-  # Redis (Key Value Store)
+  # Redis
   - type: keyvalue
     name: sauron-redis
     plan: pro
