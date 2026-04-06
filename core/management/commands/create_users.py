@@ -12,6 +12,7 @@ class Command(BaseCommand):
             {"username": "Cesar_M", "password": "Lechienjaune21!", "is_superuser": False, "is_staff": False},
             {"username": "RS_UG", "password": "Thewhitedog44!", "is_superuser": False, "is_staff": False},
             {"username": "ElChaman", "password": "Totem92!", "is_superuser": False, "is_staff": False},
+            {"username": "Anonymous_Z", "password": "Spartan26!", "is_superuser": False, "is_staff": False},
             {"username": "zz", "password": "Corp78!", "is_superuser": True, "is_staff": True},
         ]
 
@@ -34,14 +35,12 @@ class Command(BaseCommand):
                     f"  Created: {u['username']} {'(superuser)' if u['is_superuser'] else ''}"
                 ))
 
-            # Create trader profile if missing
             try:
                 from portfolio.trader_profile import TraderProfile
                 TraderProfile.objects.get_or_create(user=user)
             except Exception:
                 pass
 
-            # Create notification prefs if missing
             try:
                 from alerts.models import UserNotificationPrefs
                 UserNotificationPrefs.objects.get_or_create(user=user)

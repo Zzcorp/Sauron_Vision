@@ -340,5 +340,5 @@ PORTFOLIO_CONFIG = {
 }
 
 LOGIN_URL = "login"
-LOGIN_REDIRECT_URL = "dashboard"
+LOGIN_REDIRECT_URL = "intro"
 LOGOUT_REDIRECT_URL = "login"

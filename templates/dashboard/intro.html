@@ -1,0 +1,173 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sauron Vision — Initializing</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZD0iTTIsMzIgUTE2LDggMzIsMTQgUTQ4LDggNjIsMzIgUTQ4LDU2IDMyLDUwIFExNiw1NiAyLDMyWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjIuNSIvPjxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjEyIiBmaWxsPSJub25lIiBzdHJva2U9IiMwMGU4NjgiIHN0cm9rZS13aWR0aD0iMiIvPjxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjUiIGZpbGw9IiMwMGU4NjgiLz48ZWxsaXBzZSBjeD0iMzIiIGN5PSIzMiIgcng9IjQiIHJ5PSIxMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjAuOCIgb3BhY2l0eT0iMC41Ii8+PC9zdmc+">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #030806; color: #c8e8d8; font-family: 'Rajdhani', sans-serif;
+            min-height: 100vh; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; overflow: hidden;
+        }
+        .intro-container { text-align: center; position: relative; z-index: 2; }
+
+        /* Eye logo */
+        .intro-eye {
+            width: 120px; height: 120px; margin: 0 auto 30px;
+            opacity: 0; animation: eyeFadeIn 1.2s ease 0.3s forwards;
+        }
+        .intro-eye .pupil { animation: pupilPulse 2s ease-in-out infinite; transform-origin: 32px 32px; }
+        @keyframes eyeFadeIn { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: scale(1); } }
+        @keyframes pupilPulse { 0%,100% { r: 5; } 50% { r: 7; } }
+
+        /* Title */
+        .intro-title {
+            font-family: 'Orbitron', sans-serif; font-size: 36px; font-weight: 800;
+            letter-spacing: 12px; color: #00e868;
+            text-shadow: 0 0 40px rgba(0,232,104,0.3), 0 0 80px rgba(0,232,104,0.1);
+            opacity: 0; animation: titleFadeIn 0.8s ease 1s forwards;
+        }
+        .intro-subtitle {
+            font-family: 'Share Tech Mono', monospace; font-size: 12px;
+            letter-spacing: 6px; color: #2a5038; margin-top: 8px;
+            opacity: 0; animation: titleFadeIn 0.8s ease 1.3s forwards;
+        }
+        @keyframes titleFadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Progress bar */
+        .progress-wrap {
+            width: 320px; margin: 40px auto 0; opacity: 0;
+            animation: titleFadeIn 0.5s ease 1.8s forwards;
+        }
+        .progress-track {
+            height: 3px; background: #133020; border-radius: 2px; overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%; width: 0; background: linear-gradient(90deg, #00e868, #40ff90);
+            border-radius: 2px; transition: width 0.3s ease;
+            box-shadow: 0 0 12px rgba(0,232,104,0.4);
+        }
+        .progress-text {
+            font-family: 'Share Tech Mono', monospace; font-size: 11px;
+            color: #2a5038; margin-top: 12px; letter-spacing: 2px;
+            min-height: 16px;
+        }
+        .progress-text .active { color: #5a8a6a; }
+        .progress-pct {
+            font-family: 'Orbitron', sans-serif; font-size: 10px;
+            color: #00e868; margin-top: 4px; letter-spacing: 1px;
+        }
+
+        /* User greeting */
+        .intro-greeting {
+            font-family: 'Share Tech Mono', monospace; font-size: 13px;
+            color: #5a8a6a; margin-top: 30px; letter-spacing: 1px;
+            opacity: 0;
+        }
+        .intro-greeting.show { animation: titleFadeIn 0.5s ease forwards; }
+
+        /* Particles */
+        canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; }
+    </style>
+</head>
+<body>
+<canvas id="bgCanvas"></canvas>
+<div class="intro-container">
+    <!-- Eye -->
+    <svg class="intro-eye" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+        <path d="M2,32 Q16,8 32,14 Q48,8 62,32 Q48,56 32,50 Q16,56 2,32Z" fill="none" stroke="#00e868" stroke-width="2"/>
+        <circle cx="32" cy="32" r="12" fill="none" stroke="#00e868" stroke-width="1.5"/>
+        <circle class="pupil" cx="32" cy="32" r="5" fill="#00e868"/>
+        <ellipse cx="32" cy="32" rx="4" ry="12" fill="none" stroke="#00e868" stroke-width="0.6" opacity="0.4"/>
+    </svg>
+
+    <!-- Title -->
+    <div class="intro-title">SAURON VISION</div>
+    <div class="intro-subtitle">TRADING INTELLIGENCE PLATFORM</div>
+
+    <!-- Progress -->
+    <div class="progress-wrap">
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="progress-text" id="progressText"></div>
+        <div class="progress-pct" id="progressPct"></div>
+    </div>
+
+    <!-- Greeting -->
+    <div class="intro-greeting" id="greeting">Welcome back, {{ request.user.username }}</div>
+</div>
+
+<script>
+(function() {
+    // Particles
+    var c = document.getElementById('bgCanvas'), ctx = c.getContext('2d');
+    c.width = window.innerWidth; c.height = window.innerHeight;
+    var ps = [];
+    for (var i = 0; i < 60; i++) ps.push({
+        x: Math.random()*c.width, y: Math.random()*c.height,
+        vx: (Math.random()-0.5)*0.4, vy: (Math.random()-0.5)*0.4,
+        s: Math.random()*1.5+0.5, a: Math.random()*0.2+0.05
+    });
+    function draw() {
+        ctx.clearRect(0,0,c.width,c.height);
+        ps.forEach(function(p) {
+            p.x += p.vx; p.y += p.vy;
+            if (p.x<0||p.x>c.width) p.vx *= -1;
+            if (p.y<0||p.y>c.height) p.vy *= -1;
+            ctx.beginPath(); ctx.arc(p.x,p.y,p.s,0,Math.PI*2);
+            ctx.fillStyle = 'rgba(0,232,104,'+p.a+')'; ctx.fill();
+        });
+        requestAnimationFrame(draw);
+    }
+    draw();
+
+    // Loading sequence
+    var steps = [
+        { pct: 5, text: "Establishing secure connection..." },
+        { pct: 12, text: "Authenticating credentials..." },
+        { pct: 20, text: "Loading market configurations..." },
+        { pct: 30, text: "Connecting to exchange feeds..." },
+        { pct: 40, text: "Initializing signal engine..." },
+        { pct: 50, text: "Loading portfolio data..." },
+        { pct: 58, text: "Syncing AI agent memory..." },
+        { pct: 65, text: "Fetching latest market data..." },
+        { pct: 72, text: "Calculating technical indicators..." },
+        { pct: 80, text: "Processing active signals..." },
+        { pct: 85, text: "Loading news aggregator..." },
+        { pct: 90, text: "Preparing dashboard layout..." },
+        { pct: 95, text: "Finalizing UI components..." },
+        { pct: 100, text: "Systems online. Launching..." },
+    ];
+
+    var fill = document.getElementById('progressFill');
+    var text = document.getElementById('progressText');
+    var pct = document.getElementById('progressPct');
+    var greet = document.getElementById('greeting');
+    var idx = 0;
+    var startDelay = 2200; // wait for eye + title animations
+
+    setTimeout(function run() {
+        if (idx >= steps.length) {
+            greet.classList.add('show');
+            setTimeout(function() {
+                window.location.href = '/';
+            }, 800);
+            return;
+        }
+        var s = steps[idx];
+        fill.style.width = s.pct + '%';
+        text.innerHTML = '<span class="active">' + s.text + '</span>';
+        pct.textContent = s.pct + '%';
+        idx++;
+        var delay = 150 + Math.random() * 250;
+        if (s.pct > 80) delay = 100 + Math.random() * 150;
+        setTimeout(run, delay);
+    }, startDelay);
+})();
+</script>
+</body>
+</html>

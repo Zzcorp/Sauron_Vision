@@ -61,6 +61,7 @@ def sauron_context(request):
         "panel_recent_signals": [],
         "panel_recent_positions": [],
         "panel_recent_news": [],
+        "panel_recent_strategies": [],
     }
 
     if not hasattr(request, "user") or not request.user.is_authenticated:
@@ -150,6 +151,7 @@ def sauron_context(request):
         from scraping.models import NewsArticle
         ctx["panel_recent_signals"] = list(Signal.objects.filter(is_active=True).select_related("instrument").order_by("-score")[:5])
         ctx["panel_recent_news"] = list(NewsArticle.objects.order_by("-published_at")[:5])
+        ctx["panel_recent_strategies"] = list(Strategy.objects.filter(status__in=["active", "approved", "proposed"]).order_by("-created_at")[:5])
     except Exception as e:
         logger.debug(f"Panel signals/news unavailable: {e}")
 

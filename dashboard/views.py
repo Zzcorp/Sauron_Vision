@@ -969,3 +969,9 @@ def ai_chat_page(request):
         "ai_tasks_24h": ai_24h.count(),
         "ai_cost_24h": "{:.2f}".format(sum(float(t.cost_usd) for t in ai_24h)),
     })
+
+
+@login_required
+def intro_page(request):
+    """Login intro animation — shows loading sequence then redirects to dashboard."""
+    return render(request, "dashboard/intro.html")

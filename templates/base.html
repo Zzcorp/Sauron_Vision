@@ -567,14 +567,16 @@
         .ticker-bar {
             height: 34px; background: var(--bg-primary);
             border-bottom: 1px solid var(--border);
-            overflow: hidden; position: sticky; top: var(--topbar-height);
+            overflow: hidden; position: fixed; top: var(--topbar-height);
+            left: var(--sidebar-width); right: 0;
             z-index: 45; white-space: nowrap;
         }
+        body:has(.sidebar.mini) .ticker-bar { left: 68px; }
         .ticker-track {
             display: inline-flex; gap: 0;
             animation: tickerScroll 60s linear infinite;
         }
-        .ticker-bar:hover .ticker-track { animation-duration: 300s; }
+        .ticker-bar:hover .ticker-track { animation-play-state: paused; }
         @keyframes tickerScroll {
             0% { transform: translateX(0); }
             100% { transform: translateX(-50%); }
@@ -612,40 +614,63 @@
         .ticker-popup .tp-row { display: flex; justify-content: space-between; padding: 3px 0; }
         .ticker-popup .tp-row .lbl { color: var(--text-muted); }
 
-        /* ── Info Panel (collapsible + expandable) ── */
+        /* ── Info Panel (fixed bar with hover dropdowns) ── */
         .info-panel-wrap {
-            position: sticky; top: calc(var(--topbar-height) + 34px);
+            position: fixed; top: calc(var(--topbar-height) + 34px);
+            left: var(--sidebar-width); right: 0;
             z-index: 44; background: var(--bg-primary);
+            border-bottom: 1px solid var(--border);
         }
-        .info-panel {
-            background: var(--bg-primary); border-bottom: 1px solid var(--border);
-            overflow: hidden; transition: max-height 0.4s ease, padding 0.3s ease;
-            max-height: 0; padding: 0 20px;
+        body:has(.sidebar.mini) .info-panel-wrap { left: 68px; }
+        .info-panel-bar {
+            display: flex; height: 28px; overflow: visible;
         }
-        .info-panel.open { max-height: 80px; padding: 8px 20px; border-bottom: 1px solid var(--border); }
-        .info-panel.expanded { max-height: 420px; padding: 12px 20px; border-bottom: 1px solid var(--border); }
-        .info-panel-toggle {
-            position: absolute; bottom: -14px; left: 50%; transform: translateX(-50%);
-            z-index: 60; background: var(--bg-card); border: 1px solid var(--border);
-            border-radius: 0 0 8px 8px; padding: 2px 16px; cursor: pointer;
-            font-size: 10px; color: var(--text-muted); transition: all 0.2s;
-            font-family: var(--font-mono);
+        .ip-cat {
+            position: relative; display: flex; align-items: center; gap: 6px;
+            padding: 0 14px; border-right: 1px solid var(--border);
+            font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.5px;
+            color: var(--text-muted); text-transform: uppercase; cursor: default;
+            white-space: nowrap; transition: all 0.15s;
         }
-        .info-panel-toggle:hover { color: var(--accent); border-color: var(--accent-dim); }
-        .info-panel-inner {
-            display: flex; gap: 0; overflow-x: auto;
-            scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+        .ip-cat:hover { background: var(--bg-card); color: var(--text-secondary); }
+        .ip-cat .ip-count {
+            font-size: 10px; font-weight: 700; color: var(--accent);
+            font-family: var(--font-display);
         }
-        .info-panel-inner::-webkit-scrollbar { height: 3px; }
-        .info-panel-inner::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-        .info-card {
-            flex-shrink: 0; display: flex; flex-direction: column; gap: 2px;
-            padding: 6px 16px; border-right: 1px solid var(--border); min-width: 120px;
+        .ip-cat .ip-count.red { color: var(--accent-red); }
+        .ip-cat .ip-count.gold { color: var(--accent-gold); }
+        /* Dropdown on hover */
+        .ip-dropdown {
+            display: none; position: absolute; top: 28px; left: 0;
+            min-width: 240px; max-height: 320px; overflow-y: auto;
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.6); z-index: 250;
+            padding: 6px 0;
         }
-        .info-card:last-child { border-right: none; }
-        .info-card .ic-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px; color: var(--text-muted); text-transform: uppercase; }
-        .info-card .ic-value { font-family: var(--font-display); font-size: 16px; font-weight: 700; color: var(--text-primary); }
-        .info-card .ic-sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); }
+        .ip-cat:hover .ip-dropdown { display: block; }
+        .ip-dd-item {
+            padding: 7px 14px; font-family: var(--font-mono); font-size: 11px;
+            color: var(--text-secondary); cursor: pointer; transition: background 0.1s;
+            position: relative; display: flex; justify-content: space-between; align-items: center;
+            text-decoration: none;
+        }
+        .ip-dd-item:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+        /* Sub-preview on hover of dropdown item */
+        .ip-dd-preview {
+            display: none; position: absolute; left: calc(100% + 4px); top: 0;
+            min-width: 220px; background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 12px; z-index: 260;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5); font-size: 11px;
+        }
+        .ip-dd-item:hover .ip-dd-preview { display: block; }
+        .ip-dd-preview .tp-title { font-family: var(--font-display); font-size: 12px; font-weight: 700; margin-bottom: 6px; color: var(--accent); }
+        .ip-dd-preview .tp-row { display: flex; justify-content: space-between; padding: 2px 0; }
+        .ip-dd-preview .tp-row .lbl { color: var(--text-muted); }
+        .ip-dd-empty { padding: 16px; text-align: center; color: var(--text-muted); font-size: 10px; }
+        /* AI link in bar */
+        .ip-cat-ai { cursor: pointer; }
+        .ip-cat-ai:hover { color: var(--accent); }
 
         /* ── Notification Bell ───────────────────── */
         .notif-bell {
@@ -932,8 +957,7 @@
             </div>
         </header>
 
-        <!-- Ticker Bar (not on dashboard) -->
-        {% if page_id != "dashboard" %}
+        <!-- Ticker Bar (fixed, always visible) -->
         <div class="ticker-bar" id="tickerBar">
             <div class="ticker-track" id="tickerTrack">
                 {% for item in ticker_items %}
@@ -958,11 +982,14 @@
                         {% if item.type == "quote" %}
                         <div class="tp-row"><span class="lbl">Price</span><span>{{ item.price }}</span></div>
                         <div class="tp-row"><span class="lbl">Change</span><span style="color:{% if item.change >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{{ item.change_display }}</span></div>
+                        <div class="tp-row"><span class="lbl">Class</span><span>{{ item.asset_class }}</span></div>
                         {% elif item.type == "signal" %}
                         <div class="tp-row"><span class="lbl">Score</span><span>{{ item.score }}</span></div>
                         <div class="tp-row"><span class="lbl">Urgency</span><span>{{ item.urgency }}</span></div>
+                        <div class="tp-row"><span class="lbl">Direction</span><span>{{ item.direction }}</span></div>
                         {% elif item.type == "news" %}
-                        <div style="font-size:11px;color:var(--text-secondary);">{{ item.summary|truncatechars:120 }}</div>
+                        <div style="font-size:11px;color:var(--text-secondary);">{{ item.summary|truncatechars:150 }}</div>
+                        <div style="margin-top:4px;font-size:9px;color:var(--text-muted);">{{ item.source }}</div>
                         {% endif %}
                     </div>
                 </a>
@@ -978,77 +1005,106 @@
             </div>
         </div>
 
-        <!-- Info Panel -->
+        <!-- Info Bar (fixed, labels always visible, hover for dropdowns) -->
         <div class="info-panel-wrap">
-            <div class="info-panel" id="infoPanel">
-                <!-- Row 1: Key metrics -->
-                <div class="info-panel-inner">
-                    <div class="info-card"><span class="ic-label">Portfolio</span><span class="ic-value">&euro;{{ panel_portfolio_value|default:"—" }}</span><span class="ic-sub" style="color:{% if panel_daily_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{{ panel_daily_pnl_display|default:"+0.00%" }}</span></div>
-                    <div class="info-card"><span class="ic-label">Cash</span><span class="ic-value">&euro;{{ panel_cash|default:"—" }}</span><span class="ic-sub">{{ panel_cash_pct|default:"100" }}% free</span></div>
-                    <div class="info-card"><span class="ic-label">Positions</span><span class="ic-value">{{ panel_positions|default:"0" }}</span><span class="ic-sub">{{ panel_exposure|default:"0" }}% exposure</span></div>
-                    <div class="info-card"><span class="ic-label">Alerts</span><span class="ic-value" style="color:var(--accent-gold);">{{ notification_count|default:"0" }}</span><span class="ic-sub">unread</span></div>
-                    <div class="info-card"><span class="ic-label">Strategies</span><span class="ic-value">{{ panel_strategies|default:"0" }}</span><span class="ic-sub">{{ panel_proposed|default:"0" }} pending</span></div>
-                    <div class="info-card"><span class="ic-label">News 24h</span><span class="ic-value">{{ panel_news|default:"0" }}</span><span class="ic-sub">sentiment: {{ panel_sentiment|default:"—" }}</span></div>
-                    <div class="info-card"><span class="ic-label">Drawdown</span><span class="ic-value" style="color:var(--accent-red);">{{ panel_drawdown|default:"0" }}%</span><span class="ic-sub">limit: {{ panel_max_dd|default:"3" }}%</span></div>
-                    <div class="info-card"><span class="ic-label">Watchlist</span><span class="ic-value">{{ panel_watchlist|default:"0" }}</span><span class="ic-sub">tracked</span></div>
-                    <div class="info-card" style="cursor:pointer;" onclick="window.location='/ai/chat/'"><span class="ic-label">Sauron AI</span><span class="ic-value" style="color:var(--accent);font-size:13px;">READY</span><span class="ic-sub" style="color:var(--accent);">Ask &#x25B8;</span></div>
-                </div>
-                <!-- Row 2: Expanded detail (visible when expanded) -->
-                <div class="info-expanded" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
-                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
-                        <!-- Active Signals Summary -->
-                        <div style="font-size:11px;">
-                            <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">ACTIVE SIGNALS</div>
-                            {% for s in panel_recent_signals %}
-                            <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(19,48,32,0.2);">
-                                <span style="font-weight:600;color:var(--accent);">{{ s.instrument.symbol }}</span>
-                                <span class="badge badge-{{ s.direction }}" style="font-size:8px;">{{ s.direction }}</span>
-                                <span style="color:var(--text-muted);">{{ s.score|floatformat:2 }}</span>
-                            </div>
-                            {% empty %}
-                            <div style="color:var(--text-muted);font-size:10px;">No active signals</div>
-                            {% endfor %}
+            <div class="info-panel-bar">
+                <!-- Portfolio -->
+                <div class="ip-cat">
+                    <span>PORTFOLIO</span> <span class="ip-count">&euro;{{ panel_portfolio_value|default:"0" }}</span>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-item">
+                            <span>Value</span><span style="color:var(--text-primary);">&euro;{{ panel_portfolio_value|default:"0" }}</span>
                         </div>
-                        <!-- Open Positions -->
-                        <div style="font-size:11px;">
-                            <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">OPEN POSITIONS</div>
-                            {% for p in panel_recent_positions %}
-                            <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(19,48,32,0.2);">
-                                <span style="font-weight:600;">{{ p.instrument.symbol }}</span>
-                                <span style="font-size:10px;color:var(--text-muted);">{{ p.direction }}</span>
-                                <span style="color:{% if p.unrealized_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{{ p.unrealized_pnl_pct|floatformat:1 }}%</span>
-                            </div>
-                            {% empty %}
-                            <div style="color:var(--text-muted);font-size:10px;">No open positions</div>
-                            {% endfor %}
+                        <div class="ip-dd-item">
+                            <span>Cash</span><span style="color:var(--text-primary);">&euro;{{ panel_cash|default:"0" }}</span>
                         </div>
-                        <!-- Latest News -->
-                        <div style="font-size:11px;">
-                            <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">LATEST NEWS</div>
-                            {% for n in panel_recent_news %}
-                            <div style="padding:3px 0;border-bottom:1px solid rgba(19,48,32,0.2);">
-                                <div style="font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">{{ n.title|truncatechars:60 }}</div>
-                                <div style="font-size:8px;color:var(--text-muted);">{{ n.source }}</div>
-                            </div>
-                            {% empty %}
-                            <div style="color:var(--text-muted);font-size:10px;">No news yet</div>
-                            {% endfor %}
+                        <div class="ip-dd-item">
+                            <span>Daily P&amp;L</span><span style="color:{% if panel_daily_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{{ panel_daily_pnl_display|default:"+0.00%" }}</span>
+                        </div>
+                        <div class="ip-dd-item">
+                            <span>Exposure</span><span>{{ panel_exposure|default:"0" }}%</span>
                         </div>
                     </div>
                 </div>
+                <!-- Positions -->
+                <div class="ip-cat">
+                    <span>POSITIONS</span> <span class="ip-count">{{ panel_positions|default:"0" }}</span>
+                    <div class="ip-dropdown">
+                        {% for p in panel_recent_positions %}
+                        <div class="ip-dd-item">
+                            <span style="font-weight:700;">{{ p.instrument.symbol }}</span>
+                            <span style="font-size:9px;color:var(--text-muted);">{{ p.direction }}</span>
+                            <div class="ip-dd-preview">
+                                <div class="tp-title">{{ p.instrument.symbol }}</div>
+                                <div class="tp-row"><span class="lbl">Direction</span><span>{{ p.direction }}</span></div>
+                                <div class="tp-row"><span class="lbl">Entry</span><span>{{ p.entry_price }}</span></div>
+                                <div class="tp-row"><span class="lbl">Size</span><span>{{ p.quantity }}</span></div>
+                            </div>
+                        </div>
+                        {% empty %}
+                        <div class="ip-dd-empty">No open positions</div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <!-- Strategies -->
+                <div class="ip-cat">
+                    <span>STRATEGIES</span> <span class="ip-count">{{ panel_strategies|default:"0" }}</span>
+                    <div class="ip-dropdown">
+                        {% for st in panel_recent_strategies %}
+                        <a href="/strategies/{{ st.id }}/" class="ip-dd-item">
+                            <span>{{ st.name|truncatechars:30 }}</span>
+                            <span class="badge badge-{{ st.status }}" style="font-size:7px;">{{ st.status }}</span>
+                        </a>
+                        {% empty %}
+                        <div class="ip-dd-empty">No active strategies</div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <!-- News -->
+                <div class="ip-cat">
+                    <span>NEWS</span> <span class="ip-count">{{ panel_news|default:"0" }}</span>
+                    <div class="ip-dropdown" style="min-width:300px;">
+                        {% for n in panel_recent_news %}
+                        <a href="/news/" class="ip-dd-item" style="flex-direction:column;align-items:flex-start;gap:2px;">
+                            <span style="font-size:10px;color:var(--text-primary);">{{ n.title|truncatechars:55 }}</span>
+                            <span style="font-size:8px;color:var(--text-muted);">{{ n.source }} &middot; {{ n.published_at|timesince }} ago</span>
+                            <div class="ip-dd-preview" style="min-width:250px;">
+                                <div class="tp-title">{{ n.title|truncatechars:60 }}</div>
+                                <div style="font-size:10px;color:var(--text-secondary);margin-top:4px;">{{ n.content_summary|truncatechars:200 }}</div>
+                                <div class="tp-row" style="margin-top:6px;"><span class="lbl">Source</span><span>{{ n.source }}</span></div>
+                            </div>
+                        </a>
+                        {% empty %}
+                        <div class="ip-dd-empty">No news yet</div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <!-- Alerts -->
+                <div class="ip-cat">
+                    <span>ALERTS</span> <span class="ip-count gold">{{ notification_count|default:"0" }}</span>
+                </div>
+                <!-- Drawdown -->
+                <div class="ip-cat">
+                    <span>DD</span> <span class="ip-count red">{{ panel_drawdown|default:"0" }}%</span>
+                </div>
+                <!-- Watchlist -->
+                <div class="ip-cat">
+                    <span>WATCH</span> <span class="ip-count">{{ panel_watchlist|default:"0" }}</span>
+                </div>
+                <!-- AI -->
+                <div class="ip-cat ip-cat-ai" onclick="window.location='/ai/chat/'">
+                    <span>SAURON AI</span> <span class="ip-count">&#x25B8;</span>
+                </div>
             </div>
-            <button class="info-panel-toggle" onclick="toggleInfoPanel()" id="infoPanelToggle">&#x25B6; show</button>
         </div>
-        {% endif %}
 
-        <div class="page-content fade-in">
+        <div class="page-content fade-in" style="padding-top:90px;">
             {% block content %}{% endblock %}
         </div>
     </main>
 </div>
 
 <!-- Signals Rail (right sidebar) -->
-{% if page_id != "dashboard" %}
 <div class="signals-rail" id="signalsRail">
     <div class="signals-rail-toggle" onclick="document.getElementById('signalsRail').classList.toggle('open');localStorage.setItem('sauron_signals_rail',document.getElementById('signalsRail').classList.contains('open')?'open':'closed');">
         <span class="sr-icon">&#x25C8;</span>
@@ -1087,7 +1143,6 @@
         {% endfor %}
     </div>
 </div>
-{% endif %}
 
 <!-- Sidebar expand tab (visible when menu is minimized) -->
 <div class="sidebar-expand-tab" onclick="toggleSidebar()" title="Expand menu">
@@ -1225,84 +1280,37 @@ function toggleSidebar() {
 
 
 <script>
-function toggleInfoPanel() {
-    const panel = document.getElementById('infoPanel');
-    const btn = document.getElementById('infoPanelToggle');
-    const expanded = panel.querySelector('.info-expanded');
-
-    if (!panel.classList.contains('open') && !panel.classList.contains('expanded')) {
-        // closed → open (metrics row)
-        panel.classList.add('open');
-        panel.classList.remove('expanded');
-        if (expanded) expanded.style.display = 'none';
-        btn.innerHTML = '&#x25BC; expand';
-        localStorage.setItem('sauron_info_panel', 'open');
-    } else if (panel.classList.contains('open') && !panel.classList.contains('expanded')) {
-        // open → expanded (full detail)
-        panel.classList.add('expanded');
-        panel.style.maxHeight = '420px';
-        if (expanded) expanded.style.display = 'block';
-        btn.innerHTML = '&#x25B2; collapse';
-        localStorage.setItem('sauron_info_panel', 'expanded');
-    } else {
-        // expanded → closed
-        panel.classList.remove('open', 'expanded');
-        panel.style.maxHeight = '';
-        if (expanded) expanded.style.display = 'none';
-        btn.innerHTML = '&#x25B6; show';
-        localStorage.setItem('sauron_info_panel', 'closed');
-    }
-}
-// Restore info panel state
+// Ticker mouse wheel scroll
 (function() {
-    const state = localStorage.getItem('sauron_info_panel');
-    const panel = document.getElementById('infoPanel');
-    const btn = document.getElementById('infoPanelToggle');
-    const expanded = panel ? panel.querySelector('.info-expanded') : null;
-    if (panel && state === 'open') {
-        panel.classList.add('open');
-        if (btn) btn.innerHTML = '&#x25BC; expand';
-    } else if (panel && state === 'expanded') {
-        panel.classList.add('open', 'expanded');
-        panel.style.maxHeight = '420px';
-        if (expanded) expanded.style.display = 'block';
-        if (btn) btn.innerHTML = '&#x25B2; collapse';
-    } else {
-        // default: closed
-        if (btn) btn.innerHTML = '&#x25B6; show';
-    }
-})();
-// Ticker mouse wheel horizontal scroll
-(function() {
-    const ticker = document.getElementById('tickerBar');
+    var ticker = document.getElementById('tickerBar');
     if (ticker) {
         ticker.addEventListener('wheel', function(e) {
             e.preventDefault();
-            const track = ticker.querySelector('.ticker-track');
+            var track = ticker.querySelector('.ticker-track');
             if (track) {
-                const current = parseFloat(getComputedStyle(track).transform.split(',')[4]) || 0;
-                const delta = e.deltaY > 0 ? -80 : 80;
-                track.style.animation = 'none';
-                track.style.transform = `translateX(${current + delta}px)`;
-                // Resume animation after 2s
-                clearTimeout(ticker._resumeTimer);
-                ticker._resumeTimer = setTimeout(() => {
+                track.style.animationPlayState = 'paused';
+                var m = getComputedStyle(track).transform;
+                var current = m !== 'none' ? parseFloat(m.split(',')[4]) || 0 : 0;
+                var delta = e.deltaY > 0 ? -60 : 60;
+                track.style.transform = 'translateX(' + (current + delta) + 'px)';
+                clearTimeout(ticker._rt);
+                ticker._rt = setTimeout(function() {
                     track.style.transform = '';
-                    track.style.animation = '';
-                }, 2000);
+                    track.style.animationPlayState = '';
+                }, 1500);
             }
         });
     }
 })();
 // Close notification dropdown on outside click
 document.addEventListener('click', function(e) {
-    const bell = document.getElementById('notifBell');
+    var bell = document.getElementById('notifBell');
     if (bell && !bell.contains(e.target)) { bell.classList.remove('open'); }
 });
 // Restore signals rail state
 (function() {
-    const rail = document.getElementById('signalsRail');
-    const state = localStorage.getItem('sauron_signals_rail');
+    var rail = document.getElementById('signalsRail');
+    var state = localStorage.getItem('sauron_signals_rail');
     if (rail && state === 'open') rail.classList.add('open');
 })();
 </script>
