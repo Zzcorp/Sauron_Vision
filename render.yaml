@@ -1,7 +1,7 @@
 # SAURON VISION — Render.com Blueprint
 databases:
   - name: sauron-db
-    plan: starter
+    plan: basic-256mb
     databaseName: sauron_vision
     user: sauron
 
@@ -27,7 +27,7 @@ services:
       - key: REDIS_URL
         fromService:
           name: sauron-redis
-          type: redis
+          type: keyvalue
           property: connectionString
       - key: PYTHON_VERSION
         value: "3.12.3"
@@ -48,7 +48,7 @@ services:
       - key: REDIS_URL
         fromService:
           name: sauron-redis
-          type: redis
+          type: keyvalue
           property: connectionString
       - fromGroup: sauron-env
 
@@ -67,7 +67,7 @@ services:
       - key: REDIS_URL
         fromService:
           name: sauron-redis
-          type: redis
+          type: keyvalue
           property: connectionString
       - fromGroup: sauron-env
 
@@ -86,12 +86,12 @@ services:
       - key: REDIS_URL
         fromService:
           name: sauron-redis
-          type: redis
+          type: keyvalue
           property: connectionString
       - fromGroup: sauron-env
 
-  # Redis
-  - type: redis
+  # Redis (Key Value Store)
+  - type: keyvalue
     name: sauron-redis
     plan: free
     maxmemoryPolicy: allkeys-lru
