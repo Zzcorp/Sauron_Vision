@@ -620,10 +620,10 @@
         .info-panel {
             background: var(--bg-primary); border-bottom: 1px solid var(--border);
             overflow: hidden; transition: max-height 0.4s ease, padding 0.3s ease;
-            max-height: 80px; padding: 8px 20px;
+            max-height: 0; padding: 0 20px;
         }
-        .info-panel.expanded { max-height: 400px; padding: 12px 20px; }
-        .info-panel.collapsed { max-height: 0; padding: 0 20px; border-bottom: none; }
+        .info-panel.open { max-height: 80px; padding: 8px 20px; border-bottom: 1px solid var(--border); }
+        .info-panel.expanded { max-height: 420px; padding: 12px 20px; border-bottom: 1px solid var(--border); }
         .info-panel-toggle {
             position: absolute; bottom: -14px; left: 50%; transform: translateX(-50%);
             z-index: 60; background: var(--bg-card); border: 1px solid var(--border);
@@ -715,6 +715,75 @@
         .sidebar-expand-tab:hover { color: var(--accent); border-color: var(--accent-dim); width: 20px; }
         .sidebar-expand-tab svg { width: 10px; height: 10px; }
         body:has(.sidebar.mini) .sidebar-expand-tab { display: flex; }
+
+        /* ── Signals Sidebar (right) ─────────────── */
+        .signals-rail {
+            position: fixed; top: var(--topbar-height); right: 0; bottom: 0;
+            width: 44px; background: var(--bg-primary); border-left: 1px solid var(--border);
+            z-index: 40; transition: width 0.3s ease; overflow: hidden;
+            display: flex; flex-direction: column;
+        }
+        .signals-rail.open { width: 280px; }
+        .signals-rail-toggle {
+            padding: 10px 12px; cursor: pointer; display: flex; align-items: center;
+            gap: 8px; border-bottom: 1px solid var(--border); transition: all 0.2s;
+            background: var(--bg-card);
+        }
+        .signals-rail-toggle:hover { background: var(--bg-card-hover); }
+        .signals-rail-toggle .sr-icon { font-size: 16px; color: var(--accent); flex-shrink: 0; }
+        .signals-rail-toggle .sr-label {
+            font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px;
+            color: var(--text-muted); text-transform: uppercase; white-space: nowrap;
+            overflow: hidden;
+        }
+        .signals-rail-toggle .sr-count {
+            margin-left: auto; min-width: 20px; height: 20px; border-radius: 10px;
+            background: var(--accent-dim); color: var(--accent); font-size: 10px;
+            font-family: var(--font-mono); font-weight: 700;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .signals-rail-list {
+            flex: 1; overflow-y: auto; padding: 0;
+            scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+        }
+        .sr-signal {
+            padding: 10px 14px; border-bottom: 1px solid var(--border);
+            cursor: pointer; transition: background 0.15s; position: relative;
+        }
+        .sr-signal:hover { background: var(--bg-card-hover); }
+        .sr-signal .sr-sym { font-family: var(--font-display); font-size: 11px; font-weight: 700; color: var(--accent); }
+        .sr-signal .sr-dir { font-size: 9px; font-family: var(--font-mono); letter-spacing: 1px; }
+        .sr-signal .sr-dir.bullish { color: var(--accent); }
+        .sr-signal .sr-dir.bearish { color: var(--accent-red); }
+        .sr-signal .sr-score { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+        .sr-signal .sr-bar { height: 3px; background: var(--bg-void); border-radius: 2px; margin-top: 4px; }
+        .sr-signal .sr-bar-fill { height: 100%; border-radius: 2px; }
+        /* Mini state: just colored dots */
+        .signals-rail:not(.open) .sr-signal { padding: 6px 10px; text-align: center; }
+        .signals-rail:not(.open) .sr-signal .sr-detail { display: none; }
+        .signals-rail:not(.open) .sr-signal .sr-dot {
+            width: 10px; height: 10px; border-radius: 50%; margin: 0 auto;
+        }
+        .signals-rail:not(.open) .sr-label { display: none; }
+        /* Signal preview popup */
+        .sr-preview {
+            display: none; position: absolute; right: calc(100% + 8px); top: 0;
+            width: 260px; background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 14px; z-index: 300;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5); font-size: 11px;
+            animation: previewFadeIn 0.15s ease;
+        }
+        .sr-signal:hover .sr-preview { display: block; }
+        .sr-preview .tp-title { font-family: var(--font-display); font-size: 13px; font-weight: 700; margin-bottom: 6px; color: var(--accent); }
+        .sr-preview .tp-row { display: flex; justify-content: space-between; padding: 3px 0; }
+        .sr-preview .tp-row .lbl { color: var(--text-muted); }
+        /* Adjust main content when signals rail is visible */
+        body:has(.signals-rail) .main-content { margin-right: 44px; }
+        body:has(.signals-rail.open) .main-content { margin-right: 280px; }
+        @media (max-width: 768px) {
+            .signals-rail { display: none; }
+            body:has(.signals-rail) .main-content { margin-right: 0; }
+        }
 
     </style>{% block extra_css %}{% endblock %}
 </head>
@@ -917,7 +986,7 @@
                     <div class="info-card"><span class="ic-label">Portfolio</span><span class="ic-value">&euro;{{ panel_portfolio_value|default:"—" }}</span><span class="ic-sub" style="color:{% if panel_daily_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{{ panel_daily_pnl_display|default:"+0.00%" }}</span></div>
                     <div class="info-card"><span class="ic-label">Cash</span><span class="ic-value">&euro;{{ panel_cash|default:"—" }}</span><span class="ic-sub">{{ panel_cash_pct|default:"100" }}% free</span></div>
                     <div class="info-card"><span class="ic-label">Positions</span><span class="ic-value">{{ panel_positions|default:"0" }}</span><span class="ic-sub">{{ panel_exposure|default:"0" }}% exposure</span></div>
-                    <div class="info-card"><span class="ic-label">Signals</span><span class="ic-value" style="color:var(--accent);">{{ panel_signals|default:"0" }}</span><span class="ic-sub">{{ panel_bullish|default:"0" }}&#x25B2; {{ panel_bearish|default:"0" }}&#x25BC;</span></div>
+                    <div class="info-card"><span class="ic-label">Alerts</span><span class="ic-value" style="color:var(--accent-gold);">{{ notification_count|default:"0" }}</span><span class="ic-sub">unread</span></div>
                     <div class="info-card"><span class="ic-label">Strategies</span><span class="ic-value">{{ panel_strategies|default:"0" }}</span><span class="ic-sub">{{ panel_proposed|default:"0" }} pending</span></div>
                     <div class="info-card"><span class="ic-label">News 24h</span><span class="ic-value">{{ panel_news|default:"0" }}</span><span class="ic-sub">sentiment: {{ panel_sentiment|default:"—" }}</span></div>
                     <div class="info-card"><span class="ic-label">Drawdown</span><span class="ic-value" style="color:var(--accent-red);">{{ panel_drawdown|default:"0" }}%</span><span class="ic-sub">limit: {{ panel_max_dd|default:"3" }}%</span></div>
@@ -968,7 +1037,7 @@
                     </div>
                 </div>
             </div>
-            <button class="info-panel-toggle" onclick="toggleInfoPanel()" id="infoPanelToggle">&#x25BC; expand</button>
+            <button class="info-panel-toggle" onclick="toggleInfoPanel()" id="infoPanelToggle">&#x25B6; show</button>
         </div>
         {% endif %}
 
@@ -977,6 +1046,48 @@
         </div>
     </main>
 </div>
+
+<!-- Signals Rail (right sidebar) -->
+{% if page_id != "dashboard" %}
+<div class="signals-rail" id="signalsRail">
+    <div class="signals-rail-toggle" onclick="document.getElementById('signalsRail').classList.toggle('open');localStorage.setItem('sauron_signals_rail',document.getElementById('signalsRail').classList.contains('open')?'open':'closed');">
+        <span class="sr-icon">&#x25C8;</span>
+        <span class="sr-label">SIGNALS</span>
+        <span class="sr-count">{{ panel_signals|default:"0" }}</span>
+    </div>
+    <div class="signals-rail-list">
+        {% for s in panel_recent_signals %}
+        <a href="/signals/" class="sr-signal" style="text-decoration:none;">
+            <div class="sr-dot" style="background:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %};"></div>
+            <div class="sr-detail">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span class="sr-sym">{{ s.instrument.symbol }}</span>
+                    <span class="sr-dir {{ s.direction }}">{{ s.direction|upper }}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-top:2px;">
+                    <span class="sr-score">Score: {{ s.score|floatformat:2 }}</span>
+                    <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);">{{ s.urgency|default:"—" }}</span>
+                </div>
+                <div class="sr-bar"><div class="sr-bar-fill" style="width:{{ s.score|floatformat:0 }}0%;background:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %};"></div></div>
+            </div>
+            <div class="sr-preview">
+                <div class="tp-title">{{ s.instrument.symbol }}</div>
+                <div class="tp-row"><span class="lbl">Direction</span><span style="color:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %}">{{ s.direction|upper }}</span></div>
+                <div class="tp-row"><span class="lbl">Score</span><span>{{ s.score|floatformat:2 }}</span></div>
+                <div class="tp-row"><span class="lbl">Type</span><span>{{ s.signal_type|default:"—" }}</span></div>
+                <div class="tp-row"><span class="lbl">Urgency</span><span>{{ s.urgency|default:"—" }}</span></div>
+                <div class="tp-row"><span class="lbl">Title</span><span style="font-size:10px;">{{ s.title|default:"—"|truncatechars:40 }}</span></div>
+            </div>
+        </a>
+        {% empty %}
+        <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:11px;">
+            <div style="font-size:20px;margin-bottom:6px;opacity:0.3;">&#x25C8;</div>
+            No active signals
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
 
 <!-- Sidebar expand tab (visible when menu is minimized) -->
 <div class="sidebar-expand-tab" onclick="toggleSidebar()" title="Expand menu">
@@ -1118,27 +1229,28 @@ function toggleInfoPanel() {
     const panel = document.getElementById('infoPanel');
     const btn = document.getElementById('infoPanelToggle');
     const expanded = panel.querySelector('.info-expanded');
-    
-    if (panel.classList.contains('collapsed')) {
-        // collapsed → normal
-        panel.classList.remove('collapsed');
+
+    if (!panel.classList.contains('open') && !panel.classList.contains('expanded')) {
+        // closed → open (metrics row)
+        panel.classList.add('open');
+        panel.classList.remove('expanded');
         if (expanded) expanded.style.display = 'none';
         btn.innerHTML = '&#x25BC; expand';
-        localStorage.setItem('sauron_info_panel', 'normal');
-    } else if (panel.classList.contains('expanded')) {
-        // expanded → collapsed
-        panel.classList.remove('expanded');
-        panel.classList.add('collapsed');
-        if (expanded) expanded.style.display = 'none';
-        btn.innerHTML = '&#x25B2; show';
-        localStorage.setItem('sauron_info_panel', 'collapsed');
-    } else {
-        // normal → expanded
+        localStorage.setItem('sauron_info_panel', 'open');
+    } else if (panel.classList.contains('open') && !panel.classList.contains('expanded')) {
+        // open → expanded (full detail)
         panel.classList.add('expanded');
-        panel.style.maxHeight = '400px';
+        panel.style.maxHeight = '420px';
         if (expanded) expanded.style.display = 'block';
         btn.innerHTML = '&#x25B2; collapse';
         localStorage.setItem('sauron_info_panel', 'expanded');
+    } else {
+        // expanded → closed
+        panel.classList.remove('open', 'expanded');
+        panel.style.maxHeight = '';
+        if (expanded) expanded.style.display = 'none';
+        btn.innerHTML = '&#x25B6; show';
+        localStorage.setItem('sauron_info_panel', 'closed');
     }
 }
 // Restore info panel state
@@ -1147,14 +1259,17 @@ function toggleInfoPanel() {
     const panel = document.getElementById('infoPanel');
     const btn = document.getElementById('infoPanelToggle');
     const expanded = panel ? panel.querySelector('.info-expanded') : null;
-    if (panel && state === 'collapsed') {
-        panel.classList.add('collapsed');
-        if (btn) btn.innerHTML = '&#x25B2; show';
+    if (panel && state === 'open') {
+        panel.classList.add('open');
+        if (btn) btn.innerHTML = '&#x25BC; expand';
     } else if (panel && state === 'expanded') {
-        panel.classList.add('expanded');
-        panel.style.maxHeight = '400px';
+        panel.classList.add('open', 'expanded');
+        panel.style.maxHeight = '420px';
         if (expanded) expanded.style.display = 'block';
         if (btn) btn.innerHTML = '&#x25B2; collapse';
+    } else {
+        // default: closed
+        if (btn) btn.innerHTML = '&#x25B6; show';
     }
 })();
 // Ticker mouse wheel horizontal scroll
@@ -1184,6 +1299,12 @@ document.addEventListener('click', function(e) {
     const bell = document.getElementById('notifBell');
     if (bell && !bell.contains(e.target)) { bell.classList.remove('open'); }
 });
+// Restore signals rail state
+(function() {
+    const rail = document.getElementById('signalsRail');
+    const state = localStorage.getItem('sauron_signals_rail');
+    if (rail && state === 'open') rail.classList.add('open');
+})();
 </script>
 
 {% block extra_js %}{% endblock %}
