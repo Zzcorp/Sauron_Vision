@@ -1,5 +1,5 @@
 {% extends "base.html" %}{% block page_title %}Link Binance{% endblock %}
-{% block content %}<div class="page-content fade-in" style="padding-top:90px;max-width:600px;">
+{% block content %}<div class="page-content fade-in" style="max-width:600px;">
   <div class="card"><div class="card-header"><div class="card-title">LINK BINANCE ACCOUNT</div></div>
   {% if messages %}{% for m in messages %}<div style="color:var(--accent-red);">{{ m }}</div>{% endfor %}{% endif %}
   <form method="post">{% csrf_token %}{{ form.as_p }}

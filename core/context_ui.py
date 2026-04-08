@@ -78,8 +78,17 @@ def ui_extras(request):
     # ── Dashboard headband metrics ─────────────────────────
     try:
         from market_data.models import LiveQuote
-        tracked = ["SPX", "NDX", "DXY", "VIX", "BTCUSD", "ETHUSD",
-                   "XAUUSD", "XAGUSD", "CL", "US10Y", "EURUSD", "GBPUSD"]
+        tracked = [
+            "SPX", "NDX", "DJI", "RUT", "VIX",
+            "FTSE", "DAX", "NKY", "HSI", "STOXX50",
+            "BTCUSD", "ETHUSD", "SOLUSD", "BNBUSD", "XRPUSD",
+            "DOGEUSD", "ADAUSD", "AVAXUSD", "LINKUSD", "DOTUSD",
+            "DXY", "EURUSD", "GBPUSD", "USDJPY", "USDCHF",
+            "AUDUSD", "NZDUSD", "USDCAD", "EURGBP", "EURJPY",
+            "XAUUSD", "XAGUSD", "CL", "NG", "HG", "PL", "PA",
+            "ZC", "ZW", "KC",
+            "US02Y", "US10Y", "US30Y", "DE10Y", "UK10Y", "JP10Y",
+        ]
         band = []
         for sym in tracked:
             q = LiveQuote.objects.filter(instrument__symbol__iexact=sym).first()

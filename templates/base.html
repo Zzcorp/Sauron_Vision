@@ -620,63 +620,76 @@
         .ticker-popup .tp-row { display: flex; justify-content: space-between; padding: 3px 0; }
         .ticker-popup .tp-row .lbl { color: var(--text-muted); }
 
-        /* ── Info Panel (fixed bar with hover dropdowns) ── */
+        /* UPGRADE-9: info panel — taller, scrollable, richer */
         .info-panel-wrap {
             position: fixed; top: calc(var(--topbar-height) + 34px);
             left: var(--sidebar-width); right: 0;
             z-index: 44; background: var(--bg-primary);
             border-bottom: 1px solid var(--border);
+            overflow: visible;
         }
         body:has(.sidebar.mini) .info-panel-wrap { left: 68px; }
-        .info-panel-bar {
-            display: flex; height: 28px; overflow: visible;
+        body:has(.signals-rail) .info-panel-wrap { right: 44px; }
+        body:has(.signals-rail.open) .info-panel-wrap { right: 280px; }
+        .info-panel-scroll { height: 42px; overflow-x: auto; overflow-y: visible; scrollbar-width: none; }
+        .info-panel-scroll::-webkit-scrollbar { display: none; }
+        .info-panel-bar { display: flex; height: 42px; overflow: visible; min-width: max-content; }
+        .ip-arrow {
+            position: absolute; top: 0; width: 28px; height: 42px;
+            display: flex; align-items: center; justify-content: center;
+            color: var(--accent); cursor: pointer; z-index: 3;
+            opacity: 0; transition: opacity .2s; font-size: 13px;
+            border: 0; font-family: var(--font-mono);
         }
+        .ip-arrow.right { right: 0; background: linear-gradient(270deg, var(--bg-primary) 50%, transparent); }
+        .ip-arrow.left { left: 0; background: linear-gradient(90deg, var(--bg-primary) 50%, transparent); }
+        .info-panel-wrap:hover .ip-arrow { opacity: 1; }
+        .ip-arrow:hover { color: var(--text-primary); }
         .ip-cat {
-            position: relative; display: flex; align-items: center; gap: 6px;
-            padding: 0 14px; border-right: 1px solid var(--border);
-            font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.5px;
-            color: var(--text-muted); text-transform: uppercase; cursor: default;
-            white-space: nowrap; transition: all 0.15s;
+            position: relative; display: flex; flex-direction: column;
+            justify-content: center; gap: 2px;
+            padding: 4px 16px; border-right: 1px solid var(--border);
+            font-family: var(--font-mono);
+            color: var(--text-muted); cursor: default;
+            white-space: nowrap; transition: all 0.15s; min-height: 42px;
         }
-        .ip-cat:hover { background: var(--bg-card); color: var(--text-secondary); }
+        .ip-cat:hover { background: var(--bg-card); }
+        .ip-cat .ip-label { font-size: 8px; letter-spacing: 1.5px; color: var(--text-muted); text-transform: uppercase; }
         .ip-cat .ip-count {
-            font-size: 10px; font-weight: 700; color: var(--accent);
-            font-family: var(--font-display);
+            font-size: 14px; font-weight: 700; color: var(--accent);
+            font-family: var(--font-display); line-height: 1.1;
         }
+        .ip-cat .ip-sub { font-size: 9px; color: var(--text-secondary); }
         .ip-cat .ip-count.red { color: var(--accent-red); }
         .ip-cat .ip-count.gold { color: var(--accent-gold); }
-        /* Dropdown on hover */
+        .ip-cat .ip-count.blue { color: var(--accent-blue); }
         .ip-dropdown {
-            display: none; position: absolute; top: 28px; left: 0;
-            min-width: 240px; max-height: 320px; overflow-y: auto;
-            background: var(--bg-card); border: 1px solid var(--border);
+            display: none; position: absolute; top: 42px; left: 0;
+            min-width: 320px; max-width: 360px; max-height: 380px; overflow-y: auto;
+            background: var(--bg-card); border: 1px solid var(--border-glow);
             border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-            box-shadow: 0 12px 40px rgba(0,0,0,0.6); z-index: 250;
-            padding: 6px 0;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.7); z-index: 250;
+            padding: 10px 0; white-space: normal;
         }
         .ip-cat:hover .ip-dropdown { display: block; }
+        .ip-dd-head { padding: 4px 16px 10px; font-size: 9px; letter-spacing: 1.5px;
+                      color: var(--text-muted); border-bottom: 1px solid var(--border); margin-bottom: 6px; }
         .ip-dd-item {
-            padding: 7px 14px; font-family: var(--font-mono); font-size: 11px;
+            padding: 8px 16px; font-family: var(--font-mono); font-size: 11px;
             color: var(--text-secondary); cursor: pointer; transition: background 0.1s;
-            position: relative; display: flex; justify-content: space-between; align-items: center;
+            display: flex; justify-content: space-between; align-items: center;
             text-decoration: none;
         }
         .ip-dd-item:hover { background: var(--bg-card-hover); color: var(--text-primary); }
-        /* Sub-preview on hover of dropdown item */
-        .ip-dd-preview {
-            display: none; position: absolute; left: calc(100% + 4px); top: 0;
-            min-width: 220px; background: var(--bg-card); border: 1px solid var(--border);
-            border-radius: var(--radius-lg); padding: 12px; z-index: 260;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.5); font-size: 11px;
-        }
-        .ip-dd-item:hover .ip-dd-preview { display: block; }
-        .ip-dd-preview .tp-title { font-family: var(--font-display); font-size: 12px; font-weight: 700; margin-bottom: 6px; color: var(--accent); }
-        .ip-dd-preview .tp-row { display: flex; justify-content: space-between; padding: 2px 0; }
-        .ip-dd-preview .tp-row .lbl { color: var(--text-muted); }
+        .ip-dd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; padding: 6px 16px; }
+        .ip-dd-cell { font-size: 10px; }
+        .ip-dd-cell .dk { display: block; color: var(--text-muted); font-size: 8px; letter-spacing: 1px; }
+        .ip-dd-cell .dv { font-size: 13px; font-family: var(--font-display); font-weight: 700; color: var(--accent); }
+        .ip-dd-cell .dv.red { color: var(--accent-red); }
+        .ip-dd-cell .dv.gold { color: var(--accent-gold); }
         .ip-dd-empty { padding: 16px; text-align: center; color: var(--text-muted); font-size: 10px; }
-        /* AI link in bar */
         .ip-cat-ai { cursor: pointer; }
-        .ip-cat-ai:hover { color: var(--accent); }
+        .ip-cat-ai:hover .ip-count { color: var(--accent); }
 
         /* ── Notification Bell ───────────────────── */
         .notif-bell {
@@ -848,6 +861,64 @@
         body:has(.signals-rail.open) .rail-toggle-btn svg { transform: rotate(180deg); }
         @media (max-width: 768px) { .rail-toggle-btn { display: none; } }
 
+                /* UPGRADE-9: sidebar edge toggle (mirrors rail-toggle-btn) */
+        .sidebar-toggle-btn {
+            position: fixed; top: 50%; left: var(--sidebar-width); transform: translateY(-50%);
+            width: 28px; height: 56px; background: var(--bg-card);
+            border: 1px solid var(--border); border-left: 0;
+            border-radius: 0 8px 8px 0; cursor: pointer; z-index: 70;
+            display: flex; align-items: center; justify-content: center;
+            color: var(--accent); transition: all .25s; box-shadow: 2px 0 12px rgba(0,0,0,.4);
+        }
+        .sidebar-toggle-btn:hover { background: var(--bg-card-hover); width: 32px; }
+        .sidebar-toggle-btn svg { width: 14px; height: 14px; transition: transform .3s; }
+        body:has(.sidebar.mini) .sidebar-toggle-btn { left: 68px; transform: translateY(-50%) rotate(180deg); }
+        @media (max-width: 768px) { .sidebar-toggle-btn { display: none; } }
+        /* Ensure rail toggle has the same design (pass 6 / fallback) */
+        .rail-toggle-btn {
+            position: fixed; top: 50%; right: 44px; transform: translateY(-50%);
+            width: 28px; height: 56px; background: var(--bg-card);
+            border: 1px solid var(--border); border-right: 0;
+            border-radius: 8px 0 0 8px; cursor: pointer; z-index: 70;
+            display: flex; align-items: center; justify-content: center;
+            color: var(--accent); transition: all .25s; box-shadow: -2px 0 12px rgba(0,0,0,.4);
+        }
+        .rail-toggle-btn:hover { background: var(--bg-card-hover); width: 32px; }
+        .rail-toggle-btn svg { width: 14px; height: 14px; transition: transform .3s; }
+        body:has(.signals-rail.open) .rail-toggle-btn { right: 280px; }
+        body:has(.signals-rail.open) .rail-toggle-btn svg { transform: rotate(180deg); }
+        @media (max-width: 768px) { .rail-toggle-btn { display: none; } }
+                /* UPGRADE-9: ticker bar hover arrows + enriched news popup */
+        .ticker-bar { position: fixed; }
+        .ticker-bar .tb-arrow {
+            position: absolute; top: 0; width: 28px; height: 34px;
+            display: flex; align-items: center; justify-content: center;
+            color: var(--accent); cursor: pointer; z-index: 3;
+            opacity: 0; transition: opacity .2s; font-size: 13px;
+            border: 0; font-family: var(--font-mono);
+        }
+        .ticker-bar .tb-arrow.right { right: 0; background: linear-gradient(270deg, var(--bg-primary) 50%, transparent); }
+        .ticker-bar .tb-arrow.left { left: 0; background: linear-gradient(90deg, var(--bg-primary) 50%, transparent); }
+        .ticker-bar:hover .tb-arrow { opacity: 1; }
+        .ticker-bar .tb-arrow:hover { color: var(--text-primary); }
+        .ticker-item[data-type="news"] .ticker-popup { min-width: 360px; max-width: 420px; }
+        .tnp-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+        .tnp-source { font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px; color: var(--accent); text-transform: uppercase; }
+        .tnp-time { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); }
+        .tnp-title { font-family: var(--font-display); font-size: 13px; font-weight: 700; color: var(--text-primary); line-height: 1.35; margin-bottom: 10px; }
+        .tnp-summary { font-size: 11px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
+        .tnp-meta-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+        .tnp-sent { padding: 2px 8px; border-radius: 10px; font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: 1px; }
+        .tnp-sent.pos { background: rgba(0,232,104,.12); color: var(--accent); }
+        .tnp-sent.neg { background: rgba(232,48,48,.12); color: var(--accent-red); }
+        .tnp-sent.neu { background: rgba(136,136,136,.12); color: var(--text-secondary); }
+        .tnp-urgency { padding: 2px 8px; border-radius: 10px; background: rgba(216,176,32,.15); color: var(--accent-gold); font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: 1px; }
+        .tnp-implication { padding: 8px 10px; background: var(--bg-void); border-left: 2px solid var(--accent); font-size: 10px; color: var(--text-secondary); font-style: italic; margin-bottom: 10px; }
+        .tnp-section { font-family: var(--font-mono); font-size: 8px; letter-spacing: 1.2px; color: var(--text-muted); margin: 8px 0 4px; }
+        .tnp-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+        .tnp-chip { padding: 2px 8px; background: var(--accent-dim); color: var(--accent); border-radius: 10px; font-family: var(--font-mono); font-size: 9px; font-weight: 700; }
+        .tnp-keyword { padding: 2px 8px; background: rgba(48,160,232,.12); color: var(--accent-blue); border-radius: 10px; font-family: var(--font-mono); font-size: 9px; font-weight: 700; }
+        .tnp-cta { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 10px; color: var(--accent); text-align: right; }
         </style>{% block extra_css %}{% endblock %}
 <style>/* UPGRADE-2 */
 
@@ -1003,54 +1074,77 @@
         .signals-rail:not(.open) .wl-last, .signals-rail:not(.open) .wl-chg { display: none; }
 
         /* ═══════════════════════════════════════════════════════════ */
-        /* UPGRADE-2: Dashboard data headband (rich metrics strip)     */
+        /* ═══════════════════════════════════════════════════════════ */
+        /* UPGRADE-9: Data headband (escape-clip popups + RTL scroll)   */
         /* ═══════════════════════════════════════════════════════════ */
         .data-headband {
             position: fixed; left: var(--sidebar-width); right: 0;
-            top: calc(var(--topbar-height) + 34px + 32px); /* below ticker + info-panel */
-            height: 40px; background: linear-gradient(180deg, var(--bg-primary), var(--bg-void));
+            top: calc(var(--topbar-height) + 34px + 42px);
+            height: 42px; background: linear-gradient(180deg, var(--bg-primary), var(--bg-void));
             border-bottom: 1px solid var(--border); z-index: 43;
-            overflow-x: auto; overflow-y: visible; white-space: nowrap;
-            display: flex; align-items: stretch;
-            scrollbar-width: none;
+            overflow: visible;
         }
-        .data-headband::-webkit-scrollbar { display: none; }
+        .dh-scroll { height: 42px; overflow-x: hidden; overflow-y: visible; position: relative; }
+        .dh-track { display: inline-flex; gap: 0; align-items: stretch;
+                    animation: dhScroll 140s linear infinite; white-space: nowrap; }
+        @keyframes dhScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        .data-headband:hover .dh-track { animation-play-state: paused; }
         body:has(.sidebar.mini) .data-headband { left: 68px; }
         body:has(.signals-rail) .data-headband { right: 44px; }
         body:has(.signals-rail.open) .data-headband { right: 280px; }
         @media (max-width: 768px) { .data-headband { left: 0 !important; right: 0 !important; } }
-
         .dh-item {
             display: inline-flex; align-items: center; gap: 10px;
-            padding: 0 18px; border-right: 1px solid var(--border);
+            padding: 0 18px; border-right: 1px solid var(--border); height: 42px;
             font-family: var(--font-mono); font-size: 11px;
-            position: relative; cursor: pointer; flex-shrink: 0;
-            transition: background .15s;
+            cursor: pointer; flex-shrink: 0; transition: background .15s;
         }
         .dh-item:hover { background: var(--bg-card); }
         .dh-sym { color: var(--text-muted); font-size: 9px; letter-spacing: 1.5px; font-weight: 700; }
         .dh-val { color: var(--text-primary); font-weight: 600; }
-        .dh-chg { font-size: 10px; }
+        .dh-chg { font-size: 10px; font-family: var(--font-mono); }
         .dh-chg.up { color: var(--accent); }
         .dh-chg.down { color: var(--accent-red); }
-        .dh-dot { width: 6px; height: 6px; border-radius: 50%; }
+        .dh-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
         .dh-dot.up { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
         .dh-dot.down { background: var(--accent-red); box-shadow: 0 0 6px var(--accent-red); }
         .dh-dot.flat { background: var(--text-muted); }
-
-        /* Dropdown popup (rich info) */
-        .dh-pop {
-            display: none; position: absolute; top: calc(100% + 2px); left: 0;
-            min-width: 260px; background: var(--bg-card); border: 1px solid var(--border-glow);
-            border-radius: var(--radius-lg); padding: 14px 16px; z-index: 300;
-            box-shadow: 0 12px 40px rgba(0,0,0,.6); white-space: normal;
-            animation: dhPop .18s ease;
+        .dh-arrow {
+            position: absolute; top: 0; width: 32px; height: 42px;
+            display: flex; align-items: center; justify-content: center;
+            color: var(--accent); cursor: pointer; z-index: 3;
+            opacity: 0; transition: opacity .2s; font-size: 14px;
+            border: 0; font-family: var(--font-mono);
         }
+        .dh-arrow.right { right: 0; background: linear-gradient(270deg, var(--bg-primary) 50%, transparent); }
+        .dh-arrow.left { left: 0; background: linear-gradient(90deg, var(--bg-primary) 50%, transparent); }
+        .data-headband:hover .dh-arrow { opacity: 1; }
+        .dh-arrow:hover { color: var(--text-primary); }
+        /* Popup — fixed position, anchored by JS to escape the scroll container */
+        .dh-pop {
+            display: none; position: fixed;
+            min-width: 320px; max-width: 380px;
+            background: var(--bg-card); border: 1px solid var(--border-glow);
+            border-radius: var(--radius-lg); padding: 14px 16px; z-index: 1000;
+            box-shadow: 0 12px 40px rgba(0,0,0,.7); white-space: normal;
+            pointer-events: none;
+        }
+        .dh-item.pop-open .dh-pop { display: block; animation: dhPop .18s ease; }
         @keyframes dhPop { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
-        .dh-item:hover .dh-pop { display: block; }
+        .dh-pop-head { display: flex; justify-content: space-between; align-items: flex-start;
+                       margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
         .dh-pop-title { font-family: var(--font-display); font-size: 14px; font-weight: 700;
                         color: var(--accent); margin-bottom: 2px; }
-        .dh-pop-name { font-size: 10px; color: var(--text-muted); margin-bottom: 10px; }
+        .dh-pop-name { font-size: 10px; color: var(--text-muted); }
+        .dh-pop-badge { width: 32px; height: 32px; border-radius: 50%; display: flex;
+                        align-items: center; justify-content: center; font-size: 14px;
+                        border: 1px solid var(--border); }
+        .dh-pop-badge.up { background: rgba(0,232,104,.1); color: var(--accent); border-color: var(--accent); }
+        .dh-pop-badge.down { background: rgba(232,48,48,.1); color: var(--accent-red); border-color: var(--accent-red); }
+        .dh-pop-badge.flat { color: var(--text-muted); }
+        .dh-pop-big { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
+        .dh-pop-price { font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--text-primary); }
+        .dh-pop-pct { font-family: var(--font-mono); font-size: 12px; font-weight: 600; }
         .dh-pop-row { display: flex; justify-content: space-between; padding: 4px 0;
                       font-size: 11px; border-top: 1px dashed var(--border); }
         .dh-pop-row:first-of-type { border-top: 0; }
@@ -1059,6 +1153,8 @@
         .dh-pop-bar { height: 4px; background: var(--bg-void); border-radius: 2px;
                       margin-top: 10px; overflow: hidden; }
         .dh-pop-bar-fill { height: 100%; transition: width .3s; }
+        .dh-pop-cta { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
+                      font-size: 10px; color: var(--accent); text-align: right; }
 
         /* Push page content down to make room for the new headband */
         .page-content { padding-top: 130px !important; }
@@ -1125,11 +1221,7 @@
                 <span class="brand-text">SAURON</span>
             </h1>
             <div class="subtitle">TRADING INTELLIGENCE</div>
-            <button class="sidebar-toggle" onclick="toggleSidebar()" title="Collapse menu">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path class="toggle-arrow" d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            </button>
+<!-- UPGRADE-9: sidebar toggle moved to unified edge button -->
         </div>
         <nav class="sidebar-nav">
             <div class="nav-section">Command Center</div>
@@ -1239,9 +1331,11 @@
 
         <!-- Ticker Bar (fixed, always visible) -->
         <div class="ticker-bar" id="tickerBar">
+            <button type="button" class="tb-arrow left" aria-label="Scroll left">◀</button>
+            <button type="button" class="tb-arrow right" aria-label="Scroll right">▶</button>
             <div class="ticker-track" id="tickerTrack">
                 {% for item in ticker_items %}
-                <a href="{{ item.url }}" class="ticker-item">
+                <a href="{{ item.url }}" class="ticker-item" data-type="{{ item.type }}">
                     {% if item.type == "quote" %}
                     <span class="t-sym">{{ item.symbol }}</span>
                     <span class="t-price">{{ item.price }}</span>
@@ -1268,14 +1362,36 @@
                         <div class="tp-row"><span class="lbl">Urgency</span><span>{{ item.urgency }}</span></div>
                         <div class="tp-row"><span class="lbl">Direction</span><span>{{ item.direction }}</span></div>
                         {% elif item.type == "news" %}
-                        <div style="font-size:11px;color:var(--text-secondary);">{{ item.summary|truncatechars:150 }}</div>
-                        <div style="margin-top:4px;font-size:9px;color:var(--text-muted);">{{ item.source }}</div>
+                        <div class="tnp-head">
+                          <span class="tnp-source">{{ item.source }}</span>
+                          <span class="tnp-time">{{ item.published_at }}</span>
+                        </div>
+                        <div class="tnp-title">{{ item.title }}</div>
+                        <div class="tnp-summary">{{ item.summary|truncatechars:260 }}</div>
+                        <div class="tnp-meta-row">
+                          {% if item.sentiment_score != None %}
+                            {% if item.sentiment_score > 0.2 %}<span class="tnp-sent pos">▲ BULL {{ item.sentiment_score|floatformat:2 }}</span>
+                            {% elif item.sentiment_score < -0.2 %}<span class="tnp-sent neg">▼ BEAR {{ item.sentiment_score|floatformat:2 }}</span>
+                            {% else %}<span class="tnp-sent neu">● NEUTRAL</span>{% endif %}
+                          {% endif %}
+                          {% if item.urgency %}<span class="tnp-urgency">⚡ {{ item.urgency|upper }}</span>{% endif %}
+                        </div>
+                        {% if item.implication %}<div class="tnp-implication">{{ item.implication }}</div>{% endif %}
+                        {% if item.affected_chips %}
+                          <div class="tnp-section">AFFECTED INSTRUMENTS</div>
+                          <div class="tnp-chips">{% for c in item.affected_chips %}<span class="tnp-chip">{{ c }}</span>{% endfor %}</div>
+                        {% endif %}
+                        {% if item.keywords %}
+                          <div class="tnp-section">KEYWORDS</div>
+                          <div class="tnp-chips">{% for k in item.keywords %}<span class="tnp-keyword">{{ k }}</span>{% endfor %}</div>
+                        {% endif %}
+                        <div class="tnp-cta">▸ Click for full analysis</div>
                         {% endif %}
                     </div>
                 </a>
                 {% endfor %}
                 {% for item in ticker_items %}
-                <a href="{{ item.url }}" class="ticker-item">
+                <a href="{{ item.url }}" class="ticker-item" data-type="{{ item.type }}">
                     {% if item.type == "quote" %}<span class="t-sym">{{ item.symbol }}</span><span class="t-price">{{ item.price }}</span><span class="t-change {% if item.change >= 0 %}up{% else %}down{% endif %}">{{ item.change_display }}</span>
                     {% elif item.type == "signal" %}<span class="t-badge signal">SIG</span><span class="t-sym">{{ item.symbol }}</span>
                     {% elif item.type == "news" %}<span class="t-badge news">NEWS</span><span>{{ item.title|truncatechars:50 }}</span>
@@ -1286,139 +1402,170 @@
         </div>
 
         <!-- Info Bar (fixed, labels always visible, hover for dropdowns) -->
+        <!-- UPGRADE-9: info panel rebuilt -->
         <div class="info-panel-wrap">
+            <button type="button" class="ip-arrow left" aria-label="Scroll left">◀</button>
+            <button type="button" class="ip-arrow right" aria-label="Scroll right">▶</button>
+            <div class="info-panel-scroll" id="ipScroll">
             <div class="info-panel-bar">
-                <!-- Portfolio -->
                 <div class="ip-cat">
-                    <span>PORTFOLIO</span> <span class="ip-count">&euro;{{ panel_portfolio_value|default:"0" }}</span>
+                    <span class="ip-label">PORTFOLIO</span>
+                    <span class="ip-count">&euro;{{ panel_portfolio_value|default:"0" }}</span>
+                    <span class="ip-sub">{{ panel_positions|default:"0" }} pos · {{ panel_exposure|default:"0" }}%</span>
                     <div class="ip-dropdown">
-                        <div class="ip-dd-item">
-                            <span>Value</span><span style="color:var(--text-primary);">&euro;{{ panel_portfolio_value|default:"0" }}</span>
-                        </div>
-                        <div class="ip-dd-item">
-                            <span>Cash</span><span style="color:var(--text-primary);">&euro;{{ panel_cash|default:"0" }}</span>
-                        </div>
-                        <div class="ip-dd-item">
-                            <span>Daily P&amp;L</span><span style="color:{% if panel_daily_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{{ panel_daily_pnl_display|default:"+0.00%" }}</span>
-                        </div>
-                        <div class="ip-dd-item">
-                            <span>Exposure</span><span>{{ panel_exposure|default:"0" }}%</span>
+                        <div class="ip-dd-head">PORTFOLIO OVERVIEW</div>
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">VALUE</span><span class="dv">&euro;{{ panel_portfolio_value|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">CASH</span><span class="dv">&euro;{{ panel_cash|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">DAILY P&amp;L</span><span class="dv">{{ panel_daily_pnl_display|default:"+0.00%" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">EXPOSURE</span><span class="dv">{{ panel_exposure|default:"0" }}%</span></div>
+                            <div class="ip-dd-cell"><span class="dk">POSITIONS</span><span class="dv">{{ panel_positions|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">DRAWDOWN</span><span class="dv red">{{ panel_drawdown|default:"0" }}%</span></div>
                         </div>
                     </div>
                 </div>
-                <!-- Positions -->
                 <div class="ip-cat">
-                    <span>POSITIONS</span> <span class="ip-count">{{ panel_positions|default:"0" }}</span>
+                    <span class="ip-label">POSITIONS</span>
+                    <span class="ip-count">{{ panel_positions|default:"0" }}</span>
+                    <span class="ip-sub">open now</span>
                     <div class="ip-dropdown">
+                        <div class="ip-dd-head">OPEN POSITIONS</div>
                         {% for p in panel_recent_positions %}
-                        <div class="ip-dd-item">
-                            <span style="font-weight:700;">{{ p.instrument.symbol }}</span>
-                            <span style="font-size:9px;color:var(--text-muted);">{{ p.direction }}</span>
-                            <div class="ip-dd-preview">
-                                <div class="tp-title">{{ p.instrument.symbol }}</div>
-                                <div class="tp-row"><span class="lbl">Direction</span><span>{{ p.direction }}</span></div>
-                                <div class="tp-row"><span class="lbl">Entry</span><span>{{ p.entry_price }}</span></div>
-                                <div class="tp-row"><span class="lbl">Size</span><span>{{ p.quantity }}</span></div>
-                            </div>
-                        </div>
-                        {% empty %}
-                        <div class="ip-dd-empty">No open positions</div>
-                        {% endfor %}
+                        <a href="/positions/" class="ip-dd-item">
+                            <span style="font-weight:700;color:var(--text-primary);">{{ p.instrument.symbol }}</span>
+                            <span style="font-size:9px;">{{ p.direction|upper }}</span>
+                        </a>
+                        {% empty %}<div class="ip-dd-empty">No open positions</div>{% endfor %}
                     </div>
                 </div>
-                <!-- Strategies -->
                 <div class="ip-cat">
-                    <span>STRATEGIES</span> <span class="ip-count">{{ panel_strategies|default:"0" }}</span>
+                    <span class="ip-label">BOT</span>
+                    <span class="ip-count {% if not panel_bot_armed %}red{% endif %}">{% if panel_bot_armed %}ARMED{% else %}OFF{% endif %}</span>
+                    <span class="ip-sub">{{ panel_bot_mode|default:"paper" }} · {{ panel_bot_open|default:"0" }} open</span>
                     <div class="ip-dropdown">
+                        <div class="ip-dd-head">BOT PROGRAM</div>
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">STATUS</span><span class="dv">{% if panel_bot_armed %}ARMED{% else %}OFFLINE{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">MODE</span><span class="dv">{{ panel_bot_mode|default:"—"|upper }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">OPEN</span><span class="dv">{{ panel_bot_open|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">24H P&amp;L</span><span class="dv">{{ panel_bot_pnl_24h_display|default:"+0.00" }}</span></div>
+                        </div>
+                        <a href="{% url 'bot_home' %}" class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Go to Bot Program</a>
+                    </div>
+                </div>
+                <div class="ip-cat">
+                    <span class="ip-label">STRATEGIES</span>
+                    <span class="ip-count">{{ panel_strategies|default:"0" }}</span>
+                    <span class="ip-sub">active</span>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">ACTIVE STRATEGIES</div>
                         {% for st in panel_recent_strategies %}
                         <a href="/strategies/{{ st.id }}/" class="ip-dd-item">
                             <span>{{ st.name|truncatechars:30 }}</span>
-                            <span class="badge badge-{{ st.status }}" style="font-size:7px;">{{ st.status }}</span>
+                            <span style="font-size:8px;color:var(--accent);">{{ st.status }}</span>
                         </a>
-                        {% empty %}
-                        <div class="ip-dd-empty">No active strategies</div>
-                        {% endfor %}
+                        {% empty %}<div class="ip-dd-empty">No active strategies</div>{% endfor %}
                     </div>
                 </div>
-                <!-- News -->
                 <div class="ip-cat">
-                    <span>NEWS</span> <span class="ip-count">{{ panel_news|default:"0" }}</span>
-                    <div class="ip-dropdown" style="min-width:300px;">
+                    <span class="ip-label">SIGNALS</span>
+                    <span class="ip-count">{{ panel_signals|default:"0" }}</span>
+                    <span class="ip-sub">{{ panel_bullish|default:"0" }} bull · {{ panel_bearish|default:"0" }} bear</span>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">ACTIVE SIGNALS</div>
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">BULLISH</span><span class="dv">{{ panel_bullish|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">BEARISH</span><span class="dv red">{{ panel_bearish|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">TOTAL</span><span class="dv">{{ panel_signals|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">24H NEW</span><span class="dv">{{ panel_signals_24h|default:"0" }}</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="ip-cat">
+                    <span class="ip-label">NEWS</span>
+                    <span class="ip-count blue">{{ panel_news|default:"0" }}</span>
+                    <span class="ip-sub">last 24h</span>
+                    <div class="ip-dropdown" style="min-width:340px;">
+                        <div class="ip-dd-head">RECENT NEWS</div>
                         {% for n in panel_recent_news %}
-                        <a href="/news/" class="ip-dd-item" style="flex-direction:column;align-items:flex-start;gap:2px;">
-                            <span style="font-size:10px;color:var(--text-primary);">{{ n.title|truncatechars:55 }}</span>
+                        <a href="/news/{{ n.id }}/" class="ip-dd-item" style="flex-direction:column;align-items:flex-start;gap:2px;">
+                            <span style="font-size:10px;color:var(--text-primary);">{{ n.title|truncatechars:60 }}</span>
                             <span style="font-size:8px;color:var(--text-muted);">{{ n.source }} &middot; {{ n.published_at|timesince }} ago</span>
-                            <div class="ip-dd-preview" style="min-width:250px;">
-                                <div class="tp-title">{{ n.title|truncatechars:60 }}</div>
-                                <div style="font-size:10px;color:var(--text-secondary);margin-top:4px;">{{ n.content_summary|truncatechars:200 }}</div>
-                                <div class="tp-row" style="margin-top:6px;"><span class="lbl">Source</span><span>{{ n.source }}</span></div>
-                            </div>
                         </a>
-                        {% empty %}
-                        <div class="ip-dd-empty">No news yet</div>
-                        {% endfor %}
+                        {% empty %}<div class="ip-dd-empty">No news yet</div>{% endfor %}
                     </div>
                 </div>
-                <!-- Alerts -->
                 <div class="ip-cat">
-                    <span>ALERTS</span> <span class="ip-count gold">{{ notification_count|default:"0" }}</span>
+                    <span class="ip-label">FUNDING</span>
+                    <span class="ip-count">{{ panel_funding_display|default:"—" }}</span>
+                    <span class="ip-sub">24h avg · {{ panel_funding_extreme_count|default:"0" }} extreme</span>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">FUNDING RATES</div>
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">AVG 24H</span><span class="dv">{{ panel_funding_display|default:"—" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">EXTREME</span><span class="dv gold">{{ panel_funding_extreme_count|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">FLIPS</span><span class="dv">{{ panel_funding_flips|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">SAMPLES</span><span class="dv">{{ panel_funding_samples|default:"0" }}</span></div>
+                        </div>
+                        <a href="{% url 'liquidations_page' %}" class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Liquidations page</a>
+                    </div>
                 </div>
-                <!-- Drawdown -->
                 <div class="ip-cat">
-                    <span>DD</span> <span class="ip-count red">{{ panel_drawdown|default:"0" }}%</span>
+                    <span class="ip-label">LIQ 24H</span>
+                    <span class="ip-count">${{ panel_liq_24h_display|default:"0" }}</span>
+                    <span class="ip-sub">{{ panel_liq_count|default:"0" }} events</span>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">LIQUIDATIONS (24H)</div>
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">TOTAL</span><span class="dv">${{ panel_liq_24h_display|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">COUNT</span><span class="dv">{{ panel_liq_count|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">LONGS REKT</span><span class="dv red">${{ panel_liq_long_display|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">SHORTS REKT</span><span class="dv">${{ panel_liq_short_display|default:"0" }}</span></div>
+                        </div>
+                        <a href="{% url 'liquidations_page' %}" class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View heatmap</a>
+                    </div>
                 </div>
-                <!-- Watchlist -->
                 <div class="ip-cat">
-                    <span>WATCH</span> <span class="ip-count">{{ panel_watchlist|default:"0" }}</span>
+                    <span class="ip-label">ALERTS</span>
+                    <span class="ip-count gold">{{ notification_count|default:"0" }}</span>
+                    <span class="ip-sub">unread</span>
                 </div>
-                <!-- AI -->
+                <div class="ip-cat">
+                    <span class="ip-label">DRAWDOWN</span>
+                    <span class="ip-count red">{{ panel_drawdown|default:"0" }}%</span>
+                    <span class="ip-sub">from peak</span>
+                </div>
+                <div class="ip-cat">
+                    <span class="ip-label">WATCHLIST</span>
+                    <span class="ip-count">{{ panel_watchlist|default:"0" }}</span>
+                    <span class="ip-sub">tracked</span>
+                </div>
+                <div class="ip-cat">
+                    <span class="ip-label">VOLATILITY</span>
+                    <span class="ip-count">{{ panel_vix|default:"—" }}</span>
+                    <span class="ip-sub">VIX index</span>
+                </div>
                 <div class="ip-cat ip-cat-ai" onclick="window.location='/ai/chat/'">
-                    <span>SAURON AI</span> <span class="ip-count">&#x25B8;</span>
+                    <span class="ip-label">SAURON AI</span>
+                    <span class="ip-count">&#x25B8;</span>
+                    <span class="ip-sub">ask anything</span>
                 </div>
+            </div>
             </div>
         </div>
 
-        <!-- UPGRADE-2: Dashboard data headband -->
+        <!-- UPGRADE-9: Data headband with RTL scroll + hover arrows + escape popups -->
 <div class="data-headband" id="dataHeadband">
-  {% for m in ui_headband %}
-  <div class="dh-item" data-symbol="{{ m.symbol }}">
-    <span class="dh-dot {% if m.change_pct > 0 %}up{% elif m.change_pct < 0 %}down{% else %}flat{% endif %}"></span>
-    <span class="dh-sym">{{ m.symbol }}</span>
-    <span class="dh-val">{% if m.last %}{{ m.last|floatformat:2 }}{% else %}—{% endif %}</span>
-    <span class="dh-chg {% if m.change_pct >= 0 %}up{% else %}down{% endif %}">
-      {% if m.change_pct >= 0 %}+{% endif %}{{ m.change_pct|floatformat:2 }}%
-    </span>
-    <div class="dh-pop">
-      <div class="dh-pop-head">
-        <div>
-          <div class="dh-pop-title">{{ m.symbol }}</div>
-          <div class="dh-pop-name">{{ m.name }}</div>
-        </div>
-        <div class="dh-pop-badge {% if m.change_pct > 0 %}up{% elif m.change_pct < 0 %}down{% else %}flat{% endif %}">
-          {% if m.change_pct >= 0 %}▲{% else %}▼{% endif %}
-        </div>
-      </div>
-      <div class="dh-pop-big">
-        <span class="dh-pop-price">{% if m.last %}{{ m.last|floatformat:4 }}{% else %}—{% endif %}</span>
-        <span class="dh-pop-pct {% if m.change_pct >= 0 %}up{% else %}down{% endif %}" style="color:{% if m.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
-          {% if m.change_pct >= 0 %}+{% endif %}{{ m.change_pct|floatformat:2 }}%
-        </span>
-      </div>
-      <div class="dh-pop-row"><span class="k">Asset class</span><span class="v">{{ m.asset_class|default:"—"|upper }}</span></div>
-      <div class="dh-pop-row"><span class="k">24h volume</span><span class="v">{% if m.volume %}{{ m.volume|floatformat:0 }}{% else %}—{% endif %}</span></div>
-      {% if m.bid %}<div class="dh-pop-row"><span class="k">Bid / Ask</span><span class="v">{{ m.bid|floatformat:4 }} / {{ m.ask|floatformat:4 }}</span></div>{% endif %}
-      <div class="dh-pop-row"><span class="k">Source</span><span class="v" style="color:var(--accent);">{{ m.source|default:"—" }}</span></div>
-      <div class="dh-pop-row"><span class="k">Updated</span><span class="v">{{ m.updated_human|default:"—" }}</span></div>
-      <div class="dh-pop-cta">▸ Click symbol on dashboard for full chart</div>
+  <button type="button" class="dh-arrow left" aria-label="Scroll left">◀</button>
+  <button type="button" class="dh-arrow right" aria-label="Scroll right">▶</button>
+  <div class="dh-scroll" id="dhScroll">
+    <div class="dh-track" id="dhTrack">
+      {% for m in ui_headband %}{% include "_partials/dh_item.html" %}{% endfor %}
+      {% for m in ui_headband %}{% include "_partials/dh_item.html" %}{% endfor %}
     </div>
   </div>
-  {% empty %}
-  <div class="dh-item" style="color:var(--text-muted);">
-    <span class="dh-sym">NO LIVE DATA</span>
-    <span class="dh-val">—</span>
-  </div>
-  {% endfor %}
 </div>
+
 
 <div class="page-content fade-in" style="padding-top:90px;">
             {% block content %}{% endblock %}
@@ -1532,12 +1679,13 @@
 })();
 </script>
 
-<!-- Sidebar expand tab (visible when menu is minimized) -->
-<div class="sidebar-expand-tab" onclick="toggleSidebar()" title="Expand menu">
-    <svg viewBox="0 0 10 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M2 2L8 8L2 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-    </svg>
-</div>
+<!-- UPGRADE-9: Sidebar edge toggle (identical to rail edge toggle) -->
+<button type="button" class="sidebar-toggle-btn" id="sidebarToggleBtn"
+        onclick="toggleSidebar()" title="Toggle menu">
+  <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M6 3L11 8L6 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</button>
 {% endblock %}
 
 <script>
@@ -1821,6 +1969,118 @@ document.addEventListener('click', function(e) {
   }
   setInterval(tick,10000);
   setTimeout(tick,1500);
+})();
+</script>
+
+
+<script>
+/* UPGRADE-9: headband popup escape + hover arrows */
+(function(){
+  // Data headband popup escape: position as fixed, anchored to hovered item
+  function positionPop(item){
+    var pop = item.querySelector('.dh-pop'); if(!pop) return;
+    var r = item.getBoundingClientRect();
+    pop.style.top = (r.bottom + 4) + 'px';
+    var w = 380;
+    var left = r.left;
+    if (left + w > window.innerWidth - 16) left = window.innerWidth - w - 16;
+    if (left < 16) left = 16;
+    pop.style.left = left + 'px';
+  }
+  document.querySelectorAll('.data-headband .dh-item').forEach(function(item){
+    item.addEventListener('mouseenter', function(){
+      item.classList.add('pop-open');
+      positionPop(item);
+    });
+    item.addEventListener('mouseleave', function(){
+      item.classList.remove('pop-open');
+    });
+  });
+  window.addEventListener('scroll', function(){
+    document.querySelectorAll('.data-headband .dh-item.pop-open').forEach(positionPop);
+  }, true);
+
+  // Data headband hover arrows
+  var dhTrack = document.getElementById('dhTrack');
+  if (dhTrack) {
+    var dhOffset = 0, dhTimer = 0, dhManual = false;
+    function dhStep(dir){
+      dhManual = true;
+      dhOffset += dir * 4;
+      var max = dhTrack.scrollWidth / 2;
+      if (dhOffset > 0) dhOffset = 0;
+      if (dhOffset < -max) dhOffset = -max;
+      dhTrack.style.animationPlayState = 'paused';
+      dhTrack.style.transform = 'translateX(' + dhOffset + 'px)';
+    }
+    document.querySelectorAll('.data-headband .dh-arrow').forEach(function(btn){
+      var dir = btn.classList.contains('right') ? -1 : 1;
+      btn.addEventListener('mouseenter', function(){
+        if (dhTimer) return;
+        dhTimer = setInterval(function(){ dhStep(dir); }, 16);
+      });
+      btn.addEventListener('mouseleave', function(){
+        clearInterval(dhTimer); dhTimer = 0;
+      });
+    });
+    document.querySelector('.data-headband')?.addEventListener('mouseleave', function(){
+      clearInterval(dhTimer); dhTimer = 0;
+      if (dhManual) {
+        dhTrack.style.transform = '';
+        dhTrack.style.animationPlayState = '';
+        dhManual = false; dhOffset = 0;
+      }
+    });
+  }
+
+  // Ticker bar hover arrows
+  var tTrack = document.getElementById('tickerTrack');
+  if (tTrack) {
+    var tOffset = 0, tTimer = 0, tManual = false;
+    function tStep(dir){
+      tManual = true;
+      tOffset += dir * 4;
+      var max = tTrack.scrollWidth / 2;
+      if (tOffset > 0) tOffset = 0;
+      if (tOffset < -max) tOffset = -max;
+      tTrack.style.animationPlayState = 'paused';
+      tTrack.style.transform = 'translateX(' + tOffset + 'px)';
+    }
+    document.querySelectorAll('.ticker-bar .tb-arrow').forEach(function(btn){
+      var dir = btn.classList.contains('right') ? -1 : 1;
+      btn.addEventListener('mouseenter', function(){
+        if (tTimer) return;
+        tTimer = setInterval(function(){ tStep(dir); }, 16);
+      });
+      btn.addEventListener('mouseleave', function(){
+        clearInterval(tTimer); tTimer = 0;
+      });
+    });
+    document.querySelector('.ticker-bar')?.addEventListener('mouseleave', function(){
+      clearInterval(tTimer); tTimer = 0;
+      if (tManual) {
+        tTrack.style.transform = '';
+        tTrack.style.animationPlayState = '';
+        tManual = false; tOffset = 0;
+      }
+    });
+  }
+
+  // Info panel hover arrows (scrollLeft-based because the panel uses native overflow)
+  var ipScroll = document.getElementById('ipScroll');
+  if (ipScroll) {
+    var ipTimer = 0;
+    document.querySelectorAll('.info-panel-wrap .ip-arrow').forEach(function(btn){
+      var dir = btn.classList.contains('right') ? 1 : -1;
+      btn.addEventListener('mouseenter', function(){
+        if (ipTimer) return;
+        ipTimer = setInterval(function(){ ipScroll.scrollLeft += dir * 4; }, 16);
+      });
+      btn.addEventListener('mouseleave', function(){
+        clearInterval(ipTimer); ipTimer = 0;
+      });
+    });
+  }
 })();
 </script>
 

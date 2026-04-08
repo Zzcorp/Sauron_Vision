@@ -1,5 +1,5 @@
 {% extends "base.html" %}{% block page_title %}Scenarios{% endblock %}
-{% block content %}<div class="page-content fade-in" style="padding-top:90px;">
+{% block content %}<div class="page-content fade-in">
   <div class="card"><div class="card-header"><div class="card-title">SCENARIOS</div>
   <a href="{% url 'scenario_new' %}" style="color:var(--accent);">+ NEW</a></div>
   {% for s in scenarios %}<div class="signal-item" onclick="location='{% url 'scenario_detail' s.id %}'">

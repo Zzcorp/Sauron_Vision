@@ -1,0 +1,36 @@
+<div class="dh-item" data-symbol="{{ m.symbol }}">
+  <span class="dh-dot {% if m.change_pct > 0 %}up{% elif m.change_pct < 0 %}down{% else %}flat{% endif %}"></span>
+  <span class="dh-sym">{{ m.symbol }}</span>
+  <span class="dh-val">{% if m.last %}{{ m.last|floatformat:4 }}{% else %}—{% endif %}</span>
+  <span class="dh-chg {% if m.change_pct >= 0 %}up{% else %}down{% endif %}">
+    {% if m.change_pct >= 0 %}+{% endif %}{{ m.change_pct|floatformat:2 }}%
+  </span>
+  <div class="dh-pop">
+    <div class="dh-pop-head">
+      <div>
+        <div class="dh-pop-title">{{ m.symbol }}</div>
+        <div class="dh-pop-name">{{ m.name }}</div>
+      </div>
+      <div class="dh-pop-badge {% if m.change_pct > 0 %}up{% elif m.change_pct < 0 %}down{% else %}flat{% endif %}">
+        {% if m.change_pct >= 0 %}▲{% else %}▼{% endif %}
+      </div>
+    </div>
+    <div class="dh-pop-big">
+      <span class="dh-pop-price">{% if m.last %}{{ m.last|floatformat:4 }}{% else %}—{% endif %}</span>
+      <span class="dh-pop-pct {% if m.change_pct >= 0 %}up{% else %}down{% endif %}" style="color:{% if m.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
+        {% if m.change_pct >= 0 %}+{% endif %}{{ m.change_pct|floatformat:2 }}%
+      </span>
+    </div>
+    <div class="dh-pop-row"><span class="k">Asset class</span><span class="v">{{ m.asset_class|default:"—"|upper }}</span></div>
+    <div class="dh-pop-row"><span class="k">24h volume</span><span class="v">{% if m.volume %}{{ m.volume|floatformat:0 }}{% else %}—{% endif %}</span></div>
+    {% if m.bid %}<div class="dh-pop-row"><span class="k">Bid / Ask</span><span class="v">{{ m.bid|floatformat:4 }} / {{ m.ask|floatformat:4 }}</span></div>{% endif %}
+    <div class="dh-pop-row"><span class="k">Source</span><span class="v" style="color:var(--accent);">{{ m.source|default:"—" }}</span></div>
+    <div class="dh-pop-row"><span class="k">Updated</span><span class="v">{{ m.updated_human|default:"—" }}</span></div>
+    <div class="dh-pop-bar">
+      <div class="dh-pop-bar-fill"
+        style="width:{% if m.change_pct >= 0 %}{% widthratio m.change_pct 1 10 %}%{% else %}0%{% endif %};
+        background:{% if m.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};"></div>
+    </div>
+    <div class="dh-pop-cta">▸ Click symbol on dashboard for full chart</div>
+  </div>
+</div>

@@ -109,17 +109,31 @@ def sauron_context(request):
             })
 
         # News
-        for n in NewsArticle.objects.prefetch_related("ai_affected_instruments").order_by("-published_at")[:8]:
+        for n in NewsArticle.objects.prefetch_related("ai_affected_instruments").order_by("-published_at")[:12]:
             try:
-                affected_syms = ", ".join(i.symbol for i in n.ai_affected_instruments.all()[:4])
+                affected_list = list(n.ai_affected_instruments.all()[:6])
+                affected_chips = [i.symbol for i in affected_list]
+                affected_syms = ", ".join(affected_chips)
             except Exception:
-                affected_syms = ""
+                affected_syms = ""; affected_chips = []
+            summary_txt = (n.ai_summary or n.content_summary or "").strip()
+            import re as _re
+            tokens = _re.findall(r"\b[A-Z][A-Za-z]{3,}\b", n.title or "")
+            keywords = list(dict.fromkeys(tokens))[:5]
+            sent = n.ai_sentiment_score
+            if sent is None: implication = "Impact pending analysis"
+            elif sent > 0.3: implication = "Bullish — risk-on setup"
+            elif sent < -0.3: implication = "Bearish — risk-off setup"
+            else: implication = "Neutral — mixed signal"
             ticker.append({
                 "type": "news", "news_id": n.id, "title": n.title, "source": n.source,
-                "summary": (n.ai_summary or n.content_summary or "")[:300],
-                "sentiment_score": n.ai_sentiment_score,
+                "summary": summary_txt[:400],
+                "sentiment_score": sent,
                 "urgency": n.ai_urgency or "",
                 "affected": affected_syms,
+                "affected_chips": affected_chips,
+                "keywords": keywords,
+                "implication": implication,
                 "published_at": n.published_at.strftime("%H:%M") if n.published_at else "",
                 "url": f"/news/{n.id}/",
             })
