@@ -21,7 +21,16 @@
   button:hover{box-shadow:0 8px 30px rgba(0,232,104,.3)}
   .err{background:rgba(232,48,48,.08);border:1px solid rgba(232,48,48,.3);border-radius:6px;padding:10px;margin-bottom:16px;font-family:'Share Tech Mono',monospace;font-size:11px;color:#e83030;text-align:center}
   .back{display:block;text-align:center;margin-top:14px;font-family:'Share Tech Mono',monospace;font-size:10px;color:#2a5038;text-decoration:none}
-</style></head><body>
+
+      /* UPGRADE-8: touch keypad */
+      .sauron-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:18px}
+      .sauron-keypad button{padding:14px 0;background:#060e0a;border:1px solid #133020;border-radius:8px;color:#c8e8d8;font-family:'Orbitron',sans-serif;font-size:18px;font-weight:700;cursor:pointer;transition:all .15s}
+      .sauron-keypad button:hover{border-color:#00e868;color:#00e868;box-shadow:0 0 14px rgba(0,232,104,.18)}
+      .sauron-keypad button:active{transform:scale(.95);background:#0a1a14}
+      .sauron-keypad button.kp-fn{color:#5a8a6a;font-size:14px}
+      .sauron-keypad button.kp-fn:hover{color:#e83030;border-color:#581818}
+
+    </style></head><body>
 <div class="grid-bg"></div>
 <div class="modal">
   <svg class="eye" viewBox="0 0 64 64"><path d="M2,32 Q16,8 32,14 Q48,8 62,32 Q48,56 32,50 Q16,56 2,32Z" fill="none" stroke="#00e868" stroke-width="2.5"/><circle cx="32" cy="32" r="12" fill="none" stroke="#00e868" stroke-width="2"/><circle cx="32" cy="32" r="5" fill="#00e868"/></svg>
@@ -39,6 +48,20 @@
     <input type="hidden" name="pin" id="pinFinal">
     <button type="submit">VERIFY</button>
   </form>
+      <div class="sauron-keypad">
+        <button type="button" data-k="1">1</button>
+        <button type="button" data-k="2">2</button>
+        <button type="button" data-k="3">3</button>
+        <button type="button" data-k="4">4</button>
+        <button type="button" data-k="5">5</button>
+        <button type="button" data-k="6">6</button>
+        <button type="button" data-k="7">7</button>
+        <button type="button" data-k="8">8</button>
+        <button type="button" data-k="9">9</button>
+        <button type="button" data-k="clear" class="kp-fn">⨯</button>
+        <button type="button" data-k="0">0</button>
+        <button type="button" data-k="back" class="kp-fn">⌫</button>
+      </div>
   <a class="back" href="{% url 'login' %}">← back</a>
 </div>
 <script>
@@ -47,5 +70,20 @@
   boxes.forEach((b,i)=>{b.addEventListener('input',e=>{if(e.target.value&&i<boxes.length-1)boxes[i+1].focus();document.getElementById('pinFinal').value=boxes.map(x=>x.value).join('')});
     b.addEventListener('keydown',e=>{if(e.key==='Backspace'&&!b.value&&i>0)boxes[i-1].focus()});});
   document.getElementById('pinForm').addEventListener('submit',()=>{document.getElementById('pinFinal').value=boxes.map(x=>x.value).join('')});
-</script>
+
+      // UPGRADE-8: keypad wiring
+      document.querySelectorAll('.sauron-keypad button').forEach(btn=>{
+        btn.addEventListener('click',()=>{
+          const k=btn.dataset.k;
+          if(k==='clear'){boxes.forEach(b=>b.value='');boxes[0].focus();}
+          else if(k==='back'){
+            for(let i=boxes.length-1;i>=0;i--){if(boxes[i].value){boxes[i].value='';boxes[i].focus();break;}}
+          } else {
+            for(let i=0;i<boxes.length;i++){if(!boxes[i].value){boxes[i].value=k;if(i<boxes.length-1)boxes[i+1].focus();break;}}
+          }
+          document.getElementById('pinFinal').value=boxes.map(x=>x.value).join('');
+        });
+      });
+
+    </script>
 </body></html>

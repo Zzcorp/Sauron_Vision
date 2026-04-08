@@ -1,7 +1,196 @@
-{% extends "base.html" %}{% block page_title %}Configure Bot{% endblock %}
-{% block content %}<div class="page-content fade-in" style="padding-top:90px;max-width:820px;">
-  <div class="card"><div class="card-header"><div class="card-title">BOT CONFIGURATION</div></div>
-  <form method="post">{% csrf_token %}{{ form.as_p }}
-    <button class="btn-login" type="submit">SAVE</button>
-  </form></div>
-</div>{% endblock %}
+{% extends "base.html" %}
+{% block title %}Configure Bot — Sauron Vision{% endblock %}
+{% block page_title %}⚙ BOT CONFIGURATION{% endblock %}
+{% block content %}
+<div class="page-content fade-in" style="max-width:1100px;">
+
+  <a href="{% url 'bot_home' %}" class="btn btn-ghost btn-sm" style="margin-bottom:16px;">← Back to bot</a>
+
+  {% if messages %}{% for m in messages %}
+    <div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent);color:var(--accent);">{{ m }}</div>
+  {% endfor %}{% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+
+    <!-- ── MODE & MARKET ─────────────────────────────────────── -->
+    <div class="card" style="margin-bottom:18px;">
+      <div class="card-header"><div class="card-title">🎯 MODE &amp; MARKET</div></div>
+      <div class="grid grid-2">
+        <div class="input-group">
+          <label class="input-label">EXECUTION MODE</label>
+          <select name="mode" class="input">
+            {% for v,l in form.mode.field.choices %}
+              <option value="{{ v }}" {% if form.mode.value == v %}selected{% endif %}>{{ l }}</option>
+            {% endfor %}
+          </select>
+          <div class="input-hint">Paper = simulated · Live = real funds (PIN required to arm)</div>
+        </div>
+        <div class="input-group">
+          <label class="input-label">MARKET TYPE</label>
+          <select name="market_type" class="input">
+            {% for v,l in form.market_type.field.choices %}
+              <option value="{{ v }}" {% if form.market_type.value == v %}selected{% endif %}>{{ l }}</option>
+            {% endfor %}
+          </select>
+          <div class="input-hint">Spot = no leverage · Futures = leveraged USDT-M</div>
+        </div>
+      </div>
+      <div class="grid grid-2">
+        <div class="input-group">
+          <label class="input-label">MARGIN MODE (futures only)</label>
+          <select name="margin_mode" class="input">
+            {% for v,l in form.margin_mode.field.choices %}
+              <option value="{{ v }}" {% if form.margin_mode.value == v %}selected{% endif %}>{{ l }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="input-group">
+          <label class="input-label">LEVERAGE</label>
+          <input type="number" name="leverage" value="{{ form.leverage.value }}" step="1" min="1" max="125" class="input">
+          <div class="input-hint">1 = spot equivalent · max 125× on Binance futures</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── UNIVERSE & SIZING ─────────────────────────────────── -->
+    <div class="card" style="margin-bottom:18px;">
+      <div class="card-header"><div class="card-title">💰 CAPITAL &amp; UNIVERSE</div></div>
+      <div class="input-group">
+        <label class="input-label">SYMBOLS (JSON array)</label>
+        <textarea name="symbols" class="input" rows="2" style="font-family:var(--font-mono);">{{ form.symbols.value }}</textarea>
+        <div class="input-hint">Example: ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT"]</div>
+      </div>
+      <div class="grid grid-3">
+        <div class="input-group">
+          <label class="input-label">CAPITAL (USDT)</label>
+          <input type="number" name="capital_usdt" value="{{ form.capital_usdt.value }}" step="0.01" class="input">
+        </div>
+        <div class="input-group">
+          <label class="input-label">POSITION SIZE %</label>
+          <input type="number" name="position_size_pct" value="{{ form.position_size_pct.value }}" step="0.1" class="input">
+          <div class="input-hint">% of capital per trade</div>
+        </div>
+        <div class="input-group">
+          <label class="input-label">MAX CONCURRENT</label>
+          <input type="number" name="max_concurrent_positions" value="{{ form.max_concurrent_positions.value }}" step="1" class="input">
+        </div>
+      </div>
+      <div class="grid grid-2">
+        <div class="input-group">
+          <label class="input-label">BASE QUOTE</label>
+          <input type="text" name="base_quote" value="{{ form.base_quote.value }}" class="input">
+        </div>
+        <div class="input-group">
+          <label class="input-label">BOT NAME</label>
+          <input type="text" name="name" value="{{ form.name.value }}" class="input">
+        </div>
+      </div>
+    </div>
+
+    <!-- ── RISK MANAGEMENT ───────────────────────────────────── -->
+    <div class="card" style="margin-bottom:18px;">
+      <div class="card-header"><div class="card-title">🛡 RISK MANAGEMENT</div></div>
+      <div class="grid grid-4">
+        <div class="input-group">
+          <label class="input-label">STOP LOSS %</label>
+          <input type="number" name="stop_loss_pct" value="{{ form.stop_loss_pct.value }}" step="0.1" class="input">
+        </div>
+        <div class="input-group">
+          <label class="input-label">TAKE PROFIT %</label>
+          <input type="number" name="take_profit_pct" value="{{ form.take_profit_pct.value }}" step="0.1" class="input">
+        </div>
+        <div class="input-group">
+          <label class="input-label">TRAILING %</label>
+          <input type="number" name="trailing_stop_pct" value="{{ form.trailing_stop_pct.value }}" step="0.1" class="input">
+        </div>
+        <div class="input-group">
+          <label class="input-label">MAX DAILY LOSS %</label>
+          <input type="number" name="max_daily_loss_pct" value="{{ form.max_daily_loss_pct.value }}" step="0.1" class="input">
+        </div>
+      </div>
+      <div style="display:flex;gap:24px;margin-top:6px;">
+        <label style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);">
+          <input type="checkbox" name="halt_on_high_impact_news" {% if form.halt_on_high_impact_news.value %}checked{% endif %}>
+          HALT ON HIGH-IMPACT NEWS
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);">
+          <input type="checkbox" name="halt_on_drawdown" {% if form.halt_on_drawdown.value %}checked{% endif %}>
+          HALT ON DRAWDOWN
+        </label>
+      </div>
+    </div>
+
+    <!-- ── STRATEGY WEIGHTS ──────────────────────────────────── -->
+    <div class="card" style="margin-bottom:18px;">
+      <div class="card-header"><div class="card-title">⚖ STRATEGY WEIGHTS</div></div>
+      <p style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-bottom:12px;">
+        How much each signal source contributes to the composite decision. Values are normalised at runtime, so absolute scale doesn't matter — only relative ratios.
+      </p>
+      <div class="grid grid-3">
+        <div class="input-group">
+          <label class="input-label">TECHNICAL (TA)</label>
+          <input type="number" name="w_technical" value="{{ form.w_technical.value }}" step="0.05" class="input">
+        </div>
+        <div class="input-group">
+          <label class="input-label">SAURON SIGNALS</label>
+          <input type="number" name="w_sauron_sig" value="{{ form.w_sauron_sig.value }}" step="0.05" class="input">
+        </div>
+        <div class="input-group">
+          <label class="input-label">NEWS SENTIMENT</label>
+          <input type="number" name="w_news" value="{{ form.w_news.value }}" step="0.05" class="input">
+        </div>
+        <div class="input-group">
+          <label class="input-label">LIQUIDITY (L2)</label>
+          <input type="number" name="w_liquidity" value="{{ form.w_liquidity.value }}" step="0.05" class="input">
+        </div>
+        <div class="input-group">
+          <label class="input-label">MACRO REGIME</label>
+          <input type="number" name="w_macro" value="{{ form.w_macro.value }}" step="0.05" class="input">
+        </div>
+        <div class="input-group">
+          <label class="input-label">SOCIAL SENTIMENT</label>
+          <input type="number" name="w_sentiment" value="{{ form.w_sentiment.value }}" step="0.05" class="input">
+        </div>
+      </div>
+    </div>
+
+    <!-- ── ENTRY / EXIT THRESHOLDS ───────────────────────────── -->
+    <div class="card" style="margin-bottom:18px;">
+      <div class="card-header"><div class="card-title">📊 ENTRY &amp; TIMING</div></div>
+      <div class="grid grid-4">
+        <div class="input-group">
+          <label class="input-label">ENTRY MIN SCORE</label>
+          <input type="number" name="entry_score_min" value="{{ form.entry_score_min.value }}" step="0.05" class="input">
+          <div class="input-hint">0–1 · Open if &gt;= this</div>
+        </div>
+        <div class="input-group">
+          <label class="input-label">EXIT MAX SCORE</label>
+          <input type="number" name="exit_score_max" value="{{ form.exit_score_max.value }}" step="0.05" class="input">
+        </div>
+        <div class="input-group">
+          <label class="input-label">TIMEFRAME</label>
+          <input type="text" name="timeframe" value="{{ form.timeframe.value }}" class="input">
+          <div class="input-hint">1m / 5m / 15m / 1h</div>
+        </div>
+        <div class="input-group">
+          <label class="input-label">TICK INTERVAL (s)</label>
+          <input type="number" name="tick_interval_sec" value="{{ form.tick_interval_sec.value }}" step="1" class="input">
+        </div>
+      </div>
+      <div class="grid grid-2">
+        <div class="input-group">
+          <label class="input-label">COOLDOWN (min)</label>
+          <input type="number" name="cool_down_minutes" value="{{ form.cool_down_minutes.value }}" step="1" class="input">
+          <div class="input-hint">Wait this long after closing a trade before re-entering same symbol</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:12px;justify-content:flex-end;">
+      <a href="{% url 'bot_home' %}" class="btn btn-ghost">CANCEL</a>
+      <button type="submit" class="btn btn-primary btn-lg">💾 SAVE CONFIGURATION</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

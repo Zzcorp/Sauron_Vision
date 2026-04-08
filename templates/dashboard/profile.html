@@ -3,6 +3,36 @@
 {% block page_title %}◉ OPERATOR PROFILE{% endblock %}
 
 {% block content %}
+<!-- UPGRADE-8: Change PIN -->
+<div class="card" style="margin-bottom:20px;border-left:3px solid var(--accent-gold);">
+  <div class="card-header">
+    <div class="card-title">🔒 SECURITY — ACCESS PIN</div>
+    <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">2nd factor</span>
+  </div>
+  <p style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);margin-bottom:14px;">
+    Your PIN is required to complete login after username + password, and to arm the bot in LIVE mode.
+    {% if not profile.access_pin_hash %}<br><b style="color:var(--accent-gold);">No PIN is currently set.</b>{% endif %}
+  </p>
+  <form method="post" action="{% url 'change_pin' %}" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;align-items:end;">
+    {% csrf_token %}
+    {% if profile.access_pin_hash %}
+    <div class="input-group" style="margin-bottom:0;">
+      <label class="input-label">CURRENT PIN</label>
+      <input type="password" name="current_pin" class="input" inputmode="numeric" maxlength="8" autocomplete="off">
+    </div>
+    {% else %}<div></div>{% endif %}
+    <div class="input-group" style="margin-bottom:0;">
+      <label class="input-label">NEW PIN</label>
+      <input type="password" name="new_pin" class="input" inputmode="numeric" maxlength="8" autocomplete="new-password" required>
+    </div>
+    <div class="input-group" style="margin-bottom:0;">
+      <label class="input-label">CONFIRM</label>
+      <input type="password" name="confirm_pin" class="input" inputmode="numeric" maxlength="8" autocomplete="new-password" required>
+    </div>
+    <button type="submit" class="btn btn-primary">UPDATE PIN</button>
+  </form>
+</div>
+
 {% if messages %}
 <div style="margin-bottom: 20px;">
     {% for msg in messages %}

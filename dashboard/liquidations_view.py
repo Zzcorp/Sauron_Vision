@@ -41,22 +41,51 @@ def _aggregate(symbol: str, hours: int):
 
 @login_required
 def liquidations_page(request):
-    from market_data.models import LiquidationEvent
+    from market_data.models import LiquidationEvent, FundingRate
     symbol = (request.GET.get("symbol") or "BTCUSDT").upper()
     window = request.GET.get("window", "24h")
     hours = WINDOWS.get(window, 24)
     agg = _aggregate(symbol, hours)
-    # Symbol choices: distinct symbols that have liquidations in last 7d
     symbols = list(LiquidationEvent.objects.filter(
         timestamp__gte=timezone.now() - timedelta(days=7)
     ).values_list("symbol", flat=True).distinct()[:30])
     if symbol not in symbols: symbols.insert(0, symbol)
     recent = list(LiquidationEvent.objects.filter(symbol=symbol).values(
         "side","price","qty","notional_usd","timestamp")[:30])
+
+    # Funding panel data — top symbols by recent funding activity
+    funding_symbols = list(FundingRate.objects.filter(
+        timestamp__gte=timezone.now() - timedelta(hours=24)
+    ).values_list("symbol", flat=True).distinct()[:8])
+    funding_data = []
+    for sym in funding_symbols:
+        rows = list(FundingRate.objects.filter(
+            symbol=sym, timestamp__gte=timezone.now() - timedelta(hours=24)
+        ).order_by("timestamp").values("funding_rate","mark_price","timestamp")[:200])
+        if not rows: continue
+        rates = [float(r["funding_rate"] or 0) for r in rows]
+        cur = rates[-1]
+        avg = sum(rates) / len(rates) if rates else 0
+        extreme = abs(cur) >= 0.001
+        sign_flips = sum(1 for i in range(1, len(rates)) if rates[i]*rates[i-1] < 0)
+        funding_data.append({
+            "symbol": sym,
+            "current": cur,
+            "current_pct": cur * 100,
+            "avg_pct": avg * 100,
+            "mark": float(rows[-1]["mark_price"] or 0),
+            "extreme": extreme,
+            "sign_flips": sign_flips,
+            "spark": rates[-60:],
+            "samples": len(rates),
+        })
+    funding_data.sort(key=lambda x: abs(x["current"]), reverse=True)
+
     return render(request, "dashboard/liquidations.html", {
         "page_id": "liquidations", "symbol": symbol, "window": window,
         "hours": hours, "agg": agg, "symbols": symbols, "recent": recent,
         "windows": list(WINDOWS.keys()),
+        "funding_data": funding_data,
     })
 
 @never_cache

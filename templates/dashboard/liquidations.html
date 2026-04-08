@@ -75,7 +75,77 @@
     <canvas id="heat" style="width:100%;height:480px;"></canvas>
   </div>
 
-  <!-- Recent liquidations feed -->
+  
+      <!-- UPGRADE-8: Funding rate panel -->
+      <div class="card funding-panel" style="margin-top:18px;">
+        <div class="card-header">
+          <div class="card-title">💸 FUNDING RATES (24H)</div>
+          <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
+            Positive = longs pay shorts · Negative = shorts pay longs · |≥0.1%| = extreme
+          </div>
+        </div>
+        {% if funding_data %}
+        <div class="funding-grid">
+          {% for f in funding_data %}
+          <div class="funding-card {% if f.extreme %}extreme{% endif %}">
+            <div class="funding-head">
+              <span class="funding-sym">{{ f.symbol }}</span>
+              {% if f.extreme %}<span class="funding-badge">EXTREME</span>{% endif %}
+              {% if f.sign_flips > 0 %}<span class="funding-flip">⚡{{ f.sign_flips }}</span>{% endif %}
+            </div>
+            <div class="funding-rate" style="color:{% if f.current > 0 %}var(--accent-red){% elif f.current < 0 %}var(--accent){% else %}var(--text-muted){% endif %};">
+              {% if f.current >= 0 %}+{% endif %}{{ f.current_pct|floatformat:4 }}%
+            </div>
+            <div class="funding-meta">
+              <span>MARK ${{ f.mark|floatformat:2 }}</span>
+              <span>AVG {{ f.avg_pct|floatformat:4 }}%</span>
+            </div>
+            <canvas class="funding-spark" data-spark="{{ f.spark|join:',' }}" data-current="{{ f.current }}" height="32"></canvas>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+          <div style="padding:24px;text-align:center;color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">
+            No funding data yet. Make sure <code>stream_binance_futures</code> is running.
+          </div>
+        {% endif %}
+      </div>
+
+      <style>
+        .funding-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+        .funding-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;transition:all .2s}
+        .funding-card:hover{border-color:var(--border-glow);transform:translateY(-2px)}
+        .funding-card.extreme{border-color:var(--accent-gold);box-shadow:0 0 20px rgba(216,176,32,.12)}
+        .funding-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+        .funding-sym{font-family:var(--font-display);font-size:13px;font-weight:700;color:var(--text-primary)}
+        .funding-badge{font-family:var(--font-mono);font-size:8px;letter-spacing:1px;padding:2px 6px;border-radius:4px;background:rgba(216,176,32,.15);color:var(--accent-gold);font-weight:700}
+        .funding-flip{font-family:var(--font-mono);font-size:10px;color:var(--accent-gold);margin-left:auto}
+        .funding-rate{font-family:var(--font-display);font-size:22px;font-weight:900;margin-bottom:6px}
+        .funding-meta{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:9px;color:var(--text-muted);margin-bottom:8px}
+        .funding-spark{width:100%;display:block}
+      </style>
+
+      <script>
+      (function(){
+        document.querySelectorAll('.funding-spark').forEach(function(c){
+          var raw=(c.dataset.spark||'').split(',').filter(Boolean).map(parseFloat);
+          var cur=parseFloat(c.dataset.current||0);
+          if(!raw.length)return;
+          c.width=c.offsetWidth;var W=c.width,H=c.height;
+          var ctx=c.getContext('2d');
+          var mn=Math.min.apply(null,raw),mx=Math.max.apply(null,raw);
+          if(mn===mx)mx=mn+1e-6;
+          var zy=H-(0-mn)/(mx-mn)*H;
+          ctx.strokeStyle='#133020';ctx.setLineDash([2,2]);ctx.beginPath();
+          ctx.moveTo(0,zy);ctx.lineTo(W,zy);ctx.stroke();ctx.setLineDash([]);
+          ctx.strokeStyle=cur>=0?'#e83030':'#00e868';ctx.lineWidth=1.5;ctx.beginPath();
+          raw.forEach(function(v,i){var x=i/(raw.length-1)*W;var y=H-(v-mn)/(mx-mn)*H;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+          ctx.stroke();
+        });
+      })();
+      </script>
+
+      <!-- Recent liquidations feed -->
   <div class="card" style="margin-top:18px;">
     <div class="card-header"><div class="card-title">RECENT LIQUIDATIONS</div></div>
     <div id="liqFeed" style="max-height:320px;overflow-y:auto;">

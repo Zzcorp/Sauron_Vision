@@ -1198,6 +1198,18 @@
                         {% endfor %}
                     </div>
                 </div>
+                <!-- UPGRADE-8: Live status pill -->
+                <div class="live-status-pill" id="liveStatusPill" title="Live data sources">
+                  <span class="lsp-dot lsp-flat"></span>
+                  <span class="lsp-label">LIVE</span>
+                  <div class="lsp-dropdown" id="liveStatusDropdown">
+                    <div class="lsp-head">DATA SOURCES</div>
+                    <div class="lsp-body" id="lspBody">
+                      <div class="lsp-empty">checking…</div>
+                    </div>
+                  </div>
+                </div>
+                
                 <!-- Notification Bell -->
                 <div class="notif-bell" onclick="this.classList.toggle('open')" id="notifBell">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><path d="M8 1C5.8 1 4 2.8 4 5v3l-1 2h10l-1-2V5c0-2.2-1.8-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="8" cy="14" r="1.5" fill="currentColor"/></svg>
@@ -1782,5 +1794,35 @@ document.addEventListener('click', function(e) {
   connect();
 })();
 </script>
+
+<script>
+/* UPGRADE-8: Live status poller */
+(function(){
+  function fmt(s){if(s==null)return '—';if(s<60)return Math.round(s)+'s';if(s<3600)return Math.round(s/60)+'m';return Math.round(s/3600)+'h';}
+  function tick(){
+    fetch('/api/live/health/',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(d=>{
+      if(!d)return;
+      var dot=document.querySelector('#liveStatusPill .lsp-dot');
+      var label=document.querySelector('#liveStatusPill .lsp-label');
+      var body=document.getElementById('lspBody');
+      if(!body||!dot)return;
+      var srcs=d.sources||[];
+      // Worst-case state for the pill
+      var hasGreen=srcs.some(s=>s.state==='green');
+      var hasYellow=srcs.some(s=>s.state==='yellow');
+      var hasRed=srcs.some(s=>s.state==='red');
+      dot.className='lsp-dot '+(hasRed?'lsp-red':hasYellow?'lsp-yellow':hasGreen?'lsp-green':'lsp-flat');
+      label.textContent=hasGreen?'LIVE':'STALE';
+      if(!srcs.length){body.innerHTML='<div class="lsp-empty">No streamers connected.<br>Start one: <code>python manage.py stream_binance</code></div>';return;}
+      body.innerHTML=srcs.map(function(s){
+        return '<div class="lsp-row"><span class="lsp-dot lsp-'+s.state+'"></span><span class="lsp-src">'+s.source+'</span><span class="lsp-age">'+fmt(s.age_seconds)+' ago</span></div>';
+      }).join('');
+    }).catch(function(){});
+  }
+  setInterval(tick,10000);
+  setTimeout(tick,1500);
+})();
+</script>
+
 </body>
 </html>
