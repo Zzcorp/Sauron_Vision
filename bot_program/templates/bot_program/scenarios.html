@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block page_title %}Scenarios{% endblock %}
+{% block content %}<div class="page-content fade-in" style="padding-top:90px;">
+  <div class="card"><div class="card-header"><div class="card-title">SCENARIOS</div>
+  <a href="{% url 'scenario_new' %}" style="color:var(--accent);">+ NEW</a></div>
+  {% for s in scenarios %}<div class="signal-item" onclick="location='{% url 'scenario_detail' s.id %}'">
+    <div class="signal-header"><span class="signal-symbol">{{ s.name }}</span>
+    <span>{{ s.total_return_pct|default_if_none:"—" }}%</span></div>
+    <div class="signal-desc">{{ s.start_date }} → {{ s.end_date }} · {{ s.num_trades }} trades</div>
+  </div>{% empty %}<div style="color:var(--text-muted);">None yet.</div>{% endfor %}
+  </div>
+</div>{% endblock %}

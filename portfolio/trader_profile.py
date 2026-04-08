@@ -109,6 +109,7 @@ class TraderProfile(models.Model):
         ("light", "Light Mode"),
     ])
 
+    access_pin_hash = models.CharField(max_length=128, blank=True, default="", help_text="Hashed PIN code (2nd-factor)")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

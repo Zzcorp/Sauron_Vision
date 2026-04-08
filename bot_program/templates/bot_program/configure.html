@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block page_title %}Configure Bot{% endblock %}
+{% block content %}<div class="page-content fade-in" style="padding-top:90px;max-width:820px;">
+  <div class="card"><div class="card-header"><div class="card-title">BOT CONFIGURATION</div></div>
+  <form method="post">{% csrf_token %}{{ form.as_p }}
+    <button class="btn-login" type="submit">SAVE</button>
+  </form></div>
+</div>{% endblock %}

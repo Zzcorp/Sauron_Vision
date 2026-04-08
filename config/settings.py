@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     "alerts",
     "dashboard",
     "backtester",
+    "bot_program",
 ]
 
 MIDDLEWARE = [

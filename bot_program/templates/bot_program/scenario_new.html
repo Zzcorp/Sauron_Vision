@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block page_title %}New Scenario{% endblock %}
+{% block content %}<div class="page-content fade-in" style="padding-top:90px;max-width:760px;">
+  <div class="card"><div class="card-header"><div class="card-title">NEW SCENARIO</div></div>
+  <form method="post">{% csrf_token %}{{ form.as_p }}
+    <button class="btn-login" type="submit">RUN SIMULATION</button>
+  </form></div>
+</div>{% endblock %}

@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Bot Program — Sauron Vision{% endblock %}
+{% block page_title %}Bot Program{% endblock %}
+{% block content %}
+<div class="page-content fade-in" style="padding-top:90px;">
+  {% if messages %}{% for m in messages %}
+    <div class="card" style="margin-bottom:12px;color:var(--accent);">{{ m }}</div>
+  {% endfor %}{% endif %}
+
+  <div class="grid grid-3" style="margin-bottom:20px;">
+    <div class="stat-box">
+      <div class="stat-label">Status</div>
+      <div class="stat-value" style="color:{% if cfg.enabled %}var(--accent){% else %}var(--text-muted){% endif %};">
+        {% if cfg.enabled %}ARMED{% else %}OFF{% endif %}
+      </div>
+      <div class="stat-sub">Mode: {{ cfg.get_mode_display }}</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Capital</div>
+      <div class="stat-value">{{ cfg.capital_usdt }} USDT</div>
+      <div class="stat-sub">Realised P&amp;L: <b style="color:{% if pnl_total >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">{{ pnl_total|floatformat:2 }}</b></div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Binance</div>
+      <div class="stat-value" style="font-size:16px;">
+        {% if acct.connected %}LINKED ({% if acct.testnet %}TESTNET{% else %}LIVE{% endif %}){% else %}NOT LINKED{% endif %}
+      </div>
+      <div class="stat-sub"><a href="{% url 'bot_link' %}" style="color:var(--accent);">Manage →</a></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-header"><div class="card-title">CONTROL PANEL</div></div>
+    <form method="post" action="{% url 'bot_toggle' %}" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+      {% csrf_token %}
+      {% if cfg.mode == 'live' and not cfg.enabled %}
+        <input type="password" name="pin" placeholder="PIN" maxlength="8"
+               style="padding:10px;background:#060e0a;border:1px solid var(--border);color:#c8e8d8;font-family:var(--font-mono);">
+      {% endif %}
+      <button class="btn-login" type="submit" style="width:auto;padding:10px 18px;">
+        {% if cfg.enabled %}⏻ DISARM{% else %}▶ ARM BOT{% endif %}
+      </button>
+      <a href="{% url 'bot_configure' %}" class="btn-login" style="width:auto;padding:10px 18px;text-decoration:none;display:inline-block;">⚙ CONFIGURE</a>
+      <form method="post" action="{% url 'bot_tick' %}" style="display:inline;">
+        {% csrf_token %}
+        <button class="btn-login" type="submit" style="width:auto;padding:10px 18px;background:#1a4030;">RUN TICK NOW</button>
+      </form>
+    </form>
+    <div style="margin-top:14px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+      Weights (normalised): 
+      {% for k,v in weights.items %}<span style="margin-right:10px;">{{ k }}={{ v|floatformat:2 }}</span>{% endfor %}
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="card-header"><div class="card-title">OPEN POSITIONS</div></div>
+      {% for t in open_trades %}
+        <div class="signal-item">
+          <div class="signal-header">
+            <span class="signal-symbol">{{ t.symbol }} · {{ t.side }}</span>
+            <span>score {{ t.composite_score|floatformat:2 }}</span>
+          </div>
+          <div class="signal-desc">qty {{ t.qty }} @ {{ t.entry_price }} · SL {{ t.stop_loss }} · TP {{ t.take_profit }}</div>
+        </div>
+      {% empty %}<div style="color:var(--text-muted);padding:10px;">No open positions.</div>{% endfor %}
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">RECENT CLOSED</div></div>
+      {% for t in closed_trades %}
+        <div class="signal-item">
+          <div class="signal-header">
+            <span class="signal-symbol">{{ t.symbol }} · {{ t.side }}</span>
+            <span style="color:{% if t.pnl_usdt >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">{{ t.pnl_usdt|floatformat:2 }}</span>
+          </div>
+          <div class="signal-desc">{{ t.closed_at|date:"Y-m-d H:i" }} · {{ t.reason|truncatechars:60 }}</div>
+        </div>
+      {% empty %}<div style="color:var(--text-muted);padding:10px;">No trades yet.</div>{% endfor %}
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:20px;">
+    <div class="card-header">
+      <div class="card-title">SCENARIOS &amp; BACKTESTS</div>
+      <a href="{% url 'scenario_new' %}" style="color:var(--accent);">+ NEW SCENARIO</a>
+    </div>
+    {% for s in scenarios %}
+      <div class="signal-item" onclick="location='{% url 'scenario_detail' s.id %}'">
+        <div class="signal-header">
+          <span class="signal-symbol">{{ s.name }}</span>
+          <span>{{ s.total_return_pct|default_if_none:"—" }}%</span>
+        </div>
+        <div class="signal-desc">{{ s.start_date }} → {{ s.end_date }} · trades {{ s.num_trades }} · DD {{ s.max_drawdown_pct|default_if_none:"—" }}%</div>
+      </div>
+    {% empty %}<div style="color:var(--text-muted);padding:10px;">No scenarios yet.</div>{% endfor %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% load static %}
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sauron Vision — PIN</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#030806;color:#c8e8d8;font-family:'Rajdhani',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .grid-bg{position:fixed;inset:-50%;background-image:linear-gradient(rgba(0,232,104,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(0,232,104,0.04) 1px,transparent 1px);background-size:60px 60px;animation:g 25s linear infinite;z-index:0}
+  @keyframes g{to{transform:translate(60px,60px)}}
+  .modal{position:relative;z-index:10;width:380px;background:rgba(10,26,20,0.96);border:1px solid #133020;border-radius:14px;padding:40px 32px;backdrop-filter:blur(20px);box-shadow:0 4px 60px rgba(0,232,104,.08);animation:pop .4s cubic-bezier(.2,.8,.2,1)}
+  @keyframes pop{from{opacity:0;transform:scale(.9) translateY(20px)}to{opacity:1;transform:scale(1) translateY(0)}}
+  .eye{width:56px;height:56px;margin:0 auto 14px;display:block}
+  h1{font-family:'Orbitron',sans-serif;font-size:18px;letter-spacing:5px;color:#00e868;text-align:center;margin-bottom:4px}
+  p.sub{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:3px;color:#5a8a6a;text-align:center;margin-bottom:24px}
+  .who{text-align:center;font-family:'Share Tech Mono',monospace;font-size:11px;color:#c8e8d8;margin-bottom:18px;opacity:.8}
+  .pin-row{display:flex;gap:10px;justify-content:center;margin-bottom:22px}
+  .pin-row input{width:46px;height:56px;text-align:center;font-family:'Orbitron',sans-serif;font-size:22px;background:#060e0a;border:1px solid #133020;border-radius:8px;color:#00e868;outline:none;transition:all .2s}
+  .pin-row input:focus{border-color:#00e868;box-shadow:0 0 20px rgba(0,232,104,.25)}
+  button{width:100%;padding:14px;background:linear-gradient(135deg,#0a5028,#00e868);border:none;border-radius:8px;color:#020804;font-family:'Orbitron',sans-serif;font-weight:700;letter-spacing:4px;cursor:pointer;font-size:13px}
+  button:hover{box-shadow:0 8px 30px rgba(0,232,104,.3)}
+  .err{background:rgba(232,48,48,.08);border:1px solid rgba(232,48,48,.3);border-radius:6px;padding:10px;margin-bottom:16px;font-family:'Share Tech Mono',monospace;font-size:11px;color:#e83030;text-align:center}
+  .back{display:block;text-align:center;margin-top:14px;font-family:'Share Tech Mono',monospace;font-size:10px;color:#2a5038;text-decoration:none}
+</style></head><body>
+<div class="grid-bg"></div>
+<div class="modal">
+  <svg class="eye" viewBox="0 0 64 64"><path d="M2,32 Q16,8 32,14 Q48,8 62,32 Q48,56 32,50 Q16,56 2,32Z" fill="none" stroke="#00e868" stroke-width="2.5"/><circle cx="32" cy="32" r="12" fill="none" stroke="#00e868" stroke-width="2"/><circle cx="32" cy="32" r="5" fill="#00e868"/></svg>
+  <h1>SECOND GATE</h1>
+  <p class="sub">ENTER PIN CODE</p>
+  <div class="who">OPERATOR :: {{ username }}</div>
+  {% if error %}<div class="err">⚠ {{ error }}</div>{% endif %}
+  <form method="post" id="pinForm">{% csrf_token %}
+    <div class="pin-row">
+      <input type="password" inputmode="numeric" maxlength="1" data-pin>
+      <input type="password" inputmode="numeric" maxlength="1" data-pin>
+      <input type="password" inputmode="numeric" maxlength="1" data-pin>
+      <input type="password" inputmode="numeric" maxlength="1" data-pin>
+    </div>
+    <input type="hidden" name="pin" id="pinFinal">
+    <button type="submit">VERIFY</button>
+  </form>
+  <a class="back" href="{% url 'login' %}">← back</a>
+</div>
+<script>
+  const boxes=[...document.querySelectorAll('[data-pin]')];
+  boxes[0]?.focus();
+  boxes.forEach((b,i)=>{b.addEventListener('input',e=>{if(e.target.value&&i<boxes.length-1)boxes[i+1].focus();document.getElementById('pinFinal').value=boxes.map(x=>x.value).join('')});
+    b.addEventListener('keydown',e=>{if(e.key==='Backspace'&&!b.value&&i>0)boxes[i-1].focus()});});
+  document.getElementById('pinForm').addEventListener('submit',()=>{document.getElementById('pinFinal').value=boxes.map(x=>x.value).join('')});
+</script>
+</body></html>

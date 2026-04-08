@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% block page_title %}{{ s.name }}{% endblock %}
+{% block content %}<div class="page-content fade-in" style="padding-top:90px;">
+  <div class="grid grid-4" style="margin-bottom:20px;">
+    <div class="stat-box"><div class="stat-label">Return</div><div class="stat-value">{{ s.total_return_pct|default:"—" }}%</div></div>
+    <div class="stat-box"><div class="stat-label">Max DD</div><div class="stat-value">{{ s.max_drawdown_pct|default:"—" }}%</div></div>
+    <div class="stat-box"><div class="stat-label">Win Rate</div><div class="stat-value">{{ s.win_rate|default:"—" }}%</div></div>
+    <div class="stat-box"><div class="stat-label">Sharpe</div><div class="stat-value">{{ s.sharpe|default:"—" }}</div></div>
+  </div>
+  <div class="card"><div class="card-header"><div class="card-title">EQUITY CURVE</div></div>
+    <canvas id="eq" height="200"></canvas>
+  </div>
+  <div class="card" style="margin-top:20px;"><div class="card-header"><div class="card-title">TRADES</div></div>
+  {% for t in s.trades_log %}<div class="signal-item"><div class="signal-header">
+    <span class="signal-symbol">{{ t.symbol }} · {{ t.side }}</span>
+    <span style="color:{% if t.pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">{{ t.pnl }}</span></div>
+    <div class="signal-desc">{{ t.entry }} → {{ t.exit }} · {{ t.reason }}</div>
+  </div>{% empty %}<div style="color:var(--text-muted);">No trades.</div>{% endfor %}
+  </div>
+</div>
+<script>
+(function(){const data={{ s.equity_curve|default:"[]" }};const c=document.getElementById('eq');if(!c||!data.length)return;
+  const ctx=c.getContext('2d');c.width=c.offsetWidth;const W=c.width,H=c.height;
+  const mn=Math.min(...data),mx=Math.max(...data);ctx.strokeStyle='#00e868';ctx.lineWidth=1.5;ctx.beginPath();
+  data.forEach((v,i)=>{const x=i/(data.length-1)*W,y=H-(v-mn)/(mx-mn||1)*H;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  ctx.stroke();})();
+</script>
+{% endblock %}
