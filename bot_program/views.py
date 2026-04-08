@@ -15,17 +15,57 @@ def _ctx(request, **extra):
 
 @login_required
 def bot_home(request):
+    from datetime import timedelta
+    from django.utils import timezone
+    from decimal import Decimal
     cfg, _ = BotConfig.objects.get_or_create(user=request.user)
     acct = getattr(request.user, "binance_account", None)
+
+    all_closed = BotTrade.objects.filter(config=cfg, status="CLOSED")
     open_trades = BotTrade.objects.filter(config=cfg, status="OPEN")[:20]
-    closed_trades = BotTrade.objects.filter(config=cfg, status="CLOSED")[:30]
+    closed_trades = all_closed[:30]
     scenarios = BotScenario.objects.filter(user=request.user)[:20]
+
     equity = float(cfg.capital_usdt)
-    pnl_total = sum(float(t.pnl_usdt) for t in BotTrade.objects.filter(config=cfg, status="CLOSED"))
+    pnl_total = float(sum((t.pnl_usdt for t in all_closed), Decimal(0)))
+    total_trades = all_closed.count()
+    wins = all_closed.filter(pnl_usdt__gt=0).count()
+    losses = all_closed.filter(pnl_usdt__lt=0).count()
+    win_rate = round((wins / total_trades * 100), 1) if total_trades else 0
+
+    day_ago = timezone.now() - timedelta(hours=24)
+    day_closed = all_closed.filter(closed_at__gte=day_ago)
+    pnl_24h = float(sum((t.pnl_usdt for t in day_closed), Decimal(0)))
+    trades_24h = day_closed.count()
+
+    week_ago = timezone.now() - timedelta(days=7)
+    week_closed = all_closed.filter(closed_at__gte=week_ago)
+    pnl_7d = float(sum((t.pnl_usdt for t in week_closed), Decimal(0)))
+
+    open_exposure = float(sum((t.qty * t.entry_price for t in open_trades), Decimal(0)))
+
+    best = all_closed.order_by("-pnl_usdt").first()
+    worst = all_closed.order_by("pnl_usdt").first()
+
+    spark_qs = list(all_closed.order_by("closed_at").values_list("pnl_usdt", flat=True)[:200])
+    spark = []
+    running = 0
+    for v in spark_qs:
+        running += float(v)
+        spark.append(round(running, 2))
+
+    last_event = (all_closed.order_by("-closed_at").values_list("closed_at", flat=True).first()
+                  or BotTrade.objects.filter(config=cfg).order_by("-opened_at")
+                     .values_list("opened_at", flat=True).first())
+
     return render(request, "bot_program/home.html", _ctx(request,
         cfg=cfg, acct=acct, open_trades=open_trades,
         closed_trades=closed_trades, scenarios=scenarios,
-        equity=equity, pnl_total=pnl_total,
+        equity=equity, pnl_total=pnl_total, pnl_24h=pnl_24h, pnl_7d=pnl_7d,
+        total_trades=total_trades, trades_24h=trades_24h,
+        wins=wins, losses=losses, win_rate=win_rate,
+        open_exposure=open_exposure, best_trade=best, worst_trade=worst,
+        spark_data=spark, last_event=last_event,
         weights=cfg.normalized_weights()))
 
 @login_required

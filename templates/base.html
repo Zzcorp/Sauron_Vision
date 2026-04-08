@@ -816,7 +816,39 @@
             body:has(.signals-rail) .main-content { margin-right: 0; }
         }
 
-    </style>{% block extra_css %}{% endblock %}
+    
+        /* UPGRADE-6: enriched popups */
+        .dh-pop { min-width: 290px; }
+        .dh-pop-head { display: flex; justify-content: space-between; align-items: flex-start;
+                       margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+        .dh-pop-badge { width: 32px; height: 32px; border-radius: 50%; display: flex;
+                        align-items: center; justify-content: center; font-size: 14px;
+                        border: 1px solid var(--border); }
+        .dh-pop-badge.up { background: rgba(0,232,104,.1); color: var(--accent); border-color: var(--accent); }
+        .dh-pop-badge.down { background: rgba(232,48,48,.1); color: var(--accent-red); border-color: var(--accent-red); }
+        .dh-pop-badge.flat { color: var(--text-muted); }
+        .dh-pop-big { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
+        .dh-pop-price { font-family: var(--font-display); font-size: 24px; font-weight: 700; color: var(--text-primary); }
+        .dh-pop-pct { font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
+        .dh-pop-cta { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
+                      font-size: 10px; color: var(--accent); text-align: right; }
+
+        /* UPGRADE-6: rail toggle button */
+        .rail-toggle-btn {
+            position: fixed; top: 50%; right: 44px; transform: translateY(-50%);
+            width: 28px; height: 56px; background: var(--bg-card);
+            border: 1px solid var(--border); border-right: 0;
+            border-radius: 8px 0 0 8px; cursor: pointer; z-index: 70;
+            display: flex; align-items: center; justify-content: center;
+            color: var(--accent); transition: all .25s; box-shadow: -2px 0 12px rgba(0,0,0,.4);
+        }
+        .rail-toggle-btn:hover { background: var(--bg-card-hover); width: 32px; }
+        .rail-toggle-btn svg { width: 14px; height: 14px; transition: transform .3s; }
+        body:has(.signals-rail.open) .rail-toggle-btn { right: 280px; }
+        body:has(.signals-rail.open) .rail-toggle-btn svg { transform: rotate(180deg); }
+        @media (max-width: 768px) { .rail-toggle-btn { display: none; } }
+
+        </style>{% block extra_css %}{% endblock %}
 <style>/* UPGRADE-2 */
 
         /* ═══════════════════════════════════════════════════════════ */
@@ -1334,11 +1366,62 @@
             </div>
         </div>
 
-        <div class="page-content fade-in" style="padding-top:90px;">
+        <!-- UPGRADE-2: Dashboard data headband -->
+<div class="data-headband" id="dataHeadband">
+  {% for m in ui_headband %}
+  <div class="dh-item" data-symbol="{{ m.symbol }}">
+    <span class="dh-dot {% if m.change_pct > 0 %}up{% elif m.change_pct < 0 %}down{% else %}flat{% endif %}"></span>
+    <span class="dh-sym">{{ m.symbol }}</span>
+    <span class="dh-val">{% if m.last %}{{ m.last|floatformat:2 }}{% else %}—{% endif %}</span>
+    <span class="dh-chg {% if m.change_pct >= 0 %}up{% else %}down{% endif %}">
+      {% if m.change_pct >= 0 %}+{% endif %}{{ m.change_pct|floatformat:2 }}%
+    </span>
+    <div class="dh-pop">
+      <div class="dh-pop-head">
+        <div>
+          <div class="dh-pop-title">{{ m.symbol }}</div>
+          <div class="dh-pop-name">{{ m.name }}</div>
+        </div>
+        <div class="dh-pop-badge {% if m.change_pct > 0 %}up{% elif m.change_pct < 0 %}down{% else %}flat{% endif %}">
+          {% if m.change_pct >= 0 %}▲{% else %}▼{% endif %}
+        </div>
+      </div>
+      <div class="dh-pop-big">
+        <span class="dh-pop-price">{% if m.last %}{{ m.last|floatformat:4 }}{% else %}—{% endif %}</span>
+        <span class="dh-pop-pct {% if m.change_pct >= 0 %}up{% else %}down{% endif %}" style="color:{% if m.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
+          {% if m.change_pct >= 0 %}+{% endif %}{{ m.change_pct|floatformat:2 }}%
+        </span>
+      </div>
+      <div class="dh-pop-row"><span class="k">Asset class</span><span class="v">{{ m.asset_class|default:"—"|upper }}</span></div>
+      <div class="dh-pop-row"><span class="k">24h volume</span><span class="v">{% if m.volume %}{{ m.volume|floatformat:0 }}{% else %}—{% endif %}</span></div>
+      {% if m.bid %}<div class="dh-pop-row"><span class="k">Bid / Ask</span><span class="v">{{ m.bid|floatformat:4 }} / {{ m.ask|floatformat:4 }}</span></div>{% endif %}
+      <div class="dh-pop-row"><span class="k">Source</span><span class="v" style="color:var(--accent);">{{ m.source|default:"—" }}</span></div>
+      <div class="dh-pop-row"><span class="k">Updated</span><span class="v">{{ m.updated_human|default:"—" }}</span></div>
+      <div class="dh-pop-cta">▸ Click symbol on dashboard for full chart</div>
+    </div>
+  </div>
+  {% empty %}
+  <div class="dh-item" style="color:var(--text-muted);">
+    <span class="dh-sym">NO LIVE DATA</span>
+    <span class="dh-val">—</span>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="page-content fade-in" style="padding-top:90px;">
             {% block content %}{% endblock %}
         </div>
     </main>
 </div>
+
+<!-- UPGRADE-6: Top-level rail toggle (always visible) -->
+<button class="rail-toggle-btn" id="railToggleBtn"
+        onclick="(function(){var r=document.getElementById('signalsRail');var open=r.classList.toggle('open');localStorage.setItem('sauron_signals_rail',open?'open':'closed');})()"
+        title="Toggle signals & watchlist">
+  <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</button>
 
 <!-- Signals Rail (right sidebar) — split: Signals + Watchlist -->
 <div class="signals-rail" id="signalsRail">

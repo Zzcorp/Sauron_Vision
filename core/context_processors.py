@@ -109,11 +109,19 @@ def sauron_context(request):
             })
 
         # News
-        for n in NewsArticle.objects.order_by("-published_at")[:5]:
+        for n in NewsArticle.objects.prefetch_related("ai_affected_instruments").order_by("-published_at")[:8]:
+            try:
+                affected_syms = ", ".join(i.symbol for i in n.ai_affected_instruments.all()[:4])
+            except Exception:
+                affected_syms = ""
             ticker.append({
-                "type": "news", "title": n.title, "source": n.source,
-                "summary": n.content_summary or "", "time": "",
-                "url": "/news/",
+                "type": "news", "news_id": n.id, "title": n.title, "source": n.source,
+                "summary": (n.ai_summary or n.content_summary or "")[:300],
+                "sentiment_score": n.ai_sentiment_score,
+                "urgency": n.ai_urgency or "",
+                "affected": affected_syms,
+                "published_at": n.published_at.strftime("%H:%M") if n.published_at else "",
+                "url": f"/news/{n.id}/",
             })
 
         ctx["ticker_items"] = ticker

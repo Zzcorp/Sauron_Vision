@@ -84,6 +84,7 @@ def ui_extras(request):
         for sym in tracked:
             q = LiveQuote.objects.filter(instrument__symbol__iexact=sym).first()
             if q:
+                from django.utils.timesince import timesince
                 band.append({
                     "symbol": sym,
                     "last": float(q.last or 0),
@@ -91,7 +92,11 @@ def ui_extras(request):
                     "name": q.instrument.name or sym,
                     "asset_class": q.instrument.asset_class or "",
                     "volume": int(q.volume or 0),
+                    "bid": float(q.bid) if q.bid else None,
+                    "ask": float(q.ask) if q.ask else None,
+                    "source": q.source or "",
                     "updated": q.updated_at.isoformat() if q.updated_at else "",
+                    "updated_human": (timesince(q.updated_at) + " ago") if q.updated_at else "—",
                 })
             else:
                 band.append({"symbol": sym, "last": None, "change_pct": 0,

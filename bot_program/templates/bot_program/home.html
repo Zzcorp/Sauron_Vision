@@ -1,98 +1,365 @@
 {% extends "base.html" %}
 {% block title %}Bot Program — Sauron Vision{% endblock %}
-{% block page_title %}Bot Program{% endblock %}
+{% block page_title %}⟳ BOT PROGRAM{% endblock %}
 {% block content %}
-<div class="page-content fade-in" style="padding-top:90px;">
-  {% if messages %}{% for m in messages %}
-    <div class="card" style="margin-bottom:12px;color:var(--accent);">{{ m }}</div>
-  {% endfor %}{% endif %}
+<div class="page-content fade-in">
 
-  <div class="grid grid-3" style="margin-bottom:20px;">
-    <div class="stat-box">
-      <div class="stat-label">Status</div>
-      <div class="stat-value" style="color:{% if cfg.enabled %}var(--accent){% else %}var(--text-muted){% endif %};">
-        {% if cfg.enabled %}ARMED{% else %}OFF{% endif %}
+  {% if messages %}
+    {% for m in messages %}
+      <div class="card" style="margin-bottom:12px;border-left:3px solid var(--accent);color:var(--accent);">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <!-- ── HERO STATUS BAR ─────────────────────────────────────────── -->
+  <div class="card bot-hero" style="margin-bottom:20px;">
+    <div class="bot-hero-grid">
+      <div class="bot-hero-status">
+        <div class="bot-pulse {% if cfg.enabled %}armed{% endif %}"></div>
+        <div>
+          <div class="bot-hero-state" style="color:{% if cfg.enabled %}var(--accent){% else %}var(--text-muted){% endif %};">
+            {% if cfg.enabled %}ARMED{% else %}OFFLINE{% endif %}
+          </div>
+          <div class="bot-hero-sub">
+            {{ cfg.get_mode_display|upper }} ·
+            {% if cfg.market_type == "futures" %}<span style="color:var(--accent-gold);">FUTURES {{ cfg.leverage|floatformat:0 }}× {{ cfg.margin_mode|upper }}</span>
+            {% else %}SPOT{% endif %}
+            {% if acct.testnet %}· <span style="color:var(--accent-blue);">TESTNET</span>{% endif %}
+          </div>
+        </div>
       </div>
-      <div class="stat-sub">Mode: {{ cfg.get_mode_display }}</div>
-    </div>
-    <div class="stat-box">
-      <div class="stat-label">Capital</div>
-      <div class="stat-value">{{ cfg.capital_usdt }} USDT</div>
-      <div class="stat-sub">Realised P&amp;L: <b style="color:{% if pnl_total >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">{{ pnl_total|floatformat:2 }}</b></div>
-    </div>
-    <div class="stat-box">
-      <div class="stat-label">Binance</div>
-      <div class="stat-value" style="font-size:16px;">
-        {% if acct.connected %}LINKED ({% if acct.testnet %}TESTNET{% else %}LIVE{% endif %}){% else %}NOT LINKED{% endif %}
+      <div class="bot-hero-actions">
+        <form method="post" action="{% url 'bot_toggle' %}" style="display:flex;gap:10px;align-items:center;">
+          {% csrf_token %}
+          {% if cfg.mode == 'live' and not cfg.enabled %}
+            <input type="password" name="pin" placeholder="PIN" maxlength="8" class="input" style="width:90px;padding:10px 12px;">
+          {% endif %}
+          <button class="btn {% if cfg.enabled %}btn-danger{% else %}btn-primary{% endif %}" type="submit">
+            {% if cfg.enabled %}⏻ DISARM{% else %}▶ ARM BOT{% endif %}
+          </button>
+        </form>
+        <form method="post" action="{% url 'bot_tick' %}" style="display:inline;">
+          {% csrf_token %}
+          <button class="btn btn-ghost" type="submit">⟳ TICK NOW</button>
+        </form>
+        <a href="{% url 'bot_configure' %}" class="btn btn-ghost">⚙ CONFIGURE</a>
       </div>
-      <div class="stat-sub"><a href="{% url 'bot_link' %}" style="color:var(--accent);">Manage →</a></div>
     </div>
   </div>
 
-  <div class="card" style="margin-bottom:20px;">
-    <div class="card-header"><div class="card-title">CONTROL PANEL</div></div>
-    <form method="post" action="{% url 'bot_toggle' %}" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-      {% csrf_token %}
-      {% if cfg.mode == 'live' and not cfg.enabled %}
-        <input type="password" name="pin" placeholder="PIN" maxlength="8"
-               style="padding:10px;background:#060e0a;border:1px solid var(--border);color:#c8e8d8;font-family:var(--font-mono);">
+  <!-- ── METRIC GRID ────────────────────────────────────────────── -->
+  <div class="grid grid-4" style="margin-bottom:20px;">
+    <div class="metric">
+      <div class="metric-icon">◎</div>
+      <div class="metric-label">CAPITAL</div>
+      <div class="metric-value">{{ cfg.capital_usdt }}</div>
+      <div class="metric-sub">USDT base</div>
+    </div>
+    <div class="metric">
+      <div class="metric-icon">∑</div>
+      <div class="metric-label">REALISED P&amp;L</div>
+      <div class="metric-value" style="color:{% if pnl_total >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
+        {% if pnl_total >= 0 %}+{% endif %}{{ pnl_total|floatformat:2 }}
+      </div>
+      <div class="metric-sub">USDT all-time</div>
+    </div>
+    <div class="metric">
+      <div class="metric-icon">📊</div>
+      <div class="metric-label">WIN RATE</div>
+      <div class="metric-value">{{ win_rate }}%</div>
+      <div class="metric-sub">{{ wins }}W / {{ losses }}L · {{ total_trades }} total</div>
+    </div>
+    <div class="metric">
+      <div class="metric-icon">⚡</div>
+      <div class="metric-label">24H ACTIVITY</div>
+      <div class="metric-value" style="color:{% if pnl_24h >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
+        {% if pnl_24h >= 0 %}+{% endif %}{{ pnl_24h|floatformat:2 }}
+      </div>
+      <div class="metric-sub">{{ trades_24h }} trades</div>
+    </div>
+  </div>
+
+  <div class="grid grid-4" style="margin-bottom:20px;">
+    <div class="metric">
+      <div class="metric-label">7D P&amp;L</div>
+      <div class="metric-value" style="color:{% if pnl_7d >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};font-size:18px;">
+        {% if pnl_7d >= 0 %}+{% endif %}{{ pnl_7d|floatformat:2 }} USDT
+      </div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">OPEN EXPOSURE</div>
+      <div class="metric-value" style="font-size:18px;">{{ open_exposure|floatformat:2 }}</div>
+      <div class="metric-sub">{{ open_trades|length }} open positions</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">BEST TRADE</div>
+      <div class="metric-value" style="color:var(--accent);font-size:18px;">
+        {% if best_trade %}+{{ best_trade.pnl_usdt|floatformat:2 }}{% else %}—{% endif %}
+      </div>
+      <div class="metric-sub">{% if best_trade %}{{ best_trade.symbol }}{% else %}no data{% endif %}</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">WORST TRADE</div>
+      <div class="metric-value" style="color:var(--accent-red);font-size:18px;">
+        {% if worst_trade %}{{ worst_trade.pnl_usdt|floatformat:2 }}{% else %}—{% endif %}
+      </div>
+      <div class="metric-sub">{% if worst_trade %}{{ worst_trade.symbol }}{% else %}no data{% endif %}</div>
+    </div>
+  </div>
+
+  <!-- ── EQUITY CURVE + WEIGHTS ─────────────────────────────────── -->
+  <div class="grid" style="grid-template-columns:2fr 1fr;gap:20px;margin-bottom:20px;">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">📈 EQUITY CURVE (cumulative P&amp;L)</div>
+        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
+          {% if last_event %}LAST EVENT: {{ last_event|date:"M d H:i" }}{% else %}NO TRADES YET{% endif %}
+        </div>
+      </div>
+      <canvas id="equityCanvas" height="180" style="width:100%;display:block;"></canvas>
+      <script id="sparkData" type="application/json">{{ spark_data|default:"[]" }}</script>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">⚖ STRATEGY WEIGHTS</div></div>
+      <div class="weights-list">
+        {% for k,v in weights.items %}
+          <div class="weight-row">
+            <div class="weight-label">{{ k|upper }}</div>
+            <div class="weight-bar"><div class="weight-fill" style="width:{% widthratio v 1 100 %}%;"></div></div>
+            <div class="weight-val">{{ v|floatformat:2 }}</div>
+          </div>
+        {% endfor %}
+      </div>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
+        ENTRY MIN: <span style="color:var(--accent);">{{ cfg.entry_score_min|floatformat:2 }}</span> ·
+        EXIT MAX: <span style="color:var(--accent);">{{ cfg.exit_score_max|floatformat:2 }}</span><br>
+        SL: <span style="color:var(--accent-red);">{{ cfg.stop_loss_pct|floatformat:1 }}%</span> ·
+        TP: <span style="color:var(--accent);">{{ cfg.take_profit_pct|floatformat:1 }}%</span> ·
+        POS: <span>{{ cfg.position_size_pct|floatformat:1 }}%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── BINANCE LINK STATUS + UNIVERSE ─────────────────────────── -->
+  <div class="grid grid-2" style="margin-bottom:20px;">
+    <div class="card">
+      <div class="card-header"><div class="card-title">🔗 BINANCE LINK</div></div>
+      {% if acct.connected %}
+        <div style="font-family:var(--font-mono);font-size:13px;color:var(--accent);margin-bottom:8px;">
+          ✓ CONNECTED · {% if acct.testnet %}TESTNET{% else %}LIVE{% endif %}
+        </div>
+        <div class="bot-kv"><span>Label</span><span>{{ acct.label }}</span></div>
+        <div class="bot-kv"><span>Last balance</span><span>{{ acct.last_balance_usdt|floatformat:2 }} USDT</span></div>
+        <div class="bot-kv"><span>Last sync</span><span>{% if acct.last_sync %}{{ acct.last_sync|timesince }} ago{% else %}—{% endif %}</span></div>
+      {% else %}
+        <div style="color:var(--text-muted);margin-bottom:12px;">No Binance account linked.</div>
       {% endif %}
-      <button class="btn-login" type="submit" style="width:auto;padding:10px 18px;">
-        {% if cfg.enabled %}⏻ DISARM{% else %}▶ ARM BOT{% endif %}
-      </button>
-      <a href="{% url 'bot_configure' %}" class="btn-login" style="width:auto;padding:10px 18px;text-decoration:none;display:inline-block;">⚙ CONFIGURE</a>
-      <form method="post" action="{% url 'bot_tick' %}" style="display:inline;">
-        {% csrf_token %}
-        <button class="btn-login" type="submit" style="width:auto;padding:10px 18px;background:#1a4030;">RUN TICK NOW</button>
-      </form>
-    </form>
-    <div style="margin-top:14px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
-      Weights (normalised): 
-      {% for k,v in weights.items %}<span style="margin-right:10px;">{{ k }}={{ v|floatformat:2 }}</span>{% endfor %}
+      <a href="{% url 'bot_link' %}" class="btn btn-sm btn-ghost" style="margin-top:8px;">{% if acct.connected %}MANAGE →{% else %}LINK ACCOUNT →{% endif %}</a>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">🌐 TRADING UNIVERSE</div></div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);line-height:1.8;">
+        {% for s in cfg.symbols %}<span class="bot-chip">{{ s }}</span>{% empty %}<span style="color:var(--text-muted);">No symbols configured. Add some in Configure.</span>{% endfor %}
+      </div>
+      <div style="margin-top:12px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
+        Timeframe: {{ cfg.timeframe }} · Tick: {{ cfg.tick_interval_sec }}s · Cooldown: {{ cfg.cool_down_minutes }}min
+      </div>
     </div>
   </div>
 
-  <div class="grid grid-2">
-    <div class="card">
-      <div class="card-header"><div class="card-title">OPEN POSITIONS</div></div>
-      {% for t in open_trades %}
-        <div class="signal-item">
-          <div class="signal-header">
-            <span class="signal-symbol">{{ t.symbol }} · {{ t.side }}</span>
-            <span>score {{ t.composite_score|floatformat:2 }}</span>
-          </div>
-          <div class="signal-desc">qty {{ t.qty }} @ {{ t.entry_price }} · SL {{ t.stop_loss }} · TP {{ t.take_profit }}</div>
-        </div>
-      {% empty %}<div style="color:var(--text-muted);padding:10px;">No open positions.</div>{% endfor %}
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title">RECENT CLOSED</div></div>
-      {% for t in closed_trades %}
-        <div class="signal-item">
-          <div class="signal-header">
-            <span class="signal-symbol">{{ t.symbol }} · {{ t.side }}</span>
-            <span style="color:{% if t.pnl_usdt >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">{{ t.pnl_usdt|floatformat:2 }}</span>
-          </div>
-          <div class="signal-desc">{{ t.closed_at|date:"Y-m-d H:i" }} · {{ t.reason|truncatechars:60 }}</div>
-        </div>
-      {% empty %}<div style="color:var(--text-muted);padding:10px;">No trades yet.</div>{% endfor %}
-    </div>
-  </div>
-
-  <div class="card" style="margin-top:20px;">
+  <!-- ── OPEN POSITIONS ─────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:20px;">
     <div class="card-header">
-      <div class="card-title">SCENARIOS &amp; BACKTESTS</div>
-      <a href="{% url 'scenario_new' %}" style="color:var(--accent);">+ NEW SCENARIO</a>
+      <div class="card-title">▣ OPEN POSITIONS ({{ open_trades|length }})</div>
+    </div>
+    {% if open_trades %}
+    <div class="bot-table">
+      <div class="bot-table-head">
+        <span>SYMBOL</span><span>SIDE</span><span>QTY</span><span>ENTRY</span><span>SL / TP</span><span>SCORE</span><span>OPENED</span>
+      </div>
+      {% for t in open_trades %}
+      <div class="bot-table-row">
+        <span class="bot-sym">{{ t.symbol }}</span>
+        <span class="bot-side {{ t.side|lower }}">{{ t.side }}</span>
+        <span class="bot-mono">{{ t.qty|floatformat:6 }}</span>
+        <span class="bot-mono">{{ t.entry_price|floatformat:4 }}</span>
+        <span class="bot-mono" style="font-size:10px;">
+          <span style="color:var(--accent-red);">{{ t.stop_loss|floatformat:4 }}</span> /
+          <span style="color:var(--accent);">{{ t.take_profit|floatformat:4 }}</span>
+        </span>
+        <span class="bot-score">{{ t.composite_score|floatformat:2 }}</span>
+        <span class="bot-mono" style="font-size:10px;color:var(--text-muted);">{{ t.opened_at|timesince }} ago</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+      <div style="padding:24px;text-align:center;color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">
+        ⊘ NO OPEN POSITIONS
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- ── RECENT DECISIONS / CLOSED ─────────────────────────────── -->
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-header">
+      <div class="card-title">📋 RECENT TRADE LOG</div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
+        {{ closed_trades|length }} most recent · all-time {{ total_trades }}
+      </div>
+    </div>
+    {% for t in closed_trades %}
+    <div class="bot-trade-row">
+      <div class="bot-trade-head">
+        <span class="bot-sym">{{ t.symbol }}</span>
+        <span class="bot-side {{ t.side|lower }}">{{ t.side }}</span>
+        <span class="bot-mono" style="color:var(--text-muted);">{{ t.entry_price|floatformat:4 }} → {{ t.exit_price|default_if_none:"—"|floatformat:4 }}</span>
+        <span class="bot-pnl" style="color:{% if t.pnl_usdt >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
+          {% if t.pnl_usdt >= 0 %}+{% endif %}{{ t.pnl_usdt|floatformat:2 }}
+        </span>
+        <span class="bot-mono" style="font-size:10px;color:var(--text-muted);">{{ t.closed_at|date:"M d H:i" }}</span>
+      </div>
+      {% if t.reason %}
+      <div class="bot-trade-reason">{{ t.reason|truncatechars:200 }}</div>
+      {% endif %}
+    </div>
+    {% empty %}
+      <div style="padding:24px;text-align:center;color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">
+        ⊘ NO TRADES EXECUTED YET
+      </div>
+    {% endfor %}
+  </div>
+
+  <!-- ── SCENARIOS ──────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">🧪 SCENARIOS &amp; BACKTESTS</div>
+      <a href="{% url 'scenario_new' %}" class="btn btn-sm btn-primary">+ NEW SCENARIO</a>
     </div>
     {% for s in scenarios %}
-      <div class="signal-item" onclick="location='{% url 'scenario_detail' s.id %}'">
-        <div class="signal-header">
-          <span class="signal-symbol">{{ s.name }}</span>
-          <span>{{ s.total_return_pct|default_if_none:"—" }}%</span>
+      <a href="{% url 'scenario_detail' s.id %}" class="bot-scenario">
+        <div>
+          <div class="bot-sym">{{ s.name }}</div>
+          <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
+            {{ s.start_date }} → {{ s.end_date }} · {{ s.num_trades }} trades · DD {{ s.max_drawdown_pct|default_if_none:"—" }}%
+          </div>
         </div>
-        <div class="signal-desc">{{ s.start_date }} → {{ s.end_date }} · trades {{ s.num_trades }} · DD {{ s.max_drawdown_pct|default_if_none:"—" }}%</div>
+        <div style="font-family:var(--font-display);font-size:18px;font-weight:700;color:{% if s.total_return_pct and s.total_return_pct > 0 %}var(--accent){% elif s.total_return_pct and s.total_return_pct < 0 %}var(--accent-red){% else %}var(--text-muted){% endif %};">
+          {% if s.total_return_pct != None %}{% if s.total_return_pct >= 0 %}+{% endif %}{{ s.total_return_pct|floatformat:2 }}%{% else %}—{% endif %}
+        </div>
+      </a>
+    {% empty %}
+      <div style="padding:24px;text-align:center;color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">
+        ⊘ NO SCENARIOS YET — create one to backtest your strategy
       </div>
-    {% empty %}<div style="color:var(--text-muted);padding:10px;">No scenarios yet.</div>{% endfor %}
+    {% endfor %}
   </div>
+
 </div>
+
+{% block extra_css %}
+<style>
+  .bot-hero { background: linear-gradient(135deg, var(--bg-card), var(--bg-secondary)); border-color: var(--border-glow); }
+  .bot-hero-grid { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 18px; }
+  .bot-hero-status { display: flex; align-items: center; gap: 16px; }
+  .bot-pulse { width: 14px; height: 14px; border-radius: 50%; background: var(--text-muted); }
+  .bot-pulse.armed { background: var(--accent); box-shadow: 0 0 0 0 rgba(0,232,104,.6); animation: botPulse 2s infinite; }
+  @keyframes botPulse {
+    0%   { box-shadow: 0 0 0 0 rgba(0,232,104,.6); }
+    70%  { box-shadow: 0 0 0 14px rgba(0,232,104,0); }
+    100% { box-shadow: 0 0 0 0 rgba(0,232,104,0); }
+  }
+  .bot-hero-state { font-family: var(--font-display); font-size: 28px; font-weight: 900; letter-spacing: 4px; }
+  .bot-hero-sub { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); letter-spacing: 1.5px; margin-top: 2px; }
+  .bot-hero-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+  .weights-list { display: flex; flex-direction: column; gap: 8px; }
+  .weight-row { display: grid; grid-template-columns: 90px 1fr 36px; align-items: center; gap: 10px; }
+  .weight-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.5px; color: var(--text-muted); }
+  .weight-bar { height: 6px; background: var(--bg-void); border-radius: 3px; overflow: hidden; border: 1px solid var(--border); }
+  .weight-fill { height: 100%; background: linear-gradient(90deg, var(--accent-dim), var(--accent)); border-radius: 3px; }
+  .weight-val { font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); text-align: right; }
+
+  .bot-kv { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--border);
+            font-family: var(--font-mono); font-size: 11px; }
+  .bot-kv:last-child { border-bottom: 0; }
+  .bot-kv span:first-child { color: var(--text-muted); }
+  .bot-kv span:last-child { color: var(--text-primary); }
+
+  .bot-chip { display: inline-block; padding: 3px 9px; margin: 2px; background: var(--accent-dim);
+              color: var(--accent); border-radius: 10px; font-size: 10px; font-weight: 700; }
+
+  .bot-table { display: flex; flex-direction: column; gap: 1px; }
+  .bot-table-head, .bot-table-row { display: grid; grid-template-columns: 1.2fr 0.6fr 1fr 1fr 1.4fr 0.6fr 1fr; gap: 12px;
+                                     padding: 10px 14px; align-items: center; }
+  .bot-table-head { background: var(--bg-void); font-family: var(--font-mono); font-size: 9px;
+                    letter-spacing: 1.5px; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+  .bot-table-row { border-bottom: 1px solid var(--border); transition: background .15s; }
+  .bot-table-row:hover { background: var(--bg-card-hover); }
+  .bot-sym { font-family: var(--font-display); font-size: 12px; font-weight: 700; color: var(--text-primary); }
+  .bot-side { font-family: var(--font-mono); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; text-align: center; }
+  .bot-side.buy { background: rgba(0,232,104,.12); color: var(--accent); }
+  .bot-side.sell { background: rgba(232,48,48,.12); color: var(--accent-red); }
+  .bot-mono { font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); }
+  .bot-score { font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--accent); }
+
+  .bot-trade-row { padding: 12px 14px; border-bottom: 1px solid var(--border); transition: background .15s; }
+  .bot-trade-row:hover { background: var(--bg-card-hover); }
+  .bot-trade-row:last-child { border-bottom: 0; }
+  .bot-trade-head { display: grid; grid-template-columns: 1.2fr 0.6fr 2fr 1fr 1fr; gap: 12px; align-items: center; }
+  .bot-pnl { font-family: var(--font-display); font-size: 14px; font-weight: 700; text-align: right; }
+  .bot-trade-reason { margin-top: 6px; font-family: var(--font-mono); font-size: 10px;
+                      color: var(--text-secondary); padding-left: 4px; line-height: 1.5; opacity: .85; }
+
+  .bot-scenario { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px;
+                  border-bottom: 1px solid var(--border); text-decoration: none; transition: background .15s; }
+  .bot-scenario:last-child { border-bottom: 0; }
+  .bot-scenario:hover { background: var(--bg-card-hover); }
+</style>
+{% endblock %}
+
+<script>
+(function(){
+  var dataEl = document.getElementById('sparkData');
+  if (!dataEl) return;
+  var raw = dataEl.textContent.trim();
+  var data;
+  try { data = JSON.parse(raw); } catch(e) { data = []; }
+  var c = document.getElementById('equityCanvas');
+  if (!c) return;
+  function draw(){
+    c.width = c.offsetWidth; c.height = 180;
+    var ctx = c.getContext('2d'); var W = c.width, H = c.height;
+    ctx.clearRect(0,0,W,H);
+    if (!data.length) {
+      ctx.fillStyle = '#2a5038'; ctx.font = '11px "Share Tech Mono"';
+      ctx.fillText('— no closed trades yet —', W/2 - 80, H/2);
+      return;
+    }
+    var mn = Math.min(0, Math.min.apply(null, data));
+    var mx = Math.max(0, Math.max.apply(null, data));
+    if (mn === mx) mx = mn + 1;
+    var pad = 12;
+    function x(i){ return pad + i / (data.length - 1 || 1) * (W - pad*2); }
+    function y(v){ return H - pad - (v - mn) / (mx - mn) * (H - pad*2); }
+    // zero baseline
+    ctx.strokeStyle = '#133020'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+    ctx.beginPath(); var zy = y(0); ctx.moveTo(pad, zy); ctx.lineTo(W - pad, zy); ctx.stroke();
+    ctx.setLineDash([]);
+    // area fill
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, 'rgba(0,232,104,.25)'); grad.addColorStop(1, 'rgba(0,232,104,0)');
+    ctx.fillStyle = grad; ctx.beginPath();
+    ctx.moveTo(x(0), y(0));
+    data.forEach(function(v,i){ ctx.lineTo(x(i), y(v)); });
+    ctx.lineTo(x(data.length-1), y(0)); ctx.closePath(); ctx.fill();
+    // line
+    ctx.strokeStyle = '#00e868'; ctx.lineWidth = 2; ctx.beginPath();
+    data.forEach(function(v,i){ i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)); });
+    ctx.stroke();
+    // last point
+    var lx = x(data.length-1), ly = y(data[data.length-1]);
+    ctx.fillStyle = '#00e868'; ctx.beginPath(); ctx.arc(lx, ly, 3, 0, Math.PI*2); ctx.fill();
+  }
+  window.addEventListener('resize', draw); draw();
+})();
+</script>
 {% endblock %}
