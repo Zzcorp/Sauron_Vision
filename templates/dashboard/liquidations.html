@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Liquidation Heatmap — Sauron Vision{% endblock %}
+{% block page_title %}⚡ LIQUIDATION HEATMAP{% endblock %}
+{% block content %}
+<div class="page-content fade-in">
+
+  <!-- Controls -->
+  <div class="card" style="margin-bottom:18px;">
+    <form method="get" style="display:flex;gap:14px;align-items:end;flex-wrap:wrap;">
+      <div class="input-group" style="margin-bottom:0;">
+        <label class="input-label">SYMBOL</label>
+        <select name="symbol" class="input" style="min-width:160px;"
+                onchange="this.form.submit()">
+          {% for s in symbols %}
+            <option value="{{ s }}" {% if s == symbol %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="input-group" style="margin-bottom:0;">
+        <label class="input-label">WINDOW</label>
+        <div style="display:flex;gap:6px;">
+          {% for w in windows %}
+            <a href="?symbol={{ symbol }}&window={{ w }}"
+               class="btn btn-sm {% if w == window %}btn-primary{% endif %}">{{ w }}</a>
+          {% endfor %}
+        </div>
+      </div>
+      <div style="margin-left:auto;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
+        LIVE · updates as liquidations stream in
+      </div>
+    </form>
+  </div>
+
+  <!-- Stats -->
+  <div class="grid grid-5" style="margin-bottom:18px;">
+    <div class="metric">
+      <div class="metric-label">LONGS LIQUIDATED</div>
+      <div class="metric-value" style="color:var(--accent-red);" id="statLong">${{ agg.stats.long|floatformat:0 }}</div>
+      <div class="metric-sub">total notional</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">SHORTS LIQUIDATED</div>
+      <div class="metric-value" style="color:var(--accent);" id="statShort">${{ agg.stats.short|floatformat:0 }}</div>
+      <div class="metric-sub">total notional</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">NET FLOW</div>
+      <div class="metric-value" id="statNet" style="color:{% if agg.stats.net >= 0 %}var(--accent-red){% else %}var(--accent){% endif %};">
+        ${{ agg.stats.net|floatformat:0 }}
+      </div>
+      <div class="metric-sub">long − short</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">BIGGEST</div>
+      <div class="metric-value" id="statBig">${{ agg.stats.biggest|floatformat:0 }}</div>
+      <div class="metric-sub">single liquidation</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">COUNT</div>
+      <div class="metric-value" id="statCount">{{ agg.stats.count }}</div>
+      <div class="metric-sub">events in window</div>
+    </div>
+  </div>
+
+  <!-- Heatmap canvas -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">{{ symbol }} · {{ window|upper }} HEATMAP</div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
+        <span style="color:var(--accent-red);">■</span> LONGS REKT
+        &nbsp;&nbsp;
+        <span style="color:var(--accent);">■</span> SHORTS REKT
+      </div>
+    </div>
+    <canvas id="heat" style="width:100%;height:480px;"></canvas>
+  </div>
+
+  <!-- Recent liquidations feed -->
+  <div class="card" style="margin-top:18px;">
+    <div class="card-header"><div class="card-title">RECENT LIQUIDATIONS</div></div>
+    <div id="liqFeed" style="max-height:320px;overflow-y:auto;">
+      {% for e in recent %}
+      <div class="signal-item">
+        <div class="signal-header">
+          <span class="signal-symbol" style="color:{% if e.side == 'LONG' %}var(--accent-red){% else %}var(--accent){% endif %};">
+            {{ e.side }} REKT
+          </span>
+          <span>${{ e.notional_usd|floatformat:0 }}</span>
+        </div>
+        <div class="signal-desc">
+          {{ e.qty|floatformat:4 }} @ ${{ e.price|floatformat:2 }} · {{ e.timestamp|timesince }} ago
+        </div>
+      </div>
+      {% empty %}
+      <div style="padding:16px;color:var(--text-muted);text-align:center;">
+        No liquidations yet. Make sure <code>stream_binance_futures</code> is running.
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const SYMBOL = "{{ symbol }}";
+  const WINDOW = "{{ window }}";
+  const cvs = document.getElementById('heat');
+  if (!cvs) return;
+  const ctx = cvs.getContext('2d');
+  let data = {{ agg.buckets|default:"[]"|safe }};
+  let stats = {long: {{ agg.stats.long|default:0 }}, short: {{ agg.stats.short|default:0 }},
+               biggest: {{ agg.stats.biggest|default:0 }}, count: {{ agg.stats.count|default:0 }},
+               net: {{ agg.stats.net|default:0 }}};
+
+  function resize(){ cvs.width = cvs.offsetWidth; cvs.height = 480; draw(); }
+  function draw(){
+    const W = cvs.width, H = cvs.height;
+    ctx.clearRect(0,0,W,H);
+    if (!data.length) { ctx.fillStyle = '#2a5038'; ctx.font = '12px monospace';
+      ctx.fillText('No data', 20, 40); return; }
+    const maxVol = Math.max(1, ...data.map(b => Math.max(b.long, b.short)));
+    const barH = H / data.length;
+    // Y axis: price high at top
+    const reversed = [...data].reverse();
+    reversed.forEach((b, i) => {
+      const y = i * barH;
+      // Long (red) bar to the right of center
+      const longW = (b.long / maxVol) * (W * 0.47);
+      const shortW = (b.short / maxVol) * (W * 0.47);
+      ctx.fillStyle = 'rgba(232,48,48,' + (0.3 + 0.7*b.long/maxVol) + ')';
+      ctx.fillRect(W/2, y + 0.5, longW, Math.max(1, barH - 1));
+      ctx.fillStyle = 'rgba(0,232,104,' + (0.3 + 0.7*b.short/maxVol) + ')';
+      ctx.fillRect(W/2 - shortW, y + 0.5, shortW, Math.max(1, barH - 1));
+    });
+    // Center line
+    ctx.strokeStyle = '#133020'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H); ctx.stroke();
+    // Price labels (top, middle, bottom)
+    ctx.fillStyle = '#5a8a6a'; ctx.font = '10px "Share Tech Mono"';
+    const hi = reversed[0]?.price || 0, lo = reversed[reversed.length-1]?.price || 0;
+    ctx.fillText('$' + hi.toFixed(2), 6, 12);
+    ctx.fillText('$' + ((hi+lo)/2).toFixed(2), 6, H/2);
+    ctx.fillText('$' + lo.toFixed(2), 6, H - 4);
+  }
+  window.addEventListener('resize', resize); resize();
+
+  // Poll every 5s to refresh from DB (cheap)
+  async function refresh(){
+    try {
+      const r = await fetch(`/api/liquidations/?symbol=${SYMBOL}&window=${WINDOW}`, {credentials:'same-origin'});
+      if (!r.ok) return;
+      const j = await r.json();
+      data = j.buckets || []; stats = j.stats || stats;
+      draw();
+      document.getElementById('statLong').textContent  = '$' + Math.round(stats.long).toLocaleString();
+      document.getElementById('statShort').textContent = '$' + Math.round(stats.short).toLocaleString();
+      document.getElementById('statNet').textContent   = '$' + Math.round(stats.net).toLocaleString();
+      document.getElementById('statBig').textContent   = '$' + Math.round(stats.biggest).toLocaleString();
+      document.getElementById('statCount').textContent = stats.count;
+    } catch(e) {}
+  }
+  setInterval(refresh, 5000);
+
+  // Listen for live liquidation frames from the existing WS channel
+  // (we rely on the base.html WS client already being connected)
+  const origOnMessage = window.__sauronWSHandler;
+  window.addEventListener('sauron:liquidation', e => {
+    const d = e.detail;
+    if (!d || d.symbol !== SYMBOL) return;
+    // Prepend to feed
+    const feed = document.getElementById('liqFeed');
+    if (feed) {
+      const row = document.createElement('div');
+      row.className = 'signal-item';
+      const color = d.side === 'LONG' ? 'var(--accent-red)' : 'var(--accent)';
+      row.innerHTML = `<div class="signal-header">
+        <span class="signal-symbol" style="color:${color};">${d.side} REKT</span>
+        <span>$${Math.round(d.notional).toLocaleString()}</span></div>
+        <div class="signal-desc">${d.qty.toFixed(4)} @ $${d.price.toFixed(2)} · just now</div>`;
+      row.style.animation = 'flash 1s';
+      feed.prepend(row);
+      while (feed.children.length > 30) feed.lastElementChild.remove();
+    }
+  });
+})();
+</script>
+{% endblock %}

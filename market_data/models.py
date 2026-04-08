@@ -2,6 +2,7 @@
 from django.db import models
 from instruments.models import Instrument
 from core.constants import Timeframe
+from .models_live import LiquidationEvent, FundingRate, OrderBookSnapshot  # noqa: F401
 
 
 class PriceData(models.Model):

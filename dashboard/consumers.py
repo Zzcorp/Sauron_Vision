@@ -50,6 +50,14 @@ class DashboardConsumer(AsyncWebsocketConsumer):
             "data": event["data"],
         }))
 
+    async def liquidation(self, event):
+        """Push liquidation event to browsers."""
+        await self.send(text_data=json.dumps({"type":"liquidation","data":event["data"]}))
+
+    async def funding(self, event):
+        """Push funding/mark-price tick."""
+        await self.send(text_data=json.dumps({"type":"funding","data":event["data"]}))
+
     async def quote_stream(self, event):
         """Push real-time quote tick from Binance streamer."""
         await self.send(text_data=json.dumps({

@@ -70,3 +70,57 @@ python manage.py stream_binance --symbols BTCUSDT ETHUSDT SOLUSDT
   provider — Polygon, Finnhub, OANDA, Twelve Data. The same
   Channels pipeline will work for them; only the streamer worker
   changes.
+
+
+---
+
+## Pass 4 additional workers
+
+Each streamer runs as its own Render worker. All of them must
+share the same Redis URL as the web service so broadcasts
+reach connected browsers. Add blocks to `render.yaml`:
+
+```yaml
+  - type: worker
+    name: sauron-binance-futures
+    startCommand: "python manage.py stream_binance_futures"
+  - type: worker
+    name: sauron-binance-depth
+    startCommand: "python manage.py stream_binance_depth"
+  - type: worker
+    name: sauron-finnhub
+    startCommand: "python manage.py stream_finnhub"
+    envVars:
+      - key: FINNHUB_API_KEY
+        sync: false
+  - type: worker
+    name: sauron-oanda
+    startCommand: "python manage.py stream_oanda"
+    envVars:
+      - key: OANDA_API_KEY
+        sync: false
+      - key: OANDA_ACCOUNT_ID
+        sync: false
+      - key: OANDA_ENV
+        value: practice
+```
+
+Each worker is its own $7/mo Starter dyno on Render. If that
+adds up, you can run all the streamers on one cheap VPS
+instead: each `stream_*` command is just `python manage.py
+stream_...` with the DATABASE_URL + REDIS_URL env vars set.
+
+## Storage notes
+- **LiquidationEvent** rows grow quickly. Add a nightly
+  cleanup to keep only the last 30 days:
+  ```python
+  # scraping/tasks.py or a new cleanup task
+  LiquidationEvent.objects.filter(
+      timestamp__lt=timezone.now() - timedelta(days=30)
+  ).delete()
+  ```
+- **OrderBookSnapshot** is auto-pruned to last 2000 rows per
+  symbol by the streamer itself (opportunistic, random 1%
+  probability per write).
+- **FundingRate** is throttled to one write per symbol every
+  30s, so growth is bounded.

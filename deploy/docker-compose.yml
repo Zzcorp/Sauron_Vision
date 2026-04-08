@@ -1,0 +1,131 @@
+# Single-VPS deployment for Sauron Vision.
+# Brings up web + celery worker + beat + redis + postgres + all
+# five streamers in one go. Optional streamers (finnhub, oanda)
+# only spin up when you enable their profile.
+#
+# Usage:
+#   cp .env.example .env && edit .env
+#   docker compose -f deploy/docker-compose.yml up -d
+#
+# Enable optional streamers:
+#   docker compose -f deploy/docker-compose.yml --profile finnhub --profile oanda up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-sauron}
+      POSTGRES_USER:     ${POSTGRES_USER:-sauron}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sauron}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-sauron}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: sh -c "python manage.py migrate --noinput && python manage.py collectstatic --noinput && daphne -b 0.0.0.0 -p 8000 config.asgi:application"
+    environment: &common-env
+      DJANGO_SETTINGS_MODULE: config.settings
+      DATABASE_URL: postgres://${POSTGRES_USER:-sauron}:${POSTGRES_PASSWORD:-sauron}@postgres:5432/${POSTGRES_DB:-sauron}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: ${DEBUG:-0}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
+      OANDA_API_KEY: ${OANDA_API_KEY:-}
+      OANDA_ACCOUNT_ID: ${OANDA_ACCOUNT_ID:-}
+      OANDA_ENV: ${OANDA_ENV:-practice}
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis:    {condition: service_healthy}
+    ports:
+      - "${WEB_PORT:-8000}:8000"
+
+  celery-worker:
+    build: {context: .., dockerfile: Dockerfile}
+    restart: unless-stopped
+    command: celery -A config worker -l info --concurrency=${CELERY_CONCURRENCY:-4}
+    environment: *common-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis:    {condition: service_healthy}
+
+  celery-beat:
+    build: {context: .., dockerfile: Dockerfile}
+    restart: unless-stopped
+    command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    environment: *common-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis:    {condition: service_healthy}
+
+  stream-binance:
+    build: {context: .., dockerfile: Dockerfile}
+    restart: unless-stopped
+    command: python manage.py stream_binance
+    environment: *common-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis:    {condition: service_healthy}
+
+  stream-binance-futures:
+    build: {context: .., dockerfile: Dockerfile}
+    restart: unless-stopped
+    command: python manage.py stream_binance_futures
+    environment: *common-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis:    {condition: service_healthy}
+
+  stream-binance-depth:
+    build: {context: .., dockerfile: Dockerfile}
+    restart: unless-stopped
+    command: python manage.py stream_binance_depth
+    environment: *common-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis:    {condition: service_healthy}
+
+  stream-finnhub:
+    profiles: ["finnhub"]
+    build: {context: .., dockerfile: Dockerfile}
+    restart: unless-stopped
+    command: python manage.py stream_finnhub
+    environment: *common-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis:    {condition: service_healthy}
+
+  stream-oanda:
+    profiles: ["oanda"]
+    build: {context: .., dockerfile: Dockerfile}
+    restart: unless-stopped
+    command: python manage.py stream_oanda
+    environment: *common-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis:    {condition: service_healthy}
+
+volumes:
+  pgdata:
+  redisdata:

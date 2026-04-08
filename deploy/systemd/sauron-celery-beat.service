@@ -1,0 +1,15 @@
+[Unit]
+Description=Sauron Vision celery beat
+After=network.target redis.service
+
+[Service]
+Type=simple
+User=sauron
+WorkingDirectory=/opt/sauron/sauron_vision
+EnvironmentFile=/opt/sauron/sauron_vision/.env
+ExecStart=/opt/sauron/venv/bin/celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

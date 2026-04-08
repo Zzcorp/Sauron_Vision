@@ -36,15 +36,35 @@ def _score_technical(closes: list[float], ohlcv: list[list]) -> tuple[float, lis
     elif vw:                   score -= 0.20; reasons.append("price<VWAP")
     return (max(-1, min(1, score)), reasons)
 
-def _score_liquidity(order_book: dict) -> tuple[float, list[str]]:
-    """Order book imbalance → short-term pressure."""
+def _score_liquidity(order_book: dict, symbol: str = "") -> tuple[float, list[str]]:
+    """Order book pressure.
+
+    Priority:
+      1. Fresh L2 snapshot from DB (depth-weighted, <30s old).
+      2. Fall back to REST order book passed in.
+    """
+    # 1. Try the live L2 snapshot from stream_binance_depth
+    try:
+        from market_data.models import OrderBookSnapshot
+        from django.utils import timezone
+        from datetime import timedelta
+        snap = (OrderBookSnapshot.objects
+                .filter(symbol__iexact=symbol,
+                        timestamp__gte=timezone.now() - timedelta(seconds=30))
+                .order_by("-timestamp").first())
+        if snap:
+            return (float(snap.depth_score),
+                    [f"L2 depth {snap.depth_score:+.2f} (imb {snap.imbalance:+.2f})"])
+    except Exception:
+        pass
+    # 2. Fallback to REST order book
     try:
         bids = sum(float(q) for _, q in order_book.get("bids", [])[:20])
         asks = sum(float(q) for _, q in order_book.get("asks", [])[:20])
         total = bids + asks
         if not total: return (0, [])
-        imb = (bids - asks) / total  # [-1, +1]
-        return (imb, [f"book imbalance {imb:+.2f}"])
+        imb = (bids - asks) / total
+        return (imb, [f"REST imbalance {imb:+.2f}"])
     except Exception:
         return (0, [])
 
@@ -107,7 +127,7 @@ def decide(symbol: str, ohlcv: list[list], order_book: dict, weights: dict,
     reasons: list[str] = []
     parts = {}
     parts["technical"], r = _score_technical(closes, ohlcv); reasons += r
-    parts["liquidity"], r = _score_liquidity(order_book);     reasons += r
+    parts["liquidity"], r = _score_liquidity(order_book, symbol); reasons += r
     parts["sauron_sig"], r = _score_sauron_signals(symbol);   reasons += r
     parts["news"], r       = _score_news(symbol);             reasons += r
     parts["macro"], r      = _score_macro();                  reasons += r

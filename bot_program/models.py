@@ -46,10 +46,14 @@ class BotConfig(models.Model):
         ("paper",  "Paper Trading (simulated, safe)"),
         ("live",   "Live Trading (real funds)"),
     ]
+    MARKET_CHOICES = [("spot","Spot"), ("futures","USDT-M Futures")]
+    MARGIN_CHOICES = [("isolated","Isolated"), ("cross","Cross")]
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="bot_config")
     name = models.CharField(max_length=80, default="Sauron Bot")
     enabled = models.BooleanField(default=False)
     mode = models.CharField(max_length=8, choices=MODE_CHOICES, default="paper")
+    market_type = models.CharField(max_length=10, choices=MARKET_CHOICES, default="spot")
+    margin_mode = models.CharField(max_length=10, choices=MARGIN_CHOICES, default="isolated")
 
     # Universe
     symbols = models.JSONField(default=list, help_text='Symbols, e.g. ["BTCUSDT","ETHUSDT"]')

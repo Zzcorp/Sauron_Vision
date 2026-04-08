@@ -62,3 +62,4 @@ django-extensions>=3.2
 twilio>=9.0
 cryptography>=41
 websockets>=12
+aiohttp>=3.9

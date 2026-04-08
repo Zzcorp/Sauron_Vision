@@ -32,6 +32,16 @@ app.conf.task_routes = {
 # ============================================================
 app.conf.beat_schedule = {
 
+    # ── UPGRADE-5: Funding alerts + retention ─────────────────
+    "scan-funding-signals": {
+        "task": "market_data.funding_alerts.scan_funding_signals",
+        "schedule": 300.0,
+    },
+    "nightly-cleanup": {
+        "task": "market_data.cleanup_tasks.nightly_cleanup_all",
+        "schedule": crontab(hour=4, minute=15),
+    },
+
     # ── TIER 1: Every 1-5 min (during market hours) ──────────
     "fetch-live-quotes-watchlist": {
         "task": "market_data.tasks.fetch_live_quotes",

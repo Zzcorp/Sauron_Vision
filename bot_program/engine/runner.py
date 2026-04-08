@@ -5,18 +5,22 @@ from decimal import Decimal
 from django.utils import timezone
 from ..models import BotConfig, BotTrade, BinanceAccount
 from .binance_client import BinanceClient
+from .binance_futures_client import BinanceFuturesClient
 from .strategy import decide
 from .risk import RiskManager
 
 log = logging.getLogger(__name__)
 
-def _client_for(user) -> BinanceClient:
+def _client_for(user, cfg=None):
     try:
         acct: BinanceAccount = user.binance_account
         k, s = acct.get_credentials()
-        return BinanceClient(k, s, testnet=acct.testnet)
+        testnet = acct.testnet
     except BinanceAccount.DoesNotExist:
-        return BinanceClient(None, None, testnet=True)
+        k = s = None; testnet = True
+    if cfg is not None and getattr(cfg, "market_type", "spot") == "futures":
+        return BinanceFuturesClient(k, s, testnet=testnet)
+    return BinanceClient(k, s, testnet=testnet)
 
 def _parse_klines(raw: list[list]) -> list[list]:
     # [openTime, open, high, low, close, volume, closeTime, ...]
@@ -33,7 +37,7 @@ def run_bot_tick(user_id: int):
     if not cfg.enabled:
         log.info("bot disabled for %s", user.username); return
 
-    client = _client_for(user)
+    client = _client_for(user, cfg)
     if not client.ping():
         log.warning("binance unreachable"); return
 
@@ -82,6 +86,8 @@ def run_bot_tick(user_id: int):
             order_id = ""
             if not paper:
                 try:
+                    if cfg.market_type == "futures" and hasattr(client, "ensure_config"):
+                        client.ensure_config(symbol, cfg.leverage, cfg.margin_mode)
                     res = client.market_order(symbol, d.direction, qty)
                     order_id = str(res.get("orderId", ""))
                 except Exception as e:
@@ -110,6 +116,11 @@ def _close(trade: BotTrade, price: Decimal, client: BinanceClient, reason: str):
     trade.closed_at = timezone.now()
     trade.reason = (trade.reason + f" | closed:{reason}").strip()
     if not trade.paper:
-        try: client.market_order(trade.symbol, "SELL" if trade.side=="BUY" else "BUY", float(trade.qty))
+        try:
+            close_side = "SELL" if trade.side == "BUY" else "BUY"
+            kwargs = {}
+            if trade.config.market_type == "futures":
+                kwargs["reduce_only"] = True
+            client.market_order(trade.symbol, close_side, float(trade.qty), **kwargs)
         except Exception as e: log.error("close order fail: %s", e)
     trade.save()
