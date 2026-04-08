@@ -817,6 +817,234 @@
         }
 
     </style>{% block extra_css %}{% endblock %}
+<style>/* UPGRADE-2 */
+
+        /* ═══════════════════════════════════════════════════════════ */
+        /* UPGRADE-2: Design system — buttons, inputs, metrics         */
+        /* ═══════════════════════════════════════════════════════════ */
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            gap: 8px; padding: 11px 22px; border: 1px solid var(--border);
+            background: var(--bg-card); color: var(--text-primary);
+            font-family: var(--font-display); font-size: 12px; font-weight: 600;
+            letter-spacing: 2.5px; text-transform: uppercase; cursor: pointer;
+            border-radius: var(--radius); text-decoration: none;
+            transition: all .22s cubic-bezier(.2,.8,.2,1); position: relative; overflow: hidden;
+        }
+        .btn::before {
+            content: ""; position: absolute; inset: 0;
+            background: linear-gradient(135deg, transparent, rgba(0,232,104,.08), transparent);
+            opacity: 0; transition: opacity .3s;
+        }
+        .btn:hover::before { opacity: 1; }
+        .btn:hover { border-color: var(--accent); transform: translateY(-1px);
+                     box-shadow: 0 4px 20px rgba(0,232,104,.12); color: var(--accent); }
+        .btn:active { transform: translateY(0); }
+        .btn.btn-primary {
+            background: linear-gradient(135deg, var(--accent-dim), var(--accent));
+            color: var(--bg-void); border-color: var(--accent); font-weight: 700;
+        }
+        .btn.btn-primary:hover { color: var(--bg-void); box-shadow: 0 6px 28px rgba(0,232,104,.35); }
+        .btn.btn-danger {
+            background: linear-gradient(135deg, #3a0e0e, var(--accent-red));
+            color: #fff; border-color: var(--accent-red);
+        }
+        .btn.btn-danger:hover { color: #fff; box-shadow: 0 6px 28px rgba(232,48,48,.3); }
+        .btn.btn-ghost { background: transparent; }
+        .btn.btn-sm { padding: 7px 14px; font-size: 10px; letter-spacing: 2px; }
+        .btn.btn-lg { padding: 15px 30px; font-size: 14px; letter-spacing: 3px; }
+        .btn[disabled], .btn.disabled { opacity: .4; pointer-events: none; }
+
+        .input, input[type=text].input, input[type=password].input, input[type=email].input,
+        input[type=number].input, textarea.input, select.input {
+            width: 100%; padding: 12px 14px;
+            background: var(--bg-void); border: 1px solid var(--border);
+            border-radius: var(--radius); color: var(--text-primary);
+            font-family: var(--font-mono); font-size: 13px; outline: none;
+            transition: all .2s;
+        }
+        .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,232,104,.08); }
+        .input::placeholder { color: var(--text-muted); }
+        .input-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+        .input-label { font-family: var(--font-mono); font-size: 10px;
+                       letter-spacing: 2.5px; color: var(--text-muted); text-transform: uppercase; }
+        .input-hint { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+
+        /* Polished metric card */
+        .metric {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 18px 20px;
+            position: relative; overflow: hidden; transition: all .25s;
+        }
+        .metric::after {
+            content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: 0; transition: opacity .3s;
+        }
+        .metric:hover { border-color: var(--accent-dim); transform: translateY(-2px);
+                        box-shadow: 0 8px 30px rgba(0,0,0,.3); }
+        .metric:hover::after { opacity: 1; }
+        .metric-label { font-family: var(--font-mono); font-size: 9px;
+                        letter-spacing: 2.5px; color: var(--text-muted); text-transform: uppercase; }
+        .metric-value { font-family: var(--font-display); font-size: 26px; font-weight: 700;
+                        color: var(--text-primary); margin: 6px 0 2px; }
+        .metric-change { font-family: var(--font-mono); font-size: 11px; }
+        .metric-change.up { color: var(--accent); }
+        .metric-change.down { color: var(--accent-red); }
+        .metric-spark { height: 28px; margin-top: 8px; }
+        .metric-sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); margin-top: 4px; }
+        .metric-icon { position: absolute; top: 14px; right: 16px; font-size: 18px;
+                       color: var(--accent); opacity: .25; }
+
+        /* ═══════════════════════════════════════════════════════════ */
+        /* UPGRADE-2: Signals rail split (Signals + Watchlist)         */
+        /* ═══════════════════════════════════════════════════════════ */
+        .signals-rail {
+            display: flex !important; flex-direction: column;
+        }
+        .rail-section { display: flex; flex-direction: column; min-height: 40px; overflow: hidden; }
+        .rail-section.sig-section { flex: 1 1 50%; }
+        .rail-section.watch-section { flex: 1 1 50%; }
+        .rail-section.collapsed { flex: 0 0 38px !important; }
+        .rail-head {
+            padding: 10px 12px; cursor: pointer; display: flex; align-items: center;
+            gap: 8px; border-bottom: 1px solid var(--border); transition: all .2s;
+            background: var(--bg-card); flex-shrink: 0;
+        }
+        .rail-head:hover { background: var(--bg-card-hover); }
+        .rail-head .rh-icon { font-size: 14px; color: var(--accent); flex-shrink: 0; }
+        .rail-head .rh-label {
+            font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px;
+            color: var(--text-muted); text-transform: uppercase; white-space: nowrap;
+            overflow: hidden; flex: 1;
+        }
+        .rail-head .rh-count {
+            min-width: 20px; height: 18px; border-radius: 9px; padding: 0 6px;
+            background: var(--accent-dim); color: var(--accent); font-size: 9px;
+            font-family: var(--font-mono); font-weight: 700;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .rail-head .rh-chev { font-size: 9px; color: var(--text-muted); transition: transform .2s; }
+        .rail-section.collapsed .rh-chev { transform: rotate(-90deg); }
+        .rail-body {
+            flex: 1; overflow-y: auto; padding: 0;
+            scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+        }
+        .rail-body::-webkit-scrollbar { width: 6px; }
+        .rail-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .rail-section.collapsed .rail-body { display: none; }
+        .signals-rail:not(.open) .rh-label,
+        .signals-rail:not(.open) .rh-count,
+        .signals-rail:not(.open) .rh-chev { display: none; }
+
+        /* Drag handle between the two sections */
+        .rail-resizer {
+            height: 6px; cursor: row-resize; background: var(--bg-primary);
+            border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; transition: background .15s;
+        }
+        .rail-resizer::before {
+            content: ""; width: 24px; height: 2px; background: var(--border-glow);
+            border-radius: 1px; transition: background .15s;
+        }
+        .rail-resizer:hover { background: var(--accent-dim); }
+        .rail-resizer:hover::before { background: var(--accent); }
+        .signals-rail:not(.open) .rail-resizer { display: none; }
+
+        /* Watchlist items */
+        .wl-item {
+            padding: 10px 14px; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 10px; cursor: pointer;
+            transition: background .15s; text-decoration: none; color: inherit;
+        }
+        .wl-item:hover { background: var(--bg-card-hover); }
+        .wl-sym { font-family: var(--font-display); font-size: 11px; font-weight: 700;
+                  color: var(--text-primary); flex-shrink: 0; min-width: 56px; }
+        .wl-last { font-family: var(--font-mono); font-size: 11px; color: var(--text-primary);
+                   flex: 1; text-align: right; }
+        .wl-chg { font-family: var(--font-mono); font-size: 10px; min-width: 52px; text-align: right; }
+        .wl-chg.up { color: var(--accent); }
+        .wl-chg.down { color: var(--accent-red); }
+        .signals-rail:not(.open) .wl-item { padding: 6px 0; justify-content: center; }
+        .signals-rail:not(.open) .wl-sym { font-size: 9px; min-width: 0; text-align: center; }
+        .signals-rail:not(.open) .wl-last, .signals-rail:not(.open) .wl-chg { display: none; }
+
+        /* ═══════════════════════════════════════════════════════════ */
+        /* UPGRADE-2: Dashboard data headband (rich metrics strip)     */
+        /* ═══════════════════════════════════════════════════════════ */
+        .data-headband {
+            position: fixed; left: var(--sidebar-width); right: 0;
+            top: calc(var(--topbar-height) + 34px + 32px); /* below ticker + info-panel */
+            height: 40px; background: linear-gradient(180deg, var(--bg-primary), var(--bg-void));
+            border-bottom: 1px solid var(--border); z-index: 43;
+            overflow-x: auto; overflow-y: visible; white-space: nowrap;
+            display: flex; align-items: stretch;
+            scrollbar-width: none;
+        }
+        .data-headband::-webkit-scrollbar { display: none; }
+        body:has(.sidebar.mini) .data-headband { left: 68px; }
+        body:has(.signals-rail) .data-headband { right: 44px; }
+        body:has(.signals-rail.open) .data-headband { right: 280px; }
+        @media (max-width: 768px) { .data-headband { left: 0 !important; right: 0 !important; } }
+
+        .dh-item {
+            display: inline-flex; align-items: center; gap: 10px;
+            padding: 0 18px; border-right: 1px solid var(--border);
+            font-family: var(--font-mono); font-size: 11px;
+            position: relative; cursor: pointer; flex-shrink: 0;
+            transition: background .15s;
+        }
+        .dh-item:hover { background: var(--bg-card); }
+        .dh-sym { color: var(--text-muted); font-size: 9px; letter-spacing: 1.5px; font-weight: 700; }
+        .dh-val { color: var(--text-primary); font-weight: 600; }
+        .dh-chg { font-size: 10px; }
+        .dh-chg.up { color: var(--accent); }
+        .dh-chg.down { color: var(--accent-red); }
+        .dh-dot { width: 6px; height: 6px; border-radius: 50%; }
+        .dh-dot.up { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+        .dh-dot.down { background: var(--accent-red); box-shadow: 0 0 6px var(--accent-red); }
+        .dh-dot.flat { background: var(--text-muted); }
+
+        /* Dropdown popup (rich info) */
+        .dh-pop {
+            display: none; position: absolute; top: calc(100% + 2px); left: 0;
+            min-width: 260px; background: var(--bg-card); border: 1px solid var(--border-glow);
+            border-radius: var(--radius-lg); padding: 14px 16px; z-index: 300;
+            box-shadow: 0 12px 40px rgba(0,0,0,.6); white-space: normal;
+            animation: dhPop .18s ease;
+        }
+        @keyframes dhPop { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+        .dh-item:hover .dh-pop { display: block; }
+        .dh-pop-title { font-family: var(--font-display); font-size: 14px; font-weight: 700;
+                        color: var(--accent); margin-bottom: 2px; }
+        .dh-pop-name { font-size: 10px; color: var(--text-muted); margin-bottom: 10px; }
+        .dh-pop-row { display: flex; justify-content: space-between; padding: 4px 0;
+                      font-size: 11px; border-top: 1px dashed var(--border); }
+        .dh-pop-row:first-of-type { border-top: 0; }
+        .dh-pop-row .k { color: var(--text-muted); }
+        .dh-pop-row .v { color: var(--text-primary); }
+        .dh-pop-bar { height: 4px; background: var(--bg-void); border-radius: 2px;
+                      margin-top: 10px; overflow: hidden; }
+        .dh-pop-bar-fill { height: 100%; transition: width .3s; }
+
+        /* Push page content down to make room for the new headband */
+        .page-content { padding-top: 130px !important; }
+
+        /* Enhanced ticker news popup */
+        .ticker-item .ticker-popup { min-width: 320px; }
+        .ticker-item[data-type="news"] .ticker-popup .tp-title { line-height: 1.3; }
+        .ticker-news-meta { display: flex; justify-content: space-between; gap: 10px;
+                            margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border);
+                            font-size: 10px; color: var(--text-muted); }
+        .ticker-news-sent { display: inline-block; padding: 1px 6px; border-radius: 8px;
+                            font-weight: 700; font-size: 9px; }
+        .ticker-news-sent.pos { background: rgba(0,232,104,.12); color: var(--accent); }
+        .ticker-news-sent.neg { background: rgba(232,48,48,.12); color: var(--accent-red); }
+        .ticker-news-sent.neu { background: rgba(136,136,136,.12); color: var(--text-secondary); }
+
+    </style>
+
 </head>
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}">
 
@@ -1112,45 +1340,102 @@
     </main>
 </div>
 
-<!-- Signals Rail (right sidebar) -->
+<!-- Signals Rail (right sidebar) — split: Signals + Watchlist -->
 <div class="signals-rail" id="signalsRail">
-    <div class="signals-rail-toggle" onclick="document.getElementById('signalsRail').classList.toggle('open');localStorage.setItem('sauron_signals_rail',document.getElementById('signalsRail').classList.contains('open')?'open':'closed');">
-        <span class="sr-icon">&#x25C8;</span>
-        <span class="sr-label">SIGNALS</span>
-        <span class="sr-count">{{ panel_signals|default:"0" }}</span>
-    </div>
-    <div class="signals-rail-list">
-        {% for s in panel_recent_signals %}
-        <a href="/signals/" class="sr-signal" style="text-decoration:none;">
-            <div class="sr-dot" style="background:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %};"></div>
-            <div class="sr-detail">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <span class="sr-sym">{{ s.instrument.symbol }}</span>
-                    <span class="sr-dir {{ s.direction }}">{{ s.direction|upper }}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;margin-top:2px;">
-                    <span class="sr-score">Score: {{ s.score|floatformat:2 }}</span>
-                    <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);">{{ s.urgency|default:"—" }}</span>
-                </div>
-                <div class="sr-bar"><div class="sr-bar-fill" style="width:{{ s.score|floatformat:0 }}0%;background:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %};"></div></div>
-            </div>
-            <div class="sr-preview">
-                <div class="tp-title">{{ s.instrument.symbol }}</div>
-                <div class="tp-row"><span class="lbl">Direction</span><span style="color:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %}">{{ s.direction|upper }}</span></div>
-                <div class="tp-row"><span class="lbl">Score</span><span>{{ s.score|floatformat:2 }}</span></div>
-                <div class="tp-row"><span class="lbl">Type</span><span>{{ s.signal_type|default:"—" }}</span></div>
-                <div class="tp-row"><span class="lbl">Urgency</span><span>{{ s.urgency|default:"—" }}</span></div>
-                <div class="tp-row"><span class="lbl">Title</span><span style="font-size:10px;">{{ s.title|default:"—"|truncatechars:40 }}</span></div>
-            </div>
-        </a>
-        {% empty %}
-        <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:11px;">
-            <div style="font-size:20px;margin-bottom:6px;opacity:0.3;">&#x25C8;</div>
-            No active signals
+    <div class="rail-section sig-section" id="railSignals">
+        <div class="rail-head" onclick="(function(){const r=document.getElementById('signalsRail');if(!r.classList.contains('open')){r.classList.add('open');localStorage.setItem('sauron_signals_rail','open');return;}document.getElementById('railSignals').classList.toggle('collapsed');localStorage.setItem('sauron_rail_sig',document.getElementById('railSignals').classList.contains('collapsed')?'1':'0');})()">
+            <span class="rh-icon">&#x25C8;</span>
+            <span class="rh-label">SIGNALS</span>
+            <span class="rh-count">{{ panel_signals|default:"0" }}</span>
+            <span class="rh-chev">▼</span>
         </div>
-        {% endfor %}
+        <div class="rail-body">
+            {% for s in panel_recent_signals %}
+            <a href="/signals/" class="sr-signal" style="text-decoration:none;">
+                <div class="sr-dot" style="background:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %};"></div>
+                <div class="sr-detail">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="sr-sym">{{ s.instrument.symbol }}</span>
+                        <span class="sr-dir {{ s.direction }}">{{ s.direction|upper }}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;margin-top:2px;">
+                        <span class="sr-score">Score: {{ s.score|floatformat:2 }}</span>
+                        <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);">{{ s.urgency|default:"—" }}</span>
+                    </div>
+                    <div class="sr-bar"><div class="sr-bar-fill" style="width:{{ s.score|floatformat:0 }}0%;background:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %};"></div></div>
+                </div>
+            </a>
+            {% empty %}
+            <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:11px;">
+                <div style="font-size:20px;margin-bottom:6px;opacity:0.3;">&#x25C8;</div>
+                No active signals
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="rail-resizer" id="railResizer" title="Drag to resize"></div>
+
+    <div class="rail-section watch-section" id="railWatch">
+        <div class="rail-head" onclick="(function(){const r=document.getElementById('signalsRail');if(!r.classList.contains('open')){r.classList.add('open');localStorage.setItem('sauron_signals_rail','open');return;}document.getElementById('railWatch').classList.toggle('collapsed');localStorage.setItem('sauron_rail_watch',document.getElementById('railWatch').classList.contains('collapsed')?'1':'0');})()">
+            <span class="rh-icon">◉</span>
+            <span class="rh-label">WATCHLIST</span>
+            <span class="rh-count">{{ ui_watchlist|length }}</span>
+            <span class="rh-chev">▼</span>
+        </div>
+        <div class="rail-body" id="railWatchBody">
+            {% for w in ui_watchlist %}
+            <a href="{% url 'instrument_detail' w.symbol %}" class="wl-item">
+                <span class="wl-sym">{{ w.symbol }}</span>
+                <span class="wl-last">{% if w.last %}{{ w.last|floatformat:4 }}{% else %}—{% endif %}</span>
+                <span class="wl-chg {% if w.change_pct >= 0 %}up{% else %}down{% endif %}">
+                    {% if w.change_pct >= 0 %}+{% endif %}{{ w.change_pct|floatformat:2 }}%
+                </span>
+            </a>
+            {% empty %}
+            <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:11px;">
+                <div style="font-size:20px;margin-bottom:6px;opacity:0.3;">◉</div>
+                Watchlist empty.<br>
+                <span style="font-size:10px;">Mark instruments as watchlist in the Instruments page.</span>
+            </div>
+            {% endfor %}
+        </div>
     </div>
 </div>
+
+<script>
+/* Rail state restore + resizer */
+(function(){
+  const rail = document.getElementById('signalsRail');
+  if (!rail) return;
+  if (localStorage.getItem('sauron_signals_rail') === 'open') rail.classList.add('open');
+  if (localStorage.getItem('sauron_rail_sig')   === '1') document.getElementById('railSignals')?.classList.add('collapsed');
+  if (localStorage.getItem('sauron_rail_watch') === '1') document.getElementById('railWatch')?.classList.add('collapsed');
+
+  const sigPct = parseFloat(localStorage.getItem('sauron_rail_sig_pct') || '50');
+  const sig  = document.getElementById('railSignals');
+  const watch = document.getElementById('railWatch');
+  if (sig && watch) { sig.style.flex = `1 1 ${sigPct}%`; watch.style.flex = `1 1 ${100-sigPct}%`; }
+
+  const rz = document.getElementById('railResizer');
+  if (rz) {
+    let dragging = false, startY = 0, startPct = sigPct;
+    rz.addEventListener('mousedown', e => { dragging = true; startY = e.clientY;
+      startPct = parseFloat(sig.style.flex.split(' ')[2]) || 50;
+      document.body.style.userSelect = 'none'; e.preventDefault(); });
+    window.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const rect = rail.getBoundingClientRect();
+      const dy = e.clientY - startY;
+      const deltaPct = (dy / rect.height) * 100;
+      let pct = Math.max(15, Math.min(85, startPct + deltaPct));
+      sig.style.flex = `1 1 ${pct}%`; watch.style.flex = `1 1 ${100-pct}%`;
+      localStorage.setItem('sauron_rail_sig_pct', pct.toFixed(1));
+    });
+    window.addEventListener('mouseup', () => { dragging = false; document.body.style.userSelect = ''; });
+  }
+})();
+</script>
 
 <!-- Sidebar expand tab (visible when menu is minimized) -->
 <div class="sidebar-expand-tab" onclick="toggleSidebar()" title="Expand menu">
@@ -1324,5 +1609,95 @@ document.addEventListener('click', function(e) {
 </script>
 
 {% block extra_js %}{% endblock %}
+<script>
+/* UPGRADE-3: WebSocket live ticks.
+   Opens a persistent socket to /ws/dashboard/ and updates the headband
+   + watchlist DOM in-place. Gracefully degrades to the 15s poller if
+   the socket can't connect or drops permanently. */
+(function(){
+  if (window.__sauronWS) return;
+  window.__sauronWS = true;
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const url = `${proto}//${location.host}/ws/dashboard/`;
+  let ws = null, retries = 0, alive = false;
+
+  function applyTick(d) {
+    if (!d || !d.symbol) return;
+    const sym = (d.symbol || "").toUpperCase();
+    const pct = +d.change_pct || 0;
+    const last = +d.last || 0;
+
+    // 1. Dashboard headband
+    document.querySelectorAll(`.dh-item[data-symbol="${sym}"]`).forEach(el => {
+      const val = el.querySelector('.dh-val');
+      const chg = el.querySelector('.dh-chg');
+      const dot = el.querySelector('.dh-dot');
+      if (val) { val.textContent = last.toFixed(2); flash(val); }
+      if (chg) {
+        const sign = pct >= 0 ? '+' : '';
+        chg.textContent = `${sign}${pct.toFixed(2)}%`;
+        chg.className = 'dh-chg ' + (pct >= 0 ? 'up' : 'down');
+      }
+      if (dot) dot.className = 'dh-dot ' + (pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat');
+    });
+
+    // 2. Watchlist rail
+    document.querySelectorAll('.wl-item').forEach(el => {
+      const symEl = el.querySelector('.wl-sym');
+      if (!symEl || symEl.textContent.trim().toUpperCase() !== sym) return;
+      const lastEl = el.querySelector('.wl-last');
+      const chgEl = el.querySelector('.wl-chg');
+      if (lastEl) { lastEl.textContent = last.toFixed(4); flash(lastEl); }
+      if (chgEl) {
+        const sign = pct >= 0 ? '+' : '';
+        chgEl.textContent = `${sign}${pct.toFixed(2)}%`;
+        chgEl.className = 'wl-chg ' + (pct >= 0 ? 'up' : 'down');
+      }
+    });
+
+    // 3. Ticker bar price items
+    document.querySelectorAll('.ticker-item').forEach(el => {
+      const s = el.querySelector('.t-sym');
+      if (!s || s.textContent.trim().toUpperCase() !== sym) return;
+      const p = el.querySelector('.t-price');
+      const c = el.querySelector('.t-change');
+      if (p) p.textContent = last.toFixed(2);
+      if (c) {
+        c.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+        c.className = 't-change ' + (pct >= 0 ? 'up' : 'down');
+      }
+    });
+  }
+
+  function flash(el) {
+    el.style.transition = 'color .1s, text-shadow .1s';
+    el.style.textShadow = '0 0 8px currentColor';
+    setTimeout(() => { el.style.textShadow = ''; }, 250);
+  }
+
+  function connect() {
+    try { ws = new WebSocket(url); } catch(e) { scheduleReconnect(); return; }
+    ws.onopen = () => { retries = 0; alive = true;
+      console.log('[sauron] live WS connected'); };
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'quote_stream' || msg.type === 'quote') applyTick(msg.data);
+      } catch(e) {}
+    };
+    ws.onclose = () => { alive = false; scheduleReconnect(); };
+    ws.onerror = () => { try { ws.close(); } catch(e){} };
+  }
+
+  function scheduleReconnect() {
+    retries = Math.min(retries + 1, 6);
+    const delay = Math.min(30000, 1000 * Math.pow(2, retries)) + Math.random() * 500;
+    setTimeout(connect, delay);
+  }
+
+  connect();
+})();
+</script>
 </body>
 </html>

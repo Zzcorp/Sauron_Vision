@@ -50,6 +50,13 @@ class DashboardConsumer(AsyncWebsocketConsumer):
             "data": event["data"],
         }))
 
+    async def quote_stream(self, event):
+        """Push real-time quote tick from Binance streamer."""
+        await self.send(text_data=json.dumps({
+            "type": "quote_stream",
+            "data": event["data"],
+        }))
+
     async def strategy_update(self, event):
         """Push strategy change."""
         await self.send(text_data=json.dumps({
@@ -85,6 +92,21 @@ def push_signal_notification(signal_data):
             "dashboard_live",
             {"type": "signal_fired", "data": signal_data}
         )
+
+
+def push_stream_update(symbol, last, change_pct, bid=0, ask=0, volume=0):
+    """Broadcast a single live tick to all connected browsers."""
+    from channels.layers import get_channel_layer
+    from asgiref.sync import async_to_sync
+    layer = get_channel_layer()
+    if not layer:
+        return
+    async_to_sync(layer.group_send)(
+        "dashboard_live",
+        {"type": "quote_stream",
+         "data": {"symbol": symbol, "last": last, "change_pct": change_pct,
+                  "bid": bid, "ask": ask, "volume": volume}},
+    )
 
 
 def push_news_notification(article_data):

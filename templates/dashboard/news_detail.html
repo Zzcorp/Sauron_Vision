@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}{{ article.title|truncatechars:60 }} — Sauron Vision{% endblock %}
+{% block page_title %}▤ NEWS ANALYSIS{% endblock %}
+{% block content %}
+<div class="page-content fade-in nd-wrap">
+  <a href="{% url 'news_feed' %}" class="btn btn-ghost btn-sm">← Back to feed</a>
+
+  <div class="nd-grid">
+    <div class="nd-main">
+      <div class="card nd-article">
+        <div class="nd-meta">
+          <span class="nd-source">{{ article.source }}</span>
+          <span class="nd-dot">·</span>
+          <span>{{ article.published_at|date:"M d, Y · H:i" }}</span>
+          <span class="nd-dot">·</span>
+          <span>{{ article.published_at|timesince }} ago</span>
+        </div>
+        <h1 class="nd-title">{{ article.title }}</h1>
+        {% if article.url %}
+          <a href="{{ article.url }}" target="_blank" rel="noopener" class="btn btn-primary btn-sm" style="margin:10px 0 18px;">
+            ↗ OPEN ORIGINAL SOURCE
+          </a>
+        {% endif %}
+
+        <div class="nd-section">
+          <div class="nd-section-title">OVERVIEW</div>
+          <div class="nd-body">
+            {% if article.ai_summary %}{{ article.ai_summary|linebreaks }}
+            {% elif article.content_summary %}{{ article.content_summary|linebreaks }}
+            {% else %}<em style="color:var(--text-muted);">No summary available. Click "OPEN ORIGINAL SOURCE" to read the full article.</em>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if key_points %}
+        <div class="nd-section">
+          <div class="nd-section-title">KEY POINTS</div>
+          <ul class="nd-points">
+            {% for p in key_points %}<li><span class="nd-bullet">▸</span> {{ p }}</li>{% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+
+        {% if article.raw_content and article.raw_content != article.content_summary %}
+        <div class="nd-section">
+          <div class="nd-section-title">FULL CONTENT</div>
+          <div class="nd-body nd-raw">{{ article.raw_content|linebreaks }}</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <aside class="nd-side">
+      <!-- Impact card -->
+      <div class="card nd-impact">
+        <div class="nd-card-title">IMPACT CLASSIFICATION</div>
+        <div class="nd-stars">
+          {% for i in "12345" %}
+            {% if forloop.counter <= impact.stars %}<span class="star on">★</span>{% else %}<span class="star">☆</span>{% endif %}
+          {% endfor %}
+        </div>
+        <div class="nd-impact-label">{{ impact.label }}</div>
+        <div class="nd-ring-wrap">
+          <div class="nd-ring" style="--pct:{{ impact.percent }};">
+            <svg viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" class="ring-bg"/>
+              <circle cx="50" cy="50" r="42" class="ring-fg"
+                      style="stroke-dasharray:{{ impact.percent }} 264;"/>
+            </svg>
+            <div class="nd-ring-val">{{ impact.percent }}%</div>
+            <div class="nd-ring-lbl">RELEVANCE</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sentiment -->
+      <div class="card">
+        <div class="nd-card-title">SENTIMENT</div>
+        <div class="nd-sent-label
+          {% if sentiment > 0.2 %}pos{% elif sentiment < -0.2 %}neg{% else %}neu{% endif %}">
+          {{ sentiment_label|upper }}
+        </div>
+        <div class="nd-sent-score">{{ sentiment|floatformat:2 }}</div>
+        <div class="nd-sent-bar">
+          <div class="nd-sent-mid"></div>
+          <div class="nd-sent-fill" style="left:{{ sentiment_pct }}%;
+            background:{% if sentiment > 0.2 %}var(--accent){% elif sentiment < -0.2 %}var(--accent-red){% else %}var(--text-muted){% endif %};"></div>
+        </div>
+        <div class="nd-sent-axis"><span>-1</span><span>0</span><span>+1</span></div>
+        {% if article.ai_urgency %}
+        <div class="nd-kv" style="margin-top:14px;">
+          <span>Urgency</span><span class="badge badge-{{ article.ai_urgency }}">{{ article.ai_urgency|upper }}</span>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Affected instruments -->
+      {% if affected %}
+      <div class="card">
+        <div class="nd-card-title">AFFECTED INSTRUMENTS</div>
+        <div class="nd-chips">
+          {% for inst in affected %}
+            <a href="{% url 'instrument_detail' inst.symbol %}" class="nd-chip">{{ inst.symbol }}</a>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Related news -->
+      {% if related %}
+      <div class="card">
+        <div class="nd-card-title">RELATED</div>
+        {% for r in related %}
+          <a href="{% url 'news_detail' r.id %}" class="nd-related">
+            <div class="nd-related-t">{{ r.title|truncatechars:70 }}</div>
+            <div class="nd-related-m">{{ r.source }} · {{ r.published_at|timesince }} ago</div>
+          </a>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </aside>
+  </div>
+</div>
+
+{% block extra_css %}
+<style>
+  .nd-wrap { max-width: 1400px; }
+  .nd-grid { display: grid; grid-template-columns: 1fr 340px; gap: 22px; margin-top: 16px; }
+  @media (max-width: 1100px) { .nd-grid { grid-template-columns: 1fr; } }
+  .nd-article { padding: 28px 32px; }
+  .nd-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); letter-spacing: 1px; }
+  .nd-source { color: var(--accent); font-weight: 700; }
+  .nd-dot { margin: 0 8px; opacity: .5; }
+  .nd-title { font-family: var(--font-heading); font-size: 28px; font-weight: 700;
+              color: var(--text-primary); line-height: 1.25; margin: 12px 0 6px; }
+  .nd-section { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+  .nd-section-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 3px;
+                      color: var(--accent); margin-bottom: 12px; text-transform: uppercase; }
+  .nd-body { font-size: 15px; line-height: 1.7; color: var(--text-primary); }
+  .nd-raw { max-height: 520px; overflow-y: auto; padding-right: 8px; }
+  .nd-points { list-style: none; padding: 0; }
+  .nd-points li { padding: 8px 0; border-bottom: 1px dashed var(--border);
+                  color: var(--text-primary); font-size: 14px; line-height: 1.5; }
+  .nd-bullet { color: var(--accent); margin-right: 8px; }
+
+  .nd-side .card { margin-bottom: 18px; }
+  .nd-card-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 3px;
+                   color: var(--text-muted); margin-bottom: 14px; }
+
+  .nd-stars { text-align: center; font-size: 28px; letter-spacing: 4px; }
+  .nd-stars .star { color: var(--border-glow); }
+  .nd-stars .star.on { color: var(--accent-gold); text-shadow: 0 0 14px rgba(216,176,32,.5); }
+  .nd-impact-label { text-align: center; font-family: var(--font-display); font-size: 14px;
+                     letter-spacing: 3px; color: var(--accent); margin-top: 6px; }
+
+  .nd-ring-wrap { display: flex; justify-content: center; margin-top: 18px; }
+  .nd-ring { position: relative; width: 140px; height: 140px; }
+  .nd-ring svg { transform: rotate(-90deg); width: 100%; height: 100%; }
+  .nd-ring .ring-bg { fill: none; stroke: var(--border); stroke-width: 8; }
+  .nd-ring .ring-fg { fill: none; stroke: var(--accent); stroke-width: 8;
+                      stroke-linecap: round; transition: stroke-dasharray .8s ease; }
+  .nd-ring-val { position: absolute; inset: 0; display: flex; align-items: center;
+                 justify-content: center; font-family: var(--font-display);
+                 font-size: 26px; font-weight: 900; color: var(--text-primary); }
+  .nd-ring-lbl { position: absolute; bottom: 18px; left: 0; right: 0; text-align: center;
+                 font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px;
+                 color: var(--text-muted); }
+
+  .nd-sent-label { text-align: center; font-family: var(--font-display);
+                   font-size: 18px; letter-spacing: 4px; margin-bottom: 4px; }
+  .nd-sent-label.pos { color: var(--accent); }
+  .nd-sent-label.neg { color: var(--accent-red); }
+  .nd-sent-label.neu { color: var(--text-secondary); }
+  .nd-sent-score { text-align: center; font-family: var(--font-mono);
+                   font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+  .nd-sent-bar { position: relative; height: 10px; background: var(--bg-void);
+                 border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
+  .nd-sent-mid { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px;
+                 background: var(--border-glow); }
+  .nd-sent-fill { position: absolute; top: 0; width: 4px; height: 100%;
+                  border-radius: 2px; transform: translateX(-50%); box-shadow: 0 0 10px currentColor; }
+  .nd-sent-axis { display: flex; justify-content: space-between; margin-top: 4px;
+                  font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); }
+
+  .nd-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .nd-chip { padding: 4px 10px; background: var(--accent-dim); color: var(--accent);
+             border-radius: 10px; font-family: var(--font-mono); font-size: 11px;
+             text-decoration: none; transition: all .15s; }
+  .nd-chip:hover { background: var(--accent); color: var(--bg-void); }
+
+  .nd-related { display: block; padding: 10px 0; border-bottom: 1px solid var(--border);
+                text-decoration: none; }
+  .nd-related:last-child { border-bottom: 0; }
+  .nd-related-t { color: var(--text-primary); font-size: 12px; line-height: 1.4; }
+  .nd-related-m { color: var(--text-muted); font-size: 10px; font-family: var(--font-mono); margin-top: 3px; }
+  .nd-related:hover .nd-related-t { color: var(--accent); }
+
+  .nd-kv { display: flex; justify-content: space-between; font-family: var(--font-mono);
+           font-size: 11px; color: var(--text-secondary); }
+</style>
+{% endblock %}
+{% endblock %}

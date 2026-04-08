@@ -16,7 +16,7 @@
         <tr>
             <td style="font-size: 11px; color: var(--text-muted); white-space: nowrap;">{{ a.published_at|date:"M d H:i" }}</td>
             <td style="font-size: 12px;">{{ a.source }}</td>
-            <td><a href="{{ a.url }}" target="_blank" style="color: var(--text-primary); text-decoration: none;">{{ a.title|truncatechars:70 }}</a></td>
+            <td><a href="{% url 'news_detail' a.id %}" style="color: var(--text-primary); text-decoration: none;">{{ a.title|truncatechars:70 }}</a> <a href="{{ a.url }}" target="_blank" style="color:var(--text-muted);font-size:10px;margin-left:6px;">↗</a></td>
             <td>
                 {% if a.ai_sentiment_score != None %}
                 <span style="font-family: var(--font-mono); color: {% if a.ai_sentiment_score > 0.2 %}var(--accent-green){% elif a.ai_sentiment_score < -0.2 %}var(--accent-red){% else %}var(--text-secondary){% endif %};">
