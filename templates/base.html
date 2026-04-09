@@ -607,36 +607,64 @@
         .ticker-item .t-badge.signal { background: var(--accent-dim); color: var(--accent); }
         .ticker-item .t-badge.news { background: rgba(48,160,232,0.12); color: var(--accent-blue); }
         .ticker-item .t-badge.strat { background: rgba(136,64,208,0.12); color: var(--accent-purple); }
-        /* Ticker popup on hover */
+        /* Ticker popup on hover — fixed position, anchored by JS */
         .ticker-popup {
-            display: none; position: absolute; top: 36px; left: 0;
-            min-width: 240px; background: var(--bg-card); border: 1px solid var(--border);
-            border-radius: var(--radius-lg); padding: 12px; z-index: 250;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.5); font-size: 11px;
-            white-space: normal; animation: previewFadeIn 0.15s ease;
+            display: none; position: fixed;
+            min-width: 280px; max-width: 420px; background: var(--bg-card);
+            border: 1px solid var(--border-glow);
+            border-radius: var(--radius-lg); padding: 14px; z-index: 1000;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.7); font-size: 11px;
+            white-space: normal; pointer-events: none;
         }
-        .ticker-item:hover .ticker-popup { display: block; }
+        .ticker-item.tp-open .ticker-popup { display: block; animation: dhPop .18s ease; }
         .ticker-popup .tp-title { font-family: var(--font-display); font-size: 13px; font-weight: 700; margin-bottom: 6px; color: var(--accent); }
         .ticker-popup .tp-row { display: flex; justify-content: space-between; padding: 3px 0; }
         .ticker-popup .tp-row .lbl { color: var(--text-muted); }
 
-        /* UPGRADE-9: info panel — taller, scrollable, richer */
+        /* UPGRADE-9: info panel — bottom-docked, minimizable */
         .info-panel-wrap {
-            position: fixed; top: calc(var(--topbar-height) + 34px + 42px);
-            left: var(--sidebar-width); right: 0;
-            z-index: 44; background: var(--bg-primary);
-            border-bottom: 1px solid var(--border);
+            position: fixed; bottom: 0; left: var(--sidebar-width); right: 0;
+            z-index: 90; background: linear-gradient(0deg, var(--bg-primary), rgba(6,14,10,0.97));
+            border-top: 1px solid var(--border);
             overflow: visible;
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
+        .info-panel-wrap.minimized { transform: translateY(100%); }
         body.page-dashboard .info-panel-wrap { display: none; }
         body:has(.sidebar.mini) .info-panel-wrap { left: 68px; }
         body:has(.signals-rail) .info-panel-wrap { right: 44px; }
         body:has(.signals-rail.open) .info-panel-wrap { right: 280px; }
-        .info-panel-scroll { height: 56px; overflow-x: auto; overflow-y: visible; scrollbar-width: none; }
+        .info-panel-scroll { height: 60px; overflow-x: auto; overflow-y: visible; scrollbar-width: none; }
         .info-panel-scroll::-webkit-scrollbar { display: none; }
-        .info-panel-bar { display: flex; height: 56px; overflow: visible; min-width: max-content; }
+        .info-panel-bar { display: flex; height: 60px; overflow: visible; min-width: max-content; }
+        /* Minimize toggle tab */
+        .ip-minimize-tab {
+            position: absolute; top: -28px; left: 50%; transform: translateX(-50%);
+            width: 64px; height: 28px; background: linear-gradient(0deg, var(--bg-primary), var(--bg-card));
+            border: 1px solid var(--border); border-bottom: none;
+            border-radius: 8px 8px 0 0; cursor: pointer; z-index: 3;
+            display: flex; align-items: center; justify-content: center;
+            color: var(--text-muted); transition: all 0.25s;
+        }
+        .ip-minimize-tab:hover { color: var(--accent); border-color: var(--accent-dim); background: var(--bg-card); }
+        .ip-minimize-tab svg { width: 16px; height: 16px; transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+        .info-panel-wrap.minimized .ip-minimize-tab svg { transform: rotate(180deg); }
+        /* Floating restore pill when minimized */
+        .ip-restore-pill {
+            position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+            padding: 6px 18px; background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 20px; cursor: pointer; z-index: 89;
+            display: none; align-items: center; gap: 8px;
+            font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px;
+            color: var(--text-muted); transition: all 0.3s;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            animation: ipPillFadeIn 0.3s ease;
+        }
+        .ip-restore-pill.visible { display: inline-flex; }
+        .ip-restore-pill:hover { border-color: var(--accent); color: var(--accent); }
+        @keyframes ipPillFadeIn { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
         .ip-arrow {
-            position: absolute; top: 0; width: 28px; height: 56px;
+            position: absolute; top: 0; width: 28px; height: 60px;
             display: flex; align-items: center; justify-content: center;
             color: var(--accent); cursor: pointer; z-index: 3;
             opacity: 0; transition: opacity .2s; font-size: 13px;
@@ -652,7 +680,7 @@
             padding: 4px 16px; border-right: 1px solid var(--border);
             font-family: var(--font-mono);
             color: var(--text-muted); cursor: default;
-            white-space: nowrap; transition: all 0.15s; min-height: 56px;
+            white-space: nowrap; transition: all 0.15s; min-height: 60px;
         }
         .ip-cat:hover { background: var(--bg-card); }
         .ip-cat .ip-label { font-size: 8px; letter-spacing: 1.5px; color: var(--text-muted); text-transform: uppercase; }
@@ -668,8 +696,8 @@
             display: none; position: fixed;
             min-width: 320px; max-width: 360px; max-height: 380px; overflow-y: auto;
             background: var(--bg-card); border: 1px solid var(--border-glow);
-            border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-            box-shadow: 0 12px 40px rgba(0,0,0,0.7); z-index: 1000;
+            border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+            box-shadow: 0 -12px 40px rgba(0,0,0,0.7); z-index: 1000;
             padding: 10px 0; white-space: normal;
             pointer-events: none;
         }
@@ -875,9 +903,9 @@
             color: var(--accent); transition: all .25s; box-shadow: 2px 0 12px rgba(0,0,0,.4);
         }
         .sidebar-toggle-btn:hover { background: var(--bg-card-hover); width: 32px; }
-        .sidebar-toggle-btn svg { width: 14px; height: 14px; transition: transform .3s; }
+        .sidebar-toggle-btn svg { width: 14px; height: 14px; transition: transform .4s cubic-bezier(0.4, 0, 0.2, 1); transform: rotate(180deg); }
         body:has(.sidebar.mini) .sidebar-toggle-btn { left: 68px; }
-        body:has(.sidebar.mini) .sidebar-toggle-btn svg { transform: rotate(180deg); }
+        body:has(.sidebar.mini) .sidebar-toggle-btn svg { transform: rotate(0deg); }
         @media (max-width: 768px) { .sidebar-toggle-btn { display: none; } }
         /* Ensure rail toggle has the same design (pass 6 / fallback) */
         .rail-toggle-btn {
@@ -1161,9 +1189,9 @@
         .dh-pop-cta { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
                       font-size: 10px; color: var(--accent); text-align: right; }
 
-        /* Push page content down to make room for the headbands */
-        .page-content { padding-top: 200px !important; }
-        body.page-dashboard .page-content { padding-top: 140px !important; }
+        /* Push page content down for headbands (topbar 56 + ticker 34 + data headband 42) */
+        .page-content { padding-top: 148px !important; padding-bottom: 80px !important; }
+        body.page-dashboard .page-content { padding-bottom: 28px !important; }
 
         /* Enhanced ticker news popup */
         .ticker-item .ticker-popup { min-width: 320px; }
@@ -1599,9 +1627,12 @@
 
         <!-- Info Bar (fixed, labels always visible, hover for dropdowns) -->
         <!-- UPGRADE-9: info panel rebuilt -->
-        <div class="info-panel-wrap">
-            <button type="button" class="ip-arrow left" aria-label="Scroll left">◀</button>
-            <button type="button" class="ip-arrow right" aria-label="Scroll right">▶</button>
+        <div class="info-panel-wrap" id="infoPanelWrap">
+            <div class="ip-minimize-tab" id="ipMinTab" title="Minimize panel">
+                <svg viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <button type="button" class="ip-arrow left" aria-label="Scroll left">&#9664;</button>
+            <button type="button" class="ip-arrow right" aria-label="Scroll right">&#9654;</button>
             <div class="info-panel-scroll" id="ipScroll">
             <div class="info-panel-bar">
                 <a href="{% url 'portfolio_overview' %}" class="ip-cat ip-cat-link">
@@ -1761,6 +1792,10 @@
                 </a>
             </div>
             </div>
+        </div>
+        <div class="ip-restore-pill" id="ipRestorePill">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 10l4-4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            SHOW PANEL
         </div>
 
 
@@ -2230,6 +2265,30 @@ document.addEventListener('click', function(e) {
     });
   }
 
+  // Ticker popup escape: position as fixed, anchored to hovered item
+  function positionTickerPop(item){
+    var pop = item.querySelector('.ticker-popup'); if(!pop) return;
+    var r = item.getBoundingClientRect();
+    pop.style.top = (r.bottom + 4) + 'px';
+    var w = 420;
+    var left = r.left;
+    if (left + w > window.innerWidth - 16) left = window.innerWidth - w - 16;
+    if (left < 16) left = 16;
+    pop.style.left = left + 'px';
+  }
+  document.querySelectorAll('.ticker-bar .ticker-item').forEach(function(item){
+    item.addEventListener('mouseenter', function(){
+      item.classList.add('tp-open');
+      positionTickerPop(item);
+    });
+    item.addEventListener('mouseleave', function(){
+      item.classList.remove('tp-open');
+    });
+  });
+  window.addEventListener('scroll', function(){
+    document.querySelectorAll('.ticker-bar .ticker-item.tp-open').forEach(positionTickerPop);
+  }, true);
+
   // Ticker bar hover arrows
   var tTrack = document.getElementById('tickerTrack');
   if (tTrack) {
@@ -2288,13 +2347,18 @@ document.addEventListener('click', function(e) {
     });
   }
 
-  // Info panel dropdown positioning (fixed, escape clip)
+  // Info panel dropdown positioning (fixed, escape clip — opens UPWARD)
   document.querySelectorAll('.info-panel-wrap .ip-cat').forEach(function(cat){
     var dd = cat.querySelector('.ip-dropdown');
     if(!dd) return;
     cat.addEventListener('mouseenter', function(){
       var r = cat.getBoundingClientRect();
-      dd.style.top = (r.bottom + 2) + 'px';
+      // Temporarily show to measure height
+      dd.style.visibility = 'hidden'; dd.style.display = 'block';
+      var ddH = dd.offsetHeight;
+      dd.style.display = ''; dd.style.visibility = '';
+      // Position above the panel
+      dd.style.top = ''; dd.style.bottom = (window.innerHeight - r.top + 2) + 'px';
       var left = r.left;
       var w = 340;
       if(left + w > window.innerWidth - 16) left = window.innerWidth - w - 16;
@@ -2302,6 +2366,26 @@ document.addEventListener('click', function(e) {
       dd.style.left = left + 'px';
     });
   });
+
+  // Info panel minimize / restore toggle
+  (function(){
+    var wrap = document.getElementById('infoPanelWrap');
+    var tab = document.getElementById('ipMinTab');
+    var pill = document.getElementById('ipRestorePill');
+    if(!wrap || !tab || !pill) return;
+    // Restore saved state
+    if(localStorage.getItem('ipMinimized') === '1'){
+      wrap.classList.add('minimized');
+      pill.classList.add('visible');
+    }
+    function toggle(){
+      var min = wrap.classList.toggle('minimized');
+      pill.classList.toggle('visible', min);
+      localStorage.setItem('ipMinimized', min ? '1' : '0');
+    }
+    tab.addEventListener('click', toggle);
+    pill.addEventListener('click', toggle);
+  })();
 
   // Ticker bar arrows: show only if content available on that side
   var tbArrowL = document.querySelector('.ticker-bar .tb-arrow.left');

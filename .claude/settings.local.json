@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -c ':*)"
+      "Bash(python -c ':*)",
+      "Read(//c/Users/mathe/PycharmProjects/zz_corp/Sauron_Vision/SAURON_V/**)"
     ]
   }
 }
