@@ -6,16 +6,17 @@ databases:
     user: sauron
 
 services:
-  # Django Web
+  # Django Web (ASGI via Daphne)
   - type: web
     name: sauron-web
     runtime: python
     plan: pro
     buildCommand: "./build.sh"
-    startCommand: "gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 4 --timeout 120"
+    startCommand: "daphne -b 0.0.0.0 -p $PORT config.asgi:application"
+    healthCheckPath: "/login/"
     envVars:
       - key: SECRET_KEY
-        generateValue: true
+        sync: false                    # set manually in dashboard, never regenerate
       - key: DEBUG
         value: "False"
       - key: ALLOWED_HOSTS
@@ -31,6 +32,8 @@ services:
           property: connectionString
       - key: PYTHON_VERSION
         value: "3.12.3"
+      - key: WEB_CONCURRENCY
+        value: "2"
       - fromGroup: sauron-env
 
   # Celery Fast Worker
