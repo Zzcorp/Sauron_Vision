@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /c/Users/mathe/PycharmProjects/zz_corp/Sauron_Vision/SAURON_V/sauron_vision/templates/**/*.html)"
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+# Dev-only dependencies (not needed on Render)
+-r requirements.txt
+
+ipython>=8.28
+django-extensions>=3.2

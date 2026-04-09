@@ -1,11 +1,15 @@
 {% extends "base.html" %}
 {% block title %}New Strategy - Sauron Vision{% endblock %}
 {% block content %}
-<div class="container" style="max-width:780px;margin:40px auto;">
-  <h2 style="font-family:var(--font-heading);color:var(--accent);text-transform:uppercase;letter-spacing:0.1em;">
-    Create new strategy
-  </h2>
-  <p style="color:var(--text-secondary);">Define a strategy framework and add legs for the instruments it covers.</p>
+<div style="max-width:780px;margin:0 auto;">
+  <div class="card">
+  <div class="card-header">
+    <div class="card-title">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      Create new strategy
+    </div>
+  </div>
+  <p style="color:var(--text-secondary);margin-bottom:18px;">Define a strategy framework and add legs for the instruments it covers.</p>
 
   <form id="wizard-form" onsubmit="event.preventDefault(); submitWizard();">
     {% csrf_token %}
@@ -73,11 +77,12 @@
     <input type="hidden" name="legs_json" id="legs-json" value="[]">
 
     <div id="wizard-error" style="color:var(--accent-red);font-size:0.85rem;margin:16px 0;display:none;"></div>
-    <div style="display:flex;gap:12px;margin-top:24px;">
+    <div class="form-actions">
       <button type="submit" class="btn btn-primary">Create strategy</button>
       <a href="/strategies/" class="btn">Cancel</a>
     </div>
   </form>
+  </div>
 </div>
 
 <style>

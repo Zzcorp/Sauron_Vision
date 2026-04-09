@@ -3,12 +3,18 @@ set -o errexit
 echo "SAURON VISION — Build starting..."
 
 pip install --upgrade pip
-pip install -r requirements.txt
+
+# Use Render's pip cache directory if available
+if [ -d "/opt/render/.cache/pip" ]; then
+  pip install --cache-dir /opt/render/.cache/pip -r requirements.txt
+else
+  pip install -r requirements.txt
+fi
 
 python manage.py collectstatic --no-input
 python manage.py migrate --no-input
 
-# Seed data on first deploy
+# Seed data on first deploy (idempotent — skips existing rows)
 python manage.py seed_instruments 2>/dev/null || true
 python manage.py seed_components 2>/dev/null || true
 

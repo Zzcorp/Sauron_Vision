@@ -89,6 +89,11 @@
             position: fixed; top: 0; left: 0;
             width: 100%; height: 100%; z-index: 0; pointer-events: none;
         }
+        #caustics-canvas {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%; z-index: 0; pointer-events: none;
+            opacity: 0.035; mix-blend-mode: screen;
+        }
         .app-layout { display: flex; min-height: 100vh; position: relative; z-index: 1; }
 
         /* ── Sidebar ─────────────────────────────── */
@@ -163,13 +168,7 @@
         .status-dot.online { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
         .page-content { padding: 28px; max-width: 100%; box-sizing: border-box; }
 
-        /* ── Cards ────────────────────────────────── */
-        .card {
-            background: var(--bg-card); border: 1px solid var(--border);
-            border-radius: var(--radius-lg); padding: 20px;
-            box-shadow: var(--shadow-card); transition: all 0.25s;
-        }
-        .card:hover { border-color: var(--border-glow); box-shadow: var(--shadow-glow); }
+        /* ── Cards (base — overridden by unified card system below) ── */
         .card-header {
             display: flex; justify-content: space-between; align-items: center;
             margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border);
@@ -191,11 +190,7 @@
             .grid-2,.grid-3,.grid-4,.grid-5,.grid-6,.grid-sidebar { grid-template-columns: 1fr; }
             .sidebar { transform: translateX(-100%); } .main-content { margin-left: 0 !important; }
         }
-        .stat-box {
-            background: var(--bg-card); border: 1px solid var(--border);
-            border-radius: var(--radius-lg); padding: 16px 18px; transition: all 0.25s;
-        }
-        .stat-box:hover { border-color: var(--border-glow); transform: translateY(-2px); }
+        /* stat-box — handled by unified card system */
         .stat-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px; }
         .stat-value { font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--text-primary); }
         .stat-sub { font-family: var(--font-mono); font-size: 11px; margin-top: 3px; color: var(--text-secondary); }
@@ -230,8 +225,7 @@
         .score-bar { height: 6px; background: var(--bg-void); border-radius: 3px; overflow: hidden; margin-top: 6px; }
         .score-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
 
-        .signal-item { padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); margin-bottom: 10px; transition: all 0.3s cubic-bezier(.2,.8,.2,1); cursor: pointer; position: relative; overflow: hidden; background: linear-gradient(145deg, var(--bg-card), rgba(8,20,16,0.9)); }
-        .signal-item:hover { border-color: var(--border-glow); background: var(--bg-card-hover); transform: translateY(-2px); box-shadow: 0 4px 30px rgba(0,0,0,0.4), 0 0 1px rgba(0,232,104,0.1); }
+        /* signal-item box — handled by unified card system */
         .signal-item .signal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
         .signal-item .signal-symbol { font-family: var(--font-display); font-size: 14px; font-weight: 600; }
         .signal-item .signal-desc { font-size: 13px; color: var(--text-secondary); }
@@ -295,6 +289,7 @@
         body.light-mode .globe-eye-bg * { stroke: #00994d !important; }
         body.light-mode .globe-eye-bg circle[fill="#00e868"] { fill: #00994d !important; }
         body.light-mode #particles-canvas { opacity: 0.4; }
+        body.light-mode #caustics-canvas { opacity: 0.02; }
 
         
 
@@ -1006,27 +1001,7 @@
                        letter-spacing: 2.5px; color: var(--text-muted); text-transform: uppercase; }
         .input-hint { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
 
-        /* Polished metric card (unified with card/stat-box hover) */
-        .metric {
-            background: linear-gradient(145deg, var(--bg-card), rgba(8,20,16,0.9));
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg); padding: 18px 20px;
-            position: relative; overflow: hidden;
-            transition: all 0.3s cubic-bezier(.2,.8,.2,1);
-        }
-        .metric::after {
-            content: ""; position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
-            background: linear-gradient(90deg, transparent, var(--accent-dim), transparent);
-            opacity: 0; transition: opacity .3s;
-        }
-        .metric::before {
-            content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
-            background: linear-gradient(90deg, transparent, rgba(0,232,104,0.15), transparent);
-            opacity: 0; transition: opacity 0.3s;
-        }
-        .metric:hover { border-color: var(--border-glow); transform: translateY(-2px);
-                        box-shadow: 0 4px 30px rgba(0,0,0,0.4), 0 0 1px rgba(0,232,104,0.1); }
-        .metric:hover::after, .metric:hover::before { opacity: 1; }
+        /* metric label/value/sub (layout only — box handled by unified card system) */
         .metric-label { font-family: var(--font-mono); font-size: 9px;
                         letter-spacing: 2.5px; color: var(--text-muted); text-transform: uppercase; }
         .metric-value { font-family: var(--font-display); font-size: 26px; font-weight: 700;
@@ -1255,30 +1230,48 @@
             border-radius: 4px; font-size: 10px; color: var(--accent);
         }
 
-        /* ── Enhanced Card Design ────────────────── */
-        .card {
-            background: linear-gradient(135deg, var(--bg-card) 0%, rgba(10,26,20,0.85) 100%);
+        /* ═══════════════════════════════════════════════════════════ */
+        /* UNIFIED PREMIUM CARD SYSTEM — card, stat-box, metric,     */
+        /* signal-item all share the same rich design language        */
+        /* ═══════════════════════════════════════════════════════════ */
+        .card, .stat-box, .metric, .signal-item {
+            background: linear-gradient(160deg, var(--bg-card) 0%, rgba(8,20,16,0.92) 60%, rgba(6,14,10,0.88) 100%);
             border: 1px solid var(--border);
-            border-radius: var(--radius-lg); padding: 22px;
-            box-shadow: var(--shadow-card); transition: all 0.3s cubic-bezier(.2,.8,.2,1);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 2px 16px rgba(0,0,0,0.35), inset 0 1px 0 rgba(0,232,104,0.03);
+            transition: all 0.35s cubic-bezier(.2,.8,.2,1);
             position: relative; overflow: hidden;
         }
-        .card::before {
+        .card { padding: 22px; }
+        .stat-box { padding: 18px 20px; }
+        .metric { padding: 18px 20px; }
+        .signal-item { padding: 14px 16px; margin-bottom: 10px; cursor: pointer; }
+
+        /* Top accent line — glows on hover */
+        .card::before, .stat-box::before, .metric::before, .signal-item::before {
             content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
-            background: linear-gradient(90deg, transparent, rgba(0,232,104,0.15), transparent);
-            opacity: 0; transition: opacity 0.3s;
+            background: linear-gradient(90deg, transparent 5%, rgba(0,232,104,0.2) 50%, transparent 95%);
+            opacity: 0; transition: opacity 0.4s;
         }
-        .card::after {
+        /* Bottom accent bar */
+        .card::after, .stat-box::after, .metric::after, .signal-item::after {
             content: ""; position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
-            background: linear-gradient(90deg, transparent, var(--accent-dim), transparent);
-            opacity: 0; transition: opacity 0.3s;
+            background: linear-gradient(90deg, transparent 10%, var(--accent-dim) 50%, transparent 90%);
+            opacity: 0; transition: opacity 0.4s;
         }
-        .card:hover {
+        /* Hover state — unified */
+        .card:hover, .stat-box:hover, .metric:hover, .signal-item:hover {
             border-color: var(--border-glow);
-            box-shadow: 0 4px 30px rgba(0,0,0,0.4), 0 0 1px rgba(0,232,104,0.1);
             transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.45),
+                        0 0 1px rgba(0,232,104,0.15),
+                        inset 0 1px 0 rgba(0,232,104,0.06);
         }
-        .card:hover::before, .card:hover::after { opacity: 1; }
+        .card:hover::before, .stat-box:hover::before, .metric:hover::before, .signal-item:hover::before,
+        .card:hover::after, .stat-box:hover::after, .metric:hover::after, .signal-item:hover::after {
+            opacity: 1;
+        }
+
         .card-header {
             display: flex; justify-content: space-between; align-items: center;
             margin-bottom: 18px; padding-bottom: 14px;
@@ -1289,30 +1282,6 @@
             letter-spacing: 1.5px; color: var(--text-primary); text-transform: uppercase;
             display: flex; align-items: center; gap: 8px;
         }
-
-        /* ── Enhanced Stat Box ────────────────────── */
-        .stat-box {
-            background: linear-gradient(145deg, var(--bg-card), rgba(8,20,16,0.9));
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg); padding: 18px 20px;
-            transition: all 0.3s cubic-bezier(.2,.8,.2,1);
-            position: relative; overflow: hidden;
-        }
-        .stat-box::before {
-            content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
-            background: linear-gradient(90deg, transparent, rgba(0,232,104,0.15), transparent);
-            opacity: 0; transition: opacity 0.3s;
-        }
-        .stat-box::after {
-            content: ""; position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
-            background: linear-gradient(90deg, transparent, var(--accent-dim), transparent);
-            opacity: 0; transition: opacity 0.3s;
-        }
-        .stat-box:hover {
-            border-color: var(--border-glow); transform: translateY(-2px);
-            box-shadow: 0 4px 30px rgba(0,0,0,0.4), 0 0 1px rgba(0,232,104,0.1);
-        }
-        .stat-box:hover::before, .stat-box:hover::after { opacity: 1; }
 
         /* ── Enhanced Form Styles ─────────────────── */
         .form-input, .input,
@@ -1435,6 +1404,7 @@
 </svg>
 
 <canvas id="particles-canvas"></canvas>
+<canvas id="caustics-canvas"></canvas>
 
 {% block layout %}
 <button class="mobile-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
@@ -2040,6 +2010,85 @@
         }
     }
     setInterval(updateClock,1000);updateClock();
+})();
+</script>
+
+<script>
+/* ── Underwater caustics / light-through-water effect ─────── */
+(function(){
+    var c = document.getElementById('caustics-canvas');
+    if (!c) return;
+    var gl = c.getContext('2d');
+    function resize(){ c.width = window.innerWidth; c.height = window.innerHeight; }
+    resize(); window.addEventListener('resize', resize);
+
+    var t = 0;
+    /* Simple 2D value noise for organic movement */
+    function noise(x, y) {
+        var ix = Math.floor(x), iy = Math.floor(y);
+        var fx = x - ix, fy = y - iy;
+        fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+        var a = Math.sin(ix * 127.1 + iy * 311.7) * 43758.5453;
+        a = a - Math.floor(a);
+        var b = Math.sin((ix+1) * 127.1 + iy * 311.7) * 43758.5453;
+        b = b - Math.floor(b);
+        var cc = Math.sin(ix * 127.1 + (iy+1) * 311.7) * 43758.5453;
+        cc = cc - Math.floor(cc);
+        var d = Math.sin((ix+1) * 127.1 + (iy+1) * 311.7) * 43758.5453;
+        d = d - Math.floor(d);
+        return a + (b-a)*fx + (cc-a)*fy + (a-b-cc+d)*fx*fy;
+    }
+
+    function render(){
+        t += 0.003;
+        gl.clearRect(0, 0, c.width, c.height);
+
+        /* Overall intensity breathes slowly */
+        var breath = 0.6 + 0.4 * Math.sin(t * 0.7);
+
+        /* Draw several soft light shafts */
+        var shaftCount = 5;
+        for (var i = 0; i < shaftCount; i++) {
+            var seed = i * 1.618;
+            var cx = c.width * (0.15 + 0.7 * noise(seed, t * 0.12 + i));
+            var cy = c.height * (0.2 + 0.6 * noise(seed + 50, t * 0.08 + i));
+            var r = (200 + 300 * noise(seed + 100, t * 0.06)) * (c.width / 1400);
+            var intensity = breath * (0.3 + 0.7 * noise(seed + 200, t * 0.15));
+
+            var grd = gl.createRadialGradient(cx, cy, 0, cx, cy, r);
+            grd.addColorStop(0, 'rgba(0,232,104,' + (0.08 * intensity).toFixed(4) + ')');
+            grd.addColorStop(0.4, 'rgba(0,180,80,' + (0.03 * intensity).toFixed(4) + ')');
+            grd.addColorStop(1, 'rgba(0,232,104,0)');
+            gl.fillStyle = grd;
+            gl.fillRect(cx - r, cy - r, r * 2, r * 2);
+        }
+
+        /* Fine caustic ripples — small bright cells */
+        var cellSize = 120;
+        var cols = Math.ceil(c.width / cellSize) + 1;
+        var rows = Math.ceil(c.height / cellSize) + 1;
+        for (var gx = 0; gx < cols; gx++) {
+            for (var gy = 0; gy < rows; gy++) {
+                var n1 = noise(gx * 0.8 + t * 0.5, gy * 0.8 + t * 0.3);
+                var n2 = noise(gx * 1.2 - t * 0.4, gy * 1.2 + t * 0.2);
+                var val = n1 * n2;
+                if (val > 0.35) {
+                    var bx = gx * cellSize + noise(gx + t, gy) * 40;
+                    var by = gy * cellSize + noise(gx, gy + t) * 40;
+                    var br = 20 + val * 60;
+                    var ba = (val - 0.35) * 0.15 * breath;
+                    var bg = gl.createRadialGradient(bx, by, 0, bx, by, br);
+                    bg.addColorStop(0, 'rgba(0,232,104,' + ba.toFixed(4) + ')');
+                    bg.addColorStop(1, 'rgba(0,232,104,0)');
+                    gl.fillStyle = bg;
+                    gl.fillRect(bx - br, by - br, br * 2, br * 2);
+                }
+            }
+        }
+
+        requestAnimationFrame(render);
+    }
+    render();
 })();
 </script>
 
