@@ -4,7 +4,7 @@
 
 {% block extra_css %}
 <style>
-    .chat-container { display: flex; flex-direction: column; height: calc(100vh - 300px); min-height: 400px; }
+    .chat-container { display: flex; flex-direction: column; height: calc(100vh - 240px); min-height: 450px; }
     .chat-messages {
         flex: 1; overflow-y: auto; padding: 16px;
         background: var(--bg-void); border: 1px solid var(--border);
@@ -69,51 +69,47 @@
 {% endblock %}
 
 {% block content %}
-<div class="grid grid-sidebar">
-    <div>
-        <!-- Quick Actions -->
-        <div class="quick-actions">
-            <a class="quick-action" onclick="askAgent('Give me a market overview for today')">Market Overview</a>
-            <a class="quick-action" onclick="askAgent('What are the top active signals right now?')">Active Signals</a>
-            <a class="quick-action" onclick="askAgent('Analyze my current portfolio exposure and risk')">Portfolio Risk</a>
-            <a class="quick-action" onclick="askAgent('What critical news should I be aware of?')">Breaking News</a>
-            <a class="quick-action" onclick="askAgent('Suggest a trading strategy for this week')">Strategy Ideas</a>
-            <a class="quick-action" onclick="askAgent('Show me correlation analysis of my positions')">Correlations</a>
-        </div>
+<!-- Quick Actions — full width -->
+<div class="quick-actions">
+    <a class="quick-action" onclick="askAgent('Give me a market overview for today')">Market Overview</a>
+    <a class="quick-action" onclick="askAgent('What are the top active signals right now?')">Active Signals</a>
+    <a class="quick-action" onclick="askAgent('Analyze my current portfolio exposure and risk')">Portfolio Risk</a>
+    <a class="quick-action" onclick="askAgent('What critical news should I be aware of?')">Breaking News</a>
+    <a class="quick-action" onclick="askAgent('Suggest a trading strategy for this week')">Strategy Ideas</a>
+    <a class="quick-action" onclick="askAgent('Show me correlation analysis of my positions')">Correlations</a>
+</div>
 
-        <!-- Chat -->
-        <div class="chat-container">
-            <div class="chat-messages" id="chatMessages">
-                <div class="chat-msg ai">
-                    <div class="msg-bubble">
-                        I'm your Sauron Vision AI agent. I can analyze your portfolio, review signals, summarize news, suggest strategies, and answer questions about any market you're tracking. What would you like to know?
-                    </div>
-                    <div class="msg-meta">SAURON AI</div>
-                </div>
+<!-- Chat — full width -->
+<div class="chat-container">
+    <div class="chat-messages" id="chatMessages">
+        <div class="chat-msg ai">
+            <div class="msg-bubble">
+                I'm your Sauron Vision AI agent. I can analyze your portfolio, review signals, summarize news, suggest strategies, and answer questions about any market you're tracking. What would you like to know?
             </div>
-            <div class="chat-input-area">
-                <textarea class="chat-input" id="chatInput" placeholder="Ask Sauron anything about your markets..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea>
-                <button class="chat-send" onclick="sendChat()">SEND</button>
-            </div>
+            <div class="msg-meta">SAURON AI</div>
         </div>
     </div>
+    <div class="chat-input-area">
+        <textarea class="chat-input" id="chatInput" placeholder="Ask Sauron anything about your markets..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea>
+        <button class="chat-send" onclick="sendChat()">SEND</button>
+    </div>
+</div>
 
-    <!-- Sidebar: AI Status -->
-    <div>
-        <div class="card" style="margin-bottom:16px;">
-            <div class="card-header"><span class="card-title">AI Status</span></div>
-            <ul class="kv-list">
-                <li><span class="label">MODEL</span><span class="value">Claude Haiku</span></li>
-                <li><span class="label">TASKS 24H</span><span class="value">{{ ai_tasks_24h|default:"0" }}</span></li>
-                <li><span class="label">COST 24H</span><span class="value">${{ ai_cost_24h|default:"0.00" }}</span></li>
-                <li><span class="label">STATUS</span><span class="value" style="color:var(--accent);">READY</span></li>
-            </ul>
-        </div>
-        <div class="card">
-            <div class="card-header"><span class="card-title">Recent Queries</span></div>
-            <div id="recentQueries" style="font-size:12px;color:var(--text-muted);">
-                <p style="padding:16px;text-align:center;">No queries yet</p>
-            </div>
+<!-- AI Status + Recent Queries — below chat, side by side -->
+<div class="grid grid-2" style="margin-top:20px;">
+    <div class="card">
+        <div class="card-header"><span class="card-title">AI Status</span></div>
+        <ul class="kv-list">
+            <li><span class="label">MODEL</span><span class="value">Claude Haiku</span></li>
+            <li><span class="label">TASKS 24H</span><span class="value">{{ ai_tasks_24h|default:"0" }}</span></li>
+            <li><span class="label">COST 24H</span><span class="value">${{ ai_cost_24h|default:"0.00" }}</span></li>
+            <li><span class="label">STATUS</span><span class="value" style="color:var(--accent);">READY</span></li>
+        </ul>
+    </div>
+    <div class="card">
+        <div class="card-header"><span class="card-title">Recent Queries</span></div>
+        <div id="recentQueries" style="font-size:12px;color:var(--text-muted);">
+            <p style="padding:16px;text-align:center;">No queries yet</p>
         </div>
     </div>
 </div>

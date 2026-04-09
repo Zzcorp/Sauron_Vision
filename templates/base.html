@@ -304,47 +304,12 @@
         body.light-mode .signal-item:hover {
             box-shadow: none;
         }
-        body.light-mode .ticker-bar,
-        body.light-mode .data-headband,
-        body.light-mode .info-panel-wrap,
-        body.light-mode .topbar {
-            box-shadow: none;
-        }
+        /* Light mode: flatten headband surface gradients (keep all box-shadows) */
         body.light-mode .data-headband {
             background: var(--bg-primary);
-            border-bottom: 1px solid var(--border);
         }
         body.light-mode .ticker-bar {
             background: var(--bg-primary);
-            border-bottom: 1px solid var(--border);
-        }
-        body.light-mode .ticker-popup,
-        body.light-mode .dh-pop,
-        body.light-mode .ip-dropdown,
-        body.light-mode .exchange-dropdown,
-        body.light-mode .notif-dropdown,
-        body.light-mode .lsp-dropdown,
-        body.light-mode .instrument-preview,
-        body.light-mode .sr-preview,
-        body.light-mode .ip-restore-pill,
-        body.light-mode .ip-minimize-tab {
-            box-shadow: none;
-        }
-        body.light-mode .sidebar-toggle-btn,
-        body.light-mode .rail-toggle-btn,
-        body.light-mode .sidebar-expand-tab {
-            box-shadow: none;
-        }
-        body.light-mode .dh-dot.up,
-        body.light-mode .dh-dot.down,
-        body.light-mode .dh-pop {
-            box-shadow: none;
-        }
-        body.light-mode .btn:hover {
-            box-shadow: none;
-        }
-        body.light-mode .modal {
-            box-shadow: none;
         }
 
         
@@ -631,7 +596,7 @@
         body:has(.sidebar.mini) .ticker-bar { left: 68px; }
         .ticker-track {
             display: inline-flex; gap: 0;
-            animation: tickerScroll 80s linear infinite;
+            animation: tickerScroll 120s linear infinite;
         }
         .ticker-bar:hover .ticker-track { animation-play-state: paused; }
         @keyframes tickerScroll {
@@ -643,11 +608,13 @@
             padding: 0 18px; height: 32px; font-family: var(--font-mono);
             font-size: 12px; cursor: pointer; border-right: 1px solid var(--border);
             position: relative; transition: background 0.15s;
-            text-decoration: none; color: var(--text-primary);
+            text-decoration: none; color: #ffffff;
         }
+        body.light-mode .ticker-item { color: #1a1a1a; }
         .ticker-item:hover { background: var(--bg-card); }
         .ticker-item .t-sym { font-weight: 700; color: var(--accent); letter-spacing: 0.5px; font-size: 12px; }
-        .ticker-item .t-price { color: var(--text-primary); font-weight: 600; }
+        .ticker-item .t-price { color: #ffffff; font-weight: 600; }
+        body.light-mode .ticker-item .t-price { color: #1a1a1a; }
         .ticker-item .t-change { font-size: 11px; font-weight: 600; }
         .ticker-item .t-change.up { color: var(--accent); }
         .ticker-item .t-change.down { color: var(--accent-red); }
@@ -1229,7 +1196,7 @@
                       font-size: 10px; color: var(--accent); text-align: right; }
 
         /* Push page content down for headbands (topbar 56 + ticker 34 + data headband 42 + 4px) */
-        .page-content { padding-top: 136px !important; padding-bottom: 80px !important; }
+        .page-content { padding-top: 118px !important; padding-bottom: 80px !important; }
         body.page-dashboard .page-content { padding-bottom: 28px !important; }
 
         /* Enhanced ticker news popup */
