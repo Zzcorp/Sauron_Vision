@@ -85,7 +85,15 @@ def _score_sauron_signals(symbol: str) -> tuple[float, list[str]]:
             score = float(getattr(s, "score", 0) or 0)
             agg += (score if "bull" in direction.lower() else -score)
         agg = max(-1, min(1, agg / max(1, len(recent))))
-        return (agg, [f"sauron sig avg {agg:+.2f} ({len(recent)})"])
+        legacy_score = agg
+        legacy_reasons = [f"sauron sig avg {agg:+.2f} ({len(recent)})"]
+        try:
+            from signals.bot_bridge import smc_score_for_symbol
+            smc_score, smc_reasons = smc_score_for_symbol(symbol)
+            blended = (legacy_score + smc_score) / 2 if smc_score != 0 else legacy_score
+            return (blended, legacy_reasons + smc_reasons)
+        except Exception:
+            return (legacy_score, legacy_reasons)
     except Exception:
         return (0, [])
 

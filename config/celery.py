@@ -166,6 +166,14 @@ app.conf.beat_schedule = {
         "task": "ai_agents.tasks.generate_monday_plan",
         "schedule": crontab(hour=18, minute=0, day_of_week="sunday"),
     },
+        "smc-lifecycle-pass": {
+        "task": "signals.tasks_lifecycle.run_smc_lifecycle",
+        "schedule": 300.0,
+    },
+    "smc-universe-scan": {
+        "task": "signals.tasks_lifecycle.scan_smc_universe",
+        "schedule": 1800.0,
+    },
     "weekly-portfolio-rebalance-suggestions": {
         "task": "strategies.tasks.suggest_rebalancing",
         "schedule": crontab(hour=12, minute=0, day_of_week="sunday"),

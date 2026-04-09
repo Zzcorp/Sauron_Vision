@@ -14,10 +14,16 @@ class SignalEngine:
 
     def _load_rules(self):
         """Load all signal rule definitions."""
-        from signals.rules import technical_rules, sentiment_rules, macro_rules
+        from signals.rules import (
+            technical_rules, sentiment_rules, macro_rules,
+            flow_rules, fundamental_rules, smc_engine_rule,
+        )
         self.rules.extend(technical_rules.get_rules())
         self.rules.extend(sentiment_rules.get_rules())
         self.rules.extend(macro_rules.get_rules())
+        self.rules.extend(flow_rules.get_rules())
+        self.rules.extend(fundamental_rules.get_rules())
+        self.rules.extend(smc_engine_rule.get_rules())
 
     def scan_instrument(self, instrument) -> list:
         """Run all rules against a single instrument."""

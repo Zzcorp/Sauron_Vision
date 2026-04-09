@@ -1,6 +1,7 @@
 """Sauron Vision — Dashboard URL Configuration."""
 from django.urls import path
 from . import views
+from .views_signals_htmx import signal_cards_htmx, signal_performance_htmx
 from .api import market_views, signal_views, strategy_views, portfolio_views, ai_views
 
 urlpatterns = [
@@ -56,4 +57,6 @@ urlpatterns = [
     path("api/portfolio/snapshots/", portfolio_views.SnapshotListView.as_view(), name="api-snapshots"),
     path("api/ai/tasks/", ai_views.AgentTaskListView.as_view(), name="api-ai-tasks"),
     path("api/ai/briefing/", ai_views.DailyBriefingView.as_view(), name="api-daily-briefing"),
+    path("htmx/signal-cards/", signal_cards_htmx, name="htmx_signal_cards"),
+    path("htmx/signal-performance/", signal_performance_htmx, name="htmx_signal_performance"),
 ]

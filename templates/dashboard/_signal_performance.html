@@ -1,0 +1,31 @@
+<div class="smc-perf">
+  <h3>Setup performance — last 30 days</h3>
+  {% if perf %}
+    <table class="smc-perf__table">
+      <thead>
+        <tr><th>Setup</th><th>Hit rate</th><th>Expectancy</th><th>n</th><th>Source</th></tr>
+      </thead>
+      <tbody>
+        {% for setup, p in perf.items %}
+          <tr>
+            <td>{{ setup }}</td>
+            <td>{% if p.hit_rate %}{{ p.hit_rate|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td>{% if p.expectancy_r %}{{ p.expectancy_r|floatformat:2 }}R{% else %}—{% endif %}</td>
+            <td>{{ p.n_closed }}</td>
+            <td>{% if p.is_empirical %}empirical{% else %}fallback{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="smc-perf__empty">No closed signals yet — performance will populate as the lifecycle tracker runs.</p>
+  {% endif %}
+</div>
+<style>
+.smc-perf__table { width: 100%; border-collapse: collapse;
+                   font-family: ui-monospace, monospace; font-size: 0.85em; }
+.smc-perf__table th, .smc-perf__table td { padding: 6px 8px; text-align: left;
+                                            border-bottom: 1px solid #222; }
+.smc-perf__table th { color: #888; text-transform: uppercase; font-size: 0.75em; }
+.smc-perf__empty { color: #888; padding: 12px; }
+</style>
