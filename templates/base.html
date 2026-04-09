@@ -626,16 +626,16 @@
             100% { transform: translateX(-50%); }
         }
         .ticker-item {
-            display: inline-flex; align-items: center; gap: 6px;
+            display: inline-flex; align-items: center; gap: 8px;
             padding: 0 18px; height: 32px; font-family: var(--font-mono);
-            font-size: 11px; cursor: pointer; border-right: 1px solid var(--border);
+            font-size: 12px; cursor: pointer; border-right: 1px solid var(--border);
             position: relative; transition: background 0.15s;
-            text-decoration: none; color: var(--text-secondary);
+            text-decoration: none; color: var(--text-primary);
         }
         .ticker-item:hover { background: var(--bg-card); }
-        .ticker-item .t-sym { font-weight: 700; color: var(--text-primary); letter-spacing: 0.5px; }
-        .ticker-item .t-price { color: var(--text-primary); }
-        .ticker-item .t-change { font-size: 10px; }
+        .ticker-item .t-sym { font-weight: 700; color: var(--accent); letter-spacing: 0.5px; font-size: 12px; }
+        .ticker-item .t-price { color: var(--text-primary); font-weight: 600; }
+        .ticker-item .t-change { font-size: 11px; font-weight: 600; }
         .ticker-item .t-change.up { color: var(--accent); }
         .ticker-item .t-change.down { color: var(--accent-red); }
         .ticker-item .t-badge {
@@ -1154,13 +1154,14 @@
         .dh-item {
             display: inline-flex; align-items: center; gap: 10px;
             padding: 0 18px; border-right: 1px solid var(--border); height: 42px;
-            font-family: var(--font-mono); font-size: 11px;
+            font-family: var(--font-mono); font-size: 12px;
             cursor: pointer; flex-shrink: 0; transition: background .15s;
+            text-decoration: none; color: var(--text-primary);
         }
-        .dh-item:hover { background: var(--bg-card); }
-        .dh-sym { color: var(--text-muted); font-size: 9px; letter-spacing: 1.5px; font-weight: 700; }
-        .dh-val { color: var(--text-primary); font-weight: 600; }
-        .dh-chg { font-size: 10px; font-family: var(--font-mono); }
+        a.dh-item:hover { background: var(--bg-card); }
+        .dh-sym { color: var(--accent); font-size: 11px; letter-spacing: 1.5px; font-weight: 700; }
+        .dh-val { color: var(--text-primary); font-weight: 600; font-size: 13px; }
+        .dh-chg { font-size: 11px; font-family: var(--font-mono); font-weight: 600; }
         .dh-chg.up { color: var(--accent); }
         .dh-chg.down { color: var(--accent-red); }
         .dh-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
@@ -2489,6 +2490,15 @@ document.addEventListener('click', function(e) {
         dhManual = false; dhOffset = 0;
       }
     });
+    /* Mouse wheel scroll for data headband */
+    document.querySelector('.data-headband')?.addEventListener('wheel', function(e){
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        dhStep(e.deltaX > 0 ? -1 : 1);
+      } else {
+        dhStep(e.deltaY > 0 ? -3 : 3);
+      }
+      e.preventDefault();
+    }, {passive: false});
   }
 
   // Ticker popups (portal to body)
@@ -2529,6 +2539,15 @@ document.addEventListener('click', function(e) {
         tManual = false; tOffset = 0;
       }
     });
+    /* Mouse wheel scroll for ticker bar */
+    document.querySelector('.ticker-bar')?.addEventListener('wheel', function(e){
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        tStep(e.deltaX > 0 ? -1 : 1);
+      } else {
+        tStep(e.deltaY > 0 ? -3 : 3);
+      }
+      e.preventDefault();
+    }, {passive: false});
   }
 
   // Info panel hover arrows (scrollLeft-based because the panel uses native overflow)

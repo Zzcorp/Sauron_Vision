@@ -1,26 +1,110 @@
 {% extends "base.html" %}
 {% block title %}Economic Calendar — Sauron Vision{% endblock %}
-{% block page_title %}◇ ECONOMIC CALENDAR{% endblock %}
+{% block page_title %}ECONOMIC CALENDAR{% endblock %}
 
 {% block content %}
-<div class="card fade-in-up">
+<!-- Outlook Summary Cards -->
+<div class="grid grid-4" style="margin-bottom: 24px;">
+    <div class="stat-box fade-in-up delay-1">
+        <div class="stat-label">This Week</div>
+        <div class="stat-value">{{ total_week|default:"0" }}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">events ahead</div>
+    </div>
+    <div class="stat-box fade-in-up delay-2">
+        <div class="stat-label">High Impact (7d)</div>
+        <div class="stat-value" style="color: var(--accent-red);">{{ high_impact_week|default:"0" }}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">market-moving events</div>
+    </div>
+    <div class="stat-box fade-in-up delay-3">
+        <div class="stat-label">30-Day Outlook</div>
+        <div class="stat-value">{{ total_month|default:"0" }}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">total events</div>
+    </div>
+    <div class="stat-box fade-in-up delay-4">
+        <div class="stat-label">High Impact (30d)</div>
+        <div class="stat-value" style="color: var(--accent-gold);">{{ high_impact_month|default:"0" }}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">critical releases</div>
+    </div>
+</div>
+
+<!-- Period Outlook Card -->
+{% if top_countries %}
+<div class="card fade-in-up delay-2" style="margin-bottom: 24px;">
     <div class="card-header">
-        <span class="card-title">Upcoming Events</span>
+        <div class="card-title">Month Ahead Outlook</div>
+    </div>
+    <div style="padding: 16px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+        <div style="font-size: 12px; color: var(--text-secondary); margin-right: 8px;">Top regions:</div>
+        {% for country, count in top_countries %}
+        <div style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:20px;font-size:12px;">
+            <span style="font-weight:700;color:var(--text-primary);">{{ country }}</span>
+            <span style="color:var(--accent);font-family:var(--font-mono);font-size:11px;">{{ count }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Calendar Grid -->
+<div class="card fade-in-up delay-3">
+    <div class="card-header" style="flex-wrap:wrap;gap:12px;">
+        <div class="card-title">Calendar</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <button class="btn btn-sm" id="calPrev" title="Previous month">&#9664;</button>
+            <span id="calMonthLabel" style="font-family:var(--font-display);font-size:14px;min-width:140px;text-align:center;"></span>
+            <button class="btn btn-sm" id="calNext" title="Next month">&#9654;</button>
+            <button class="btn btn-sm" id="calToday" style="margin-left:8px;">Today</button>
+        </div>
+        <div style="display:flex;gap:12px;font-size:10px;font-family:var(--font-mono);letter-spacing:1px;">
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent-red);margin-right:4px;"></span>HIGH</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent-gold);margin-right:4px;"></span>MEDIUM</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-muted);margin-right:4px;"></span>LOW</span>
+        </div>
+    </div>
+    <div id="calendarGrid" style="padding:0 16px 16px;"></div>
+</div>
+
+<!-- Event Detail Panel -->
+<div class="card fade-in-up delay-4" style="margin-top:24px;" id="eventDetailCard" hidden>
+    <div class="card-header">
+        <div class="card-title" id="eventDetailTitle">Event Details</div>
+    </div>
+    <div id="eventDetailBody" style="padding:16px;"></div>
+</div>
+
+<!-- Full Event List (scrollable) -->
+<div class="card fade-in-up delay-4" style="margin-top:24px;">
+    <div class="card-header">
+        <div class="card-title">All Events</div>
+        <div style="display:flex;gap:6px;">
+            <button class="btn btn-sm" onclick="filterImpact('')">All</button>
+            <button class="btn btn-sm" onclick="filterImpact('high')">High</button>
+            <button class="btn btn-sm" onclick="filterImpact('medium')">Medium</button>
+            <button class="btn btn-sm" onclick="filterImpact('low')">Low</button>
+        </div>
     </div>
     {% if events %}
-    <div class="table-wrapper">
+    <div class="table-wrapper" style="max-height:600px;overflow-y:auto;">
     <table>
-        <thead><tr><th>Date/Time</th><th>Impact</th><th>Country</th><th>Event</th><th>Forecast</th><th>Previous</th><th>Actual</th></tr></thead>
-        <tbody>
+        <thead><tr>
+            <th>Date/Time</th><th>Impact</th><th>Country</th><th>Currency</th>
+            <th>Event</th><th>Forecast</th><th>Previous</th><th>Actual</th>
+        </tr></thead>
+        <tbody id="eventsBody">
         {% for ev in events %}
-        <tr>
-            <td style="font-size: 12px;">{{ ev.datetime|date:"M d, H:i" }}</td>
-            <td><span class="badge badge-{{ ev.impact }}">{{ ev.impact }}</span></td>
-            <td>{{ ev.country }}</td>
+        <tr class="ev-row" data-impact="{{ ev.impact|lower }}" style="cursor:pointer;" onclick="showEventDetail(this)">
+            <td style="font-size:12px;font-family:var(--font-mono);white-space:nowrap;">{{ ev.datetime|date:"M d, H:i" }}</td>
+            <td>
+                <span class="badge" style="background:{% if ev.impact == 'high' or ev.impact == 'HIGH' %}rgba(232,48,48,0.15);color:var(--accent-red){% elif ev.impact == 'medium' or ev.impact == 'MEDIUM' %}rgba(216,176,32,0.15);color:var(--accent-gold){% else %}rgba(90,138,106,0.15);color:var(--text-secondary){% endif %};font-size:10px;letter-spacing:1px;">
+                    {{ ev.impact|upper }}
+                </span>
+            </td>
+            <td style="font-weight:600;">{{ ev.country }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">{{ ev.currency_affected|default:"-" }}</td>
             <td>{{ ev.title }}</td>
-            <td>{{ ev.forecast|default:"-" }}</td>
-            <td>{{ ev.previous|default:"-" }}</td>
-            <td style="font-weight: 600;">{{ ev.actual|default:"-" }}</td>
+            <td style="font-family:var(--font-mono);font-size:12px;">{{ ev.forecast|default:"-" }}</td>
+            <td style="font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);">{{ ev.previous|default:"-" }}</td>
+            <td style="font-family:var(--font-mono);font-size:12px;font-weight:700;color:{% if ev.actual %}var(--text-primary){% else %}var(--text-muted){% endif %};">{{ ev.actual|default:"-" }}</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -28,9 +112,215 @@
     </div>
     {% else %}
     <div class="empty-state">
-        <div class="empty-icon">◇</div>
+        <div class="empty-icon">&#9671;</div>
         <p>NO ECONOMIC EVENTS — Scraper will populate this automatically</p>
     </div>
     {% endif %}
 </div>
+
+<style>
+.ecal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.ecal-header { font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px;
+               color: var(--text-muted); text-align: center; padding: 8px 0;
+               text-transform: uppercase; }
+.ecal-day { min-height: 90px; background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 4px; padding: 6px; cursor: pointer;
+            transition: all 0.2s; position: relative; }
+.ecal-day:hover { border-color: var(--border-glow); background: var(--bg-card); }
+.ecal-day.today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.ecal-day.other-month { opacity: 0.35; }
+.ecal-day.selected { border-color: var(--accent); background: rgba(0,232,104,0.04); }
+.ecal-day-num { font-family: var(--font-display); font-size: 13px; font-weight: 700;
+                color: var(--text-primary); margin-bottom: 4px; }
+.ecal-day.today .ecal-day-num { color: var(--accent); }
+.ecal-event { font-size: 9px; font-family: var(--font-mono); padding: 2px 4px;
+              margin-bottom: 2px; border-radius: 3px; white-space: nowrap;
+              overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
+.ecal-event.high { background: rgba(232,48,48,0.12); color: var(--accent-red); }
+.ecal-event.medium { background: rgba(216,176,32,0.1); color: var(--accent-gold); }
+.ecal-event.low { background: rgba(90,138,106,0.08); color: var(--text-secondary); }
+.ecal-more { font-size: 9px; color: var(--accent); font-family: var(--font-mono);
+             margin-top: 2px; }
+@media (max-width: 768px) {
+    .ecal-day { min-height: 60px; }
+    .ecal-event { display: none; }
+    .ecal-day-num { font-size: 11px; }
+}
+</style>
+
+<script>
+(function(){
+  var EVENTS = {{ events_by_date_json|safe }};
+  var TODAY = '{{ today }}';
+  var currentDate = new Date(TODAY + 'T00:00:00');
+  var selectedDate = null;
+
+  var MONTHS = ['January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+  var DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+  function renderCalendar(year, month) {
+    var grid = document.getElementById('calendarGrid');
+    var label = document.getElementById('calMonthLabel');
+    label.textContent = MONTHS[month] + ' ' + year;
+
+    var html = '<div class="ecal-grid">';
+    DAYS.forEach(function(d){ html += '<div class="ecal-header">' + d + '</div>'; });
+
+    var first = new Date(year, month, 1);
+    var startDay = (first.getDay() + 6) % 7; // Monday=0
+    var daysInMonth = new Date(year, month + 1, 0).getDate();
+    var prevDays = new Date(year, month, 0).getDate();
+
+    // Previous month filler
+    for (var p = startDay - 1; p >= 0; p--) {
+      var d = prevDays - p;
+      var pd = new Date(year, month - 1, d);
+      var key = pd.toISOString().slice(0,10);
+      html += dayCell(d, key, true);
+    }
+    // Current month
+    for (var i = 1; i <= daysInMonth; i++) {
+      var cd = new Date(year, month, i);
+      var key = cd.toISOString().slice(0,10);
+      var isToday = key === TODAY;
+      html += dayCell(i, key, false, isToday);
+    }
+    // Next month filler
+    var totalCells = startDay + daysInMonth;
+    var remaining = (7 - (totalCells % 7)) % 7;
+    for (var n = 1; n <= remaining; n++) {
+      var nd = new Date(year, month + 1, n);
+      var key = nd.toISOString().slice(0,10);
+      html += dayCell(n, key, true);
+    }
+
+    html += '</div>';
+    grid.innerHTML = html;
+
+    // Click handlers
+    grid.querySelectorAll('.ecal-day').forEach(function(cell){
+      cell.addEventListener('click', function(){
+        var dateKey = this.getAttribute('data-date');
+        grid.querySelectorAll('.ecal-day.selected').forEach(function(s){ s.classList.remove('selected'); });
+        this.classList.add('selected');
+        showDayDetail(dateKey);
+      });
+    });
+  }
+
+  function dayCell(num, dateKey, otherMonth, isToday) {
+    var classes = 'ecal-day';
+    if (otherMonth) classes += ' other-month';
+    if (isToday) classes += ' today';
+    if (dateKey === selectedDate) classes += ' selected';
+
+    var html = '<div class="' + classes + '" data-date="' + dateKey + '">';
+    html += '<div class="ecal-day-num">' + num + '</div>';
+
+    var dayEvents = EVENTS[dateKey] || [];
+    var maxShow = 3;
+    for (var i = 0; i < Math.min(dayEvents.length, maxShow); i++) {
+      var ev = dayEvents[i];
+      var impact = (ev.impact || 'low').toLowerCase();
+      html += '<div class="ecal-event ' + impact + '" title="' + ev.time + ' ' + ev.title + '">';
+      html += ev.time + ' ' + ev.title;
+      html += '</div>';
+    }
+    if (dayEvents.length > maxShow) {
+      html += '<div class="ecal-more">+' + (dayEvents.length - maxShow) + ' more</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function showDayDetail(dateKey) {
+    selectedDate = dateKey;
+    var card = document.getElementById('eventDetailCard');
+    var title = document.getElementById('eventDetailTitle');
+    var body = document.getElementById('eventDetailBody');
+    var dayEvents = EVENTS[dateKey] || [];
+
+    if (dayEvents.length === 0) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+    var d = new Date(dateKey + 'T00:00:00');
+    title.textContent = 'Events for ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+
+    var html = '';
+    dayEvents.forEach(function(ev){
+      var impact = (ev.impact || 'low').toLowerCase();
+      var impactColor = impact === 'high' ? 'var(--accent-red)' : impact === 'medium' ? 'var(--accent-gold)' : 'var(--text-secondary)';
+
+      html += '<div style="padding:14px;margin-bottom:8px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);border-left:3px solid ' + impactColor + ';">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+      html += '<div>';
+      html += '<span style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text-primary);">' + ev.title + '</span>';
+      html += '<span style="margin-left:10px;font-size:10px;color:var(--text-muted);font-family:var(--font-mono);">' + ev.country + ' / ' + ev.currency + '</span>';
+      html += '</div>';
+      html += '<span style="font-family:var(--font-mono);font-size:12px;color:var(--accent);">' + ev.time + '</span>';
+      html += '</div>';
+
+      html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">';
+      html += '<div><div style="font-size:9px;color:var(--text-muted);font-family:var(--font-mono);letter-spacing:1px;margin-bottom:2px;">FORECAST</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600;">' + ev.forecast + '</div></div>';
+      html += '<div><div style="font-size:9px;color:var(--text-muted);font-family:var(--font-mono);letter-spacing:1px;margin-bottom:2px;">PREVIOUS</div><div style="font-family:var(--font-mono);font-size:14px;color:var(--text-secondary);">' + ev.previous + '</div></div>';
+      html += '<div><div style="font-size:9px;color:var(--text-muted);font-family:var(--font-mono);letter-spacing:1px;margin-bottom:2px;">ACTUAL</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + (ev.actual !== '-' ? 'var(--text-primary)' : 'var(--text-muted)') + ';">' + ev.actual + '</div></div>';
+      html += '</div>';
+
+      // Potential movement indicator
+      if (impact === 'high') {
+        html += '<div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border);font-size:10px;color:var(--accent-red);font-family:var(--font-mono);">';
+        html += 'HIGH IMPACT — Potential significant movement on ' + ev.currency + ' pairs and related instruments';
+        html += '</div>';
+      } else if (impact === 'medium') {
+        html += '<div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border);font-size:10px;color:var(--accent-gold);font-family:var(--font-mono);">';
+        html += 'MEDIUM IMPACT — Moderate volatility expected if data deviates from forecast';
+        html += '</div>';
+      }
+      html += '</div>';
+    });
+    body.innerHTML = html;
+    card.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+
+  // Navigation
+  document.getElementById('calPrev').addEventListener('click', function(){
+    currentDate.setMonth(currentDate.getMonth() - 1);
+    renderCalendar(currentDate.getFullYear(), currentDate.getMonth());
+  });
+  document.getElementById('calNext').addEventListener('click', function(){
+    currentDate.setMonth(currentDate.getMonth() + 1);
+    renderCalendar(currentDate.getFullYear(), currentDate.getMonth());
+  });
+  document.getElementById('calToday').addEventListener('click', function(){
+    currentDate = new Date(TODAY + 'T00:00:00');
+    renderCalendar(currentDate.getFullYear(), currentDate.getMonth());
+  });
+
+  // Initial render
+  renderCalendar(currentDate.getFullYear(), currentDate.getMonth());
+
+  // Impact filter for the table
+  window.filterImpact = function(impact) {
+    document.querySelectorAll('#eventsBody .ev-row').forEach(function(row){
+      if (!impact || row.getAttribute('data-impact') === impact) {
+        row.style.display = '';
+      } else {
+        row.style.display = 'none';
+      }
+    });
+  };
+
+  // Show event detail from table row
+  window.showEventDetail = function(row) {
+    var cells = row.querySelectorAll('td');
+    var dateStr = cells[0].textContent.trim();
+    // Highlight the row
+    document.querySelectorAll('#eventsBody .ev-row').forEach(function(r){ r.style.background = ''; });
+    row.style.background = 'var(--bg-card-hover)';
+  };
+})();
+</script>
 {% endblock %}

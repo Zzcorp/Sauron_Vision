@@ -134,7 +134,60 @@ def market_quotes(request):
 @login_required
 def economic_calendar(request):
     from market_data.models import EconomicEvent
-    return render(request, "dashboard/economic_calendar.html", {"page_id": "calendar", "events": EconomicEvent.objects.order_by("datetime")[:50]})
+    from datetime import timedelta
+    from django.utils import timezone
+    from collections import defaultdict
+    import json
+
+    now = timezone.now()
+    month_ahead = now + timedelta(days=30)
+    week_ahead = now + timedelta(days=7)
+
+    all_events = list(
+        EconomicEvent.objects.filter(datetime__gte=now - timedelta(days=7))
+        .order_by("datetime")[:200]
+    )
+    upcoming = [e for e in all_events if e.datetime >= now]
+    past_week = [e for e in all_events if e.datetime < now]
+
+    # Group events by date for calendar view
+    events_by_date = defaultdict(list)
+    for ev in all_events:
+        events_by_date[ev.datetime.date().isoformat()].append({
+            "time": ev.datetime.strftime("%H:%M"),
+            "title": ev.title,
+            "country": ev.country,
+            "impact": ev.impact,
+            "forecast": ev.forecast or "-",
+            "previous": ev.previous or "-",
+            "actual": ev.actual or "-",
+            "currency": ev.currency_affected or "-",
+        })
+
+    # Outlook summary cards
+    high_impact_week = len([e for e in upcoming if e.impact in ("high", "HIGH") and e.datetime <= week_ahead])
+    high_impact_month = len([e for e in upcoming if e.impact in ("high", "HIGH") and e.datetime <= month_ahead])
+    total_week = len([e for e in upcoming if e.datetime <= week_ahead])
+    total_month = len(upcoming)
+
+    # Countries with most events
+    country_counts = defaultdict(int)
+    for e in upcoming:
+        country_counts[e.country] += 1
+    top_countries = sorted(country_counts.items(), key=lambda x: -x[1])[:5]
+
+    ctx = {
+        "page_id": "calendar",
+        "events": all_events,
+        "events_by_date_json": json.dumps(events_by_date),
+        "high_impact_week": high_impact_week,
+        "high_impact_month": high_impact_month,
+        "total_week": total_week,
+        "total_month": total_month,
+        "top_countries": top_countries,
+        "today": now.date().isoformat(),
+    }
+    return render(request, "dashboard/economic_calendar.html", ctx)
 
 
 @login_required
