@@ -1,5 +1,5 @@
 {% extends "base.html" %}{% block page_title %}{{ s.name }}{% endblock %}
-{% block content %}<div class="page-content fade-in">
+{% block content %}
   <div class="grid grid-4" style="margin-bottom:20px;">
     <div class="stat-box"><div class="stat-label">Return</div><div class="stat-value">{{ s.total_return_pct|default:"—" }}%</div></div>
     <div class="stat-box"><div class="stat-label">Max DD</div><div class="stat-value">{{ s.max_drawdown_pct|default:"—" }}%</div></div>
@@ -16,7 +16,6 @@
     <div class="signal-desc">{{ t.entry }} → {{ t.exit }} · {{ t.reason }}</div>
   </div>{% empty %}<div style="color:var(--text-muted);">No trades.</div>{% endfor %}
   </div>
-</div>
 <script>
 (function(){const data={{ s.equity_curve|default:"[]" }};const c=document.getElementById('eq');if(!c||!data.length)return;
   const ctx=c.getContext('2d');c.width=c.offsetWidth;const W=c.width,H=c.height;

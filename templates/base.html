@@ -580,7 +580,7 @@
         body:has(.sidebar.mini) .ticker-bar { left: 68px; }
         .ticker-track {
             display: inline-flex; gap: 0;
-            animation: tickerScroll 60s linear infinite;
+            animation: tickerScroll 80s linear infinite;
         }
         .ticker-bar:hover .ticker-track { animation-play-state: paused; }
         @keyframes tickerScroll {
@@ -622,20 +622,21 @@
 
         /* UPGRADE-9: info panel — taller, scrollable, richer */
         .info-panel-wrap {
-            position: fixed; top: calc(var(--topbar-height) + 34px);
+            position: fixed; top: calc(var(--topbar-height) + 34px + 42px);
             left: var(--sidebar-width); right: 0;
             z-index: 44; background: var(--bg-primary);
             border-bottom: 1px solid var(--border);
             overflow: visible;
         }
+        body.page-dashboard .info-panel-wrap { display: none; }
         body:has(.sidebar.mini) .info-panel-wrap { left: 68px; }
         body:has(.signals-rail) .info-panel-wrap { right: 44px; }
         body:has(.signals-rail.open) .info-panel-wrap { right: 280px; }
-        .info-panel-scroll { height: 42px; overflow-x: auto; overflow-y: visible; scrollbar-width: none; }
+        .info-panel-scroll { height: 56px; overflow-x: auto; overflow-y: visible; scrollbar-width: none; }
         .info-panel-scroll::-webkit-scrollbar { display: none; }
-        .info-panel-bar { display: flex; height: 42px; overflow: visible; min-width: max-content; }
+        .info-panel-bar { display: flex; height: 56px; overflow: visible; min-width: max-content; }
         .ip-arrow {
-            position: absolute; top: 0; width: 28px; height: 42px;
+            position: absolute; top: 0; width: 28px; height: 56px;
             display: flex; align-items: center; justify-content: center;
             color: var(--accent); cursor: pointer; z-index: 3;
             opacity: 0; transition: opacity .2s; font-size: 13px;
@@ -651,7 +652,7 @@
             padding: 4px 16px; border-right: 1px solid var(--border);
             font-family: var(--font-mono);
             color: var(--text-muted); cursor: default;
-            white-space: nowrap; transition: all 0.15s; min-height: 42px;
+            white-space: nowrap; transition: all 0.15s; min-height: 56px;
         }
         .ip-cat:hover { background: var(--bg-card); }
         .ip-cat .ip-label { font-size: 8px; letter-spacing: 1.5px; color: var(--text-muted); text-transform: uppercase; }
@@ -664,14 +665,15 @@
         .ip-cat .ip-count.gold { color: var(--accent-gold); }
         .ip-cat .ip-count.blue { color: var(--accent-blue); }
         .ip-dropdown {
-            display: none; position: absolute; top: 42px; left: 0;
+            display: none; position: fixed;
             min-width: 320px; max-width: 360px; max-height: 380px; overflow-y: auto;
             background: var(--bg-card); border: 1px solid var(--border-glow);
             border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-            box-shadow: 0 12px 40px rgba(0,0,0,0.7); z-index: 250;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.7); z-index: 1000;
             padding: 10px 0; white-space: normal;
+            pointer-events: none;
         }
-        .ip-cat:hover .ip-dropdown { display: block; }
+        .ip-cat:hover .ip-dropdown { display: block; pointer-events: auto; }
         .ip-dd-head { padding: 4px 16px 10px; font-size: 9px; letter-spacing: 1.5px;
                       color: var(--text-muted); border-bottom: 1px solid var(--border); margin-bottom: 6px; }
         .ip-dd-item {
@@ -688,6 +690,8 @@
         .ip-dd-cell .dv.red { color: var(--accent-red); }
         .ip-dd-cell .dv.gold { color: var(--accent-gold); }
         .ip-dd-empty { padding: 16px; text-align: center; color: var(--text-muted); font-size: 10px; }
+        .ip-cat-link { text-decoration: none; color: inherit; cursor: pointer; }
+        .ip-cat-link:hover { background: var(--bg-card-hover); }
         .ip-cat-ai { cursor: pointer; }
         .ip-cat-ai:hover .ip-count { color: var(--accent); }
 
@@ -872,7 +876,8 @@
         }
         .sidebar-toggle-btn:hover { background: var(--bg-card-hover); width: 32px; }
         .sidebar-toggle-btn svg { width: 14px; height: 14px; transition: transform .3s; }
-        body:has(.sidebar.mini) .sidebar-toggle-btn { left: 68px; transform: translateY(-50%) rotate(180deg); }
+        body:has(.sidebar.mini) .sidebar-toggle-btn { left: 68px; }
+        body:has(.sidebar.mini) .sidebar-toggle-btn svg { transform: rotate(180deg); }
         @media (max-width: 768px) { .sidebar-toggle-btn { display: none; } }
         /* Ensure rail toggle has the same design (pass 6 / fallback) */
         .rail-toggle-btn {
@@ -1079,14 +1084,14 @@
         /* ═══════════════════════════════════════════════════════════ */
         .data-headband {
             position: fixed; left: var(--sidebar-width); right: 0;
-            top: calc(var(--topbar-height) + 34px + 42px);
+            top: calc(var(--topbar-height) + 34px);
             height: 42px; background: linear-gradient(180deg, var(--bg-primary), var(--bg-void));
-            border-bottom: 1px solid var(--border); z-index: 43;
+            border-bottom: 1px solid var(--border); z-index: 45;
             overflow: visible;
         }
         .dh-scroll { height: 42px; overflow-x: hidden; overflow-y: visible; position: relative; }
         .dh-track { display: inline-flex; gap: 0; align-items: stretch;
-                    animation: dhScroll 140s linear infinite; white-space: nowrap; }
+                    animation: dhScroll 80s linear infinite; white-space: nowrap; }
         @keyframes dhScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
         .data-headband:hover .dh-track { animation-play-state: paused; }
         body:has(.sidebar.mini) .data-headband { left: 68px; }
@@ -1156,8 +1161,9 @@
         .dh-pop-cta { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
                       font-size: 10px; color: var(--accent); text-align: right; }
 
-        /* Push page content down to make room for the new headband */
-        .page-content { padding-top: 130px !important; }
+        /* Push page content down to make room for the headbands */
+        .page-content { padding-top: 200px !important; }
+        body.page-dashboard .page-content { padding-top: 140px !important; }
 
         /* Enhanced ticker news popup */
         .ticker-item .ticker-popup { min-width: 320px; }
@@ -1171,10 +1177,188 @@
         .ticker-news-sent.neg { background: rgba(232,48,48,.12); color: var(--accent-red); }
         .ticker-news-sent.neu { background: rgba(136,136,136,.12); color: var(--text-secondary); }
 
+        /* ── Live Status Pill ────────────────────── */
+        .live-status-pill {
+            position: relative; display: inline-flex; align-items: center; gap: 6px;
+            padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+            cursor: pointer; font-family: var(--font-mono); font-size: 11px;
+            transition: all 0.2s;
+        }
+        .live-status-pill:hover { border-color: var(--accent-dim); background: var(--bg-card); }
+        .lsp-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .lsp-flat { background: var(--text-muted); }
+        .lsp-green { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+        .lsp-yellow { background: var(--accent-gold); box-shadow: 0 0 8px var(--accent-gold); }
+        .lsp-red { background: var(--accent-red); box-shadow: 0 0 8px var(--accent-red); }
+        .lsp-label { color: var(--text-secondary); letter-spacing: 1px; font-weight: 600; }
+        .lsp-dropdown {
+            display: none; position: absolute; top: calc(100% + 8px); right: 0;
+            min-width: 260px; background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+            z-index: 300; padding: 0; overflow: hidden;
+        }
+        .live-status-pill:hover .lsp-dropdown { display: block; }
+        .lsp-head {
+            padding: 10px 14px; border-bottom: 1px solid var(--border);
+            font-size: 9px; letter-spacing: 2px; color: var(--text-muted); text-transform: uppercase;
+        }
+        .lsp-body { padding: 6px 0; }
+        .lsp-row {
+            display: flex; align-items: center; gap: 8px; padding: 6px 14px;
+            font-family: var(--font-mono); font-size: 11px;
+        }
+        .lsp-row .lsp-dot { width: 6px; height: 6px; }
+        .lsp-src { color: var(--text-primary); flex: 1; }
+        .lsp-age { color: var(--text-muted); font-size: 10px; }
+        .lsp-empty {
+            padding: 16px 14px; text-align: center; color: var(--text-muted);
+            font-size: 11px; line-height: 1.6;
+        }
+        .lsp-empty code {
+            display: inline-block; margin-top: 4px; padding: 2px 8px;
+            background: var(--bg-void); border: 1px solid var(--border);
+            border-radius: 4px; font-size: 10px; color: var(--accent);
+        }
+
+        /* ── Enhanced Card Design ────────────────── */
+        .card {
+            background: linear-gradient(135deg, var(--bg-card) 0%, rgba(10,26,20,0.85) 100%);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 22px;
+            box-shadow: var(--shadow-card); transition: all 0.3s cubic-bezier(.2,.8,.2,1);
+            position: relative; overflow: hidden;
+        }
+        .card::before {
+            content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(0,232,104,0.15), transparent);
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .card:hover {
+            border-color: var(--border-glow);
+            box-shadow: 0 4px 30px rgba(0,0,0,0.4), 0 0 1px rgba(0,232,104,0.1);
+            transform: translateY(-1px);
+        }
+        .card:hover::before { opacity: 1; }
+        .card-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 18px; padding-bottom: 14px;
+            border-bottom: 1px solid var(--border);
+        }
+        .card-title {
+            font-family: var(--font-heading); font-size: 14px; font-weight: 600;
+            letter-spacing: 1.5px; color: var(--text-primary); text-transform: uppercase;
+            display: flex; align-items: center; gap: 8px;
+        }
+
+        /* ── Enhanced Stat Box ────────────────────── */
+        .stat-box {
+            background: linear-gradient(145deg, var(--bg-card), rgba(8,20,16,0.9));
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 18px 20px;
+            transition: all 0.3s cubic-bezier(.2,.8,.2,1);
+            position: relative; overflow: hidden;
+        }
+        .stat-box::after {
+            content: ""; position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent-dim), transparent);
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .stat-box:hover {
+            border-color: var(--border-glow); transform: translateY(-3px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3), 0 0 1px rgba(0,232,104,0.08);
+        }
+        .stat-box:hover::after { opacity: 1; }
+
+        /* ── Enhanced Form Styles ─────────────────── */
+        .form-input, .input,
+        input[type=text], input[type=password], input[type=email],
+        input[type=number], input[type=search], textarea, select {
+            width: 100%; padding: 12px 16px;
+            background: var(--bg-void); border: 1px solid var(--border);
+            border-radius: var(--radius); color: var(--text-primary);
+            font-family: var(--font-mono); font-size: 13px; outline: none;
+            transition: all 0.25s;
+        }
+        .form-input:focus, .input:focus,
+        input[type=text]:focus, input[type=password]:focus, input[type=email]:focus,
+        input[type=number]:focus, input[type=search]:focus, textarea:focus, select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0,232,104,0.08), 0 0 16px rgba(0,232,104,0.04);
+        }
+        .form-input::placeholder, .input::placeholder,
+        input::placeholder, textarea::placeholder {
+            color: var(--text-muted); font-style: italic;
+        }
+        select { cursor: pointer; appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%235a8a6a' stroke-width='1.5'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 12px center;
+            padding-right: 32px;
+        }
+        .form-group, .input-group { margin-bottom: 18px; }
+        .form-label, .input-label {
+            display: block; font-family: var(--font-mono); font-size: 10px;
+            letter-spacing: 2.5px; color: var(--text-muted); text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        .form-hint, .input-hint {
+            font-family: var(--font-mono); font-size: 10px;
+            color: var(--text-muted); margin-top: 6px; letter-spacing: 0.5px;
+        }
+        .form-actions { display: flex; gap: 12px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+        /* Django form.as_p styling */
+        form p { margin-bottom: 14px; }
+        form p label {
+            display: block; font-family: var(--font-mono); font-size: 10px;
+            letter-spacing: 2px; color: var(--text-muted); text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+        form p input, form p select, form p textarea {
+            width: 100%; padding: 12px 16px;
+            background: var(--bg-void); border: 1px solid var(--border);
+            border-radius: var(--radius); color: var(--text-primary);
+            font-family: var(--font-mono); font-size: 13px; outline: none;
+            transition: all 0.25s;
+        }
+        form p input:focus, form p select:focus, form p textarea:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0,232,104,0.08);
+        }
+        .sauron-form .helptext { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+        .btn-login {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 100%; padding: 14px 24px;
+            background: linear-gradient(135deg, var(--accent-dim), var(--accent));
+            border: none; border-radius: var(--radius);
+            color: var(--bg-void); font-family: var(--font-display); font-size: 12px;
+            font-weight: 700; letter-spacing: 3px; cursor: pointer;
+            transition: all 0.3s; text-transform: uppercase;
+        }
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(0,232,104,0.25);
+        }
+
+        /* ── Search Input ─────────────────────────── */
+        .search-wrap {
+            position: relative; display: flex; align-items: center;
+        }
+        .search-wrap input {
+            padding-left: 36px; padding-right: 36px;
+        }
+        .search-wrap .search-icon {
+            position: absolute; left: 12px; color: var(--text-muted); pointer-events: none;
+        }
+        .search-wrap .search-clear {
+            position: absolute; right: 10px; background: none; border: none;
+            color: var(--text-muted); cursor: pointer; font-size: 14px; display: none;
+        }
+        .search-wrap input:not(:placeholder-shown) + .search-icon + .search-clear { display: block; }
+
     </style>
 
 </head>
-<body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}">
+<body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}">
 
 <!-- Globe-Eye: static eye shape, rotating globe inside -->
 <svg class="globe-eye-bg" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
@@ -1401,6 +1585,18 @@
             </div>
         </div>
 
+        <!-- UPGRADE-9: Data headband with RTL scroll + hover arrows + escape popups -->
+<div class="data-headband" id="dataHeadband">
+  <button type="button" class="dh-arrow left" aria-label="Scroll left">◀</button>
+  <button type="button" class="dh-arrow right" aria-label="Scroll right">▶</button>
+  <div class="dh-scroll" id="dhScroll">
+    <div class="dh-track" id="dhTrack">
+      {% for m in ui_headband %}{% include "_partials/dh_item.html" %}{% endfor %}
+      {% for m in ui_headband %}{% include "_partials/dh_item.html" %}{% endfor %}
+    </div>
+  </div>
+</div>
+
         <!-- Info Bar (fixed, labels always visible, hover for dropdowns) -->
         <!-- UPGRADE-9: info panel rebuilt -->
         <div class="info-panel-wrap">
@@ -1408,7 +1604,7 @@
             <button type="button" class="ip-arrow right" aria-label="Scroll right">▶</button>
             <div class="info-panel-scroll" id="ipScroll">
             <div class="info-panel-bar">
-                <div class="ip-cat">
+                <a href="{% url 'portfolio_overview' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">PORTFOLIO</span>
                     <span class="ip-count">&euro;{{ panel_portfolio_value|default:"0" }}</span>
                     <span class="ip-sub">{{ panel_positions|default:"0" }} pos · {{ panel_exposure|default:"0" }}%</span>
@@ -1422,23 +1618,25 @@
                             <div class="ip-dd-cell"><span class="dk">POSITIONS</span><span class="dv">{{ panel_positions|default:"0" }}</span></div>
                             <div class="ip-dd-cell"><span class="dk">DRAWDOWN</span><span class="dv red">{{ panel_drawdown|default:"0" }}%</span></div>
                         </div>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Portfolio</div>
                     </div>
-                </div>
-                <div class="ip-cat">
+                </a>
+                <a href="{% url 'positions_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">POSITIONS</span>
                     <span class="ip-count">{{ panel_positions|default:"0" }}</span>
                     <span class="ip-sub">open now</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">OPEN POSITIONS</div>
                         {% for p in panel_recent_positions %}
-                        <a href="/positions/" class="ip-dd-item">
+                        <div class="ip-dd-item">
                             <span style="font-weight:700;color:var(--text-primary);">{{ p.instrument.symbol }}</span>
                             <span style="font-size:9px;">{{ p.direction|upper }}</span>
-                        </a>
+                        </div>
                         {% empty %}<div class="ip-dd-empty">No open positions</div>{% endfor %}
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View All Positions</div>
                     </div>
-                </div>
-                <div class="ip-cat">
+                </a>
+                <a href="{% url 'bot_home' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">BOT</span>
                     <span class="ip-count {% if not panel_bot_armed %}red{% endif %}">{% if panel_bot_armed %}ARMED{% else %}OFF{% endif %}</span>
                     <span class="ip-sub">{{ panel_bot_mode|default:"paper" }} · {{ panel_bot_open|default:"0" }} open</span>
@@ -1450,24 +1648,25 @@
                             <div class="ip-dd-cell"><span class="dk">OPEN</span><span class="dv">{{ panel_bot_open|default:"0" }}</span></div>
                             <div class="ip-dd-cell"><span class="dk">24H P&amp;L</span><span class="dv">{{ panel_bot_pnl_24h_display|default:"+0.00" }}</span></div>
                         </div>
-                        <a href="{% url 'bot_home' %}" class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Go to Bot Program</a>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Go to Bot Program</div>
                     </div>
-                </div>
-                <div class="ip-cat">
+                </a>
+                <a href="{% url 'strategies_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">STRATEGIES</span>
                     <span class="ip-count">{{ panel_strategies|default:"0" }}</span>
                     <span class="ip-sub">active</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">ACTIVE STRATEGIES</div>
                         {% for st in panel_recent_strategies %}
-                        <a href="/strategies/{{ st.id }}/" class="ip-dd-item">
+                        <div class="ip-dd-item">
                             <span>{{ st.name|truncatechars:30 }}</span>
                             <span style="font-size:8px;color:var(--accent);">{{ st.status }}</span>
-                        </a>
+                        </div>
                         {% empty %}<div class="ip-dd-empty">No active strategies</div>{% endfor %}
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Strategies</div>
                     </div>
-                </div>
-                <div class="ip-cat">
+                </a>
+                <a href="{% url 'signals_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">SIGNALS</span>
                     <span class="ip-count">{{ panel_signals|default:"0" }}</span>
                     <span class="ip-sub">{{ panel_bullish|default:"0" }} bull · {{ panel_bearish|default:"0" }} bear</span>
@@ -1479,23 +1678,25 @@
                             <div class="ip-dd-cell"><span class="dk">TOTAL</span><span class="dv">{{ panel_signals|default:"0" }}</span></div>
                             <div class="ip-dd-cell"><span class="dk">24H NEW</span><span class="dv">{{ panel_signals_24h|default:"0" }}</span></div>
                         </div>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Signals</div>
                     </div>
-                </div>
-                <div class="ip-cat">
+                </a>
+                <a href="{% url 'news_feed' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">NEWS</span>
                     <span class="ip-count blue">{{ panel_news|default:"0" }}</span>
                     <span class="ip-sub">last 24h</span>
                     <div class="ip-dropdown" style="min-width:340px;">
                         <div class="ip-dd-head">RECENT NEWS</div>
                         {% for n in panel_recent_news %}
-                        <a href="/news/{{ n.id }}/" class="ip-dd-item" style="flex-direction:column;align-items:flex-start;gap:2px;">
+                        <div class="ip-dd-item" style="flex-direction:column;align-items:flex-start;gap:2px;">
                             <span style="font-size:10px;color:var(--text-primary);">{{ n.title|truncatechars:60 }}</span>
                             <span style="font-size:8px;color:var(--text-muted);">{{ n.source }} &middot; {{ n.published_at|timesince }} ago</span>
-                        </a>
+                        </div>
                         {% empty %}<div class="ip-dd-empty">No news yet</div>{% endfor %}
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View All News</div>
                     </div>
-                </div>
-                <div class="ip-cat">
+                </a>
+                <a href="{% url 'liquidations_page' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">FUNDING</span>
                     <span class="ip-count">{{ panel_funding_display|default:"—" }}</span>
                     <span class="ip-sub">24h avg · {{ panel_funding_extreme_count|default:"0" }} extreme</span>
@@ -1507,10 +1708,10 @@
                             <div class="ip-dd-cell"><span class="dk">FLIPS</span><span class="dv">{{ panel_funding_flips|default:"0" }}</span></div>
                             <div class="ip-dd-cell"><span class="dk">SAMPLES</span><span class="dv">{{ panel_funding_samples|default:"0" }}</span></div>
                         </div>
-                        <a href="{% url 'liquidations_page' %}" class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Liquidations page</a>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Liquidations page</div>
                     </div>
-                </div>
-                <div class="ip-cat">
+                </a>
+                <a href="{% url 'liquidations_page' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">LIQ 24H</span>
                     <span class="ip-count">${{ panel_liq_24h_display|default:"0" }}</span>
                     <span class="ip-sub">{{ panel_liq_count|default:"0" }} events</span>
@@ -1522,52 +1723,48 @@
                             <div class="ip-dd-cell"><span class="dk">LONGS REKT</span><span class="dv red">${{ panel_liq_long_display|default:"0" }}</span></div>
                             <div class="ip-dd-cell"><span class="dk">SHORTS REKT</span><span class="dv">${{ panel_liq_short_display|default:"0" }}</span></div>
                         </div>
-                        <a href="{% url 'liquidations_page' %}" class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View heatmap</a>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View heatmap</div>
                     </div>
-                </div>
-                <div class="ip-cat">
+                </a>
+                <a href="{% url 'user_notifications' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">ALERTS</span>
                     <span class="ip-count gold">{{ notification_count|default:"0" }}</span>
                     <span class="ip-sub">unread</span>
-                </div>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">ALERTS</div>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Notifications</div>
+                    </div>
+                </a>
                 <div class="ip-cat">
                     <span class="ip-label">DRAWDOWN</span>
                     <span class="ip-count red">{{ panel_drawdown|default:"0" }}%</span>
                     <span class="ip-sub">from peak</span>
                 </div>
-                <div class="ip-cat">
+                <a href="{% url 'instruments_list' %}?filter=watchlist" class="ip-cat ip-cat-link">
                     <span class="ip-label">WATCHLIST</span>
                     <span class="ip-count">{{ panel_watchlist|default:"0" }}</span>
                     <span class="ip-sub">tracked</span>
-                </div>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">WATCHLIST</div>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Instruments</div>
+                    </div>
+                </a>
                 <div class="ip-cat">
                     <span class="ip-label">VOLATILITY</span>
                     <span class="ip-count">{{ panel_vix|default:"—" }}</span>
                     <span class="ip-sub">VIX index</span>
                 </div>
-                <div class="ip-cat ip-cat-ai" onclick="window.location='/ai/chat/'">
+                <a href="{% url 'ai_chat' %}" class="ip-cat ip-cat-link ip-cat-ai">
                     <span class="ip-label">SAURON AI</span>
                     <span class="ip-count">&#x25B8;</span>
                     <span class="ip-sub">ask anything</span>
-                </div>
+                </a>
             </div>
             </div>
         </div>
 
-        <!-- UPGRADE-9: Data headband with RTL scroll + hover arrows + escape popups -->
-<div class="data-headband" id="dataHeadband">
-  <button type="button" class="dh-arrow left" aria-label="Scroll left">◀</button>
-  <button type="button" class="dh-arrow right" aria-label="Scroll right">▶</button>
-  <div class="dh-scroll" id="dhScroll">
-    <div class="dh-track" id="dhTrack">
-      {% for m in ui_headband %}{% include "_partials/dh_item.html" %}{% endfor %}
-      {% for m in ui_headband %}{% include "_partials/dh_item.html" %}{% endfor %}
-    </div>
-  </div>
-</div>
 
-
-<div class="page-content fade-in" style="padding-top:90px;">
+<div class="page-content fade-in">
             {% block content %}{% endblock %}
         </div>
     </main>
@@ -1960,8 +2157,8 @@ document.addEventListener('click', function(e) {
       var hasYellow=srcs.some(s=>s.state==='yellow');
       var hasRed=srcs.some(s=>s.state==='red');
       dot.className='lsp-dot '+(hasRed?'lsp-red':hasYellow?'lsp-yellow':hasGreen?'lsp-green':'lsp-flat');
-      label.textContent=hasGreen?'LIVE':'STALE';
-      if(!srcs.length){body.innerHTML='<div class="lsp-empty">No streamers connected.<br>Start one: <code>python manage.py stream_binance</code></div>';return;}
+      label.textContent=hasGreen?'LIVE':hasYellow?'DELAYED':'OFFLINE';
+      if(!srcs.length){body.innerHTML='<div class="lsp-empty">No live data sources.<br>See <a href="/getting-started/" style="color:var(--accent);text-decoration:none;">Getting Started</a> to configure.</div>';return;}
       body.innerHTML=srcs.map(function(s){
         return '<div class="lsp-row"><span class="lsp-dot lsp-'+s.state+'"></span><span class="lsp-src">'+s.source+'</span><span class="lsp-age">'+fmt(s.age_seconds)+' ago</span></div>';
       }).join('');
@@ -2070,6 +2267,15 @@ document.addEventListener('click', function(e) {
   var ipScroll = document.getElementById('ipScroll');
   if (ipScroll) {
     var ipTimer = 0;
+    var ipArrowL = document.querySelector('.info-panel-wrap .ip-arrow.left');
+    var ipArrowR = document.querySelector('.info-panel-wrap .ip-arrow.right');
+    function updateIpArrows(){
+      if(!ipArrowL||!ipArrowR) return;
+      ipArrowL.style.display = ipScroll.scrollLeft > 2 ? '' : 'none';
+      ipArrowR.style.display = (ipScroll.scrollLeft + ipScroll.clientWidth) < (ipScroll.scrollWidth - 2) ? '' : 'none';
+    }
+    ipScroll.addEventListener('scroll', updateIpArrows);
+    setTimeout(updateIpArrows, 200);
     document.querySelectorAll('.info-panel-wrap .ip-arrow').forEach(function(btn){
       var dir = btn.classList.contains('right') ? 1 : -1;
       btn.addEventListener('mouseenter', function(){
@@ -2080,6 +2286,69 @@ document.addEventListener('click', function(e) {
         clearInterval(ipTimer); ipTimer = 0;
       });
     });
+  }
+
+  // Info panel dropdown positioning (fixed, escape clip)
+  document.querySelectorAll('.info-panel-wrap .ip-cat').forEach(function(cat){
+    var dd = cat.querySelector('.ip-dropdown');
+    if(!dd) return;
+    cat.addEventListener('mouseenter', function(){
+      var r = cat.getBoundingClientRect();
+      dd.style.top = (r.bottom + 2) + 'px';
+      var left = r.left;
+      var w = 340;
+      if(left + w > window.innerWidth - 16) left = window.innerWidth - w - 16;
+      if(left < 16) left = 16;
+      dd.style.left = left + 'px';
+    });
+  });
+
+  // Ticker bar arrows: show only if content available on that side
+  var tbArrowL = document.querySelector('.ticker-bar .tb-arrow.left');
+  var tbArrowR = document.querySelector('.ticker-bar .tb-arrow.right');
+  if(tbArrowL) tbArrowL.style.display = '';
+  if(tbArrowR) tbArrowR.style.display = '';
+
+  // Data headband arrows: show only if content available
+  var dhArrowL = document.querySelector('.data-headband .dh-arrow.left');
+  var dhArrowR = document.querySelector('.data-headband .dh-arrow.right');
+  if(dhArrowL) dhArrowL.style.display = '';
+  if(dhArrowR) dhArrowR.style.display = '';
+
+  // User drag scrolling for ticker and headband
+  function enableDragScroll(container, track, getOffset, setOffset){
+    var dragging = false, startX = 0, startOff = 0;
+    container.addEventListener('mousedown', function(e){
+      if(e.target.closest('.tb-arrow,.dh-arrow,.ticker-popup,.dh-pop')) return;
+      dragging = true; startX = e.clientX; startOff = getOffset();
+      container.style.cursor = 'grabbing';
+      track.style.animationPlayState = 'paused';
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', function(e){
+      if(!dragging) return;
+      var dx = e.clientX - startX;
+      setOffset(startOff + dx);
+    });
+    window.addEventListener('mouseup', function(){
+      if(!dragging) return;
+      dragging = false;
+      container.style.cursor = '';
+    });
+  }
+  // Ticker drag scroll
+  if(tTrack){
+    enableDragScroll(document.getElementById('tickerBar'), tTrack,
+      function(){ return tOffset; },
+      function(v){ tManual=true; tOffset=v; var max=tTrack.scrollWidth/2; if(tOffset>0)tOffset=0; if(tOffset<-max)tOffset=-max; tTrack.style.transform='translateX('+tOffset+'px)'; }
+    );
+  }
+  // Data headband drag scroll
+  if(dhTrack){
+    enableDragScroll(document.querySelector('.data-headband'), dhTrack,
+      function(){ return dhOffset; },
+      function(v){ dhManual=true; dhOffset=v; var max=dhTrack.scrollWidth/2; if(dhOffset>0)dhOffset=0; if(dhOffset<-max)dhOffset=-max; dhTrack.style.transform='translateX('+dhOffset+'px)'; }
+    );
   }
 })();
 </script>

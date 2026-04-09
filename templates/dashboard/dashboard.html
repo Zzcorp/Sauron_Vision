@@ -1,31 +1,32 @@
 {% extends "base.html" %}
 {% block title %}Sauron Vision — Dashboard{% endblock %}
 {% block page_title %}⬡ COMMAND CENTER{% endblock %}
+{% block body_class %} page-dashboard{% endblock %}
 
 {% block content %}
 <!-- ── Row 1: Portfolio KPIs ──────────────────────────── -->
 <div class="section-label fade-in-up">Portfolio Overview</div>
 <div class="grid grid-6" style="margin-bottom: 20px;">
-    <div class="stat-box fade-in-up delay-1">
+    <a href="{% url 'portfolio_overview' %}" class="stat-box fade-in-up delay-1 dash-link">
         <div class="stat-label">Portfolio Value</div>
         <div class="stat-value">€{{ portfolio.current_value|default:"10,000" }}</div>
         <div class="stat-change positive">▲ {{ daily_pnl_pct|default:"+0.00" }}% today</div>
-    </div>
-    <div class="stat-box fade-in-up delay-2">
+    </a>
+    <a href="{% url 'portfolio_overview' %}" class="stat-box fade-in-up delay-2 dash-link">
         <div class="stat-label">Cash Available</div>
         <div class="stat-value">€{{ portfolio.cash_available|default:"10,000" }}</div>
         <div class="stat-sub">{{ cash_pct|default:"100" }}% of portfolio</div>
-    </div>
-    <div class="stat-box fade-in-up delay-3">
+    </a>
+    <a href="{% url 'positions_list' %}" class="stat-box fade-in-up delay-3 dash-link">
         <div class="stat-label">Unrealized P&L</div>
         <div class="stat-value" style="color:{% if total_unrealized_pnl >= 0 %}var(--success){% else %}var(--accent-red){% endif %}">€{{ total_unrealized_pnl|default:"0.00" }}</div>
         <div class="stat-sub">{{ open_positions_count|default:"0" }} open positions</div>
-    </div>
-    <div class="stat-box fade-in-up delay-4">
+    </a>
+    <a href="{% url 'portfolio_overview' %}" class="stat-box fade-in-up delay-4 dash-link">
         <div class="stat-label">Total Exposure</div>
         <div class="stat-value">{{ total_exposure_pct|default:"0" }}%</div>
         <div class="stat-sub">limit: {{ portfolio.max_total_exposure_pct|default:"100" }}%</div>
-    </div>
+    </a>
     <div class="stat-box fade-in-up delay-5">
         <div class="stat-label">Max Drawdown</div>
         <div class="stat-value" style="color: var(--accent-red);">{{ max_drawdown|default:"0.00" }}%</div>
@@ -41,71 +42,76 @@
 <!-- ── Row 2: Market & Intelligence KPIs ─────────────── -->
 <div class="section-label fade-in-up">Markets & Intelligence</div>
 <div class="grid grid-6" style="margin-bottom: 20px;">
-    <div class="stat-box fade-in-up delay-1">
+    <a href="{% url 'instruments_list' %}" class="stat-box fade-in-up delay-1 dash-link">
         <div class="stat-label">Instruments</div>
         <div class="stat-value">{{ instruments_count|default:"0" }}</div>
         <div class="stat-sub">{{ watchlist_count|default:"0" }} on watchlist</div>
-    </div>
-    <div class="stat-box fade-in-up delay-2">
+    </a>
+    <a href="{% url 'signals_list' %}" class="stat-box fade-in-up delay-2 dash-link">
         <div class="stat-label">Active Signals</div>
         <div class="stat-value" style="color: var(--accent);">{{ active_signals_count|default:"0" }}</div>
         <div class="stat-sub">{{ bullish_count|default:"0" }}▲ {{ bearish_count|default:"0" }}▼</div>
-    </div>
-    <div class="stat-box fade-in-up delay-3">
+    </a>
+    <a href="{% url 'signals_list' %}" class="stat-box fade-in-up delay-3 dash-link">
         <div class="stat-label">Avg Signal Score</div>
         <div class="stat-value">{{ avg_signal_score|default:"—" }}</div>
         <div class="stat-sub">composite confidence</div>
-    </div>
-    <div class="stat-box fade-in-up delay-4">
+    </a>
+    <a href="{% url 'strategies_list' %}" class="stat-box fade-in-up delay-4 dash-link">
         <div class="stat-label">Strategies</div>
         <div class="stat-value">{{ active_strategies_count|default:"0" }}</div>
         <div class="stat-sub">{{ proposed_strategies|default:"0" }} proposed</div>
-    </div>
-    <div class="stat-box fade-in-up delay-5">
+    </a>
+    <a href="{% url 'news_feed' %}" class="stat-box fade-in-up delay-5 dash-link">
         <div class="stat-label">News (24h)</div>
         <div class="stat-value">{{ news_24h|default:"0" }}</div>
         <div class="stat-sub">avg sentiment: {{ avg_news_sentiment|default:"—" }}</div>
-    </div>
-    <div class="stat-box fade-in-up delay-6">
+    </a>
+    <a href="{% url 'economic_calendar' %}" class="stat-box fade-in-up delay-6 dash-link">
         <div class="stat-label">Econ Events</div>
         <div class="stat-value">{{ upcoming_events|default:"0" }}</div>
         <div class="stat-sub">{{ high_impact_events|default:"0" }} high impact</div>
-    </div>
+    </a>
 </div>
 
-<!-- ── Row 3: AI KPIs ────────────────────────────────── -->
-<div class="section-label fade-in-up">AI Agents</div>
-<div class="grid grid-5" style="margin-bottom: 24px;">
-    <div class="stat-box fade-in-up delay-1">
+<!-- ── Row 3: Bot & AI KPIs ──────────────────────────── -->
+<div class="section-label fade-in-up">Automation & AI</div>
+<div class="grid grid-6" style="margin-bottom: 24px;">
+    <a href="{% url 'bot_home' %}" class="stat-box fade-in-up delay-1 dash-link">
+        <div class="stat-label">Bot Status</div>
+        <div class="stat-value" style="color:{% if panel_bot_armed %}var(--accent){% else %}var(--text-muted){% endif %};font-size:18px;">{% if panel_bot_armed %}ARMED{% else %}OFFLINE{% endif %}</div>
+        <div class="stat-sub">{{ panel_bot_mode|default:"paper" }} mode</div>
+    </a>
+    <a href="{% url 'bot_home' %}" class="stat-box fade-in-up delay-2 dash-link">
+        <div class="stat-label">Bot 24h P&L</div>
+        <div class="stat-value" style="font-size:18px;">{{ panel_bot_pnl_24h_display|default:"+0.00" }}</div>
+        <div class="stat-sub">{{ panel_bot_open|default:"0" }} open trades</div>
+    </a>
+    <a href="{% url 'ai_insights' %}" class="stat-box fade-in-up delay-3 dash-link">
         <div class="stat-label">AI Tasks (24h)</div>
         <div class="stat-value">{{ ai_tasks_24h|default:"0" }}</div>
         <div class="stat-sub">{{ ai_success_rate|default:"0" }}% success</div>
-    </div>
-    <div class="stat-box fade-in-up delay-2">
+    </a>
+    <a href="{% url 'ai_tasks_list' %}" class="stat-box fade-in-up delay-4 dash-link">
         <div class="stat-label">AI Cost (24h)</div>
         <div class="stat-value">{{ ai_cost_24h|default:"$0.00" }}</div>
         <div class="stat-sub">{{ ai_cost_mtd|default:"$0.00" }} this month</div>
-    </div>
-    <div class="stat-box fade-in-up delay-3">
-        <div class="stat-label">Avg Response</div>
-        <div class="stat-value">{{ ai_avg_duration|default:"0.0" }}s</div>
-        <div class="stat-sub">avg latency</div>
-    </div>
-    <div class="stat-box fade-in-up delay-4">
+    </a>
+    <div class="stat-box fade-in-up delay-5">
         <div class="stat-label">Tokens (24h)</div>
         <div class="stat-value">{{ ai_tokens_24h|default:"0" }}</div>
         <div class="stat-sub">in + out combined</div>
     </div>
-    <div class="stat-box fade-in-up delay-5">
-        <div class="stat-label">Last Agent Run</div>
+    <a href="{% url 'ai_tasks_list' %}" class="stat-box fade-in-up delay-6 dash-link">
+        <div class="stat-label">Last Agent</div>
         <div class="stat-value" style="font-size: 14px;">{{ last_agent_name|default:"—" }}</div>
         <div class="stat-sub">{{ last_agent_time|default:"—" }}</div>
-    </div>
+    </a>
 </div>
 
 <!-- ── Row 4: Exposure Breakdown ─────────────────────── -->
 <div class="section-label fade-in-up">Exposure Breakdown</div>
-<div class="grid grid-4" style="margin-bottom: 24px;">
+<div class="grid grid-5" style="margin-bottom: 24px;">
     <div class="stat-box fade-in-up delay-1">
         <div class="stat-label">Stocks</div>
         <div class="stat-value" style="color: var(--accent-blue);">{{ exposure.stock|default:"0" }}%</div>
@@ -122,6 +128,11 @@
         <div class="score-bar"><div class="score-bar-fill" style="width:{{ exposure.commodity|default:0 }}%; background: var(--accent-red);"></div></div>
     </div>
     <div class="stat-box fade-in-up delay-4">
+        <div class="stat-label">Crypto</div>
+        <div class="stat-value" style="color: var(--accent-purple);">{{ exposure.crypto|default:"0" }}%</div>
+        <div class="score-bar"><div class="score-bar-fill" style="width:{{ exposure.crypto|default:0 }}%; background: var(--accent-purple);"></div></div>
+    </div>
+    <div class="stat-box fade-in-up delay-5">
         <div class="stat-label">Cash</div>
         <div class="stat-value" style="color: var(--accent);">{{ exposure.cash|default:"100" }}%</div>
         <div class="score-bar"><div class="score-bar-fill" style="width:{{ exposure.cash|default:100 }}%; background: var(--accent);"></div></div>
@@ -134,12 +145,12 @@
         <!-- Active Signals -->
         <div class="card fade-in-up delay-3" style="margin-bottom: 20px;">
             <div class="card-header">
-                <span class="card-title">⚡ Active Signals</span>
+                <span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><polygon points="8,2 10,6 14,6.5 11,9.5 12,14 8,11.5 4,14 5,9.5 2,6.5 6,6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg> Active Signals</span>
                 <a href="{% url 'signals_list' %}" class="btn btn-sm">View All →</a>
             </div>
             {% if recent_signals %}
                 {% for signal in recent_signals %}
-                <div class="signal-item">
+                <a href="{% url 'signals_list' %}" class="signal-item" style="text-decoration:none;display:block;">
                     <div class="signal-header">
                         <span>
                             <span class="signal-symbol">{{ signal.instrument.symbol }}</span>
@@ -149,17 +160,17 @@
                         <span style="font-family:var(--font-display);font-size:13px;">{{ signal.score|floatformat:2 }}</span>
                     </div>
                     <div class="signal-desc">{{ signal.title }}</div>
-                </div>
+                </a>
                 {% endfor %}
             {% else %}
-                <div class="empty-state"><div class="empty-icon">⚡</div><p>NO ACTIVE SIGNALS — MARKETS SCANNING</p></div>
+                <div class="empty-state"><div class="empty-icon"><svg width="32" height="32" viewBox="0 0 16 16" fill="none"><polygon points="8,2 10,6 14,6.5 11,9.5 12,14 8,11.5 4,14 5,9.5 2,6.5 6,6" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg></div><p>NO ACTIVE SIGNALS — MARKETS SCANNING</p></div>
             {% endif %}
         </div>
 
         <!-- Strategies -->
-        <div class="card fade-in-up delay-4">
+        <div class="card fade-in-up delay-4" style="margin-bottom: 20px;">
             <div class="card-header">
-                <span class="card-title">⬡ Active Strategies</span>
+                <span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><polygon points="8,1 15,5 15,11 8,15 1,11 1,5" fill="none" stroke="currentColor" stroke-width="1.2"/></svg> Active Strategies</span>
                 <a href="{% url 'strategies_list' %}" class="btn btn-sm">View All →</a>
             </div>
             {% if active_strategies %}
@@ -167,7 +178,7 @@
                 <thead><tr><th>Strategy</th><th>Horizon</th><th>Status</th><th>P&L</th></tr></thead>
                 <tbody>
                 {% for s in active_strategies %}
-                <tr>
+                <tr onclick="window.location='{% url 'strategy_detail' s.id %}'" style="cursor:pointer;">
                     <td>{{ s.name|truncatechars:40 }}</td>
                     <td><span class="badge badge-medium">{{ s.time_horizon }}</span></td>
                     <td><span class="badge badge-active">{{ s.status }}</span></td>
@@ -177,8 +188,30 @@
                 </tbody>
             </table></div>
             {% else %}
-                <div class="empty-state"><div class="empty-icon">⬡</div><p>NO ACTIVE STRATEGIES</p></div>
+                <div class="empty-state"><div class="empty-icon"><svg width="32" height="32" viewBox="0 0 16 16" fill="none"><polygon points="8,1 15,5 15,11 8,15 1,11 1,5" fill="none" stroke="currentColor" stroke-width="1"/></svg></div><p>NO ACTIVE STRATEGIES</p></div>
             {% endif %}
+        </div>
+
+        <!-- Bot Program Summary -->
+        <div class="card fade-in-up delay-5">
+            <div class="card-header">
+                <span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><path d="M2 8a6 6 0 0111.5-2M14 8a6 6 0 01-11.5 2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg> Bot Program</span>
+                <a href="{% url 'bot_home' %}" class="btn btn-sm">Details →</a>
+            </div>
+            <div class="grid grid-3" style="gap:10px;">
+                <div style="text-align:center;padding:12px 0;">
+                    <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--text-muted);margin-bottom:4px;">STATUS</div>
+                    <div style="font-family:var(--font-display);font-size:16px;font-weight:700;color:{% if panel_bot_armed %}var(--accent){% else %}var(--text-muted){% endif %};">{% if panel_bot_armed %}ARMED{% else %}OFF{% endif %}</div>
+                </div>
+                <div style="text-align:center;padding:12px 0;">
+                    <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--text-muted);margin-bottom:4px;">OPEN</div>
+                    <div style="font-family:var(--font-display);font-size:16px;font-weight:700;">{{ panel_bot_open|default:"0" }}</div>
+                </div>
+                <div style="text-align:center;padding:12px 0;">
+                    <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--text-muted);margin-bottom:4px;">24H P&L</div>
+                    <div style="font-family:var(--font-display);font-size:16px;font-weight:700;">{{ panel_bot_pnl_24h_display|default:"+0.00" }}</div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -186,20 +219,20 @@
         <!-- News -->
         <div class="card fade-in-up delay-2" style="margin-bottom: 20px;">
             <div class="card-header">
-                <span class="card-title">▤ Latest News</span>
+                <span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.2"/><line x1="5" y1="5" x2="11" y2="5" stroke="currentColor" stroke-width="0.8"/><line x1="5" y1="7.5" x2="11" y2="7.5" stroke="currentColor" stroke-width="0.8"/><line x1="5" y1="10" x2="8" y2="10" stroke="currentColor" stroke-width="0.8"/></svg> Latest News</span>
                 <a href="{% url 'news_feed' %}" class="btn btn-sm">All →</a>
             </div>
             {% if recent_news %}
                 {% for article in recent_news %}
-                <div style="padding:8px 0;border-bottom:1px solid rgba(19,48,32,0.4);">
-                    <div style="font-size:13px;margin-bottom:3px;">{{ article.title|truncatechars:80 }}</div>
+                <a href="{% url 'news_detail' article.id %}" style="display:block;padding:10px 0;border-bottom:1px solid rgba(19,48,32,0.4);text-decoration:none;color:inherit;transition:background 0.15s;margin:0 -8px;padding-left:8px;padding-right:8px;border-radius:4px;">
+                    <div style="font-size:13px;margin-bottom:3px;color:var(--text-primary);">{{ article.title|truncatechars:80 }}</div>
                     <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
                         {{ article.source }} · {{ article.published_at|timesince }} ago
                         {% if article.ai_sentiment_score != None %}
                         · <span style="color:{% if article.ai_sentiment_score > 0 %}var(--success){% elif article.ai_sentiment_score < 0 %}var(--accent-red){% else %}var(--text-secondary){% endif %}">{{ article.ai_sentiment_score|floatformat:2 }}</span>
                         {% endif %}
                     </div>
-                </div>
+                </a>
                 {% endfor %}
             {% else %}
                 <div class="empty-state" style="padding:30px;"><p>NO NEWS YET</p></div>
@@ -209,16 +242,16 @@
         <!-- Recent AI Tasks -->
         <div class="card fade-in-up delay-3" style="margin-bottom: 20px;">
             <div class="card-header">
-                <span class="card-title">◬ AI Agents</span>
+                <span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><path d="M8 1L1 5v6l7 4 7-4V5z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M1 5l7 4 7-4" fill="none" stroke="currentColor" stroke-width="0.8"/><line x1="8" y1="9" x2="8" y2="15" stroke="currentColor" stroke-width="0.8"/></svg> AI Agents</span>
                 <a href="{% url 'ai_insights' %}" class="btn btn-sm">Details →</a>
             </div>
             {% if recent_ai_tasks %}
                 {% for task in recent_ai_tasks %}
-                <div style="padding:6px 0;border-bottom:1px solid rgba(19,48,32,0.3);font-size:12px;">
+                <a href="{% url 'ai_tasks_list' %}" style="display:block;padding:6px 0;border-bottom:1px solid rgba(19,48,32,0.3);font-size:12px;text-decoration:none;color:inherit;">
                     <span style="color:{% if task.success %}var(--success){% else %}var(--accent-red){% endif %}">●</span>
                     <span style="font-family:var(--font-mono);color:var(--text-secondary);">{{ task.agent }}</span>
                     <span style="float:right;color:var(--text-muted);font-family:var(--font-mono);font-size:10px;">{{ task.created_at|timesince }} ago</span>
-                </div>
+                </a>
                 {% endfor %}
             {% else %}
                 <div class="empty-state" style="padding:30px;"><p>NO AI TASKS YET</p></div>
@@ -226,15 +259,36 @@
         </div>
 
         <!-- Market Sessions -->
-        <div class="card fade-in-up delay-4">
-            <div class="card-header"><span class="card-title">◎ Market Sessions</span></div>
+        <div class="card fade-in-up delay-4" style="margin-bottom: 20px;">
+            <div class="card-header"><span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1"/></svg> Market Sessions</span></div>
             <ul class="kv-list">
                 <li><span class="label">FOREX</span><span class="value" style="color:{% if forex_open %}var(--success){% else %}var(--accent-red){% endif %}">{% if forex_open %}OPEN{% else %}CLOSED{% endif %}</span></li>
                 <li><span class="label">US MARKETS</span><span class="value" style="color:{% if us_open %}var(--success){% else %}var(--accent-red){% endif %}">{% if us_open %}OPEN{% else %}CLOSED{% endif %}</span></li>
                 <li><span class="label">EU MARKETS</span><span class="value" style="color:{% if eu_open %}var(--success){% else %}var(--accent-red){% endif %}">{% if eu_open %}OPEN{% else %}CLOSED{% endif %}</span></li>
+                <li><span class="label">CRYPTO</span><span class="value" style="color:var(--success);">24/7</span></li>
                 <li><span class="label">MODE</span><span class="value">{% if is_weekend %}WEEKEND{% else %}LIVE{% endif %}</span></li>
             </ul>
         </div>
+
+        <!-- Quick Links -->
+        <div class="card fade-in-up delay-5">
+            <div class="card-header"><span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><path d="M8 1v14M1 8h14" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg> Quick Actions</span></div>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+                <a href="{% url 'ai_chat' %}" class="btn btn-sm" style="justify-content:flex-start;">Chat with Sauron AI →</a>
+                <a href="{% url 'market_quotes' %}" class="btn btn-sm" style="justify-content:flex-start;">Live Market Quotes →</a>
+                <a href="{% url 'backtest_list' %}" class="btn btn-sm" style="justify-content:flex-start;">Run Backtest →</a>
+                <a href="{% url 'bot_configure' %}" class="btn btn-sm" style="justify-content:flex-start;">Configure Bot →</a>
+            </div>
+        </div>
     </div>
 </div>
+
+{% block extra_css %}
+<style>
+.dash-link {
+    text-decoration: none; color: inherit; display: block; cursor: pointer;
+}
+.dash-link:hover { border-color: var(--accent) !important; }
+</style>
+{% endblock %}
 {% endblock %}

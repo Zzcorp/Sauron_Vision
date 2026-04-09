@@ -1,7 +1,30 @@
 {% extends "base.html" %}{% block page_title %}New Scenario{% endblock %}
-{% block content %}<div class="page-content fade-in" style="max-width:760px;">
-  <div class="card"><div class="card-header"><div class="card-title">NEW SCENARIO</div></div>
-  <form method="post">{% csrf_token %}{{ form.as_p }}
-    <button class="btn-login" type="submit">RUN SIMULATION</button>
-  </form></div>
-</div>{% endblock %}
+{% block content %}
+<div style="max-width:760px;">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><path d="M6 2h4l1 5-2.5 3h-1L5 7z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><line x1="6" y1="10" x2="10" y2="10" stroke="currentColor" stroke-width="1.2"/><line x1="6.5" y1="12" x2="9.5" y2="12" stroke="currentColor" stroke-width="1.2"/><line x1="7" y1="14" x2="9" y2="14" stroke="currentColor" stroke-width="1.2"/></svg> NEW SCENARIO</div>
+    </div>
+    <form method="post" class="sauron-form">{% csrf_token %}
+      {% for field in form %}
+      <div class="input-group">
+        <label class="input-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {% if field.field.widget.input_type == 'select' %}
+          {{ field }}
+        {% elif field.field.widget.input_type == 'textarea' %}
+          <textarea name="{{ field.html_name }}" id="{{ field.id_for_label }}" class="input" rows="4" placeholder="{{ field.label }}">{{ field.value|default:'' }}</textarea>
+        {% else %}
+          <input type="{{ field.field.widget.input_type|default:'text' }}" name="{{ field.html_name }}" id="{{ field.id_for_label }}" value="{{ field.value|default:'' }}" {% if field.field.required %}required{% endif %} class="input" placeholder="{{ field.label }}">
+        {% endif %}
+        {% if field.help_text %}<div class="input-hint">{{ field.help_text }}</div>{% endif %}
+        {% if field.errors %}<div style="color:var(--accent-red);font-size:11px;margin-top:4px;">{{ field.errors.0 }}</div>{% endif %}
+      </div>
+      {% endfor %}
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">RUN SIMULATION</button>
+        <a href="{% url 'scenarios' %}" class="btn btn-ghost">CANCEL</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

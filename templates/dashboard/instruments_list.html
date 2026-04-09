@@ -4,9 +4,13 @@
 
 {% block content %}
 <div class="card fade-in-up">
-    <div class="card-header">
+    <div class="card-header" style="flex-wrap:wrap;gap:12px;">
         <span class="card-title">Tracked Instruments ({{ instruments|length }})</span>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            <div class="search-wrap" style="min-width:200px;">
+                <input type="search" id="instrumentSearch" placeholder="Search instruments..." style="padding:8px 14px 8px 34px;font-size:12px;">
+                <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.3"/><line x1="10.5" y1="10.5" x2="14" y2="14" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            </div>
             <a href="?filter=watchlist" class="btn btn-sm {% if filter == 'watchlist' %}btn-primary{% endif %}">Watchlist</a>
             <a href="?filter=stock" class="btn btn-sm {% if filter == 'stock' %}btn-primary{% endif %}">Stocks</a>
             <a href="?filter=forex" class="btn btn-sm {% if filter == 'forex' %}btn-primary{% endif %}">Forex</a>
@@ -20,9 +24,9 @@
     <div class="table-wrapper">
     <table>
         <thead><tr><th>Symbol</th><th>Name</th><th>Class</th><th>Exchange</th><th>Watchlist</th><th>Active</th></tr></thead>
-        <tbody>
+        <tbody id="instrumentsBody">
         {% for inst in instruments %}
-        <tr class="instrument-row" data-instrument="{{ inst.symbol }}" onclick="window.location='{% url 'instrument_detail' inst.symbol %}'" style="cursor:pointer;">
+        <tr class="instrument-row" data-instrument="{{ inst.symbol }}" data-name="{{ inst.name|lower }}" data-symbol="{{ inst.symbol|lower }}" onclick="window.location='{% url 'instrument_detail' inst.symbol %}'" style="cursor:pointer;">
             <td>
                 <a href="{% url 'instrument_detail' inst.symbol %}" style="font-family:var(--font-display);font-size:13px;color:var(--accent);text-decoration:none;font-weight:700;" data-instrument="{{ inst.symbol }}">{{ inst.symbol }}</a>
             </td>
@@ -39,4 +43,21 @@
     </table>
     </div>
 </div>
+
+{% block extra_js %}
+<script>
+(function(){
+  var search = document.getElementById('instrumentSearch');
+  if(!search) return;
+  search.addEventListener('input', function(){
+    var q = this.value.toLowerCase().trim();
+    document.querySelectorAll('#instrumentsBody .instrument-row').forEach(function(row){
+      var sym = row.getAttribute('data-symbol') || '';
+      var name = row.getAttribute('data-name') || '';
+      row.style.display = (!q || sym.indexOf(q) !== -1 || name.indexOf(q) !== -1) ? '' : 'none';
+    });
+  });
+})();
+</script>
+{% endblock %}
 {% endblock %}
