@@ -57,3 +57,4 @@ class Signal(models.Model):
 
     def __str__(self):
         return f"[{self.direction.upper()}] {self.title} (score: {self.score:.2f})"
+from .models_smc import SmcSignal  # noqa: F401
