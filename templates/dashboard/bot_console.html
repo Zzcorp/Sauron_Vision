@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Bot Console - Sauron Vision{% endblock %}
+{% block content %}
+<div class="container" style="max-width:1100px;margin:30px auto;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+    <h2 style="font-family:var(--font-heading);color:var(--accent);text-transform:uppercase;letter-spacing:0.1em;margin:0;">
+      Bot Console
+    </h2>
+    {% if config %}
+      <button id="pause-btn" class="btn {% if config.enabled %}btn-danger{% else %}btn-primary{% endif %}"
+              onclick="togglePause()" style="font-size:1.1rem;padding:14px 28px;">
+        {% if config.enabled %}⏸  PAUSE BOT{% else %}▶  RESUME BOT{% endif %}
+      </button>
+    {% endif %}
+  </div>
+
+  {% if not config %}
+    <div class="empty-state">
+      <p>No bot configured. Create one from the Bot Program page.</p>
+    </div>
+  {% else %}
+    <div class="sv-metrics-grid">
+      <div class="sv-metric-card">
+        <div class="sv-metric-label">Status</div>
+        <div class="sv-metric-value {% if config.enabled %}up{% else %}down{% endif %}">
+          {% if config.enabled %}RUNNING{% else %}PAUSED{% endif %}
+        </div>
+      </div>
+      <div class="sv-metric-card">
+        <div class="sv-metric-label">Mode</div>
+        <div class="sv-metric-value">{{ config.mode|upper }}</div>
+      </div>
+      <div class="sv-metric-card">
+        <div class="sv-metric-label">Market</div>
+        <div class="sv-metric-value">{{ config.market_type|upper }}</div>
+      </div>
+      <div class="sv-metric-card">
+        <div class="sv-metric-label">Heartbeat</div>
+        <div class="sv-metric-value">{% if heartbeat %}{{ heartbeat|floatformat:0 }}s{% else %}-{% endif %}</div>
+      </div>
+      <div class="sv-metric-card">
+        <div class="sv-metric-label">Open trades</div>
+        <div class="sv-metric-value">{{ open_trades|length }}</div>
+      </div>
+      {% if shadow %}
+      <div class="sv-metric-card">
+        <div class="sv-metric-label">Shadow mode</div>
+        <div class="sv-metric-value" style="color:var(--accent-gold);">ACTIVE</div>
+      </div>
+      {% endif %}
+      {% if circuit %}
+      <div class="sv-metric-card">
+        <div class="sv-metric-label">Circuit</div>
+        <div class="sv-metric-value down">{{ circuit }}</div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="sv-section-title">Open positions</div>
+    {% if open_trades %}
+      <table class="sv-perf-table">
+        <thead>
+          <tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th>
+              <th>Stop</th><th>Target</th><th>Score</th><th>Reason</th><th>Opened</th></tr>
+        </thead>
+        <tbody>
+          {% for t in open_trades %}
+            <tr>
+              <td>{{ t.symbol }}</td>
+              <td class="{% if t.side == 'BUY' %}up{% else %}down{% endif %}">{{ t.side }}</td>
+              <td>{{ t.qty }}</td>
+              <td>{{ t.entry_price|floatformat:4 }}</td>
+              <td>{{ t.stop_loss|floatformat:4 }}</td>
+              <td>{{ t.take_profit|floatformat:4 }}</td>
+              <td>{{ t.composite_score|floatformat:2 }}</td>
+              <td style="font-size:0.75rem;color:var(--text-muted);">{{ t.reason|truncatechars:50 }}</td>
+              <td style="font-size:0.75rem;">{{ t.opened_at|date:"M d H:i" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p style="color:var(--text-muted);">No open positions.</p>
+    {% endif %}
+
+    <div class="sv-section-title">Last 10 closed trades</div>
+    {% if recent_trades %}
+      <table class="sv-perf-table">
+        <thead>
+          <tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th>
+              <th>P&amp;L</th><th>Reason</th><th>Closed</th></tr>
+        </thead>
+        <tbody>
+          {% for t in recent_trades %}
+            <tr>
+              <td>{{ t.symbol }}</td>
+              <td>{{ t.side }}</td>
+              <td>{{ t.entry_price|floatformat:4 }}</td>
+              <td>{{ t.exit_price|floatformat:4 }}</td>
+              <td class="{% if t.pnl_usdt > 0 %}up{% else %}down{% endif %}">{{ t.pnl_usdt|floatformat:2 }}</td>
+              <td style="font-size:0.75rem;color:var(--text-muted);">{{ t.reason|truncatechars:60 }}</td>
+              <td style="font-size:0.75rem;">{{ t.closed_at|date:"M d H:i" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p style="color:var(--text-muted);">No closed trades yet.</p>
+    {% endif %}
+  {% endif %}
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; margin-bottom: 24px; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+.up { color: var(--accent); } .down { color: var(--accent-red); }
+.btn-danger { background: var(--accent-red); color: white;
+              border: 1px solid var(--accent-red); }
+.btn-danger:hover { background: #b02020; }
+</style>
+
+<script>
+function getCsrf() {
+  const m = document.cookie.match(/csrftoken=([^;]+)/);
+  return m ? m[1] : "";
+}
+async function togglePause() {
+  if (!confirm("Are you sure you want to toggle the bot?")) return;
+  try {
+    const r = await fetch("/bot/console/pause/", {
+      method: "POST", headers: { "X-CSRFToken": getCsrf() },
+    });
+    const j = await r.json();
+    if (j.ok) location.reload();
+    else alert("Failed: " + j.error);
+  } catch (e) {
+    alert("Network error: " + e);
+  }
+}
+window.togglePause = togglePause;
+</script>
+{% endblock %}

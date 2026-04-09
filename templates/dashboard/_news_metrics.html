@@ -1,37 +1,76 @@
 {% include "_chart_assets.html" %}
 <div class="news-metrics">
-  <div class="sv-section-title">News volume — last 14 days</div>
+  <div class="sv-section-title">News &amp; sentiment</div>
   <div class="sv-metrics-grid">
     <div class="sv-metric-card">
       <div class="sv-metric-label">Articles (14d)</div>
       <div class="sv-metric-value">{{ totals.count_14d|default:"0" }}</div>
     </div>
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Current sentiment</div>
+      <div class="sv-metric-value {% if current_sentiment > 0.2 %}up{% elif current_sentiment < -0.2 %}down{% endif %}">
+        {{ totals.sentiment_label|default:"-" }}
+      </div>
+    </div>
+    {% if current_sentiment != None %}
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Score</div>
+      <div class="sv-metric-value">{{ current_sentiment|floatformat:2 }}</div>
+    </div>
+    {% endif %}
   </div>
-  <div class="sv-chart-container">
-    <canvas id="news-volume-chart"></canvas>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+    <div>
+      <div class="sv-section-title">Volume per day</div>
+      <div class="sv-chart-container"><canvas id="news-volume-chart"></canvas></div>
+    </div>
+    <div>
+      <div class="sv-section-title">Sentiment trend</div>
+      <div class="sv-chart-container"><canvas id="news-sentiment-chart"></canvas></div>
+    </div>
   </div>
 </div>
 
 <script>
 (function() {
   const data = {{ chart_data|safe }};
-  const ctx = document.getElementById("news-volume-chart");
-  if (!ctx || !data.labels) return;
-  if (window._newsVolChart) window._newsVolChart.destroy();
-  window._newsVolChart = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels: data.labels,
-      datasets: [{
-        label: "Articles per day",
-        data: data.values,
-        borderColor: window.SAURON_CHART_COLORS.accent,
-        backgroundColor: window.SAURON_CHART_COLORS.accentDim,
+  const sent = {{ sentiment_data|safe }};
+  const COLORS = window.SAURON_CHART_COLORS;
+
+  if (data.labels && data.labels.length) {
+    const ctx = document.getElementById("news-volume-chart");
+    if (window._newsVolChart) window._newsVolChart.destroy();
+    window._newsVolChart = new Chart(ctx, {
+      type: "line",
+      data: { labels: data.labels, datasets: [{
+        label: "Articles per day", data: data.values,
+        borderColor: COLORS.accent, backgroundColor: COLORS.accentDim,
         tension: 0.3, fill: true,
-      }],
-    },
-    options: { responsive: true, maintainAspectRatio: false,
-               plugins: { legend: { display: false } } },
-  });
+      }]},
+      options: { responsive: true, maintainAspectRatio: false,
+                 plugins: { legend: { display: false } } },
+    });
+  }
+
+  if (sent.labels && sent.labels.length) {
+    const ctx = document.getElementById("news-sentiment-chart");
+    if (window._newsSentChart) window._newsSentChart.destroy();
+    window._newsSentChart = new Chart(ctx, {
+      type: "line",
+      data: { labels: sent.labels, datasets: [{
+        label: "Avg sentiment", data: sent.values,
+        borderColor: COLORS.gold, backgroundColor: "rgba(216, 176, 32, 0.18)",
+        tension: 0.3, fill: true,
+      }]},
+      options: { responsive: true, maintainAspectRatio: false,
+                 plugins: { legend: { display: false } },
+                 scales: { y: { suggestedMin: -1, suggestedMax: 1,
+                                ticks: { callback: v => v.toFixed(1) } } } },
+    });
+  } else {
+    const ctx = document.getElementById("news-sentiment-chart");
+    if (ctx) ctx.parentElement.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px;">No AI-scored sentiment yet.</p>';
+  }
 })();
 </script>

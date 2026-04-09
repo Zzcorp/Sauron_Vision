@@ -13,6 +13,7 @@ from .views_admin_bots import (
     admin_bot_reset_circuit, admin_bot_reconcile,
 )
 from .views_strategy_wizard import strategy_wizard, strategy_wizard_save
+from .views_bot_console import bot_console, bot_pause
 
 from .views_signals_htmx import signal_cards_htmx, signal_performance_htmx
 from .api import market_views, signal_views, strategy_views, portfolio_views, ai_views
@@ -89,4 +90,6 @@ urlpatterns = [
     path("htmx/admin/bots/<int:config_id>/reconcile/", admin_bot_reconcile, name="admin_bot_reconcile"),
     path("strategies/new/", strategy_wizard, name="strategy_wizard"),
     path("strategies/new/save/", strategy_wizard_save, name="strategy_wizard_save"),
+    path("bot/console/", bot_console, name="bot_console"),
+    path("bot/console/pause/", bot_pause, name="bot_pause"),
 ]

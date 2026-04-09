@@ -20,9 +20,15 @@
     </div>
   </div>
 
-  <div class="sv-section-title">Status distribution</div>
-  <div class="sv-chart-container">
-    <canvas id="strategies-status-chart"></canvas>
+  <div style="display:grid;grid-template-columns:1fr 2fr;gap:20px;">
+    <div>
+      <div class="sv-section-title">Status mix</div>
+      <div class="sv-chart-container"><canvas id="strategies-status-chart"></canvas></div>
+    </div>
+    <div>
+      <div class="sv-section-title">P&amp;L per strategy</div>
+      <div class="sv-chart-container"><canvas id="strategies-pnl-chart"></canvas></div>
+    </div>
   </div>
 
   <div style="margin-top:24px;">
@@ -33,29 +39,37 @@
 <script>
 (function() {
   const data = {{ chart_data|safe }};
-  const ctx = document.getElementById("strategies-status-chart");
-  if (!ctx || !data.labels) return;
-  if (window._stratStatusChart) window._stratStatusChart.destroy();
-  const colors = [
-    window.SAURON_CHART_COLORS.accent,
-    window.SAURON_CHART_COLORS.gold,
-    window.SAURON_CHART_COLORS.blue,
-    window.SAURON_CHART_COLORS.purple,
-    window.SAURON_CHART_COLORS.red,
-    "#666",
-  ];
-  window._stratStatusChart = new Chart(ctx, {
-    type: "doughnut",
-    data: {
-      labels: data.labels,
-      datasets: [{ data: data.values,
-                   backgroundColor: data.labels.map((_, i) => colors[i % colors.length]),
-                   borderColor: window.SAURON_CHART_COLORS.border, borderWidth: 2 }],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: "right" } },
-    },
-  });
+  const pnlData = {{ pnl_data|safe }};
+  const COLORS = window.SAURON_CHART_COLORS;
+
+  if (data.labels && data.labels.length) {
+    const ctx = document.getElementById("strategies-status-chart");
+    if (window._stratStatusChart) window._stratStatusChart.destroy();
+    const colors = [COLORS.accent, COLORS.gold, COLORS.blue, COLORS.purple, COLORS.red, "#666"];
+    window._stratStatusChart = new Chart(ctx, {
+      type: "doughnut",
+      data: { labels: data.labels, datasets: [{ data: data.values,
+              backgroundColor: data.labels.map((_, i) => colors[i % colors.length]),
+              borderColor: COLORS.border, borderWidth: 2 }]},
+      options: { responsive: true, maintainAspectRatio: false,
+                 plugins: { legend: { position: "right" } } },
+    });
+  }
+
+  if (pnlData.labels && pnlData.labels.length) {
+    const ctx = document.getElementById("strategies-pnl-chart");
+    if (window._stratPnlChart) window._stratPnlChart.destroy();
+    const colors = pnlData.values.map(v => v >= 0 ? COLORS.accent : COLORS.red);
+    window._stratPnlChart = new Chart(ctx, {
+      type: "bar",
+      data: { labels: pnlData.labels, datasets: [{ data: pnlData.values,
+              backgroundColor: colors, borderWidth: 0 }]},
+      options: { responsive: true, maintainAspectRatio: false, indexAxis: "y",
+                 plugins: { legend: { display: false } } },
+    });
+  } else {
+    const ctx = document.getElementById("strategies-pnl-chart");
+    if (ctx) ctx.parentElement.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px;">No P&amp;L data yet.</p>';
+  }
 })();
 </script>

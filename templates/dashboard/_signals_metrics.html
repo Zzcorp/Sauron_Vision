@@ -1,4 +1,3 @@
-{% load static %}
 {% include "_chart_assets.html" %}
 <div class="signals-metrics">
   <div class="sv-section-title">Signal overview</div>
@@ -21,12 +20,21 @@
     </div>
   </div>
 
-  <div class="sv-section-title">Signals per day (14d)</div>
-  <div class="sv-chart-container">
-    <canvas id="signals-daily-chart"></canvas>
+  <div style="display:grid;grid-template-columns:2fr 1fr;gap:20px;">
+    <div>
+      <div class="sv-section-title">Signals per day (14d)</div>
+      <div class="sv-chart-container"><canvas id="signals-daily-chart"></canvas></div>
+    </div>
+    <div>
+      <div class="sv-section-title">Setup mix (active)</div>
+      <div class="sv-chart-container"><canvas id="signals-setup-chart"></canvas></div>
+    </div>
   </div>
 
-  <div class="sv-section-title">Setup performance — last 30 days</div>
+  <div class="sv-section-title">R-multiple distribution (closed, 90d)</div>
+  <div class="sv-chart-container short"><canvas id="signals-r-hist"></canvas></div>
+
+  <div class="sv-section-title">Setup performance - last 30 days</div>
   {% if setups %}
     <table class="sv-perf-table">
       <thead>
@@ -36,8 +44,8 @@
         {% for s in setups %}
           <tr>
             <td>{{ s.name }}</td>
-            <td>{% if s.hit_rate %}{{ s.hit_rate|floatformat:2 }}{% else %}—{% endif %}</td>
-            <td>{% if s.expectancy %}{{ s.expectancy|floatformat:2 }}R{% else %}—{% endif %}</td>
+            <td>{% if s.hit_rate %}{{ s.hit_rate|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td>{% if s.expectancy %}{{ s.expectancy|floatformat:2 }}R{% else %}-{% endif %}</td>
             <td>{{ s.n_closed }}</td>
             <td>{% if s.is_empirical %}empirical{% else %}fallback{% endif %}</td>
           </tr>
@@ -61,27 +69,57 @@
 <script>
 (function() {
   const data = {{ chart_data|safe }};
-  const ctx = document.getElementById("signals-daily-chart");
-  if (!ctx || !data.labels) return;
-  if (window._signalsDailyChart) window._signalsDailyChart.destroy();
-  window._signalsDailyChart = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels: data.labels,
-      datasets: [
+  const setupDist = {{ setup_dist|safe }};
+  const rHist = {{ r_hist|safe }};
+  const COLORS = window.SAURON_CHART_COLORS;
+
+  if (data.labels && data.labels.length) {
+    const ctx = document.getElementById("signals-daily-chart");
+    if (window._signalsDailyChart) window._signalsDailyChart.destroy();
+    window._signalsDailyChart = new Chart(ctx, {
+      type: "bar",
+      data: { labels: data.labels, datasets: [
         { label: "Long", data: data.long,
-          backgroundColor: window.SAURON_CHART_COLORS.accentDim,
-          borderColor: window.SAURON_CHART_COLORS.accent, borderWidth: 1 },
+          backgroundColor: COLORS.accentDim, borderColor: COLORS.accent, borderWidth: 1 },
         { label: "Short", data: data.short,
-          backgroundColor: window.SAURON_CHART_COLORS.redDim,
-          borderColor: window.SAURON_CHART_COLORS.red, borderWidth: 1 },
-      ],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
-      plugins: { legend: { position: "top" } },
-    },
-  });
+          backgroundColor: COLORS.redDim, borderColor: COLORS.red, borderWidth: 1 },
+      ]},
+      options: { responsive: true, maintainAspectRatio: false,
+                 scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
+                 plugins: { legend: { position: "top" } } },
+    });
+  }
+
+  if (setupDist.labels && setupDist.labels.length) {
+    const ctx = document.getElementById("signals-setup-chart");
+    if (window._signalsSetupChart) window._signalsSetupChart.destroy();
+    const colors = [COLORS.accent, COLORS.gold, COLORS.blue, COLORS.purple,
+                    COLORS.red, "#666", "#aaa", "#0a8"];
+    window._signalsSetupChart = new Chart(ctx, {
+      type: "doughnut",
+      data: { labels: setupDist.labels, datasets: [{ data: setupDist.values,
+              backgroundColor: setupDist.labels.map((_, i) => colors[i % colors.length]),
+              borderColor: COLORS.border, borderWidth: 2 }]},
+      options: { responsive: true, maintainAspectRatio: false,
+                 plugins: { legend: { position: "right", labels: { font: { size: 10 } } } } },
+    });
+  }
+
+  if (rHist.labels && rHist.labels.length) {
+    const ctx = document.getElementById("signals-r-hist");
+    if (window._signalsRHist) window._signalsRHist.destroy();
+    const barColors = rHist.labels.map(label => {
+      const lower = parseFloat(label.split(" ")[0]);
+      return lower >= 0 ? COLORS.accent : COLORS.red;
+    });
+    window._signalsRHist = new Chart(ctx, {
+      type: "bar",
+      data: { labels: rHist.labels, datasets: [{ data: rHist.values,
+              backgroundColor: barColors, borderWidth: 0 }]},
+      options: { responsive: true, maintainAspectRatio: false,
+                 plugins: { legend: { display: false } },
+                 scales: { y: { beginAtZero: true } } },
+    });
+  }
 })();
 </script>

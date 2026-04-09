@@ -1,14 +1,15 @@
 {% extends "base.html" %}
-{% block title %}New Strategy · Sauron Vision{% endblock %}
+{% block title %}New Strategy - Sauron Vision{% endblock %}
 {% block content %}
-<div class="container" style="max-width:680px;margin:40px auto;">
+<div class="container" style="max-width:780px;margin:40px auto;">
   <h2 style="font-family:var(--font-heading);color:var(--accent);text-transform:uppercase;letter-spacing:0.1em;">
     Create new strategy
   </h2>
-  <p style="color:var(--text-secondary);">Define a strategy framework. You can refine the legs and risk parameters after creation.</p>
+  <p style="color:var(--text-secondary);">Define a strategy framework and add legs for the instruments it covers.</p>
 
   <form id="wizard-form" onsubmit="event.preventDefault(); submitWizard();">
     {% csrf_token %}
+
     <div class="input-group">
       <label class="input-label">Strategy name</label>
       <input type="text" name="name" class="input" required placeholder="e.g. BTC dip-buy with hedge">
@@ -36,15 +37,109 @@
       <label class="input-label">Max loss per trade (%)</label>
       <input type="number" name="max_loss_pct" class="input" value="2" min="0" max="20" step="0.5">
     </div>
-    <div id="wizard-error" style="color:var(--accent-red);font-size:0.85rem;margin:12px 0;display:none;"></div>
-    <div style="display:flex;gap:12px;">
+
+    <div class="sv-section-title" style="margin-top:24px;">Legs</div>
+    <p style="color:var(--text-muted);font-size:0.85rem;">Add the instruments this strategy will trade. Each leg has a direction and a weight.</p>
+
+    <div id="legs-list" style="margin-bottom:12px;"></div>
+
+    <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;align-items:end;">
+      <div>
+        <label class="input-label">Instrument</label>
+        <select id="leg-instrument" class="input">
+          <option value="">-- select --</option>
+          {% for i in instruments %}
+            <option value="{{ i.id }}">{{ i.symbol }}{% if i.name %} ({{ i.name|truncatechars:30 }}){% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="input-label">Action</label>
+        <select id="leg-action" class="input">
+          <option value="long">Long</option>
+          <option value="short">Short</option>
+          <option value="hedge">Hedge</option>
+        </select>
+      </div>
+      <div>
+        <label class="input-label">Weight</label>
+        <input type="number" id="leg-weight" class="input" value="1.0" step="0.1" min="0">
+      </div>
+      <div>
+        <button type="button" class="btn" onclick="addLeg()">Add leg</button>
+      </div>
+    </div>
+
+    <input type="hidden" name="legs_json" id="legs-json" value="[]">
+
+    <div id="wizard-error" style="color:var(--accent-red);font-size:0.85rem;margin:16px 0;display:none;"></div>
+    <div style="display:flex;gap:12px;margin-top:24px;">
       <button type="submit" class="btn btn-primary">Create strategy</button>
       <a href="/strategies/" class="btn">Cancel</a>
     </div>
   </form>
 </div>
 
+<style>
+.leg-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr auto;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  align-items: center;
+}
+.leg-row__remove {
+  background: none; border: 1px solid var(--border);
+  color: var(--accent-red); cursor: pointer; padding: 4px 8px;
+  border-radius: 3px; font-size: 0.8rem;
+}
+</style>
+
 <script>
+const SV_INSTRUMENTS = {{ instruments_json|safe }};
+const SV_LEGS = [];
+
+function renderLegs() {
+  const list = document.getElementById("legs-list");
+  list.innerHTML = "";
+  SV_LEGS.forEach((leg, i) => {
+    const inst = SV_INSTRUMENTS.find(x => x.id == leg.instrument_id);
+    const row = document.createElement("div");
+    row.className = "leg-row";
+    row.innerHTML = `
+      <span>${inst ? inst.symbol : "?"}</span>
+      <span style="color:${leg.action === 'long' ? 'var(--accent)' : leg.action === 'short' ? 'var(--accent-red)' : 'var(--accent-gold)'};">
+        ${leg.action.toUpperCase()}
+      </span>
+      <span>${leg.weight}</span>
+      <button type="button" class="leg-row__remove" onclick="removeLeg(${i})">Remove</button>
+    `;
+    list.appendChild(row);
+  });
+  document.getElementById("legs-json").value = JSON.stringify(SV_LEGS);
+}
+
+function addLeg() {
+  const id = document.getElementById("leg-instrument").value;
+  const action = document.getElementById("leg-action").value;
+  const weight = parseFloat(document.getElementById("leg-weight").value || "1");
+  if (!id) return;
+  SV_LEGS.push({ instrument_id: parseInt(id), action, weight });
+  renderLegs();
+  document.getElementById("leg-instrument").value = "";
+}
+
+function removeLeg(i) {
+  SV_LEGS.splice(i, 1);
+  renderLegs();
+}
+
 async function submitWizard() {
   const form = document.getElementById("wizard-form");
   const data = new FormData(form);
@@ -67,6 +162,9 @@ async function submitWizard() {
     errEl.style.display = "block";
   }
 }
+
+window.addLeg = addLeg;
+window.removeLeg = removeLeg;
 window.submitWizard = submitWizard;
 </script>
 {% endblock %}

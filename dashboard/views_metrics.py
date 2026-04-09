@@ -1,22 +1,17 @@
-"""Metrics endpoints for the enriched dashboard pages.
-
-Each view returns a small HTML partial (cards + JSON for charts) that the
-parent page polls via HTMX. Charts are rendered client-side by Chart.js.
-"""
+"""Metrics endpoints — v2 with sentiment trend, R-distribution, P&L bars."""
 import json
 from collections import Counter
 from datetime import timedelta
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
 
 
-# ── Signals page metrics ────────────────────────────────────────────────
+# ── Signals ─────────────────────────────────────────────────────────────
 @login_required
 def signals_metrics(request):
-    """Active signal counts, hit-rate per setup, distribution by direction."""
-    ctx = {"setups": [], "totals": {}, "chart_data": "{}"}
+    ctx = {"setups": [], "totals": {}, "chart_data": "{}",
+           "setup_dist": "{}", "r_hist": "{}"}
     try:
         from signals.models_smc import SmcSignal
         from signals.performance import setup_performance_summary
@@ -32,17 +27,12 @@ def signals_metrics(request):
         }
         perf = setup_performance_summary(days=30)
         ctx["setups"] = [
-            {
-                "name": k,
-                "hit_rate": v["hit_rate"],
-                "expectancy": v["expectancy_r"],
-                "n_closed": v["n_closed"],
-                "is_empirical": v["is_empirical"],
-            }
+            {"name": k, "hit_rate": v["hit_rate"], "expectancy": v["expectancy_r"],
+             "n_closed": v["n_closed"], "is_empirical": v["is_empirical"]}
             for k, v in perf.items()
         ]
 
-        # Chart data: signal counts per day for the last 14 days
+        # Chart 1: signals per day stacked long/short
         since = timezone.now() - timedelta(days=14)
         recent = SmcSignal.objects.filter(created_at__gte=since)
         per_day = {}
@@ -50,23 +40,46 @@ def signals_metrics(request):
             day = s.created_at.date().isoformat()
             per_day.setdefault(day, {"long": 0, "short": 0})
             per_day[day]["long" if s.direction == "LONG" else "short"] += 1
-
         days_sorted = sorted(per_day.keys())
         ctx["chart_data"] = json.dumps({
             "labels": days_sorted,
             "long": [per_day[d]["long"] for d in days_sorted],
             "short": [per_day[d]["short"] for d in days_sorted],
         })
+
+        # Chart 2: setup distribution donut (active signals)
+        setup_counts = Counter(s.setup for s in active)
+        ctx["setup_dist"] = json.dumps({
+            "labels": list(setup_counts.keys()),
+            "values": list(setup_counts.values()),
+        })
+
+        # Chart 3: R-multiple histogram from closed signals (90d)
+        closed = SmcSignal.objects.filter(
+            closed_at__gte=timezone.now() - timedelta(days=90),
+            realized_r__isnull=False,
+        )
+        bins = [-3, -2, -1, 0, 1, 2, 3, 5]
+        hist = [0] * (len(bins) - 1)
+        for s in closed:
+            r = float(s.realized_r)
+            for i in range(len(bins) - 1):
+                if bins[i] <= r < bins[i + 1]:
+                    hist[i] += 1
+                    break
+        ctx["r_hist"] = json.dumps({
+            "labels": [f"{bins[i]} to {bins[i+1]}R" for i in range(len(bins) - 1)],
+            "values": hist,
+        })
     except Exception as e:
         ctx["error"] = str(e)
     return render(request, "dashboard/_signals_metrics.html", ctx)
 
 
-# ── Strategies page metrics ─────────────────────────────────────────────
+# ── Strategies ──────────────────────────────────────────────────────────
 @login_required
 def strategies_metrics(request):
-    """Strategy outcomes, R-distribution, status mix."""
-    ctx = {"by_status": [], "chart_data": "{}", "totals": {}}
+    ctx = {"by_status": [], "chart_data": "{}", "totals": {}, "pnl_data": "{}"}
     try:
         from strategies.models import Strategy
         all_strats = Strategy.objects.all()
@@ -82,41 +95,91 @@ def strategies_metrics(request):
             "labels": list(status_counts.keys()),
             "values": list(status_counts.values()),
         })
+        # Per-strategy P&L bar (uses any 'realized_pnl' or 'pnl' field if present)
+        labels = []
+        values = []
+        for s in all_strats[:20]:
+            pnl = getattr(s, "realized_pnl", None) or getattr(s, "pnl", None) or 0
+            try:
+                pnl = float(pnl)
+            except (ValueError, TypeError):
+                pnl = 0
+            if pnl != 0:
+                labels.append((s.name or f"#{s.id}")[:24])
+                values.append(round(pnl, 2))
+        ctx["pnl_data"] = json.dumps({"labels": labels, "values": values})
     except Exception as e:
         ctx["error"] = str(e)
     return render(request, "dashboard/_strategies_metrics.html", ctx)
 
 
-# ── News & sentiment metrics ────────────────────────────────────────────
+# ── News & sentiment ────────────────────────────────────────────────────
 @login_required
 def news_metrics(request):
-    """News volume per day, sentiment trend."""
-    ctx = {"totals": {}, "chart_data": "{}"}
+    ctx = {"totals": {}, "chart_data": "{}", "sentiment_data": "{}",
+           "current_sentiment": None}
     try:
         from scraping.models import NewsItem
         since = timezone.now() - timedelta(days=14)
-        items = NewsItem.objects.filter(published_at__gte=since) if hasattr(NewsItem, "published_at") else []
-        ctx["totals"]["count_14d"] = len(list(items)) if items else 0
+        # NewsItem may not have published_at; tolerate both
+        ts_field = None
+        for f in ("published_at", "created_at", "scraped_at", "timestamp"):
+            if hasattr(NewsItem, f):
+                ts_field = f
+                break
+        if ts_field is None:
+            ctx["totals"]["count_14d"] = 0
+            return render(request, "dashboard/_news_metrics.html", ctx)
+
+        items = list(NewsItem.objects.filter(**{f"{ts_field}__gte": since}).order_by(ts_field))
+        ctx["totals"]["count_14d"] = len(items)
 
         per_day = {}
+        sentiment_per_day = {}
         for n in items:
-            day = (n.published_at or timezone.now()).date().isoformat()
+            ts = getattr(n, ts_field) or timezone.now()
+            day = ts.date().isoformat()
             per_day[day] = per_day.get(day, 0) + 1
+            score = getattr(n, "ai_sentiment_score", None)
+            if score is not None:
+                try:
+                    score_f = float(score)
+                except (ValueError, TypeError):
+                    continue
+                sentiment_per_day.setdefault(day, []).append(score_f)
+
         days_sorted = sorted(per_day.keys())
         ctx["chart_data"] = json.dumps({
             "labels": days_sorted,
             "values": [per_day[d] for d in days_sorted],
         })
+
+        # Sentiment trend: average per day, only days with data
+        sent_days = [d for d in days_sorted if d in sentiment_per_day]
+        sent_values = [
+            round(sum(sentiment_per_day[d]) / len(sentiment_per_day[d]), 3)
+            for d in sent_days
+        ]
+        ctx["sentiment_data"] = json.dumps({
+            "labels": sent_days, "values": sent_values,
+        })
+        if sent_values:
+            current = sent_values[-1]
+            ctx["current_sentiment"] = current
+            ctx["totals"]["sentiment_label"] = (
+                "BULLISH" if current > 0.2
+                else "BEARISH" if current < -0.2
+                else "NEUTRAL"
+            )
     except Exception as e:
         ctx["error"] = str(e)
         ctx["totals"]["count_14d"] = 0
     return render(request, "dashboard/_news_metrics.html", ctx)
 
 
-# ── Backtest metrics ────────────────────────────────────────────────────
+# ── Backtest ────────────────────────────────────────────────────────────
 @login_required
 def backtest_metrics(request):
-    """Latest backtest summary + equity curve."""
     ctx = {"runs": [], "chart_data": "{}"}
     try:
         from backtester.models_v2 import BacktestRunV2
@@ -135,15 +198,13 @@ def backtest_metrics(request):
     return render(request, "dashboard/_backtest_metrics.html", ctx)
 
 
-# ── Portfolio metrics ───────────────────────────────────────────────────
+# ── Portfolio ───────────────────────────────────────────────────────────
 @login_required
 def portfolio_metrics(request):
-    """Portfolio composition + exposure breakdown."""
     ctx = {"exposure": {}, "chart_data": "{}"}
     try:
         from portfolio.models import Portfolio
         from strategies.portfolio_analyzer import analyze_exposure
-
         portfolio = Portfolio.objects.filter(user=request.user).first()
         if portfolio:
             exposure = analyze_exposure(portfolio)
@@ -158,10 +219,9 @@ def portfolio_metrics(request):
     return render(request, "dashboard/_portfolio_metrics.html", ctx)
 
 
-# ── Positions metrics ───────────────────────────────────────────────────
+# ── Positions ───────────────────────────────────────────────────────────
 @login_required
 def positions_metrics(request):
-    """Open positions table with PnL distribution."""
     ctx = {"positions": [], "chart_data": "{}"}
     try:
         from portfolio.models import Position, Portfolio
@@ -176,10 +236,7 @@ def positions_metrics(request):
             for p in positions:
                 symbols.append(getattr(p.instrument, "symbol", "?"))
                 pnls.append(float(getattr(p, "unrealized_pnl", 0) or 0))
-            ctx["chart_data"] = json.dumps({
-                "labels": symbols,
-                "values": pnls,
-            })
+            ctx["chart_data"] = json.dumps({"labels": symbols, "values": pnls})
     except Exception as e:
         ctx["error"] = str(e)
     return render(request, "dashboard/_positions_metrics.html", ctx)

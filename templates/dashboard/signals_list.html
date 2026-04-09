@@ -67,4 +67,6 @@
     </div>
     {% endif %}
 </div>
+
+<div class="sv-metrics-wrapper" hx-get="/htmx/metrics/signals/" hx-trigger="load, every 60s" style="margin-top:32px;"></div>
 {% endblock %}
