@@ -4,24 +4,23 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZD0iTTIsMzIgUTE2LDggMzIsMTQgUTQ4LDggNjIsMzIgUTQ4LDU2IDMyLDUwIFExNiw1NiAyLDMyWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjIuNSIvPjxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjEyIiBmaWxsPSJub25lIiBzdHJva2U9IiMwMGU4NjgiIHN0cm9rZS13aWR0aD0iMiIvPjxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjUiIGZpbGw9IiMwMGU4NjgiLz48ZWxsaXBzZSBjeD0iMzIiIGN5PSIzMiIgcng9IjQiIHJ5PSIxMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjAuOCIgb3BhY2l0eT0iMC41Ii8+PGVsbGlwc2UgY3g9IjMyIiBjeT0iMzIiIHJ4PSI5IiByeT0iMTIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwZTg2OCIgc3Ryb2tlLXdpZHRoPSIwLjUiIG9wYWNpdHk9IjAuMyIvPjwvc3ZnPg==">
+    <link rel="icon" type="image/png" href="{% static 'logo/logo_SV.png' %}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Sauron Vision{% endblock %}</title>
 
     <!-- Favicon -->
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHBhdGggZD0iTTIsMzIgUTE2LDggMzIsMTQgUTQ4LDggNjIsMzIgUTQ4LDU2IDMyLDUwIFExNiw1NiAyLDMyWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjIuNSIvPgogIDxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjEyIiBmaWxsPSJub25lIiBzdHJva2U9IiMwMGU4NjgiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjUiIGZpbGw9IiMwMGU4NjgiLz4KICA8ZWxsaXBzZSBjeD0iMzIiIGN5PSIzMiIgcng9IjQiIHJ5PSIxMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjAuOCIgb3BhY2l0eT0iMC41Ii8+CiAgPGVsbGlwc2UgY3g9IjMyIiBjeT0iMzIiIHJ4PSI5IiByeT0iMTIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwZTg2OCIgc3Ryb2tlLXdpZHRoPSIwLjUiIG9wYWNpdHk9IjAuMyIvPgo8L3N2Zz4=">
-    <link rel="icon" type="image/svg+xml" href="{% static 'favicon.svg' %}">
-    <link rel="apple-touch-icon" href="{% static 'favicon.svg' %}">
+    <link rel="icon" type="image/png" href="{% static 'logo/logo_SV.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'logo/logo_SV.png' %}">
 
     <!-- Social / OG Meta -->
     <meta property="og:title" content="Sauron Vision — Trading Intelligence">
     <meta property="og:description" content="AI-powered trading platform monitoring Stocks, Commodities & Forex with real-time signals and strategy engine.">
-    <meta property="og:image" content="{% static 'og-image.svg' %}">
+    <meta property="og:image" content="{% static 'logo/logo_SV.png' %}">
     <meta property="og:type" content="website">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Sauron Vision">
     <meta name="twitter:description" content="AI-powered trading intelligence platform.">
-    <meta name="twitter:image" content="{% static 'og-image.svg' %}">
+    <meta name="twitter:image" content="{% static 'logo/logo_SV.png' %}">
     <meta name="theme-color" content="#00e868">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -35,9 +34,9 @@
             --bg-card-hover: #0e2218;
             --border: #133020;
             --border-glow: #1a4030;
-            --text-primary: #c8e8d8;
-            --text-secondary: #5a8a6a;
-            --text-muted: #2a5038;
+            --text-primary: #daf0e6;
+            --text-secondary: #7aaa8a;
+            --text-muted: #3a6850;
             --accent: #00e868;
             --accent-dim: #0a5028;
             --accent-glow: rgba(0, 232, 104, 0.12);
@@ -64,7 +63,7 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: var(--bg-void); color: var(--text-primary);
-            font-family: var(--font-body); font-size: 15px; font-weight: 400;
+            font-family: var(--font-body); font-size: 15px; font-weight: 500;
             line-height: 1.6; min-height: 100vh; overflow-x: hidden;
         }
 
@@ -1456,13 +1455,7 @@
     <aside class="sidebar" id="mainSidebar">
         <div class="sidebar-brand">
             <h1>
-                <!-- Inline eye logo in sidebar -->
-                <svg class="brand-eye" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M2,32 Q16,8 32,14 Q48,8 62,32 Q48,56 32,50 Q16,56 2,32Z" fill="none" stroke="#00e868" stroke-width="2.5"/>
-                    <circle cx="32" cy="32" r="12" fill="none" stroke="#00e868" stroke-width="2"/>
-                    <circle cx="32" cy="32" r="5" fill="#00e868"/>
-                    <ellipse cx="32" cy="32" rx="4" ry="12" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.5"/>
-                </svg>
+                <img class="brand-eye" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision" style="width:36px;height:36px;object-fit:contain;">
                 <span class="brand-text">SAURON</span>
             </h1>
             <div class="subtitle">TRADING INTELLIGENCE</div>
@@ -1960,37 +1953,78 @@
     function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
     resize(); window.addEventListener('resize', resize);
 
+    /* ── Ticker data pool for particle labels ─────────────────── */
+    var TICKERS = [
+        {sym:'BTC',base:67500},{sym:'ETH',base:3420},{sym:'SOL',base:178},
+        {sym:'AAPL',base:192},{sym:'TSLA',base:248},{sym:'NVDA',base:880},
+        {sym:'MSFT',base:425},{sym:'GOOG',base:176},{sym:'AMZN',base:185},
+        {sym:'META',base:510},{sym:'XAU',base:2340},{sym:'EUR/USD',base:1.085},
+        {sym:'GBP/USD',base:1.268},{sym:'JPY',base:154.2},{sym:'SPX',base:5210},
+        {sym:'NAS100',base:18350},{sym:'BNB',base:605},{sym:'XRP',base:0.62},
+        {sym:'DOGE',base:0.165},{sym:'ADA',base:0.48},{sym:'DOT',base:7.8},
+        {sym:'CL',base:78.5},{sym:'NG',base:2.15},{sym:'SI',base:28.4}
+    ];
+    function tickerPrice(t, time) {
+        var swing = t.base * 0.03;
+        return t.base + Math.sin(time * 0.0007 + t.base) * swing
+            + Math.cos(time * 0.0013 + t.sym.length) * swing * 0.5;
+    }
+
     /* ── Embers & Ash particle system ─────────────────────────── */
-    const PARTICLE_COUNT = 180;
-    const ASH_COUNT = 40;
-    const particles = [];
-    const ashes = [];
+    var PARTICLE_COUNT = 240;
+    var ASH_COUNT = 50;
+    var particles = [];
+    var ashes = [];
 
     class Ember {
         constructor() { this.spawn(); }
         spawn() {
             this.x = -10 - Math.random() * 100;
             this.y = Math.random() * canvas.height;
-            this.size = Math.random() * 2.2 + 0.3;
-            this.speed = 0.2 + Math.random() * 0.6 + this.size * 0.15;
+            this.size = Math.random() * 3.0 + 0.4;
+            this.speed = 0.25 + Math.random() * 0.8 + this.size * 0.18;
             this.drift = (Math.random() - 0.5) * 0.35;
-            this.alpha = Math.random() * 0.22 + 0.04;
+            this.alpha = Math.random() * 0.32 + 0.06;
             this.pulse = Math.random() * Math.PI * 2;
-            this.pulseSpeed = 0.01 + Math.random() * 0.02;
+            this.pulseSpeed = 0.012 + Math.random() * 0.025;
+            /* Ticker label — ~30% of particles get one */
+            this.ticker = null;
+            if (this.size > 1.4 && Math.random() < 0.35) {
+                this.ticker = TICKERS[Math.floor(Math.random() * TICKERS.length)];
+                this.pricePhase = Math.random() * 10000;
+            }
         }
         update() {
             this.x += this.speed;
-            this.y += this.drift + Math.sin(this.pulse) * 0.15;
+            this.y += this.drift + Math.sin(this.pulse) * 0.18;
             this.pulse += this.pulseSpeed;
-            if (this.x > canvas.width + 20 || this.y < -20 || this.y > canvas.height + 20) this.spawn();
+            if (this.x > canvas.width + 80 || this.y < -30 || this.y > canvas.height + 30) this.spawn();
         }
-        draw() {
-            var a = this.alpha * (0.7 + 0.3 * Math.sin(this.pulse));
-            ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(0,232,104,' + a + ')'; ctx.fill();
-            if (this.size > 1.2) {
+        draw(now) {
+            var a = this.alpha * (0.6 + 0.4 * Math.sin(this.pulse));
+            /* Glow halo — all particles get one */
+            var glowR = this.size * 4;
+            ctx.beginPath(); ctx.arc(this.x, this.y, glowR, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0,232,104,' + (a * 0.06).toFixed(4) + ')'; ctx.fill();
+            /* Mid glow */
+            if (this.size > 0.8) {
                 ctx.beginPath(); ctx.arc(this.x, this.y, this.size * 2.5, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(0,232,104,' + (a * 0.12) + ')'; ctx.fill();
+                ctx.fillStyle = 'rgba(0,232,104,' + (a * 0.15).toFixed(4) + ')'; ctx.fill();
+            }
+            /* Core */
+            ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0,232,104,' + a.toFixed(4) + ')'; ctx.fill();
+            /* Ticker label */
+            if (this.ticker) {
+                var price = tickerPrice(this.ticker, now + this.pricePhase);
+                var decimals = this.ticker.base >= 100 ? 1 : this.ticker.base >= 1 ? 2 : 4;
+                var labelA = a * 0.7;
+                ctx.font = '600 9px "Share Tech Mono", monospace';
+                ctx.fillStyle = 'rgba(0,232,104,' + labelA.toFixed(4) + ')';
+                ctx.fillText(this.ticker.sym, this.x + this.size + 4, this.y - 3);
+                ctx.font = '8px "Share Tech Mono", monospace';
+                ctx.fillStyle = 'rgba(218,240,230,' + (labelA * 0.8).toFixed(4) + ')';
+                ctx.fillText(price.toFixed(decimals), this.x + this.size + 4, this.y + 8);
             }
         }
     }
@@ -2000,13 +2034,13 @@
         spawn() {
             this.x = -10 - Math.random() * 200;
             this.y = Math.random() * canvas.height;
-            this.w = 2 + Math.random() * 4;
-            this.h = 1 + Math.random() * 2;
-            this.speed = 0.15 + Math.random() * 0.35;
+            this.w = 2 + Math.random() * 5;
+            this.h = 1 + Math.random() * 2.5;
+            this.speed = 0.18 + Math.random() * 0.4;
             this.drift = (Math.random() - 0.5) * 0.25;
             this.rot = Math.random() * Math.PI * 2;
             this.rotSpeed = (Math.random() - 0.5) * 0.02;
-            this.alpha = 0.04 + Math.random() * 0.08;
+            this.alpha = 0.04 + Math.random() * 0.1;
             this.wobble = Math.random() * Math.PI * 2;
         }
         update() {
@@ -2034,9 +2068,10 @@
     }
 
     function animate() {
+        var now = performance.now();
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ashes.forEach(function(a) { a.update(); a.draw(); });
-        particles.forEach(function(p) { p.update(); p.draw(); });
+        particles.forEach(function(p) { p.update(); p.draw(now); });
         requestAnimationFrame(animate);
     }
     animate();

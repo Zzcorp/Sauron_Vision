@@ -14,6 +14,10 @@ PENDING_KEY = "sauron_pending_user_id"
 class SauronLoginView(LoginView):
     template_name = "registration/login.html"
 
+    def get_success_url(self):
+        """After login, show the intro loading sequence."""
+        return reverse_lazy("intro")
+
     def form_valid(self, form):
         """Username+password is good → stash user id, send to PIN page."""
         user = form.get_user()
@@ -22,7 +26,7 @@ class SauronLoginView(LoginView):
         if not prof or not prof.access_pin_hash:
             return super().form_valid(form)
         self.request.session[PENDING_KEY] = user.id
-        self.request.session["sauron_pending_next"] = self.request.POST.get("next") or "/"
+        self.request.session["sauron_pending_next"] = self.request.POST.get("next") or "/intro/"
         return redirect("login_pin")
 
 
@@ -45,7 +49,7 @@ def login_pin(request):
         prof = getattr(user, "trader_profile", None)
         if prof and prof.access_pin_hash and check_password(pin, prof.access_pin_hash):
             auth_login(request, user)
-            next_url = request.session.pop("sauron_pending_next", "/") or "/"
+            next_url = request.session.pop("sauron_pending_next", "/intro/") or "/intro/"
             request.session.pop(PENDING_KEY, None)
             return redirect(next_url)
         error = "Invalid PIN"

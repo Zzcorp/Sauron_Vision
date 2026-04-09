@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sauron Vision — Initializing</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZD0iTTIsMzIgUTE2LDggMzIsMTQgUTQ4LDggNjIsMzIgUTQ4LDU2IDMyLDUwIFExNiw1NiAyLDMyWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjIuNSIvPjxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjEyIiBmaWxsPSJub25lIiBzdHJva2U9IiMwMGU4NjgiIHN0cm9rZS13aWR0aD0iMiIvPjxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjUiIGZpbGw9IiMwMGU4NjgiLz48ZWxsaXBzZSBjeD0iMzIiIGN5PSIzMiIgcng9IjQiIHJ5PSIxMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjAuOCIgb3BhY2l0eT0iMC41Ii8+PC9zdmc+">
+    <link rel="icon" type="image/png" href="{% static 'logo/logo_SV.png' %}">
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -78,13 +78,8 @@
 <body>
 <canvas id="bgCanvas"></canvas>
 <div class="intro-container">
-    <!-- Eye -->
-    <svg class="intro-eye" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-        <path d="M2,32 Q16,8 32,14 Q48,8 62,32 Q48,56 32,50 Q16,56 2,32Z" fill="none" stroke="#00e868" stroke-width="2"/>
-        <circle cx="32" cy="32" r="12" fill="none" stroke="#00e868" stroke-width="1.5"/>
-        <circle class="pupil" cx="32" cy="32" r="5" fill="#00e868"/>
-        <ellipse cx="32" cy="32" rx="4" ry="12" fill="none" stroke="#00e868" stroke-width="0.6" opacity="0.4"/>
-    </svg>
+    <!-- Logo -->
+    <img class="intro-eye" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision" style="object-fit:contain;">
 
     <!-- Title -->
     <div class="intro-title">SAURON VISION</div>

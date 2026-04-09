@@ -3,12 +3,12 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZD0iTTIsMzIgUTE2LDggMzIsMTQgUTQ4LDggNjIsMzIgUTQ4LDU2IDMyLDUwIFExNiw1NiAyLDMyWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjIuNSIvPjxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjEyIiBmaWxsPSJub25lIiBzdHJva2U9IiMwMGU4NjgiIHN0cm9rZS13aWR0aD0iMiIvPjxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjUiIGZpbGw9IiMwMGU4NjgiLz48ZWxsaXBzZSBjeD0iMzIiIGN5PSIzMiIgcng9IjQiIHJ5PSIxMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjAuOCIgb3BhY2l0eT0iMC41Ii8+PGVsbGlwc2UgY3g9IjMyIiBjeT0iMzIiIHJ4PSI5IiByeT0iMTIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwZTg2OCIgc3Ryb2tlLXdpZHRoPSIwLjUiIG9wYWNpdHk9IjAuMyIvPjwvc3ZnPg==">
+    <link rel="icon" type="image/png" href="{% static 'logo/logo_SV.png' %}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sauron Vision — Access</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHBhdGggZD0iTTIsMzIgUTE2LDggMzIsMTQgUTQ4LDggNjIsMzIgUTQ4LDU2IDMyLDUwIFExNiw1NiAyLDMyWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjIuNSIvPgogIDxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjEyIiBmaWxsPSJub25lIiBzdHJva2U9IiMwMGU4NjgiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjUiIGZpbGw9IiMwMGU4NjgiLz4KICA8ZWxsaXBzZSBjeD0iMzIiIGN5PSIzMiIgcng9IjQiIHJ5PSIxMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBlODY4IiBzdHJva2Utd2lkdGg9IjAuOCIgb3BhY2l0eT0iMC41Ii8+CiAgPGVsbGlwc2UgY3g9IjMyIiBjeT0iMzIiIHJ4PSI5IiByeT0iMTIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwZTg2OCIgc3Ryb2tlLXdpZHRoPSIwLjUiIG9wYWNpdHk9IjAuMyIvPgo8L3N2Zz4=">
+    <link rel="apple-touch-icon" href="{% static 'logo/logo_SV.png' %}">
     <meta property="og:title" content="Sauron Vision — Trading Intelligence">
-    <meta property="og:image" content="{% static 'og-image.svg' %}">
+    <meta property="og:image" content="{% static 'logo/logo_SV.png' %}">
     <meta name="theme-color" content="#00e868">
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
@@ -73,19 +73,8 @@
     <div class="scan-line"></div>
 
     <div class="login-container">
-        <!-- Eye logo on login -->
-        <svg class="login-eye" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-            <path d="M2,32 Q16,8 32,14 Q48,8 62,32 Q48,56 32,50 Q16,56 2,32Z" fill="none" stroke="#00e868" stroke-width="2.5">
-                <animate attributeName="stroke-opacity" values="0.4;1;0.4" dur="3s" repeatCount="indefinite"/>
-            </path>
-            <circle cx="32" cy="32" r="12" fill="none" stroke="#00e868" stroke-width="2"/>
-            <circle cx="32" cy="32" r="5" fill="#00e868" opacity="0.8">
-                <animate attributeName="r" values="4;6;4" dur="3s" repeatCount="indefinite"/>
-            </circle>
-            <ellipse cx="32" cy="32" rx="4" ry="12" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.5">
-                <animateTransform attributeName="transform" type="rotate" from="0 32 32" to="360 32 32" dur="30s" repeatCount="indefinite"/>
-            </ellipse>
-        </svg>
+        <!-- Logo -->
+        <img class="login-eye" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision" style="object-fit:contain;">
         <h1 class="login-title">SAURON VISION</h1>
         <p class="login-subtitle">AUTHENTICATE TO PROCEED</p>
         <div class="login-card">
