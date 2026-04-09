@@ -57,5 +57,8 @@
     </div>
 </div>
 
-<div class="sv-metrics-wrapper" hx-get="/htmx/metrics/portfolio/" hx-trigger="load, every 60s" style="margin-top:32px;"></div>
+<div class="card" style="margin-top:24px;">
+  <div class="card-header"><div class="card-title">Portfolio Analytics</div></div>
+  <div class="sv-metrics-wrapper" hx-get="/htmx/metrics/portfolio/" hx-trigger="load, every 60s"></div>
+</div>
 {% endblock %}

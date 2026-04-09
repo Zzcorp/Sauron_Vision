@@ -31,18 +31,42 @@ Use once per page; later includes detect the loaded flag and skip.
   .sv-chart-container.tall { height: 380px; }
   .sv-chart-container.short { height: 180px; }
   .sv-metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-                     gap: 12px; margin: 16px 0; }
-  .sv-metric-card { background: var(--bg-card); border: 1px solid var(--border);
-                    border-radius: var(--radius); padding: 14px; }
-  .sv-metric-label { font-size: 0.7rem; color: var(--text-muted);
-                     text-transform: uppercase; letter-spacing: 0.05em; }
-  .sv-metric-value { font-family: var(--font-mono); font-size: 1.4rem;
+                     gap: 14px; margin: 16px 0; }
+  .sv-metric-card {
+    background: linear-gradient(160deg, var(--bg-card) 0%, rgba(8,20,16,0.92) 60%, rgba(6,14,10,0.88) 100%);
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 16px 18px; position: relative; overflow: hidden;
+    transition: all 0.35s cubic-bezier(.2,.8,.2,1);
+    box-shadow: 0 2px 16px rgba(0,0,0,0.35), inset 0 1px 0 rgba(0,232,104,0.03);
+  }
+  .sv-metric-card::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent 5%, rgba(0,232,104,0.2) 50%, transparent 95%);
+    opacity: 0; transition: opacity 0.4s;
+  }
+  .sv-metric-card::after {
+    content: ""; position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent 10%, var(--accent-dim) 50%, transparent 90%);
+    opacity: 0; transition: opacity 0.4s;
+  }
+  .sv-metric-card:hover {
+    border-color: var(--border-glow); transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.45), 0 0 1px rgba(0,232,104,0.15),
+                inset 0 1px 0 rgba(0,232,104,0.06);
+  }
+  .sv-metric-card:hover::before, .sv-metric-card:hover::after { opacity: 1; }
+  body.light-mode .sv-metric-card { box-shadow: none; background: var(--bg-card); }
+  body.light-mode .sv-metric-card:hover { box-shadow: none; }
+  .sv-metric-label { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted);
+                     text-transform: uppercase; letter-spacing: 2px; }
+  .sv-metric-value { font-family: var(--font-display); font-size: 22px; font-weight: 700;
                      color: var(--text-primary); margin-top: 4px;
                      font-variant-numeric: tabular-nums; }
   .sv-metric-value.up { color: var(--accent); }
   .sv-metric-value.down { color: var(--accent-red); }
-  .sv-section-title { font-family: var(--font-heading); font-size: 1rem;
-                      color: var(--text-secondary); text-transform: uppercase;
-                      letter-spacing: 0.1em; margin: 24px 0 12px; }
+  .sv-section-title { font-family: var(--font-mono); font-size: 10px;
+                      color: var(--text-muted); text-transform: uppercase;
+                      letter-spacing: 3px; margin: 24px 0 12px; padding-bottom: 6px;
+                      border-bottom: 1px solid var(--border); }
 </style>
 {% endif %}

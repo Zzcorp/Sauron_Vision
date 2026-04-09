@@ -291,6 +291,50 @@
         body.light-mode #particles-canvas { opacity: 0.4; }
         body.light-mode #caustics-canvas { opacity: 0.02; }
 
+        /* Light mode: remove ALL shadows from cards, headbands, and UI elements */
+        body.light-mode .card,
+        body.light-mode .stat-box,
+        body.light-mode .metric,
+        body.light-mode .signal-item {
+            box-shadow: none;
+            background: var(--bg-card);
+        }
+        body.light-mode .card:hover,
+        body.light-mode .stat-box:hover,
+        body.light-mode .metric:hover,
+        body.light-mode .signal-item:hover {
+            box-shadow: none;
+        }
+        body.light-mode .ticker-bar,
+        body.light-mode .data-headband,
+        body.light-mode .info-panel-wrap,
+        body.light-mode .topbar {
+            box-shadow: none;
+        }
+        body.light-mode .ticker-popup,
+        body.light-mode .dh-pop,
+        body.light-mode .ip-dropdown,
+        body.light-mode .exchange-dropdown,
+        body.light-mode .notif-dropdown,
+        body.light-mode .lsp-dropdown,
+        body.light-mode .instrument-preview,
+        body.light-mode .sr-preview,
+        body.light-mode .ip-restore-pill,
+        body.light-mode .ip-minimize-tab {
+            box-shadow: none;
+        }
+        body.light-mode .sidebar-toggle-btn,
+        body.light-mode .rail-toggle-btn,
+        body.light-mode .sidebar-expand-tab {
+            box-shadow: none;
+        }
+        body.light-mode .btn:hover {
+            box-shadow: none;
+        }
+        body.light-mode .modal {
+            box-shadow: none;
+        }
+
         
 
 

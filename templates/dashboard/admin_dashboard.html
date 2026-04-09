@@ -160,5 +160,8 @@
     </div>
 </div>
 
-<div class="sv-metrics-wrapper" hx-get="/htmx/admin/bots/" hx-trigger="load, every 30s" style="margin-top:32px;"></div>
+<div class="card" style="margin-top:24px;">
+  <div class="card-header"><div class="card-title">Bot Analytics</div></div>
+  <div class="sv-metrics-wrapper" hx-get="/htmx/admin/bots/" hx-trigger="load, every 30s"></div>
+</div>
 {% endblock %}
