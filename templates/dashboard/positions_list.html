@@ -1,8 +1,38 @@
 {% extends "base.html" %}
 {% block title %}Positions — Sauron Vision{% endblock %}
-{% block page_title %}▣ OPEN POSITIONS{% endblock %}
+{% block page_title %}POSITIONS{% endblock %}
 
 {% block content %}
+<!-- Summary Stats -->
+<div class="grid grid-4" style="margin-bottom: 24px;">
+    <div class="stat-box fade-in-up delay-1">
+        <div class="stat-label">Open Positions</div>
+        <div class="stat-value">{{ positions|length }}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">currently active</div>
+    </div>
+    <div class="stat-box fade-in-up delay-2">
+        <div class="stat-label">Closed Trades</div>
+        <div class="stat-value">{{ total_closed|default:"0" }}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">total history</div>
+    </div>
+    <div class="stat-box fade-in-up delay-3">
+        <div class="stat-label">Win Rate</div>
+        <div class="stat-value" style="color:{% if win_rate >= 50 %}var(--accent){% else %}var(--accent-red){% endif %};">{{ win_rate|default:"0" }}%</div>
+    </div>
+    <div class="stat-box fade-in-up delay-4">
+        <div class="stat-label">Total Realized P&L</div>
+        <div class="stat-value" style="color:var(--accent);">{{ total_realized|default:"0.00" }}</div>
+    </div>
+</div>
+
+<!-- Tab Navigation -->
+<div class="pos-tabs fade-in-up" style="margin-bottom: 20px;">
+    <a href="?tab=open" class="pos-tab {% if tab == 'open' %}active{% endif %}">Open Positions</a>
+    <a href="?tab=history" class="pos-tab {% if tab == 'history' %}active{% endif %}">Position History</a>
+</div>
+
+{% if tab == 'open' %}
+<!-- ── Open Positions Tab ──────────────────────────── -->
 <div class="card fade-in-up">
     <div class="card-header">
         <span class="card-title">Current Positions</span>
@@ -21,8 +51,8 @@
             <td style="font-family: var(--font-mono); font-weight: 600;">{{ p.current_price }}</td>
             <td style="font-family: var(--font-mono); color: var(--accent-red);">{{ p.stop_loss|default:"-" }}</td>
             <td style="font-family: var(--font-mono); color: var(--accent-green);">{{ p.take_profit|default:"-" }}</td>
-            <td style="color: {% if p.unrealized_pnl >= 0 %}var(--accent-green){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">€{{ p.unrealized_pnl }}</td>
-            <td style="color: {% if p.unrealized_pnl_pct >= 0 %}var(--accent-green){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ p.unrealized_pnl_pct|floatformat:2 }}%</td>
+            <td style="color: {% if p.unrealized_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ p.unrealized_pnl }}</td>
+            <td style="color: {% if p.unrealized_pnl_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ p.unrealized_pnl_pct|floatformat:2 }}%</td>
             <td style="font-size: 12px;">{{ p.strategy.name|default:"-"|truncatechars:20 }}</td>
             <td style="font-size: 11px; color: var(--text-muted);">{{ p.opened_at|date:"M d H:i" }}</td>
         </tr>
@@ -32,7 +62,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-        <div class="empty-icon">▣</div>
+        <div class="empty-icon">&#9635;</div>
         <p>NO OPEN POSITIONS</p>
     </div>
     {% endif %}
@@ -42,4 +72,215 @@
   <div class="card-header"><div class="card-title">Position Analytics</div></div>
   <div class="sv-metrics-wrapper" hx-get="/htmx/metrics/positions/" hx-trigger="load, every 30s"></div>
 </div>
+
+{% else %}
+<!-- ── Position History Tab ────────────────────────── -->
+
+{% if best_trade %}
+<div class="grid grid-2" style="margin-bottom:20px;">
+    <div class="card fade-in-up delay-1" style="border-left:3px solid var(--accent);">
+        <div class="card-header"><span class="card-title" style="color:var(--accent);">Best Trade</span></div>
+        <div style="padding:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-family:var(--font-display);font-size:18px;color:var(--accent);font-weight:700;">{{ best_trade.instrument.symbol }}</span>
+                <span class="badge badge-{% if best_trade.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ best_trade.direction }}</span>
+            </div>
+            <div class="ph-kv"><span>P&L</span><span style="color:var(--accent);font-weight:700;">+{{ best_trade.unrealized_pnl }} ({{ best_trade.unrealized_pnl_pct|floatformat:1 }}%)</span></div>
+            <div class="ph-kv"><span>Entry → Exit</span><span>{{ best_trade.entry_price|floatformat:2 }} → {{ best_trade.current_price|floatformat:2 }}</span></div>
+            <div class="ph-kv"><span>Period</span><span>{{ best_trade.opened_at|date:"M d" }} → {{ best_trade.closed_at|date:"M d" }}</span></div>
+        </div>
+    </div>
+    <div class="card fade-in-up delay-2" style="border-left:3px solid var(--accent-red);">
+        <div class="card-header"><span class="card-title" style="color:var(--accent-red);">Worst Trade</span></div>
+        <div style="padding:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-family:var(--font-display);font-size:18px;color:var(--accent);font-weight:700;">{{ worst_trade.instrument.symbol }}</span>
+                <span class="badge badge-{% if worst_trade.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ worst_trade.direction }}</span>
+            </div>
+            <div class="ph-kv"><span>P&L</span><span style="color:var(--accent-red);font-weight:700;">{{ worst_trade.unrealized_pnl }} ({{ worst_trade.unrealized_pnl_pct|floatformat:1 }}%)</span></div>
+            <div class="ph-kv"><span>Entry → Exit</span><span>{{ worst_trade.entry_price|floatformat:2 }} → {{ worst_trade.current_price|floatformat:2 }}</span></div>
+            <div class="ph-kv"><span>Period</span><span>{{ worst_trade.opened_at|date:"M d" }} → {{ worst_trade.closed_at|date:"M d" }}</span></div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="card fade-in-up delay-3">
+    <div class="card-header">
+        <span class="card-title">Trade History</span>
+        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);letter-spacing:1px;">{{ total_closed }} TRADES</span>
+    </div>
+    {% if closed_positions %}
+    <div class="ph-list">
+        {% for p in closed_positions %}
+        <div class="ph-trade-card" onclick="this.classList.toggle('expanded')">
+            <div class="ph-trade-row">
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}" style="font-size:9px;padding:2px 6px;">{{ p.direction }}</span>
+                    <span style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--accent);">{{ p.instrument.symbol }}</span>
+                    {% if p.strategy %}<span style="font-size:10px;color:var(--text-muted);">via {{ p.strategy.name|truncatechars:20 }}</span>{% endif %}
+                </div>
+                <div style="display:flex;align-items:center;gap:16px;">
+                    <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">{{ p.opened_at|date:"M d H:i" }} → {{ p.closed_at|date:"M d H:i" }}</span>
+                    <span style="font-family:var(--font-mono);font-weight:700;font-size:13px;min-width:80px;text-align:right;color:{% if p.unrealized_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
+                        {% if p.unrealized_pnl >= 0 %}+{% endif %}{{ p.unrealized_pnl }}
+                    </span>
+                    <span style="font-family:var(--font-mono);font-size:11px;min-width:55px;text-align:right;color:{% if p.unrealized_pnl_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
+                        {% if p.unrealized_pnl_pct >= 0 %}+{% endif %}{{ p.unrealized_pnl_pct|floatformat:2 }}%
+                    </span>
+                    <span class="ph-expand-icon">&#9662;</span>
+                </div>
+            </div>
+            <div class="ph-trade-detail">
+                <div class="ph-detail-grid">
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Entry Price</div>
+                        <div class="ph-detail-value">{{ p.entry_price|floatformat:4 }}</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Exit Price</div>
+                        <div class="ph-detail-value">{{ p.current_price|floatformat:4 }}</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Quantity</div>
+                        <div class="ph-detail-value">{{ p.quantity }}</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">ROI</div>
+                        <div class="ph-detail-value" style="color:{% if p.unrealized_pnl_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">{{ p.unrealized_pnl_pct|floatformat:2 }}%</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Stop Loss</div>
+                        <div class="ph-detail-value">{{ p.stop_loss|default:"—" }}</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Take Profit</div>
+                        <div class="ph-detail-value">{{ p.take_profit|default:"—" }}</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Exposure</div>
+                        <div class="ph-detail-value">{{ p.quantity }} × {{ p.entry_price|floatformat:2 }}</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Duration</div>
+                        <div class="ph-detail-value">{{ p.opened_at|timesince:p.closed_at }}</div>
+                    </div>
+                </div>
+                <!-- Mini chart: entry/exit visualization -->
+                <div class="ph-chart-bar">
+                    <div class="ph-chart-label" style="left:0;">Entry: {{ p.entry_price|floatformat:2 }}</div>
+                    <div class="ph-chart-track">
+                        {% if p.direction == 'long' %}
+                        <div class="ph-chart-fill {% if p.unrealized_pnl >= 0 %}up{% else %}down{% endif %}" style="width:{% if p.unrealized_pnl_pct >= 0 %}{{ p.unrealized_pnl_pct|floatformat:0 }}{% else %}{{ p.unrealized_pnl_pct|floatformat:0 }}{% endif %}%;max-width:100%;min-width:4px;">
+                            <span class="ph-chart-marker">&#9654;</span>
+                        </div>
+                        {% else %}
+                        <div class="ph-chart-fill {% if p.unrealized_pnl >= 0 %}up{% else %}down{% endif %}" style="width:50%;min-width:4px;">
+                            <span class="ph-chart-marker">&#9664;</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="ph-chart-label" style="right:0;">Exit: {{ p.current_price|floatformat:2 }}</div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">&#9635;</div>
+        <p>NO CLOSED TRADES YET — YOUR HISTORY WILL APPEAR HERE</p>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<style>
+/* Tab navigation */
+.pos-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+.pos-tab {
+    padding: 10px 20px; font-family: var(--font-display); font-size: 12px;
+    letter-spacing: 2px; text-transform: uppercase; text-decoration: none;
+    color: var(--text-muted); border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+}
+.pos-tab:hover { color: var(--text-primary); }
+.pos-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* History key-value pairs */
+.ph-kv {
+    display: flex; justify-content: space-between; padding: 5px 0;
+    font-family: var(--font-mono); font-size: 12px;
+    border-bottom: 1px dashed rgba(19,48,32,0.3);
+}
+.ph-kv span:first-child { color: var(--text-muted); }
+.ph-kv span:last-child { color: var(--text-primary); }
+
+/* Trade cards */
+.ph-trade-card {
+    border-bottom: 1px solid var(--border); cursor: pointer;
+    transition: background 0.15s;
+}
+.ph-trade-card:hover { background: rgba(0,232,104,0.02); }
+.ph-trade-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 14px; gap: 12px;
+}
+.ph-expand-icon {
+    font-size: 10px; color: var(--text-muted);
+    transition: transform 0.2s;
+}
+.ph-trade-card.expanded .ph-expand-icon { transform: rotate(180deg); }
+
+/* Expandable detail */
+.ph-trade-detail {
+    max-height: 0; overflow: hidden; transition: max-height 0.3s ease;
+    padding: 0 14px;
+}
+.ph-trade-card.expanded .ph-trade-detail {
+    max-height: 300px; padding: 0 14px 16px;
+}
+
+.ph-detail-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    margin-bottom: 14px;
+}
+.ph-detail-item { }
+.ph-detail-label {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px;
+    color: var(--text-muted); text-transform: uppercase; margin-bottom: 3px;
+}
+.ph-detail-value {
+    font-family: var(--font-mono); font-size: 13px; font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Mini chart bar */
+.ph-chart-bar {
+    position: relative; padding: 18px 0 4px;
+}
+.ph-chart-label {
+    position: absolute; top: 0; font-size: 9px; font-family: var(--font-mono);
+    color: var(--text-muted);
+}
+.ph-chart-track {
+    height: 6px; background: rgba(19,48,32,0.4); border-radius: 3px;
+    overflow: visible; position: relative;
+}
+.ph-chart-fill {
+    height: 100%; border-radius: 3px; position: relative;
+    transition: width 0.4s ease;
+}
+.ph-chart-fill.up { background: linear-gradient(90deg, var(--accent), rgba(0,232,104,0.4)); }
+.ph-chart-fill.down { background: linear-gradient(90deg, var(--accent-red), rgba(220,50,50,0.4)); }
+.ph-chart-marker {
+    position: absolute; right: -4px; top: -5px; font-size: 10px;
+    color: var(--text-primary);
+}
+
+@media (max-width: 768px) {
+    .ph-trade-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+    .ph-detail-grid { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
 {% endblock %}

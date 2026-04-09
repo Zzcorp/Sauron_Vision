@@ -1,8 +1,9 @@
 """Sauron Vision — Dashboard Views (enriched)."""
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from datetime import timedelta
+from django.db import models
 from django.db.models import Avg, Sum
 
 
@@ -29,6 +30,26 @@ def dashboard(request):
     cash_pct = round(float(portfolio.cash_available) / max(float(portfolio.current_value), 1) * 100)
 
     latest_snapshot = PortfolioSnapshot.objects.filter(portfolio=portfolio).first()
+
+    # Trading performance metrics
+    closed_positions = Position.objects.filter(
+        portfolio=portfolio, closed_at__isnull=False
+    ).select_related("instrument", "strategy")
+    total_closed = closed_positions.count()
+    winning_trades = [p for p in closed_positions if float(p.unrealized_pnl) > 0]
+    losing_trades = [p for p in closed_positions if float(p.unrealized_pnl) <= 0]
+    win_rate = round(len(winning_trades) / total_closed * 100, 1) if total_closed > 0 else 0
+    all_returns = [float(p.unrealized_pnl_pct) for p in closed_positions]
+    avg_return = sum(all_returns) / len(all_returns) if all_returns else 0
+    portfolio_alpha = round(avg_return, 2)
+    portfolio_delta = round(
+        sum(float(p.quantity) * float(p.current_price) for p in open_positions)
+        / max(float(portfolio.current_value), 1), 2
+    )
+    best_trades = sorted(closed_positions, key=lambda p: float(p.unrealized_pnl), reverse=True)[:5]
+    avg_win = round(sum(float(p.unrealized_pnl) for p in winning_trades) / len(winning_trades), 2) if winning_trades else 0
+    avg_loss = round(sum(float(p.unrealized_pnl) for p in losing_trades) / len(losing_trades), 2) if losing_trades else 0
+    profit_factor = round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else 0
 
     # Signal metrics
     active_signals = Signal.objects.filter(is_active=True)
@@ -95,6 +116,16 @@ def dashboard(request):
         "last_agent_name": last_task.agent if last_task else "—",
         "last_agent_time": "{} ago".format(last_task.created_at.strftime("%H:%M")) if last_task else "—",
 
+        # Trading performance
+        "win_rate": win_rate,
+        "total_trades": total_closed,
+        "portfolio_alpha": portfolio_alpha,
+        "portfolio_delta": portfolio_delta,
+        "profit_factor": profit_factor,
+        "avg_win": "{:.2f}".format(avg_win),
+        "avg_loss": "{:.2f}".format(avg_loss),
+        "best_trades": best_trades,
+
         # Exposure
         "exposure": {"stock": 0, "forex": 0, "commodity": 0, "cash": cash_pct},
 
@@ -115,20 +146,111 @@ def dashboard(request):
 
 @login_required
 def instruments_list(request):
+    import json
     from instruments.models import Instrument
+    from market_data.models import LiveQuote
+
     qs = Instrument.objects.filter(is_active=True)
     filter_type = request.GET.get("filter", "")
+    search_q = request.GET.get("q", "").strip()
+    sort_by = request.GET.get("sort", "symbol")
+    exchange_filter = request.GET.get("exchange", "")
+    country_filter = request.GET.get("country", "")
+
     if filter_type == "watchlist":
         qs = qs.filter(is_watchlist=True)
-    elif filter_type in ["stock", "forex", "commodity", "index", "etf", "crypto"]:
+    elif filter_type in ("stock", "forex", "commodity", "index", "etf", "crypto", "bond"):
         qs = qs.filter(asset_class=filter_type)
-    return render(request, "dashboard/instruments_list.html", {"page_id": "instruments", "instruments": qs.order_by("asset_class", "symbol"), "filter": filter_type})
+    if search_q:
+        qs = qs.filter(
+            models.Q(symbol__icontains=search_q) |
+            models.Q(name__icontains=search_q) |
+            models.Q(sector__icontains=search_q)
+        )
+    if exchange_filter:
+        qs = qs.filter(exchange__iexact=exchange_filter)
+    if country_filter:
+        qs = qs.filter(country__iexact=country_filter)
+
+    instruments = list(qs.order_by("asset_class", "symbol"))
+
+    # Attach live quotes
+    quotes_map = {}
+    try:
+        for lq in LiveQuote.objects.select_related("instrument").all():
+            quotes_map[lq.instrument_id] = lq
+    except Exception:
+        pass
+
+    items = []
+    for inst in instruments:
+        q = quotes_map.get(inst.id)
+        items.append({
+            "id": inst.id,
+            "symbol": inst.symbol,
+            "name": inst.name,
+            "asset_class": inst.asset_class,
+            "exchange": inst.exchange or "-",
+            "currency": inst.currency,
+            "sector": inst.sector or "-",
+            "country": inst.country or "-",
+            "is_watchlist": inst.is_watchlist,
+            "last": float(q.last) if q else None,
+            "change_pct": float(q.change_pct) if q else None,
+            "bid": float(q.bid) if q and q.bid else None,
+            "ask": float(q.ask) if q and q.ask else None,
+            "volume": q.volume if q else None,
+            "source": q.source if q else "-",
+            "updated_at": q.updated_at.isoformat() if q else None,
+        })
+
+    # Sort
+    if sort_by == "change":
+        items.sort(key=lambda x: x["change_pct"] or 0, reverse=True)
+    elif sort_by == "change_asc":
+        items.sort(key=lambda x: x["change_pct"] or 0)
+    elif sort_by == "volume":
+        items.sort(key=lambda x: x["volume"] or 0, reverse=True)
+    elif sort_by == "name":
+        items.sort(key=lambda x: x["name"].lower())
+
+    # Summary stats
+    total = len(items)
+    with_quotes = sum(1 for i in items if i["last"] is not None)
+    gainers = sum(1 for i in items if (i["change_pct"] or 0) > 0)
+    losers = sum(1 for i in items if (i["change_pct"] or 0) < 0)
+
+    # Unique exchanges and countries for filter dropdowns
+    all_instruments = Instrument.objects.filter(is_active=True)
+    exchanges = sorted(set(
+        i.exchange for i in all_instruments if i.exchange
+    ))
+    countries = sorted(set(
+        i.country for i in all_instruments if i.country
+    ))
+
+    return render(request, "dashboard/instruments_list.html", {
+        "page_id": "instruments",
+        "items": items,
+        "items_json": json.dumps(items, default=str),
+        "filter": filter_type,
+        "search_q": search_q,
+        "sort_by": sort_by,
+        "exchange_filter": exchange_filter,
+        "country_filter": country_filter,
+        "total": total,
+        "with_quotes": with_quotes,
+        "gainers": gainers,
+        "losers": losers,
+        "exchanges": exchanges,
+        "countries": countries,
+    })
 
 
 @login_required
 def market_quotes(request):
-    from market_data.models import LiveQuote
-    return render(request, "dashboard/market_quotes.html", {"page_id": "quotes", "quotes": LiveQuote.objects.select_related("instrument").order_by("instrument__symbol")})
+    """Redirect to unified instruments & quotes page."""
+    return redirect("instruments_list")
 
 
 @login_required
@@ -245,10 +367,29 @@ def portfolio_overview(request):
 @login_required
 def positions_list(request):
     from portfolio.services import get_or_create_default_portfolio
+    from portfolio.models import Position
     portfolio = get_or_create_default_portfolio()
+    tab = request.GET.get("tab", "open")
+    open_positions = portfolio.positions.filter(closed_at__isnull=True).select_related("instrument", "strategy")
+    closed_positions = portfolio.positions.filter(closed_at__isnull=False).select_related("instrument", "strategy")
+
+    total_closed = closed_positions.count()
+    winning = [p for p in closed_positions if float(p.unrealized_pnl) > 0]
+    win_rate = round(len(winning) / total_closed * 100, 1) if total_closed > 0 else 0
+    total_realized = sum(float(p.unrealized_pnl) for p in closed_positions)
+    best_trade = max(closed_positions, key=lambda p: float(p.unrealized_pnl)) if total_closed > 0 else None
+    worst_trade = min(closed_positions, key=lambda p: float(p.unrealized_pnl)) if total_closed > 0 else None
+
     return render(request, "dashboard/positions_list.html", {
         "page_id": "positions",
-        "positions": portfolio.positions.filter(closed_at__isnull=True).select_related("instrument", "strategy"),
+        "tab": tab,
+        "positions": open_positions,
+        "closed_positions": closed_positions,
+        "total_closed": total_closed,
+        "win_rate": win_rate,
+        "total_realized": "{:.2f}".format(total_realized),
+        "best_trade": best_trade,
+        "worst_trade": worst_trade,
     })
 
 
@@ -703,12 +844,83 @@ def instrument_detail(request, symbol):
 @login_required
 def backtest_list(request):
     """List all backtests for the current user."""
+    import json as _json
     from backtester.models import BacktestRun
-    runs = BacktestRun.objects.filter(user=request.user).order_by("-created_at")[:50]
+    from instruments.models import Instrument
+
+    runs = list(BacktestRun.objects.filter(user=request.user).order_by("-created_at")[:50])
+    total = len(runs)
+    completed = [r for r in runs if r.status == "completed"]
+    avg_return = round(sum(r.total_return_pct or 0 for r in completed) / max(len(completed), 1), 2)
+    best = max((r.total_return_pct or 0 for r in completed), default=0)
+    avg_sharpe = round(sum(r.sharpe_ratio or 0 for r in completed) / max(len(completed), 1), 2)
+
+    instruments = list(Instrument.objects.filter(is_active=True).order_by("symbol").values("id", "symbol", "name", "asset_class"))
+    strategies = []
+    try:
+        from strategies.models import Strategy
+        strategies = list(Strategy.objects.all().values("id", "name", "time_horizon"))
+    except Exception:
+        pass
+
     return render(request, "dashboard/backtest_list.html", {
         "page_id": "backtest",
         "runs": runs,
+        "total": total,
+        "completed_count": len(completed),
+        "avg_return": avg_return,
+        "best_return": round(best, 2),
+        "avg_sharpe": avg_sharpe,
+        "instruments_json": _json.dumps(instruments),
+        "strategies_json": _json.dumps(strategies, default=str),
     })
+
+
+@login_required
+def backtest_create(request):
+    """Create and launch a new backtest."""
+    import json as _json
+    from django.http import JsonResponse
+    from backtester.models import BacktestRun
+
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
+
+    try:
+        name = request.POST.get("name", "").strip() or "Untitled Backtest"
+        strategy_type = request.POST.get("strategy_type", "smc_signals")
+        symbols_raw = request.POST.get("symbols", "")
+        symbols = [s.strip() for s in symbols_raw.split(",") if s.strip()]
+        start_date = request.POST.get("start_date")
+        end_date = request.POST.get("end_date")
+        initial_capital = float(request.POST.get("initial_capital", 10000))
+        params = {}
+        if request.POST.get("position_size_pct"):
+            params["position_size_pct"] = float(request.POST["position_size_pct"])
+        if request.POST.get("stop_loss_pct"):
+            params["stop_loss_pct"] = float(request.POST["stop_loss_pct"])
+        if request.POST.get("take_profit_pct"):
+            params["take_profit_pct"] = float(request.POST["take_profit_pct"])
+        if request.POST.get("timeframe"):
+            params["timeframe"] = request.POST["timeframe"]
+
+        run = BacktestRun.objects.create(
+            user=request.user,
+            name=name,
+            strategy_type=strategy_type,
+            symbols=symbols,
+            start_date=start_date,
+            end_date=end_date,
+            initial_capital=initial_capital,
+            parameters=params,
+            status="pending",
+        )
+        # TODO: dispatch celery task to actually run the backtest
+        # from backtester.tasks import run_backtest
+        # run_backtest.delay(run.id)
+        return JsonResponse({"ok": True, "id": run.id, "redirect": "/backtest/"})
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=400)
 
 
 @login_required

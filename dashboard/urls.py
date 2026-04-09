@@ -42,6 +42,7 @@ urlpatterns = [
     path("ai/chat/", views.ai_chat_page, name="ai_chat"),
     path("api/ai-chat/", views.ai_chat_api, name="ai_chat_api"),
     path("backtest/", views.backtest_list, name="backtest_list"),
+    path("backtest/create/", views.backtest_create, name="backtest_create"),
     path("profile/", views.profile, name="profile"),
     path("profile/change-pin/", __import__("dashboard.pin_views", fromlist=["change_pin"]).change_pin, name="change_pin"),
     path("setup/", views.setup, name="setup"),

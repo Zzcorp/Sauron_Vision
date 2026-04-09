@@ -157,11 +157,11 @@
         <div style="margin-bottom:18px;">
             <label class="form-label">MARKETS I TRADE</label>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;">
-                {% if "stock" in enabled_markets %}<label class="toggle-label"><input type="checkbox" name="trade_stocks" {% if profile.trade_stocks %}checked{% endif %}> <span>Stocks</span></label>{% endif %}
-                {% if "forex" in enabled_markets %}<label class="toggle-label"><input type="checkbox" name="trade_forex" {% if profile.trade_forex %}checked{% endif %}> <span>Forex</span></label>{% endif %}
-                {% if "commodity" in enabled_markets %}<label class="toggle-label"><input type="checkbox" name="trade_commodities" {% if profile.trade_commodities %}checked{% endif %}> <span>Commodities</span></label>{% endif %}
-                {% if "crypto" in enabled_markets %}<label class="toggle-label"><input type="checkbox" name="trade_crypto" {% if profile.trade_crypto %}checked{% endif %}> <span>Crypto</span></label>{% endif %}
-                {% if "index" in enabled_markets %}<label class="toggle-label"><input type="checkbox" name="trade_indices" {% if profile.trade_indices %}checked{% endif %}> <span>Indices</span></label>{% endif %}
+                <label class="toggle-label"><input type="checkbox" name="trade_stocks" {% if profile.trade_stocks %}checked{% endif %}> <span>Stocks</span></label>
+                <label class="toggle-label"><input type="checkbox" name="trade_forex" {% if profile.trade_forex %}checked{% endif %}> <span>Forex</span></label>
+                <label class="toggle-label"><input type="checkbox" name="trade_commodities" {% if profile.trade_commodities %}checked{% endif %}> <span>Commodities</span></label>
+                <label class="toggle-label"><input type="checkbox" name="trade_crypto" {% if profile.trade_crypto %}checked{% endif %}> <span>Crypto</span></label>
+                <label class="toggle-label"><input type="checkbox" name="trade_indices" {% if profile.trade_indices %}checked{% endif %}> <span>Indices</span></label>
                 <label class="toggle-label"><input type="checkbox" name="trade_bonds" {% if profile.trade_bonds %}checked{% endif %}> <span>Bonds</span></label>
             </div>
         </div>

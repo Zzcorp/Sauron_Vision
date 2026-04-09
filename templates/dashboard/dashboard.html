@@ -109,7 +109,42 @@
     </a>
 </div>
 
-<!-- ── Row 4: Exposure Breakdown ─────────────────────── -->
+<!-- ── Row 4: Trading Performance ────────────────────── -->
+<div class="section-label fade-in-up">Trading Performance</div>
+<div class="grid grid-6" style="margin-bottom: 20px;">
+    <a href="{% url 'positions_list' %}?tab=history" class="stat-box fade-in-up delay-1 dash-link">
+        <div class="stat-label">Win Rate</div>
+        <div class="stat-value" style="color:{% if win_rate >= 50 %}var(--accent){% else %}var(--accent-red){% endif %};">{{ win_rate|default:"0" }}%</div>
+        <div class="stat-sub">{{ total_trades|default:"0" }} closed trades</div>
+    </a>
+    <a href="{% url 'positions_list' %}?tab=history" class="stat-box fade-in-up delay-2 dash-link">
+        <div class="stat-label">Alpha</div>
+        <div class="stat-value" style="color:{% if portfolio_alpha >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">{% if portfolio_alpha >= 0 %}+{% endif %}{{ portfolio_alpha|default:"0" }}%</div>
+        <div class="stat-sub">avg return per trade</div>
+    </a>
+    <div class="stat-box fade-in-up delay-3">
+        <div class="stat-label">Delta</div>
+        <div class="stat-value">{{ portfolio_delta|default:"0" }}</div>
+        <div class="stat-sub">portfolio sensitivity</div>
+    </div>
+    <div class="stat-box fade-in-up delay-4">
+        <div class="stat-label">Profit Factor</div>
+        <div class="stat-value" style="color:{% if profit_factor >= 1 %}var(--accent){% else %}var(--accent-red){% endif %};">{{ profit_factor|default:"0" }}</div>
+        <div class="stat-sub">avg win / avg loss</div>
+    </div>
+    <div class="stat-box fade-in-up delay-5">
+        <div class="stat-label">Avg Win</div>
+        <div class="stat-value" style="color:var(--accent);font-size:18px;">+{{ avg_win|default:"0.00" }}</div>
+        <div class="stat-sub">per winning trade</div>
+    </div>
+    <div class="stat-box fade-in-up delay-6">
+        <div class="stat-label">Avg Loss</div>
+        <div class="stat-value" style="color:var(--accent-red);font-size:18px;">{{ avg_loss|default:"0.00" }}</div>
+        <div class="stat-sub">per losing trade</div>
+    </div>
+</div>
+
+<!-- ── Row 5: Exposure Breakdown ─────────────────────── -->
 <div class="section-label fade-in-up">Exposure Breakdown</div>
 <div class="grid grid-5" style="margin-bottom: 24px;">
     <div class="stat-box fade-in-up delay-1">
@@ -270,8 +305,33 @@
             </ul>
         </div>
 
+        <!-- Best Trades -->
+        <div class="card fade-in-up delay-5" style="margin-bottom: 20px;">
+            <div class="card-header">
+                <span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><path d="M2 14l4-5 3 3 5-8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg> Best Trades</span>
+                <a href="{% url 'positions_list' %}?tab=history" class="btn btn-sm">History →</a>
+            </div>
+            {% if best_trades %}
+                {% for t in best_trades %}
+                <a href="{% url 'positions_list' %}?tab=history" style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(19,48,32,0.3);text-decoration:none;color:inherit;font-size:12px;">
+                    <span style="display:flex;align-items:center;gap:8px;">
+                        <span class="badge badge-{% if t.direction == 'long' %}bullish{% else %}bearish{% endif %}" style="font-size:9px;padding:2px 5px;">{{ t.direction }}</span>
+                        <span style="font-family:var(--font-display);color:var(--accent);font-weight:700;">{{ t.instrument.symbol }}</span>
+                        <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:10px;">{{ t.opened_at|date:"M d" }} → {{ t.closed_at|date:"M d" }}</span>
+                    </span>
+                    <span style="font-family:var(--font-mono);font-weight:700;color:{% if t.unrealized_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
+                        {% if t.unrealized_pnl >= 0 %}+{% endif %}{{ t.unrealized_pnl }}
+                        <span style="font-size:10px;opacity:0.7;">({{ t.unrealized_pnl_pct|floatformat:1 }}%)</span>
+                    </span>
+                </a>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state" style="padding:24px;"><p>NO CLOSED TRADES YET</p></div>
+            {% endif %}
+        </div>
+
         <!-- Quick Links -->
-        <div class="card fade-in-up delay-5">
+        <div class="card fade-in-up delay-6">
             <div class="card-header"><span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><path d="M8 1v14M1 8h14" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg> Quick Actions</span></div>
             <div style="display:flex;flex-direction:column;gap:6px;">
                 <a href="{% url 'ai_chat' %}" class="btn btn-sm" style="justify-content:flex-start;">Chat with Sauron AI →</a>

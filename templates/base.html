@@ -72,7 +72,7 @@
             position: fixed; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             width: 90vmin; height: 90vmin;
-            z-index: 0; pointer-events: none; opacity: 0.04;
+            z-index: 0; pointer-events: none; opacity: 0.06;
         }
         .globe-eye-bg .eye-static { }
         .globe-eye-bg .globe-spin {
@@ -91,7 +91,7 @@
         #caustics-canvas {
             position: fixed; top: 0; left: 0;
             width: 100%; height: 100%; z-index: 0; pointer-events: none;
-            opacity: 0.035; mix-blend-mode: screen;
+            opacity: 0.06; mix-blend-mode: screen;
         }
         .app-layout { display: flex; min-height: 100vh; position: relative; z-index: 1; }
 
@@ -310,6 +310,14 @@
         body.light-mode .topbar {
             box-shadow: none;
         }
+        body.light-mode .data-headband {
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border);
+        }
+        body.light-mode .ticker-bar {
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border);
+        }
         body.light-mode .ticker-popup,
         body.light-mode .dh-pop,
         body.light-mode .ip-dropdown,
@@ -325,6 +333,11 @@
         body.light-mode .sidebar-toggle-btn,
         body.light-mode .rail-toggle-btn,
         body.light-mode .sidebar-expand-tab {
+            box-shadow: none;
+        }
+        body.light-mode .dh-dot.up,
+        body.light-mode .dh-dot.down,
+        body.light-mode .dh-pop {
             box-shadow: none;
         }
         body.light-mode .btn:hover {
@@ -1215,8 +1228,8 @@
         .dh-pop-cta { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
                       font-size: 10px; color: var(--accent); text-align: right; }
 
-        /* Push page content down for headbands (topbar 56 + ticker 34 + data headband 42) */
-        .page-content { padding-top: 148px !important; padding-bottom: 80px !important; }
+        /* Push page content down for headbands (topbar 56 + ticker 34 + data headband 42 + 4px) */
+        .page-content { padding-top: 136px !important; padding-bottom: 80px !important; }
         body.page-dashboard .page-content { padding-bottom: 28px !important; }
 
         /* Enhanced ticker news popup */
@@ -1422,28 +1435,43 @@
 
 <!-- Globe-Eye: static eye shape, rotating globe inside -->
 <svg class="globe-eye-bg" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
-    <!-- STATIC: eye structure -->
+    <defs>
+        <filter id="pupilGlow" x="-100%" y="-100%" width="300%" height="300%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur1"/>
+            <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur2"/>
+            <feMerge><feMergeNode in="blur1"/><feMergeNode in="blur2"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <radialGradient id="pupilFill" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#00e868" stop-opacity="0.4"/>
+            <stop offset="60%" stop-color="#00e868" stop-opacity="0.15"/>
+            <stop offset="100%" stop-color="#00e868" stop-opacity="0"/>
+        </radialGradient>
+    </defs>
+    <!-- STATIC: eye structure — thicker strokes -->
     <g class="eye-static">
-        <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="2"/>
-        <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="0.5" opacity="0.5"/>
-        <path d="M 10,400 Q 200,100 400,160 Q 600,100 790,400" fill="none" stroke="#00e868" stroke-width="1" opacity="0.6"/>
-        <path d="M 10,400 Q 200,700 400,640 Q 600,700 790,400" fill="none" stroke="#00e868" stroke-width="1" opacity="0.6"/>
-        <circle cx="400" cy="400" r="160" fill="none" stroke="#00e868" stroke-width="1.5"/>
-        <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="2"/>
-        <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.12"/>
-        <line x1="10" y1="400" x2="80" y2="400" stroke="#00e868" stroke-width="0.5" opacity="0.3"/>
-        <line x1="720" y1="400" x2="790" y2="400" stroke="#00e868" stroke-width="0.5" opacity="0.3"/>
+        <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="3.5"/>
+        <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
+        <path d="M 10,400 Q 200,100 400,160 Q 600,100 790,400" fill="none" stroke="#00e868" stroke-width="2" opacity="0.6"/>
+        <path d="M 10,400 Q 200,700 400,640 Q 600,700 790,400" fill="none" stroke="#00e868" stroke-width="2" opacity="0.6"/>
+        <circle cx="400" cy="400" r="160" fill="none" stroke="#00e868" stroke-width="2.5"/>
+        <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="3"/>
+        <!-- Pupil with glow -->
+        <circle cx="400" cy="400" r="40" fill="url(#pupilFill)" filter="url(#pupilGlow)"/>
+        <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.18" filter="url(#pupilGlow)"/>
+        <circle cx="400" cy="400" r="8" fill="#00e868" opacity="0.4"/>
+        <line x1="10" y1="400" x2="80" y2="400" stroke="#00e868" stroke-width="1" opacity="0.3"/>
+        <line x1="720" y1="400" x2="790" y2="400" stroke="#00e868" stroke-width="1" opacity="0.3"/>
     </g>
-    <!-- ROTATING: globe meridians & latitude lines -->
+    <!-- ROTATING: globe meridians & latitude lines — thicker -->
     <g class="globe-spin">
-        <ellipse cx="400" cy="400" rx="50" ry="140" fill="none" stroke="#00e868" stroke-width="0.5" opacity="0.4"/>
-        <ellipse cx="400" cy="400" rx="100" ry="140" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.3"/>
-        <ellipse cx="400" cy="400" rx="140" ry="50" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.3"/>
-        <ellipse cx="400" cy="400" rx="30" ry="140" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.25" transform="rotate(25 400 400)"/>
-        <ellipse cx="400" cy="400" rx="120" ry="140" fill="none" stroke="#00e868" stroke-width="0.3" opacity="0.2" transform="rotate(-20 400 400)"/>
-        <line x1="260" y1="340" x2="540" y2="340" stroke="#00e868" stroke-width="0.4" opacity="0.25"/>
-        <line x1="260" y1="400" x2="540" y2="400" stroke="#00e868" stroke-width="0.5" opacity="0.3"/>
-        <line x1="260" y1="460" x2="540" y2="460" stroke="#00e868" stroke-width="0.4" opacity="0.25"/>
+        <ellipse cx="400" cy="400" rx="50" ry="140" fill="none" stroke="#00e868" stroke-width="1" opacity="0.4"/>
+        <ellipse cx="400" cy="400" rx="100" ry="140" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.3"/>
+        <ellipse cx="400" cy="400" rx="140" ry="50" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.3"/>
+        <ellipse cx="400" cy="400" rx="30" ry="140" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.25" transform="rotate(25 400 400)"/>
+        <ellipse cx="400" cy="400" rx="120" ry="140" fill="none" stroke="#00e868" stroke-width="0.6" opacity="0.2" transform="rotate(-20 400 400)"/>
+        <line x1="260" y1="340" x2="540" y2="340" stroke="#00e868" stroke-width="0.8" opacity="0.25"/>
+        <line x1="260" y1="400" x2="540" y2="400" stroke="#00e868" stroke-width="1" opacity="0.3"/>
+        <line x1="260" y1="460" x2="540" y2="460" stroke="#00e868" stroke-width="0.8" opacity="0.25"/>
     </g>
 </svg>
 
@@ -1466,8 +1494,7 @@
             <div class="nav-section">Command Center</div>
             <a href="{% url 'dashboard' %}" class="nav-link {% if page_id == 'dashboard' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Dashboard</span></a>
             <div class="nav-section">Markets</div>
-            <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Instruments</span></a>
-            <a href="{% url 'market_quotes' %}" class="nav-link {% if page_id == 'quotes' %}active{% endif %}"><span class="icon">◆</span> <span class="label-text">Live Quotes</span></a>
+            <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' or page_id == 'quotes' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Instruments & Quotes</span></a>
             <a href="{% url 'economic_calendar' %}" class="nav-link {% if page_id == 'calendar' %}active{% endif %}"><span class="icon">◇</span> <span class="label-text">Economic Calendar</span></a>
             <div class="nav-section">Intelligence</div>
             <a href="{% url 'signals_list' %}" class="nav-link {% if page_id == 'signals' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Signals</span></a>
@@ -1988,6 +2015,10 @@
             this.alpha = Math.random() * 0.32 + 0.06;
             this.pulse = Math.random() * Math.PI * 2;
             this.pulseSpeed = 0.012 + Math.random() * 0.025;
+            /* Tail — ~40% of larger particles get a fading trail */
+            this.hasTail = this.size > 1.0 && Math.random() < 0.4;
+            this.trail = [];
+            this.trailMax = this.hasTail ? (8 + Math.floor(Math.random() * 10)) : 0;
             /* Ticker label — ~30% of particles get one */
             this.ticker = null;
             if (this.size > 1.4 && Math.random() < 0.35) {
@@ -1996,21 +2027,41 @@
             }
         }
         update() {
+            if (this.hasTail) {
+                this.trail.push({x: this.x, y: this.y});
+                if (this.trail.length > this.trailMax) this.trail.shift();
+            }
             this.x += this.speed;
             this.y += this.drift + Math.sin(this.pulse) * 0.18;
             this.pulse += this.pulseSpeed;
-            if (this.x > canvas.width + 80 || this.y < -30 || this.y > canvas.height + 30) this.spawn();
+            if (this.x > canvas.width + 80 || this.y < -30 || this.y > canvas.height + 30) {
+                this.trail = [];
+                this.spawn();
+            }
         }
         draw(now) {
             var a = this.alpha * (0.6 + 0.4 * Math.sin(this.pulse));
-            /* Glow halo — all particles get one */
-            var glowR = this.size * 4;
+            /* Fading tail — oldest = faintest */
+            if (this.hasTail && this.trail.length > 1) {
+                for (var ti = 0; ti < this.trail.length; ti++) {
+                    var frac = ti / this.trail.length;
+                    var tailA = a * frac * 0.35;
+                    var tailR = this.size * frac * 0.7;
+                    if (tailR < 0.3) continue;
+                    ctx.beginPath();
+                    ctx.arc(this.trail[ti].x, this.trail[ti].y, tailR, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(0,232,104,' + tailA.toFixed(4) + ')';
+                    ctx.fill();
+                }
+            }
+            /* Glow halo — stronger */
+            var glowR = this.size * 4.5;
             ctx.beginPath(); ctx.arc(this.x, this.y, glowR, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(0,232,104,' + (a * 0.06).toFixed(4) + ')'; ctx.fill();
+            ctx.fillStyle = 'rgba(0,232,104,' + (a * 0.08).toFixed(4) + ')'; ctx.fill();
             /* Mid glow */
             if (this.size > 0.8) {
                 ctx.beginPath(); ctx.arc(this.x, this.y, this.size * 2.5, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(0,232,104,' + (a * 0.15).toFixed(4) + ')'; ctx.fill();
+                ctx.fillStyle = 'rgba(0,232,104,' + (a * 0.18).toFixed(4) + ')'; ctx.fill();
             }
             /* Core */
             ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
@@ -2035,27 +2086,31 @@
         spawn() {
             this.x = -10 - Math.random() * 200;
             this.y = Math.random() * canvas.height;
-            this.w = 2 + Math.random() * 5;
-            this.h = 1 + Math.random() * 2.5;
-            this.speed = 0.18 + Math.random() * 0.4;
-            this.drift = (Math.random() - 0.5) * 0.25;
+            this.w = 2 + Math.random() * 6;
+            this.h = 1 + Math.random() * 3;
+            this.speed = 0.12 + Math.random() * 0.35;
+            this.drift = (Math.random() - 0.5) * 0.3;
             this.rot = Math.random() * Math.PI * 2;
-            this.rotSpeed = (Math.random() - 0.5) * 0.02;
-            this.alpha = 0.04 + Math.random() * 0.1;
+            this.rotSpeed = (Math.random() - 0.5) * 0.015;
+            this.alpha = 0.03 + Math.random() * 0.08;
             this.wobble = Math.random() * Math.PI * 2;
+            this.wobbleAmp = 0.15 + Math.random() * 0.2;
         }
         update() {
             this.x += this.speed;
-            this.y += this.drift + Math.sin(this.wobble) * 0.2;
+            this.y += this.drift + Math.sin(this.wobble) * this.wobbleAmp;
             this.rot += this.rotSpeed;
-            this.wobble += 0.015;
+            this.wobble += 0.012;
             if (this.x > canvas.width + 30) this.spawn();
         }
         draw() {
             ctx.save();
             ctx.translate(this.x, this.y);
             ctx.rotate(this.rot);
-            ctx.fillStyle = 'rgba(90,138,106,' + this.alpha + ')';
+            /* Soft outer glow on ash */
+            ctx.fillStyle = 'rgba(0,180,80,' + (this.alpha * 0.25).toFixed(4) + ')';
+            ctx.fillRect(-this.w / 2 - 1, -this.h / 2 - 1, this.w + 2, this.h + 2);
+            ctx.fillStyle = 'rgba(60,120,80,' + this.alpha + ')';
             ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
             ctx.restore();
         }
@@ -2123,21 +2178,21 @@
         t += 0.003;
         gl.clearRect(0, 0, c.width, c.height);
 
-        /* Overall intensity breathes slowly */
-        var breath = 0.6 + 0.4 * Math.sin(t * 0.7);
+        /* Overall intensity breathes slowly — stronger */
+        var breath = 0.7 + 0.3 * Math.sin(t * 0.7);
 
-        /* Draw several soft light shafts */
-        var shaftCount = 5;
+        /* Draw several soft light shafts — more, stronger */
+        var shaftCount = 7;
         for (var i = 0; i < shaftCount; i++) {
             var seed = i * 1.618;
-            var cx = c.width * (0.15 + 0.7 * noise(seed, t * 0.12 + i));
-            var cy = c.height * (0.2 + 0.6 * noise(seed + 50, t * 0.08 + i));
-            var r = (200 + 300 * noise(seed + 100, t * 0.06)) * (c.width / 1400);
-            var intensity = breath * (0.3 + 0.7 * noise(seed + 200, t * 0.15));
+            var cx = c.width * (0.1 + 0.8 * noise(seed, t * 0.12 + i));
+            var cy = c.height * (0.15 + 0.7 * noise(seed + 50, t * 0.08 + i));
+            var r = (250 + 350 * noise(seed + 100, t * 0.06)) * (c.width / 1400);
+            var intensity = breath * (0.4 + 0.6 * noise(seed + 200, t * 0.15));
 
             var grd = gl.createRadialGradient(cx, cy, 0, cx, cy, r);
-            grd.addColorStop(0, 'rgba(0,232,104,' + (0.08 * intensity).toFixed(4) + ')');
-            grd.addColorStop(0.4, 'rgba(0,180,80,' + (0.03 * intensity).toFixed(4) + ')');
+            grd.addColorStop(0, 'rgba(0,232,104,' + (0.14 * intensity).toFixed(4) + ')');
+            grd.addColorStop(0.4, 'rgba(0,180,80,' + (0.06 * intensity).toFixed(4) + ')');
             grd.addColorStop(1, 'rgba(0,232,104,0)');
             gl.fillStyle = grd;
             gl.fillRect(cx - r, cy - r, r * 2, r * 2);
@@ -2152,11 +2207,11 @@
                 var n1 = noise(gx * 0.8 + t * 0.5, gy * 0.8 + t * 0.3);
                 var n2 = noise(gx * 1.2 - t * 0.4, gy * 1.2 + t * 0.2);
                 var val = n1 * n2;
-                if (val > 0.35) {
+                if (val > 0.3) {
                     var bx = gx * cellSize + noise(gx + t, gy) * 40;
                     var by = gy * cellSize + noise(gx, gy + t) * 40;
-                    var br = 20 + val * 60;
-                    var ba = (val - 0.35) * 0.15 * breath;
+                    var br = 25 + val * 70;
+                    var ba = (val - 0.3) * 0.22 * breath;
                     var bg = gl.createRadialGradient(bx, by, 0, bx, by, br);
                     bg.addColorStop(0, 'rgba(0,232,104,' + ba.toFixed(4) + ')');
                     bg.addColorStop(1, 'rgba(0,232,104,0)');
