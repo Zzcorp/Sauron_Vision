@@ -1,0 +1,48 @@
+{% comment %}
+Chart.js loader. Include with: {% include "_chart_assets.html" %}
+Use once per page; later includes detect the loaded flag and skip.
+{% endcomment %}
+{% if not request.chart_assets_loaded %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+        integrity="sha384-rHwkN4ZQrQezJlqaepbhhyNvk9PqaH7GqvO5Hjfrxol0w63cKx2OqAVCXjuVUFLJ"
+        crossorigin="anonymous"></script>
+<script>
+  // Common dark theme defaults that match Sauron's --accent / --text vars
+  if (typeof Chart !== "undefined") {
+    Chart.defaults.color = "#5a8a6a";
+    Chart.defaults.borderColor = "#133020";
+    Chart.defaults.font.family = "'Share Tech Mono', monospace";
+    Chart.defaults.font.size = 11;
+  }
+  window.SAURON_CHART_COLORS = {
+    accent: "#00e868",
+    accentDim: "rgba(0, 232, 104, 0.18)",
+    red: "#e83030",
+    redDim: "rgba(232, 48, 48, 0.18)",
+    gold: "#d8b020",
+    blue: "#30a0e8",
+    purple: "#8840d0",
+    text: "#c8e8d8",
+    border: "#133020",
+  };
+</script>
+<style>
+  .sv-chart-container { position: relative; height: 280px; margin: 16px 0; }
+  .sv-chart-container.tall { height: 380px; }
+  .sv-chart-container.short { height: 180px; }
+  .sv-metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                     gap: 12px; margin: 16px 0; }
+  .sv-metric-card { background: var(--bg-card); border: 1px solid var(--border);
+                    border-radius: var(--radius); padding: 14px; }
+  .sv-metric-label { font-size: 0.7rem; color: var(--text-muted);
+                     text-transform: uppercase; letter-spacing: 0.05em; }
+  .sv-metric-value { font-family: var(--font-mono); font-size: 1.4rem;
+                     color: var(--text-primary); margin-top: 4px;
+                     font-variant-numeric: tabular-nums; }
+  .sv-metric-value.up { color: var(--accent); }
+  .sv-metric-value.down { color: var(--accent-red); }
+  .sv-section-title { font-family: var(--font-heading); font-size: 1rem;
+                      color: var(--text-secondary); text-transform: uppercase;
+                      letter-spacing: 0.1em; margin: 24px 0 12px; }
+</style>
+{% endif %}

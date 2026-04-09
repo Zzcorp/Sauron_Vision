@@ -1,0 +1,37 @@
+{% include "_chart_assets.html" %}
+<div class="news-metrics">
+  <div class="sv-section-title">News volume — last 14 days</div>
+  <div class="sv-metrics-grid">
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Articles (14d)</div>
+      <div class="sv-metric-value">{{ totals.count_14d|default:"0" }}</div>
+    </div>
+  </div>
+  <div class="sv-chart-container">
+    <canvas id="news-volume-chart"></canvas>
+  </div>
+</div>
+
+<script>
+(function() {
+  const data = {{ chart_data|safe }};
+  const ctx = document.getElementById("news-volume-chart");
+  if (!ctx || !data.labels) return;
+  if (window._newsVolChart) window._newsVolChart.destroy();
+  window._newsVolChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: data.labels,
+      datasets: [{
+        label: "Articles per day",
+        data: data.values,
+        borderColor: window.SAURON_CHART_COLORS.accent,
+        backgroundColor: window.SAURON_CHART_COLORS.accentDim,
+        tension: 0.3, fill: true,
+      }],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+               plugins: { legend: { display: false } } },
+  });
+})();
+</script>

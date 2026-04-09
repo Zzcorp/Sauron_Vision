@@ -149,3 +149,8 @@ class BotScenario(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+from .models_v2 import (  # noqa: F401
+    BotHeartbeat, BotCircuitState, BotShadowState,
+    BotShadowAction, BotSymbolOverride,
+)

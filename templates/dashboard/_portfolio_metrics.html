@@ -1,0 +1,56 @@
+{% include "_chart_assets.html" %}
+<div class="portfolio-metrics">
+  <div class="sv-section-title">Portfolio exposure</div>
+  <div class="sv-metrics-grid">
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Total</div>
+      <div class="sv-metric-value">{{ exposure.total|default:"0" }}</div>
+    </div>
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Gross</div>
+      <div class="sv-metric-value">{{ exposure.gross|default:"0" }}</div>
+    </div>
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Net</div>
+      <div class="sv-metric-value">{{ exposure.net|default:"0" }}</div>
+    </div>
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Long / Short</div>
+      <div class="sv-metric-value">{{ exposure.long_value|default:"0" }} / {{ exposure.short_value|default:"0" }}</div>
+    </div>
+  </div>
+
+  <div class="sv-section-title">Composition by asset class</div>
+  <div class="sv-chart-container">
+    <canvas id="portfolio-asset-chart"></canvas>
+  </div>
+</div>
+
+<script>
+(function() {
+  const data = {{ chart_data|safe }};
+  const ctx = document.getElementById("portfolio-asset-chart");
+  if (!ctx || !data.labels || data.labels.length === 0) {
+    if (ctx) ctx.parentElement.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px;">No portfolio data yet.</p>';
+    return;
+  }
+  if (window._portfolioChart) window._portfolioChart.destroy();
+  const colors = [
+    window.SAURON_CHART_COLORS.accent,
+    window.SAURON_CHART_COLORS.blue,
+    window.SAURON_CHART_COLORS.gold,
+    window.SAURON_CHART_COLORS.purple,
+  ];
+  window._portfolioChart = new Chart(ctx, {
+    type: "pie",
+    data: {
+      labels: data.labels,
+      datasets: [{ data: data.values,
+                   backgroundColor: data.labels.map((_, i) => colors[i % colors.length]),
+                   borderColor: window.SAURON_CHART_COLORS.border, borderWidth: 2 }],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+               plugins: { legend: { position: "right" } } },
+  });
+})();
+</script>

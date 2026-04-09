@@ -1,0 +1,48 @@
+<form id="pin-change-form" onsubmit="event.preventDefault(); submitPinChange();">
+  {% csrf_token %}
+  <div class="input-group" style="margin-bottom:12px;">
+    <label class="input-label">CURRENT PIN</label>
+    <input type="password" name="current_pin" class="input"
+           inputmode="numeric" maxlength="8" autocomplete="off">
+  </div>
+  <div class="input-group" style="margin-bottom:12px;">
+    <label class="input-label">NEW PIN</label>
+    <input type="password" name="new_pin" class="input"
+           inputmode="numeric" maxlength="8" autocomplete="new-password" required>
+  </div>
+  <div class="input-group" style="margin-bottom:16px;">
+    <label class="input-label">CONFIRM</label>
+    <input type="password" name="confirm_pin" class="input"
+           inputmode="numeric" maxlength="8" autocomplete="new-password" required>
+  </div>
+  <div id="pin-modal-error" style="color:var(--accent-red);font-size:0.85rem;margin-bottom:12px;display:none;"></div>
+  <button type="submit" class="btn btn-primary" style="width:100%;">UPDATE PIN</button>
+</form>
+
+<script>
+async function submitPinChange() {
+  const form = document.getElementById("pin-change-form");
+  const data = new FormData(form);
+  const errEl = document.getElementById("pin-modal-error");
+  errEl.style.display = "none";
+  try {
+    const r = await fetch("/profile/change-pin-modal/", {
+      method: "POST",
+      body: data,
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+    });
+    const j = await r.json();
+    if (j.ok) {
+      svCloseModal("pin-modal");
+      location.reload();    // auto-save effect: refresh to show new state
+    } else {
+      errEl.textContent = j.error || "Update failed.";
+      errEl.style.display = "block";
+    }
+  } catch (e) {
+    errEl.textContent = "Network error.";
+    errEl.style.display = "block";
+  }
+}
+window.submitPinChange = submitPinChange;
+</script>

@@ -1,0 +1,74 @@
+{% include "_chart_assets.html" %}
+<div class="backtest-metrics">
+  <div class="sv-section-title">Latest backtest equity curve</div>
+  <div class="sv-chart-container tall">
+    <canvas id="backtest-equity-chart"></canvas>
+  </div>
+
+  <div class="sv-section-title">Recent runs</div>
+  {% if runs %}
+    <table class="sv-perf-table">
+      <thead>
+        <tr><th>Name</th><th>Hash</th><th>Return</th><th>Max DD</th>
+            <th>Sharpe</th><th>Trades</th><th>Win rate</th></tr>
+      </thead>
+      <tbody>
+        {% for r in runs %}
+          <tr>
+            <td>{{ r.name }}</td>
+            <td>{{ r.config_hash }}</td>
+            <td class="{% if r.total_return_pct > 0 %}up{% else %}down{% endif %}">
+              {{ r.total_return_pct|floatformat:2 }}%
+            </td>
+            <td>{{ r.max_drawdown_pct|floatformat:2 }}%</td>
+            <td>{{ r.sharpe|default:"—"|floatformat:2 }}</td>
+            <td>{{ r.n_trades }}</td>
+            <td>{{ r.win_rate|floatformat:2 }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p style="color:var(--text-muted);">No backtest runs yet. Run
+      <code>python manage.py backtest_v2 --symbol BTCUSDT --persist</code></p>
+  {% endif %}
+</div>
+
+<style>
+.up { color: var(--accent); }
+.down { color: var(--accent-red); }
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+</style>
+
+<script>
+(function() {
+  const data = {{ chart_data|safe }};
+  const ctx = document.getElementById("backtest-equity-chart");
+  if (!ctx || !data.labels || data.labels.length === 0) {
+    if (ctx) ctx.parentElement.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px;">No equity curve data.</p>';
+    return;
+  }
+  if (window._btEquityChart) window._btEquityChart.destroy();
+  window._btEquityChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: data.labels,
+      datasets: [{
+        label: data.name || "Equity",
+        data: data.equity,
+        borderColor: window.SAURON_CHART_COLORS.accent,
+        backgroundColor: window.SAURON_CHART_COLORS.accentDim,
+        tension: 0.1, fill: true, pointRadius: 0, borderWidth: 2,
+      }],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+               plugins: { legend: { position: "top" } },
+               scales: { x: { ticks: { maxTicksLimit: 12 } } } },
+  });
+})();
+</script>

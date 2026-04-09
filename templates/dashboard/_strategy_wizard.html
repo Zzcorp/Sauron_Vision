@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}New Strategy · Sauron Vision{% endblock %}
+{% block content %}
+<div class="container" style="max-width:680px;margin:40px auto;">
+  <h2 style="font-family:var(--font-heading);color:var(--accent);text-transform:uppercase;letter-spacing:0.1em;">
+    Create new strategy
+  </h2>
+  <p style="color:var(--text-secondary);">Define a strategy framework. You can refine the legs and risk parameters after creation.</p>
+
+  <form id="wizard-form" onsubmit="event.preventDefault(); submitWizard();">
+    {% csrf_token %}
+    <div class="input-group">
+      <label class="input-label">Strategy name</label>
+      <input type="text" name="name" class="input" required placeholder="e.g. BTC dip-buy with hedge">
+    </div>
+    <div class="input-group">
+      <label class="input-label">Description / thesis</label>
+      <textarea name="description" class="input" rows="4" placeholder="Why does this trade make sense now?"></textarea>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="input-group">
+        <label class="input-label">Time horizon</label>
+        <select name="time_horizon" class="input">
+          <option value="scalp">Scalp</option>
+          <option value="intraday">Intraday</option>
+          <option value="swing" selected>Swing</option>
+          <option value="position">Position</option>
+        </select>
+      </div>
+      <div class="input-group">
+        <label class="input-label">Max allocation (%)</label>
+        <input type="number" name="max_portfolio_allocation_pct" class="input" value="10" min="0" max="100" step="0.5">
+      </div>
+    </div>
+    <div class="input-group">
+      <label class="input-label">Max loss per trade (%)</label>
+      <input type="number" name="max_loss_pct" class="input" value="2" min="0" max="20" step="0.5">
+    </div>
+    <div id="wizard-error" style="color:var(--accent-red);font-size:0.85rem;margin:12px 0;display:none;"></div>
+    <div style="display:flex;gap:12px;">
+      <button type="submit" class="btn btn-primary">Create strategy</button>
+      <a href="/strategies/" class="btn">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<script>
+async function submitWizard() {
+  const form = document.getElementById("wizard-form");
+  const data = new FormData(form);
+  const errEl = document.getElementById("wizard-error");
+  errEl.style.display = "none";
+  try {
+    const r = await fetch("/strategies/new/save/", {
+      method: "POST", body: data,
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+    });
+    const j = await r.json();
+    if (j.ok) {
+      window.location = j.redirect || "/strategies/";
+    } else {
+      errEl.textContent = j.error || "Failed to create strategy.";
+      errEl.style.display = "block";
+    }
+  } catch (e) {
+    errEl.textContent = "Network error.";
+    errEl.style.display = "block";
+  }
+}
+window.submitWizard = submitWizard;
+</script>
+{% endblock %}

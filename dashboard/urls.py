@@ -1,6 +1,19 @@
 """Sauron Vision — Dashboard URL Configuration."""
 from django.urls import path
 from . import views
+from .views_metrics import (
+    signals_metrics, strategies_metrics, news_metrics,
+    backtest_metrics, portfolio_metrics, positions_metrics,
+)
+from .views_profile_modals import (
+    pin_modal, password_modal, change_password, change_pin_modal,
+)
+from .views_admin_bots import (
+    admin_bots_panel, admin_bot_toggle, admin_bot_shadow,
+    admin_bot_reset_circuit, admin_bot_reconcile,
+)
+from .views_strategy_wizard import strategy_wizard, strategy_wizard_save
+
 from .views_signals_htmx import signal_cards_htmx, signal_performance_htmx
 from .api import market_views, signal_views, strategy_views, portfolio_views, ai_views
 
@@ -59,4 +72,21 @@ urlpatterns = [
     path("api/ai/briefing/", ai_views.DailyBriefingView.as_view(), name="api-daily-briefing"),
     path("htmx/signal-cards/", signal_cards_htmx, name="htmx_signal_cards"),
     path("htmx/signal-performance/", signal_performance_htmx, name="htmx_signal_performance"),
+    path("htmx/metrics/signals/", signals_metrics, name="metrics_signals"),
+    path("htmx/metrics/strategies/", strategies_metrics, name="metrics_strategies"),
+    path("htmx/metrics/news/", news_metrics, name="metrics_news"),
+    path("htmx/metrics/backtest/", backtest_metrics, name="metrics_backtest"),
+    path("htmx/metrics/portfolio/", portfolio_metrics, name="metrics_portfolio"),
+    path("htmx/metrics/positions/", positions_metrics, name="metrics_positions"),
+    path("htmx/profile/pin-modal/", pin_modal, name="pin_modal"),
+    path("htmx/profile/password-modal/", password_modal, name="password_modal"),
+    path("profile/change-password/", change_password, name="change_password"),
+    path("profile/change-pin-modal/", change_pin_modal, name="change_pin_modal"),
+    path("htmx/admin/bots/", admin_bots_panel, name="admin_bots_panel"),
+    path("htmx/admin/bots/<int:config_id>/toggle/", admin_bot_toggle, name="admin_bot_toggle"),
+    path("htmx/admin/bots/<int:config_id>/shadow/", admin_bot_shadow, name="admin_bot_shadow"),
+    path("htmx/admin/bots/<int:config_id>/reset-circuit/", admin_bot_reset_circuit, name="admin_bot_reset_circuit"),
+    path("htmx/admin/bots/<int:config_id>/reconcile/", admin_bot_reconcile, name="admin_bot_reconcile"),
+    path("strategies/new/", strategy_wizard, name="strategy_wizard"),
+    path("strategies/new/save/", strategy_wizard_save, name="strategy_wizard_save"),
 ]

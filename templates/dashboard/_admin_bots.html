@@ -1,0 +1,98 @@
+{% load static %}
+<div class="admin-bots">
+  <div class="sv-section-title">Bot control panel</div>
+  {% if error %}
+    <div style="color:var(--accent-red);">{{ error }}</div>
+  {% endif %}
+  {% if rows %}
+    <table class="sv-perf-table">
+      <thead>
+        <tr>
+          <th>User</th><th>Mode</th><th>Market</th><th>Enabled</th>
+          <th>Shadow</th><th>HB age</th><th>Open</th><th>Circuit</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr id="bot-row-{{ row.config.id }}">
+            <td>{{ row.user.username }}</td>
+            <td><span class="badge">{{ row.mode }}</span></td>
+            <td>{{ row.market }}</td>
+            <td>{% if row.enabled %}✅{% else %}⏸{% endif %}</td>
+            <td>{% if row.shadow %}👁{% else %}—{% endif %}</td>
+            <td>{% if row.heartbeat_age %}{{ row.heartbeat_age|floatformat:0 }}s{% else %}—{% endif %}</td>
+            <td>{{ row.open_trades }}</td>
+            <td>{% if row.circuit %}<span style="color:var(--accent-red);">{{ row.circuit }}</span>{% else %}ok{% endif %}</td>
+            <td class="actions">
+              <button class="btn-small" onclick="adminBotToggle({{ row.config.id }})">Toggle</button>
+              <button class="btn-small" onclick="adminBotShadow({{ row.config.id }})">Shadow 24h</button>
+              <button class="btn-small" onclick="adminBotResetCircuit({{ row.config.id }})">Reset circuit</button>
+              <button class="btn-small" onclick="adminBotReconcile({{ row.config.id }})">Reconcile</button>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p style="color:var(--text-muted);">No bot configs found.</p>
+  {% endif %}
+</div>
+
+<style>
+.admin-bots .sv-perf-table { width: 100%; border-collapse: collapse;
+                              font-family: var(--font-mono); font-size: 0.85rem; }
+.admin-bots .sv-perf-table th, .admin-bots .sv-perf-table td {
+  padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border);
+}
+.admin-bots .sv-perf-table th { color: var(--text-muted);
+  text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+.admin-bots .actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.admin-bots .btn-small {
+  padding: 4px 8px; font-size: 0.7rem; background: var(--bg-secondary);
+  color: var(--text-secondary); border: 1px solid var(--border);
+  border-radius: 4px; cursor: pointer; font-family: var(--font-mono);
+}
+.admin-bots .btn-small:hover { color: var(--accent); border-color: var(--accent); }
+.admin-bots .badge {
+  padding: 2px 6px; background: var(--bg-secondary); border-radius: 3px;
+  font-size: 0.7rem; text-transform: uppercase;
+}
+</style>
+
+<script>
+function getCsrf() {
+  const m = document.cookie.match(/csrftoken=([^;]+)/);
+  return m ? m[1] : "";
+}
+async function adminBotPost(url) {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "X-CSRFToken": getCsrf() },
+  });
+  return r.json();
+}
+async function adminBotToggle(id) {
+  const r = await adminBotPost(`/htmx/admin/bots/${id}/toggle/`);
+  if (r.ok) location.reload();
+  else alert("Failed: " + r.error);
+}
+async function adminBotShadow(id) {
+  const r = await adminBotPost(`/htmx/admin/bots/${id}/shadow/`);
+  if (r.ok) alert("Shadow mode enabled until " + r.shadow_until);
+  else alert("Failed: " + r.error);
+}
+async function adminBotResetCircuit(id) {
+  const r = await adminBotPost(`/htmx/admin/bots/${id}/reset-circuit/`);
+  if (r.ok) location.reload();
+  else alert("Failed: " + r.error);
+}
+async function adminBotReconcile(id) {
+  const r = await adminBotPost(`/htmx/admin/bots/${id}/reconcile/`);
+  if (r.ok) alert("Reconciled: " + JSON.stringify(r.result));
+  else alert("Failed: " + r.error);
+}
+window.adminBotToggle = adminBotToggle;
+window.adminBotShadow = adminBotShadow;
+window.adminBotResetCircuit = adminBotResetCircuit;
+window.adminBotReconcile = adminBotReconcile;
+</script>

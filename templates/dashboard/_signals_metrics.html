@@ -1,0 +1,87 @@
+{% load static %}
+{% include "_chart_assets.html" %}
+<div class="signals-metrics">
+  <div class="sv-section-title">Signal overview</div>
+  <div class="sv-metrics-grid">
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Active</div>
+      <div class="sv-metric-value">{{ totals.active|default:"0" }}</div>
+    </div>
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Long</div>
+      <div class="sv-metric-value up">{{ totals.long|default:"0" }}</div>
+    </div>
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Short</div>
+      <div class="sv-metric-value down">{{ totals.short|default:"0" }}</div>
+    </div>
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Avg conviction</div>
+      <div class="sv-metric-value">{{ totals.avg_conviction|default:"0" }}/100</div>
+    </div>
+  </div>
+
+  <div class="sv-section-title">Signals per day (14d)</div>
+  <div class="sv-chart-container">
+    <canvas id="signals-daily-chart"></canvas>
+  </div>
+
+  <div class="sv-section-title">Setup performance — last 30 days</div>
+  {% if setups %}
+    <table class="sv-perf-table">
+      <thead>
+        <tr><th>Setup</th><th>Hit rate</th><th>Expectancy</th><th>n closed</th><th>Source</th></tr>
+      </thead>
+      <tbody>
+        {% for s in setups %}
+          <tr>
+            <td>{{ s.name }}</td>
+            <td>{% if s.hit_rate %}{{ s.hit_rate|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td>{% if s.expectancy %}{{ s.expectancy|floatformat:2 }}R{% else %}—{% endif %}</td>
+            <td>{{ s.n_closed }}</td>
+            <td>{% if s.is_empirical %}empirical{% else %}fallback{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p style="color:var(--text-muted);">No closed signals yet.</p>
+  {% endif %}
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+</style>
+
+<script>
+(function() {
+  const data = {{ chart_data|safe }};
+  const ctx = document.getElementById("signals-daily-chart");
+  if (!ctx || !data.labels) return;
+  if (window._signalsDailyChart) window._signalsDailyChart.destroy();
+  window._signalsDailyChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: data.labels,
+      datasets: [
+        { label: "Long", data: data.long,
+          backgroundColor: window.SAURON_CHART_COLORS.accentDim,
+          borderColor: window.SAURON_CHART_COLORS.accent, borderWidth: 1 },
+        { label: "Short", data: data.short,
+          backgroundColor: window.SAURON_CHART_COLORS.redDim,
+          borderColor: window.SAURON_CHART_COLORS.red, borderWidth: 1 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
+      plugins: { legend: { position: "top" } },
+    },
+  });
+})();
+</script>

@@ -1,0 +1,61 @@
+{% include "_chart_assets.html" %}
+<div class="strategies-metrics">
+  <div class="sv-section-title">Strategy overview</div>
+  <div class="sv-metrics-grid">
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Total</div>
+      <div class="sv-metric-value">{{ totals.total|default:"0" }}</div>
+    </div>
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Active</div>
+      <div class="sv-metric-value up">{{ totals.active|default:"0" }}</div>
+    </div>
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Proposed</div>
+      <div class="sv-metric-value">{{ totals.proposed|default:"0" }}</div>
+    </div>
+    <div class="sv-metric-card">
+      <div class="sv-metric-label">Completed</div>
+      <div class="sv-metric-value">{{ totals.completed|default:"0" }}</div>
+    </div>
+  </div>
+
+  <div class="sv-section-title">Status distribution</div>
+  <div class="sv-chart-container">
+    <canvas id="strategies-status-chart"></canvas>
+  </div>
+
+  <div style="margin-top:24px;">
+    <a href="/strategies/new/" class="btn btn-primary">+ Create new strategy</a>
+  </div>
+</div>
+
+<script>
+(function() {
+  const data = {{ chart_data|safe }};
+  const ctx = document.getElementById("strategies-status-chart");
+  if (!ctx || !data.labels) return;
+  if (window._stratStatusChart) window._stratStatusChart.destroy();
+  const colors = [
+    window.SAURON_CHART_COLORS.accent,
+    window.SAURON_CHART_COLORS.gold,
+    window.SAURON_CHART_COLORS.blue,
+    window.SAURON_CHART_COLORS.purple,
+    window.SAURON_CHART_COLORS.red,
+    "#666",
+  ];
+  window._stratStatusChart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: data.labels,
+      datasets: [{ data: data.values,
+                   backgroundColor: data.labels.map((_, i) => colors[i % colors.length]),
+                   borderColor: window.SAURON_CHART_COLORS.border, borderWidth: 2 }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: "right" } },
+    },
+  });
+})();
+</script>

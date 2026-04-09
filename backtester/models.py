@@ -44,3 +44,5 @@ class BacktestRun(models.Model):
 
     def __str__(self):
         return f"[{self.status}] {self.name} — {self.total_return_pct or 0:.1f}%"
+
+from .models_v2 import BacktestRunV2  # noqa: F401
