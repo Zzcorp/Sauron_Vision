@@ -653,6 +653,116 @@
             transition: color 0.3s;
         }
         .login-back:hover { color: var(--accent); }
+
+        /* ── When pin-mode active: login overlay fades out ── */
+        body.login-mode.pin-mode .login-overlay {
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.5s ease;
+        }
+        body.login-mode.pin-mode .login-overlay .login-anim {
+            opacity: 0; transform: translateY(-20px);
+            transition: opacity 0.4s ease, transform 0.4s ease;
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* PIN OVERLAY — second gate, transitions from login overlay     */
+        /* ══════════════════════════════════════════════════════════════ */
+        .pin-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 200;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1) 0.5s;
+        }
+        body.pin-mode .pin-overlay {
+            opacity: 1; pointer-events: auto;
+        }
+
+        .pin-box { width: 420px; max-width: 90vw; }
+
+        .pin-anim {
+            opacity: 0; transform: translateY(30px);
+            transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        body.pin-mode .pin-anim { opacity: 1; transform: translateY(0); }
+        body.pin-mode .pin-anim.pa-1 { transition-delay: 0.7s; }
+        body.pin-mode .pin-anim.pa-2 { transition-delay: 0.85s; }
+        body.pin-mode .pin-anim.pa-3 { transition-delay: 1.0s; }
+        body.pin-mode .pin-anim.pa-4 { transition-delay: 1.15s; }
+        body.pin-mode .pin-anim.pa-5 { transition-delay: 1.3s; }
+
+        .pin-title-text {
+            font-family: var(--font-d); font-size: 20px; font-weight: 900;
+            letter-spacing: 5px; color: var(--accent); text-align: center;
+            margin-bottom: 4px; text-shadow: 0 0 30px rgba(0,232,104,0.2);
+        }
+        .pin-sub {
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 3px;
+            color: var(--text3); text-align: center; margin-bottom: 24px;
+        }
+        .pin-who {
+            text-align: center; font-family: var(--font-m); font-size: 11px;
+            color: var(--text2); margin-bottom: 18px; opacity: 0.8;
+        }
+        .pin-card {
+            background: rgba(10,26,20,0.92); border: 1px solid var(--border);
+            border-radius: 12px; padding: 32px; backdrop-filter: blur(24px);
+            box-shadow: 0 4px 60px rgba(0,0,0,0.6), 0 0 80px rgba(0,232,104,0.04);
+        }
+        .pin-row {
+            display: flex; gap: 12px; justify-content: center; margin-bottom: 24px;
+        }
+        .pin-row input {
+            width: 52px; height: 62px; text-align: center;
+            font-family: var(--font-d); font-size: 24px;
+            background: var(--bg); border: 1px solid var(--border);
+            border-radius: 8px; color: var(--accent); outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+        }
+        .pin-row input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 20px rgba(0,232,104,0.2);
+            transform: scale(1.05);
+        }
+        .btn-verify {
+            width: 100%; padding: 14px;
+            background: linear-gradient(135deg, var(--accent-dim), var(--accent));
+            border: none; border-radius: 6px;
+            color: #020804; font-family: var(--font-d); font-size: 13px;
+            font-weight: 700; letter-spacing: 4px; cursor: pointer;
+            text-transform: uppercase;
+            transition: transform 0.3s, box-shadow 0.3s, background 0.3s;
+        }
+        .btn-verify:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 24px rgba(0,232,104,0.4), 0 0 48px rgba(0,232,104,0.15), 0 8px 30px rgba(0,232,104,0.25);
+            background: linear-gradient(135deg, var(--accent), var(--accent-bright));
+        }
+        .pin-errors {
+            background: rgba(232,48,48,0.08); border: 1px solid rgba(232,48,48,0.25);
+            border-radius: 6px; padding: 12px; margin-bottom: 18px;
+            font-family: var(--font-m); font-size: 12px; color: var(--accent-red);
+            text-align: center;
+        }
+        .sauron-keypad {
+            display: grid; grid-template-columns: repeat(3, 1fr);
+            gap: 8px; margin-top: 20px;
+        }
+        .sauron-keypad button {
+            padding: 16px 0; background: var(--bg);
+            border: 1px solid var(--border); border-radius: 8px;
+            color: var(--text); font-family: var(--font-d);
+            font-size: 18px; font-weight: 700; cursor: pointer;
+            transition: all 0.15s;
+        }
+        .sauron-keypad button:hover {
+            border-color: var(--accent); color: var(--accent);
+            box-shadow: 0 0 14px rgba(0,232,104,0.18);
+        }
+        .sauron-keypad button:active { transform: scale(0.95); background: var(--bg2); }
+        .sauron-keypad button.kp-fn { color: var(--text3); font-size: 14px; }
+        .sauron-keypad button.kp-fn:hover { color: var(--accent-red); border-color: #581818; }
     </style>
 </head>
 <body>
@@ -1149,6 +1259,50 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- PIN OVERLAY — second gate, fades in after credentials accepted     -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="pin-overlay" id="pinOverlay">
+    <div class="pin-box">
+        <div class="login-logo-wrap pin-anim pa-1">
+            <div class="login-logo-glow"></div>
+            <img class="login-eye-logo" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision">
+        </div>
+        <h1 class="pin-title-text pin-anim pa-2">SECOND GATE</h1>
+        <p class="pin-sub pin-anim pa-2">ENTER PIN CODE</p>
+        <div class="pin-who pin-anim pa-3" id="pinOperator">OPERATOR</div>
+        <div class="pin-card pin-anim pa-3">
+            <div class="pin-errors" id="pinErrors" style="display:none;"></div>
+            <form method="post" action="{% url 'login_pin' %}" id="pinForm">
+                {% csrf_token %}
+                <div class="pin-row">
+                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
+                </div>
+                <input type="hidden" name="pin" id="pinFinal">
+                <button type="submit" class="btn-verify">Verify</button>
+            </form>
+            <div class="sauron-keypad pin-anim pa-4">
+                <button type="button" data-k="1">1</button>
+                <button type="button" data-k="2">2</button>
+                <button type="button" data-k="3">3</button>
+                <button type="button" data-k="4">4</button>
+                <button type="button" data-k="5">5</button>
+                <button type="button" data-k="6">6</button>
+                <button type="button" data-k="7">7</button>
+                <button type="button" data-k="8">8</button>
+                <button type="button" data-k="9">9</button>
+                <button type="button" data-k="clear" class="kp-fn">&times;</button>
+                <button type="button" data-k="0">0</button>
+                <button type="button" data-k="back" class="kp-fn">&#9003;</button>
+            </div>
+        </div>
+        <a href="#" class="login-back pin-anim pa-5" id="pinBack">&larr; Back</a>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 <!-- SCRIPTS                                                            -->
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <script>
@@ -1343,6 +1497,148 @@
         loginBack.addEventListener('click', function(e) {
             e.preventDefault();
             document.body.classList.remove('login-mode');
+            document.body.classList.remove('pin-mode');
+        });
+    }
+
+    // Back from PIN → return to login overlay
+    var pinBack = document.getElementById('pinBack');
+    if (pinBack) {
+        pinBack.addEventListener('click', function(e) {
+            e.preventDefault();
+            document.body.classList.remove('pin-mode');
+            // Re-focus username
+            setTimeout(function() {
+                var u = document.getElementById('id_username');
+                if (u) u.focus();
+            }, 500);
+        });
+    }
+
+    // ── Helper: show error in a target element ──────────────────────
+    function showError(el, msg) {
+        if (!el) return;
+        el.textContent = msg || 'An error occurred';
+        el.style.display = 'block';
+    }
+    function hideError(el) {
+        if (!el) return;
+        el.style.display = 'none';
+        el.textContent = '';
+    }
+
+    // ── Intercept credentials form: AJAX submit ─────────────────────
+    var loginForm = document.getElementById('loginForm');
+    var loginErrors = document.getElementById('loginErrors');
+    if (loginForm) {
+        loginForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            hideError(loginErrors);
+            var fd = new FormData(loginForm);
+            fetch(loginForm.action, {
+                method: 'POST',
+                body: fd,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin'
+            })
+            .then(function(r) {
+                return r.json().then(function(j) { return { ok: r.ok, body: j }; })
+                    .catch(function() { return { ok: r.ok, body: {} }; });
+            })
+            .then(function(res) {
+                if (res.ok && res.body.status === 'ok') {
+                    // No PIN — full login, redirect
+                    window.location.href = res.body.redirect || '/';
+                } else if (res.ok && res.body.status === 'pin_required') {
+                    // Show PIN overlay
+                    var op = document.getElementById('pinOperator');
+                    if (op) op.textContent = 'OPERATOR :: ' + (res.body.username || '');
+                    document.body.classList.add('pin-mode');
+                    // Focus first PIN box after overlay appears
+                    setTimeout(function() {
+                        var first = document.querySelector('#pinForm [data-pin]');
+                        if (first) first.focus();
+                    }, 1200);
+                } else {
+                    showError(loginErrors, (res.body && res.body.message) || 'Authentication failed — invalid credentials');
+                }
+            })
+            .catch(function() {
+                showError(loginErrors, 'Network error — please try again');
+            });
+        });
+    }
+
+    // ── PIN form: input navigation, keypad, AJAX submit ─────────────
+    var pinBoxes = [].slice.call(document.querySelectorAll('#pinForm [data-pin]'));
+    var pinFinal = document.getElementById('pinFinal');
+    var pinErrors = document.getElementById('pinErrors');
+    function updatePinFinal() {
+        if (pinFinal) pinFinal.value = pinBoxes.map(function(x){ return x.value; }).join('');
+    }
+    pinBoxes.forEach(function(b, i) {
+        b.addEventListener('input', function(e) {
+            if (e.target.value && i < pinBoxes.length - 1) pinBoxes[i+1].focus();
+            updatePinFinal();
+        });
+        b.addEventListener('keydown', function(e) {
+            if (e.key === 'Backspace' && !b.value && i > 0) pinBoxes[i-1].focus();
+        });
+    });
+    document.querySelectorAll('.sauron-keypad button').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var k = btn.dataset.k;
+            if (k === 'clear') {
+                pinBoxes.forEach(function(b) { b.value = ''; });
+                if (pinBoxes[0]) pinBoxes[0].focus();
+            } else if (k === 'back') {
+                for (var i = pinBoxes.length - 1; i >= 0; i--) {
+                    if (pinBoxes[i].value) { pinBoxes[i].value = ''; pinBoxes[i].focus(); break; }
+                }
+            } else {
+                for (var j = 0; j < pinBoxes.length; j++) {
+                    if (!pinBoxes[j].value) {
+                        pinBoxes[j].value = k;
+                        if (j < pinBoxes.length - 1) pinBoxes[j+1].focus();
+                        break;
+                    }
+                }
+            }
+            updatePinFinal();
+        });
+    });
+
+    var pinForm = document.getElementById('pinForm');
+    if (pinForm) {
+        pinForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            hideError(pinErrors);
+            updatePinFinal();
+            var fd = new FormData(pinForm);
+            fetch(pinForm.action, {
+                method: 'POST',
+                body: fd,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin'
+            })
+            .then(function(r) {
+                return r.json().then(function(j) { return { ok: r.ok, body: j }; })
+                    .catch(function() { return { ok: r.ok, body: {} }; });
+            })
+            .then(function(res) {
+                if (res.ok && res.body.status === 'ok') {
+                    window.location.href = res.body.redirect || '/intro/';
+                } else {
+                    showError(pinErrors, (res.body && res.body.message) || 'Invalid PIN');
+                    // Clear PIN inputs
+                    pinBoxes.forEach(function(b) { b.value = ''; });
+                    if (pinBoxes[0]) pinBoxes[0].focus();
+                    updatePinFinal();
+                }
+            })
+            .catch(function() {
+                showError(pinErrors, 'Network error — please try again');
+            });
         });
     }
 })();
