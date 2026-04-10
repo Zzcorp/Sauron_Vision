@@ -144,6 +144,10 @@ app.conf.beat_schedule = {
         "task": "ai_agents.tasks.generate_daily_briefing",
         "schedule": crontab(hour=6, minute=0),
     },
+    "daily-market-commentary": {
+        "task": "ai_agents.tasks.generate_daily_commentary",
+        "schedule": crontab(hour=17, minute=30),
+    },
     "run-full-signal-scan": {
         "task": "signals.tasks.run_full_universe_scan",
         "schedule": crontab(hour=23, minute=45),
@@ -177,5 +181,19 @@ app.conf.beat_schedule = {
     "weekly-portfolio-rebalance-suggestions": {
         "task": "strategies.tasks.suggest_rebalancing",
         "schedule": crontab(hour=12, minute=0, day_of_week="sunday"),
+    },
+
+    # ── Alerts / Digests ─────────────────────────────────────
+    "send-morning-digest": {
+        "task": "alerts.tasks.send_morning_digest",
+        "schedule": crontab(hour=7, minute=0),
+    },
+    "send-eod-digest": {
+        "task": "alerts.tasks.send_eod_digest",
+        "schedule": crontab(hour=17, minute=0),
+    },
+    "check-price-alerts": {
+        "task": "alerts.tasks.check_all_price_alerts",
+        "schedule": 60.0,  # Every minute
     },
 }

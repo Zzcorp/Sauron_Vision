@@ -1,5 +1,6 @@
 """AI agent task logging."""
 from django.db import models
+from django.utils import timezone
 
 
 class AgentTask(models.Model):
@@ -85,3 +86,28 @@ class AIMemory(models.Model):
             lines.append(line)
             total += len(line)
         return "\n".join(lines)
+
+
+class AgentPrediction(models.Model):
+    """Track individual agent predictions for calibration."""
+    agent = models.CharField(max_length=50, db_index=True)
+    prediction_type = models.CharField(max_length=30)  # direction, target_price, urgency
+    instrument_symbol = models.CharField(max_length=20, blank=True)
+    predicted_value = models.CharField(max_length=100)
+    actual_value = models.CharField(max_length=100, blank=True)
+    confidence = models.FloatField(default=0.5)
+    was_correct = models.BooleanField(null=True)  # null = not yet evaluated
+    evaluation_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    evaluated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = 'ai_agents'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['agent', '-created_at']),
+        ]
+
+    def __str__(self):
+        status = 'correct' if self.was_correct else ('wrong' if self.was_correct is False else 'pending')
+        return f"{self.agent} {self.prediction_type}: {self.predicted_value} [{status}]"

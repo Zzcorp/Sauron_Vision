@@ -46,3 +46,46 @@ def check_telegram_commands():
     from alerts.channels.telegram_alert import process_commands
     processed = process_commands()
     return {"status": "ok", "processed": processed}
+
+
+@shared_task
+@guarded_task("pipeline_alerts")
+def check_all_price_alerts():
+    """Check all active price alerts against current market prices."""
+    from alerts.models import check_price_alerts
+    count = check_price_alerts()
+    return {"status": "ok", "triggered": count}
+
+
+@shared_task
+@guarded_task("pipeline_digest")
+def send_morning_digest():
+    """Scheduled: send morning market brief to all active users."""
+    from alerts.scheduled_digests import generate_morning_digest, send_digest
+    from django.contrib.auth.models import User
+
+    for user in User.objects.filter(is_active=True):
+        try:
+            digest = generate_morning_digest(user=user)
+            send_digest(digest, user=user)
+        except Exception as e:
+            logger.error(f"Morning digest failed for {user.username}: {e}")
+
+    return {"status": "ok"}
+
+
+@shared_task
+@guarded_task("pipeline_digest")
+def send_eod_digest():
+    """Scheduled: send end-of-day summary to all active users."""
+    from alerts.scheduled_digests import generate_eod_digest, send_digest
+    from django.contrib.auth.models import User
+
+    for user in User.objects.filter(is_active=True):
+        try:
+            digest = generate_eod_digest(user=user)
+            send_digest(digest, user=user)
+        except Exception as e:
+            logger.error(f"EOD digest failed for {user.username}: {e}")
+
+    return {"status": "ok"}

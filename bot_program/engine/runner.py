@@ -6,21 +6,34 @@ from django.utils import timezone
 from ..models import BotConfig, BotTrade, BinanceAccount
 from .binance_client import BinanceClient
 from .binance_futures_client import BinanceFuturesClient
+from .paper_trader import PaperTrader
 from .strategy import decide
 from .risk import RiskManager
 
 log = logging.getLogger(__name__)
 
 def _client_for(user, cfg=None):
+    # Paper mode: use PaperTrader regardless of account state
+    if cfg is not None and getattr(cfg, "mode", "paper") == "paper":
+        log.info("[PAPER] Paper trading mode active for %s", user.username)
+        return PaperTrader(cfg)
+
     try:
         acct: BinanceAccount = user.binance_account
         k, s = acct.get_credentials()
         testnet = acct.testnet
+        # Testnet account also gets PaperTrader
+        if testnet:
+            log.info("[PAPER] Testnet mode — using PaperTrader for %s", user.username)
+            return PaperTrader(cfg)
     except BinanceAccount.DoesNotExist:
-        k = s = None; testnet = True
+        # No account configured — fall back to paper trading
+        log.warning("[PAPER] No BinanceAccount for %s — using PaperTrader", user.username)
+        return PaperTrader(cfg)
+
     if cfg is not None and getattr(cfg, "market_type", "spot") == "futures":
-        return BinanceFuturesClient(k, s, testnet=testnet)
-    return BinanceClient(k, s, testnet=testnet)
+        return BinanceFuturesClient(k, s, testnet=False)
+    return BinanceClient(k, s, testnet=False)
 
 def _parse_klines(raw: list[list]) -> list[list]:
     # [openTime, open, high, low, close, volume, closeTime, ...]

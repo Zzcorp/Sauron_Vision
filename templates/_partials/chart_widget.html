@@ -1,0 +1,505 @@
+{# Chart widget — reusable candlestick + volume chart powered by TradingView lightweight-charts.
+   Usage:
+     {% include "_partials/chart_widget.html" with symbol="AAPL" chart_id="chart-aapl" height="400" timeframe="1d" %}
+   Parameters:
+     chart_id   — unique HTML id for this widget (default: sv-chart-widget)
+     symbol     — ticker symbol (default: "")
+     height     — height in px (default: 400)
+     timeframe  — initial timeframe: 1d, 1w, 1m, 3m, 1y (default: 1d)
+#}
+{% load static %}
+
+{% with chart_id=chart_id|default:"sv-chart-widget" symbol=symbol|default:"" height=height|default:"400" timeframe=timeframe|default:"1d" %}
+
+<style>
+/* ── Chart Widget Styles (scoped) ─────────────────────────────────────── */
+.sv-chart-container {
+    position: relative;
+    width: 100%;
+    background: var(--bg-void, #0a0f0a);
+    border: 1px solid var(--border, #1a2e1a);
+    border-radius: var(--radius-md, 6px);
+    overflow: hidden;
+}
+.sv-chart-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--bg-card, #111a11);
+    border-bottom: 1px solid var(--border, #1a2e1a);
+    flex-wrap: wrap;
+}
+.sv-chart-symbol-badge {
+    font-family: var(--font-display, monospace);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--accent, #00e868);
+    min-width: 60px;
+}
+.sv-chart-timeframes,
+.sv-chart-type-btns {
+    display: flex;
+    gap: 3px;
+}
+.sv-tf-btn,
+.sv-type-btn {
+    background: transparent;
+    border: 1px solid var(--border, #1a2e1a);
+    border-radius: 3px;
+    padding: 2px 7px;
+    font-family: var(--font-mono, monospace);
+    font-size: 10px;
+    cursor: pointer;
+    color: var(--text-muted, #5a7a5a);
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    line-height: 1.6;
+}
+.sv-tf-btn:hover,
+.sv-type-btn:hover {
+    color: var(--accent, #00e868);
+    border-color: var(--accent, #00e868);
+}
+.sv-tf-btn.active,
+.sv-type-btn.active {
+    color: var(--accent, #00e868);
+    border-color: var(--accent, #00e868);
+    background: rgba(0, 232, 104, 0.08);
+}
+.sv-chart-body {
+    width: 100%;
+}
+.sv-chart-legend {
+    position: absolute;
+    top: 44px;
+    left: 10px;
+    font-family: var(--font-mono, monospace);
+    font-size: 10px;
+    color: var(--text-secondary, #8aaa8a);
+    pointer-events: none;
+    z-index: 5;
+    line-height: 1.8;
+    background: rgba(10, 15, 10, 0.6);
+    border-radius: 3px;
+    padding: 2px 6px;
+}
+.sv-chart-loading-overlay,
+.sv-chart-error-overlay {
+    position: absolute;
+    inset: 0;
+    top: 36px; /* below toolbar */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    background: var(--bg-void, #0a0f0a);
+}
+.sv-chart-error-overlay {
+    display: none;
+}
+.sv-chart-drawing-btns {
+    margin-left: auto;
+    display: flex;
+    gap: 3px;
+}
+@keyframes svChartDot {
+    0%, 80%, 100% { opacity: 0.2; }
+    40% { opacity: 1; }
+}
+</style>
+
+<div class="sv-chart-container" id="{{ chart_id }}-container" style="height: {{ height }}px;">
+    <!-- Toolbar -->
+    <div class="sv-chart-toolbar">
+        <div class="sv-chart-symbol-badge">{{ symbol }}</div>
+
+        <!-- Timeframe buttons -->
+        <div class="sv-chart-timeframes">
+            <button class="sv-tf-btn {% if timeframe == '1d' %}active{% endif %}" data-tf="1d">1D</button>
+            <button class="sv-tf-btn {% if timeframe == '1w' %}active{% endif %}" data-tf="1w">1W</button>
+            <button class="sv-tf-btn {% if timeframe == '1m' %}active{% endif %}" data-tf="1m">1M</button>
+            <button class="sv-tf-btn {% if timeframe == '3m' %}active{% endif %}" data-tf="3m">3M</button>
+            <button class="sv-tf-btn {% if timeframe == '1y' %}active{% endif %}" data-tf="1y">1Y</button>
+        </div>
+
+        <!-- Chart type buttons -->
+        <div class="sv-chart-type-btns">
+            <button class="sv-type-btn active" data-type="candlestick" title="Candlestick">&#x1F4CA;</button>
+            <button class="sv-type-btn" data-type="line" title="Line">&#x1F4C8;</button>
+            <button class="sv-type-btn" data-type="area" title="Area">&#x1F30A;</button>
+        </div>
+
+        <!-- Drawing tools -->
+        <div class="sv-chart-drawing-btns">
+            <button class="sv-chart-btn" data-tool="crosshair" title="Crosshair" style="background:transparent;border:1px solid var(--border,#1a2e1a);border-radius:3px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--text-muted,#5a7a5a);transition:color 0.15s,border-color 0.15s;">&#8982;</button>
+            <button class="sv-chart-btn" data-tool="hline" title="H-Line" style="background:transparent;border:1px solid var(--border,#1a2e1a);border-radius:3px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--text-muted,#5a7a5a);transition:color 0.15s,border-color 0.15s;">&#8213;</button>
+            <button class="sv-chart-btn" data-tool="trendline" title="Trend Line" style="background:transparent;border:1px solid var(--border,#1a2e1a);border-radius:3px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--text-muted,#5a7a5a);transition:color 0.15s,border-color 0.15s;">&#8599;</button>
+            <button class="sv-chart-btn" data-tool="clear" title="Clear drawings" style="background:transparent;border:1px solid var(--border,#1a2e1a);border-radius:3px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--text-muted,#5a7a5a);transition:color 0.15s,border-color 0.15s;">&#10005;</button>
+        </div>
+    </div>
+
+    <!-- Chart canvas -->
+    <div class="sv-chart-body" id="{{ chart_id }}" style="height: calc({{ height }}px - 36px);"></div>
+
+    <!-- OHLCV legend overlay -->
+    <div class="sv-chart-legend" id="{{ chart_id }}-legend"></div>
+
+    <!-- Loading overlay -->
+    <div class="sv-chart-loading-overlay" id="{{ chart_id }}-loading">
+        <div style="text-align:center;">
+            <div style="font-family:monospace;font-size:10px;letter-spacing:2px;color:var(--accent,#00e868);opacity:0.7;">LOADING CHART</div>
+            <div style="display:flex;gap:4px;justify-content:center;margin-top:8px;">
+                <span style="width:5px;height:5px;border-radius:50%;background:var(--accent,#00e868);animation:svChartDot 1.4s infinite ease-in-out;"></span>
+                <span style="width:5px;height:5px;border-radius:50%;background:var(--accent,#00e868);animation:svChartDot 1.4s 0.2s infinite ease-in-out;"></span>
+                <span style="width:5px;height:5px;border-radius:50%;background:var(--accent,#00e868);animation:svChartDot 1.4s 0.4s infinite ease-in-out;"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error overlay -->
+    <div class="sv-chart-error-overlay" id="{{ chart_id }}-error">
+        <div style="font-family:monospace;font-size:11px;color:var(--accent-red,#dc3232);letter-spacing:1px;text-align:center;padding:16px;"></div>
+    </div>
+</div>
+
+<!-- Lightweight Charts library (loaded once globally) -->
+<script>
+(function() {
+    if (window.__svLwChartsLoaded) return;
+    window.__svLwChartsLoaded = true;
+    var s = document.createElement('script');
+    s.src = 'https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js';
+    s.onload = function() {
+        document.dispatchEvent(new CustomEvent('sv:lwcharts:ready'));
+    };
+    document.head.appendChild(s);
+})();
+</script>
+
+<script>
+(function() {
+    var CHART_ID     = '{{ chart_id }}';
+    var SYMBOL       = '{{ symbol }}';
+    var INIT_TF      = '{{ timeframe }}';
+    var CHART_HEIGHT = parseInt('{{ height }}', 10) || 400;
+
+    var container   = document.getElementById(CHART_ID + '-container');
+    var canvasEl    = document.getElementById(CHART_ID);
+    var legendEl    = document.getElementById(CHART_ID + '-legend');
+    var loadingEl   = document.getElementById(CHART_ID + '-loading');
+    var errorEl     = document.getElementById(CHART_ID + '-error');
+
+    if (!container || !canvasEl) return;
+
+    // ── Theme colours ────────────────────────────────────────────────────
+    function getThemeColors() {
+        var isDark = !document.body.classList.contains('theme-light');
+        return {
+            isDark:       isDark,
+            accent:       isDark ? '#00e868' : '#16a34a',
+            red:          isDark ? '#dc3232' : '#dc2626',
+            bg:           isDark ? '#0a0f0a' : '#ffffff',
+            grid:         isDark ? 'rgba(0,232,104,0.05)' : 'rgba(0,0,0,0.06)',
+            border:       isDark ? '#1a2e1a' : '#e5e7eb',
+            text:         isDark ? '#5a7a5a' : '#6b7280',
+        };
+    }
+
+    // ── State ────────────────────────────────────────────────────────────
+    var chart        = null;
+    var mainSeries   = null;   // candlestick | line | area
+    var volumeSeries = null;
+    var chartType    = 'candlestick';
+    var currentTf    = INIT_TF;
+    var activeTool   = 'crosshair';
+    var drawingPts   = [];
+    var drawings     = [];
+
+    // ── Initialise chart ─────────────────────────────────────────────────
+    function initChart() {
+        var c = getThemeColors();
+        var bodyH = CHART_HEIGHT - 36; // subtract toolbar
+
+        chart = LightweightCharts.createChart(canvasEl, {
+            width:  container.offsetWidth || 600,
+            height: bodyH,
+            layout: {
+                background: { type: 'solid', color: c.bg },
+                textColor:  c.text,
+                fontFamily: 'monospace',
+                fontSize:   10,
+            },
+            grid: {
+                vertLines: { color: c.grid },
+                horzLines: { color: c.grid },
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+                vertLine: { color: c.accent, width: 1, style: 3 },
+                horzLine: { color: c.accent, width: 1, style: 3 },
+            },
+            rightPriceScale: { borderColor: c.border, textColor: c.text },
+            timeScale: { borderColor: c.border, timeVisible: true, secondsVisible: false },
+            handleScroll: true,
+            handleScale:  true,
+        });
+
+        addSeries(chartType);
+
+        // Volume histogram
+        volumeSeries = chart.addHistogramSeries({
+            color: 'rgba(0,232,104,0.18)',
+            priceFormat: { type: 'volume' },
+            priceScaleId: 'volume',
+            scaleMargins: { top: 0.8, bottom: 0 },
+        });
+        chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+
+        // Crosshair legend
+        chart.subscribeCrosshairMove(onCrosshair);
+
+        // Click handler for drawing tools
+        chart.subscribeClick(onChartClick);
+    }
+
+    // ── Add/replace main series ──────────────────────────────────────────
+    function addSeries(type) {
+        var c = getThemeColors();
+        if (mainSeries) {
+            try { chart.removeSeries(mainSeries); } catch(e) {}
+            mainSeries = null;
+        }
+        chartType = type;
+        if (type === 'candlestick') {
+            mainSeries = chart.addCandlestickSeries({
+                upColor:        c.accent,
+                downColor:      c.red,
+                borderUpColor:  c.accent,
+                borderDownColor:c.red,
+                wickUpColor:    c.accent,
+                wickDownColor:  c.red,
+            });
+        } else if (type === 'line') {
+            mainSeries = chart.addLineSeries({
+                color:     c.accent,
+                lineWidth: 2,
+                lastValueVisible: true,
+                priceLineVisible: true,
+            });
+        } else if (type === 'area') {
+            mainSeries = chart.addAreaSeries({
+                lineColor:   c.accent,
+                topColor:    'rgba(0,232,104,0.3)',
+                bottomColor: 'rgba(0,232,104,0.02)',
+                lineWidth:   2,
+            });
+        }
+    }
+
+    // ── Crosshair legend ─────────────────────────────────────────────────
+    function onCrosshair(param) {
+        if (!param || !param.time || !param.seriesData || !mainSeries) {
+            legendEl.textContent = '';
+            return;
+        }
+        var c   = getThemeColors();
+        var bar = param.seriesData.get(mainSeries);
+        var vol = volumeSeries ? param.seriesData.get(volumeSeries) : null;
+        if (!bar) { legendEl.textContent = ''; return; }
+
+        var d = (typeof param.time === 'object')
+            ? param.time.year + '-' + String(param.time.month).padStart(2,'0') + '-' + String(param.time.day).padStart(2,'0')
+            : new Date(param.time * 1000).toISOString().slice(0, 10);
+
+        if (chartType === 'candlestick') {
+            legendEl.innerHTML =
+                '<span style="color:var(--text-muted,#5a7a5a);">' + d + '</span>&nbsp; ' +
+                'O <b>' + bar.open.toFixed(4) + '</b>&nbsp; ' +
+                'H <b style="color:' + c.accent + ';">' + bar.high.toFixed(4) + '</b>&nbsp; ' +
+                'L <b style="color:' + c.red + ';">' + bar.low.toFixed(4) + '</b>&nbsp; ' +
+                'C <b>' + bar.close.toFixed(4) + '</b>' +
+                (vol ? '&nbsp; V <span style="color:var(--text-muted,#5a7a5a);">' + Number(vol.value).toLocaleString() + '</span>' : '');
+        } else {
+            var val = bar.value !== undefined ? bar.value : bar.close;
+            legendEl.innerHTML =
+                '<span style="color:var(--text-muted,#5a7a5a);">' + d + '</span>&nbsp; ' +
+                '<b style="color:' + c.accent + ';">' + (val ? val.toFixed(4) : '—') + '</b>' +
+                (vol ? '&nbsp; V <span style="color:var(--text-muted,#5a7a5a);">' + Number(vol.value).toLocaleString() + '</span>' : '');
+        }
+    }
+
+    // ── Click / drawing tools ────────────────────────────────────────────
+    function onChartClick(param) {
+        if (activeTool === 'crosshair' || !param.time || !mainSeries) return;
+        var c     = getThemeColors();
+        var price = mainSeries.coordinateToPrice(param.point.y);
+        if (price === null) return;
+
+        if (activeTool === 'hline') {
+            var pl = mainSeries.createPriceLine({
+                price: price, color: c.accent, lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dashed,
+                axisLabelVisible: true, title: 'H',
+            });
+            drawings.push({ type: 'hline', priceLine: pl });
+
+        } else if (activeTool === 'trendline') {
+            drawingPts.push({ time: param.time, price: price });
+            if (drawingPts.length === 2) {
+                var pts = drawingPts.slice().sort(function(a, b) { return a.time - b.time; });
+                drawingPts = [];
+                var ls = chart.addLineSeries({
+                    color: c.accent, lineWidth: 1,
+                    lineStyle: LightweightCharts.LineStyle.Solid,
+                    lastValueVisible: false, priceLineVisible: false,
+                });
+                ls.setData([
+                    { time: pts[0].time, value: pts[0].price },
+                    { time: pts[1].time, value: pts[1].price },
+                ]);
+                drawings.push({ type: 'trendline', lineSeries: ls });
+            }
+        }
+    }
+
+    function setActiveTool(tool) {
+        activeTool = tool;
+        drawingPts = [];
+        container.querySelectorAll('.sv-chart-btn').forEach(function(b) {
+            b.classList.toggle('active', b.dataset.tool === tool);
+        });
+    }
+    container.querySelectorAll('.sv-chart-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var tool = btn.dataset.tool;
+            if (tool === 'clear') {
+                drawings.forEach(function(d) {
+                    try { if (d.priceLine) mainSeries.removePriceLine(d.priceLine); } catch(e) {}
+                    try { if (d.lineSeries) chart.removeSeries(d.lineSeries); } catch(e) {}
+                });
+                drawings = [];
+                drawingPts = [];
+                setActiveTool('crosshair');
+            } else {
+                setActiveTool(tool);
+            }
+        });
+    });
+
+    // ── Fetch + load data ─────────────────────────────────────────────────
+    function loadData(tf) {
+        if (!SYMBOL) {
+            loadingEl.style.display = 'none';
+            return;
+        }
+        loadingEl.style.display = 'flex';
+        errorEl.style.display = 'none';
+
+        fetch('/api/chart-data/?symbol=' + encodeURIComponent(SYMBOL) + '&timeframe=' + encodeURIComponent(tf))
+            .then(function(r) { return r.json(); })
+            .then(function(json) {
+                loadingEl.style.display = 'none';
+                if (json.error) {
+                    showError(json.error);
+                    return;
+                }
+                var bars = json.bars || [];
+                if (!bars.length) {
+                    showError('No data available for ' + SYMBOL);
+                    return;
+                }
+                if (chartType === 'candlestick') {
+                    mainSeries.setData(bars.map(function(b) {
+                        return { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
+                    }));
+                } else {
+                    mainSeries.setData(bars.map(function(b) {
+                        return { time: b.time, value: b.close };
+                    }));
+                }
+                volumeSeries.setData(bars.map(function(b) {
+                    return {
+                        time:  b.time,
+                        value: b.volume || 0,
+                        color: (b.close >= b.open)
+                            ? 'rgba(0,232,104,0.25)'
+                            : 'rgba(220,50,50,0.25)',
+                    };
+                }));
+                chart.timeScale().fitContent();
+            })
+            .catch(function() {
+                loadingEl.style.display = 'none';
+                showError('Failed to load chart data');
+            });
+    }
+
+    function showError(msg) {
+        errorEl.querySelector('div').textContent = msg;
+        errorEl.style.display = 'flex';
+    }
+
+    // ── Timeframe buttons ─────────────────────────────────────────────────
+    container.querySelectorAll('.sv-tf-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var tf = btn.dataset.tf;
+            currentTf = tf;
+            container.querySelectorAll('.sv-tf-btn').forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            loadData(tf);
+        });
+    });
+
+    // ── Chart type buttons ────────────────────────────────────────────────
+    container.querySelectorAll('.sv-type-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var type = btn.dataset.type;
+            container.querySelectorAll('.sv-type-btn').forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            addSeries(type);
+            loadData(currentTf);
+        });
+    });
+
+    // ── Auto-resize ───────────────────────────────────────────────────────
+    var resizeTimer;
+    window.addEventListener('resize', function() {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function() {
+            if (chart && container.offsetWidth > 0) {
+                chart.applyOptions({ width: container.offsetWidth });
+            }
+        }, 150);
+    });
+
+    // ── Bootstrap ─────────────────────────────────────────────────────────
+    function bootstrap() {
+        if (window.LightweightCharts) {
+            initChart();
+            loadData(currentTf);
+        } else {
+            document.addEventListener('sv:lwcharts:ready', function handler() {
+                document.removeEventListener('sv:lwcharts:ready', handler);
+                initChart();
+                loadData(currentTf);
+            });
+            // Fallback polling
+            var attempts = 0;
+            var poll = setInterval(function() {
+                if (window.LightweightCharts) {
+                    clearInterval(poll);
+                    if (!chart) { initChart(); loadData(currentTf); }
+                } else if (++attempts > 30) {
+                    clearInterval(poll);
+                    loadingEl.style.display = 'none';
+                    showError('Chart library failed to load');
+                }
+            }, 500);
+        }
+    }
+
+    bootstrap();
+})();
+</script>
+{% endwith %}

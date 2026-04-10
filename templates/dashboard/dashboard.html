@@ -4,6 +4,263 @@
 {% block body_class %} page-dashboard{% endblock %}
 
 {% block content %}
+
+<!-- ── Dashboard Preset Selector ──────────────────────── -->
+<div class="sv-preset-bar fade-in-up" id="sv-preset-bar" style="margin-bottom:16px;">
+    <div class="sv-preset-pills" id="sv-preset-pills">
+        <!-- Populated dynamically by the preset JS below -->
+    </div>
+    <button class="sv-preset-custom-btn" id="sv-preset-save-btn" title="Save current layout as a custom preset">
+        + Custom
+    </button>
+</div>
+
+<style>
+.sv-preset-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.sv-preset-pills {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    flex: 1;
+}
+.sv-preset-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border, #1a2e1a);
+    background: var(--bg-card, #111a11);
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    color: var(--text-muted, #5a7a5a);
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    user-select: none;
+}
+.sv-preset-pill:hover { color: var(--accent, #00e868); border-color: var(--accent, #00e868); }
+.sv-preset-pill.active { color: var(--accent, #00e868); border-color: var(--accent, #00e868); background: rgba(0,232,104,0.08); }
+.sv-preset-pill .sv-preset-icon { font-size: 13px; }
+.sv-preset-pill .sv-preset-del { margin-left: 5px; opacity: 0.4; font-size: 9px; line-height: 1; transition: opacity 0.15s; }
+.sv-preset-pill:hover .sv-preset-del { opacity: 0.8; }
+.sv-preset-custom-btn {
+    padding: 5px 14px;
+    border-radius: 20px;
+    border: 1px dashed var(--border, #1a2e1a);
+    background: transparent;
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    cursor: pointer;
+    color: var(--text-muted, #5a7a5a);
+    transition: color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+}
+.sv-preset-custom-btn:hover { color: var(--accent, #00e868); border-color: var(--accent, #00e868); }
+/* Save modal */
+.sv-modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.65);
+    z-index: 2000;
+    display: flex; align-items: center; justify-content: center;
+}
+.sv-modal {
+    background: var(--bg-card, #111a11);
+    border: 1px solid var(--border, #1a2e1a);
+    border-radius: var(--radius-md, 6px);
+    padding: 24px;
+    min-width: 320px; max-width: 440px;
+    font-family: var(--font-mono, monospace);
+}
+.sv-modal h3 { margin: 0 0 16px; font-size: 13px; letter-spacing: 1px; color: var(--accent, #00e868); }
+.sv-modal input[type=text] {
+    width: 100%; box-sizing: border-box;
+    padding: 8px 10px;
+    background: var(--bg-void, #0a0f0a);
+    border: 1px solid var(--border, #1a2e1a);
+    border-radius: 4px;
+    color: var(--text-primary, #c8e6c9);
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
+    margin-bottom: 14px;
+}
+.sv-modal input[type=text]:focus { outline: none; border-color: var(--accent, #00e868); }
+.sv-modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.sv-modal-actions button {
+    padding: 6px 16px; border-radius: 4px;
+    border: 1px solid var(--border, #1a2e1a);
+    background: transparent;
+    font-family: var(--font-mono, monospace);
+    font-size: 11px; cursor: pointer;
+    color: var(--text-muted, #5a7a5a);
+    transition: color 0.15s, border-color 0.15s;
+}
+.sv-modal-actions button.sv-btn-primary { color: var(--accent, #00e868); border-color: var(--accent, #00e868); }
+.sv-modal-actions button:hover { color: var(--accent, #00e868); border-color: var(--accent, #00e868); }
+</style>
+
+<script>
+(function() {
+    var ICONS = {
+        morning_review: '\u{1F305}',
+        active_trading: '\u26A1',
+        end_of_day:     '\u{1F307}',
+        custom:         '\u2699',
+    };
+    var CSRF = '{{ csrf_token }}';
+
+    function getCSRF() {
+        var m = document.cookie.match(/csrftoken=([^;]+)/);
+        return m ? m[1] : CSRF;
+    }
+
+    function renderPills(data) {
+        var pills = document.getElementById('sv-preset-pills');
+        if (!pills) return;
+        pills.innerHTML = '';
+        (data.presets || []).forEach(function(p) {
+            var btn = document.createElement('button');
+            btn.className = 'sv-preset-pill' + (p.id === data.active_id ? ' active' : '');
+            btn.dataset.id = p.id;
+            var icon = ICONS[p.preset_type] || '\u2699';
+            var delHtml = p.preset_type === 'custom'
+                ? '<span class="sv-preset-del" data-del="' + p.id + '" title="Delete this preset">&#x2715;</span>'
+                : '';
+            btn.innerHTML = '<span class="sv-preset-icon">' + icon + '</span>' + p.name + delHtml;
+
+            btn.addEventListener('click', function(e) {
+                if (e.target.dataset && e.target.dataset.del) return;
+                activatePreset(p.id);
+            });
+            var delEl = btn.querySelector('[data-del]');
+            if (delEl) {
+                delEl.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    if (!confirm('Delete preset "' + p.name + '"?')) return;
+                    deletePreset(p.id);
+                });
+            }
+            pills.appendChild(btn);
+        });
+    }
+
+    function loadPresets() {
+        fetch('/api/dashboard/presets/', { credentials: 'same-origin' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                renderPills(data);
+                if (data.active_id) {
+                    var active = (data.presets || []).find(function(p) { return p.id === data.active_id; });
+                    if (active && active.config && active.config.sections) {
+                        applySections(active.config.sections);
+                    }
+                }
+            })
+            .catch(function() {});
+    }
+
+    function activatePreset(id) {
+        fetch('/api/dashboard/presets/' + id + '/activate/', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'X-CSRFToken': getCSRF() },
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.ok) return;
+            document.querySelectorAll('.sv-preset-pill').forEach(function(p) {
+                p.classList.toggle('active', parseInt(p.dataset.id) === data.active_id);
+            });
+            if (data.config && data.config.sections) {
+                applySections(data.config.sections);
+            }
+        })
+        .catch(function() {});
+    }
+
+    function deletePreset(id) {
+        fetch('/api/dashboard/presets/' + id + '/delete/', {
+            method: 'DELETE',
+            credentials: 'same-origin',
+            headers: { 'X-CSRFToken': getCSRF() },
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) { if (data.ok) loadPresets(); })
+        .catch(function() {});
+    }
+
+    function applySections(sections) {
+        document.querySelectorAll('[id^="section-"]').forEach(function(el) {
+            el.style.display = sections.includes(el.id) ? '' : 'none';
+        });
+    }
+
+    /* ── Save Modal ─────────────────────────────────── */
+    var saveBtn = document.getElementById('sv-preset-save-btn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', function() { openSaveModal(); });
+    }
+
+    function openSaveModal() {
+        var bd = document.createElement('div');
+        bd.className = 'sv-modal-backdrop';
+        bd.innerHTML =
+            '<div class="sv-modal">' +
+            '<h3>SAVE PRESET</h3>' +
+            '<input type="text" id="sv-preset-name-inp" placeholder="Preset name..." maxlength="50" autocomplete="off"/>' +
+            '<div class="sv-modal-actions">' +
+            '<button id="sv-modal-cancel">Cancel</button>' +
+            '<button id="sv-modal-confirm" class="sv-btn-primary">Save</button>' +
+            '</div></div>';
+        document.body.appendChild(bd);
+        var inp = bd.querySelector('#sv-preset-name-inp');
+        inp.focus();
+
+        bd.querySelector('#sv-modal-cancel').addEventListener('click', function() { document.body.removeChild(bd); });
+        bd.addEventListener('click', function(e) { if (e.target === bd) document.body.removeChild(bd); });
+        bd.querySelector('#sv-modal-confirm').addEventListener('click', function() { doSave(inp, bd); });
+        inp.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') doSave(inp, bd);
+            if (e.key === 'Escape') document.body.removeChild(bd);
+        });
+    }
+
+    function doSave(inp, bd) {
+        var name = inp.value.trim();
+        if (!name) { inp.focus(); return; }
+        var visibleSections = [];
+        document.querySelectorAll('[id^="section-"]').forEach(function(el) {
+            if (el.style.display !== 'none') visibleSections.push(el.id);
+        });
+        fetch('/api/dashboard/presets/', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRF() },
+            body: JSON.stringify({ name: name, config: { sections: visibleSections } }),
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) { document.body.removeChild(bd); loadPresets(); }
+            else { alert(data.error || 'Could not save preset'); }
+        })
+        .catch(function() { alert('Failed to save preset'); });
+    }
+
+    loadPresets();
+})();
+</script>
+
+<!-- ── Quick Actions Bar ──────────────────────────────── -->
+<div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:10px;">
+    <a href="{% url 'portfolio_report' %}" class="btn btn-sm btn-danger" title="Download PDF Portfolio Report">
+        ⬇ Download Report
+    </a>
+</div>
 <!-- ── Row 1: Portfolio KPIs ──────────────────────────── -->
 <div class="section-label fade-in-up">Portfolio Overview</div>
 <div class="grid grid-6" style="margin-bottom: 20px;">

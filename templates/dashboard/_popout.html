@@ -1,0 +1,125 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sauron Vision — {{ panel|default:"Panel" }}</title>
+    <link rel="icon" type="image/png" href="{% static 'logo/logo_SV.png' %}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-void: #030806;
+            --bg-primary: #060e0a;
+            --bg-card: #0a1a14;
+            --border: #133020;
+            --text-primary: #daf0e6;
+            --text-secondary: #7aaa8a;
+            --text-muted: #3a6850;
+            --accent: #00e868;
+            --accent-dim: #0a5028;
+            --accent-glow: rgba(0, 232, 104, 0.12);
+            --accent-red: #e83030;
+            --accent-gold: #d8b020;
+            --accent-blue: #30a0e8;
+            --font-display: 'Orbitron', sans-serif;
+            --font-heading: 'Rajdhani', sans-serif;
+            --font-mono: 'Share Tech Mono', monospace;
+            --radius: 6px;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg-void);
+            color: var(--text-primary);
+            font-family: var(--font-heading);
+            font-size: 15px;
+            font-weight: 500;
+            line-height: 1.6;
+            min-height: 100vh;
+            padding: 16px;
+        }
+        .popout-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0 14px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+        .popout-title {
+            font-family: var(--font-display);
+            font-size: 13px;
+            letter-spacing: 3px;
+            color: var(--accent);
+        }
+        .popout-close {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            cursor: pointer;
+            padding: 4px 10px;
+            border-radius: var(--radius);
+        }
+        .popout-close:hover { color: var(--accent); border-color: var(--accent); }
+        .popout-content { width: 100%; }
+        /* Card styles for embedded content */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        .card-title {
+            font-family: var(--font-heading);
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            color: var(--text-primary);
+            text-transform: uppercase;
+        }
+        table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12px; }
+        thead th { text-align: left; padding: 8px 12px; font-size: 10px; letter-spacing: 2px; color: var(--text-muted); text-transform: uppercase; border-bottom: 1px solid var(--border); }
+        tbody td { padding: 8px 12px; border-bottom: 1px solid rgba(19,48,32,0.5); }
+        tbody tr:hover { background: rgba(0,232,104,0.04); }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+        .badge-bullish { background: var(--accent-dim); color: var(--accent); }
+        .badge-bearish { background: rgba(232,48,48,0.15); color: var(--accent-red); }
+    </style>
+</head>
+<body>
+<div class="popout-header">
+    <span class="popout-title">⬡ SAURON VISION — {{ panel|upper|default:"PANEL" }}</span>
+    <button class="popout-close" onclick="window.close()">✕ Close</button>
+</div>
+<div class="popout-content">
+    {% block popout_content %}
+    <div style="text-align:center;padding:60px 20px;color:var(--text-muted);font-family:var(--font-mono);font-size:13px;letter-spacing:1px;">
+        Panel <strong style="color:var(--accent);">{{ panel|default:"(none)" }}</strong> — no content template found.
+    </div>
+    {% endblock %}
+</div>
+<script>
+    // Notify opener when this window loads so it can update state
+    if (window.opener && !window.opener.closed) {
+        try { window.opener.postMessage({ type: 'popout_ready', panel: '{{ panel|escapejs }}' }, '*'); } catch(e) {}
+    }
+    window.addEventListener('beforeunload', function() {
+        if (window.opener && !window.opener.closed) {
+            try { window.opener.postMessage({ type: 'popout_closed', panel: '{{ panel|escapejs }}' }, '*'); } catch(e) {}
+        }
+    });
+</script>
+</body>
+</html>

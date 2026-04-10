@@ -1163,7 +1163,7 @@ def mark_all_notifications_read(request):
 
 @login_required
 def ai_chat_api(request):
-    """AI chat endpoint — send question to Claude, get response."""
+    """AI chat endpoint — send question to Claude, get response with conversation memory."""
     from django.http import JsonResponse
     import json, os
 
@@ -1183,7 +1183,88 @@ def ai_chat_api(request):
     if not api_key:
         return JsonResponse({"response": "Anthropic API key not configured. Add ANTHROPIC_API_KEY to your .env file."})
 
-    # Build context
+    # Build rich context
+    context_parts = [f"User: {request.user.username}"]
+    try:
+        from signals.models import Signal
+        from portfolio.services import get_or_create_default_portfolio
+        from portfolio.models import Position
+        portfolio = get_or_create_default_portfolio(user=request.user)
+        context_parts.append(f"Portfolio: {portfolio.currency} {portfolio.current_value}")
+
+        open_positions = Position.objects.filter(
+            portfolio=portfolio, closed_at__isnull=True
+        ).select_related("instrument")[:10]
+        if open_positions:
+            pos_list = [f"{p.instrument.symbol} {p.direction} {p.quantity}@{p.entry_price} (P&L: {p.unrealized_pnl_pct:.1f}%)" for p in open_positions]
+            context_parts.append(f"Open positions: {'; '.join(pos_list)}")
+
+        active = Signal.objects.filter(is_active=True).order_by("-score")[:5]
+        if active:
+            sig_list = [f"{s.instrument.symbol} {s.direction} score={s.score:.2f}" for s in active.select_related("instrument")]
+            context_parts.append(f"Top signals: {'; '.join(sig_list)}")
+    except Exception:
+        pass
+
+    system_prompt = f"""You are Sauron Vision AI, a trading intelligence assistant.
+You help traders analyze markets, review signals, and make informed decisions.
+Current user context: {'; '.join(context_parts)}
+Be concise, data-driven, and professional. Use markdown formatting."""
+
+    # Conversation memory via session — keep last 20 messages
+    SESSION_KEY = "ai_chat_history"
+    MAX_HISTORY = 20
+    history = request.session.get(SESSION_KEY, [])
+
+    # Add user message to history
+    history.append({"role": "user", "content": message})
+
+    # Trim to keep within token budget (last MAX_HISTORY messages)
+    if len(history) > MAX_HISTORY:
+        history = history[-MAX_HISTORY:]
+
+    try:
+        import requests as req
+        resp = req.post("https://api.anthropic.com/v1/messages", headers={
+            "x-api-key": api_key,
+            "content-type": "application/json",
+            "anthropic-version": "2023-06-01",
+        }, json={
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 1024,
+            "system": system_prompt,
+            "messages": history,
+        }, timeout=30)
+        resp.raise_for_status()
+        result = resp.json()
+        ai_text = result.get("content", [{}])[0].get("text", "No response")
+
+        # Add assistant response to history and save
+        history.append({"role": "assistant", "content": ai_text})
+        if len(history) > MAX_HISTORY:
+            history = history[-MAX_HISTORY:]
+        request.session[SESSION_KEY] = history
+
+        return JsonResponse({"response": ai_text})
+    except Exception as e:
+        return JsonResponse({"response": f"AI request failed: {str(e)}"})
+
+
+@login_required
+def ai_chat_stream(request):
+    """SSE streaming AI chat endpoint."""
+    import json, os
+    from django.http import StreamingHttpResponse
+
+    message = request.GET.get("message", "")
+    if not message:
+        return JsonResponse({"error": "Empty message"}, status=400)
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return JsonResponse({"error": "API key not configured"}, status=500)
+
+    # Build same context as ai_chat_api
     context_parts = [f"User: {request.user.username}"]
     try:
         from signals.models import Signal
@@ -1200,24 +1281,61 @@ You help traders analyze markets, review signals, and make informed decisions.
 Current user context: {'; '.join(context_parts)}
 Be concise, data-driven, and professional. Use markdown formatting."""
 
-    try:
+    # Get conversation history from session
+    SESSION_KEY = "ai_chat_history"
+    history = request.session.get(SESSION_KEY, [])
+    history.append({"role": "user", "content": message})
+    if len(history) > 20:
+        history = history[-20:]
+
+    def stream_response():
         import requests as req
-        resp = req.post("https://api.anthropic.com/v1/messages", headers={
-            "x-api-key": api_key,
-            "content-type": "application/json",
-            "anthropic-version": "2023-06-01",
-        }, json={
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 1024,
-            "system": system_prompt,
-            "messages": [{"role": "user", "content": message}],
-        }, timeout=30)
-        resp.raise_for_status()
-        result = resp.json()
-        ai_text = result.get("content", [{}])[0].get("text", "No response")
-        return JsonResponse({"response": ai_text})
-    except Exception as e:
-        return JsonResponse({"response": f"AI request failed: {str(e)}"})
+        full_text = ""
+        try:
+            resp = req.post("https://api.anthropic.com/v1/messages", headers={
+                "x-api-key": api_key,
+                "content-type": "application/json",
+                "anthropic-version": "2023-06-01",
+            }, json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 1024,
+                "stream": True,
+                "system": system_prompt,
+                "messages": history,
+            }, stream=True, timeout=60)
+            resp.raise_for_status()
+
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                line = line.decode("utf-8")
+                if line.startswith("data: "):
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(data)
+                        if event.get("type") == "content_block_delta":
+                            text = event.get("delta", {}).get("text", "")
+                            if text:
+                                full_text += text
+                                yield f"data: {json.dumps({'text': text})}\n\n"
+                    except json.JSONDecodeError:
+                        pass
+
+            # Save to session after streaming completes
+            history.append({"role": "assistant", "content": full_text})
+            request.session[SESSION_KEY] = history[-20:]
+            request.session.save()
+
+            yield f"data: {json.dumps({'done': True})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    response = StreamingHttpResponse(stream_response(), content_type="text/event-stream")
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response
 
 
 @login_required
@@ -1240,3 +1358,930 @@ def ai_chat_page(request):
 def intro_page(request):
     """Login intro animation — shows loading sequence then redirects to dashboard."""
     return render(request, "dashboard/intro.html")
+
+
+# ── Chart Data API ──────────────────────────────────────────────────────────
+
+@login_required
+def chart_data_api(request):
+    """
+    Returns OHLCV bars for a symbol + timeframe.
+
+    GET /api/chart-data/?symbol=AAPL&timeframe=1d
+    Response: { "bars": [{"time": "2024-01-02", "open": 1.0, "high": 1.1, "low": 0.9, "close": 1.05, "volume": 1000}, ...] }
+    Timeframe values accepted: 1d, 1w, 1m, 3m, 1y
+    """
+    from django.http import JsonResponse
+    from instruments.models import Instrument
+    from market_data.models import PriceData
+    from django.utils import timezone
+    from datetime import timedelta
+
+    symbol    = request.GET.get("symbol", "").strip().upper()
+    timeframe = request.GET.get("timeframe", "1d").strip().lower()
+
+    if not symbol:
+        return JsonResponse({"error": "symbol required", "bars": []})
+
+    try:
+        instrument = Instrument.objects.get(symbol=symbol)
+    except Instrument.DoesNotExist:
+        return JsonResponse({"error": f"Symbol '{symbol}' not found", "bars": []})
+
+    # Map UI timeframe to DB timeframe label and date cutoff
+    TF_MAP = {
+        "1d":  ("1d",  90),    # daily bars, last 90 days shown by default
+        "1w":  ("1d",  365),   # weekly view using daily bars, 1 year
+        "1m":  ("1d",  90),    # 1 month range
+        "3m":  ("1d",  180),   # 3 month range
+        "1y":  ("1d",  365),   # 1 year range
+    }
+    db_tf, days_back = TF_MAP.get(timeframe, ("1d", 90))
+
+    # Override days_back for specific timeframes
+    days_override = {
+        "1m": 30,
+        "3m": 90,
+    }
+    if timeframe in days_override:
+        days_back = days_override[timeframe]
+
+    since = timezone.now() - timedelta(days=days_back)
+
+    qs = PriceData.objects.filter(
+        instrument=instrument,
+        timeframe=db_tf,
+        timestamp__gte=since,
+    ).order_by("timestamp")
+
+    bars = []
+    for p in qs:
+        bars.append({
+            "time":   p.timestamp.strftime("%Y-%m-%d"),
+            "open":   float(p.open),
+            "high":   float(p.high),
+            "low":    float(p.low),
+            "close":  float(p.close),
+            "volume": float(p.volume) if p.volume else 0,
+        })
+
+    return JsonResponse({"symbol": symbol, "timeframe": timeframe, "bars": bars})
+
+
+# ── Dashboard Preset APIs ───────────────────────────────────────────────────
+
+@login_required
+def dashboard_presets_api(request):
+    """
+    GET  — Returns list of user's dashboard presets (creates defaults if none exist).
+    POST — Creates a new custom preset.
+           Body: { "name": "My Layout", "config": { "sections": [...] } }
+    """
+    from django.http import JsonResponse
+    import json
+    from .models import DashboardPreset
+
+    if request.method == "GET":
+        # Ensure defaults exist
+        DashboardPreset.get_or_create_defaults(request.user)
+        presets = DashboardPreset.objects.filter(user=request.user).order_by("preset_type", "name")
+        data = []
+        for p in presets:
+            data.append({
+                "id":          p.id,
+                "name":        p.name,
+                "preset_type": p.preset_type,
+                "config":      p.layout_config,
+                "is_active":   p.is_active,
+                "created_at":  p.created_at.isoformat(),
+            })
+        active = DashboardPreset.get_active_for_user(request.user)
+        return JsonResponse({
+            "presets":   data,
+            "active_id": active.id if active else None,
+        })
+
+    if request.method == "POST":
+        try:
+            body = json.loads(request.body)
+        except (json.JSONDecodeError, ValueError):
+            return JsonResponse({"ok": False, "error": "Invalid JSON"}, status=400)
+
+        name   = body.get("name", "").strip()
+        config = body.get("config", {})
+
+        if not name:
+            return JsonResponse({"ok": False, "error": "name is required"}, status=400)
+
+        if DashboardPreset.objects.filter(user=request.user, name=name).exists():
+            return JsonResponse({"ok": False, "error": f"A preset named '{name}' already exists"}, status=409)
+
+        preset = DashboardPreset.objects.create(
+            user=request.user,
+            name=name,
+            preset_type="custom",
+            layout_config=config,
+            is_active=False,
+        )
+        return JsonResponse({
+            "ok":    True,
+            "id":    preset.id,
+            "name":  preset.name,
+            "type":  preset.preset_type,
+            "config": preset.layout_config,
+        }, status=201)
+
+    return JsonResponse({"ok": False, "error": "Method not allowed"}, status=405)
+
+
+@login_required
+def dashboard_preset_activate(request, preset_id):
+    """
+    POST — Activates a preset, deactivating all others for the user.
+    """
+    from django.http import JsonResponse
+    from .models import DashboardPreset
+
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
+
+    try:
+        preset = DashboardPreset.objects.get(id=preset_id, user=request.user)
+    except DashboardPreset.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Preset not found"}, status=404)
+
+    # Deactivate all, then activate chosen one
+    DashboardPreset.objects.filter(user=request.user).update(is_active=False)
+    preset.is_active = True
+    preset.save(update_fields=["is_active"])
+
+    return JsonResponse({
+        "ok":        True,
+        "active_id": preset.id,
+        "name":      preset.name,
+        "config":    preset.layout_config,
+    })
+
+
+@login_required
+def dashboard_preset_delete(request, preset_id):
+    """
+    DELETE — Removes a custom preset. Built-in presets (morning/active/eod) cannot be deleted.
+    """
+    from django.http import JsonResponse
+    from .models import DashboardPreset
+
+    if request.method != "DELETE":
+        return JsonResponse({"ok": False, "error": "DELETE required"}, status=405)
+
+    try:
+        preset = DashboardPreset.objects.get(id=preset_id, user=request.user)
+    except DashboardPreset.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Preset not found"}, status=404)
+
+    if preset.preset_type != "custom":
+        return JsonResponse({"ok": False, "error": "Built-in presets cannot be deleted"}, status=403)
+
+    preset.delete()
+    return JsonResponse({"ok": True, "deleted_id": preset_id})
+
+
+# ── Annotations API ─────────────────────────────────────────────────────────
+
+@login_required
+def annotations_api(request):
+    """GET list of annotations (filtered by type/target), POST to create."""
+    from django.http import JsonResponse
+    import json
+    from .models import UserAnnotation
+
+    if request.method == "GET":
+        qs = UserAnnotation.objects.filter(user=request.user)
+        ann_type = request.GET.get("type", "")
+        target_id = request.GET.get("target_id", "")
+        target_symbol = request.GET.get("symbol", "")
+        if ann_type:
+            qs = qs.filter(annotation_type=ann_type)
+        if target_id:
+            qs = qs.filter(target_id=target_id)
+        if target_symbol:
+            qs = qs.filter(target_symbol__iexact=target_symbol)
+        data = [
+            {
+                "id": a.id,
+                "annotation_type": a.annotation_type,
+                "target_id": a.target_id,
+                "target_symbol": a.target_symbol,
+                "content": a.content,
+                "color": a.color,
+                "pinned": a.pinned,
+                "created_at": a.created_at.isoformat(),
+                "updated_at": a.updated_at.isoformat(),
+            }
+            for a in qs[:100]
+        ]
+        return JsonResponse({"annotations": data})
+
+    if request.method == "POST":
+        try:
+            body = json.loads(request.body)
+        except (json.JSONDecodeError, ValueError):
+            return JsonResponse({"ok": False, "error": "Invalid JSON"}, status=400)
+
+        content = body.get("content", "").strip()
+        if not content:
+            return JsonResponse({"ok": False, "error": "content is required"}, status=400)
+
+        ann = UserAnnotation.objects.create(
+            user=request.user,
+            annotation_type=body.get("annotation_type", "general"),
+            target_id=body.get("target_id") or None,
+            target_symbol=body.get("target_symbol", ""),
+            content=content,
+            color=body.get("color", "#ffeb3b"),
+            pinned=bool(body.get("pinned", False)),
+        )
+        return JsonResponse({
+            "ok": True,
+            "id": ann.id,
+            "annotation_type": ann.annotation_type,
+            "target_symbol": ann.target_symbol,
+            "content": ann.content,
+            "color": ann.color,
+            "pinned": ann.pinned,
+            "created_at": ann.created_at.isoformat(),
+        }, status=201)
+
+    return JsonResponse({"ok": False, "error": "Method not allowed"}, status=405)
+
+
+@login_required
+def annotation_delete(request, pk):
+    """DELETE — Remove a user annotation by pk."""
+    from django.http import JsonResponse
+    from .models import UserAnnotation
+
+    if request.method != "DELETE":
+        return JsonResponse({"ok": False, "error": "DELETE required"}, status=405)
+
+    try:
+        ann = UserAnnotation.objects.get(id=pk, user=request.user)
+    except UserAnnotation.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Annotation not found"}, status=404)
+
+    ann.delete()
+    return JsonResponse({"ok": True, "deleted_id": pk})
+
+
+# ── Risk Dashboard API ───────────────────────────────────────────────────────
+
+@login_required
+def risk_dashboard_api(request):
+    """API endpoint for risk metrics, VaR, and stress testing."""
+    from django.http import JsonResponse
+    from portfolio.services import get_or_create_default_portfolio
+    from portfolio.risk_engine import RiskEngine
+
+    portfolio = get_or_create_default_portfolio(user=request.user)
+    engine = RiskEngine(portfolio)
+
+    action = request.GET.get("action", "all")
+
+    if action == "var":
+        method = request.GET.get("method", "historical")
+        confidence = float(request.GET.get("confidence", 0.95))
+        result = engine.calculate_var(confidence=confidence, method=method)
+        return JsonResponse(result)
+    elif action == "stress":
+        result = engine.stress_test()
+        return JsonResponse({"scenarios": result})
+    elif action == "metrics":
+        result = engine.calculate_risk_metrics()
+        return JsonResponse(result)
+    else:
+        return JsonResponse({
+            "var": engine.calculate_var(),
+            "stress_test": engine.stress_test(),
+            "risk_metrics": engine.calculate_risk_metrics(),
+        })
+
+
+# ── Monte Carlo / Regime / Position Sizing APIs ──────────────────────────────
+
+@login_required
+def monte_carlo_api(request):
+    """Run Monte Carlo simulation on a strategy's trades."""
+    from django.http import JsonResponse
+    from backtester.monte_carlo import run_monte_carlo
+
+    strategy_id = request.GET.get('strategy_id')
+    if not strategy_id:
+        return JsonResponse({'error': 'strategy_id required'}, status=400)
+
+    from strategies.models import Strategy
+    from portfolio.models import Position
+
+    strategy = Strategy.objects.filter(id=strategy_id).first()
+    if not strategy:
+        return JsonResponse({'error': 'strategy not found'}, status=404)
+
+    # Get closed positions for this strategy
+    closed = Position.objects.filter(strategy=strategy, closed_at__isnull=False)
+    trades = []
+    for pos in closed:
+        if pos.entry_price and pos.entry_price > 0:
+            pnl_pct = float((pos.current_price - pos.entry_price) / pos.entry_price * 100)
+            if pos.direction.lower() in ('short',):
+                pnl_pct = -pnl_pct
+            trades.append({'pnl_pct': pnl_pct})
+
+    if not trades:
+        # Fall back to backtest trades log
+        from backtester.models import BacktestRun
+        bt = BacktestRun.objects.filter(strategy_type=strategy.name).order_by('-created_at').first()
+        if bt and bt.trades_log:
+            trades = [{'pnl_pct': t.get('pnl_pct', t.get('pnl', 0))} for t in bt.trades_log]
+
+    result = run_monte_carlo(trades)
+    return JsonResponse(result)
+
+
+@login_required
+def regime_api(request):
+    """Get current market regime detection."""
+    from django.http import JsonResponse
+    from signals.regime_detector import RegimeDetector
+
+    symbol = request.GET.get('symbol')
+    instrument = None
+    if symbol:
+        from instruments.models import Instrument
+        instrument = Instrument.objects.filter(symbol=symbol).first()
+
+    detector = RegimeDetector()
+    result = detector.detect(instrument=instrument)
+    return JsonResponse(result)
+
+
+@login_required
+def position_sizing_api(request):
+    """Calculate position sizing recommendations."""
+    from django.http import JsonResponse
+    from portfolio.services import get_or_create_default_portfolio
+    from portfolio.position_sizing import PositionSizer
+
+    portfolio = get_or_create_default_portfolio(user=request.user)
+    sizer = PositionSizer(portfolio)
+
+    method = request.GET.get('method', 'volatility')
+    symbol = request.GET.get('symbol')
+
+    if method == 'kelly':
+        win_rate = float(request.GET.get('win_rate', 0.5))
+        avg_win = float(request.GET.get('avg_win', 2.0))
+        avg_loss = float(request.GET.get('avg_loss', 1.0))
+        result = sizer.kelly_criterion(win_rate, avg_win, avg_loss)
+    elif method == 'fixed_risk':
+        entry = float(request.GET.get('entry_price', 0))
+        stop = float(request.GET.get('stop_loss', 0))
+        risk_pct = float(request.GET.get('risk_pct', 0.02))
+        result = sizer.fixed_risk(entry, stop, risk_pct)
+    else:
+        if not symbol:
+            return JsonResponse({'error': 'symbol required for volatility sizing'}, status=400)
+        from instruments.models import Instrument
+        instrument = Instrument.objects.filter(symbol=symbol).first()
+        if not instrument:
+            return JsonResponse({'error': 'instrument not found'}, status=404)
+        risk_pct = float(request.GET.get('risk_pct', 0.02))
+        result = sizer.volatility_based(instrument, risk_pct)
+
+    return JsonResponse(result)
+
+
+# ── Pop-Out Panel ────────────────────────────────────────────────────────────
+
+@login_required
+def popout_panel(request):
+    """Render a panel in a minimal popup window."""
+    panel = request.GET.get("panel", "")
+    return render(request, "dashboard/_popout.html", {"panel": panel})
+
+
+# ── Kill Switch ──────────────────────────────────────────────────────────────
+
+@login_required
+def kill_switch_api(request):
+    """Emergency kill switch endpoint — flatten all positions instantly."""
+    from django.http import JsonResponse
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    from bot_program.engine.kill_switch import execute_kill_switch
+    import json
+
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except Exception:
+        data = {}
+
+    reason = data.get('reason', 'manual activation')
+    results = execute_kill_switch(user=request.user, reason=reason)
+    return JsonResponse(results)
+
+
+# ── Price Alerts ─────────────────────────────────────────────────────────────
+
+@login_required
+def price_alerts_api(request):
+    """GET list of price alerts or POST to create a new one."""
+    from django.http import JsonResponse
+    from alerts.models import PriceAlert
+    from instruments.models import Instrument
+    import json
+
+    if request.method == 'GET':
+        alerts = PriceAlert.objects.filter(user=request.user).select_related('instrument')
+        data = [
+            {
+                'id': a.id,
+                'instrument': a.instrument.symbol,
+                'condition': a.condition,
+                'target_price': str(a.target_price),
+                'triggered': a.triggered,
+                'triggered_at': a.triggered_at.isoformat() if a.triggered_at else None,
+                'notify_telegram': a.notify_telegram,
+                'notify_email': a.notify_email,
+                'note': a.note,
+                'created_at': a.created_at.isoformat(),
+            }
+            for a in alerts
+        ]
+        return JsonResponse({'alerts': data})
+
+    if request.method == 'POST':
+        try:
+            body = json.loads(request.body)
+        except Exception:
+            return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+        symbol = body.get('instrument', '').strip().upper()
+        if not symbol:
+            return JsonResponse({'error': 'instrument is required'}, status=400)
+
+        try:
+            instrument = Instrument.objects.get(symbol=symbol)
+        except Instrument.DoesNotExist:
+            return JsonResponse({'error': f'Instrument {symbol} not found'}, status=404)
+
+        condition = body.get('condition', 'above')
+        if condition not in ('above', 'below', 'cross'):
+            return JsonResponse({'error': 'condition must be above, below, or cross'}, status=400)
+
+        target_price = body.get('target_price')
+        if target_price is None:
+            return JsonResponse({'error': 'target_price is required'}, status=400)
+
+        alert = PriceAlert.objects.create(
+            user=request.user,
+            instrument=instrument,
+            condition=condition,
+            target_price=target_price,
+            notify_telegram=bool(body.get('notify_telegram', True)),
+            notify_email=bool(body.get('notify_email', False)),
+            note=body.get('note', ''),
+        )
+        return JsonResponse({'id': alert.id, 'status': 'created'}, status=201)
+
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+@login_required
+def price_alert_delete(request, pk):
+    """DELETE a price alert by pk."""
+    from django.http import JsonResponse
+    from alerts.models import PriceAlert
+
+    if request.method != 'DELETE':
+        return JsonResponse({'error': 'DELETE required'}, status=405)
+
+    try:
+        alert = PriceAlert.objects.get(id=pk, user=request.user)
+    except PriceAlert.DoesNotExist:
+        return JsonResponse({'error': 'Alert not found'}, status=404)
+
+    alert.delete()
+    return JsonResponse({'status': 'deleted', 'id': pk})
+
+
+# ── Audit Log ────────────────────────────────────────────────────────────────
+
+@login_required
+def audit_log_api(request):
+    """Return the most recent 100 audit log entries for the current user."""
+    from core.audit import AuditLog
+    from django.http import JsonResponse
+
+    logs = AuditLog.objects.filter(user=request.user).order_by('-created_at')[:100]
+    data = [
+        {
+            'action': l.action,
+            'description': l.description,
+            'target_type': l.target_type,
+            'created_at': l.created_at.isoformat(),
+            'metadata': l.metadata,
+        }
+        for l in logs
+    ]
+    return JsonResponse({'logs': data})
+
+
+# ── Session Management ───────────────────────────────────────────────────────
+
+@login_required
+def active_sessions_api(request):
+    """View and manage active sessions."""
+    from django.contrib.sessions.models import Session
+    from django.http import JsonResponse
+    from django.utils import timezone
+    import json
+
+    if request.method == 'DELETE':
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return JsonResponse({'error': 'Invalid JSON'}, status=400)
+        session_key = data.get('session_key')
+        if session_key and session_key != request.session.session_key:
+            Session.objects.filter(session_key=session_key).delete()
+            return JsonResponse({'status': 'revoked'})
+        return JsonResponse({'error': 'Cannot revoke current session'}, status=400)
+
+    # List active sessions for this user
+    sessions = Session.objects.filter(expire_date__gte=timezone.now())
+    user_sessions = []
+    for session in sessions:
+        session_data = session.get_decoded()
+        if str(session_data.get('_auth_user_id')) == str(request.user.id):
+            user_sessions.append({
+                'session_key': session.session_key[:8] + '...',
+                'full_key': session.session_key,
+                'expires': session.expire_date.isoformat(),
+                'is_current': session.session_key == request.session.session_key,
+            })
+
+    return JsonResponse({'sessions': user_sessions})
+
+
+# ── AI/Data Enhancement APIs ─────────────────────────────────────────────────
+
+@login_required
+def sentiment_index_api(request):
+    from django.http import JsonResponse
+    from signals.sentiment_index import SentimentIndex
+
+    symbol = request.GET.get('symbol')
+    instrument = None
+    if symbol:
+        from instruments.models import Instrument
+        instrument = Instrument.objects.filter(symbol=symbol).first()
+
+    index = SentimentIndex()
+    result = index.calculate(instrument=instrument)
+    return JsonResponse(result)
+
+
+@login_required
+def agent_calibration_api(request):
+    from django.http import JsonResponse
+    from ai_agents.calibration import CalibrationTracker
+
+    agent = request.GET.get('agent')
+    tracker = CalibrationTracker()
+
+    if agent:
+        result = tracker.get_agent_accuracy(agent)
+        result['adjustment'] = tracker.suggest_confidence_adjustment(agent)
+    else:
+        result = tracker.get_all_agents_accuracy()
+
+    return JsonResponse(result, safe=False)
+
+
+@login_required
+def rag_search_api(request):
+    from django.http import JsonResponse
+    from ai_agents.rag import rag_store
+
+    query = request.GET.get('q', '')
+    doc_type = request.GET.get('type')
+    top_k = int(request.GET.get('k', 5))
+
+    types = [doc_type] if doc_type else None
+    results = rag_store.retrieve(query, top_k=top_k, doc_types=types)
+    return JsonResponse({'results': results, 'query': query})
+
+
+# ── Sector Rotation API ──────────────────────────────────────────────────────
+
+@login_required
+def sector_rotation_api(request):
+    from django.http import JsonResponse
+    from signals.sector_rotation import SectorRotationModel
+
+    lookback = int(request.GET.get('lookback_days', 30))
+    model = SectorRotationModel()
+    result = model.analyze(lookback_days=lookback)
+    return JsonResponse(result)
+
+
+# ── Earnings Predictor API ───────────────────────────────────────────────────
+
+@login_required
+def earnings_predictor_api(request):
+    from django.http import JsonResponse
+    from signals.earnings_predictor import EarningsPredictor
+
+    symbol = request.GET.get('symbol')
+    eps_actual = float(request.GET.get('eps_actual', 0))
+    eps_estimate = float(request.GET.get('eps_estimate', 0))
+    revenue_actual = request.GET.get('revenue_actual')
+    revenue_estimate = request.GET.get('revenue_estimate')
+
+    if not symbol:
+        return JsonResponse({'error': 'symbol required'}, status=400)
+
+    predictor = EarningsPredictor()
+    result = predictor.predict_reaction(
+        symbol, eps_actual, eps_estimate,
+        float(revenue_actual) if revenue_actual else None,
+        float(revenue_estimate) if revenue_estimate else None,
+    )
+    return JsonResponse(result)
+
+
+# ── Trade Journal API ────────────────────────────────────────────────────────
+
+@login_required
+def trade_journal_api(request):
+    from django.http import JsonResponse
+    from portfolio.models import Position
+    from portfolio.services import get_or_create_default_portfolio
+
+    portfolio = get_or_create_default_portfolio(user=request.user)
+
+    if request.method == 'POST':
+        # Generate journal for a specific position
+        import json as json_mod
+        data = json_mod.loads(request.body)
+        position_id = data.get('position_id')
+        position = Position.objects.filter(id=position_id, portfolio=portfolio).first()
+        if not position or not position.closed_at:
+            return JsonResponse({'error': 'closed position not found'}, status=404)
+
+        from ai_agents.trade_journal import generate_journal_entry
+        result = generate_journal_entry(position)
+        return JsonResponse(result or {'error': 'generation failed'})
+
+    # GET: return recent closed positions for journaling
+    closed = Position.objects.filter(
+        portfolio=portfolio, closed_at__isnull=False
+    ).select_related('instrument', 'strategy').order_by('-closed_at')[:20]
+
+    positions = [{
+        'id': p.id,
+        'symbol': p.instrument.symbol,
+        'direction': p.direction,
+        'pnl_pct': p.unrealized_pnl_pct,
+        'opened_at': p.opened_at.isoformat(),
+        'closed_at': p.closed_at.isoformat(),
+    } for p in closed]
+
+    return JsonResponse({'positions': positions})
+
+
+# ── Webhook API ──────────────────────────────────────────────────────────────
+
+@login_required
+def webhooks_api(request):
+    """GET list of webhooks or POST to create a new one."""
+    from django.http import JsonResponse
+    from alerts.models import WebhookEndpoint
+    import json
+
+    if request.method == 'GET':
+        hooks = WebhookEndpoint.objects.filter(user=request.user)
+        data = [
+            {
+                'id': h.id,
+                'name': h.name,
+                'url': h.url,
+                'is_active': h.is_active,
+                'on_signal': h.on_signal,
+                'on_trade': h.on_trade,
+                'on_alert': h.on_alert,
+                'on_portfolio': h.on_portfolio,
+                'on_news': h.on_news,
+                'total_sent': h.total_sent,
+                'last_sent_at': h.last_sent_at.isoformat() if h.last_sent_at else None,
+                'consecutive_failures': h.consecutive_failures,
+                'last_error': h.last_error,
+                'created_at': h.created_at.isoformat(),
+            }
+            for h in hooks
+        ]
+        return JsonResponse({'webhooks': data})
+
+    if request.method == 'POST':
+        try:
+            body = json.loads(request.body)
+        except Exception:
+            return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+        name = body.get('name', '').strip()
+        url = body.get('url', '').strip()
+        if not name:
+            return JsonResponse({'error': 'name is required'}, status=400)
+        if not url:
+            return JsonResponse({'error': 'url is required'}, status=400)
+
+        hook = WebhookEndpoint.objects.create(
+            user=request.user,
+            name=name,
+            url=url,
+            secret=body.get('secret', ''),
+            is_active=bool(body.get('is_active', True)),
+            on_signal=bool(body.get('on_signal', True)),
+            on_trade=bool(body.get('on_trade', True)),
+            on_alert=bool(body.get('on_alert', True)),
+            on_portfolio=bool(body.get('on_portfolio', False)),
+            on_news=bool(body.get('on_news', False)),
+        )
+        return JsonResponse({'id': hook.id, 'status': 'created'}, status=201)
+
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+@login_required
+def webhook_delete(request, pk):
+    """DELETE a webhook endpoint by pk."""
+    from django.http import JsonResponse
+    from alerts.models import WebhookEndpoint
+
+    if request.method != 'DELETE':
+        return JsonResponse({'error': 'DELETE required'}, status=405)
+
+    try:
+        hook = WebhookEndpoint.objects.get(id=pk, user=request.user)
+    except WebhookEndpoint.DoesNotExist:
+        return JsonResponse({'error': 'Webhook not found'}, status=404)
+
+    hook.delete()
+    return JsonResponse({'status': 'deleted', 'id': pk})
+
+
+@login_required
+def webhook_test(request, pk):
+    """POST to send a test event to a webhook endpoint."""
+    from django.http import JsonResponse
+    from alerts.models import WebhookEndpoint
+    from alerts.webhook_manager import _deliver_webhook
+
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    try:
+        hook = WebhookEndpoint.objects.get(id=pk, user=request.user)
+    except WebhookEndpoint.DoesNotExist:
+        return JsonResponse({'error': 'Webhook not found'}, status=404)
+
+    try:
+        _deliver_webhook(hook, 'test', {
+            'message': 'This is a test event from Sauron Vision',
+            'user': request.user.username,
+        })
+        return JsonResponse({'status': 'sent'})
+    except Exception as e:
+        return JsonResponse({'status': 'failed', 'error': str(e)}, status=500)
+
+
+# ── On-Chain API ─────────────────────────────────────────────────────────────
+
+@login_required
+def onchain_api(request):
+    """GET on-chain analytics data (whale tracking, exchange flows, DeFi TVL)."""
+    from django.http import JsonResponse
+    from market_data.adapters.onchain_adapter import OnChainAdapter
+
+    adapter = OnChainAdapter()
+    action = request.GET.get('action', 'flows')
+    asset = request.GET.get('asset', 'BTC').upper()
+
+    if action == 'flows':
+        data = adapter.get_exchange_flows(asset=asset)
+    elif action == 'whales':
+        min_usd = int(request.GET.get('min_usd', 1000000))
+        data = adapter.get_whale_transactions(asset=asset, min_value_usd=min_usd)
+    elif action == 'network':
+        data = adapter.get_network_metrics(asset=asset)
+    elif action == 'defi':
+        protocol = request.GET.get('protocol') or None
+        data = adapter.get_defi_tvl(protocol=protocol)
+    else:
+        return JsonResponse({'error': f'Unknown action: {action}. Use flows, whales, network, or defi'}, status=400)
+
+    return JsonResponse({'action': action, 'asset': asset, 'data': data})
+
+
+# ── Natural Language Trade API ───────────────────────────────────────────────
+
+@login_required
+def nl_trade_api(request):
+    """Natural language trade entry."""
+    from django.http import JsonResponse
+    import json as json_mod
+
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    data = json_mod.loads(request.body)
+    command = data.get('command', '')
+
+    if not command:
+        return JsonResponse({'error': 'command required'}, status=400)
+
+    from bot_program.nl_trader import NLTradeParser
+    parser = NLTradeParser()
+    parsed = parser.parse(command)
+
+    # If just parsing (preview mode)
+    if data.get('preview', False):
+        return JsonResponse({'parsed': parsed})
+
+    # Execute
+    result = parser.execute(parsed, request.user)
+
+    # Audit log
+    try:
+        from core.audit import AuditLog
+        AuditLog.log(
+            user=request.user,
+            action='trade_open' if result.get('status') == 'executed' else 'config_change',
+            description=f"NL trade: {command} → {result.get('status')}",
+            metadata={'command': command, 'parsed': parsed, 'result': result},
+        )
+    except Exception:
+        pass
+
+    return JsonResponse(result)
+
+
+# ── Compliance API ────────────────────────────────────────────────────────────
+
+@login_required
+def compliance_api(request):
+    """Check compliance or list restrictions."""
+    from django.http import JsonResponse
+    from core.compliance import ComplianceChecker
+
+    checker = ComplianceChecker()
+
+    if request.method == 'POST':
+        import json as json_mod
+        data = json_mod.loads(request.body)
+        allowed, reasons = checker.check_trade(
+            request.user,
+            data.get('symbol', ''),
+            data.get('action', ''),
+            quantity=data.get('quantity'),
+            value=data.get('value'),
+        )
+        return JsonResponse({'allowed': allowed, 'violations': reasons})
+
+    # GET: list restrictions
+    restrictions = checker.get_active_restrictions(user=request.user)
+    return JsonResponse({'restrictions': restrictions})
+
+
+# ── Market Commentary API ─────────────────────────────────────────────────────
+
+@login_required
+def market_commentary_api(request):
+    """Return latest daily market commentary from notifications."""
+    from django.http import JsonResponse
+    from alerts.models import Notification
+
+    latest = (
+        Notification.objects.filter(title__icontains='Market Commentary')
+        .order_by('-created_at')
+        .first()
+    )
+
+    if not latest:
+        return JsonResponse({'commentary': None, 'message': 'No commentary available yet'})
+
+    return JsonResponse({
+        'commentary': latest.body,
+        'title': latest.title,
+        'created_at': latest.created_at.isoformat(),
+    })

@@ -1,6 +1,7 @@
 """Sauron Vision — Dashboard URL Configuration."""
 from django.urls import path
 from . import views
+from .reports import generate_portfolio_report
 from .views_metrics import (
     signals_metrics, strategies_metrics, news_metrics,
     backtest_metrics, portfolio_metrics, positions_metrics,
@@ -17,6 +18,7 @@ from .views_bot_console import bot_console, bot_pause
 
 from .views_signals_htmx import signal_cards_htmx, signal_performance_htmx
 from .api import market_views, signal_views, strategy_views, portfolio_views, ai_views
+from core.views import rate_limiter_stats, system_status
 
 urlpatterns = [
     # ── Frontend Pages ──────────────────────────────────────
@@ -41,6 +43,7 @@ urlpatterns = [
     path("ai/tasks/", views.ai_tasks_list, name="ai_tasks_list"),
     path("ai/chat/", views.ai_chat_page, name="ai_chat"),
     path("api/ai-chat/", views.ai_chat_api, name="ai_chat_api"),
+    path("api/ai-chat/stream/", views.ai_chat_stream, name="ai_chat_stream"),
     path("backtest/", views.backtest_list, name="backtest_list"),
     path("backtest/create/", views.backtest_create, name="backtest_create"),
     path("profile/", views.profile, name="profile"),
@@ -93,4 +96,70 @@ urlpatterns = [
     path("strategies/new/save/", strategy_wizard_save, name="strategy_wizard_save"),
     path("bot/console/", bot_console, name="bot_console"),
     path("bot/console/pause/", bot_pause, name="bot_pause"),
+
+    # ── System Status APIs ─────────────────────────────────
+    path("api/system/rate-limits/", rate_limiter_stats, name="rate_limiter_stats"),
+    path("api/system/status/", system_status, name="system_status"),
+
+    # ── Chart Data API ──────────────────────────────────────
+    path("api/chart-data/", views.chart_data_api, name="chart_data_api"),
+
+    # ── Risk API ──────────────────────────────────────────
+    path("api/risk/", views.risk_dashboard_api, name="risk_dashboard_api"),
+
+    # ── Dashboard Preset APIs ───────────────────────────────
+    path("api/dashboard/presets/", views.dashboard_presets_api, name="dashboard_presets_api"),
+    path("api/dashboard/presets/<int:preset_id>/activate/", views.dashboard_preset_activate, name="dashboard_preset_activate"),
+    path("api/dashboard/presets/<int:preset_id>/delete/", views.dashboard_preset_delete, name="dashboard_preset_delete"),
+
+    # ── Reports ────────────────────────────────────────────
+    path("reports/portfolio/", generate_portfolio_report, name="portfolio_report"),
+
+    # ── Annotations API ───────────────────────────────────
+    path("api/annotations/", views.annotations_api, name="annotations_api"),
+    path("api/annotations/<int:pk>/delete/", views.annotation_delete, name="annotation_delete"),
+
+    # ── Pop-Out Panel ─────────────────────────────────────
+    path("popout/", views.popout_panel, name="popout_panel"),
+
+    # ── Kill Switch ────────────────────────────────────────
+    path("api/kill-switch/", views.kill_switch_api, name="kill_switch_api"),
+
+    # ── Price Alerts ───────────────────────────────────────
+    path("api/price-alerts/", views.price_alerts_api, name="price_alerts_api"),
+    path("api/price-alerts/<int:pk>/delete/", views.price_alert_delete, name="price_alert_delete"),
+
+    # ── Audit Log ──────────────────────────────────────────
+    path("api/audit-log/", views.audit_log_api, name="audit_log_api"),
+
+    # ── Session Management ─────────────────────────────────
+    path("api/sessions/", views.active_sessions_api, name="active_sessions_api"),
+
+    # ── Backtesting / Simulation / Sizing APIs ─────────────
+    path("api/monte-carlo/", views.monte_carlo_api, name="monte_carlo_api"),
+    path("api/regime/", views.regime_api, name="regime_api"),
+    path("api/position-sizing/", views.position_sizing_api, name="position_sizing_api"),
+
+    # ── AI/Data Enhancement APIs ────────────────────────────
+    path("api/sentiment-index/", views.sentiment_index_api, name="sentiment_index_api"),
+    path("api/calibration/", views.agent_calibration_api, name="agent_calibration_api"),
+    path("api/rag/search/", views.rag_search_api, name="rag_search_api"),
+
+    # ── NLP / Rotation / Earnings / Journal APIs ───────────────────────────
+    path("api/sector-rotation/", views.sector_rotation_api, name="sector_rotation_api"),
+    path("api/earnings-predictor/", views.earnings_predictor_api, name="earnings_predictor_api"),
+    path("api/trade-journal/", views.trade_journal_api, name="trade_journal_api"),
+
+    # ── Webhook APIs ────────────────────────────────────────
+    path("api/webhooks/", views.webhooks_api, name="webhooks_api"),
+    path("api/webhooks/<int:pk>/delete/", views.webhook_delete, name="webhook_delete"),
+    path("api/webhooks/<int:pk>/test/", views.webhook_test, name="webhook_test"),
+
+    # ── On-Chain Analytics API ──────────────────────────────
+    path("api/onchain/", views.onchain_api, name="onchain_api"),
+
+    # ── NL Trade / Compliance / Commentary APIs ────────────────────────────────
+    path("api/nl-trade/", views.nl_trade_api, name="nl_trade_api"),
+    path("api/compliance/", views.compliance_api, name="compliance_api"),
+    path("api/market-commentary/", views.market_commentary_api, name="market_commentary_api"),
 ]

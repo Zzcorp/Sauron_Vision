@@ -2,16 +2,12 @@
 from django.contrib import admin
 from django.urls import path, include
 from django.contrib.auth import views as auth_views
-from django.http import JsonResponse
 from dashboard.auth_views import SauronLoginView, login_pin
-
-
-def healthz(request):
-    return JsonResponse({"status": "ok"})
+from core.health import health_check
 
 
 urlpatterns = [
-    path("healthz/", healthz, name="healthz"),
+    path("healthz/", health_check, name="healthz"),
     path("admin/", admin.site.urls),
     path("login/", SauronLoginView.as_view(), name="login"),
     path("login/pin/", login_pin, name="login_pin"),

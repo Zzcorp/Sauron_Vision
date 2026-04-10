@@ -1,0 +1,394 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sauron Vision — Portfolio Report {{ report_date|date:"Y-m-d" }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        /* ── Variables ─────────────────────────────────── */
+        :root {
+            --accent: #00e868;
+            --accent-red: #e83030;
+            --accent-blue: #30a0e8;
+            --accent-gold: #d8b020;
+            --accent-purple: #8840d0;
+            --text: #1a2a20;
+            --text-muted: #556655;
+            --border: #c8dcc8;
+            --bg: #ffffff;
+            --bg-alt: #f4f9f5;
+            --font-display: 'Orbitron', sans-serif;
+            --font-heading: 'Rajdhani', sans-serif;
+            --font-mono: 'Share Tech Mono', monospace;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-heading);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        /* ── Layout ────────────────────────────────────── */
+        .report-wrapper { max-width: 960px; margin: 0 auto; padding: 32px 40px; }
+
+        /* ── Header ────────────────────────────────────── */
+        .report-header {
+            display: flex; justify-content: space-between; align-items: flex-start;
+            border-bottom: 3px solid var(--accent); padding-bottom: 16px; margin-bottom: 28px;
+        }
+        .report-logo { font-family: var(--font-display); font-size: 18px; font-weight: 700; color: #0a5020; }
+        .report-meta { text-align: right; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+
+        /* ── Section titles ────────────────────────────── */
+        .section-title {
+            font-family: var(--font-display); font-size: 11px; font-weight: 700;
+            letter-spacing: 3px; color: #0a5020; text-transform: uppercase;
+            border-bottom: 1px solid var(--border); padding-bottom: 6px;
+            margin: 24px 0 14px;
+        }
+
+        /* ── KPI grid ──────────────────────────────────── */
+        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 8px; }
+        .kpi-box {
+            background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px;
+            padding: 12px 14px;
+        }
+        .kpi-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px; color: var(--text-muted); margin-bottom: 4px; }
+        .kpi-value { font-family: var(--font-display); font-size: 18px; font-weight: 700; }
+        .kpi-sub { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); margin-top: 2px; }
+        .positive { color: #0a8040; }
+        .negative { color: var(--accent-red); }
+
+        /* ── Table ─────────────────────────────────────── */
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th {
+            font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.5px;
+            text-transform: uppercase; color: var(--text-muted);
+            border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left;
+        }
+        td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
+        tr:last-child td { border-bottom: none; }
+        tr:nth-child(even) td { background: var(--bg-alt); }
+
+        /* ── Allocation bars ───────────────────────────── */
+        .alloc-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+        .alloc-box { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+        .alloc-label { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); margin-bottom: 4px; }
+        .alloc-value { font-family: var(--font-display); font-size: 15px; font-weight: 700; }
+        .alloc-bar-wrap { height: 4px; background: var(--border); border-radius: 2px; margin-top: 6px; }
+        .alloc-bar-fill { height: 4px; border-radius: 2px; background: #0a8040; }
+
+        /* ── Strategy grades ───────────────────────────── */
+        .grade { display: inline-block; width: 24px; height: 24px; line-height: 24px; text-align: center;
+            font-family: var(--font-display); font-size: 11px; font-weight: 700; border-radius: 4px; }
+        .grade-A { background: #c8f0d0; color: #0a5020; }
+        .grade-B { background: #d8e8ff; color: #1040a0; }
+        .grade-C { background: #fff0c0; color: #806000; }
+        .grade-D { background: #ffe0d0; color: #803000; }
+        .grade-F { background: #ffd0d0; color: #800000; }
+
+        /* ── Footer ────────────────────────────────────── */
+        .report-footer {
+            margin-top: 32px; padding-top: 12px; border-top: 1px solid var(--border);
+            font-family: var(--font-mono); font-size: 9px; color: var(--text-muted);
+            display: flex; justify-content: space-between;
+        }
+
+        /* ── Print button (screen only) ─────────────────── */
+        .print-btn {
+            position: fixed; top: 16px; right: 16px; z-index: 100;
+            background: #0a5020; color: #fff; border: none; border-radius: 6px;
+            padding: 8px 18px; cursor: pointer; font-family: var(--font-display);
+            font-size: 11px; letter-spacing: 1px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .print-btn:hover { background: #0d6828; }
+
+        /* ── Print media ────────────────────────────────── */
+        @media print {
+            .print-btn { display: none !important; }
+            body { font-size: 11px; }
+            .report-wrapper { padding: 16px 20px; max-width: 100%; }
+            .kpi-grid { grid-template-columns: repeat(4, 1fr); }
+            .alloc-grid { grid-template-columns: repeat(5, 1fr); }
+            @page { margin: 1.5cm; size: A4; }
+        }
+    </style>
+</head>
+<body>
+<button class="print-btn" onclick="window.print()">PRINT / SAVE PDF</button>
+
+<div class="report-wrapper">
+
+    <!-- Header -->
+    <div class="report-header">
+        <div>
+            <div class="report-logo">SAURON VISION</div>
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:3px;">PORTFOLIO PERFORMANCE REPORT</div>
+        </div>
+        <div class="report-meta">
+            <div>Generated: {{ report_date|date:"Y-m-d H:i" }}</div>
+            <div>Period: {{ start_date|date:"Y-m-d" }} → {{ end_date|date:"Y-m-d" }}</div>
+            <div>Account: {{ user.username }}</div>
+        </div>
+    </div>
+
+    <!-- Portfolio Summary -->
+    <div class="section-title">Portfolio Summary</div>
+    <div class="kpi-grid">
+        <div class="kpi-box">
+            <div class="kpi-label">Portfolio Value</div>
+            <div class="kpi-value">€{{ portfolio.current_value|default:"—" }}</div>
+            <div class="kpi-sub">{{ portfolio.currency }}</div>
+        </div>
+        <div class="kpi-box">
+            <div class="kpi-label">Cash Available</div>
+            <div class="kpi-value">€{{ portfolio.cash_available|default:"—" }}</div>
+            <div class="kpi-sub">liquid</div>
+        </div>
+        <div class="kpi-box">
+            <div class="kpi-label">Period P&L</div>
+            <div class="kpi-value {% if total_pnl >= 0 %}positive{% else %}negative{% endif %}">
+                {% if total_pnl >= 0 %}+{% endif %}€{{ total_pnl|floatformat:2 }}
+            </div>
+            <div class="kpi-sub">closed trades only</div>
+        </div>
+        <div class="kpi-box">
+            <div class="kpi-label">Win Rate</div>
+            <div class="kpi-value {% if win_rate >= 50 %}positive{% else %}negative{% endif %}">{{ win_rate }}%</div>
+            <div class="kpi-sub">{{ total_closed }} closed trades</div>
+        </div>
+        <div class="kpi-box">
+            <div class="kpi-label">Profit Factor</div>
+            <div class="kpi-value {% if profit_factor >= 1 %}positive{% else %}negative{% endif %}">{{ profit_factor }}</div>
+            <div class="kpi-sub">win / loss ratio</div>
+        </div>
+        <div class="kpi-box">
+            <div class="kpi-label">Avg Win</div>
+            <div class="kpi-value positive">+€{{ avg_win }}</div>
+            <div class="kpi-sub">per winning trade</div>
+        </div>
+        <div class="kpi-box">
+            <div class="kpi-label">Avg Loss</div>
+            <div class="kpi-value negative">€{{ avg_loss }}</div>
+            <div class="kpi-sub">per losing trade</div>
+        </div>
+        <div class="kpi-box">
+            <div class="kpi-label">Open Positions</div>
+            <div class="kpi-value">{{ open_count }}</div>
+            <div class="kpi-sub">currently active</div>
+        </div>
+    </div>
+
+    {% if latest_snapshot %}
+    <div class="kpi-grid" style="margin-top:12px;">
+        <div class="kpi-box">
+            <div class="kpi-label">Max Drawdown</div>
+            <div class="kpi-value negative">{{ latest_snapshot.max_drawdown|floatformat:2 }}%</div>
+        </div>
+        <div class="kpi-box">
+            <div class="kpi-label">Sharpe Ratio</div>
+            <div class="kpi-value">{% if latest_snapshot.sharpe_ratio %}{{ latest_snapshot.sharpe_ratio|floatformat:2 }}{% else %}—{% endif %}</div>
+        </div>
+        <div class="kpi-box">
+            <div class="kpi-label">Daily P&L %</div>
+            <div class="kpi-value {% if latest_snapshot.daily_pnl_pct >= 0 %}positive{% else %}negative{% endif %}">
+                {{ latest_snapshot.daily_pnl_pct|floatformat:2 }}%
+            </div>
+        </div>
+        <div class="kpi-box">
+            <div class="kpi-label">Active Signals</div>
+            <div class="kpi-value">{{ active_signals_count }}</div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Best Trades -->
+    {% if best_trades %}
+    <div class="section-title">Best Trades (Period)</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Instrument</th>
+                <th>Direction</th>
+                <th>Strategy</th>
+                <th>Open Date</th>
+                <th>Close Date</th>
+                <th style="text-align:right;">P&L (€)</th>
+                <th style="text-align:right;">Return %</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for t in best_trades %}
+        <tr>
+            <td style="font-family:var(--font-mono);font-weight:700;">{{ t.instrument.symbol }}</td>
+            <td>{{ t.direction|upper }}</td>
+            <td>{{ t.strategy.name|default:"—"|truncatechars:24 }}</td>
+            <td style="font-family:var(--font-mono);font-size:10px;">{{ t.opened_at|date:"M d, Y" }}</td>
+            <td style="font-family:var(--font-mono);font-size:10px;">{{ t.closed_at|date:"M d, Y" }}</td>
+            <td style="text-align:right;font-family:var(--font-mono);" class="{% if t.unrealized_pnl >= 0 %}positive{% else %}negative{% endif %}">
+                {% if t.unrealized_pnl >= 0 %}+{% endif %}{{ t.unrealized_pnl|floatformat:2 }}
+            </td>
+            <td style="text-align:right;font-family:var(--font-mono);" class="{% if t.unrealized_pnl_pct >= 0 %}positive{% else %}negative{% endif %}">
+                {{ t.unrealized_pnl_pct|floatformat:2 }}%
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <!-- Worst Trades -->
+    {% if worst_trades %}
+    <div class="section-title">Worst Trades (Period)</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Instrument</th>
+                <th>Direction</th>
+                <th>Strategy</th>
+                <th>Open Date</th>
+                <th>Close Date</th>
+                <th style="text-align:right;">P&L (€)</th>
+                <th style="text-align:right;">Return %</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for t in worst_trades %}
+        <tr>
+            <td style="font-family:var(--font-mono);font-weight:700;">{{ t.instrument.symbol }}</td>
+            <td>{{ t.direction|upper }}</td>
+            <td>{{ t.strategy.name|default:"—"|truncatechars:24 }}</td>
+            <td style="font-family:var(--font-mono);font-size:10px;">{{ t.opened_at|date:"M d, Y" }}</td>
+            <td style="font-family:var(--font-mono);font-size:10px;">{{ t.closed_at|date:"M d, Y" }}</td>
+            <td style="text-align:right;font-family:var(--font-mono);" class="{% if t.unrealized_pnl >= 0 %}positive{% else %}negative{% endif %}">
+                {% if t.unrealized_pnl >= 0 %}+{% endif %}{{ t.unrealized_pnl|floatformat:2 }}
+            </td>
+            <td style="text-align:right;font-family:var(--font-mono);" class="{% if t.unrealized_pnl_pct >= 0 %}positive{% else %}negative{% endif %}">
+                {{ t.unrealized_pnl_pct|floatformat:2 }}%
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <!-- Signal Accuracy -->
+    <div class="section-title">Signal Intelligence</div>
+    <div class="kpi-grid" style="grid-template-columns: repeat(3, 1fr);">
+        <div class="kpi-box">
+            <div class="kpi-label">Signals Generated</div>
+            <div class="kpi-value">{{ total_signals }}</div>
+            <div class="kpi-sub">in period</div>
+        </div>
+        <div class="kpi-box">
+            <div class="kpi-label">Currently Active</div>
+            <div class="kpi-value">{{ active_signals_count }}</div>
+            <div class="kpi-sub">live signals</div>
+        </div>
+        <div class="kpi-box">
+            <div class="kpi-label">Win Rate</div>
+            <div class="kpi-value {% if win_rate >= 50 %}positive{% else %}negative{% endif %}">{{ win_rate }}%</div>
+            <div class="kpi-sub">signal accuracy proxy</div>
+        </div>
+    </div>
+
+    <!-- Strategy Performance -->
+    {% if strategies %}
+    <div class="section-title">Strategy Performance</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Strategy</th>
+                <th>Horizon</th>
+                <th>Status</th>
+                <th style="text-align:right;">P&L %</th>
+                <th style="text-align:center;">Grade</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for s in strategies %}
+        <tr>
+            <td style="font-weight:600;">{{ s.name|truncatechars:40 }}</td>
+            <td style="font-family:var(--font-mono);font-size:10px;">{{ s.time_horizon }}</td>
+            <td style="font-family:var(--font-mono);font-size:10px;text-transform:uppercase;">{{ s.status }}</td>
+            <td style="text-align:right;font-family:var(--font-mono);" class="{% if s.pnl_pct >= 0 %}positive{% else %}negative{% endif %}">
+                {% if s.pnl_pct >= 0 %}+{% endif %}{{ s.pnl_pct|floatformat:2 }}%
+            </td>
+            <td style="text-align:center;">
+                {% if s.pnl_pct >= 10 %}<span class="grade grade-A">A</span>
+                {% elif s.pnl_pct >= 5 %}<span class="grade grade-B">B</span>
+                {% elif s.pnl_pct >= 0 %}<span class="grade grade-C">C</span>
+                {% elif s.pnl_pct >= -5 %}<span class="grade grade-D">D</span>
+                {% else %}<span class="grade grade-F">F</span>{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <!-- Asset Allocation -->
+    <div class="section-title">Asset Allocation (Open Positions)</div>
+    {% if allocation %}
+    <div class="alloc-grid">
+        {% for asset_class, pct in allocation.items %}
+        <div class="alloc-box">
+            <div class="alloc-label">{{ asset_class|upper }}</div>
+            <div class="alloc-value">{{ pct }}%</div>
+            <div class="alloc-bar-wrap"><div class="alloc-bar-fill" style="width:{{ pct }}%;"></div></div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;padding:12px 0;">No open positions — fully in cash.</p>
+    {% endif %}
+
+    <!-- Open Positions -->
+    {% if open_positions %}
+    <div class="section-title">Current Open Positions</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Instrument</th>
+                <th>Direction</th>
+                <th>Qty</th>
+                <th style="text-align:right;">Entry</th>
+                <th style="text-align:right;">Current</th>
+                <th style="text-align:right;">Unrealized P&L</th>
+                <th style="text-align:right;">Return %</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for p in open_positions %}
+        <tr>
+            <td style="font-family:var(--font-mono);font-weight:700;">{{ p.instrument.symbol }}</td>
+            <td>{{ p.direction|upper }}</td>
+            <td style="font-family:var(--font-mono);">{{ p.quantity|floatformat:4 }}</td>
+            <td style="text-align:right;font-family:var(--font-mono);">{{ p.entry_price|floatformat:4 }}</td>
+            <td style="text-align:right;font-family:var(--font-mono);">{{ p.current_price|floatformat:4 }}</td>
+            <td style="text-align:right;font-family:var(--font-mono);" class="{% if p.unrealized_pnl >= 0 %}positive{% else %}negative{% endif %}">
+                {% if p.unrealized_pnl >= 0 %}+{% endif %}€{{ p.unrealized_pnl|floatformat:2 }}
+            </td>
+            <td style="text-align:right;font-family:var(--font-mono);" class="{% if p.unrealized_pnl_pct >= 0 %}positive{% else %}negative{% endif %}">
+                {{ p.unrealized_pnl_pct|floatformat:2 }}%
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <!-- Footer -->
+    <div class="report-footer">
+        <span>SAURON VISION — AI-Powered Trading Intelligence</span>
+        <span>Report generated {{ report_date|date:"Y-m-d H:i:s" }} UTC</span>
+    </div>
+
+</div><!-- /report-wrapper -->
+</body>
+</html>

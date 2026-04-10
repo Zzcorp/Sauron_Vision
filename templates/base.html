@@ -5,12 +5,20 @@
 <head>
     <meta charset="UTF-8">
     <link rel="icon" type="image/png" href="{% static 'logo/logo_SV.png' %}">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
     <title>{% block title %}Sauron Vision{% endblock %}</title>
 
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="{% static 'logo/logo_SV.png' %}">
     <link rel="apple-touch-icon" href="{% static 'logo/logo_SV.png' %}">
+
+    <!-- PWA -->
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#c0392b">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Sauron">
+    <meta name="mobile-web-app-capable" content="yes">
 
     <!-- Social / OG Meta -->
     <meta property="og:title" content="Sauron Vision — Trading Intelligence">
@@ -21,7 +29,6 @@
     <meta name="twitter:title" content="Sauron Vision">
     <meta name="twitter:description" content="AI-powered trading intelligence platform.">
     <meta name="twitter:image" content="{% static 'logo/logo_SV.png' %}">
-    <meta name="theme-color" content="#00e868">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -188,7 +195,38 @@
         @media (max-width: 768px) {
             .grid-2,.grid-3,.grid-4,.grid-5,.grid-6,.grid-sidebar { grid-template-columns: 1fr; }
             .sidebar { transform: translateX(-100%); } .main-content { margin-left: 0 !important; }
+            .grid { grid-template-columns: 1fr !important; }
+            .data-headband { font-size: 0.7rem; }
+            .topbar { padding: 0 0.5rem; }
+            .mobile-menu-btn { display: flex !important; }
         }
+
+        /* ── Mobile Hamburger Menu ─── */
+        .mobile-menu-btn {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 6px 10px;
+            border-radius: var(--radius);
+            font-size: 18px;
+            line-height: 1;
+            margin-right: 10px;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .mobile-menu-btn:hover { color: var(--accent); border-color: var(--accent); }
+        .sidebar.mobile-open { transform: translateX(0) !important; z-index: 200; }
+        .sidebar-overlay {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 199;
+            backdrop-filter: blur(2px);
+        }
+        .sidebar-overlay.visible { display: block; }
         /* stat-box — handled by unified card system */
         .stat-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px; }
         .stat-value { font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--text-primary); }
@@ -340,8 +378,78 @@
         body.light-mode .theme-icon-dark { display: none; }
         body.light-mode .theme-icon-light { display: inline; }
 
-        
+        /* ── Theme Smooth Transitions ─────────────── */
+        body, .sidebar, .topbar, .card, .stat-box, .metric, .data-headband,
+        .chat-msg .msg-bubble, .chat-input-area, input, textarea, select,
+        .btn, .nav-link, .ticker-bar, .modal, .modal-overlay {
+            transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+        }
+        .theme-transitioning * {
+            transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease !important;
+        }
+
+        /* ── Keyboard Shortcuts Modal ─────────────── */
+        .kbd-modal-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.75); z-index: 9999;
+            align-items: center; justify-content: center;
+        }
+        .kbd-modal-overlay.open { display: flex; }
+        .kbd-modal {
+            background: var(--bg-card); border: 1px solid var(--border-glow);
+            border-radius: var(--radius-lg); padding: 28px 32px;
+            max-width: 540px; width: 90%; box-shadow: 0 8px 48px rgba(0,232,104,0.08);
+        }
+        .kbd-modal-title {
+            font-family: var(--font-display); font-size: 14px; letter-spacing: 2px;
+            color: var(--accent); margin-bottom: 20px; display: flex;
+            justify-content: space-between; align-items: center;
+        }
+        .kbd-modal-close {
+            background: none; border: none; color: var(--text-muted);
+            font-size: 18px; cursor: pointer; padding: 0 4px;
+        }
+        .kbd-modal-close:hover { color: var(--text-primary); }
+        .kbd-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px;
+        }
+        .kbd-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 6px 0; border-bottom: 1px solid var(--border);
+            font-family: var(--font-body); font-size: 13px;
+        }
+        .kbd-label { color: var(--text-secondary); }
+        .kbd-keys { display: flex; gap: 4px; }
+        kbd {
+            background: var(--bg-secondary); border: 1px solid var(--border-glow);
+            border-radius: 4px; padding: 2px 7px; font-family: var(--font-mono);
+            font-size: 11px; color: var(--accent); letter-spacing: 0.5px;
+            box-shadow: 0 2px 0 var(--border);
+        }
+        .kbd-section-title {
+            grid-column: 1 / -1; font-family: var(--font-mono); font-size: 10px;
+            color: var(--text-muted); letter-spacing: 2px; padding: 8px 0 4px;
+            text-transform: uppercase;
+        }
+
+        /* ── Shortcut Toast ───────────────────────── */
+        .shortcut-toast {
+            position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
+            background: var(--bg-card); border: 1px solid var(--accent);
+            color: var(--accent); font-family: var(--font-mono); font-size: 12px;
+            letter-spacing: 1px; padding: 10px 24px; border-radius: 30px;
+            box-shadow: 0 4px 24px var(--accent-glow); z-index: 10000;
+            opacity: 0; transition: opacity 0.2s, transform 0.2s; pointer-events: none;
+        }
+        .shortcut-toast.show {
+            opacity: 1; transform: translateX(-50%) translateY(0);
+        }
+
         /* ── Sidebar Collapse ────────────────────── */
+        .sidebar {
+            transition: width 0.3s ease;
+            overflow-y: auto;
+            overflow-x: hidden;
         .sidebar {
             transition: width 0.3s ease;
             overflow-y: auto;
@@ -1496,9 +1604,15 @@
         </div>
     </aside>
 
+    <!-- Mobile sidebar overlay -->
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeMobileSidebar()"></div>
+
     <main class="main-content">
         <header class="topbar">
-            <span class="topbar-title">{% block page_title %}Dashboard{% endblock %}</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleMobileSidebar()" aria-label="Toggle menu">&#9776;</button>
+                <span class="topbar-title">{% block page_title %}Dashboard{% endblock %}</span>
+            </div>
             <div class="topbar-right">
                 <span><span class="status-dot online"></span> LIVE</span>
                 <a href="{% url 'toggle_theme' %}" class="theme-toggle-btn" title="Switch to light/dark mode">
@@ -2685,6 +2799,253 @@ document.addEventListener('click', function(e) {
     );
   }
 })();
+</script>
+
+<!-- ── Keyboard Shortcuts Modal (Feature 2) ──────────────────────────── -->
+<div class="kbd-modal-overlay" id="kbdModalOverlay">
+    <div class="kbd-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+        <div class="kbd-modal-title">
+            <span>KEYBOARD SHORTCUTS</span>
+            <button class="kbd-modal-close" onclick="closeKbdModal()" aria-label="Close">&times;</button>
+        </div>
+        <div class="kbd-grid">
+            <div class="kbd-section-title">Navigation (press g then key)</div>
+            <div class="kbd-row"><span class="kbd-label">Dashboard</span><span class="kbd-keys"><kbd>g</kbd><kbd>d</kbd></span></div>
+            <div class="kbd-row"><span class="kbd-label">Signals</span><span class="kbd-keys"><kbd>g</kbd><kbd>s</kbd></span></div>
+            <div class="kbd-row"><span class="kbd-label">Positions</span><span class="kbd-keys"><kbd>g</kbd><kbd>p</kbd></span></div>
+            <div class="kbd-row"><span class="kbd-label">AI Chat</span><span class="kbd-keys"><kbd>g</kbd><kbd>a</kbd></span></div>
+            <div class="kbd-row"><span class="kbd-label">News</span><span class="kbd-keys"><kbd>g</kbd><kbd>n</kbd></span></div>
+            <div class="kbd-row"><span class="kbd-label">Profile</span><span class="kbd-keys"><kbd>g</kbd><kbd>r</kbd></span></div>
+            <div class="kbd-row"><span class="kbd-label">Bot Console</span><span class="kbd-keys"><kbd>g</kbd><kbd>b</kbd></span></div>
+            <div class="kbd-section-title">Actions</div>
+            <div class="kbd-row"><span class="kbd-label">Show shortcuts</span><span class="kbd-keys"><kbd>?</kbd></span></div>
+            <div class="kbd-row"><span class="kbd-label">Close modal</span><span class="kbd-keys"><kbd>Esc</kbd></span></div>
+            <div class="kbd-row"><span class="kbd-label">Toggle theme</span><span class="kbd-keys"><kbd>t</kbd></span></div>
+            <div class="kbd-row"><span class="kbd-label">Mark notifs read</span><span class="kbd-keys"><kbd>n</kbd></span></div>
+            <div class="kbd-row"><span class="kbd-label">Open AI Chat</span><span class="kbd-keys"><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Shortcut Toast ─────────────────────────────────────────────────── -->
+<div class="shortcut-toast" id="shortcutToast"></div>
+
+<script>
+// ── Feature 2: Keyboard Shortcuts ────────────────────────────────────────
+(function() {
+    var gPressed = false;
+    var gTimer = null;
+
+    var routes = {
+        d: { url: '/', label: 'Dashboard' },
+        s: { url: '/signals/', label: 'Signals' },
+        p: { url: '/positions/', label: 'Positions' },
+        a: { url: '/ai/chat/', label: 'AI Chat' },
+        n: { url: '/news/', label: 'News' },
+        r: { url: '/profile/', label: 'Profile' },
+        b: { url: '/bot/console/', label: 'Bot Console' },
+    };
+
+    function isTyping() {
+        var el = document.activeElement;
+        if (!el) return false;
+        var tag = el.tagName.toLowerCase();
+        return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
+    }
+
+    function showToast(msg) {
+        var toast = document.getElementById('shortcutToast');
+        if (!toast) return;
+        toast.textContent = msg;
+        toast.classList.add('show');
+        clearTimeout(toast._timer);
+        toast._timer = setTimeout(function() { toast.classList.remove('show'); }, 1800);
+    }
+
+    function openKbdModal() {
+        var overlay = document.getElementById('kbdModalOverlay');
+        if (overlay) overlay.classList.add('open');
+    }
+
+    window.closeKbdModal = function() {
+        var overlay = document.getElementById('kbdModalOverlay');
+        if (overlay) overlay.classList.remove('open');
+    };
+
+    // Close modal when clicking overlay background
+    var overlay = document.getElementById('kbdModalOverlay');
+    if (overlay) {
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) closeKbdModal();
+        });
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (isTyping()) return;
+
+        var key = e.key;
+        var ctrl = e.ctrlKey || e.metaKey;
+
+        // Ctrl+K / Cmd+K — navigate to AI chat
+        if (ctrl && (key === 'k' || key === 'K')) {
+            e.preventDefault();
+            showToast('Navigating to AI Chat...');
+            setTimeout(function() { window.location.href = '/ai/chat/'; }, 300);
+            return;
+        }
+
+        // Escape — close any open modals
+        if (key === 'Escape') {
+            closeKbdModal();
+            gPressed = false;
+            clearTimeout(gTimer);
+            return;
+        }
+
+        // ? — show shortcuts help
+        if (key === '?') {
+            openKbdModal();
+            return;
+        }
+
+        // g prefix navigation
+        if (gPressed) {
+            clearTimeout(gTimer);
+            gPressed = false;
+            var dest = routes[key];
+            if (dest) {
+                showToast('Navigating to ' + dest.label + '...');
+                setTimeout(function() { window.location.href = dest.url; }, 300);
+            }
+            return;
+        }
+
+        if (key === 'g') {
+            gPressed = true;
+            gTimer = setTimeout(function() { gPressed = false; }, 1500);
+            return;
+        }
+
+        // t — toggle theme
+        if (key === 't') {
+            var themeLink = document.querySelector('.theme-toggle-btn');
+            if (themeLink) {
+                showToast('Toggling theme...');
+                themeLink.click();
+            }
+            return;
+        }
+
+        // n — mark all notifications read
+        if (key === 'n') {
+            var readAllLink = document.querySelector('a[href*="read-all"]');
+            if (readAllLink) {
+                showToast('Marking notifications read...');
+                readAllLink.click();
+            } else {
+                showToast('No notifications to clear');
+            }
+            return;
+        }
+    });
+})();
+
+// ── Feature 3: Theme Transition Patch ────────────────────────────────────
+(function() {
+    var themeBtn = document.querySelector('.theme-toggle-btn');
+    if (!themeBtn) return;
+
+    themeBtn.addEventListener('click', function() {
+        document.body.classList.add('theme-transitioning');
+        setTimeout(function() {
+            document.body.classList.remove('theme-transitioning');
+        }, 400);
+        // Allow the link to navigate normally (Django toggles theme via redirect)
+    });
+})();
+</script>
+
+<!-- ── Mobile Sidebar Toggle ─────────────────────────────────────────── -->
+<script>
+function toggleMobileSidebar() {
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.getElementById('sidebarOverlay');
+    if (!sidebar) return;
+    var isOpen = sidebar.classList.toggle('mobile-open');
+    if (overlay) overlay.classList.toggle('visible', isOpen);
+}
+function closeMobileSidebar() {
+    var sidebar = document.querySelector('.sidebar');
+    var overlay = document.getElementById('sidebarOverlay');
+    if (sidebar) sidebar.classList.remove('mobile-open');
+    if (overlay) overlay.classList.remove('visible');
+}
+// Close sidebar when navigating (mobile)
+document.addEventListener('click', function(e) {
+    var link = e.target.closest('.sidebar .nav-link');
+    if (link && window.innerWidth <= 768) { closeMobileSidebar(); }
+});
+</script>
+
+<!-- ── Pop-Out Panel System ───────────────────────────────────────────── -->
+<script>
+(function(){
+  var _popouts = {};
+
+  function openPopout(panel) {
+    if (_popouts[panel] && !_popouts[panel].closed) {
+      _popouts[panel].focus();
+      return;
+    }
+    var w = 900, h = 640;
+    var left = Math.round((screen.width - w) / 2);
+    var top  = Math.round((screen.height - h) / 3);
+    var url  = '/dashboard/popout/?panel=' + encodeURIComponent(panel);
+    var win  = window.open(url, 'sauron_popout_' + panel,
+      'width=' + w + ',height=' + h + ',left=' + left + ',top=' + top +
+      ',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no,status=no');
+    if (win) { _popouts[panel] = win; }
+  }
+
+  window.addEventListener('message', function(e) {
+    if (!e.data || typeof e.data !== 'object') return;
+    if (e.data.type === 'popout_closed') { delete _popouts[e.data.panel]; }
+  });
+
+  function injectPopoutButtons() {
+    document.querySelectorAll('.card[data-panel]').forEach(function(card) {
+      if (card.querySelector('.popout-btn')) return;
+      var panel = card.getAttribute('data-panel');
+      var header = card.querySelector('.card-header');
+      if (!header) return;
+      var btn = document.createElement('button');
+      btn.className = 'popout-btn';
+      btn.setAttribute('title', 'Open in new window');
+      btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M6 2H2v12h12v-4M9 2h5v5M9 7l5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      btn.style.cssText = 'background:none;border:1px solid var(--border);color:var(--text-muted);cursor:pointer;padding:3px 6px;border-radius:4px;display:inline-flex;align-items:center;margin-left:8px;transition:color .2s,border-color .2s;flex-shrink:0;';
+      btn.addEventListener('mouseenter', function(){ btn.style.color='var(--accent)'; btn.style.borderColor='var(--accent)'; });
+      btn.addEventListener('mouseleave', function(){ btn.style.color='var(--text-muted)'; btn.style.borderColor='var(--border)'; });
+      btn.addEventListener('click', function(e){ e.stopPropagation(); openPopout(panel); });
+      var titleEl = header.querySelector('.card-title, .card-header-title');
+      if (titleEl) { titleEl.style.display='flex'; titleEl.style.alignItems='center'; titleEl.appendChild(btn); }
+      else { header.appendChild(btn); }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', injectPopoutButtons);
+  } else {
+    injectPopoutButtons();
+  }
+  document.addEventListener('htmx:afterSwap', injectPopoutButtons);
+})();
+</script>
+
+<!-- ── PWA: Service Worker Registration ─────────────────────────────── -->
+<script>
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/static/sw.js').catch(function(){});
+}
 </script>
 
 </body>

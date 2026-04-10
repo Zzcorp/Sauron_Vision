@@ -60,3 +60,6 @@ cryptography>=41
 websockets>=12
 aiohttp>=3.9
 uvicorn[standard]>=0.30
+
+# PDF Generation
+reportlab>=4.2

@@ -49,6 +49,26 @@
         transition: all 0.2s;
     }
     .chat-send:hover { background: var(--accent); color: #000; }
+    /* ── Microphone button ── */
+    .chat-mic {
+        padding: 12px 16px; background: var(--bg-card);
+        border: 1px solid var(--border); border-radius: 8px;
+        color: var(--text-secondary); font-size: 16px; cursor: pointer;
+        transition: all 0.2s; display: flex; align-items: center; justify-content: center;
+        min-width: 46px;
+    }
+    .chat-mic:hover { border-color: var(--accent); color: var(--accent); }
+    .chat-mic.recording {
+        border-color: var(--accent-red);
+        color: var(--accent-red);
+        background: var(--accent-red-dim);
+        animation: micPulse 1s ease-in-out infinite;
+    }
+    .chat-mic.unsupported { opacity: 0.3; cursor: not-allowed; }
+    @keyframes micPulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(232, 48, 48, 0.4); }
+        50% { box-shadow: 0 0 0 8px rgba(232, 48, 48, 0); }
+    }
     .quick-actions { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
     .quick-action {
         padding: 6px 14px; border: 1px solid var(--border);
@@ -65,6 +85,12 @@
     .ai-thinking span:nth-child(2) { animation-delay: 0.2s; }
     .ai-thinking span:nth-child(3) { animation-delay: 0.4s; }
     @keyframes aiDot { 0%,80%,100% { opacity: 0.2; } 40% { opacity: 1; } }
+    /* Streaming cursor */
+    .streaming-cursor::after {
+        content: '▋'; animation: blink 0.7s step-end infinite;
+        color: var(--accent); margin-left: 2px;
+    }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 </style>
 {% endblock %}
 
@@ -90,8 +116,9 @@
         </div>
     </div>
     <div class="chat-input-area">
-        <textarea class="chat-input" id="chatInput" placeholder="Ask Sauron anything about your markets..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea>
-        <button class="chat-send" onclick="sendChat()">SEND</button>
+        <textarea class="chat-input" id="chatInput" placeholder="Ask Sauron anything about your markets..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatStream();}"></textarea>
+        <button class="chat-mic" id="micBtn" title="Voice input" onclick="toggleMic()">🎤</button>
+        <button class="chat-send" onclick="sendChatStream()">SEND</button>
     </div>
 </div>
 
@@ -122,31 +149,106 @@ const recentQueries = document.getElementById('recentQueries');
 
 function askAgent(question) {
     chatInput.value = question;
-    sendChat();
+    sendChatStream();
 }
 
-async function sendChat() {
+// ── Streaming send (primary) ──────────────────────────────────────────────
+async function sendChatStream() {
     const msg = chatInput.value.trim();
     if (!msg) return;
     chatInput.value = '';
 
-    // Add user message
     appendMessage('user', msg);
+    trackQuery(msg);
 
-    // Add thinking indicator
+    // Show typing indicator
     const thinkingId = 'thinking-' + Date.now();
-    const thinkingHtml = `<div class="chat-msg ai" id="${thinkingId}"><div class="msg-bubble"><div class="ai-thinking"><span></span><span></span><span></span></div></div></div>`;
-    chatMessages.insertAdjacentHTML('beforeend', thinkingHtml);
+    chatMessages.insertAdjacentHTML('beforeend',
+        `<div class="chat-msg ai" id="${thinkingId}"><div class="msg-bubble"><div class="ai-thinking"><span></span><span></span><span></span></div></div></div>`);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 
-    // Track query
-    const queryEl = document.createElement('div');
-    queryEl.style.cssText = 'padding:6px 0;border-bottom:1px solid rgba(19,48,32,0.3);font-size:11px;';
-    queryEl.textContent = msg.substring(0, 50) + (msg.length > 50 ? '...' : '');
-    if (recentQueries.querySelector('p')) recentQueries.innerHTML = '';
-    recentQueries.prepend(queryEl);
+    try {
+        // Create the streaming AI message bubble
+        const streamId = 'stream-' + Date.now();
+        let fullText = '';
+        let bubbleCreated = false;
 
-    // Call AI API
+        const url = '/api/ai-chat/stream/?message=' + encodeURIComponent(msg);
+        const resp = await fetch(url);
+
+        if (!resp.ok) throw new Error('Stream request failed: ' + resp.status);
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // keep incomplete last line
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const raw = line.slice(6).trim();
+                if (!raw) continue;
+                try {
+                    const event = JSON.parse(raw);
+                    if (event.text) {
+                        // Remove thinking indicator on first chunk
+                        if (!bubbleCreated) {
+                            document.getElementById(thinkingId)?.remove();
+                            const div = document.createElement('div');
+                            div.className = 'chat-msg ai';
+                            div.id = streamId;
+                            div.innerHTML = '<div class="msg-bubble streaming-cursor" id="' + streamId + '-bubble"></div><div class="msg-meta">SAURON AI &middot; streaming...</div>';
+                            chatMessages.appendChild(div);
+                            bubbleCreated = true;
+                        }
+                        fullText += event.text;
+                        const bubble = document.getElementById(streamId + '-bubble');
+                        if (bubble) {
+                            bubble.innerHTML = escapeAndFormat(fullText);
+                        }
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                    } else if (event.done) {
+                        // Finalize: remove cursor, update meta
+                        const bubble = document.getElementById(streamId + '-bubble');
+                        if (bubble) bubble.classList.remove('streaming-cursor');
+                        const streamEl = document.getElementById(streamId);
+                        if (streamEl) {
+                            const meta = streamEl.querySelector('.msg-meta');
+                            if (meta) meta.textContent = 'SAURON AI \u00b7 now';
+                        }
+                    } else if (event.error) {
+                        document.getElementById(thinkingId)?.remove();
+                        appendMessage('ai', 'Streaming error: ' + event.error + '. Retrying...');
+                        await sendChatFallback(msg);
+                        return;
+                    }
+                } catch(e) { /* ignore parse errors */ }
+            }
+        }
+        // If no bubble was ever created (empty response), clean up
+        if (!bubbleCreated) {
+            document.getElementById(thinkingId)?.remove();
+            await sendChatFallback(msg);
+        }
+    } catch (e) {
+        document.getElementById(thinkingId)?.remove();
+        // Fall back to regular POST endpoint
+        await sendChatFallback(msg);
+    }
+}
+
+// ── Fallback non-streaming send ───────────────────────────────────────────
+async function sendChatFallback(msg) {
+    const thinkingId = 'thinking-fallback-' + Date.now();
+    chatMessages.insertAdjacentHTML('beforeend',
+        `<div class="chat-msg ai" id="${thinkingId}"><div class="msg-bubble"><div class="ai-thinking"><span></span><span></span><span></span></div></div></div>`);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
     try {
         const resp = await fetch('/api/ai-chat/', {
             method: 'POST',
@@ -162,18 +264,122 @@ async function sendChat() {
     }
 }
 
+// ── Legacy sendChat (kept for compatibility) ──────────────────────────────
+async function sendChat() { return sendChatStream(); }
+
+function escapeAndFormat(text) {
+    // Basic HTML escaping then newline conversion
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\n/g, '<br>');
+}
+
 function appendMessage(role, text) {
     const div = document.createElement('div');
     div.className = `chat-msg ${role}`;
-    div.innerHTML = `<div class="msg-bubble">${text.replace(/\n/g, '<br>')}</div><div class="msg-meta">${role === 'user' ? 'YOU' : 'SAURON AI'} &middot; now</div>`;
+    div.innerHTML = `<div class="msg-bubble">${escapeAndFormat(text)}</div><div class="msg-meta">${role === 'user' ? 'YOU' : 'SAURON AI'} &middot; now</div>`;
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function trackQuery(msg) {
+    const queryEl = document.createElement('div');
+    queryEl.style.cssText = 'padding:6px 0;border-bottom:1px solid rgba(19,48,32,0.3);font-size:11px;';
+    queryEl.textContent = msg.substring(0, 50) + (msg.length > 50 ? '...' : '');
+    if (recentQueries.querySelector('p')) recentQueries.innerHTML = '';
+    recentQueries.prepend(queryEl);
 }
 
 function getCookie(name) {
     const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
     return v ? v.pop() : '';
 }
+
+// ── Voice Commands (Web Speech API) ──────────────────────────────────────
+(function initVoice() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const micBtn = document.getElementById('micBtn');
+    if (!SpeechRecognition) {
+        micBtn.classList.add('unsupported');
+        micBtn.title = 'Voice input not supported in this browser';
+        micBtn.onclick = null;
+        return;
+    }
+
+    let recognition = null;
+    let isRecording = false;
+    let silenceTimer = null;
+
+    window.toggleMic = function() {
+        if (isRecording) {
+            stopRecording();
+        } else {
+            startRecording();
+        }
+    };
+
+    function startRecording() {
+        recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = function() {
+            isRecording = true;
+            micBtn.classList.add('recording');
+            micBtn.title = 'Recording... click to stop';
+        };
+
+        recognition.onresult = function(event) {
+            clearTimeout(silenceTimer);
+            let transcript = '';
+            for (let i = 0; i < event.results.length; i++) {
+                transcript += event.results[i][0].transcript;
+            }
+            chatInput.value = transcript;
+
+            // Auto-send after 1.5s pause in speech
+            const lastResult = event.results[event.results.length - 1];
+            if (lastResult.isFinal) {
+                silenceTimer = setTimeout(function() {
+                    if (chatInput.value.trim()) {
+                        stopRecording();
+                        sendChatStream();
+                    }
+                }, 1500);
+            }
+        };
+
+        recognition.onerror = function(event) {
+            console.warn('Speech recognition error:', event.error);
+            stopRecording();
+        };
+
+        recognition.onend = function() {
+            if (isRecording) {
+                // Ended unexpectedly — don't auto-restart
+                isRecording = false;
+                micBtn.classList.remove('recording');
+                micBtn.title = 'Voice input';
+            }
+        };
+
+        recognition.start();
+    }
+
+    function stopRecording() {
+        clearTimeout(silenceTimer);
+        isRecording = false;
+        micBtn.classList.remove('recording');
+        micBtn.title = 'Voice input';
+        if (recognition) {
+            recognition.stop();
+            recognition = null;
+        }
+    }
+})();
 </script>
 {% endblock %}
 {% endblock %}

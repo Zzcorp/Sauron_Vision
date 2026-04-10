@@ -30,10 +30,24 @@ def fetch_breaking_news():
 @shared_task
 @guarded_task("scraper_sentiment")
 def fetch_social_sentiment():
-    """Tier 2: Fetch sentiment from Reddit."""
-    # TODO: Implement PRAW integration
-    logger.info("Social sentiment fetch — pending PRAW implementation")
-    return {"status": "pending_implementation"}
+    """Tier 2: Fetch sentiment from Reddit + StockTwits."""
+    from scraping.scrapers.reddit_sentiment import fetch_reddit_sentiment
+    from scraping.scrapers.stocktwits import fetch_trending
+
+    results = {"reddit": 0, "stocktwits": 0}
+    try:
+        reddit_data = fetch_reddit_sentiment(limit=50)
+        results["reddit"] = len(reddit_data)
+    except Exception as e:
+        logger.error(f"Reddit sentiment failed: {e}")
+
+    try:
+        trending = fetch_trending()
+        results["stocktwits"] = len(trending)
+    except Exception as e:
+        logger.error(f"StockTwits trending failed: {e}")
+
+    return {"status": "success", **results}
 
 
 @shared_task
@@ -49,37 +63,117 @@ def check_economic_calendar():
 @guarded_task("scraper_finviz")
 def fetch_finviz_screener():
     """Tier 3: Fetch FinViz screener data."""
-    logger.info("FinViz screener — pending implementation")
-    return {"status": "pending_implementation"}
+    from scraping.scrapers.finviz import fetch_screener_results
+
+    try:
+        results = fetch_screener_results()
+        return {"status": "success", "stocks_found": len(results)}
+    except Exception as e:
+        logger.error(f"FinViz screener failed: {e}")
+        return {"status": "error", "error": str(e)}
 
 
 @shared_task
 @guarded_task("pipeline_sentiment_agg")
 def aggregate_sentiment():
-    """Tier 3: Aggregate sentiment scores."""
-    logger.info("Sentiment aggregation — pending implementation")
-    return {"status": "pending_implementation"}
+    """Tier 3: Aggregate sentiment scores across all sources."""
+    from scraping.models import SentimentSnapshot
+    from instruments.models import Instrument
+    from django.utils import timezone
+    from datetime import timedelta
+    from django.db.models import Avg, Sum
+
+    cutoff = timezone.now() - timedelta(hours=24)
+    instruments = Instrument.objects.filter(is_active=True, is_watchlist=True)
+    aggregated = 0
+
+    for inst in instruments:
+        snapshots = SentimentSnapshot.objects.filter(
+            instrument=inst, timestamp__gte=cutoff
+        )
+        if not snapshots.exists():
+            continue
+
+        agg = snapshots.aggregate(
+            avg_score=Avg("composite_score"),
+            total_volume=Sum("volume"),
+            total_bullish=Sum("bullish_count"),
+            total_bearish=Sum("bearish_count"),
+        )
+        SentimentSnapshot.objects.create(
+            instrument=inst,
+            source="aggregated",
+            timestamp=timezone.now(),
+            composite_score=agg["avg_score"] or 0,
+            volume=agg["total_volume"] or 0,
+            bullish_count=agg["total_bullish"] or 0,
+            bearish_count=agg["total_bearish"] or 0,
+            trending=bool(agg["total_volume"] and agg["total_volume"] > 100),
+        )
+        aggregated += 1
+
+    return {"status": "success", "instruments_aggregated": aggregated}
 
 
 @shared_task
 @guarded_task("scraper_tradingview")
 def fetch_tradingview_ideas():
-    """Tier 4: Fetch TradingView ideas."""
-    logger.info("TradingView scraper — pending implementation")
-    return {"status": "pending_implementation"}
+    """Tier 4: Fetch TradingView ideas + technicals for watchlist."""
+    from scraping.scrapers.tradingview import fetch_trending_ideas, fetch_technical_analysis
+    from instruments.models import Instrument
+
+    results = {"ideas": 0, "technicals": 0}
+    try:
+        ideas = fetch_trending_ideas(limit=20)
+        results["ideas"] = len(ideas)
+    except Exception as e:
+        logger.error(f"TradingView ideas failed: {e}")
+
+    try:
+        watchlist = Instrument.objects.filter(is_watchlist=True, is_active=True)[:20]
+        for inst in watchlist:
+            try:
+                fetch_technical_analysis(inst.symbol)
+                results["technicals"] += 1
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"TradingView technicals failed: {e}")
+
+    return {"status": "success", **results}
 
 
 @shared_task
 @guarded_task("scraper_sec")
 def fetch_sec_filings():
-    """Tier 5: Fetch SEC filings."""
-    logger.info("SEC filings — pending implementation")
-    return {"status": "pending_implementation"}
+    """Tier 5: Fetch SEC filings (13F + insider trades)."""
+    from scraping.scrapers.sec_edgar import fetch_recent_13f_filings, fetch_insider_trades
+
+    results = {"filings_13f": 0, "insider_trades": 0}
+    try:
+        filings = fetch_recent_13f_filings(limit=20)
+        results["filings_13f"] = len(filings)
+    except Exception as e:
+        logger.error(f"SEC 13F fetch failed: {e}")
+
+    try:
+        trades = fetch_insider_trades(limit=20)
+        results["insider_trades"] = len(trades)
+    except Exception as e:
+        logger.error(f"SEC insider trades failed: {e}")
+
+    return {"status": "success", **results}
 
 
 @shared_task
 @guarded_task("scraper_cot")
 def fetch_cot_reports():
-    """Tier 6: Fetch COT reports."""
-    logger.info("COT reports — pending implementation")
-    return {"status": "pending_implementation"}
+    """Tier 6: Fetch CFTC Commitments of Traders reports."""
+    from scraping.scrapers.cot_reports import fetch_latest_cot_report
+
+    try:
+        reports = fetch_latest_cot_report()
+        return {"status": "success", "reports_processed": len(reports)}
+    except Exception as e:
+        logger.error(f"COT reports failed: {e}")
+        return {"status": "error", "error": str(e)}

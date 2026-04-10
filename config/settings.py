@@ -75,6 +75,7 @@ MIDDLEWARE = [
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "core.middleware.CorrelationIdMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -344,3 +345,9 @@ PORTFOLIO_CONFIG = {
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "intro"
 LOGOUT_REDIRECT_URL = "login"
+
+# ============================================================
+# Logging — structured JSON in production, readable in dev
+# ============================================================
+from core.logging_config import build_logging_config  # noqa: E402
+LOGGING = build_logging_config(debug=DEBUG)

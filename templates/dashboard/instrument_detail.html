@@ -15,10 +15,9 @@
     <a href="{% url 'instruments_list' %}" class="btn">← Back</a>
 </div>
 
-<!-- TradingView Lightweight Chart -->
-<div class="card fade-in-up delay-1" style="margin-bottom:20px;">
-    <div class="card-header"><span class="card-title">Price Chart</span></div>
-    <div id="tv-chart" style="height:400px;"></div>
+<!-- TradingView Lightweight Chart (chart widget) -->
+<div class="card fade-in-up delay-1" style="margin-bottom:20px;padding:0;overflow:hidden;">
+    {% include "_partials/chart_widget.html" with chart_id="instrument-main-chart" symbol=instrument.symbol height="420" timeframe="1d" %}
 </div>
 
 <div class="grid grid-2" style="margin-bottom:20px;">
@@ -100,51 +99,5 @@
     {% endif %}
 </div>
 
-{% block extra_js %}
-<!-- TradingView Lightweight Charts -->
-<script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
-<script>
-(function() {
-    const chartContainer = document.getElementById('tv-chart');
-    if (!chartContainer) return;
-
-    const isDark = document.body.classList.contains('light-mode') === false;
-    const chart = LightweightCharts.createChart(chartContainer, {
-        width: chartContainer.clientWidth,
-        height: 400,
-        layout: {
-            background: { color: isDark ? '#0a1a14' : '#ffffff' },
-            textColor: isDark ? '#5a8a6a' : '#4a6a4a',
-        },
-        grid: {
-            vertLines: { color: isDark ? '#133020' : '#e0e8e0' },
-            horzLines: { color: isDark ? '#133020' : '#e0e8e0' },
-        },
-        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-        timeScale: { borderColor: isDark ? '#133020' : '#c0d0c0' },
-    });
-
-    const candleSeries = chart.addCandlestickSeries({
-        upColor: '#00e868',
-        downColor: '#e83030',
-        borderUpColor: '#00e868',
-        borderDownColor: '#e83030',
-        wickUpColor: '#00e868',
-        wickDownColor: '#e83030',
-    });
-
-    // Load price data from JSON
-    const priceData = {{ price_data_json|safe }};
-    if (priceData && priceData.length > 0) {
-        candleSeries.setData(priceData);
-        chart.timeScale().fitContent();
-    }
-
-    // Resize handler
-    window.addEventListener('resize', () => {
-        chart.applyOptions({ width: chartContainer.clientWidth });
-    });
-})();
-</script>
-{% endblock %}
+{% block extra_js %}{% endblock %}
 {% endblock %}

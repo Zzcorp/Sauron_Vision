@@ -160,3 +160,113 @@ class Notification(models.Model):
     @classmethod
     def recent(cls, user, limit=15):
         return cls.objects.filter(user=user).order_by("-created_at")[:limit]
+
+
+class PriceAlert(models.Model):
+    """User-defined price alert."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='price_alerts')
+    instrument = models.ForeignKey('instruments.Instrument', on_delete=models.CASCADE)
+    condition = models.CharField(max_length=10, choices=[
+        ('above', 'Price Above'),
+        ('below', 'Price Below'),
+        ('cross', 'Price Crosses'),
+    ])
+    target_price = models.DecimalField(max_digits=20, decimal_places=8)
+    triggered = models.BooleanField(default=False)
+    triggered_at = models.DateTimeField(null=True, blank=True)
+    notify_telegram = models.BooleanField(default=True)
+    notify_email = models.BooleanField(default=False)
+    note = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.instrument.symbol} {self.condition} {self.target_price}"
+
+
+def check_price_alerts():
+    """Check all active price alerts against current prices."""
+    import logging
+    from market_data.models import LiveQuote
+    from django.utils import timezone
+
+    logger = logging.getLogger(__name__)
+    alerts = PriceAlert.objects.filter(triggered=False).select_related('instrument', 'user')
+    triggered_count = 0
+
+    for alert in alerts:
+        try:
+            quote = LiveQuote.objects.get(instrument=alert.instrument)
+            current_price = quote.last
+
+            should_trigger = False
+            if alert.condition == 'above' and current_price >= alert.target_price:
+                should_trigger = True
+            elif alert.condition == 'below' and current_price <= alert.target_price:
+                should_trigger = True
+            elif alert.condition == 'cross':
+                should_trigger = current_price >= alert.target_price or current_price <= alert.target_price
+
+            if should_trigger:
+                alert.triggered = True
+                alert.triggered_at = timezone.now()
+                alert.save()
+
+                title = f"Price Alert: {alert.instrument.symbol} {alert.condition} {alert.target_price}"
+                body = f"Current price: {current_price}. {alert.note}" if alert.note else f"Current price: {current_price}"
+                Notification.create_for_user(alert.user, 'portfolio', title, body)
+
+                if alert.notify_telegram:
+                    try:
+                        from alerts.channels.telegram_alert import send_telegram
+                        prefs = alert.user.notification_prefs
+                        if prefs.telegram_chat_id:
+                            send_telegram(prefs.telegram_chat_id, f"🔔 {title}\n{body}")
+                    except Exception:
+                        pass
+
+                if alert.notify_email:
+                    try:
+                        from alerts.channels.email_alert import send_email_to_user
+                        send_email_to_user(alert.user, title, body)
+                    except Exception:
+                        pass
+
+                triggered_count += 1
+        except Exception as e:
+            logger.error(f"Price alert check failed for {alert.id}: {e}")
+
+    return triggered_count
+
+
+class WebhookEndpoint(models.Model):
+    """User-configured webhook for receiving alerts (Zapier/IFTTT compatible)."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='webhooks')
+    name = models.CharField(max_length=100)
+    url = models.URLField()
+    secret = models.CharField(max_length=100, blank=True, help_text="Shared secret for HMAC signing")
+    is_active = models.BooleanField(default=True)
+
+    # What events to send
+    on_signal = models.BooleanField(default=True)
+    on_trade = models.BooleanField(default=True)
+    on_alert = models.BooleanField(default=True)
+    on_portfolio = models.BooleanField(default=False)
+    on_news = models.BooleanField(default=False)
+
+    # Stats
+    total_sent = models.IntegerField(default=0)
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    consecutive_failures = models.IntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username}: {self.name} ({'active' if self.is_active else 'disabled'})"
