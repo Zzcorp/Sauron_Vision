@@ -177,13 +177,17 @@ else:
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 try:
+    from urllib.parse import urlparse as _urlparse
     import socket as _sock
+    _parsed = _urlparse(REDIS_URL)
+    _redis_host = _parsed.hostname or "localhost"
+    _redis_port = _parsed.port or 6379
     _rs = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
-    _rs.settimeout(1)
-    _rs.connect(("localhost", 6379))
+    _rs.settimeout(2)
+    _rs.connect((_redis_host, _redis_port))
     _rs.close()
     _redis_available = True
-except (ConnectionRefusedError, OSError):
+except (ConnectionRefusedError, OSError, ValueError):
     _redis_available = False
 
 if _redis_available:
