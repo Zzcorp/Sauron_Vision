@@ -139,12 +139,13 @@
         .nav-links a:hover { color: var(--accent); text-shadow: 0 0 12px rgba(0,232,104,0.3); }
         .nav-links a:hover::after { width: 100%; }
         .nav-links a.btn-access::after { display: none; }
+        .nav-links .btn-access,
         .btn-access {
             display: inline-flex; align-items: center; gap: 8px;
             padding: 10px 28px;
             background: linear-gradient(135deg, var(--accent-dim), var(--accent));
             border: none; border-radius: 6px;
-            color: #020804; font-family: var(--font-d); font-size: 11px;
+            color: #020804 !important; font-family: var(--font-d); font-size: 11px;
             font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
             text-decoration: none; cursor: pointer;
             transition: transform 0.3s, box-shadow 0.3s, background 0.3s;
@@ -531,6 +532,110 @@
 
         /* Count-up */
         .count-up { display: inline-block; }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* LOGIN OVERLAY — inline transition from Wall to Login         */
+        /* ══════════════════════════════════════════════════════════════ */
+        .wall-content {
+            transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1),
+                        transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        body.login-mode .wall-content {
+            opacity: 0;
+            transform: translateY(-30px);
+            pointer-events: none;
+        }
+        body.login-mode .wall-nav {
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.4s ease;
+        }
+
+        .login-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 200;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1) 0.3s;
+        }
+        body.login-mode .login-overlay {
+            opacity: 1; pointer-events: auto;
+        }
+
+        .login-box {
+            width: 400px; max-width: 90vw;
+            transform: translateY(40px) scale(0.95);
+            transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.5s,
+                        opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.5s;
+            opacity: 0;
+        }
+        body.login-mode .login-box {
+            transform: translateY(0) scale(1);
+            opacity: 1;
+        }
+
+        .login-eye-logo {
+            width: 80px; height: 80px; margin: 0 auto 24px;
+            object-fit: contain;
+            filter: drop-shadow(0 0 30px rgba(0,232,104,0.25));
+            animation: heroLogoFloat 6s ease-in-out infinite;
+        }
+        .login-heading {
+            font-family: var(--font-d); font-size: 22px; font-weight: 900;
+            letter-spacing: 6px; color: var(--accent); text-align: center;
+            margin-bottom: 4px; text-shadow: 0 0 30px rgba(0,232,104,0.2);
+        }
+        .login-sub {
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 3px;
+            color: var(--text3); text-align: center; margin-bottom: 32px;
+        }
+        .login-card {
+            background: rgba(10,26,20,0.92); border: 1px solid var(--border);
+            border-radius: 12px; padding: 32px; backdrop-filter: blur(24px);
+            box-shadow: 0 4px 60px rgba(0,0,0,0.6), 0 0 80px rgba(0,232,104,0.04);
+        }
+        .login-field { margin-bottom: 20px; }
+        .login-field label {
+            display: block; font-family: var(--font-m); font-size: 10px;
+            letter-spacing: 3px; color: var(--text3); text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        .login-field input {
+            width: 100%; padding: 12px 16px;
+            background: var(--bg); border: 1px solid var(--border);
+            border-radius: 6px; color: var(--text); font-family: var(--font-m);
+            font-size: 14px; outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .login-field input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 15px rgba(0,232,104,0.1);
+        }
+        .btn-login-submit {
+            width: 100%; padding: 14px;
+            background: linear-gradient(135deg, var(--accent-dim), var(--accent));
+            border: none; border-radius: 6px;
+            color: #020804; font-family: var(--font-d); font-size: 13px;
+            font-weight: 700; letter-spacing: 4px; cursor: pointer;
+            text-transform: uppercase;
+            transition: transform 0.3s, box-shadow 0.3s, background 0.3s;
+        }
+        .btn-login-submit:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 24px rgba(0,232,104,0.4), 0 0 48px rgba(0,232,104,0.15), 0 8px 30px rgba(0,232,104,0.25);
+            background: linear-gradient(135deg, var(--accent), var(--accent-bright));
+        }
+        .login-errors {
+            background: rgba(232,48,48,0.08); border: 1px solid rgba(232,48,48,0.25);
+            border-radius: 6px; padding: 12px; margin-bottom: 20px;
+            font-family: var(--font-m); font-size: 12px; color: var(--accent-red);
+        }
+        .login-back {
+            display: block; text-align: center; margin-top: 20px;
+            font-family: var(--font-m); font-size: 11px; letter-spacing: 2px;
+            color: var(--text3); text-decoration: none; text-transform: uppercase;
+            transition: color 0.3s;
+        }
+        .login-back:hover { color: var(--accent); }
     </style>
 </head>
 <body>
@@ -563,6 +668,11 @@
         <ellipse cx="400" cy="400" rx="120" ry="140" fill="none" stroke="#00e868" stroke-width="0.3" opacity="0.15" transform="rotate(-20 400 400)"/>
     </g>
 </svg>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- WALL CONTENT — wraps all page content for fade-out transition      -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="wall-content" id="wallContent">
 
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <!-- NAVIGATION                                                         -->
@@ -988,6 +1098,36 @@
     </div>
 </footer>
 
+</div><!-- /.wall-content -->
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- LOGIN OVERLAY — appears when user clicks a login/access button     -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="login-overlay" id="loginOverlay">
+    <div class="login-box">
+        <img class="login-eye-logo" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision">
+        <h1 class="login-heading">SAURON VISION</h1>
+        <p class="login-sub">AUTHENTICATE TO PROCEED</p>
+        <div class="login-card">
+            <div class="login-errors" id="loginErrors" style="display:none;"></div>
+            <form method="post" action="{% url 'login' %}" id="loginForm">
+                {% csrf_token %}
+                <div class="login-field">
+                    <label for="id_username">Operator ID</label>
+                    <input type="text" name="username" id="id_username" autocomplete="username" required>
+                </div>
+                <div class="login-field">
+                    <label for="id_password">Access Key</label>
+                    <input type="password" name="password" id="id_password" autocomplete="current-password" required>
+                </div>
+                <input type="hidden" name="next" value="{% url 'intro' %}">
+                <button type="submit" class="btn-login-submit">Initialize Session</button>
+            </form>
+            <a href="#" class="login-back" id="loginBack">&larr; Back to The Wall</a>
+        </div>
+    </div>
+</div>
+
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <!-- SCRIPTS                                                            -->
 <!-- ═══════════════════════════════════════════════════════════════════ -->
@@ -1161,6 +1301,35 @@
             }
         });
     });
+
+    // ── Login transition ─────────────────────────────────────────────
+    // Intercept all login/access links → fade out wall, reveal login form
+    var loginLinks = document.querySelectorAll('a[href="' + '{% url "login" %}' + '"], a.btn-access');
+    loginLinks.forEach(function(link) {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            // Scroll to top smoothly first
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            // Small delay so scroll starts, then trigger transition
+            setTimeout(function() {
+                document.body.classList.add('login-mode');
+                // Focus username field after transition completes
+                setTimeout(function() {
+                    var usernameField = document.getElementById('id_username');
+                    if (usernameField) usernameField.focus();
+                }, 900);
+            }, 200);
+        });
+    });
+
+    // Back button — return from login to wall
+    var loginBack = document.getElementById('loginBack');
+    if (loginBack) {
+        loginBack.addEventListener('click', function(e) {
+            e.preventDefault();
+            document.body.classList.remove('login-mode');
+        });
+    }
 })();
 </script>
 </body>
