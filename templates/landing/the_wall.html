@@ -1,0 +1,1103 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sauron Vision — Institutional Trading Intelligence</title>
+    <link rel="icon" type="image/png" href="{% static 'logo/logo_SV.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'logo/logo_SV.png' %}">
+    <meta property="og:title" content="Sauron Vision — Institutional Trading Intelligence">
+    <meta property="og:description" content="AI-powered trading platform. Multi-asset signals, autonomous agents, and institutional-grade analytics.">
+    <meta property="og:image" content="{% static 'logo/logo_SV.png' %}">
+    <meta name="theme-color" content="#00e868">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* ══════════════════════════════════════════════════════════════ */
+        /* ROOT & RESET                                                  */
+        /* ══════════════════════════════════════════════════════════════ */
+        :root {
+            --bg: #030806; --bg2: #060e0a; --bg3: #0a1a14;
+            --accent: #00e868; --accent-dim: #0a5028; --accent-glow: rgba(0,232,104,0.12);
+            --accent-bright: #40ff90; --accent-red: #e83030;
+            --gold: #d8b020; --blue: #30a0e8; --purple: #8840d0;
+            --text: #daf0e6; --text2: #7aaa8a; --text3: #3a6850;
+            --border: #133020; --border-glow: #1a4030;
+            --font-d: 'Orbitron', sans-serif;
+            --font-h: 'Rajdhani', sans-serif;
+            --font-m: 'Share Tech Mono', monospace;
+        }
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; overflow-x: hidden; }
+        body {
+            background: var(--bg); color: var(--text); font-family: var(--font-h);
+            font-size: 16px; line-height: 1.6; overflow-x: hidden;
+        }
+        ::selection { background: var(--accent); color: var(--bg); }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* UTILITY                                                       */
+        /* ══════════════════════════════════════════════════════════════ */
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 40px; }
+        @media (max-width: 768px) { .container { padding: 0 20px; } }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* REVEAL ANIMATION SYSTEM                                       */
+        /* ══════════════════════════════════════════════════════════════ */
+        .reveal {
+            opacity: 0; transform: translateY(60px);
+            transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .reveal.visible { opacity: 1; transform: translateY(0); }
+        .reveal-left { opacity: 0; transform: translateX(-80px);
+            transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
+        .reveal-left.visible { opacity: 1; transform: translateX(0); }
+        .reveal-right { opacity: 0; transform: translateX(80px);
+            transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
+        .reveal-right.visible { opacity: 1; transform: translateX(0); }
+        .reveal-scale { opacity: 0; transform: scale(0.85);
+            transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
+        .reveal-scale.visible { opacity: 1; transform: scale(1); }
+        .delay-1 { transition-delay: 0.1s; } .delay-2 { transition-delay: 0.2s; }
+        .delay-3 { transition-delay: 0.3s; } .delay-4 { transition-delay: 0.4s; }
+        .delay-5 { transition-delay: 0.5s; } .delay-6 { transition-delay: 0.6s; }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* FIXED BACKGROUND LAYERS                                       */
+        /* ══════════════════════════════════════════════════════════════ */
+        #bgCanvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+        .grid-bg {
+            position: fixed; top: -50%; left: -50%; width: 200%; height: 200%; z-index: 0;
+            background-image:
+                linear-gradient(rgba(0,232,104,0.025) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,232,104,0.025) 1px, transparent 1px);
+            background-size: 80px 80px;
+            animation: gridDrift 40s linear infinite;
+            pointer-events: none;
+        }
+        @keyframes gridDrift { 0% { transform: translate(0,0); } 100% { transform: translate(80px,80px); } }
+
+        .globe-eye-fixed {
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90vmin; height: 90vmin;
+            z-index: 0; pointer-events: none; opacity: 0.04;
+        }
+        .globe-eye-fixed .globe-spin {
+            transform-origin: 400px 400px;
+            animation: globeRotate 80s linear infinite;
+        }
+        @keyframes globeRotate { 0% { transform: rotate(0); } 100% { transform: rotate(360deg); } }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* FLOATING NAV                                                  */
+        /* ══════════════════════════════════════════════════════════════ */
+        .wall-nav {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            padding: 18px 40px; display: flex; align-items: center;
+            justify-content: space-between;
+            background: transparent;
+            transition: background 0.4s, box-shadow 0.4s, backdrop-filter 0.4s;
+        }
+        .wall-nav.scrolled {
+            background: rgba(3,8,6,0.9);
+            box-shadow: 0 2px 40px rgba(0,0,0,0.5);
+            backdrop-filter: blur(20px);
+        }
+        .nav-brand {
+            display: flex; align-items: center; gap: 12px;
+            text-decoration: none;
+        }
+        .nav-brand img { width: 36px; height: 36px; object-fit: contain; }
+        .nav-brand-text {
+            font-family: var(--font-d); font-size: 14px; font-weight: 700;
+            letter-spacing: 4px; color: var(--accent);
+            text-shadow: 0 0 20px rgba(0,232,104,0.2);
+        }
+        .nav-links { display: flex; align-items: center; gap: 32px; }
+        .nav-links a {
+            font-family: var(--font-m); font-size: 11px; letter-spacing: 2px;
+            color: var(--text2); text-decoration: none; text-transform: uppercase;
+            transition: color 0.3s;
+        }
+        .nav-links a:hover { color: var(--accent); }
+        .btn-access {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 10px 28px;
+            background: linear-gradient(135deg, var(--accent-dim), var(--accent));
+            border: none; border-radius: 6px;
+            color: #020804; font-family: var(--font-d); font-size: 11px;
+            font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+            text-decoration: none; cursor: pointer;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .btn-access:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(0,232,104,0.3);
+        }
+        @media (max-width: 768px) {
+            .wall-nav { padding: 14px 20px; }
+            .nav-links a:not(.btn-access) { display: none; }
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* HERO SECTION                                                  */
+        /* ══════════════════════════════════════════════════════════════ */
+        .hero {
+            position: relative; min-height: 100vh;
+            display: flex; align-items: center; justify-content: center;
+            text-align: center; z-index: 1;
+            padding: 120px 40px 80px;
+        }
+        .hero-content { position: relative; z-index: 2; max-width: 900px; }
+        .hero-badge {
+            display: inline-block;
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 4px;
+            color: var(--gold); text-transform: uppercase;
+            padding: 6px 20px; border: 1px solid rgba(216,176,32,0.3);
+            border-radius: 30px; margin-bottom: 32px;
+            background: rgba(216,176,32,0.05);
+        }
+        .hero-logo {
+            width: 100px; height: 100px; margin: 0 auto 28px;
+            animation: heroLogoFloat 6s ease-in-out infinite;
+            filter: drop-shadow(0 0 30px rgba(0,232,104,0.15));
+        }
+        @keyframes heroLogoFloat {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-12px); }
+        }
+        .hero-title {
+            font-family: var(--font-d); font-size: clamp(36px, 6vw, 72px);
+            font-weight: 900; letter-spacing: 8px; line-height: 1.1;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+        .hero-title .accent { color: var(--accent);
+            text-shadow: 0 0 40px rgba(0,232,104,0.2), 0 0 80px rgba(0,232,104,0.08); }
+        .hero-subtitle {
+            font-family: var(--font-m); font-size: clamp(11px, 1.5vw, 14px);
+            letter-spacing: 6px; color: var(--text3); margin-bottom: 48px;
+            text-transform: uppercase;
+        }
+        .hero-desc {
+            font-family: var(--font-h); font-size: clamp(16px, 2vw, 20px);
+            font-weight: 400; color: var(--text2); max-width: 640px;
+            margin: 0 auto 52px; line-height: 1.7;
+        }
+        .hero-cta { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }
+        .btn-primary {
+            padding: 16px 44px;
+            background: linear-gradient(135deg, var(--accent-dim), var(--accent));
+            border: none; border-radius: 8px;
+            color: #020804; font-family: var(--font-d); font-size: 13px;
+            font-weight: 700; letter-spacing: 4px; text-transform: uppercase;
+            text-decoration: none; cursor: pointer;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .btn-primary:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 40px rgba(0,232,104,0.3);
+        }
+        .btn-outline {
+            padding: 16px 44px;
+            background: transparent;
+            border: 1px solid var(--border-glow); border-radius: 8px;
+            color: var(--accent); font-family: var(--font-d); font-size: 13px;
+            font-weight: 700; letter-spacing: 4px; text-transform: uppercase;
+            text-decoration: none; cursor: pointer;
+            transition: transform 0.3s, border-color 0.3s, box-shadow 0.3s;
+        }
+        .btn-outline:hover {
+            transform: translateY(-3px);
+            border-color: var(--accent);
+            box-shadow: 0 12px 40px rgba(0,232,104,0.1);
+        }
+
+        /* Hero scroll indicator */
+        .scroll-indicator {
+            position: absolute; bottom: 40px; left: 50%;
+            transform: translateX(-50%);
+            display: flex; flex-direction: column; align-items: center; gap: 8px;
+        }
+        .scroll-indicator span {
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 3px;
+            color: var(--text3); text-transform: uppercase;
+        }
+        .scroll-arrow {
+            width: 20px; height: 20px; border-right: 1px solid var(--text3);
+            border-bottom: 1px solid var(--text3);
+            transform: rotate(45deg);
+            animation: scrollBounce 2s ease-in-out infinite;
+        }
+        @keyframes scrollBounce {
+            0%, 100% { transform: rotate(45deg) translateY(0); opacity: 0.5; }
+            50% { transform: rotate(45deg) translateY(8px); opacity: 1; }
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* LIVE TICKER BAR                                               */
+        /* ══════════════════════════════════════════════════════════════ */
+        .wall-ticker {
+            position: relative; z-index: 2;
+            background: rgba(6,14,10,0.95);
+            border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+            padding: 14px 0; overflow: hidden;
+        }
+        .ticker-track {
+            display: flex; gap: 48px; align-items: center;
+            animation: tickerScroll 30s linear infinite; white-space: nowrap;
+        }
+        @keyframes tickerScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        .ticker-sym { font-family: var(--font-d); font-size: 11px; letter-spacing: 2px; color: var(--text3); }
+        .ticker-price { font-family: var(--font-m); font-size: 13px; color: var(--text); margin-left: 8px; }
+        .ticker-chg { font-family: var(--font-m); font-size: 11px; margin-left: 6px; }
+        .ticker-chg.up { color: var(--accent); } .ticker-chg.down { color: var(--accent-red); }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* SECTION COMMON                                                */
+        /* ══════════════════════════════════════════════════════════════ */
+        .wall-section {
+            position: relative; z-index: 1;
+            padding: 140px 0;
+        }
+        .wall-section:nth-child(even) { background: rgba(6,14,10,0.4); }
+        .section-label {
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 5px;
+            color: var(--accent); text-transform: uppercase; margin-bottom: 16px;
+        }
+        .section-title {
+            font-family: var(--font-d); font-size: clamp(24px, 4vw, 42px);
+            font-weight: 700; letter-spacing: 3px; color: var(--text);
+            margin-bottom: 20px; line-height: 1.2;
+        }
+        .section-desc {
+            font-size: 17px; color: var(--text2); max-width: 600px;
+            line-height: 1.7; margin-bottom: 60px;
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* STATS BAR                                                     */
+        /* ══════════════════════════════════════════════════════════════ */
+        .stats-bar {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px;
+            background: var(--border); border-radius: 12px; overflow: hidden;
+            margin-bottom: 100px;
+        }
+        @media (max-width: 768px) { .stats-bar { grid-template-columns: repeat(2, 1fr); } }
+        .stat-cell {
+            background: var(--bg2); padding: 36px 24px; text-align: center;
+        }
+        .stat-number {
+            font-family: var(--font-d); font-size: 32px; font-weight: 800;
+            color: var(--accent); margin-bottom: 6px;
+            text-shadow: 0 0 20px rgba(0,232,104,0.15);
+        }
+        .stat-label {
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 3px;
+            color: var(--text3); text-transform: uppercase;
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* FEATURE CARDS                                                 */
+        /* ══════════════════════════════════════════════════════════════ */
+        .features-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+        }
+        @media (max-width: 1024px) { .features-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 640px) { .features-grid { grid-template-columns: 1fr; } }
+        .feature-card {
+            background: rgba(10,26,20,0.6); border: 1px solid var(--border);
+            border-radius: 12px; padding: 36px 28px;
+            transition: border-color 0.4s, transform 0.4s, box-shadow 0.4s;
+            backdrop-filter: blur(8px);
+        }
+        .feature-card:hover {
+            border-color: var(--accent-dim);
+            transform: translateY(-4px);
+            box-shadow: 0 16px 48px rgba(0,0,0,0.4), 0 0 40px rgba(0,232,104,0.04);
+        }
+        .feature-icon {
+            width: 48px; height: 48px; border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px; margin-bottom: 20px;
+            background: rgba(0,232,104,0.06); border: 1px solid var(--border);
+        }
+        .feature-icon.blue { background: rgba(48,160,232,0.06); }
+        .feature-icon.gold { background: rgba(216,176,32,0.06); }
+        .feature-icon.purple { background: rgba(136,64,208,0.06); }
+        .feature-icon.red { background: rgba(232,48,48,0.06); }
+        .feature-title {
+            font-family: var(--font-d); font-size: 13px; font-weight: 700;
+            letter-spacing: 2px; color: var(--text); margin-bottom: 12px;
+        }
+        .feature-text {
+            font-size: 14px; color: var(--text2); line-height: 1.7;
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* SPLIT SECTIONS (image + text)                                 */
+        /* ══════════════════════════════════════════════════════════════ */
+        .split { display: grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: center; }
+        @media (max-width: 900px) { .split { grid-template-columns: 1fr; gap: 40px; } }
+        .split-visual {
+            position: relative; border-radius: 16px; overflow: hidden;
+            background: var(--bg2); border: 1px solid var(--border);
+            aspect-ratio: 4 / 3;
+        }
+        .split-visual-inner {
+            position: absolute; inset: 0; display: flex;
+            align-items: center; justify-content: center;
+            font-family: var(--font-m); font-size: 11px;
+            color: var(--text3); letter-spacing: 2px;
+        }
+        /* Animated grid inside the visual */
+        .visual-grid {
+            position: absolute; inset: 0;
+            background-image:
+                linear-gradient(rgba(0,232,104,0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,232,104,0.05) 1px, transparent 1px);
+            background-size: 30px 30px;
+        }
+        .visual-pulse {
+            position: absolute; top: 50%; left: 50%;
+            width: 120px; height: 120px;
+            border-radius: 50%; border: 1px solid var(--accent);
+            transform: translate(-50%, -50%);
+            animation: vPulse 3s ease-in-out infinite;
+            opacity: 0.3;
+        }
+        .visual-pulse:nth-child(2) { width: 200px; height: 200px; animation-delay: 0.5s; opacity: 0.15; }
+        .visual-pulse:nth-child(3) { width: 280px; height: 280px; animation-delay: 1s; opacity: 0.08; }
+        @keyframes vPulse {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.3; }
+            50% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.1; }
+        }
+        .visual-dot {
+            position: absolute; width: 8px; height: 8px; border-radius: 50%;
+            background: var(--accent); box-shadow: 0 0 12px var(--accent);
+            animation: dotBlink 2s ease-in-out infinite;
+        }
+        @keyframes dotBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .visual-label {
+            position: absolute; padding: 4px 10px; border-radius: 4px;
+            background: rgba(0,0,0,0.6); border: 1px solid var(--border);
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 1px;
+            color: var(--accent); white-space: nowrap;
+        }
+
+        .split-content .check-list { list-style: none; margin-top: 32px; }
+        .split-content .check-list li {
+            display: flex; align-items: flex-start; gap: 12px;
+            padding: 10px 0; font-size: 15px; color: var(--text2);
+            border-bottom: 1px solid rgba(19,48,32,0.4);
+        }
+        .split-content .check-list li:last-child { border-bottom: 0; }
+        .check-mark {
+            flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%;
+            background: rgba(0,232,104,0.08); border: 1px solid var(--accent-dim);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px; color: var(--accent); margin-top: 2px;
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* TECHNOLOGY BADGES                                             */
+        /* ══════════════════════════════════════════════════════════════ */
+        .tech-grid {
+            display: flex; flex-wrap: wrap; gap: 12px;
+            justify-content: center; margin-top: 48px;
+        }
+        .tech-badge {
+            padding: 8px 20px; border: 1px solid var(--border);
+            border-radius: 30px; font-family: var(--font-m);
+            font-size: 10px; letter-spacing: 2px; color: var(--text2);
+            text-transform: uppercase; transition: border-color 0.3s, color 0.3s;
+        }
+        .tech-badge:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* CTA SECTION                                                   */
+        /* ══════════════════════════════════════════════════════════════ */
+        .cta-section {
+            position: relative; z-index: 1; padding: 160px 0;
+            text-align: center;
+        }
+        .cta-title {
+            font-family: var(--font-d); font-size: clamp(28px, 4vw, 48px);
+            font-weight: 800; letter-spacing: 4px; color: var(--text);
+            margin-bottom: 20px;
+        }
+        .cta-desc {
+            font-size: 18px; color: var(--text2); max-width: 560px;
+            margin: 0 auto 48px; line-height: 1.7;
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* FOOTER                                                        */
+        /* ══════════════════════════════════════════════════════════════ */
+        .wall-footer {
+            position: relative; z-index: 1;
+            border-top: 1px solid var(--border);
+            padding: 40px 0; text-align: center;
+        }
+        .footer-text {
+            font-family: var(--font-m); font-size: 10px;
+            letter-spacing: 3px; color: var(--text3);
+        }
+        .footer-text .accent { color: var(--accent); }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* PARALLAX DEPTH LAYERS                                         */
+        /* ══════════════════════════════════════════════════════════════ */
+        .parallax-layer {
+            will-change: transform;
+            transition: transform 0.1s linear;
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* SEPARATOR LINE                                                */
+        /* ══════════════════════════════════════════════════════════════ */
+        .sep {
+            width: 60px; height: 1px; background: var(--accent-dim);
+            margin: 0 auto 40px;
+        }
+        .sep-left { margin: 0 0 40px 0; }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* SCAN LINE (cinematic)                                         */
+        /* ══════════════════════════════════════════════════════════════ */
+        .scan-line {
+            position: fixed; top: 0; left: 0; bottom: 0; width: 3px;
+            z-index: 1; animation: scanRTL 12s linear infinite;
+            pointer-events: none;
+        }
+        .scan-line::before {
+            content: ''; position: absolute; top: 0; left: -40px; bottom: 0; width: 80px;
+            background: linear-gradient(90deg, transparent, rgba(0,232,104,0.04), transparent);
+        }
+        .scan-line::after {
+            content: ''; position: absolute; top: 0; left: 0; bottom: 0; width: 3px;
+            background: linear-gradient(180deg, transparent 10%, rgba(0,232,104,0.3) 50%, transparent 90%);
+            box-shadow: 0 0 12px rgba(0,232,104,0.2);
+        }
+        @keyframes scanRTL { 0% { left: 100%; } 100% { left: -80px; } }
+
+        /* 4-column data sources grid */
+        .sources-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 16px !important; margin-top: 48px; }
+        @media (max-width: 900px) { .sources-grid { grid-template-columns: repeat(2, 1fr) !important; } }
+        @media (max-width: 480px) { .sources-grid { grid-template-columns: 1fr !important; } }
+
+        /* Count-up animation for numbers */
+        .count-up { display: inline-block; }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- BACKGROUND LAYERS                                                  -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="grid-bg"></div>
+<canvas id="bgCanvas"></canvas>
+<div class="scan-line"></div>
+
+<svg class="globe-eye-fixed" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+    <g class="eye-static">
+        <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="2"/>
+        <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.4"/>
+        <circle cx="400" cy="400" r="160" fill="none" stroke="#00e868" stroke-width="1.5"/>
+        <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="2"/>
+        <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.12"/>
+        <path d="M 10,400 Q 200,100 400,160 Q 600,100 790,400" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
+        <path d="M 10,400 Q 200,700 400,640 Q 600,700 790,400" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
+    </g>
+    <g class="globe-spin">
+        <ellipse cx="400" cy="400" rx="50" ry="140" fill="none" stroke="#00e868" stroke-width="0.5" opacity="0.35"/>
+        <ellipse cx="400" cy="400" rx="100" ry="140" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.25"/>
+        <ellipse cx="400" cy="400" rx="140" ry="50" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.25"/>
+        <line x1="260" y1="340" x2="540" y2="340" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
+        <line x1="260" y1="400" x2="540" y2="400" stroke="#00e868" stroke-width="0.5" opacity="0.3"/>
+        <line x1="260" y1="460" x2="540" y2="460" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
+        <ellipse cx="400" cy="400" rx="30" ry="140" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.2" transform="rotate(25 400 400)"/>
+        <ellipse cx="400" cy="400" rx="120" ry="140" fill="none" stroke="#00e868" stroke-width="0.3" opacity="0.15" transform="rotate(-20 400 400)"/>
+    </g>
+</svg>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- NAVIGATION                                                         -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<nav class="wall-nav" id="wallNav">
+    <a href="#" class="nav-brand">
+        <img src="{% static 'logo/logo_SV.png' %}" alt="SV">
+        <span class="nav-brand-text">SAURON VISION</span>
+    </a>
+    <div class="nav-links">
+        <a href="#platform">Platform</a>
+        <a href="#signals">Signals</a>
+        <a href="#agents">AI Agents</a>
+        <a href="#technology">Technology</a>
+        <a href="{% url 'login' %}" class="btn-access">Access Terminal</a>
+    </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- HERO                                                               -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="hero" id="hero">
+    <div class="hero-content">
+        <div class="hero-badge reveal delay-1">Institutional-Grade Intelligence</div>
+        <img class="hero-logo reveal delay-2" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision">
+        <h1 class="hero-title reveal delay-3">
+            <span class="accent">SAURON</span> VISION
+        </h1>
+        <p class="hero-subtitle reveal delay-4">The All-Seeing Trading Intelligence Platform</p>
+        <p class="hero-desc reveal delay-5">
+            Multi-asset surveillance across global equities, forex, commodities, and crypto.
+            Autonomous AI agents, real-time signal generation, and institutional-grade risk analytics
+            &mdash; engineered for decisive capital allocation.
+        </p>
+        <div class="hero-cta reveal delay-6">
+            <a href="{% url 'login' %}" class="btn-primary">Initialize Session</a>
+            <a href="#platform" class="btn-outline">Explore Platform</a>
+        </div>
+    </div>
+    <div class="scroll-indicator">
+        <span>Scroll</span>
+        <div class="scroll-arrow"></div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- LIVE TICKER                                                        -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="wall-ticker">
+    <div class="ticker-track" id="wallTickerTrack">
+        <!-- Populated by JS with sample data -->
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- STATS                                                              -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="platform">
+    <div class="container">
+        <div class="stats-bar reveal">
+            <div class="stat-cell">
+                <div class="stat-number"><span class="count-up" data-target="14">0</span></div>
+                <div class="stat-label">Global Exchanges</div>
+            </div>
+            <div class="stat-cell">
+                <div class="stat-number"><span class="count-up" data-target="6">0</span></div>
+                <div class="stat-label">Asset Classes</div>
+            </div>
+            <div class="stat-cell">
+                <div class="stat-number"><span class="count-up" data-target="8">0</span></div>
+                <div class="stat-label">AI Agents</div>
+            </div>
+            <div class="stat-cell">
+                <div class="stat-number"><span class="count-up" data-target="24">0</span>/7</div>
+                <div class="stat-label">Surveillance</div>
+            </div>
+        </div>
+
+        <!-- PLATFORM OVERVIEW -->
+        <div class="section-label reveal">The Platform</div>
+        <h2 class="section-title reveal delay-1">Complete Market Dominance</h2>
+        <p class="section-desc reveal delay-2">
+            A unified command center that aggregates market intelligence from every corner of the
+            financial world. From equities and bonds to crypto and commodities &mdash; nothing escapes the Eye.
+        </p>
+
+        <div class="features-grid">
+            <div class="feature-card reveal delay-1">
+                <div class="feature-icon">&#x1F4CA;</div>
+                <div class="feature-title">Real-Time Dashboard</div>
+                <div class="feature-text">
+                    Multi-panel command center with live quotes, portfolio tracking,
+                    TradingView charts, and customizable layout presets. Every data point, one glance.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-2">
+                <div class="feature-icon blue">&#x1F310;</div>
+                <div class="feature-title">Multi-Asset Coverage</div>
+                <div class="feature-text">
+                    Stocks, forex, commodities, crypto, bonds, and indices.
+                    14 global exchanges monitored simultaneously with sub-second latency.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-3">
+                <div class="feature-icon gold">&#x1F4B0;</div>
+                <div class="feature-title">Portfolio Engine</div>
+                <div class="feature-text">
+                    Real-time P&L, exposure analytics, Value-at-Risk calculations,
+                    and automated daily snapshots. Monte Carlo simulations for stress testing.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-4">
+                <div class="feature-icon purple">&#x1F916;</div>
+                <div class="feature-title">Autonomous Bots</div>
+                <div class="feature-text">
+                    Paper trading and live execution engines with circuit breakers,
+                    kill switches, and reconciliation. Shadow mode for risk-free validation.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-5">
+                <div class="feature-icon">&#x1F4F0;</div>
+                <div class="feature-title">News Intelligence</div>
+                <div class="feature-text">
+                    AI-powered news aggregation from Reuters, Bloomberg, SEC filings,
+                    and social media. Sentiment scoring and urgency classification in real time.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-6">
+                <div class="feature-icon red">&#x26A0;</div>
+                <div class="feature-title">Risk Management</div>
+                <div class="feature-text">
+                    Historical, parametric, and Monte Carlo VaR. Stress testing across 6 scenarios.
+                    Position sizing with Kelly criterion and ATR-based allocation.
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- SIGNAL ENGINE                                                      -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="signals">
+    <div class="container">
+        <div class="split">
+            <div class="split-visual reveal-left">
+                <div class="visual-grid"></div>
+                <div class="visual-pulse"></div>
+                <div class="visual-pulse"></div>
+                <div class="visual-pulse"></div>
+                <div class="visual-dot" style="top:30%;left:25%;animation-delay:0s;"></div>
+                <div class="visual-dot" style="top:55%;left:70%;animation-delay:0.7s;"></div>
+                <div class="visual-dot" style="top:75%;left:40%;animation-delay:1.4s;"></div>
+                <div class="visual-dot" style="top:20%;left:65%;animation-delay:0.3s;background:var(--accent-red);box-shadow:0 0 12px var(--accent-red);"></div>
+                <div class="visual-label" style="top:28%;left:22%;">EURUSD BUY 0.87</div>
+                <div class="visual-label" style="top:53%;left:67%;">BTCUSD STRONG 0.94</div>
+                <div class="visual-label" style="top:73%;left:37%;">XAUUSD HOLD 0.62</div>
+                <div class="visual-label" style="top:18%;left:62%;border-color:var(--accent-red);color:var(--accent-red);">SPX SELL 0.81</div>
+                <div class="split-visual-inner">SIGNAL RADAR</div>
+            </div>
+            <div class="split-content reveal-right">
+                <div class="section-label">Signal Engine</div>
+                <h2 class="section-title">Precision Signal<br>Generation</h2>
+                <div class="sep sep-left"></div>
+                <p class="section-desc" style="margin-bottom:0;">
+                    Multi-factor signal engine combining technical analysis, sentiment data,
+                    and machine learning models. Each signal scored, classified, and delivered
+                    with institutional-grade confidence metrics.
+                </p>
+                <ul class="check-list">
+                    <li><span class="check-mark">&#x2713;</span>Technical + fundamental + sentiment fusion</li>
+                    <li><span class="check-mark">&#x2713;</span>Real-time watchlist and full universe scanning</li>
+                    <li><span class="check-mark">&#x2713;</span>Regime detection via Hurst exponent analysis</li>
+                    <li><span class="check-mark">&#x2713;</span>Sector rotation and earnings prediction models</li>
+                    <li><span class="check-mark">&#x2713;</span>Multi-timeframe confluence with deduplication</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- AI AGENTS                                                          -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="agents">
+    <div class="container">
+        <div class="split" style="direction: rtl;">
+            <div class="split-visual reveal-right" style="direction: ltr;">
+                <div class="visual-grid"></div>
+                <svg viewBox="0 0 400 300" style="position:absolute;inset:0;width:100%;height:100%;opacity:0.6;">
+                    <!-- Neural network visualization -->
+                    <circle cx="60" cy="80" r="6" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.5"/>
+                    <circle cx="60" cy="150" r="6" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.5"/>
+                    <circle cx="60" cy="220" r="6" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.5"/>
+                    <circle cx="160" cy="100" r="6" fill="none" stroke="#30a0e8" stroke-width="0.8" opacity="0.5"/>
+                    <circle cx="160" cy="150" r="6" fill="none" stroke="#30a0e8" stroke-width="0.8" opacity="0.5"/>
+                    <circle cx="160" cy="200" r="6" fill="none" stroke="#30a0e8" stroke-width="0.8" opacity="0.5"/>
+                    <circle cx="260" cy="120" r="6" fill="none" stroke="#d8b020" stroke-width="0.8" opacity="0.5"/>
+                    <circle cx="260" cy="180" r="6" fill="none" stroke="#d8b020" stroke-width="0.8" opacity="0.5"/>
+                    <circle cx="340" cy="150" r="8" fill="#00e868" opacity="0.15" stroke="#00e868" stroke-width="1"/>
+                    <!-- Connections -->
+                    <line x1="66" y1="80" x2="154" y2="100" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
+                    <line x1="66" y1="80" x2="154" y2="150" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
+                    <line x1="66" y1="150" x2="154" y2="100" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
+                    <line x1="66" y1="150" x2="154" y2="150" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
+                    <line x1="66" y1="150" x2="154" y2="200" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
+                    <line x1="66" y1="220" x2="154" y2="150" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
+                    <line x1="66" y1="220" x2="154" y2="200" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
+                    <line x1="166" y1="100" x2="254" y2="120" stroke="#30a0e8" stroke-width="0.4" opacity="0.2"/>
+                    <line x1="166" y1="100" x2="254" y2="180" stroke="#30a0e8" stroke-width="0.4" opacity="0.2"/>
+                    <line x1="166" y1="150" x2="254" y2="120" stroke="#30a0e8" stroke-width="0.4" opacity="0.2"/>
+                    <line x1="166" y1="150" x2="254" y2="180" stroke="#30a0e8" stroke-width="0.4" opacity="0.2"/>
+                    <line x1="166" y1="200" x2="254" y2="180" stroke="#30a0e8" stroke-width="0.4" opacity="0.2"/>
+                    <line x1="266" y1="120" x2="332" y2="150" stroke="#d8b020" stroke-width="0.6" opacity="0.3"/>
+                    <line x1="266" y1="180" x2="332" y2="150" stroke="#d8b020" stroke-width="0.6" opacity="0.3"/>
+                    <!-- Data pulse animation -->
+                    <circle r="3" fill="#00e868" opacity="0.8">
+                        <animateMotion dur="3s" repeatCount="indefinite" path="M66,80 L154,100 L254,120 L332,150"/>
+                    </circle>
+                    <circle r="3" fill="#30a0e8" opacity="0.8">
+                        <animateMotion dur="4s" repeatCount="indefinite" path="M66,220 L154,200 L254,180 L332,150"/>
+                    </circle>
+                </svg>
+                <div class="split-visual-inner">NEURAL ARCHITECTURE</div>
+            </div>
+            <div class="split-content reveal-left" style="direction: ltr;">
+                <div class="section-label">Artificial Intelligence</div>
+                <h2 class="section-title">Autonomous AI<br>Agent Fleet</h2>
+                <div class="sep sep-left"></div>
+                <p class="section-desc" style="margin-bottom:0;">
+                    Eight specialized AI agents powered by Claude, GPT-4, and local models.
+                    Multi-model consensus, RAG-augmented memory, and calibrated prediction tracking
+                    ensure every decision is data-grounded.
+                </p>
+                <ul class="check-list">
+                    <li><span class="check-mark">&#x2713;</span>Daily briefings, anomaly detection, strategy review</li>
+                    <li><span class="check-mark">&#x2713;</span>Multi-model consensus with Jaccard agreement scoring</li>
+                    <li><span class="check-mark">&#x2713;</span>RAG pipeline with TF-IDF retrieval over historical data</li>
+                    <li><span class="check-mark">&#x2713;</span>Agent calibration tracking with Brier score evaluation</li>
+                    <li><span class="check-mark">&#x2713;</span>Natural language trade entry and voice commands</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- STRATEGY & BACKTESTING                                             -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section">
+    <div class="container">
+        <div class="split">
+            <div class="split-visual reveal-left">
+                <div class="visual-grid"></div>
+                <!-- Simulated equity curve -->
+                <svg viewBox="0 0 400 300" style="position:absolute;inset:0;width:100%;height:100%;opacity:0.7;">
+                    <defs>
+                        <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stop-color="#00e868" stop-opacity="0.15"/>
+                            <stop offset="100%" stop-color="#00e868" stop-opacity="0"/>
+                        </linearGradient>
+                    </defs>
+                    <path d="M20,260 L60,240 L100,250 L140,220 L180,200 L220,180 L240,190 L260,160 L280,140 L310,100 L340,80 L370,50" fill="none" stroke="#00e868" stroke-width="2" opacity="0.7">
+                        <animate attributeName="stroke-dashoffset" from="800" to="0" dur="3s" fill="freeze"/>
+                    </path>
+                    <path d="M20,260 L60,240 L100,250 L140,220 L180,200 L220,180 L240,190 L260,160 L280,140 L310,100 L340,80 L370,50 L370,300 L20,300 Z" fill="url(#eqGrad)" opacity="0.5"/>
+                    <!-- Benchmark line -->
+                    <path d="M20,260 L100,245 L180,230 L260,215 L340,200 L370,190" fill="none" stroke="#3a6850" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"/>
+                    <text x="375" y="48" fill="#00e868" font-size="8" font-family="monospace" opacity="0.6">ALPHA</text>
+                    <text x="375" y="192" fill="#3a6850" font-size="8" font-family="monospace" opacity="0.6">BENCH</text>
+                </svg>
+                <div class="split-visual-inner">EQUITY CURVE</div>
+            </div>
+            <div class="split-content reveal-right">
+                <div class="section-label">Strategy Engine</div>
+                <h2 class="section-title">Backtest. Optimize.<br>Deploy.</h2>
+                <div class="sep sep-left"></div>
+                <p class="section-desc" style="margin-bottom:0;">
+                    Build, backtest, and deploy trading strategies with a visual wizard.
+                    Monte Carlo simulations quantify tail risk. Paper trading validates
+                    before capital is committed.
+                </p>
+                <ul class="check-list">
+                    <li><span class="check-mark">&#x2713;</span>Visual strategy builder with drag-and-drop rules</li>
+                    <li><span class="check-mark">&#x2713;</span>10,000-path Monte Carlo simulation engine</li>
+                    <li><span class="check-mark">&#x2713;</span>Paper trading with realistic slippage modeling</li>
+                    <li><span class="check-mark">&#x2713;</span>Automated rebalancing and stop-loss management</li>
+                    <li><span class="check-mark">&#x2713;</span>Kelly criterion and volatility-based position sizing</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- TECHNOLOGY STACK                                                    -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="technology">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">Built With</div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            Enterprise-Grade Stack
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            Engineered on battle-tested infrastructure. Every component chosen for
+            reliability, performance, and security at institutional scale.
+        </p>
+        <div class="tech-grid reveal delay-4">
+            <span class="tech-badge">Python</span>
+            <span class="tech-badge">Django</span>
+            <span class="tech-badge">PostgreSQL</span>
+            <span class="tech-badge">Redis</span>
+            <span class="tech-badge">Celery</span>
+            <span class="tech-badge">WebSockets</span>
+            <span class="tech-badge">Claude AI</span>
+            <span class="tech-badge">GPT-4</span>
+            <span class="tech-badge">TF-IDF / NLP</span>
+            <span class="tech-badge">TradingView</span>
+            <span class="tech-badge">REST API</span>
+            <span class="tech-badge">HTMX</span>
+            <span class="tech-badge">Docker</span>
+            <span class="tech-badge">Render</span>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- DATA SOURCES                                                       -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">Intelligence Network</div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            Connected to Everything
+        </h2>
+        <div class="sep reveal delay-2"></div>
+
+        <div class="features-grid sources-grid">
+            <div class="feature-card reveal delay-1" style="padding: 24px 16px; text-align: center;">
+                <div class="feature-title" style="font-size: 11px;">SEC EDGAR</div>
+                <div class="feature-text" style="font-size: 12px;">13F & insider filings</div>
+            </div>
+            <div class="feature-card reveal delay-2" style="padding: 24px 16px; text-align: center;">
+                <div class="feature-title" style="font-size: 11px;">Reddit / StockTwits</div>
+                <div class="feature-text" style="font-size: 12px;">Social sentiment</div>
+            </div>
+            <div class="feature-card reveal delay-3" style="padding: 24px 16px; text-align: center;">
+                <div class="feature-title" style="font-size: 11px;">CFTC / COT</div>
+                <div class="feature-text" style="font-size: 12px;">Commitments of traders</div>
+            </div>
+            <div class="feature-card reveal delay-4" style="padding: 24px 16px; text-align: center;">
+                <div class="feature-title" style="font-size: 11px;">On-Chain</div>
+                <div class="feature-text" style="font-size: 12px;">Blockchain analytics</div>
+            </div>
+            <div class="feature-card reveal delay-1" style="padding: 24px 16px; text-align: center;">
+                <div class="feature-title" style="font-size: 11px;">TradingView</div>
+                <div class="feature-text" style="font-size: 12px;">Technical scanner</div>
+            </div>
+            <div class="feature-card reveal delay-2" style="padding: 24px 16px; text-align: center;">
+                <div class="feature-title" style="font-size: 11px;">FinViz</div>
+                <div class="feature-text" style="font-size: 12px;">Stock screener</div>
+            </div>
+            <div class="feature-card reveal delay-3" style="padding: 24px 16px; text-align: center;">
+                <div class="feature-title" style="font-size: 11px;">DeFi Llama</div>
+                <div class="feature-text" style="font-size: 12px;">TVL & protocol data</div>
+            </div>
+            <div class="feature-card reveal delay-4" style="padding: 24px 16px; text-align: center;">
+                <div class="feature-title" style="font-size: 11px;">Economic Calendar</div>
+                <div class="feature-text" style="font-size: 12px;">Central bank events</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- CTA                                                                -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="cta-section">
+    <div class="container">
+        <div class="sep reveal"></div>
+        <h2 class="cta-title reveal delay-1">Ready to See<br><span style="color:var(--accent);">Everything</span>?</h2>
+        <p class="cta-desc reveal delay-2">
+            The markets never sleep. Neither does Sauron.
+            Initialize your session and take command.
+        </p>
+        <a href="{% url 'login' %}" class="btn-primary reveal delay-3" style="display:inline-flex;">
+            Initialize Session
+        </a>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- FOOTER                                                             -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<footer class="wall-footer">
+    <div class="container">
+        <p class="footer-text">
+            <span class="accent">SAURON VISION</span> &mdash; TRADING INTELLIGENCE PLATFORM &mdash; ALL RIGHTS RESERVED
+        </p>
+    </div>
+</footer>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- SCRIPTS                                                            -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<script>
+(function(){
+    // ── Particles with price labels ──────────────────────────────────
+    var canvas = document.getElementById('bgCanvas');
+    var ctx = canvas.getContext('2d');
+    var W, H;
+    function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+    resize(); window.addEventListener('resize', resize);
+
+    var symbols = ['EURUSD','BTCUSD','XAUUSD','SPX','AAPL','TSLA','NVDA','NKY','DAX','USDJPY','ETHUSD','GBPUSD','CL','VIX','DXY'];
+    var prices = {};
+    symbols.forEach(function(s) {
+        prices[s] = { val: (Math.random()*5000+10).toFixed(2), chg: ((Math.random()-0.45)*4).toFixed(2) };
+    });
+
+    var particles = [];
+    var PARTICLE_COUNT = 80;
+    for (var i = 0; i < PARTICLE_COUNT; i++) {
+        particles.push({
+            x: Math.random()*2000, y: Math.random()*2000,
+            vx: (Math.random()-0.5)*0.4, vy: (Math.random()-0.5)*0.4,
+            s: Math.random()*1.8+0.3, a: Math.random()*0.18+0.04,
+            sym: i < symbols.length ? symbols[i] : null
+        });
+    }
+
+    function drawParticles() {
+        ctx.clearRect(0,0,W,H);
+        // Connections
+        for (var i = 0; i < particles.length; i++) {
+            for (var j = i+1; j < particles.length; j++) {
+                var dx = particles[i].x - particles[j].x;
+                var dy = particles[i].y - particles[j].y;
+                var d = Math.sqrt(dx*dx + dy*dy);
+                if (d < 140) {
+                    ctx.beginPath();
+                    ctx.moveTo(particles[i].x, particles[i].y);
+                    ctx.lineTo(particles[j].x, particles[j].y);
+                    ctx.strokeStyle = 'rgba(0,232,104,' + (0.035*(1-d/140)) + ')';
+                    ctx.stroke();
+                }
+            }
+        }
+        // Particles + labels
+        for (var k = 0; k < particles.length; k++) {
+            var p = particles[k];
+            p.x += p.vx; p.y += p.vy;
+            if (p.x < 0 || p.x > W) p.vx *= -1;
+            if (p.y < 0 || p.y > H) p.vy *= -1;
+
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.s, 0, Math.PI*2);
+            ctx.fillStyle = 'rgba(0,232,104,' + p.a + ')';
+            ctx.fill();
+
+            if (p.sym && prices[p.sym]) {
+                var pr = prices[p.sym];
+                ctx.font = '9px "Share Tech Mono", monospace';
+                ctx.fillStyle = 'rgba(0,232,104,0.18)';
+                ctx.fillText(p.sym, p.x + 8, p.y - 4);
+                ctx.fillStyle = parseFloat(pr.chg) >= 0 ? 'rgba(0,232,104,0.12)' : 'rgba(232,48,48,0.12)';
+                ctx.fillText(pr.val, p.x + 8, p.y + 7);
+            }
+        }
+        requestAnimationFrame(drawParticles);
+    }
+    drawParticles();
+
+    // Slowly drift prices
+    setInterval(function(){
+        symbols.forEach(function(s){
+            var v = parseFloat(prices[s].val);
+            v += (Math.random()-0.48)*v*0.001;
+            prices[s].val = v.toFixed(2);
+            prices[s].chg = ((Math.random()-0.45)*4).toFixed(2);
+        });
+    }, 2000);
+
+    // ── Ticker bar population ────────────────────────────────────────
+    var tickerData = [
+        {sym:'SPX',price:'5,842.31',chg:'+0.67%',up:true},
+        {sym:'NDX',price:'20,614.50',chg:'+1.12%',up:true},
+        {sym:'DJI',price:'43,729.80',chg:'+0.34%',up:true},
+        {sym:'BTCUSD',price:'97,234.00',chg:'+2.41%',up:true},
+        {sym:'ETHUSD',price:'3,521.40',chg:'+1.88%',up:true},
+        {sym:'XAUUSD',price:'2,714.30',chg:'+0.52%',up:true},
+        {sym:'EURUSD',price:'1.0847',chg:'-0.12%',up:false},
+        {sym:'USDJPY',price:'154.32',chg:'+0.28%',up:true},
+        {sym:'VIX',price:'14.82',chg:'-3.21%',up:false},
+        {sym:'CL',price:'71.42',chg:'-0.89%',up:false},
+        {sym:'DXY',price:'106.14',chg:'+0.15%',up:true},
+        {sym:'AAPL',price:'227.48',chg:'+0.91%',up:true},
+        {sym:'NVDA',price:'141.20',chg:'+3.14%',up:true},
+        {sym:'TSLA',price:'352.80',chg:'+2.67%',up:true},
+    ];
+    var track = document.getElementById('wallTickerTrack');
+    var html = '';
+    for (var t = 0; t < 3; t++) {
+        tickerData.forEach(function(d) {
+            html += '<span style="display:inline-flex;align-items:center;gap:6px;margin-right:48px;">';
+            html += '<span class="ticker-sym">' + d.sym + '</span>';
+            html += '<span class="ticker-price">' + d.price + '</span>';
+            html += '<span class="ticker-chg ' + (d.up ? 'up' : 'down') + '">' + d.chg + '</span>';
+            html += '</span>';
+        });
+    }
+    track.innerHTML = html;
+
+    // ── Scroll-based reveal ──────────────────────────────────────────
+    var reveals = document.querySelectorAll('.reveal, .reveal-left, .reveal-right, .reveal-scale');
+    var observer = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('visible');
+            }
+        });
+    }, { threshold: 0.1, rootMargin: '0px 0px -60px 0px' });
+    reveals.forEach(function(el) { observer.observe(el); });
+
+    // ── Navbar scroll state ──────────────────────────────────────────
+    var nav = document.getElementById('wallNav');
+    window.addEventListener('scroll', function() {
+        if (window.scrollY > 80) { nav.classList.add('scrolled'); }
+        else { nav.classList.remove('scrolled'); }
+    });
+
+    // ── Count-up animation ───────────────────────────────────────────
+    var countEls = document.querySelectorAll('.count-up');
+    var countObserver = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+            if (entry.isIntersecting && !entry.target.dataset.done) {
+                entry.target.dataset.done = '1';
+                var target = parseInt(entry.target.dataset.target);
+                var current = 0;
+                var step = Math.max(1, Math.floor(target / 40));
+                var interval = setInterval(function() {
+                    current += step;
+                    if (current >= target) { current = target; clearInterval(interval); }
+                    entry.target.textContent = current;
+                }, 40);
+            }
+        });
+    }, { threshold: 0.5 });
+    countEls.forEach(function(el) { countObserver.observe(el); });
+
+    // ── Parallax on mouse move (subtle depth) ────────────────────────
+    var globe = document.querySelector('.globe-eye-fixed');
+    document.addEventListener('mousemove', function(e) {
+        var mx = (e.clientX / W - 0.5) * 2;
+        var my = (e.clientY / H - 0.5) * 2;
+        if (globe) {
+            globe.style.transform = 'translate(calc(-50% + ' + (mx*15) + 'px), calc(-50% + ' + (my*15) + 'px))';
+        }
+    });
+
+    // ── Smooth scroll for anchor links ───────────────────────────────
+    document.querySelectorAll('a[href^="#"]').forEach(function(a) {
+        a.addEventListener('click', function(e) {
+            var target = document.querySelector(this.getAttribute('href'));
+            if (target) {
+                e.preventDefault();
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        });
+    });
+})();
+</script>
+</body>
+</html>

@@ -346,9 +346,9 @@ PORTFOLIO_CONFIG = {
     "max_daily_loss_pct": 3.0,
 }
 
-LOGIN_URL = "login"
+LOGIN_URL = "the_wall"
 LOGIN_REDIRECT_URL = "intro"
-LOGOUT_REDIRECT_URL = "login"
+LOGOUT_REDIRECT_URL = "the_wall"
 
 # ============================================================
 # Logging — structured JSON in production, readable in dev
