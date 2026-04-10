@@ -563,20 +563,37 @@
         }
 
         .login-box {
-            width: 400px; max-width: 90vw;
-            transform: translateY(40px) scale(0.95);
-            transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.5s,
-                        opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.5s;
-            opacity: 0;
-        }
-        body.login-mode .login-box {
-            transform: translateY(0) scale(1);
-            opacity: 1;
+            width: 420px; max-width: 90vw;
         }
 
+        /* Staggered fade-in for each login element */
+        .login-anim {
+            opacity: 0; transform: translateY(30px);
+            transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        body.login-mode .login-anim { opacity: 1; transform: translateY(0); }
+        body.login-mode .login-anim.la-1 { transition-delay: 0.4s; }
+        body.login-mode .login-anim.la-2 { transition-delay: 0.55s; }
+        body.login-mode .login-anim.la-3 { transition-delay: 0.65s; }
+        body.login-mode .login-anim.la-4 { transition-delay: 0.8s; }
+
+        .login-logo-wrap {
+            position: relative; width: 140px; height: 140px;
+            margin: 0 auto 28px;
+        }
+        .login-logo-glow {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 200px; height: 200px; border-radius: 50%;
+            background: radial-gradient(circle, rgba(0,232,104,0.18) 0%, rgba(0,232,104,0.05) 40%, transparent 70%);
+            animation: logoGlow 4s ease-in-out infinite;
+            pointer-events: none;
+        }
         .login-eye-logo {
-            width: 80px; height: 80px; margin: 0 auto 24px;
-            object-fit: contain;
+            position: relative; z-index: 1;
+            width: 140px; height: 140px; margin: 0 auto;
+            display: block; object-fit: contain;
             filter: drop-shadow(0 0 30px rgba(0,232,104,0.25));
             animation: heroLogoFloat 6s ease-in-out infinite;
         }
@@ -1105,10 +1122,13 @@
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <div class="login-overlay" id="loginOverlay">
     <div class="login-box">
-        <img class="login-eye-logo" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision">
-        <h1 class="login-heading">SAURON VISION</h1>
-        <p class="login-sub">AUTHENTICATE TO PROCEED</p>
-        <div class="login-card">
+        <div class="login-logo-wrap login-anim la-1">
+            <div class="login-logo-glow"></div>
+            <img class="login-eye-logo" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision">
+        </div>
+        <h1 class="login-heading login-anim la-2">SAURON VISION</h1>
+        <p class="login-sub login-anim la-2">AUTHENTICATE TO PROCEED</p>
+        <div class="login-card login-anim la-3">
             <div class="login-errors" id="loginErrors" style="display:none;"></div>
             <form method="post" action="{% url 'login' %}" id="loginForm">
                 {% csrf_token %}
@@ -1123,8 +1143,8 @@
                 <input type="hidden" name="next" value="{% url 'intro' %}">
                 <button type="submit" class="btn-login-submit">Initialize Session</button>
             </form>
-            <a href="#" class="login-back" id="loginBack">&larr; Back to The Wall</a>
         </div>
+        <a href="#" class="login-back login-anim la-4" id="loginBack">&larr; Back to The Wall</a>
     </div>
 </div>
 
@@ -1308,17 +1328,12 @@
     loginLinks.forEach(function(link) {
         link.addEventListener('click', function(e) {
             e.preventDefault();
-            // Scroll to top smoothly first
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-            // Small delay so scroll starts, then trigger transition
+            document.body.classList.add('login-mode');
+            // Focus username field after transition completes
             setTimeout(function() {
-                document.body.classList.add('login-mode');
-                // Focus username field after transition completes
-                setTimeout(function() {
-                    var usernameField = document.getElementById('id_username');
-                    if (usernameField) usernameField.focus();
-                }, 900);
-            }, 200);
+                var usernameField = document.getElementById('id_username');
+                if (usernameField) usernameField.focus();
+            }, 900);
         });
     });
 

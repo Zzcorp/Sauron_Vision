@@ -12,42 +12,62 @@
     <meta name="theme-color" content="#00e868">
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg: #030806; --bg2: #060e0a; --accent: #00e868;
+            --accent-dim: #0a5028; --accent-bright: #40ff90;
+            --text: #c8e8d8; --text3: #3a6850; --border: #133020;
+        }
         *{margin:0;padding:0;box-sizing:border-box}
-        body{background:#030806;color:#c8e8d8;font-family:'Rajdhani',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
-        .grid-bg{position:fixed;top:-50%;left:-50%;width:200%;height:200%;z-index:0;background-image:linear-gradient(rgba(0,232,104,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(0,232,104,0.04) 1px,transparent 1px);background-size:60px 60px;animation:gridMove 25s linear infinite}
-        @keyframes gridMove{0%{transform:translate(0,0)}100%{transform:translate(60px,60px)}}
+        body{background:var(--bg);color:var(--text);font-family:'Rajdhani',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
 
-        /* Globe-eye: static eye, spinning globe */
-        .globe-eye-login{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:110vmin;height:110vmin;z-index:1;pointer-events:none;opacity:0.035}
-        .globe-eye-login .globe-spin{transform-origin:400px 400px;animation:globeSpin 60s linear infinite}
-        @keyframes globeSpin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
-
-        canvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:2}
-        .scan-line{position:fixed;top:0;left:0;bottom:0;width:3px;z-index:3;animation:scanRTL 8s linear infinite}
+        /* ── Background layers ── */
+        .grid-bg{position:fixed;inset:-50%;background-image:linear-gradient(rgba(0,232,104,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,232,104,0.03) 1px,transparent 1px);background-size:80px 80px;animation:gridDrift 40s linear infinite;z-index:0;pointer-events:none}
+        @keyframes gridDrift{0%{transform:translate(0,0)}100%{transform:translate(80px,80px)}}
+        .globe-eye{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:90vmin;height:90vmin;z-index:0;pointer-events:none;opacity:0.05}
+        .globe-eye .globe-spin{transform-origin:400px 400px;animation:globeSpin 80s linear infinite}
+        @keyframes globeSpin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+        #bgCanvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none}
+        .scan-line{position:fixed;top:0;left:0;bottom:0;width:3px;z-index:1;animation:scanRTL 8s linear infinite;pointer-events:none}
         .scan-line::before{content:'';position:absolute;top:0;left:-40px;bottom:0;width:80px;background:linear-gradient(90deg,transparent,rgba(0,232,104,0.06),transparent)}
-        .scan-line::after{content:'';position:absolute;top:0;left:0;bottom:0;width:3px;background:linear-gradient(180deg,transparent 10%,rgba(0,232,104,0.4) 50%,transparent 90%);box-shadow:0 0 15px rgba(0,232,104,0.3),0 0 40px rgba(0,232,104,0.1)}
+        .scan-line::after{content:'';position:absolute;top:0;left:0;bottom:0;width:3px;background:linear-gradient(180deg,transparent 10%,rgba(0,232,104,0.4) 50%,transparent 90%);box-shadow:0 0 15px rgba(0,232,104,0.3)}
         @keyframes scanRTL{0%{left:100%}100%{left:-80px}}
 
-        .login-container{position:relative;z-index:10;width:380px;animation:fadeInUp .8s ease}
-        @keyframes fadeInUp{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:translateY(0)}}
-        .login-eye{width:64px;height:64px;margin:0 auto 20px}
-        .login-title{font-family:'Orbitron',sans-serif;font-size:24px;font-weight:900;letter-spacing:6px;color:#00e868;text-align:center;margin-bottom:4px;text-shadow:0 0 30px rgba(0,232,104,0.2)}
-        .login-subtitle{font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:3px;color:#2a5038;text-align:center;margin-bottom:32px}
-        .login-card{background:rgba(10,26,20,0.9);border:1px solid #133020;border-radius:12px;padding:32px;backdrop-filter:blur(20px);box-shadow:0 4px 40px rgba(0,0,0,0.5),0 0 60px rgba(0,232,104,0.03)}
+        /* ── Login container ── */
+        .login-container{position:relative;z-index:10;width:420px;max-width:90vw}
+
+        /* ── Staggered fade-in ── */
+        .fade-up{opacity:0;transform:translateY(30px);animation:fadeUp 0.7s cubic-bezier(0.16,1,0.3,1) forwards}
+        .fade-up.d1{animation-delay:0.1s} .fade-up.d2{animation-delay:0.25s}
+        .fade-up.d3{animation-delay:0.4s} .fade-up.d4{animation-delay:0.55s}
+        @keyframes fadeUp{to{opacity:1;transform:translateY(0)}}
+
+        /* ── Logo with glow ── */
+        .logo-wrap{position:relative;width:140px;height:140px;margin:0 auto 28px}
+        .logo-glow{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:200px;height:200px;border-radius:50%;background:radial-gradient(circle,rgba(0,232,104,0.18) 0%,rgba(0,232,104,0.05) 40%,transparent 70%);animation:logoGlow 4s ease-in-out infinite;pointer-events:none}
+        @keyframes logoGlow{0%,100%{transform:translate(-50%,-50%) scale(1);opacity:0.7}50%{transform:translate(-50%,-50%) scale(1.15);opacity:1}}
+        .logo-img{position:relative;z-index:1;width:140px;height:140px;display:block;object-fit:contain;filter:drop-shadow(0 0 30px rgba(0,232,104,0.25));animation:logoFloat 6s ease-in-out infinite}
+        @keyframes logoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+
+        .login-title{font-family:'Orbitron',sans-serif;font-size:22px;font-weight:900;letter-spacing:6px;color:var(--accent);text-align:center;margin-bottom:4px;text-shadow:0 0 30px rgba(0,232,104,0.2)}
+        .login-subtitle{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:3px;color:var(--text3);text-align:center;margin-bottom:32px}
+
+        /* ── Card ── */
+        .login-card{background:rgba(10,26,20,0.92);border:1px solid var(--border);border-radius:12px;padding:32px;backdrop-filter:blur(24px);box-shadow:0 4px 60px rgba(0,0,0,0.6),0 0 80px rgba(0,232,104,0.04)}
         .form-group{margin-bottom:20px}
-        .form-group label{display:block;font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:3px;color:#5a8a6a;text-transform:uppercase;margin-bottom:8px}
-        .form-group input{width:100%;padding:12px 16px;background:#060e0a;border:1px solid #133020;border-radius:6px;color:#c8e8d8;font-family:'Share Tech Mono',monospace;font-size:14px;outline:none;transition:all .2s}
-        .form-group input:focus{border-color:#00e868;box-shadow:0 0 15px rgba(0,232,104,0.1)}
-        .btn-login{width:100%;padding:14px;background:linear-gradient(135deg,#0a5028,#00e868);border:none;border-radius:6px;color:#020804;font-family:'Orbitron',sans-serif;font-size:13px;font-weight:700;letter-spacing:4px;cursor:pointer;transition:all .3s;text-transform:uppercase}
-        .btn-login:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,232,104,0.25)}
+        .form-group label{display:block;font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:3px;color:var(--text3);text-transform:uppercase;margin-bottom:8px}
+        .form-group input{width:100%;padding:12px 16px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:14px;outline:none;transition:border-color .2s,box-shadow .2s}
+        .form-group input:focus{border-color:var(--accent);box-shadow:0 0 15px rgba(0,232,104,0.1)}
+        .btn-login{width:100%;padding:14px;background:linear-gradient(135deg,var(--accent-dim),var(--accent));border:none;border-radius:6px;color:#020804;font-family:'Orbitron',sans-serif;font-size:13px;font-weight:700;letter-spacing:4px;cursor:pointer;text-transform:uppercase;transition:transform .3s,box-shadow .3s,background .3s}
+        .btn-login:hover{transform:translateY(-2px);box-shadow:0 0 24px rgba(0,232,104,0.4),0 0 48px rgba(0,232,104,0.15),0 8px 30px rgba(0,232,104,0.25);background:linear-gradient(135deg,var(--accent),var(--accent-bright))}
         .errors{background:rgba(232,48,48,0.08);border:1px solid rgba(232,48,48,0.25);border-radius:6px;padding:12px;margin-bottom:20px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#e83030}
+        .login-back{display:block;text-align:center;margin-top:20px;font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:2px;color:var(--text3);text-decoration:none;text-transform:uppercase;transition:color .3s}
+        .login-back:hover{color:var(--accent)}
     </style>
 </head>
 <body>
     <div class="grid-bg"></div>
 
-    <!-- Static eye, rotating globe -->
-    <svg class="globe-eye-login" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+    <svg class="globe-eye" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
         <g class="eye-static">
             <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="2"/>
             <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.4"/>
@@ -69,16 +89,18 @@
         </g>
     </svg>
 
-    <canvas id="particles-canvas"></canvas>
+    <canvas id="bgCanvas"></canvas>
     <div class="scan-line"></div>
 
     <div class="login-container">
-        <!-- Logo -->
-        <img class="login-eye" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision" style="object-fit:contain;">
-        <h1 class="login-title">SAURON VISION</h1>
-        <p class="login-subtitle">AUTHENTICATE TO PROCEED</p>
-        <div class="login-card">
-            {% if form.errors %}<div class="errors">⚠ AUTHENTICATION FAILED — INVALID CREDENTIALS</div>{% endif %}
+        <div class="logo-wrap fade-up d1">
+            <div class="logo-glow"></div>
+            <img class="logo-img" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision">
+        </div>
+        <h1 class="login-title fade-up d2">SAURON VISION</h1>
+        <p class="login-subtitle fade-up d2">AUTHENTICATE TO PROCEED</p>
+        <div class="login-card fade-up d3">
+            {% if form.errors %}<div class="errors">AUTHENTICATION FAILED — INVALID CREDENTIALS</div>{% endif %}
             <form method="post" action="{% url 'login' %}">
                 {% csrf_token %}
                 <div class="form-group"><label for="id_username">Operator ID</label><input type="text" name="username" id="id_username" autofocus autocomplete="username" required></div>
@@ -87,14 +109,50 @@
                 <button type="submit" class="btn-login">Initialize Session</button>
             </form>
         </div>
+        <a href="{% url 'the_wall' %}" class="login-back fade-up d4">&larr; Back to The Wall</a>
     </div>
 
     <script>
-    const canvas=document.getElementById('particles-canvas');const ctx=canvas.getContext('2d');let particles=[];
-    function resize(){canvas.width=window.innerWidth;canvas.height=window.innerHeight}resize();window.addEventListener('resize',resize);
-    class P{constructor(){this.reset()}reset(){this.x=Math.random()*canvas.width;this.y=Math.random()*canvas.height;this.vx=(Math.random()-.5)*.35;this.vy=(Math.random()-.5)*.35;this.s=Math.random()*1.5+.3;this.a=Math.random()*.2+.04}update(){this.x+=this.vx;this.y+=this.vy;if(this.x<0||this.x>canvas.width||this.y<0||this.y>canvas.height)this.reset()}draw(){ctx.beginPath();ctx.arc(this.x,this.y,this.s,0,Math.PI*2);ctx.fillStyle=`rgba(0,232,104,${this.a})`;ctx.fill()}}
-    for(let i=0;i<60;i++)particles.push(new P());
-    function animate(){ctx.clearRect(0,0,canvas.width,canvas.height);particles.forEach(p=>{p.update();p.draw()});for(let i=0;i<particles.length;i++)for(let j=i+1;j<particles.length;j++){const d=Math.hypot(particles[i].x-particles[j].x,particles[i].y-particles[j].y);if(d<120){ctx.beginPath();ctx.moveTo(particles[i].x,particles[i].y);ctx.lineTo(particles[j].x,particles[j].y);ctx.strokeStyle=`rgba(0,232,104,${.04*(1-d/120)})`;ctx.stroke()}}requestAnimationFrame(animate)}animate();
+    (function(){
+        var canvas = document.getElementById('bgCanvas');
+        var ctx = canvas.getContext('2d');
+        var W, H;
+        function resize(){ W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+        resize(); window.addEventListener('resize', resize);
+
+        var particles = [];
+        for (var i = 0; i < 50; i++) {
+            particles.push({
+                x: Math.random()*2000, y: Math.random()*2000,
+                vx: (Math.random()-0.5)*0.35, vy: (Math.random()-0.5)*0.35,
+                s: Math.random()*1.5+0.3, a: Math.random()*0.2+0.04
+            });
+        }
+        function draw(){
+            ctx.clearRect(0,0,W,H);
+            for(var i=0;i<particles.length;i++){
+                for(var j=i+1;j<particles.length;j++){
+                    var dx=particles[i].x-particles[j].x,dy=particles[i].y-particles[j].y;
+                    var d=Math.sqrt(dx*dx+dy*dy);
+                    if(d<120){ctx.beginPath();ctx.moveTo(particles[i].x,particles[i].y);ctx.lineTo(particles[j].x,particles[j].y);ctx.strokeStyle='rgba(0,232,104,'+(0.04*(1-d/120))+')';ctx.stroke()}
+                }
+            }
+            for(var k=0;k<particles.length;k++){
+                var p=particles[k];p.x+=p.vx;p.y+=p.vy;
+                if(p.x<0||p.x>W)p.vx*=-1;if(p.y<0||p.y>H)p.vy*=-1;
+                ctx.beginPath();ctx.arc(p.x,p.y,p.s,0,Math.PI*2);ctx.fillStyle='rgba(0,232,104,'+p.a+')';ctx.fill();
+            }
+            requestAnimationFrame(draw);
+        }
+        draw();
+
+        /* Mouse parallax on eye */
+        var globe = document.querySelector('.globe-eye');
+        document.addEventListener('mousemove', function(e){
+            var mx = (e.clientX/W - 0.5)*2, my = (e.clientY/H - 0.5)*2;
+            if(globe) globe.style.transform = 'translate(calc(-50% + '+mx*15+'px), calc(-50% + '+my*15+'px))';
+        });
+    })();
     </script>
 </body>
 </html>

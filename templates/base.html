@@ -100,6 +100,19 @@
             width: 100%; height: 100%; z-index: 0; pointer-events: none;
             opacity: 0.06; mix-blend-mode: screen;
         }
+        .grid-bg {
+            position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
+            z-index: 0; pointer-events: none;
+            background-image:
+                linear-gradient(rgba(0,232,104,0.025) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,232,104,0.025) 1px, transparent 1px);
+            background-size: 80px 80px;
+            animation: gridDrift 40s linear infinite;
+        }
+        @keyframes gridDrift { 0% { transform: translate(0,0); } 100% { transform: translate(80px,80px); } }
+        body.light-mode .grid-bg { background-image:
+            linear-gradient(rgba(0,153,77,0.04) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(0,153,77,0.04) 1px, transparent 1px); }
         .app-layout { display: flex; min-height: 100vh; position: relative; z-index: 1; }
 
         /* ── Sidebar ─────────────────────────────── */
@@ -1511,6 +1524,9 @@
 </head>
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}">
 
+<!-- Animated grid background -->
+<div class="grid-bg"></div>
+
 <!-- Globe-Eye: static eye shape, rotating globe inside -->
 <svg class="globe-eye-bg" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
     <defs>
@@ -2215,6 +2231,17 @@
         requestAnimationFrame(animate);
     }
     animate();
+
+    /* ── Mouse parallax on globe-eye ─────────────────────── */
+    var globe = document.querySelector('.globe-eye-bg');
+    if (globe) {
+        document.addEventListener('mousemove', function(e) {
+            var mx = (e.clientX / canvas.width - 0.5) * 2;
+            var my = (e.clientY / canvas.height - 0.5) * 2;
+            globe.style.transform = 'translate(calc(-50% + ' + (mx * 12) + 'px), calc(-50% + ' + (my * 12) + 'px))';
+        });
+    }
+
     function updateClock(){
         const el=document.getElementById('clock');
         if(el){

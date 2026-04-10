@@ -1,89 +1,216 @@
 {% load static %}
-<!DOCTYPE html><html lang="en"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sauron Vision — PIN</title>
-<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600&display=swap" rel="stylesheet">
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{background:#030806;color:#c8e8d8;font-family:'Rajdhani',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
-  .grid-bg{position:fixed;inset:-50%;background-image:linear-gradient(rgba(0,232,104,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(0,232,104,0.04) 1px,transparent 1px);background-size:60px 60px;animation:g 25s linear infinite;z-index:0}
-  @keyframes g{to{transform:translate(60px,60px)}}
-  .modal{position:relative;z-index:10;width:380px;background:rgba(10,26,20,0.96);border:1px solid #133020;border-radius:14px;padding:40px 32px;backdrop-filter:blur(20px);box-shadow:0 4px 60px rgba(0,232,104,.08);animation:pop .4s cubic-bezier(.2,.8,.2,1)}
-  @keyframes pop{from{opacity:0;transform:scale(.9) translateY(20px)}to{opacity:1;transform:scale(1) translateY(0)}}
-  .eye{width:56px;height:56px;margin:0 auto 14px;display:block}
-  h1{font-family:'Orbitron',sans-serif;font-size:18px;letter-spacing:5px;color:#00e868;text-align:center;margin-bottom:4px}
-  p.sub{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:3px;color:#5a8a6a;text-align:center;margin-bottom:24px}
-  .who{text-align:center;font-family:'Share Tech Mono',monospace;font-size:11px;color:#c8e8d8;margin-bottom:18px;opacity:.8}
-  .pin-row{display:flex;gap:10px;justify-content:center;margin-bottom:22px}
-  .pin-row input{width:46px;height:56px;text-align:center;font-family:'Orbitron',sans-serif;font-size:22px;background:#060e0a;border:1px solid #133020;border-radius:8px;color:#00e868;outline:none;transition:all .2s}
-  .pin-row input:focus{border-color:#00e868;box-shadow:0 0 20px rgba(0,232,104,.25)}
-  button{width:100%;padding:14px;background:linear-gradient(135deg,#0a5028,#00e868);border:none;border-radius:8px;color:#020804;font-family:'Orbitron',sans-serif;font-weight:700;letter-spacing:4px;cursor:pointer;font-size:13px}
-  button:hover{box-shadow:0 8px 30px rgba(0,232,104,.3)}
-  .err{background:rgba(232,48,48,.08);border:1px solid rgba(232,48,48,.3);border-radius:6px;padding:10px;margin-bottom:16px;font-family:'Share Tech Mono',monospace;font-size:11px;color:#e83030;text-align:center}
-  .back{display:block;text-align:center;margin-top:14px;font-family:'Share Tech Mono',monospace;font-size:10px;color:#2a5038;text-decoration:none}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="{% static 'logo/logo_SV.png' %}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sauron Vision — PIN</title>
+    <link rel="apple-touch-icon" href="{% static 'logo/logo_SV.png' %}">
+    <meta name="theme-color" content="#00e868">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #030806; --bg2: #060e0a; --accent: #00e868;
+            --accent-dim: #0a5028; --accent-bright: #40ff90;
+            --text: #c8e8d8; --text2: #7aaa8a; --text3: #3a6850; --border: #133020;
+        }
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{background:var(--bg);color:var(--text);font-family:'Rajdhani',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
 
-      /* UPGRADE-8: touch keypad */
-      .sauron-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:18px}
-      .sauron-keypad button{padding:14px 0;background:#060e0a;border:1px solid #133020;border-radius:8px;color:#c8e8d8;font-family:'Orbitron',sans-serif;font-size:18px;font-weight:700;cursor:pointer;transition:all .15s}
-      .sauron-keypad button:hover{border-color:#00e868;color:#00e868;box-shadow:0 0 14px rgba(0,232,104,.18)}
-      .sauron-keypad button:active{transform:scale(.95);background:#0a1a14}
-      .sauron-keypad button.kp-fn{color:#5a8a6a;font-size:14px}
-      .sauron-keypad button.kp-fn:hover{color:#e83030;border-color:#581818}
+        /* ── Background layers ── */
+        .grid-bg{position:fixed;inset:-50%;background-image:linear-gradient(rgba(0,232,104,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,232,104,0.03) 1px,transparent 1px);background-size:80px 80px;animation:gridDrift 40s linear infinite;z-index:0;pointer-events:none}
+        @keyframes gridDrift{0%{transform:translate(0,0)}100%{transform:translate(80px,80px)}}
+        .globe-eye{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:90vmin;height:90vmin;z-index:0;pointer-events:none;opacity:0.05}
+        .globe-eye .globe-spin{transform-origin:400px 400px;animation:globeSpin 80s linear infinite}
+        @keyframes globeSpin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+        #bgCanvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none}
+        .scan-line{position:fixed;top:0;left:0;bottom:0;width:3px;z-index:1;animation:scanRTL 8s linear infinite;pointer-events:none}
+        .scan-line::before{content:'';position:absolute;top:0;left:-40px;bottom:0;width:80px;background:linear-gradient(90deg,transparent,rgba(0,232,104,0.06),transparent)}
+        .scan-line::after{content:'';position:absolute;top:0;left:0;bottom:0;width:3px;background:linear-gradient(180deg,transparent 10%,rgba(0,232,104,0.4) 50%,transparent 90%);box-shadow:0 0 15px rgba(0,232,104,0.3)}
+        @keyframes scanRTL{0%{left:100%}100%{left:-80px}}
 
-    </style></head><body>
-<div class="grid-bg"></div>
-<div class="modal">
-  <img class="eye" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision" style="object-fit:contain;">
-  <h1>SECOND GATE</h1>
-  <p class="sub">ENTER PIN CODE</p>
-  <div class="who">OPERATOR :: {{ username }}</div>
-  {% if error %}<div class="err">⚠ {{ error }}</div>{% endif %}
-  <form method="post" id="pinForm">{% csrf_token %}
-    <div class="pin-row">
-      <input type="password" inputmode="numeric" maxlength="1" data-pin>
-      <input type="password" inputmode="numeric" maxlength="1" data-pin>
-      <input type="password" inputmode="numeric" maxlength="1" data-pin>
-      <input type="password" inputmode="numeric" maxlength="1" data-pin>
+        /* ── PIN container ── */
+        .pin-container{position:relative;z-index:10;width:420px;max-width:90vw}
+
+        /* ── Staggered fade-in ── */
+        .fade-up{opacity:0;transform:translateY(30px);animation:fadeUp 0.7s cubic-bezier(0.16,1,0.3,1) forwards}
+        .fade-up.d1{animation-delay:0.1s} .fade-up.d2{animation-delay:0.25s}
+        .fade-up.d3{animation-delay:0.4s} .fade-up.d4{animation-delay:0.55s}
+        .fade-up.d5{animation-delay:0.7s}
+        @keyframes fadeUp{to{opacity:1;transform:translateY(0)}}
+
+        /* ── Logo with glow ── */
+        .logo-wrap{position:relative;width:140px;height:140px;margin:0 auto 28px}
+        .logo-glow{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:200px;height:200px;border-radius:50%;background:radial-gradient(circle,rgba(0,232,104,0.18) 0%,rgba(0,232,104,0.05) 40%,transparent 70%);animation:logoGlow 4s ease-in-out infinite;pointer-events:none}
+        @keyframes logoGlow{0%,100%{transform:translate(-50%,-50%) scale(1);opacity:0.7}50%{transform:translate(-50%,-50%) scale(1.15);opacity:1}}
+        .logo-img{position:relative;z-index:1;width:140px;height:140px;display:block;object-fit:contain;filter:drop-shadow(0 0 30px rgba(0,232,104,0.25));animation:logoFloat 6s ease-in-out infinite}
+        @keyframes logoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+
+        .pin-title{font-family:'Orbitron',sans-serif;font-size:20px;font-weight:900;letter-spacing:5px;color:var(--accent);text-align:center;margin-bottom:4px;text-shadow:0 0 30px rgba(0,232,104,0.2)}
+        .pin-subtitle{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:3px;color:var(--text3);text-align:center;margin-bottom:24px}
+        .pin-who{text-align:center;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text2);margin-bottom:18px;opacity:0.8}
+
+        /* ── Card ── */
+        .pin-card{background:rgba(10,26,20,0.92);border:1px solid var(--border);border-radius:12px;padding:32px;backdrop-filter:blur(24px);box-shadow:0 4px 60px rgba(0,0,0,0.6),0 0 80px rgba(0,232,104,0.04)}
+        .pin-row{display:flex;gap:12px;justify-content:center;margin-bottom:24px}
+        .pin-row input{width:52px;height:62px;text-align:center;font-family:'Orbitron',sans-serif;font-size:24px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--accent);outline:none;transition:border-color .2s,box-shadow .2s,transform .15s}
+        .pin-row input:focus{border-color:var(--accent);box-shadow:0 0 20px rgba(0,232,104,0.2);transform:scale(1.05)}
+        .btn-verify{width:100%;padding:14px;background:linear-gradient(135deg,var(--accent-dim),var(--accent));border:none;border-radius:6px;color:#020804;font-family:'Orbitron',sans-serif;font-size:13px;font-weight:700;letter-spacing:4px;cursor:pointer;text-transform:uppercase;transition:transform .3s,box-shadow .3s,background .3s}
+        .btn-verify:hover{transform:translateY(-2px);box-shadow:0 0 24px rgba(0,232,104,0.4),0 0 48px rgba(0,232,104,0.15),0 8px 30px rgba(0,232,104,0.25);background:linear-gradient(135deg,var(--accent),var(--accent-bright))}
+        .pin-err{background:rgba(232,48,48,0.08);border:1px solid rgba(232,48,48,0.25);border-radius:6px;padding:12px;margin-bottom:18px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#e83030;text-align:center}
+
+        /* ── Keypad ── */
+        .sauron-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:20px}
+        .sauron-keypad button{padding:16px 0;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'Orbitron',sans-serif;font-size:18px;font-weight:700;cursor:pointer;transition:all .15s}
+        .sauron-keypad button:hover{border-color:var(--accent);color:var(--accent);box-shadow:0 0 14px rgba(0,232,104,0.18)}
+        .sauron-keypad button:active{transform:scale(0.95);background:var(--bg2)}
+        .sauron-keypad button.kp-fn{color:var(--text3);font-size:14px}
+        .sauron-keypad button.kp-fn:hover{color:#e83030;border-color:#581818}
+
+        .pin-back{display:block;text-align:center;margin-top:20px;font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:2px;color:var(--text3);text-decoration:none;text-transform:uppercase;transition:color .3s}
+        .pin-back:hover{color:var(--accent)}
+    </style>
+</head>
+<body>
+    <div class="grid-bg"></div>
+
+    <svg class="globe-eye" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+        <g class="eye-static">
+            <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="2"/>
+            <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.4"/>
+            <circle cx="400" cy="400" r="160" fill="none" stroke="#00e868" stroke-width="1.5"/>
+            <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="2"/>
+            <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.12"/>
+            <path d="M 10,400 Q 200,100 400,160 Q 600,100 790,400" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
+            <path d="M 10,400 Q 200,700 400,640 Q 600,700 790,400" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
+        </g>
+        <g class="globe-spin">
+            <ellipse cx="400" cy="400" rx="50" ry="140" fill="none" stroke="#00e868" stroke-width="0.5" opacity="0.35"/>
+            <ellipse cx="400" cy="400" rx="100" ry="140" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.25"/>
+            <ellipse cx="400" cy="400" rx="140" ry="50" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.25"/>
+            <line x1="260" y1="340" x2="540" y2="340" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
+            <line x1="260" y1="400" x2="540" y2="400" stroke="#00e868" stroke-width="0.5" opacity="0.3"/>
+            <line x1="260" y1="460" x2="540" y2="460" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
+            <ellipse cx="400" cy="400" rx="30" ry="140" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.2" transform="rotate(25 400 400)"/>
+            <ellipse cx="400" cy="400" rx="120" ry="140" fill="none" stroke="#00e868" stroke-width="0.3" opacity="0.15" transform="rotate(-20 400 400)"/>
+        </g>
+    </svg>
+
+    <canvas id="bgCanvas"></canvas>
+    <div class="scan-line"></div>
+
+    <div class="pin-container">
+        <div class="logo-wrap fade-up d1">
+            <div class="logo-glow"></div>
+            <img class="logo-img" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision">
+        </div>
+        <h1 class="pin-title fade-up d2">SECOND GATE</h1>
+        <p class="pin-subtitle fade-up d2">ENTER PIN CODE</p>
+        <div class="pin-who fade-up d3">OPERATOR :: {{ username }}</div>
+        <div class="pin-card fade-up d3">
+            {% if error %}<div class="pin-err">{{ error }}</div>{% endif %}
+            <form method="post" id="pinForm">{% csrf_token %}
+                <div class="pin-row">
+                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
+                </div>
+                <input type="hidden" name="pin" id="pinFinal">
+                <button type="submit" class="btn-verify">Verify</button>
+            </form>
+            <div class="sauron-keypad fade-up d4">
+                <button type="button" data-k="1">1</button>
+                <button type="button" data-k="2">2</button>
+                <button type="button" data-k="3">3</button>
+                <button type="button" data-k="4">4</button>
+                <button type="button" data-k="5">5</button>
+                <button type="button" data-k="6">6</button>
+                <button type="button" data-k="7">7</button>
+                <button type="button" data-k="8">8</button>
+                <button type="button" data-k="9">9</button>
+                <button type="button" data-k="clear" class="kp-fn">&times;</button>
+                <button type="button" data-k="0">0</button>
+                <button type="button" data-k="back" class="kp-fn">&#9003;</button>
+            </div>
+        </div>
+        <a class="pin-back fade-up d5" href="{% url 'login' %}">&larr; Back</a>
     </div>
-    <input type="hidden" name="pin" id="pinFinal">
-    <button type="submit">VERIFY</button>
-  </form>
-      <div class="sauron-keypad">
-        <button type="button" data-k="1">1</button>
-        <button type="button" data-k="2">2</button>
-        <button type="button" data-k="3">3</button>
-        <button type="button" data-k="4">4</button>
-        <button type="button" data-k="5">5</button>
-        <button type="button" data-k="6">6</button>
-        <button type="button" data-k="7">7</button>
-        <button type="button" data-k="8">8</button>
-        <button type="button" data-k="9">9</button>
-        <button type="button" data-k="clear" class="kp-fn">⨯</button>
-        <button type="button" data-k="0">0</button>
-        <button type="button" data-k="back" class="kp-fn">⌫</button>
-      </div>
-  <a class="back" href="{% url 'login' %}">← back</a>
-</div>
-<script>
-  const boxes=[...document.querySelectorAll('[data-pin]')];
-  boxes[0]?.focus();
-  boxes.forEach((b,i)=>{b.addEventListener('input',e=>{if(e.target.value&&i<boxes.length-1)boxes[i+1].focus();document.getElementById('pinFinal').value=boxes.map(x=>x.value).join('')});
-    b.addEventListener('keydown',e=>{if(e.key==='Backspace'&&!b.value&&i>0)boxes[i-1].focus()});});
-  document.getElementById('pinForm').addEventListener('submit',()=>{document.getElementById('pinFinal').value=boxes.map(x=>x.value).join('')});
 
-      // UPGRADE-8: keypad wiring
-      document.querySelectorAll('.sauron-keypad button').forEach(btn=>{
-        btn.addEventListener('click',()=>{
-          const k=btn.dataset.k;
-          if(k==='clear'){boxes.forEach(b=>b.value='');boxes[0].focus();}
-          else if(k==='back'){
-            for(let i=boxes.length-1;i>=0;i--){if(boxes[i].value){boxes[i].value='';boxes[i].focus();break;}}
-          } else {
-            for(let i=0;i<boxes.length;i++){if(!boxes[i].value){boxes[i].value=k;if(i<boxes.length-1)boxes[i+1].focus();break;}}
-          }
-          document.getElementById('pinFinal').value=boxes.map(x=>x.value).join('');
+    <script>
+    (function(){
+        /* ── Particles ── */
+        var canvas = document.getElementById('bgCanvas');
+        var ctx = canvas.getContext('2d');
+        var W, H;
+        function resize(){ W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+        resize(); window.addEventListener('resize', resize);
+
+        var particles = [];
+        for (var i = 0; i < 50; i++) {
+            particles.push({
+                x: Math.random()*2000, y: Math.random()*2000,
+                vx: (Math.random()-0.5)*0.35, vy: (Math.random()-0.5)*0.35,
+                s: Math.random()*1.5+0.3, a: Math.random()*0.2+0.04
+            });
+        }
+        function draw(){
+            ctx.clearRect(0,0,W,H);
+            for(var i=0;i<particles.length;i++){
+                for(var j=i+1;j<particles.length;j++){
+                    var dx=particles[i].x-particles[j].x,dy=particles[i].y-particles[j].y;
+                    var d=Math.sqrt(dx*dx+dy*dy);
+                    if(d<120){ctx.beginPath();ctx.moveTo(particles[i].x,particles[i].y);ctx.lineTo(particles[j].x,particles[j].y);ctx.strokeStyle='rgba(0,232,104,'+(0.04*(1-d/120))+')';ctx.stroke()}
+                }
+            }
+            for(var k=0;k<particles.length;k++){
+                var p=particles[k];p.x+=p.vx;p.y+=p.vy;
+                if(p.x<0||p.x>W)p.vx*=-1;if(p.y<0||p.y>H)p.vy*=-1;
+                ctx.beginPath();ctx.arc(p.x,p.y,p.s,0,Math.PI*2);ctx.fillStyle='rgba(0,232,104,'+p.a+')';ctx.fill();
+            }
+            requestAnimationFrame(draw);
+        }
+        draw();
+
+        /* Mouse parallax on eye */
+        var globe = document.querySelector('.globe-eye');
+        document.addEventListener('mousemove', function(e){
+            var mx = (e.clientX/W - 0.5)*2, my = (e.clientY/H - 0.5)*2;
+            if(globe) globe.style.transform = 'translate(calc(-50% + '+mx*15+'px), calc(-50% + '+my*15+'px))';
         });
-      });
 
+        /* ── PIN logic ── */
+        var boxes = [].slice.call(document.querySelectorAll('[data-pin]'));
+        if (boxes[0]) boxes[0].focus();
+        boxes.forEach(function(b, i){
+            b.addEventListener('input', function(e){
+                if(e.target.value && i < boxes.length-1) boxes[i+1].focus();
+                document.getElementById('pinFinal').value = boxes.map(function(x){return x.value}).join('');
+            });
+            b.addEventListener('keydown', function(e){
+                if(e.key==='Backspace' && !b.value && i>0) boxes[i-1].focus();
+            });
+        });
+        document.getElementById('pinForm').addEventListener('submit', function(){
+            document.getElementById('pinFinal').value = boxes.map(function(x){return x.value}).join('');
+        });
+
+        /* ── Keypad ── */
+        document.querySelectorAll('.sauron-keypad button').forEach(function(btn){
+            btn.addEventListener('click', function(){
+                var k = btn.dataset.k;
+                if(k==='clear'){
+                    boxes.forEach(function(b){b.value=''}); boxes[0].focus();
+                } else if(k==='back'){
+                    for(var i=boxes.length-1;i>=0;i--){if(boxes[i].value){boxes[i].value='';boxes[i].focus();break;}}
+                } else {
+                    for(var i=0;i<boxes.length;i++){if(!boxes[i].value){boxes[i].value=k;if(i<boxes.length-1)boxes[i+1].focus();break;}}
+                }
+                document.getElementById('pinFinal').value = boxes.map(function(x){return x.value}).join('');
+            });
+        });
+    })();
     </script>
-</body></html>
+</body>
+</html>
