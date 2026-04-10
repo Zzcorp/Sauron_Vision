@@ -92,7 +92,15 @@
             position: fixed; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             width: 90vmin; height: 90vmin;
-            z-index: 1; pointer-events: none; opacity: 0.06;
+            z-index: 1; pointer-events: none; opacity: 0.085;
+        }
+        .eye-glow-shadow {
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 70vmin; height: 70vmin;
+            z-index: 1; pointer-events: none;
+            background: radial-gradient(circle, rgba(0,232,104,0.10) 0%, rgba(0,232,104,0.03) 30%, transparent 55%);
+            filter: blur(50px);
         }
         .globe-eye-fixed .globe-spin {
             transform-origin: 400px 400px;
@@ -678,7 +686,8 @@
             opacity: 1; pointer-events: auto;
         }
 
-        .pin-box { width: 420px; max-width: 90vw; }
+        .pin-box { width: 380px; max-width: 90vw; }
+        .pin-box .login-back { margin-top: 14px; }
 
         .pin-anim {
             opacity: 0; transform: translateY(30px);
@@ -692,30 +701,49 @@
         body.pin-mode .pin-anim.pa-4 { transition-delay: 1.15s; }
         body.pin-mode .pin-anim.pa-5 { transition-delay: 1.3s; }
 
+        /* PIN-specific compact logo */
+        .pin-logo-wrap {
+            position: relative; width: 90px; height: 90px;
+            margin: 0 auto 14px;
+        }
+        .pin-logo-glow {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 140px; height: 140px; border-radius: 50%;
+            background: radial-gradient(circle, rgba(0,232,104,0.18) 0%, rgba(0,232,104,0.05) 40%, transparent 70%);
+            animation: logoGlow 4s ease-in-out infinite;
+            pointer-events: none;
+        }
+        .pin-logo-img {
+            position: relative; z-index: 1;
+            width: 90px; height: 90px; display: block; object-fit: contain;
+            filter: drop-shadow(0 0 25px rgba(0,232,104,0.25));
+            animation: heroLogoFloat 6s ease-in-out infinite;
+        }
         .pin-title-text {
-            font-family: var(--font-d); font-size: 20px; font-weight: 900;
+            font-family: var(--font-d); font-size: 18px; font-weight: 900;
             letter-spacing: 5px; color: var(--accent); text-align: center;
-            margin-bottom: 4px; text-shadow: 0 0 30px rgba(0,232,104,0.2);
+            margin-bottom: 2px; text-shadow: 0 0 30px rgba(0,232,104,0.2);
         }
         .pin-sub {
-            font-family: var(--font-m); font-size: 10px; letter-spacing: 3px;
-            color: var(--text3); text-align: center; margin-bottom: 24px;
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 3px;
+            color: var(--text3); text-align: center; margin-bottom: 12px;
         }
         .pin-who {
-            text-align: center; font-family: var(--font-m); font-size: 11px;
-            color: var(--text2); margin-bottom: 18px; opacity: 0.8;
+            text-align: center; font-family: var(--font-m); font-size: 10px;
+            color: var(--text2); margin-bottom: 12px; opacity: 0.8;
         }
         .pin-card {
             background: rgba(10,26,20,0.92); border: 1px solid var(--border);
-            border-radius: 12px; padding: 32px; backdrop-filter: blur(24px);
+            border-radius: 12px; padding: 22px 24px; backdrop-filter: blur(24px);
             box-shadow: 0 4px 60px rgba(0,0,0,0.6), 0 0 80px rgba(0,232,104,0.04);
         }
         .pin-row {
-            display: flex; gap: 12px; justify-content: center; margin-bottom: 24px;
+            display: flex; gap: 10px; justify-content: center; margin-bottom: 16px;
         }
         .pin-row input {
-            width: 52px; height: 62px; text-align: center;
-            font-family: var(--font-d); font-size: 24px;
+            width: 44px; height: 52px; text-align: center;
+            font-family: var(--font-d); font-size: 20px;
             background: var(--bg); border: 1px solid var(--border);
             border-radius: 8px; color: var(--accent); outline: none;
             transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
@@ -726,10 +754,10 @@
             transform: scale(1.05);
         }
         .btn-verify {
-            width: 100%; padding: 14px;
+            width: 100%; padding: 12px;
             background: linear-gradient(135deg, var(--accent-dim), var(--accent));
             border: none; border-radius: 6px;
-            color: #020804; font-family: var(--font-d); font-size: 13px;
+            color: #020804; font-family: var(--font-d); font-size: 12px;
             font-weight: 700; letter-spacing: 4px; cursor: pointer;
             text-transform: uppercase;
             transition: transform 0.3s, box-shadow 0.3s, background 0.3s;
@@ -741,19 +769,19 @@
         }
         .pin-errors {
             background: rgba(232,48,48,0.08); border: 1px solid rgba(232,48,48,0.25);
-            border-radius: 6px; padding: 12px; margin-bottom: 18px;
-            font-family: var(--font-m); font-size: 12px; color: var(--accent-red);
+            border-radius: 6px; padding: 10px; margin-bottom: 14px;
+            font-family: var(--font-m); font-size: 11px; color: var(--accent-red);
             text-align: center;
         }
         .sauron-keypad {
             display: grid; grid-template-columns: repeat(3, 1fr);
-            gap: 8px; margin-top: 20px;
+            gap: 6px; margin-top: 14px;
         }
         .sauron-keypad button {
-            padding: 16px 0; background: var(--bg);
+            padding: 11px 0; background: var(--bg);
             border: 1px solid var(--border); border-radius: 8px;
             color: var(--text); font-family: var(--font-d);
-            font-size: 18px; font-weight: 700; cursor: pointer;
+            font-size: 16px; font-weight: 700; cursor: pointer;
             transition: all 0.15s;
         }
         .sauron-keypad button:hover {
@@ -774,25 +802,40 @@
 <canvas id="bgCanvas"></canvas>
 <div class="scan-line"></div>
 
+<div class="eye-glow-shadow"></div>
 <svg class="globe-eye-fixed" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <filter id="wallEyeGlow" x="-100%" y="-100%" width="300%" height="300%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="b1"/>
+            <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="b2"/>
+            <feMerge><feMergeNode in="b1"/><feMergeNode in="b2"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <radialGradient id="wallPupilFill" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#00e868" stop-opacity="0.5"/>
+            <stop offset="60%" stop-color="#00e868" stop-opacity="0.18"/>
+            <stop offset="100%" stop-color="#00e868" stop-opacity="0"/>
+        </radialGradient>
+    </defs>
     <g class="eye-static">
-        <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="2"/>
-        <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.4"/>
-        <circle cx="400" cy="400" r="160" fill="none" stroke="#00e868" stroke-width="1.5"/>
-        <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="2"/>
-        <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.12"/>
-        <path d="M 10,400 Q 200,100 400,160 Q 600,100 790,400" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
-        <path d="M 10,400 Q 200,700 400,640 Q 600,700 790,400" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
+        <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="3.5"/>
+        <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
+        <circle cx="400" cy="400" r="160" fill="none" stroke="#00e868" stroke-width="2.5"/>
+        <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="3"/>
+        <circle cx="400" cy="400" r="40" fill="url(#wallPupilFill)" filter="url(#wallEyeGlow)"/>
+        <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.18" filter="url(#wallEyeGlow)"/>
+        <circle cx="400" cy="400" r="8" fill="#00e868" opacity="0.4"/>
+        <path d="M 10,400 Q 200,100 400,160 Q 600,100 790,400" fill="none" stroke="#00e868" stroke-width="2" opacity="0.6"/>
+        <path d="M 10,400 Q 200,700 400,640 Q 600,700 790,400" fill="none" stroke="#00e868" stroke-width="2" opacity="0.6"/>
     </g>
     <g class="globe-spin">
-        <ellipse cx="400" cy="400" rx="50" ry="140" fill="none" stroke="#00e868" stroke-width="0.5" opacity="0.35"/>
-        <ellipse cx="400" cy="400" rx="100" ry="140" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.25"/>
-        <ellipse cx="400" cy="400" rx="140" ry="50" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.25"/>
-        <line x1="260" y1="340" x2="540" y2="340" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
-        <line x1="260" y1="400" x2="540" y2="400" stroke="#00e868" stroke-width="0.5" opacity="0.3"/>
-        <line x1="260" y1="460" x2="540" y2="460" stroke="#00e868" stroke-width="0.4" opacity="0.2"/>
-        <ellipse cx="400" cy="400" rx="30" ry="140" fill="none" stroke="#00e868" stroke-width="0.4" opacity="0.2" transform="rotate(25 400 400)"/>
-        <ellipse cx="400" cy="400" rx="120" ry="140" fill="none" stroke="#00e868" stroke-width="0.3" opacity="0.15" transform="rotate(-20 400 400)"/>
+        <ellipse cx="400" cy="400" rx="50" ry="140" fill="none" stroke="#00e868" stroke-width="1" opacity="0.4"/>
+        <ellipse cx="400" cy="400" rx="100" ry="140" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.3"/>
+        <ellipse cx="400" cy="400" rx="140" ry="50" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.3"/>
+        <line x1="260" y1="340" x2="540" y2="340" stroke="#00e868" stroke-width="0.8" opacity="0.25"/>
+        <line x1="260" y1="400" x2="540" y2="400" stroke="#00e868" stroke-width="1" opacity="0.3"/>
+        <line x1="260" y1="460" x2="540" y2="460" stroke="#00e868" stroke-width="0.8" opacity="0.25"/>
+        <ellipse cx="400" cy="400" rx="30" ry="140" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.25" transform="rotate(25 400 400)"/>
+        <ellipse cx="400" cy="400" rx="120" ry="140" fill="none" stroke="#00e868" stroke-width="0.6" opacity="0.2" transform="rotate(-20 400 400)"/>
     </g>
 </svg>
 
@@ -1263,9 +1306,9 @@
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <div class="pin-overlay" id="pinOverlay">
     <div class="pin-box">
-        <div class="login-logo-wrap pin-anim pa-1">
-            <div class="login-logo-glow"></div>
-            <img class="login-eye-logo" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision">
+        <div class="pin-logo-wrap pin-anim pa-1">
+            <div class="pin-logo-glow"></div>
+            <img class="pin-logo-img" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision">
         </div>
         <h1 class="pin-title-text pin-anim pa-2">SECOND GATE</h1>
         <p class="pin-sub pin-anim pa-2">ENTER PIN CODE</p>
@@ -1327,7 +1370,8 @@
             x: Math.random()*2000, y: Math.random()*2000,
             vx: (Math.random()-0.5)*0.4, vy: (Math.random()-0.5)*0.4,
             s: Math.random()*1.8+0.3, a: Math.random()*0.25+0.06,
-            sym: i < symbols.length ? symbols[i] : null
+            sym: i < symbols.length ? symbols[i] : null,
+            trail: [], trailMax: 7
         });
     }
 
@@ -1348,13 +1392,31 @@
                 }
             }
         }
-        // Particles + labels
+        // Particles + trails + labels
         for (var k = 0; k < particles.length; k++) {
             var p = particles[k];
-            p.x += p.vx; p.y += p.vy;
-            if (p.x < 0 || p.x > W) p.vx *= -1;
-            if (p.y < 0 || p.y > H) p.vy *= -1;
 
+            // Push current position into trail before moving
+            p.trail.push({x: p.x, y: p.y});
+            if (p.trail.length > p.trailMax) p.trail.shift();
+
+            p.x += p.vx; p.y += p.vy;
+            if (p.x < 0 || p.x > W) { p.vx *= -1; p.trail = []; }
+            if (p.y < 0 || p.y > H) { p.vy *= -1; p.trail = []; }
+
+            // Draw fading trail
+            for (var ti = 0; ti < p.trail.length; ti++) {
+                var frac = (ti + 1) / p.trail.length;
+                var tailA = p.a * frac * 0.55;
+                var tailR = p.s * frac * 0.75;
+                if (tailR < 0.2) continue;
+                ctx.beginPath();
+                ctx.arc(p.trail[ti].x, p.trail[ti].y, tailR, 0, Math.PI*2);
+                ctx.fillStyle = 'rgba(0,232,104,' + tailA.toFixed(3) + ')';
+                ctx.fill();
+            }
+
+            // Core particle
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.s, 0, Math.PI*2);
             ctx.fillStyle = 'rgba(0,232,104,' + p.a + ')';
@@ -1455,13 +1517,17 @@
     }, { threshold: 0.5 });
     countEls.forEach(function(el) { countObserver.observe(el); });
 
-    // ── Parallax on mouse move ───────────────────────────────────────
+    // ── Parallax on mouse move (eye + glow shadow at different depths) ──
     var globe = document.querySelector('.globe-eye-fixed');
+    var eyeShadow = document.querySelector('.eye-glow-shadow');
     document.addEventListener('mousemove', function(e) {
         var mx = (e.clientX / W - 0.5) * 2;
         var my = (e.clientY / H - 0.5) * 2;
         if (globe) {
             globe.style.transform = 'translate(calc(-50% + ' + (mx*15) + 'px), calc(-50% + ' + (my*15) + 'px))';
+        }
+        if (eyeShadow) {
+            eyeShadow.style.transform = 'translate(calc(-50% + ' + (mx*32) + 'px), calc(-50% + ' + (my*32) + 'px))';
         }
     });
 

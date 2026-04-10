@@ -21,7 +21,8 @@
         /* ── Background layers ── */
         .grid-bg{position:fixed;inset:-50%;background-image:linear-gradient(rgba(0,232,104,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,232,104,0.03) 1px,transparent 1px);background-size:80px 80px;animation:gridDrift 40s linear infinite;z-index:0;pointer-events:none}
         @keyframes gridDrift{0%{transform:translate(0,0)}100%{transform:translate(80px,80px)}}
-        .globe-eye{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:90vmin;height:90vmin;z-index:0;pointer-events:none;opacity:0.05}
+        .eye-glow-shadow{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:70vmin;height:70vmin;z-index:0;pointer-events:none;background:radial-gradient(circle,rgba(0,232,104,0.10) 0%,rgba(0,232,104,0.03) 30%,transparent 55%);filter:blur(50px)}
+        .globe-eye{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:90vmin;height:90vmin;z-index:0;pointer-events:none;opacity:0.085}
         .globe-eye .globe-spin{transform-origin:400px 400px;animation:globeSpin 80s linear infinite}
         @keyframes globeSpin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
         #bgCanvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none}
@@ -31,7 +32,7 @@
         @keyframes scanRTL{0%{left:100%}100%{left:-80px}}
 
         /* ── PIN container ── */
-        .pin-container{position:relative;z-index:10;width:420px;max-width:90vw}
+        .pin-container{position:relative;z-index:10;width:380px;max-width:90vw}
 
         /* ── Staggered fade-in ── */
         .fade-up{opacity:0;transform:translateY(30px);animation:fadeUp 0.7s cubic-bezier(0.16,1,0.3,1) forwards}
@@ -40,50 +41,65 @@
         .fade-up.d5{animation-delay:0.7s}
         @keyframes fadeUp{to{opacity:1;transform:translateY(0)}}
 
-        /* ── Logo with glow ── */
-        .logo-wrap{position:relative;width:140px;height:140px;margin:0 auto 28px}
-        .logo-glow{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:200px;height:200px;border-radius:50%;background:radial-gradient(circle,rgba(0,232,104,0.18) 0%,rgba(0,232,104,0.05) 40%,transparent 70%);animation:logoGlow 4s ease-in-out infinite;pointer-events:none}
+        /* ── Logo with glow (compact) ── */
+        .logo-wrap{position:relative;width:90px;height:90px;margin:0 auto 14px}
+        .logo-glow{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:140px;height:140px;border-radius:50%;background:radial-gradient(circle,rgba(0,232,104,0.18) 0%,rgba(0,232,104,0.05) 40%,transparent 70%);animation:logoGlow 4s ease-in-out infinite;pointer-events:none}
         @keyframes logoGlow{0%,100%{transform:translate(-50%,-50%) scale(1);opacity:0.7}50%{transform:translate(-50%,-50%) scale(1.15);opacity:1}}
-        .logo-img{position:relative;z-index:1;width:140px;height:140px;display:block;object-fit:contain;filter:drop-shadow(0 0 30px rgba(0,232,104,0.25));animation:logoFloat 6s ease-in-out infinite}
+        .logo-img{position:relative;z-index:1;width:90px;height:90px;display:block;object-fit:contain;filter:drop-shadow(0 0 25px rgba(0,232,104,0.25));animation:logoFloat 6s ease-in-out infinite}
         @keyframes logoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
 
-        .pin-title{font-family:'Orbitron',sans-serif;font-size:20px;font-weight:900;letter-spacing:5px;color:var(--accent);text-align:center;margin-bottom:4px;text-shadow:0 0 30px rgba(0,232,104,0.2)}
-        .pin-subtitle{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:3px;color:var(--text3);text-align:center;margin-bottom:24px}
-        .pin-who{text-align:center;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text2);margin-bottom:18px;opacity:0.8}
+        .pin-title{font-family:'Orbitron',sans-serif;font-size:18px;font-weight:900;letter-spacing:5px;color:var(--accent);text-align:center;margin-bottom:2px;text-shadow:0 0 30px rgba(0,232,104,0.2)}
+        .pin-subtitle{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:3px;color:var(--text3);text-align:center;margin-bottom:12px}
+        .pin-who{text-align:center;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text2);margin-bottom:12px;opacity:0.8}
 
         /* ── Card ── */
-        .pin-card{background:rgba(10,26,20,0.92);border:1px solid var(--border);border-radius:12px;padding:32px;backdrop-filter:blur(24px);box-shadow:0 4px 60px rgba(0,0,0,0.6),0 0 80px rgba(0,232,104,0.04)}
-        .pin-row{display:flex;gap:12px;justify-content:center;margin-bottom:24px}
-        .pin-row input{width:52px;height:62px;text-align:center;font-family:'Orbitron',sans-serif;font-size:24px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--accent);outline:none;transition:border-color .2s,box-shadow .2s,transform .15s}
+        .pin-card{background:rgba(10,26,20,0.92);border:1px solid var(--border);border-radius:12px;padding:22px 24px;backdrop-filter:blur(24px);box-shadow:0 4px 60px rgba(0,0,0,0.6),0 0 80px rgba(0,232,104,0.04)}
+        .pin-row{display:flex;gap:10px;justify-content:center;margin-bottom:16px}
+        .pin-row input{width:44px;height:52px;text-align:center;font-family:'Orbitron',sans-serif;font-size:20px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--accent);outline:none;transition:border-color .2s,box-shadow .2s,transform .15s}
         .pin-row input:focus{border-color:var(--accent);box-shadow:0 0 20px rgba(0,232,104,0.2);transform:scale(1.05)}
-        .btn-verify{width:100%;padding:14px;background:linear-gradient(135deg,var(--accent-dim),var(--accent));border:none;border-radius:6px;color:#020804;font-family:'Orbitron',sans-serif;font-size:13px;font-weight:700;letter-spacing:4px;cursor:pointer;text-transform:uppercase;transition:transform .3s,box-shadow .3s,background .3s}
+        .btn-verify{width:100%;padding:12px;background:linear-gradient(135deg,var(--accent-dim),var(--accent));border:none;border-radius:6px;color:#020804;font-family:'Orbitron',sans-serif;font-size:12px;font-weight:700;letter-spacing:4px;cursor:pointer;text-transform:uppercase;transition:transform .3s,box-shadow .3s,background .3s}
         .btn-verify:hover{transform:translateY(-2px);box-shadow:0 0 24px rgba(0,232,104,0.4),0 0 48px rgba(0,232,104,0.15),0 8px 30px rgba(0,232,104,0.25);background:linear-gradient(135deg,var(--accent),var(--accent-bright))}
-        .pin-err{background:rgba(232,48,48,0.08);border:1px solid rgba(232,48,48,0.25);border-radius:6px;padding:12px;margin-bottom:18px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#e83030;text-align:center}
+        .pin-err{background:rgba(232,48,48,0.08);border:1px solid rgba(232,48,48,0.25);border-radius:6px;padding:10px;margin-bottom:14px;font-family:'Share Tech Mono',monospace;font-size:11px;color:#e83030;text-align:center}
 
         /* ── Keypad ── */
-        .sauron-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:20px}
-        .sauron-keypad button{padding:16px 0;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'Orbitron',sans-serif;font-size:18px;font-weight:700;cursor:pointer;transition:all .15s}
+        .sauron-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:14px}
+        .sauron-keypad button{padding:11px 0;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'Orbitron',sans-serif;font-size:16px;font-weight:700;cursor:pointer;transition:all .15s}
         .sauron-keypad button:hover{border-color:var(--accent);color:var(--accent);box-shadow:0 0 14px rgba(0,232,104,0.18)}
         .sauron-keypad button:active{transform:scale(0.95);background:var(--bg2)}
         .sauron-keypad button.kp-fn{color:var(--text3);font-size:14px}
         .sauron-keypad button.kp-fn:hover{color:#e83030;border-color:#581818}
 
-        .pin-back{display:block;text-align:center;margin-top:20px;font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:2px;color:var(--text3);text-decoration:none;text-transform:uppercase;transition:color .3s}
+        .pin-back{display:block;text-align:center;margin-top:14px;font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:2px;color:var(--text3);text-decoration:none;text-transform:uppercase;transition:color .3s}
         .pin-back:hover{color:var(--accent)}
     </style>
 </head>
 <body>
     <div class="grid-bg"></div>
+    <div class="eye-glow-shadow"></div>
 
     <svg class="globe-eye" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <filter id="pinEyeGlow" x="-100%" y="-100%" width="300%" height="300%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur1"/>
+                <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur2"/>
+                <feMerge><feMergeNode in="blur1"/><feMergeNode in="blur2"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <radialGradient id="pinPupilFill" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#00e868" stop-opacity="0.4"/>
+                <stop offset="60%" stop-color="#00e868" stop-opacity="0.15"/>
+                <stop offset="100%" stop-color="#00e868" stop-opacity="0"/>
+            </radialGradient>
+        </defs>
         <g class="eye-static">
-            <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="2"/>
-            <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.4"/>
-            <circle cx="400" cy="400" r="160" fill="none" stroke="#00e868" stroke-width="1.5"/>
-            <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="2"/>
-            <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.12"/>
-            <path d="M 10,400 Q 200,100 400,160 Q 600,100 790,400" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
-            <path d="M 10,400 Q 200,700 400,640 Q 600,700 790,400" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
+            <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="3.5"/>
+            <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
+            <circle cx="400" cy="400" r="160" fill="none" stroke="#00e868" stroke-width="2.5"/>
+            <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="3"/>
+            <circle cx="400" cy="400" r="40" fill="url(#pinPupilFill)" filter="url(#pinEyeGlow)"/>
+            <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.18" filter="url(#pinEyeGlow)"/>
+            <circle cx="400" cy="400" r="8" fill="#00e868" opacity="0.4"/>
+            <path d="M 10,400 Q 200,100 400,160 Q 600,100 790,400" fill="none" stroke="#00e868" stroke-width="2" opacity="0.6"/>
+            <path d="M 10,400 Q 200,700 400,640 Q 600,700 790,400" fill="none" stroke="#00e868" stroke-width="2" opacity="0.6"/>
         </g>
         <g class="globe-spin">
             <ellipse cx="400" cy="400" rx="50" ry="140" fill="none" stroke="#00e868" stroke-width="0.5" opacity="0.35"/>
@@ -147,12 +163,25 @@
         function resize(){ W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
         resize(); window.addEventListener('resize', resize);
 
+        var symbols = ['BTC','ETH','SOL','SPX','NDX','DXY','GLD','OIL','VIX','EUR','JPY','TSLA','NVDA','AAPL'];
+        var prices = {};
+        symbols.forEach(function(s){ prices[s] = (Math.random()*1000+50).toFixed(2); });
+        setInterval(function(){
+            symbols.forEach(function(s){
+                var v = parseFloat(prices[s]);
+                v += (Math.random()-0.5) * v * 0.002;
+                prices[s] = v.toFixed(2);
+            });
+        }, 1500);
+
         var particles = [];
-        for (var i = 0; i < 50; i++) {
+        for (var i = 0; i < 60; i++) {
             particles.push({
                 x: Math.random()*2000, y: Math.random()*2000,
                 vx: (Math.random()-0.5)*0.35, vy: (Math.random()-0.5)*0.35,
-                s: Math.random()*1.5+0.3, a: Math.random()*0.2+0.04
+                s: Math.random()*1.6+0.3, a: Math.random()*0.22+0.05,
+                sym: i < symbols.length ? symbols[i] : null,
+                trail: [], trailMax: 7
             });
         }
         function draw(){
@@ -161,23 +190,48 @@
                 for(var j=i+1;j<particles.length;j++){
                     var dx=particles[i].x-particles[j].x,dy=particles[i].y-particles[j].y;
                     var d=Math.sqrt(dx*dx+dy*dy);
-                    if(d<120){ctx.beginPath();ctx.moveTo(particles[i].x,particles[i].y);ctx.lineTo(particles[j].x,particles[j].y);ctx.strokeStyle='rgba(0,232,104,'+(0.04*(1-d/120))+')';ctx.stroke()}
+                    if(d<120){ctx.beginPath();ctx.moveTo(particles[i].x,particles[i].y);ctx.lineTo(particles[j].x,particles[j].y);ctx.strokeStyle='rgba(0,232,104,'+(0.04*(1-d/120))+')';ctx.stroke();}
                 }
             }
             for(var k=0;k<particles.length;k++){
-                var p=particles[k];p.x+=p.vx;p.y+=p.vy;
-                if(p.x<0||p.x>W)p.vx*=-1;if(p.y<0||p.y>H)p.vy*=-1;
-                ctx.beginPath();ctx.arc(p.x,p.y,p.s,0,Math.PI*2);ctx.fillStyle='rgba(0,232,104,'+p.a+')';ctx.fill();
+                var p=particles[k];
+                p.trail.push({x:p.x,y:p.y});
+                if(p.trail.length > p.trailMax) p.trail.shift();
+                p.x+=p.vx; p.y+=p.vy;
+                var bounced=false;
+                if(p.x<0||p.x>W){p.vx*=-1; bounced=true;}
+                if(p.y<0||p.y>H){p.vy*=-1; bounced=true;}
+                if(bounced) p.trail.length = 0;
+                /* draw trail (fading) */
+                for(var t=0;t<p.trail.length;t++){
+                    var tp = p.trail[t];
+                    var frac = t / p.trail.length;
+                    ctx.beginPath();
+                    ctx.arc(tp.x, tp.y, p.s * frac * 0.85, 0, Math.PI*2);
+                    ctx.fillStyle = 'rgba(0,232,104,' + (p.a * frac * 0.55) + ')';
+                    ctx.fill();
+                }
+                /* particle head */
+                ctx.beginPath();ctx.arc(p.x,p.y,p.s,0,Math.PI*2);
+                ctx.fillStyle='rgba(0,232,104,'+p.a+')';ctx.fill();
+                /* ticker label */
+                if(p.sym && prices[p.sym]){
+                    ctx.font = '9px "Share Tech Mono", monospace';
+                    ctx.fillStyle = 'rgba(0,232,104,' + (p.a * 1.6) + ')';
+                    ctx.fillText(p.sym + ' ' + prices[p.sym], p.x + 6, p.y - 4);
+                }
             }
             requestAnimationFrame(draw);
         }
         draw();
 
-        /* Mouse parallax on eye */
+        /* Mouse parallax on eye + glow shadow */
         var globe = document.querySelector('.globe-eye');
+        var eyeShadow = document.querySelector('.eye-glow-shadow');
         document.addEventListener('mousemove', function(e){
             var mx = (e.clientX/W - 0.5)*2, my = (e.clientY/H - 0.5)*2;
             if(globe) globe.style.transform = 'translate(calc(-50% + '+mx*15+'px), calc(-50% + '+my*15+'px))';
+            if(eyeShadow) eyeShadow.style.transform = 'translate(calc(-50% + '+mx*32+'px), calc(-50% + '+my*32+'px))';
         });
 
         /* ── PIN logic ── */

@@ -16,14 +16,35 @@
         }
         .intro-container { text-align: center; position: relative; z-index: 2; }
 
-        /* Eye logo */
-        .intro-eye {
-            width: 120px; height: 120px; margin: 0 auto 30px;
+        /* Eye logo with pulsing glow + floating motion */
+        .intro-logo-wrap {
+            position: relative; width: 220px; height: 220px;
+            margin: 0 auto 36px;
             opacity: 0; animation: eyeFadeIn 1.2s ease 0.3s forwards;
         }
-        .intro-eye .pupil { animation: pupilPulse 2s ease-in-out infinite; transform-origin: 32px 32px; }
+        .intro-logo-glow {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 300px; height: 300px; border-radius: 50%;
+            background: radial-gradient(circle, rgba(0,232,104,0.18) 0%, rgba(0,232,104,0.05) 40%, transparent 70%);
+            animation: introLogoGlow 4s ease-in-out infinite;
+            pointer-events: none;
+        }
+        @keyframes introLogoGlow {
+            0%,100% { transform: translate(-50%,-50%) scale(1); opacity: 0.7; }
+            50% { transform: translate(-50%,-50%) scale(1.18); opacity: 1; }
+        }
+        .intro-eye {
+            position: relative; z-index: 1;
+            width: 220px; height: 220px; display: block; object-fit: contain;
+            filter: drop-shadow(0 0 45px rgba(0,232,104,0.28));
+            animation: introLogoFloat 6s ease-in-out infinite;
+        }
+        @keyframes introLogoFloat {
+            0%,100% { transform: translateY(0); }
+            50% { transform: translateY(-14px); }
+        }
         @keyframes eyeFadeIn { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: scale(1); } }
-        @keyframes pupilPulse { 0%,100% { r: 5; } 50% { r: 7; } }
 
         /* Title */
         .intro-title {
@@ -73,13 +94,88 @@
 
         /* Particles */
         canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; }
+
+        /* Background eye + glow shadow */
+        .globe-eye-bg {
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90vmin; height: 90vmin;
+            z-index: 0; pointer-events: none; opacity: 0.06;
+        }
+        .globe-eye-bg .globe-spin {
+            transform-origin: 400px 400px;
+            animation: introGlobeSpin 90s linear infinite;
+        }
+        @keyframes introGlobeSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .eye-glow-shadow {
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 70vmin; height: 70vmin;
+            z-index: 0; pointer-events: none;
+            background: radial-gradient(circle, rgba(0,232,104,0.10) 0%, rgba(0,232,104,0.03) 30%, transparent 55%);
+            filter: blur(50px);
+        }
+        .grid-bg {
+            position: fixed; inset: -50%;
+            background-image:
+                linear-gradient(rgba(0,232,104,0.025) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,232,104,0.025) 1px, transparent 1px);
+            background-size: 80px 80px;
+            animation: introGridDrift 40s linear infinite;
+            z-index: 0; pointer-events: none;
+        }
+        @keyframes introGridDrift {
+            0% { transform: translate(0,0); }
+            100% { transform: translate(80px,80px); }
+        }
     </style>
 </head>
 <body>
+<div class="grid-bg"></div>
+<div class="eye-glow-shadow"></div>
+
+<svg class="globe-eye-bg" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <filter id="introEyeGlow" x="-100%" y="-100%" width="300%" height="300%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur1"/>
+            <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur2"/>
+            <feMerge><feMergeNode in="blur1"/><feMergeNode in="blur2"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <radialGradient id="introPupilFill" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#00e868" stop-opacity="0.4"/>
+            <stop offset="60%" stop-color="#00e868" stop-opacity="0.15"/>
+            <stop offset="100%" stop-color="#00e868" stop-opacity="0"/>
+        </radialGradient>
+    </defs>
+    <g class="eye-static">
+        <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="3.5"/>
+        <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
+        <circle cx="400" cy="400" r="160" fill="none" stroke="#00e868" stroke-width="2.5"/>
+        <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="3"/>
+        <circle cx="400" cy="400" r="40" fill="url(#introPupilFill)" filter="url(#introEyeGlow)"/>
+        <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.18" filter="url(#introEyeGlow)"/>
+        <circle cx="400" cy="400" r="8" fill="#00e868" opacity="0.4"/>
+        <path d="M 10,400 Q 200,100 400,160 Q 600,100 790,400" fill="none" stroke="#00e868" stroke-width="2" opacity="0.6"/>
+        <path d="M 10,400 Q 200,700 400,640 Q 600,700 790,400" fill="none" stroke="#00e868" stroke-width="2" opacity="0.6"/>
+    </g>
+    <g class="globe-spin">
+        <ellipse cx="400" cy="400" rx="50" ry="140" fill="none" stroke="#00e868" stroke-width="1" opacity="0.4"/>
+        <ellipse cx="400" cy="400" rx="100" ry="140" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.3"/>
+        <ellipse cx="400" cy="400" rx="140" ry="50" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.3"/>
+        <ellipse cx="400" cy="400" rx="30" ry="140" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.25" transform="rotate(25 400 400)"/>
+    </g>
+</svg>
+
 <canvas id="bgCanvas"></canvas>
 <div class="intro-container">
-    <!-- Logo -->
-    <img class="intro-eye" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision" style="object-fit:contain;">
+    <!-- Logo with pulsing glow + floating motion -->
+    <div class="intro-logo-wrap">
+        <div class="intro-logo-glow"></div>
+        <img class="intro-eye" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision">
+    </div>
 
     <!-- Title -->
     <div class="intro-title">SAURON VISION</div>
@@ -100,25 +196,77 @@
 (function() {
     // Particles
     var c = document.getElementById('bgCanvas'), ctx = c.getContext('2d');
-    c.width = window.innerWidth; c.height = window.innerHeight;
+    function resize(){ c.width = window.innerWidth; c.height = window.innerHeight; }
+    resize(); window.addEventListener('resize', resize);
+
+    var symbols = ['BTC','ETH','SOL','SPX','NDX','DXY','GLD','OIL','VIX','EUR','JPY','TSLA','NVDA','AAPL'];
+    var prices = {};
+    symbols.forEach(function(s){ prices[s] = (Math.random()*1000+50).toFixed(2); });
+    setInterval(function(){
+        symbols.forEach(function(s){
+            var v = parseFloat(prices[s]);
+            v += (Math.random()-0.5) * v * 0.002;
+            prices[s] = v.toFixed(2);
+        });
+    }, 1500);
+
     var ps = [];
-    for (var i = 0; i < 60; i++) ps.push({
+    for (var i = 0; i < 70; i++) ps.push({
         x: Math.random()*c.width, y: Math.random()*c.height,
         vx: (Math.random()-0.5)*0.4, vy: (Math.random()-0.5)*0.4,
-        s: Math.random()*1.5+0.5, a: Math.random()*0.2+0.05
+        s: Math.random()*1.6+0.4, a: Math.random()*0.22+0.05,
+        sym: i < symbols.length ? symbols[i] : null,
+        trail: [], trailMax: 7
     });
     function draw() {
         ctx.clearRect(0,0,c.width,c.height);
+        for(var i=0;i<ps.length;i++){
+            for(var j=i+1;j<ps.length;j++){
+                var dx=ps[i].x-ps[j].x, dy=ps[i].y-ps[j].y;
+                var d=Math.sqrt(dx*dx+dy*dy);
+                if(d<120){
+                    ctx.beginPath();ctx.moveTo(ps[i].x,ps[i].y);ctx.lineTo(ps[j].x,ps[j].y);
+                    ctx.strokeStyle='rgba(0,232,104,'+(0.04*(1-d/120))+')';ctx.stroke();
+                }
+            }
+        }
         ps.forEach(function(p) {
+            p.trail.push({x:p.x,y:p.y});
+            if(p.trail.length > p.trailMax) p.trail.shift();
             p.x += p.vx; p.y += p.vy;
-            if (p.x<0||p.x>c.width) p.vx *= -1;
-            if (p.y<0||p.y>c.height) p.vy *= -1;
+            var bounced=false;
+            if (p.x<0||p.x>c.width){p.vx *= -1; bounced=true;}
+            if (p.y<0||p.y>c.height){p.vy *= -1; bounced=true;}
+            if(bounced) p.trail.length = 0;
+            for(var t=0;t<p.trail.length;t++){
+                var tp=p.trail[t];
+                var frac=t/p.trail.length;
+                ctx.beginPath();
+                ctx.arc(tp.x, tp.y, p.s*frac*0.85, 0, Math.PI*2);
+                ctx.fillStyle='rgba(0,232,104,'+(p.a*frac*0.55)+')';
+                ctx.fill();
+            }
             ctx.beginPath(); ctx.arc(p.x,p.y,p.s,0,Math.PI*2);
             ctx.fillStyle = 'rgba(0,232,104,'+p.a+')'; ctx.fill();
+            if(p.sym && prices[p.sym]){
+                ctx.font = '9px "Share Tech Mono", monospace';
+                ctx.fillStyle = 'rgba(0,232,104,'+(p.a*1.6)+')';
+                ctx.fillText(p.sym + ' ' + prices[p.sym], p.x + 6, p.y - 4);
+            }
         });
         requestAnimationFrame(draw);
     }
     draw();
+
+    /* Mouse parallax: eye + glow shadow at different depths */
+    var globe = document.querySelector('.globe-eye-bg');
+    var eyeShadow = document.querySelector('.eye-glow-shadow');
+    document.addEventListener('mousemove', function(e){
+        var mx = (e.clientX/c.width - 0.5)*2;
+        var my = (e.clientY/c.height - 0.5)*2;
+        if(globe) globe.style.transform = 'translate(calc(-50% + '+(mx*15)+'px), calc(-50% + '+(my*15)+'px))';
+        if(eyeShadow) eyeShadow.style.transform = 'translate(calc(-50% + '+(mx*32)+'px), calc(-50% + '+(my*32)+'px))';
+    });
 
     // Loading sequence
     var steps = [
