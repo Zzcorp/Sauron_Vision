@@ -262,6 +262,7 @@
     </a>
 </div>
 <!-- ── Row 1: Portfolio KPIs ──────────────────────────── -->
+<div id="section-portfolio">
 <div class="section-label fade-in-up">Portfolio Overview</div>
 <div class="grid grid-6" style="margin-bottom: 20px;">
     <a href="{% url 'portfolio_overview' %}" class="stat-box fade-in-up delay-1 dash-link">
@@ -296,7 +297,10 @@
     </div>
 </div>
 
+</div><!-- /section-portfolio -->
+
 <!-- ── Row 2: Market & Intelligence KPIs ─────────────── -->
+<div id="section-markets">
 <div class="section-label fade-in-up">Markets & Intelligence</div>
 <div class="grid grid-6" style="margin-bottom: 20px;">
     <a href="{% url 'instruments_list' %}" class="stat-box fade-in-up delay-1 dash-link">
@@ -331,7 +335,10 @@
     </a>
 </div>
 
+</div><!-- /section-markets -->
+
 <!-- ── Row 3: Bot & AI KPIs ──────────────────────────── -->
+<div id="section-automation">
 <div class="section-label fade-in-up">Automation & AI</div>
 <div class="grid grid-6" style="margin-bottom: 24px;">
     <a href="{% url 'bot_home' %}" class="stat-box fade-in-up delay-1 dash-link">
@@ -366,7 +373,10 @@
     </a>
 </div>
 
+</div><!-- /section-automation -->
+
 <!-- ── Row 4: Trading Performance ────────────────────── -->
+<div id="section-performance">
 <div class="section-label fade-in-up">Trading Performance</div>
 <div class="grid grid-6" style="margin-bottom: 20px;">
     <a href="{% url 'positions_list' %}?tab=history" class="stat-box fade-in-up delay-1 dash-link">
@@ -401,7 +411,10 @@
     </div>
 </div>
 
+</div><!-- /section-performance -->
+
 <!-- ── Row 5: Exposure Breakdown ─────────────────────── -->
+<div id="section-exposure">
 <div class="section-label fade-in-up">Exposure Breakdown</div>
 <div class="grid grid-5" style="margin-bottom: 24px;">
     <div class="stat-box fade-in-up delay-1">
@@ -431,11 +444,13 @@
     </div>
 </div>
 
+</div><!-- /section-exposure -->
+
 <!-- ── Row 5: Main content grid ──────────────────────── -->
 <div class="grid grid-sidebar">
     <div>
         <!-- Active Signals -->
-        <div class="card fade-in-up delay-3" style="margin-bottom: 20px;">
+        <div id="section-signals" class="card fade-in-up delay-3" style="margin-bottom: 20px;">
             <div class="card-header">
                 <span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><polygon points="8,2 10,6 14,6.5 11,9.5 12,14 8,11.5 4,14 5,9.5 2,6.5 6,6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg> Active Signals</span>
                 <a href="{% url 'signals_list' %}" class="btn btn-sm">View All →</a>
@@ -460,7 +475,7 @@
         </div>
 
         <!-- Strategies -->
-        <div class="card fade-in-up delay-4" style="margin-bottom: 20px;">
+        <div id="section-strategies" class="card fade-in-up delay-4" style="margin-bottom: 20px;">
             <div class="card-header">
                 <span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><polygon points="8,1 15,5 15,11 8,15 1,11 1,5" fill="none" stroke="currentColor" stroke-width="1.2"/></svg> Active Strategies</span>
                 <a href="{% url 'strategies_list' %}" class="btn btn-sm">View All →</a>
@@ -485,7 +500,7 @@
         </div>
 
         <!-- Bot Program Summary -->
-        <div class="card fade-in-up delay-5">
+        <div id="section-bot" class="card fade-in-up delay-5">
             <div class="card-header">
                 <span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><path d="M2 8a6 6 0 0111.5-2M14 8a6 6 0 01-11.5 2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg> Bot Program</span>
                 <a href="{% url 'bot_home' %}" class="btn btn-sm">Details →</a>
@@ -509,7 +524,7 @@
 
     <div>
         <!-- News -->
-        <div class="card fade-in-up delay-2" style="margin-bottom: 20px;">
+        <div id="section-news" class="card fade-in-up delay-2" style="margin-bottom: 20px;">
             <div class="card-header">
                 <span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.2"/><line x1="5" y1="5" x2="11" y2="5" stroke="currentColor" stroke-width="0.8"/><line x1="5" y1="7.5" x2="11" y2="7.5" stroke="currentColor" stroke-width="0.8"/><line x1="5" y1="10" x2="8" y2="10" stroke="currentColor" stroke-width="0.8"/></svg> Latest News</span>
                 <a href="{% url 'news_feed' %}" class="btn btn-sm">All →</a>
@@ -532,7 +547,7 @@
         </div>
 
         <!-- Recent AI Tasks -->
-        <div class="card fade-in-up delay-3" style="margin-bottom: 20px;">
+        <div id="section-ai-tasks" class="card fade-in-up delay-3" style="margin-bottom: 20px;">
             <div class="card-header">
                 <span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><path d="M8 1L1 5v6l7 4 7-4V5z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M1 5l7 4 7-4" fill="none" stroke="currentColor" stroke-width="0.8"/><line x1="8" y1="9" x2="8" y2="15" stroke="currentColor" stroke-width="0.8"/></svg> AI Agents</span>
                 <a href="{% url 'ai_insights' %}" class="btn btn-sm">Details →</a>
@@ -551,7 +566,7 @@
         </div>
 
         <!-- Market Sessions -->
-        <div class="card fade-in-up delay-4" style="margin-bottom: 20px;">
+        <div id="section-sessions" class="card fade-in-up delay-4" style="margin-bottom: 20px;">
             <div class="card-header"><span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1"/></svg> Market Sessions</span></div>
             <ul class="kv-list">
                 <li><span class="label">FOREX</span><span class="value" style="color:{% if forex_open %}var(--success){% else %}var(--accent-red){% endif %}">{% if forex_open %}OPEN{% else %}CLOSED{% endif %}</span></li>
@@ -563,7 +578,7 @@
         </div>
 
         <!-- Best Trades -->
-        <div class="card fade-in-up delay-5" style="margin-bottom: 20px;">
+        <div id="section-best-trades" class="card fade-in-up delay-5" style="margin-bottom: 20px;">
             <div class="card-header">
                 <span class="card-title"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><path d="M2 14l4-5 3 3 5-8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg> Best Trades</span>
                 <a href="{% url 'positions_list' %}?tab=history" class="btn btn-sm">History →</a>

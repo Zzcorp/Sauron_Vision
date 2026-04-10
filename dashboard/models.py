@@ -17,28 +17,30 @@ MORNING_REVIEW_CONFIG = {
         "section-portfolio",
         "section-markets",
         "section-news",
-        "section-calendar",
+        "section-sessions",
         "section-signals",
     ]
 }
 
 ACTIVE_TRADING_CONFIG = {
     "sections": [
-        "section-positions",
+        "section-portfolio",
         "section-signals",
-        "section-performance",
-        "section-pnl",
+        "section-strategies",
         "section-bot",
+        "section-performance",
+        "section-automation",
     ]
 }
 
 END_OF_DAY_CONFIG = {
     "sections": [
         "section-performance",
-        "section-positions",
-        "section-pnl",
+        "section-exposure",
+        "section-best-trades",
         "section-strategies",
-        "section-calendar",
+        "section-ai-tasks",
+        "section-portfolio",
     ]
 }
 
@@ -51,11 +53,11 @@ ALL_CONFIG = {
         "section-exposure",
         "section-signals",
         "section-strategies",
-        "section-news",
-        "section-positions",
         "section-bot",
-        "section-calendar",
-        "section-pnl",
+        "section-news",
+        "section-ai-tasks",
+        "section-sessions",
+        "section-best-trades",
     ]
 }
 
@@ -76,18 +78,23 @@ class DashboardPreset(models.Model):
 
     @classmethod
     def get_or_create_defaults(cls, user):
-        """Ensure the three default presets exist for this user."""
+        """Ensure the three default presets exist for this user, and refresh
+        their layout_config to the canonical values (so updates to the section
+        IDs propagate to existing rows)."""
         defaults = [
             ("Morning Review", "morning_review", MORNING_REVIEW_CONFIG),
             ("Active Trading", "active_trading", ACTIVE_TRADING_CONFIG),
             ("End of Day", "end_of_day", END_OF_DAY_CONFIG),
         ]
         for name, ptype, config in defaults:
-            cls.objects.get_or_create(
+            obj, _ = cls.objects.get_or_create(
                 user=user,
                 preset_type=ptype,
                 defaults={"name": name, "layout_config": config, "is_active": False},
             )
+            if obj.layout_config != config:
+                obj.layout_config = config
+                obj.save(update_fields=["layout_config"])
 
     @classmethod
     def get_active_for_user(cls, user):
