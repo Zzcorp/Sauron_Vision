@@ -771,14 +771,16 @@
 
 
         /* ── Headband collapse system: dynamic offsets ── */
-        body { --hb-ticker-h: 42px; --hb-data-h: 48px; }
+        /* ticker height matches actual .ticker-bar height (38px) so the data
+           headband sits flush against it with no gap */
+        body { --hb-ticker-h: 38px; --hb-data-h: 48px; }
         body.hb-ticker-hidden { --hb-ticker-h: 0px; }
         body.hb-data-hidden   { --hb-data-h: 0px; }
 
         /* ── Ticker Bar ──────────────────────────── */
         .ticker-bar {
             height: 38px; background: var(--bg-primary);
-            border-top: 3px solid var(--border);
+            border-top: 1px solid rgba(0,232,104,0.10);
             border-bottom: 1px solid var(--border);
             overflow: hidden; position: fixed; top: var(--topbar-height);
             left: var(--sidebar-width); right: 0;
@@ -794,7 +796,7 @@
         body:has(.sidebar.mini) .ticker-bar { left: 68px; }
         .ticker-track {
             display: inline-flex; gap: 0;
-            animation: tickerScroll 240s linear infinite;
+            animation: tickerScroll 480s linear infinite;
         }
         .ticker-bar:hover .ticker-track { animation-play-state: paused; }
         @keyframes tickerScroll {
@@ -811,7 +813,8 @@
         }
         body.light-mode .ticker-item { color: #1a1a1a; }
         .ticker-item:hover { background: var(--bg-card); }
-        .ticker-item .t-sym { font-weight: 700; color: var(--accent); letter-spacing: 0.5px; font-size: 12px; }
+        .ticker-item .t-sym { font-weight: 700; color: #ffffff; letter-spacing: 0.5px; font-size: 12px; }
+        body.light-mode .ticker-item .t-sym { color: #1a1a1a; }
         .ticker-item .t-price { color: #ffffff; font-weight: 600; }
         body.light-mode .ticker-item .t-price { color: #1a1a1a; }
         .ticker-item .t-change { font-size: 11px; font-weight: 600; }
@@ -1138,41 +1141,38 @@
         body:has(.signals-rail.open) .rail-toggle-btn { right: 280px; }
         body:has(.signals-rail.open) .rail-toggle-btn svg { transform: rotate(180deg); }
         @media (max-width: 768px) { .rail-toggle-btn { display: none; } }
-                /* UPGRADE-9: ticker bar hover arrows + enriched news popup */
         .ticker-bar { position: fixed; }
-        .ticker-bar .tb-arrow {
-            position: absolute; top: 0; width: 28px; height: 38px;
-            display: flex; align-items: center; justify-content: center;
-            color: var(--accent); cursor: pointer; z-index: 3;
-            opacity: 0; transition: opacity .2s; font-size: 13px;
-            border: 0; font-family: var(--font-mono);
-        }
-        .ticker-bar .tb-arrow.right { right: 36px; background: linear-gradient(270deg, var(--bg-primary) 50%, transparent); }
-        .ticker-bar .tb-arrow.left { left: 0; background: linear-gradient(90deg, var(--bg-primary) 50%, transparent); }
 
-        /* ── Headband collapse buttons (slim right-edge tab) ── */
+        /* ── Headband collapse buttons (right-edge tab — always visible) ── */
         .hb-collapse-btn {
             position: absolute; top: 0; right: 0;
-            width: 34px; height: 100%;
+            width: 38px; height: 100%;
             display: flex; align-items: center; justify-content: center;
-            color: var(--accent-dim); cursor: pointer;
-            background: linear-gradient(270deg, rgba(6,14,10,1) 30%, rgba(6,14,10,0.85) 75%, transparent);
-            border: 0; border-left: 1px solid var(--border);
+            color: var(--accent); cursor: pointer;
+            background: linear-gradient(270deg, rgba(0,232,104,0.18) 0%, rgba(6,14,10,0.96) 60%, rgba(6,14,10,0.65) 100%);
+            border: 0; border-left: 1px solid rgba(0,232,104,0.35);
             font-family: var(--font-mono); font-size: 14px;
-            z-index: 4; opacity: 0.55;
-            transition: opacity .2s, color .2s, background .2s;
+            z-index: 6; opacity: 1;
+            box-shadow: -4px 0 14px rgba(0,232,104,0.10);
+            transition: color .2s, background .2s, box-shadow .2s, transform .2s;
         }
         .hb-collapse-btn:hover {
-            opacity: 1; color: var(--accent);
-            background: linear-gradient(270deg, rgba(0,232,104,0.10) 30%, rgba(6,14,10,0.92) 75%, transparent);
+            color: #ffffff;
+            background: linear-gradient(270deg, rgba(0,232,104,0.32) 0%, rgba(6,14,10,0.96) 60%, rgba(6,14,10,0.7) 100%);
+            box-shadow: -4px 0 22px rgba(0,232,104,0.30);
         }
-        .hb-collapse-btn svg { width: 14px; height: 14px; }
+        .hb-collapse-btn:hover svg { transform: translateX(2px); }
+        .hb-collapse-btn svg {
+            width: 18px; height: 18px;
+            filter: drop-shadow(0 0 6px rgba(0,232,104,0.55));
+            transition: transform .2s;
+        }
         .data-headband .hb-collapse-btn {
-            background: linear-gradient(270deg, rgba(8,20,16,1) 30%, rgba(8,20,16,0.85) 75%, transparent);
-            border-left-color: rgba(0,232,104,0.18);
+            background: linear-gradient(270deg, rgba(0,232,104,0.20) 0%, rgba(8,20,16,0.97) 60%, rgba(8,20,16,0.7) 100%);
+            border-left-color: rgba(0,232,104,0.35);
         }
         .data-headband .hb-collapse-btn:hover {
-            background: linear-gradient(270deg, rgba(0,232,104,0.12) 30%, rgba(8,20,16,0.92) 75%, transparent);
+            background: linear-gradient(270deg, rgba(0,232,104,0.34) 0%, rgba(8,20,16,0.97) 60%, rgba(8,20,16,0.75) 100%);
         }
         body:has(.signals-rail) .hb-collapse-btn { right: 0; }
 
@@ -1213,8 +1213,6 @@
         body.hb-data-hidden   .hb-restore-tab.data   { display: flex; opacity: 1; }
         /* When data is shown but ticker is hidden, the data restore tab needs to sit at topbar level */
         body.hb-ticker-hidden:not(.hb-data-hidden) .hb-restore-tab.data { top: calc(var(--topbar-height) + var(--hb-ticker-h) + 4px); }
-        .ticker-bar:hover .tb-arrow { opacity: 1; }
-        .ticker-bar .tb-arrow:hover { color: var(--text-primary); }
         .ticker-item[data-type="news"] .ticker-popup { min-width: 360px; max-width: 420px; }
         .tnp-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
         .tnp-source { font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px; color: var(--accent); text-transform: uppercase; }
@@ -1425,17 +1423,6 @@
         .dh-dot.up { background: var(--accent); box-shadow: 0 0 8px var(--accent), 0 0 16px rgba(0,232,104,0.3); }
         .dh-dot.down { background: var(--accent-red); box-shadow: 0 0 8px var(--accent-red), 0 0 16px rgba(232,48,48,0.3); }
         .dh-dot.flat { background: var(--text-muted); }
-        .dh-arrow {
-            position: absolute; top: 0; width: 36px; height: 48px;
-            display: flex; align-items: center; justify-content: center;
-            color: var(--accent); cursor: pointer; z-index: 3;
-            opacity: 0; transition: opacity .2s; font-size: 14px;
-            border: 0; font-family: var(--font-mono);
-        }
-        .dh-arrow.right { right: 36px; background: linear-gradient(270deg, rgba(6,14,10,0.95) 50%, transparent); }
-        .dh-arrow.left { left: 0; background: linear-gradient(90deg, rgba(6,14,10,0.95) 50%, transparent); }
-        .data-headband:hover .dh-arrow { opacity: 1; }
-        .dh-arrow:hover { color: var(--text-primary); }
         /* Popup — fixed position, anchored by JS to escape the scroll container */
         .dh-pop {
             display: none; position: fixed;
@@ -1683,6 +1670,17 @@
         .um-link .um-icon {
             font-size: 14px; width: 18px; text-align: center;
             opacity: 0.8;
+            display: inline-flex; align-items: center; justify-content: center;
+        }
+        .um-link .um-icon-svg svg {
+            width: 16px; height: 16px;
+            stroke: currentColor;
+            filter: drop-shadow(0 0 4px rgba(0,232,104,0.25));
+            transition: transform .2s, filter .2s;
+        }
+        .um-link:hover .um-icon-svg svg {
+            transform: scale(1.08);
+            filter: drop-shadow(0 0 8px rgba(0,232,104,0.55));
         }
         .um-link.um-logout { color: #e8a040; }
         .um-link.um-logout:hover { color: #e83030; background: rgba(232,48,48,0.08); }
@@ -2166,16 +2164,21 @@
                             <a class="um-link" href="{% url 'profile' %}" role="menuitem">
                                 <span class="um-icon">◉</span> Profile
                             </a>
-                            <a class="um-link" href="{% url 'change_password' %}" role="menuitem">
+                            <a class="um-link" href="{% url 'profile' %}?modal=password" role="menuitem">
                                 <span class="um-icon">⚿</span> Change Password
                             </a>
-                            <a class="um-link" href="{% url 'change_pin' %}" role="menuitem">
+                            <a class="um-link" href="{% url 'profile' %}?modal=pin" role="menuitem">
                                 <span class="um-icon">⌗</span> Change PIN
                             </a>
                         </div>
                         <div class="um-section">
                             <a class="um-link" href="{% url 'user_notifications' %}" role="menuitem">
-                                <span class="um-icon">⏰</span> Notifications
+                                <span class="um-icon um-icon-svg">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M6 8a6 6 0 0 1 12 0c0 5 2 7 2 7H4s2-2 2-7"/>
+                                        <path d="M10 19a2 2 0 0 0 4 0"/>
+                                    </svg>
+                                </span> Notifications
                             </a>
                             <a class="um-link" href="{% url 'getting_started' %}" role="menuitem">
                                 <span class="um-icon">★</span> Getting Started
@@ -2201,10 +2204,8 @@
 
         <!-- Ticker Bar (fixed, always visible) -->
         <div class="ticker-bar" id="tickerBar">
-            <button type="button" class="tb-arrow left" aria-label="Scroll left">◀</button>
-            <button type="button" class="tb-arrow right" aria-label="Scroll right">▶</button>
             <button type="button" class="hb-collapse-btn" data-collapse="ticker" aria-label="Hide ticker bar" title="Hide ticker bar">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M3 8h10"/><path d="M9 4l4 4-4 4"/>
                 </svg>
             </button>
@@ -2278,10 +2279,8 @@
 
         <!-- UPGRADE-9: Data headband with RTL scroll + hover arrows + escape popups -->
 <div class="data-headband" id="dataHeadband">
-  <button type="button" class="dh-arrow left" aria-label="Scroll left">◀</button>
-  <button type="button" class="dh-arrow right" aria-label="Scroll right">▶</button>
   <button type="button" class="hb-collapse-btn" data-collapse="data" aria-label="Hide data headband" title="Hide data headband">
-    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M3 8h10"/><path d="M9 4l4 4-4 4"/>
     </svg>
   </button>
