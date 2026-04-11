@@ -245,6 +245,30 @@
         .grid-sidebar { grid-template-columns: 2fr 1fr; }
         @media (max-width: 1400px) { .grid-6 { grid-template-columns: repeat(3, 1fr); } .grid-5 { grid-template-columns: repeat(3, 1fr); } }
         @media (max-width: 1200px) { .grid-4, .grid-3 { grid-template-columns: repeat(2, 1fr); } }
+
+        /* ═══════════════════════════════════════════════════════════ */
+        /* Smart 2-row reflow when BOTH rails are open                  */
+        /*  - left sidebar expanded (not mini)                          */
+        /*  - right signals rail open                                   */
+        /*  Any grid with 4+ cards drops to 2 rows so cards stay        */
+        /*  readable instead of getting crushed into narrow columns.    */
+        /* ═══════════════════════════════════════════════════════════ */
+        body:has(.signals-rail.open):not(:has(.sidebar.mini)) .grid-4 {
+            grid-template-columns: repeat(2, 1fr);
+        }
+        body:has(.signals-rail.open):not(:has(.sidebar.mini)) .grid-5 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+        body:has(.signals-rail.open):not(:has(.sidebar.mini)) .grid-6 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+        /* Fallback: any .grid that holds 4+ direct children lands on
+           an auto-fit layout that naturally wraps to 2 rows when the
+           viewport gets squeezed by both rails. */
+        body:has(.signals-rail.open):not(:has(.sidebar.mini))
+            .grid:not(.grid-2):not(.grid-3):not(.grid-sidebar):has(> :nth-child(4)) {
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        }
         @media (max-width: 768px) {
             .grid-2,.grid-3,.grid-4,.grid-5,.grid-6,.grid-sidebar { grid-template-columns: 1fr; }
             .sidebar { transform: translateX(-100%); } .main-content { margin-left: 0 !important; }
@@ -796,7 +820,7 @@
         body:has(.sidebar.mini) .ticker-bar { left: 68px; }
         .ticker-track {
             display: inline-flex; gap: 0;
-            animation: tickerScroll 480s linear infinite;
+            animation: tickerScroll 240s linear infinite;
         }
         .ticker-bar:hover .ticker-track { animation-play-state: paused; }
         @keyframes tickerScroll {
@@ -1396,7 +1420,7 @@
         }
         .dh-scroll { height: 48px; overflow-x: hidden; overflow-y: visible; position: relative; }
         .dh-track { display: inline-flex; gap: 0; align-items: stretch;
-                    animation: dhScroll 80s linear infinite; white-space: nowrap; }
+                    animation: dhScroll 200s linear infinite; white-space: nowrap; }
         @keyframes dhScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
         .data-headband:hover .dh-track { animation-play-state: paused; }
         body:has(.sidebar.mini) .data-headband { left: 68px; }
@@ -1615,7 +1639,10 @@
         }
         .user-menu.open .um-caret { transform: rotate(180deg); }
         .user-menu-dropdown {
-            position: absolute; top: calc(100% + 10px); right: 0;
+            /* Fixed-position + JS-anchored so it escapes the topbar's
+               backdrop-filter stacking context and always appears above
+               the signals rail (z: 40) and rail toggle button (z: 70). */
+            position: fixed; top: 0; left: 0;
             min-width: 240px;
             background: linear-gradient(180deg, rgba(10,26,20,0.98), rgba(6,14,10,0.98));
             border: 1px solid var(--border-glow, var(--accent-dim));
@@ -1625,10 +1652,11 @@
             opacity: 0; visibility: hidden;
             transform: translateY(-8px);
             transition: opacity 0.22s, transform 0.22s, visibility 0.22s;
-            z-index: 200;
+            z-index: 500;
             overflow: hidden;
         }
-        .user-menu.open .user-menu-dropdown {
+        .user-menu.open .user-menu-dropdown,
+        .user-menu-dropdown.is-open {
             opacity: 1; visibility: visible; transform: translateY(0);
         }
         .um-head {
@@ -2760,12 +2788,28 @@
     /* ── Mouse parallax on globe-eye + eye-glow-shadow ─────── */
     var globe = document.querySelector('.globe-eye-bg');
     var eyeShadow = document.querySelector('.eye-glow-shadow');
+    /* Smoothed (lerped) target so the eye eases toward the cursor instead
+       of jittering frame-to-frame */
+    var pTargetX = 0, pTargetY = 0, pCurX = 0, pCurY = 0;
     document.addEventListener('mousemove', function(e) {
-        var mx = (e.clientX / canvas.width - 0.5) * 2;
-        var my = (e.clientY / canvas.height - 0.5) * 2;
-        if (globe) globe.style.transform = 'translate(calc(-50% + ' + (mx * 15) + 'px), calc(-50% + ' + (my * 15) + 'px))';
-        if (eyeShadow) eyeShadow.style.transform = 'translate(calc(-50% + ' + (mx * 32) + 'px), calc(-50% + ' + (my * 32) + 'px))';
+        var w = window.innerWidth || canvas.width || 1;
+        var h = window.innerHeight || canvas.height || 1;
+        pTargetX = (e.clientX / w - 0.5) * 2;
+        pTargetY = (e.clientY / h - 0.5) * 2;
     });
+    (function loop() {
+        pCurX += (pTargetX - pCurX) * 0.08;
+        pCurY += (pTargetY - pCurY) * 0.08;
+        if (globe) {
+            globe.style.transform =
+                'translate(calc(-50% + ' + (pCurX * 60) + 'px), calc(-50% + ' + (pCurY * 60) + 'px))';
+        }
+        if (eyeShadow) {
+            eyeShadow.style.transform =
+                'translate(calc(-50% + ' + (pCurX * 110) + 'px), calc(-50% + ' + (pCurY * 110) + 'px))';
+        }
+        requestAnimationFrame(loop);
+    })();
 
     function updateClock(){
         const el=document.getElementById('clock');
@@ -2978,21 +3022,57 @@ document.addEventListener('click', function(e) {
     var um = document.getElementById('userMenu');
     var trigger = document.getElementById('userMenuTrigger');
     if (!um || !trigger) return;
+
+    var dropdown = um.querySelector('.user-menu-dropdown');
+    // Portal the dropdown out to <body> so it escapes the topbar's
+    // backdrop-filter stacking context (which was sandwiching it
+    // behind the signals rail).
+    if (dropdown && dropdown.parentNode !== document.body) {
+        document.body.appendChild(dropdown);
+    }
+
+    function anchor(){
+        if (!dropdown) return;
+        var r = trigger.getBoundingClientRect();
+        var vw = window.innerWidth;
+        var ddW = dropdown.offsetWidth || 240;
+        // Align the dropdown's RIGHT edge with the trigger's right edge.
+        var left = Math.max(8, Math.min(vw - ddW - 8, r.right - ddW));
+        dropdown.style.top  = (r.bottom + 10) + 'px';
+        dropdown.style.left = left + 'px';
+    }
+
     trigger.addEventListener('click', function(e){
         e.stopPropagation();
         var open = um.classList.toggle('open');
+        if (dropdown) dropdown.classList.toggle('is-open', open);
         trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) anchor();
     });
+    // Keep dropdown glued to the trigger if the window moves while open
+    window.addEventListener('resize', function(){
+        if (um.classList.contains('open')) anchor();
+    });
+    window.addEventListener('scroll', function(){
+        if (um.classList.contains('open')) anchor();
+    }, true);
+
+    function close(){
+        um.classList.remove('open');
+        if (dropdown) dropdown.classList.remove('is-open');
+        trigger.setAttribute('aria-expanded', 'false');
+    }
+
     document.addEventListener('click', function(e){
-        if (!um.contains(e.target)) {
-            um.classList.remove('open');
-            trigger.setAttribute('aria-expanded', 'false');
+        // `um` no longer contains the dropdown (it's been portaled to
+        // <body>), so check both explicitly.
+        if (!um.contains(e.target) && !(dropdown && dropdown.contains(e.target))) {
+            close();
         }
     });
     document.addEventListener('keydown', function(e){
         if (e.key === 'Escape' && um.classList.contains('open')) {
-            um.classList.remove('open');
-            trigger.setAttribute('aria-expanded', 'false');
+            close();
             trigger.focus();
         }
     });
@@ -3017,6 +3097,23 @@ document.addEventListener('click', function(e) {
         } else {
             el.classList.remove('collapsed');
             body.classList.remove(bodyClass);
+            // Reset any inline transform / paused animation that the
+            // drag-scroll or wheel handlers may have left on the inner track,
+            // so the CSS scroll animation resumes after re-expanding.
+            var track = (kind === 'ticker')
+                ? document.getElementById('tickerTrack')
+                : document.getElementById('dhTrack');
+            if (track) {
+                track.style.transform = '';
+                track.style.animationPlayState = '';
+                // Force a reflow + reapply animation so paused state clears
+                // even if the browser cached the previous play-state.
+                var anim = track.style.animation;
+                track.style.animation = 'none';
+                // eslint-disable-next-line no-unused-expressions
+                track.offsetHeight;
+                track.style.animation = anim || '';
+            }
         }
         if (persist) {
             try { localStorage.setItem(kind === 'ticker' ? KEY_TICKER : KEY_DATA, collapsed ? '1' : '0'); } catch(e){}

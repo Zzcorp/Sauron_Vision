@@ -10,9 +10,21 @@
     <div class="sv-preset-pills" id="sv-preset-pills">
         <!-- Populated dynamically by the preset JS below -->
     </div>
-    <button class="sv-preset-custom-btn" id="sv-preset-save-btn" title="Save current layout as a custom preset">
-        + Custom
+    <button class="sv-preset-custom-btn" id="sv-preset-save-btn" title="Enter edit mode: hide the sections you don't want, then save">
+        ✎ Custom
     </button>
+</div>
+
+<!-- ── Edit-Mode Toolbar (appears when designing a custom preset) ── -->
+<div class="sv-edit-toolbar" id="sv-edit-toolbar" style="display:none;">
+    <div class="sv-edit-toolbar-inner">
+        <span class="sv-edit-title">◉ EDIT MODE</span>
+        <span class="sv-edit-hint">Click <span class="sv-edit-x-demo">×</span> on any card to hide it · <span id="sv-edit-count">0</span> visible</span>
+        <input type="text" id="sv-edit-name" class="sv-edit-name" placeholder="Name your preset..." maxlength="50" />
+        <button type="button" class="sv-edit-btn sv-edit-reset" id="sv-edit-reset" title="Restore all cards">↻ All</button>
+        <button type="button" class="sv-edit-btn sv-edit-cancel" id="sv-edit-cancel">Cancel</button>
+        <button type="button" class="sv-edit-btn sv-edit-save" id="sv-edit-save">✓ Save</button>
+    </div>
 </div>
 
 <style>
@@ -102,27 +114,203 @@
 }
 .sv-modal-actions button.sv-btn-primary { color: var(--accent, #00e868); border-color: var(--accent, #00e868); }
 .sv-modal-actions button:hover { color: var(--accent, #00e868); border-color: var(--accent, #00e868); }
+
+/* ── Edit-Mode Toolbar + card delete overlays ─────────────────── */
+.sv-edit-toolbar {
+    position: sticky;
+    top: calc(var(--topbar-height, 60px) + var(--hb-ticker-h, 38px) + var(--hb-data-h, 48px));
+    z-index: 70;
+    margin: -4px 0 16px;
+    animation: svEditSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes svEditSlideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.sv-edit-toolbar-inner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: linear-gradient(180deg, rgba(10, 28, 18, 0.98), rgba(6, 14, 10, 0.98));
+    border: 1px solid var(--accent, #00e868);
+    border-radius: 10px;
+    backdrop-filter: blur(14px);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.5), 0 0 30px rgba(0,232,104,0.12);
+    flex-wrap: wrap;
+}
+.sv-edit-title {
+    font-family: var(--font-display, 'Orbitron', sans-serif);
+    font-size: 12px; font-weight: 800;
+    letter-spacing: 2px;
+    color: var(--accent, #00e868);
+    text-shadow: 0 0 12px rgba(0,232,104,0.5);
+}
+.sv-edit-hint {
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    color: var(--text-secondary, #a0c0a0);
+    flex: 1;
+    min-width: 180px;
+}
+.sv-edit-x-demo {
+    display: inline-block;
+    width: 16px; height: 16px;
+    line-height: 14px; text-align: center;
+    background: rgba(232, 48, 48, 0.18);
+    border: 1px solid var(--accent-red, #e83030);
+    color: var(--accent-red, #e83030);
+    border-radius: 50%;
+    font-size: 11px; font-weight: 700;
+    vertical-align: middle;
+    margin: 0 2px;
+}
+.sv-edit-name {
+    padding: 7px 12px;
+    background: var(--bg-void, #0a0f0a);
+    border: 1px solid var(--border, #1a2e1a);
+    border-radius: 6px;
+    color: var(--text-primary, #c8e6c9);
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
+    min-width: 180px;
+}
+.sv-edit-name:focus {
+    outline: none;
+    border-color: var(--accent, #00e868);
+    box-shadow: 0 0 0 2px rgba(0,232,104,0.15);
+}
+.sv-edit-btn {
+    padding: 7px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border, #1a2e1a);
+    background: transparent;
+    color: var(--text-secondary, #a0c0a0);
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+}
+.sv-edit-btn:hover {
+    color: var(--accent, #00e868);
+    border-color: var(--accent, #00e868);
+    background: rgba(0,232,104,0.06);
+}
+.sv-edit-btn.sv-edit-save {
+    color: var(--accent, #00e868);
+    border-color: var(--accent, #00e868);
+    background: rgba(0,232,104,0.08);
+}
+.sv-edit-btn.sv-edit-save:hover {
+    background: rgba(0,232,104,0.18);
+    box-shadow: 0 0 16px rgba(0,232,104,0.25);
+}
+.sv-edit-btn.sv-edit-cancel:hover {
+    color: var(--accent-red, #e83030);
+    border-color: var(--accent-red, #e83030);
+    background: rgba(232,48,48,0.06);
+}
+
+/* Delete overlay attached to each editable section in edit mode */
+body.sv-editing [id^="section-"] {
+    position: relative;
+    outline: 1px dashed rgba(0,232,104,0.28);
+    outline-offset: 4px;
+    border-radius: 8px;
+    transition: outline-color 0.2s, opacity 0.2s, filter 0.2s;
+}
+body.sv-editing [id^="section-"]:hover {
+    outline-color: var(--accent, #00e868);
+}
+body.sv-editing [id^="section-"].sv-hidden-in-edit {
+    opacity: 0.22;
+    filter: grayscale(0.7);
+    outline-color: var(--accent-red, #e83030);
+    outline-style: dotted;
+}
+.sv-edit-x {
+    position: absolute;
+    top: -12px; right: -12px;
+    width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, rgba(232,48,48,0.22), rgba(232,48,48,0.08));
+    border: 1.5px solid var(--accent-red, #e83030);
+    border-radius: 50%;
+    color: var(--accent-red, #e83030);
+    font-family: var(--font-display, 'Orbitron', sans-serif);
+    font-size: 16px; font-weight: 800;
+    cursor: pointer;
+    z-index: 10;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5), 0 0 12px rgba(232,48,48,0.2);
+    transition: transform 0.18s, background 0.18s, box-shadow 0.18s;
+    opacity: 0;
+    animation: svEditXIn 0.25s cubic-bezier(0.16,1,0.3,1) 0.05s forwards;
+}
+.sv-edit-x:hover {
+    transform: scale(1.12) rotate(90deg);
+    background: linear-gradient(135deg, rgba(232,48,48,0.4), rgba(232,48,48,0.15));
+    box-shadow: 0 2px 14px rgba(0,0,0,0.6), 0 0 22px rgba(232,48,48,0.45);
+}
+body.sv-editing [id^="section-"].sv-hidden-in-edit .sv-edit-x {
+    background: linear-gradient(135deg, rgba(0,232,104,0.22), rgba(0,232,104,0.08));
+    border-color: var(--accent, #00e868);
+    color: var(--accent, #00e868);
+}
+body.sv-editing [id^="section-"].sv-hidden-in-edit .sv-edit-x::before {
+    content: '+';
+    display: block;
+    font-size: 18px;
+    line-height: 1;
+}
+body.sv-editing [id^="section-"].sv-hidden-in-edit .sv-edit-x span { display: none; }
+@keyframes svEditXIn {
+    from { opacity: 0; transform: scale(0.5); }
+    to   { opacity: 1; transform: scale(1); }
+}
 </style>
 
 <script>
 (function() {
     var ICONS = {
+        all:            '\u25C9',   /* ◉ */
         morning_review: '\u{1F305}',
         active_trading: '\u26A1',
         end_of_day:     '\u{1F307}',
         custom:         '\u2699',
     };
     var CSRF = '{{ csrf_token }}';
+    var ALL_PRESET_ID = '__all__';  /* client-only pseudo-preset */
 
     function getCSRF() {
         var m = document.cookie.match(/csrftoken=([^;]+)/);
         return m ? m[1] : CSRF;
     }
 
+    /* Collect every section that exists on the page (ordered by DOM). */
+    function getAllSectionIds() {
+        return Array.prototype.map.call(
+            document.querySelectorAll('[id^="section-"]'),
+            function(el) { return el.id; }
+        );
+    }
+
     function renderPills(data) {
         var pills = document.getElementById('sv-preset-pills');
         if (!pills) return;
         pills.innerHTML = '';
+
+        /* ── "All" pseudo-pill (shows every metric, client-side only) ── */
+        var allBtn = document.createElement('button');
+        var activeIsAll = (data.active_id == null);
+        allBtn.className = 'sv-preset-pill' + (activeIsAll ? ' active' : '');
+        allBtn.dataset.id = ALL_PRESET_ID;
+        allBtn.innerHTML = '<span class="sv-preset-icon">' + ICONS.all + '</span>All';
+        allBtn.title = 'Show every metric / section';
+        allBtn.addEventListener('click', function() { activateAll(); });
+        pills.appendChild(allBtn);
+
         (data.presets || []).forEach(function(p) {
             var btn = document.createElement('button');
             btn.className = 'sv-preset-pill' + (p.id === data.active_id ? ' active' : '');
@@ -159,9 +347,25 @@
                     if (active && active.config && active.config.sections) {
                         applySections(active.config.sections);
                     }
+                } else {
+                    /* No active preset → show All by default */
+                    activateAll(true);
                 }
             })
             .catch(function() {});
+    }
+
+    /* ── "All" activator: show every section (no server call) ── */
+    function activateAll(silent) {
+        applySections(getAllSectionIds());
+        document.querySelectorAll('.sv-preset-pill').forEach(function(p) {
+            p.classList.toggle('active', p.dataset.id === ALL_PRESET_ID);
+        });
+        if (silent) return;
+        /* Deactivate any server-side active preset so a reload also lands on All */
+        var current = document.querySelector('.sv-preset-pill.active[data-id]:not([data-id="' + ALL_PRESET_ID + '"])');
+        /* (No endpoint to deactivate — leaving the DB as-is is fine; the pill
+            state persists via the next loadPresets call.) */
     }
 
     function activatePreset(id) {
@@ -200,56 +404,133 @@
         });
     }
 
-    /* ── Save Modal ─────────────────────────────────── */
-    var saveBtn = document.getElementById('sv-preset-save-btn');
-    if (saveBtn) {
-        saveBtn.addEventListener('click', function() { openSaveModal(); });
-    }
+    /* ═══════════════════════════════════════════════════════════ */
+    /*  EDIT MODE — design a custom preset by deleting cards       */
+    /* ═══════════════════════════════════════════════════════════ */
+    var editBtn     = document.getElementById('sv-preset-save-btn');
+    var editBar     = document.getElementById('sv-edit-toolbar');
+    var editName    = document.getElementById('sv-edit-name');
+    var editCountEl = document.getElementById('sv-edit-count');
+    var editReset   = document.getElementById('sv-edit-reset');
+    var editCancel  = document.getElementById('sv-edit-cancel');
+    var editSave    = document.getElementById('sv-edit-save');
 
-    function openSaveModal() {
-        var bd = document.createElement('div');
-        bd.className = 'sv-modal-backdrop';
-        bd.innerHTML =
-            '<div class="sv-modal">' +
-            '<h3>SAVE PRESET</h3>' +
-            '<input type="text" id="sv-preset-name-inp" placeholder="Preset name..." maxlength="50" autocomplete="off"/>' +
-            '<div class="sv-modal-actions">' +
-            '<button id="sv-modal-cancel">Cancel</button>' +
-            '<button id="sv-modal-confirm" class="sv-btn-primary">Save</button>' +
-            '</div></div>';
-        document.body.appendChild(bd);
-        var inp = bd.querySelector('#sv-preset-name-inp');
-        inp.focus();
+    /* Snapshot so Cancel can restore the pre-edit visibility state. */
+    var preEditSnapshot = null;
 
-        bd.querySelector('#sv-modal-cancel').addEventListener('click', function() { document.body.removeChild(bd); });
-        bd.addEventListener('click', function(e) { if (e.target === bd) document.body.removeChild(bd); });
-        bd.querySelector('#sv-modal-confirm').addEventListener('click', function() { doSave(inp, bd); });
-        inp.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') doSave(inp, bd);
-            if (e.key === 'Escape') document.body.removeChild(bd);
-        });
-    }
-
-    function doSave(inp, bd) {
-        var name = inp.value.trim();
-        if (!name) { inp.focus(); return; }
-        var visibleSections = [];
+    function enterEditMode() {
+        /* Save current visibility so Cancel can roll back */
+        preEditSnapshot = {};
         document.querySelectorAll('[id^="section-"]').forEach(function(el) {
-            if (el.style.display !== 'none') visibleSections.push(el.id);
+            preEditSnapshot[el.id] = (el.style.display !== 'none');
+            /* Start the edit session with ALL sections visible so the user can
+               delete what they don't want — matches the intent "start from all
+               metrics, then delete from the set". */
+            el.style.display = '';
+            el.classList.remove('sv-hidden-in-edit');
+            /* Attach an × button if it isn't there yet */
+            if (!el.querySelector('.sv-edit-x')) {
+                var x = document.createElement('button');
+                x.type = 'button';
+                x.className = 'sv-edit-x';
+                x.setAttribute('aria-label', 'Hide this section');
+                x.innerHTML = '<span>&#x2715;</span>';
+                x.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    el.classList.toggle('sv-hidden-in-edit');
+                    updateEditCount();
+                });
+                el.appendChild(x);
+            }
         });
+        document.body.classList.add('sv-editing');
+        editBar.style.display = 'block';
+        editName.value = '';
+        updateEditCount();
+        setTimeout(function() { editName.focus(); }, 50);
+    }
+
+    function exitEditMode(restoreSnapshot) {
+        /* Remove × buttons and the edit outline */
+        document.querySelectorAll('[id^="section-"]').forEach(function(el) {
+            var x = el.querySelector('.sv-edit-x');
+            if (x) x.remove();
+            el.classList.remove('sv-hidden-in-edit');
+            if (restoreSnapshot && preEditSnapshot) {
+                el.style.display = preEditSnapshot[el.id] === false ? 'none' : '';
+            }
+        });
+        document.body.classList.remove('sv-editing');
+        editBar.style.display = 'none';
+        preEditSnapshot = null;
+    }
+
+    function updateEditCount() {
+        if (!editCountEl) return;
+        var visible = 0;
+        document.querySelectorAll('[id^="section-"]').forEach(function(el) {
+            if (!el.classList.contains('sv-hidden-in-edit')) visible++;
+        });
+        editCountEl.textContent = visible;
+    }
+
+    function editResetAll() {
+        document.querySelectorAll('[id^="section-"]').forEach(function(el) {
+            el.classList.remove('sv-hidden-in-edit');
+        });
+        updateEditCount();
+    }
+
+    function editDoSave() {
+        var name = (editName.value || '').trim();
+        if (!name) {
+            editName.focus();
+            editName.style.borderColor = 'var(--accent-red, #e83030)';
+            setTimeout(function() { editName.style.borderColor = ''; }, 900);
+            return;
+        }
+        var chosen = [];
+        document.querySelectorAll('[id^="section-"]').forEach(function(el) {
+            if (!el.classList.contains('sv-hidden-in-edit')) chosen.push(el.id);
+        });
+        if (chosen.length === 0) {
+            alert('Keep at least one section before saving.');
+            return;
+        }
         fetch('/api/dashboard/presets/', {
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRF() },
-            body: JSON.stringify({ name: name, config: { sections: visibleSections } }),
+            body: JSON.stringify({ name: name, config: { sections: chosen } }),
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            if (data.ok) { document.body.removeChild(bd); loadPresets(); }
-            else { alert(data.error || 'Could not save preset'); }
+            if (!data.ok) { alert(data.error || 'Could not save preset'); return; }
+            /* Apply the saved layout and exit without restoring snapshot */
+            preEditSnapshot = null;
+            exitEditMode(false);
+            applySections(chosen);
+            /* Reload and activate the new preset server-side */
+            loadPresets();
+            if (data.id) setTimeout(function() { activatePreset(data.id); }, 150);
         })
         .catch(function() { alert('Failed to save preset'); });
     }
+
+    if (editBtn) editBtn.addEventListener('click', enterEditMode);
+    if (editReset) editReset.addEventListener('click', editResetAll);
+    if (editCancel) editCancel.addEventListener('click', function() { exitEditMode(true); });
+    if (editSave) editSave.addEventListener('click', editDoSave);
+    if (editName) editName.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter')  editDoSave();
+        if (e.key === 'Escape') exitEditMode(true);
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && document.body.classList.contains('sv-editing')) {
+            if (document.activeElement !== editName) exitEditMode(true);
+        }
+    });
 
     loadPresets();
 })();

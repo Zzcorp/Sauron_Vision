@@ -258,15 +258,24 @@
     }
     draw();
 
-    /* Mouse parallax: eye + glow shadow at different depths */
+    /* Mouse parallax: eye + glow shadow at different depths — smoothed
+       (lerped) so the background visibly tracks the cursor */
     var globe = document.querySelector('.globe-eye-bg');
     var eyeShadow = document.querySelector('.eye-glow-shadow');
+    var pTX = 0, pTY = 0, pCX = 0, pCY = 0;
     document.addEventListener('mousemove', function(e){
-        var mx = (e.clientX/c.width - 0.5)*2;
-        var my = (e.clientY/c.height - 0.5)*2;
-        if(globe) globe.style.transform = 'translate(calc(-50% + '+(mx*15)+'px), calc(-50% + '+(my*15)+'px))';
-        if(eyeShadow) eyeShadow.style.transform = 'translate(calc(-50% + '+(mx*32)+'px), calc(-50% + '+(my*32)+'px))';
+        var w = window.innerWidth || c.width || 1;
+        var h = window.innerHeight || c.height || 1;
+        pTX = (e.clientX/w - 0.5)*2;
+        pTY = (e.clientY/h - 0.5)*2;
     });
+    (function eyeLoop(){
+        pCX += (pTX - pCX) * 0.08;
+        pCY += (pTY - pCY) * 0.08;
+        if(globe) globe.style.transform = 'translate(calc(-50% + '+(pCX*60)+'px), calc(-50% + '+(pCY*60)+'px))';
+        if(eyeShadow) eyeShadow.style.transform = 'translate(calc(-50% + '+(pCX*110)+'px), calc(-50% + '+(pCY*110)+'px))';
+        requestAnimationFrame(eyeLoop);
+    })();
 
     // Loading sequence
     var steps = [
