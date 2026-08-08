@@ -40,6 +40,146 @@ class BinanceAccount(models.Model):
     def __str__(self): return f"{self.user.username} · Binance ({'testnet' if self.testnet else 'live'})"
 
 
+class OANDAAccount(models.Model):
+    """Encrypted OANDA v20 trading credentials — Phase-4 forex execution.
+
+    Mirrors `BinanceAccount` so a user can have one Binance + one OANDA + one
+    Alpaca account simultaneously, each routing different asset classes.
+    """
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="oanda_account")
+    label = models.CharField(max_length=60, default="Main")
+    api_key_enc = models.TextField(blank=True)
+    account_id_enc = models.TextField(blank=True)
+    practice = models.BooleanField(default=True, help_text="Use OANDA practice (demo) endpoint.")
+    connected = models.BooleanField(default=False)
+    last_sync = models.DateTimeField(null=True, blank=True)
+    last_balance = models.DecimalField(max_digits=18, decimal_places=4, default=0,
+                                       help_text="In account base currency.")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def set_credentials(self, api_key: str, account_id: str):
+        f = _fernet()
+        self.api_key_enc = f.encrypt(api_key.encode()).decode()
+        self.account_id_enc = f.encrypt(account_id.encode()).decode()
+
+    def get_credentials(self) -> "tuple[str, str] | tuple[None, None]":
+        if not self.api_key_enc:
+            return (None, None)
+        try:
+            f = _fernet()
+            return (f.decrypt(self.api_key_enc.encode()).decode(),
+                    f.decrypt(self.account_id_enc.encode()).decode())
+        except InvalidToken:
+            return (None, None)
+
+    def __str__(self):
+        return f"{self.user.username} · OANDA ({'practice' if self.practice else 'live'})"
+
+
+class IBKRAccount(models.Model):
+    """Phase-14 Interactive Brokers connection — TWS / IB Gateway socket.
+
+    IBKR's API is socket-based: TWS or IB Gateway must run on the deployment
+    host (or a reachable host) and be configured to accept API connections.
+    The `account_id_enc` is encrypted at rest because it identifies the
+    customer's funded account; the client_id is just an integer namespace
+    that lets multiple processes connect to the same TWS without colliding.
+
+    Default ports:
+        7497  TWS paper  | 7496  TWS live
+        4002  Gateway paper | 4001  Gateway live
+    """
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE,
+                                 related_name="ibkr_account")
+    label = models.CharField(max_length=60, default="Main")
+
+    host = models.CharField(max_length=120, default="127.0.0.1")
+    port = models.IntegerField(default=7497,
+        help_text="7497=TWS paper, 7496=TWS live, 4002=Gateway paper, 4001=Gateway live.")
+    client_id = models.IntegerField(default=1,
+        help_text="API client ID. Allows multiple connections to the same TWS.")
+    account_id_enc = models.TextField(blank=True)
+
+    paper = models.BooleanField(default=True,
+        help_text="Informational — actual paper/live behaviour follows TWS port.")
+
+    # Per-asset-class routing preferences. When set, IBKR routing OVERRIDES
+    # the default broker_router mapping (Alpaca/OANDA/etc.).
+    is_primary_for_stocks = models.BooleanField(default=False)
+    is_primary_for_forex = models.BooleanField(default=False)
+    is_primary_for_options = models.BooleanField(default=True,
+        help_text="IBKR is the default for options since Alpaca/OANDA don't trade them at scale.")
+    is_primary_for_commodity = models.BooleanField(default=False,
+        help_text="IBKR routes futures via FUT contracts; commodity bot still defers to PaperTrader unless this is on.")
+    is_primary_for_cfd = models.BooleanField(default=False,
+        help_text="IBKR CFD trading — indices, commodities, shares. NOT available to US residents (IBKR LLC blocks CFDs); UK/EU/SG/HK accounts only.")
+
+    connected = models.BooleanField(default=False)
+    last_sync = models.DateTimeField(null=True, blank=True)
+    last_balance_usd = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def set_credentials(self, account_id: str):
+        """Only the IBKR account ID is encrypted — host/port/client_id are not secret."""
+        f = _fernet()
+        self.account_id_enc = f.encrypt(account_id.encode()).decode()
+
+    def get_account_id(self) -> "str | None":
+        if not self.account_id_enc:
+            return None
+        try:
+            f = _fernet()
+            return f.decrypt(self.account_id_enc.encode()).decode()
+        except InvalidToken:
+            return None
+
+    def is_primary_for(self, asset_class: str) -> bool:
+        return bool({
+            "stock": self.is_primary_for_stocks,
+            "etf": self.is_primary_for_stocks,
+            "index": self.is_primary_for_stocks,
+            "forex": self.is_primary_for_forex,
+            "options": self.is_primary_for_options,
+            "commodity": self.is_primary_for_commodity,
+            "cfd": self.is_primary_for_cfd,
+        }.get(asset_class, False))
+
+    def __str__(self):
+        return f"{self.user.username} · IBKR @ {self.host}:{self.port} ({'paper' if self.paper else 'live'})"
+
+
+class AlpacaAccount(models.Model):
+    """Encrypted Alpaca v2 trading credentials — Phase-4 stock execution."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="alpaca_account")
+    label = models.CharField(max_length=60, default="Main")
+    api_key_enc = models.TextField(blank=True)
+    api_secret_enc = models.TextField(blank=True)
+    paper = models.BooleanField(default=True, help_text="Use Alpaca paper endpoint.")
+    connected = models.BooleanField(default=False)
+    last_sync = models.DateTimeField(null=True, blank=True)
+    last_balance_usd = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def set_credentials(self, api_key: str, api_secret: str):
+        f = _fernet()
+        self.api_key_enc = f.encrypt(api_key.encode()).decode()
+        self.api_secret_enc = f.encrypt(api_secret.encode()).decode()
+
+    def get_credentials(self) -> "tuple[str, str] | tuple[None, None]":
+        if not self.api_key_enc:
+            return (None, None)
+        try:
+            f = _fernet()
+            return (f.decrypt(self.api_key_enc.encode()).decode(),
+                    f.decrypt(self.api_secret_enc.encode()).decode())
+        except InvalidToken:
+            return (None, None)
+
+    def __str__(self):
+        return f"{self.user.username} · Alpaca ({'paper' if self.paper else 'live'})"
+
+
 class BotConfig(models.Model):
     """One bot configuration per user. Defines strategy weights & risk."""
     MODE_CHOICES = [
@@ -154,3 +294,10 @@ from .models_v2 import (  # noqa: F401
     BotHeartbeat, BotCircuitState, BotShadowState,
     BotShadowAction, BotSymbolOverride,
 )
+from .asset_models import AssetBotConfig, AssetBotTrade  # noqa: F401
+from .options_models import OptionContract  # noqa: F401
+from .orchestrator_models import OrchestratorEvent  # noqa: F401
+from .backtest_models import BotBacktestRun  # noqa: F401
+from .track_record_models import RuleTrackRecordAlert  # noqa: F401
+from .audit_models import AuditLogEntry  # noqa: F401
+from .tax_lot_models import TaxLot, TaxLotConsumption  # noqa: F401

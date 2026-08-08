@@ -62,12 +62,20 @@ class BinanceClient:
             log.warning("balance fetch failed: %s", e)
         return 0.0
 
-    def market_order(self, symbol: str, side: str, quantity: float) -> dict:
-        """side: BUY/SELL. Quantity in base asset."""
-        params = self._sign({
+    def market_order(self, symbol: str, side: str, quantity: float, **kwargs) -> dict:
+        """side: BUY/SELL. Quantity in base asset.
+
+        kwargs: `client_order_id` (Phase-33 idempotency) is passed through to
+        Binance as `newClientOrderId`. Other kwargs ignored.
+        """
+        body = {
             "symbol": symbol, "side": side, "type": "MARKET",
             "quantity": f"{quantity:.8f}".rstrip("0").rstrip("."),
-        })
+        }
+        coid = kwargs.get("client_order_id")
+        if coid:
+            body["newClientOrderId"] = coid[:36]  # Binance cap
+        params = self._sign(body)
         r = requests.post(f"{self.base}/api/v3/order",
                           params=params, headers=self._headers(), timeout=10)
         try: r.raise_for_status()
