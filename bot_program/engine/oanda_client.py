@@ -173,6 +173,34 @@ class OANDATrader:
             log.warning("OANDA balance fetch failed: %s", e)
             return 0.0
 
+    def get_positions(self) -> list[dict]:
+        """Open positions via /v3/accounts/{id}/openPositions — Phase-33
+        reconciliation. Symbols are returned in bot format (EURUSD, not
+        EUR_USD). Raises on transport errors so reconcile counts the broker
+        unavailable instead of assuming flat."""
+        r = self._sess().get(
+            f"{self.base}/v3/accounts/{self.account_id}/openPositions",
+            timeout=self.timeout,
+        )
+        r.raise_for_status()
+        out = []
+        for p in r.json().get("positions", []):
+            instr = str(p.get("instrument", ""))
+            long_units = float((p.get("long") or {}).get("units", 0) or 0)
+            short_units = float((p.get("short") or {}).get("units", 0) or 0)
+            # Gross, not net: on a hedging-enabled account offsetting legs
+            # net to zero while both remain open at the broker.
+            gross = abs(long_units) + abs(short_units)
+            if gross == 0:
+                continue
+            net = long_units + short_units
+            out.append({
+                "symbol": instr.replace("_", "").upper(),
+                "qty": gross,
+                "side": "BUY" if net >= 0 else "SELL",
+            })
+        return out
+
     def market_order(self, symbol: str, side: str, quantity: float, **kwargs) -> dict:
         """side: BUY/SELL. quantity in base units (positive for BUY, negative
         for SELL — OANDA convention; we accept BUY/SELL and sign internally)."""

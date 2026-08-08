@@ -85,9 +85,8 @@ class AssetBot(ABC):
         for trade in AssetBotTrade.objects.filter(config=self.cfg, status="OPEN"):
             try:
                 client = client_for_symbol(self.user, trade.symbol, self.cfg)
-                tk = client.ticker(trade.symbol)
-                price = Decimal(str(tk.get("lastPrice", "0") or "0"))
-                if price <= 0:
+                price = self._mark_price(trade, client)
+                if price is None or price <= 0:
                     continue
                 hit_sl = (
                     (trade.side == "BUY" and trade.stop_loss is not None
@@ -110,12 +109,32 @@ class AssetBot(ABC):
                                self.asset_class, trade.symbol, e)
         return closed
 
+    # ── overridable marking / pnl / close-order hooks ────────────────────
+    # OptionsBot overrides all three: its trades are premium-denominated and
+    # close via option orders, never by trading the underlying.
+
+    def _mark_price(self, trade, client) -> Optional[Decimal]:
+        """Current mark for SL/TP checks. Default: broker ticker last price.
+        Return None to skip managing this trade on this tick."""
+        tk = client.ticker(trade.symbol)
+        price = Decimal(str(tk.get("lastPrice", "0") or "0"))
+        return price if price > 0 else None
+
+    def _trade_pnl(self, trade, price: Decimal) -> Decimal:
+        """Realised pnl for closing `trade` at `price` (config base_currency)."""
+        if trade.side == "BUY":
+            return (price - trade.entry_price) * trade.qty
+        return (trade.entry_price - price) * trade.qty
+
+    def _submit_close_order(self, trade, client, client_order_id: str):
+        """Submit the broker order that flattens `trade`. Raise on failure."""
+        close_side = "SELL" if trade.side == "BUY" else "BUY"
+        client.market_order(trade.symbol, close_side, float(trade.qty),
+                            client_order_id=client_order_id)
+
     def _close_trade(self, trade, price: Decimal, client, *, reason: str):
         """Close a trade — pnl is realised in the config's base_currency."""
-        if trade.side == "BUY":
-            pnl = (price - trade.entry_price) * trade.qty
-        else:
-            pnl = (trade.entry_price - price) * trade.qty
+        pnl = self._trade_pnl(trade, price)
 
         trade.exit_price = price
         trade.pnl = pnl
@@ -125,7 +144,6 @@ class AssetBot(ABC):
 
         if not trade.paper:
             try:
-                close_side = "SELL" if trade.side == "BUY" else "BUY"
                 # Phase-33 idempotency on close — id derived from trade.id so
                 # a retry of the same close uses the same id.
                 from bot_program.engine.idempotency import make_client_order_id
@@ -134,8 +152,7 @@ class AssetBot(ABC):
                     signal_id=str(trade.id), intent="EXIT",
                     bar_ts=timezone.now().strftime("%Y%m%d%H%M"),
                 )
-                client.market_order(trade.symbol, close_side, float(trade.qty),
-                                     client_order_id=client_order_id)
+                self._submit_close_order(trade, client, client_order_id)
             except Exception as e:
                 logger.warning("[%s_bot] live close order failed for %s: %s",
                                self.asset_class, trade.symbol, e)
@@ -308,6 +325,19 @@ class AssetBot(ABC):
                            self.asset_class, symbol, e)
 
         client = client_for_symbol(self.user, symbol, self.cfg)
+
+        # Money-safety: a live-mode config whose broker creds are missing or
+        # broken gets a PaperTrader back from the router. Refuse to trade —
+        # recording a paper fill as paper=False fabricates live history that
+        # reconciliation and grading then treat as real.
+        if self.cfg.mode == "live" and self._is_paper_client(client):
+            logger.error(
+                "[%s_bot] LIVE config %s fell back to PaperTrader for %s "
+                "(missing/invalid broker credentials?) — refusing to trade",
+                self.asset_class, self.cfg.id, symbol)
+            self._notify_paper_fallback(symbol)
+            return None
+
         try:
             tk = client.ticker(symbol)
         except Exception as e:
@@ -429,6 +459,39 @@ class AssetBot(ABC):
         return {"trade_id": trade.id, "symbol": symbol,
                 "side": decision.direction, "qty": float(qty),
                 "entry": price, "score": decision.score}
+
+    # ── live-mode paper-fallback guard ───────────────────────────────────
+
+    @staticmethod
+    def _is_paper_client(client) -> bool:
+        from bot_program.engine.paper_trader import PaperTrader
+        return isinstance(client, PaperTrader)
+
+    def _notify_paper_fallback(self, symbol: str):
+        """Best-effort alert, deduped to at most one per config per hour."""
+        try:
+            from datetime import timedelta as _td
+            from alerts.models import Notification as _N
+            title = f"🛑 Live bot blocked: {self.cfg.name}"
+            recent = _N.objects.filter(
+                user=self.user, notification_type="bot",
+                title=title,
+                created_at__gte=timezone.now() - _td(hours=1),
+            ).exists()
+            if not recent:
+                _N.objects.create(
+                    user=self.user, notification_type="bot", title=title,
+                    body=(
+                        f"{self.asset_class} config '{self.cfg.name}' is in LIVE "
+                        f"mode but its broker is unavailable (missing or invalid "
+                        f"credentials?). Entry on {symbol} was refused rather "
+                        f"than silently traded on paper."
+                    ),
+                    url="/asset-bots/",
+                )
+        except Exception as e:
+            logger.warning("[%s_bot] paper-fallback notification failed: %s",
+                           self.asset_class, e)
 
     # ── default sizing ──────────────────────────────────────────────────
 

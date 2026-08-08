@@ -148,6 +148,24 @@ class AlpacaTrader:
             log.warning("Alpaca balance fetch failed: %s", e)
             return 0.0
 
+    def get_positions(self) -> list[dict]:
+        """Open positions via GET /v2/positions — Phase-33 reconciliation.
+
+        Returns [{"symbol", "qty", "side"}, ...]. Raises on transport errors
+        so reconcile counts the broker unavailable instead of assuming flat.
+        """
+        r = self._sess().get(f"{self.trading_base}/v2/positions",
+                             timeout=self.timeout)
+        r.raise_for_status()
+        out = []
+        for p in r.json() or []:
+            out.append({
+                "symbol": str(p.get("symbol", "")).upper(),
+                "qty": float(p.get("qty", 0) or 0),
+                "side": str(p.get("side", "")).upper(),
+            })
+        return out
+
     def market_order(self, symbol: str, side: str, quantity: float, **kwargs) -> dict:
         body = {
             "symbol": symbol,

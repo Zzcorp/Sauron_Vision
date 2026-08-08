@@ -92,6 +92,15 @@ def grade_bot_trade(trade) -> bool:
         risk_per_unit = abs(entry - sl)
         if risk_per_unit > 0:
             risk_dollars = risk_per_unit * qty
+            if trade.asset_class == "options":
+                # Options pnl is dollar-denominated (premium × qty × contract
+                # multiplier); scale the risk the same way or R is inflated
+                # by the multiplier (~100×).
+                try:
+                    from bot_program.asset_engine.options_bot import option_pnl_multiplier
+                    risk_dollars *= float(option_pnl_multiplier(trade))
+                except Exception:
+                    pass
             if risk_dollars > 0:
                 pnl = float(trade.pnl or 0)
                 trade.realized_r = round(pnl / risk_dollars, 4)

@@ -275,6 +275,36 @@ class IBKRTrader:
                     continue
         return 0.0
 
+    def get_positions(self) -> list[dict]:
+        """Open positions via ib.positions() — Phase-33 reconciliation.
+
+        Raises when TWS is unreachable: returning [] would read as
+        "everything flat" and reconcile would close live DB rows for
+        positions that are still open at the broker. For OPT positions the
+        reported symbol is the UNDERLYING, matching AssetBotTrade.symbol.
+        """
+        if not self._connect():
+            raise RuntimeError("IBKR unavailable — cannot list positions")
+        out = []
+        for pos in self._ib.positions(self.account_id or ""):
+            qty = float(pos.position or 0)
+            if qty == 0:
+                continue
+            contract = pos.contract
+            sec_type = str(getattr(contract, "secType", ""))
+            symbol = str(getattr(contract, "symbol", "")).upper()
+            # ib_insync Forex contracts carry only the base currency in
+            # .symbol ("EUR"); rebuild the bot's pair form ("EURUSD").
+            if sec_type == "CASH":
+                symbol += str(getattr(contract, "currency", "")).upper()
+            out.append({
+                "symbol": symbol,
+                "qty": abs(qty),
+                "side": "BUY" if qty > 0 else "SELL",
+                "sec_type": sec_type,
+            })
+        return out
+
     def market_order(self, symbol: str, side: str, quantity: float, **kwargs) -> dict:
         empty = {
             "orderId": "", "symbol": symbol, "side": side,

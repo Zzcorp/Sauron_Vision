@@ -175,11 +175,31 @@ def _close_asset_trade(trade, now):
     """Close one multi-asset AssetBotTrade, routing through the broker_router."""
     from bot_program.engine.broker_router import client_for_symbol
 
-    exit_price = _market_exit_price(trade.symbol, trade.entry_price)
+    is_options = trade.asset_class == "options"
+    if is_options:
+        # Premium-denominated trade: LiveQuote holds the UNDERLYING's price,
+        # which is the wrong scale — mark at the option's own premium, falling
+        # back to the entry premium.
+        from bot_program.asset_engine.options_bot import (
+            current_premium_for_trade, submit_option_close,
+            option_pnl_multiplier,
+        )
+        exit_price = float(current_premium_for_trade(trade) or trade.entry_price)
+    else:
+        exit_price = _market_exit_price(trade.symbol, trade.entry_price)
 
     try:
-        client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
-        _try_broker_close(client, trade.symbol, trade.side, trade.qty)
+        # Paper trades have no broker-side position to flatten — same rule
+        # as AssetBot._close_trade. Submitting anyway can raise (PaperTrader
+        # has no option order path) and strand the row OPEN forever.
+        if not trade.paper:
+            client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
+            if is_options:
+                # A plain market_order here would trade the underlying's STOCK,
+                # opening a new position instead of closing the option.
+                submit_option_close(client, trade)
+            else:
+                _try_broker_close(client, trade.symbol, trade.side, trade.qty)
     except Exception as e:  # noqa: BLE001
         logger.warning("[KILL SWITCH] broker close failed for %s: %s", trade.symbol, e)
         raise
@@ -187,6 +207,8 @@ def _close_asset_trade(trade, now):
     pnl = (exit_price - float(trade.entry_price)) * float(trade.qty)
     if trade.side == "SELL":
         pnl = -pnl
+    if is_options:
+        pnl *= float(option_pnl_multiplier(trade))
 
     trade.exit_price = exit_price
     trade.closed_at = now

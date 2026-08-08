@@ -152,6 +152,14 @@ def run_bot_tick(user_id: int):
             paper = (cfg.mode == "paper")
             order_id = ""
             if not paper:
+                # Money-safety: live mode + router fell back to PaperTrader
+                # (dead/missing creds) — refuse rather than record a paper
+                # fill as a live trade.
+                if isinstance(sym_client, PaperTrader):
+                    log.error("LIVE bot for %s fell back to PaperTrader on %s "
+                              "(missing/invalid broker credentials?) — skipping",
+                              user.username, symbol)
+                    continue
                 try:
                     if cfg.market_type == "futures" and hasattr(sym_client, "ensure_config"):
                         sym_client.ensure_config(symbol, cfg.leverage, cfg.margin_mode)

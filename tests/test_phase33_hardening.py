@@ -233,12 +233,99 @@ class ReconciliationTests(TestCase):
         from bot_program.reconcile_asset import reconcile_user
         from bot_program.models import AssetBotTrade
         AssetBotTrade.objects.create(
-            config=self.cfg, asset_class="stock", symbol="PAPER", side="BUY",
+            config=self.cfg, asset_class="stock", symbol="PAPRX", side="BUY",
             qty=Decimal("10"), entry_price=Decimal("100"),
             status="OPEN", paper=True,
         )
         r = reconcile_user(self.user)
         self.assertEqual(r["checked"], 0)
+
+    # ── options rows: symbol conventions differ per broker ──────────────
+
+    def _open_options_trade(self, occ="AAPL250620C00190000"):
+        from bot_program.models import AssetBotTrade
+        return AssetBotTrade.objects.create(
+            config=self.cfg, asset_class="options", symbol="AAPL", side="BUY",
+            qty=Decimal("2"), entry_price=Decimal("3.00"),
+            stop_loss=Decimal("2.40"), take_profit=Decimal("3.60"),
+            status="OPEN", paper=False,
+            metadata={"right": "C", "strike": 190.0, "expiry": "2026-06-20",
+                       "multiplier": 100, "occ_symbol": occ},
+        )
+
+    def test_options_row_kept_open_when_broker_lists_occ_symbol(self):
+        """Alpaca-style feed: the option appears under its OCC symbol, never
+        the underlying. Matching trade.symbol against the stock feed used to
+        orphan-close a still-open live option."""
+        from bot_program.reconcile_asset import reconcile_user
+
+        trade = self._open_options_trade()
+        fake_client = MagicMock()
+        fake_client.get_positions = MagicMock(return_value=[
+            {"symbol": "AAPL250620C00190000"},
+        ])
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                    return_value=fake_client):
+            r = reconcile_user(self.user)
+        self.assertEqual(r["closed_as_orphan"], 0)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+
+    def test_options_row_kept_open_when_ibkr_reports_opt_underlying(self):
+        """IBKR-style feed: OPT positions report the underlying + sec_type."""
+        from bot_program.reconcile_asset import reconcile_user
+
+        trade = self._open_options_trade(occ="")
+        fake_client = MagicMock()
+        fake_client.get_positions = MagicMock(return_value=[
+            {"symbol": "AAPL", "sec_type": "OPT"},
+        ])
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                    return_value=fake_client):
+            r = reconcile_user(self.user)
+        self.assertEqual(r["closed_as_orphan"], 0)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+
+    def test_options_row_not_closed_when_feed_cannot_see_options(self):
+        """No OCC symbol recorded and an untyped feed (e.g. only stock rows):
+        we cannot tell whether the option is open — never guess-close it."""
+        from bot_program.reconcile_asset import reconcile_user
+
+        trade = self._open_options_trade(occ="")
+        fake_client = MagicMock()
+        fake_client.get_positions = MagicMock(return_value=[
+            {"symbol": "AAPL"},  # the user's stock position, not the option
+        ])
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                    return_value=fake_client):
+            r = reconcile_user(self.user)
+        self.assertEqual(r["closed_as_orphan"], 0)
+        self.assertEqual(r["broker_unavailable"], 1)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+
+    def test_options_orphan_closed_at_premium_scale(self):
+        """A genuinely-closed option (sec-typed feed, no OPT rows) is closed
+        at the entry premium (unknown current premium → zero P&L), never at
+        the underlying's stock price."""
+        from bot_program.reconcile_asset import reconcile_user
+
+        trade = self._open_options_trade()
+        fake_client = MagicMock()
+        fake_client.get_positions = MagicMock(return_value=[
+            {"symbol": "AAPL", "sec_type": "STK"},  # stock only, option gone
+        ])
+        fake_client.ticker = MagicMock(return_value={"lastPrice": "190"})
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                    return_value=fake_client):
+            r = reconcile_user(self.user)
+        self.assertEqual(r["closed_as_orphan"], 1)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        # Premium scale (entry 3.00), NOT the underlying's 190.
+        self.assertEqual(trade.exit_price, Decimal("3.00"))
+        self.assertEqual(trade.pnl, Decimal("0.00"))
 
 
 class BeatScheduleTests(TestCase):

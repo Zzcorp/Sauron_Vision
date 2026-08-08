@@ -48,6 +48,87 @@ DEFAULT_CLOSE_BEFORE_DTE = 5
 DEFAULT_MAX_PREMIUM_PER_CONTRACT = 5.0  # in $, multiplied by 100 = $500/contract
 
 
+# ── module-level helpers (shared with kill_switch / reconciliation) ─────────
+
+def contract_for_trade(trade):
+    """Resolve the OptionContract row an options AssetBotTrade was opened on,
+    via metadata (right/strike/expiry, falling back to the OCC symbol)."""
+    from datetime import date
+
+    from instruments.models import Instrument
+    from bot_program.options_models import OptionContract
+
+    meta = trade.metadata or {}
+    occ = meta.get("occ_symbol") or ""
+    if occ:
+        contract = OptionContract.objects.filter(symbol=occ).first()
+        if contract is not None:
+            return contract
+
+    right, strike, exp = meta.get("right"), meta.get("strike"), meta.get("expiry")
+    if not (right and strike and exp):
+        return None
+    inst = Instrument.objects.filter(symbol=trade.symbol).first()
+    if inst is None:
+        return None
+    try:
+        expiry = date.fromisoformat(str(exp))
+    except ValueError:
+        return None
+    return OptionContract.objects.filter(
+        underlying=inst, right=right, expiry=expiry,
+        strike=Decimal(str(strike)),
+    ).first()
+
+
+def current_premium_for_trade(trade) -> Optional[Decimal]:
+    """Current mid premium for an options trade, or None if unknown.
+
+    NEVER fall back to the underlying's price — it is on a different scale
+    than the premium-denominated entry/SL/TP and produces fake closes.
+    """
+    contract = contract_for_trade(trade)
+    if contract is None:
+        return None
+    return OptionsBot._mid_price(contract)
+
+
+def submit_option_close(client, trade, *, client_order_id: str = "") -> dict:
+    """Flatten an options trade at the broker as an OPTION order.
+
+    Raises rather than ever submitting a plain order on the underlying —
+    a stock order is not a close, it is a brand-new position.
+    """
+    meta = trade.metadata or {}
+    side = "SELL" if trade.side == "BUY" else "BUY"
+    if hasattr(client, "market_order_option") and meta.get("strike") and meta.get("expiry"):
+        return client.market_order_option(
+            underlying=trade.symbol,
+            strike=float(meta["strike"]),
+            expiry=str(meta["expiry"]),
+            right=meta.get("right", "C"),
+            side=side,
+            contracts=int(float(trade.qty)),
+        )
+    occ = meta.get("occ_symbol") or ""
+    if occ and occ != trade.symbol and hasattr(client, "market_order"):
+        kwargs = {"client_order_id": client_order_id} if client_order_id else {}
+        return client.market_order(occ, side, float(trade.qty), **kwargs)
+    raise RuntimeError(
+        f"cannot close options trade {trade.id}: client "
+        f"{type(client).__name__} has no option order path and no OCC symbol"
+    )
+
+
+def option_pnl_multiplier(trade) -> Decimal:
+    """Contract multiplier (usually 100) for premium-points → dollars."""
+    meta = trade.metadata or {}
+    try:
+        return Decimal(str(int(meta.get("multiplier") or 100)))
+    except (TypeError, ValueError):
+        return Decimal("100")
+
+
 class OptionsBot(AssetBot):
     """Bot for buying long calls/puts driven by Phase-1 Signals.
 
@@ -257,6 +338,14 @@ class OptionsBot(AssetBot):
 
         client = client_for_symbol(self.user, symbol, self.cfg)
 
+        # Money-safety: same guard as base.scan_symbol — a LIVE config whose
+        # broker is unavailable must not record paper fills as live trades.
+        if self.cfg.mode == "live" and self._is_paper_client(client):
+            logger.error("[options_bot] LIVE config %s fell back to PaperTrader "
+                         "for %s — refusing to trade", self.cfg.id, symbol)
+            self._notify_paper_fallback(symbol)
+            return None
+
         sl = premium * (1 - self.cfg.stop_loss_pct / 100)
         tp = premium * (1 + self.cfg.take_profit_pct / 100)
 
@@ -311,6 +400,23 @@ class OptionsBot(AssetBot):
                 "contracts": n_contracts, "premium": premium,
                 "score": decision.score}
 
+    # ── premium-denominated marking / pnl / close-order overrides ───────
+    # trade.entry_price / stop_loss / take_profit are PREMIUM values; the
+    # base hooks would compare them against the UNDERLYING's price (instant
+    # fake closes) and flatten by trading the underlying's stock.
+
+    def _mark_price(self, trade, client) -> Optional[Decimal]:
+        """Mark against the option's own premium — never the underlying.
+        Returns None (skip this tick) when no fresh premium is available."""
+        return current_premium_for_trade(trade)
+
+    def _trade_pnl(self, trade, price: Decimal) -> Decimal:
+        """Premium points × contracts × multiplier = realised dollars."""
+        return super()._trade_pnl(trade, price) * option_pnl_multiplier(trade)
+
+    def _submit_close_order(self, trade, client, client_order_id: str):
+        submit_option_close(client, trade, client_order_id=client_order_id)
+
     # ── manage_positions: add expiry-close gate on top of base SL/TP ────
 
     def manage_positions(self) -> int:
@@ -333,12 +439,9 @@ class OptionsBot(AssetBot):
                 exp = date.fromisoformat(exp_str)
                 if exp <= cutoff:
                     client = client_for_symbol(self.user, trade.symbol, self.cfg)
-                    # Re-mark current premium (best effort; fall back to entry).
-                    try:
-                        tk = client.ticker(trade.symbol)
-                        price = Decimal(str(tk.get("lastPrice", "0") or "0"))
-                    except Exception:
-                        price = trade.entry_price
+                    # Re-mark current premium (best effort; fall back to the
+                    # entry premium — same scale — never the underlying).
+                    price = current_premium_for_trade(trade) or trade.entry_price
                     if price <= 0:
                         price = trade.entry_price
                     self._close_trade(trade, price, client, reason="EXPIRY_CLOSE")

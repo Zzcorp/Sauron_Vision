@@ -120,3 +120,25 @@ class BinanceFuturesClient:
             r.raise_for_status(); return r.json()
         except Exception as e:
             log.warning("positions fetch failed: %s", e); return []
+
+    def get_positions(self) -> list[dict]:
+        """Non-zero open positions — Phase-33 reconciliation contract.
+
+        Unlike positions(), transport errors RAISE here: returning [] on
+        failure would read as "everything flat" and reconcile would close
+        live DB rows for positions that are still open at the broker.
+        """
+        r = requests.get(f"{self.base}/fapi/v2/positionRisk",
+                         params=self._sign({}), headers=self._headers(), timeout=10)
+        r.raise_for_status()
+        out = []
+        for p in r.json() or []:
+            amt = float(p.get("positionAmt", 0) or 0)
+            if amt == 0:
+                continue
+            out.append({
+                "symbol": str(p.get("symbol", "")).upper(),
+                "qty": abs(amt),
+                "side": "BUY" if amt > 0 else "SELL",
+            })
+        return out

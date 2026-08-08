@@ -26,15 +26,22 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
-def _broker_open_symbols(client, *, asset_class: str) -> set:
-    """Best-effort set of symbols the broker says are open.
+def _broker_open_symbols(client, *, asset_class: str) -> dict:
+    """Best-effort broker open-position state.
 
     Returns None if the broker doesn't expose enough state (we won't
-    reconcile in that case rather than guess wrong).
+    reconcile in that case rather than guess wrong), else a dict:
+
+      symbols          — every symbol the broker reports open. Alpaca
+                         reports options under their OCC symbol here.
+      opt_underlyings  — underlyings of positions explicitly typed OPT
+                         (IBKR provides sec_type per position).
+      has_sec_types    — True when the client annotates security types,
+                         i.e. opt_underlyings is a meaningful signal.
     """
     # Alpaca exposes /v2/positions; OANDA via /v3/accounts/.../openPositions;
-    # IBKR via positions(); Binance via balance / open orders. The exact API
-    # varies — we use a duck-typed `get_positions()` if present, else None.
+    # IBKR via positions(); Binance via positionRisk. The exact API varies —
+    # we use a duck-typed `get_positions()` if present, else None.
     fn = getattr(client, "get_positions", None)
     if not callable(fn):
         return None
@@ -44,12 +51,43 @@ def _broker_open_symbols(client, *, asset_class: str) -> set:
         logger.warning("reconcile: %s.get_positions() failed: %s",
                        type(client).__name__, e)
         return None
-    out = set()
+    symbols, opt_underlyings, has_sec_types = set(), set(), False
     for p in positions:
-        sym = p.get("symbol") if isinstance(p, dict) else getattr(p, "symbol", None)
-        if sym:
-            out.add(str(sym).upper())
-    return out
+        if isinstance(p, dict):
+            sym, sec = p.get("symbol"), p.get("sec_type")
+        else:
+            sym, sec = getattr(p, "symbol", None), getattr(p, "sec_type", None)
+        if not sym:
+            continue
+        sym = str(sym).upper()
+        symbols.add(sym)
+        if sec is not None:
+            has_sec_types = True
+            if str(sec).upper() == "OPT":
+                opt_underlyings.add(sym)
+    return {"symbols": symbols, "opt_underlyings": opt_underlyings,
+            "has_sec_types": has_sec_types}
+
+
+def _options_row_open_at_broker(trade, state: dict):
+    """Whether the broker still reports this options trade — or None when the
+    broker feed can't answer for options and we must not guess.
+
+    trade.symbol is the UNDERLYING for options rows, and brokers disagree on
+    how they report option positions: Alpaca lists the OCC symbol, IBKR lists
+    the underlying with sec_type OPT. Matching trade.symbol against a stock
+    feed would orphan-close a live option (and keep a closed one open).
+    """
+    occ = str((trade.metadata or {}).get("occ_symbol") or "").upper()
+    if occ and occ in state["symbols"]:
+        return True
+    if trade.symbol.upper() in state["opt_underlyings"]:
+        return True
+    # Definitive "not open" needs a definitive way to have seen it: an OCC
+    # symbol to look for, or a sec-typed feed. Otherwise: cannot reconcile.
+    if not occ and not state["has_sec_types"]:
+        return None
+    return False
 
 
 def reconcile_user(user) -> dict:
@@ -78,13 +116,21 @@ def reconcile_user(user) -> dict:
             if cache_key not in cache:
                 cache[cache_key] = _broker_open_symbols(
                     client, asset_class=trade.asset_class)
-            broker_open = cache[cache_key]
-            if broker_open is None:
+            state = cache[cache_key]
+            if state is None:
                 # Broker doesn't expose state — can't reconcile this row.
                 out["broker_unavailable"] += 1
                 continue
 
-            if trade.symbol.upper() not in broker_open:
+            if trade.asset_class == "options":
+                open_at_broker = _options_row_open_at_broker(trade, state)
+                if open_at_broker is None:
+                    out["broker_unavailable"] += 1
+                    continue
+            else:
+                open_at_broker = trade.symbol.upper() in state["symbols"]
+
+            if not open_at_broker:
                 # DB says OPEN but broker says no position — orphan close.
                 # Don't grade: we don't know if it was manual close, stop-out,
                 # liquidation, etc. The `outcome="manual_close"` label is
@@ -108,27 +154,43 @@ def _close_as_orphan(trade) -> None:
     from market_data.models import LiveQuote
 
     exit_price = trade.entry_price
-    try:
-        client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
-        tk = client.ticker(trade.symbol) or {}
-        last = float(tk.get("lastPrice", 0) or 0)
-        if last > 0:
-            exit_price = Decimal(str(last))
-    except Exception:
+    if trade.asset_class == "options":
+        # trade.symbol is the UNDERLYING — its ticker/LiveQuote is the wrong
+        # scale for a premium-denominated trade. Mark at the option's own
+        # premium, or entry (zero P&L) when unknown.
         try:
-            from instruments.models import Instrument
-            inst = Instrument.objects.filter(symbol=trade.symbol).first()
-            if inst:
-                lq = LiveQuote.objects.filter(instrument=inst).first()
-                if lq and lq.last:
-                    exit_price = lq.last
+            from bot_program.asset_engine.options_bot import current_premium_for_trade
+            exit_price = current_premium_for_trade(trade) or trade.entry_price
         except Exception:
             pass
+    else:
+        try:
+            client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
+            tk = client.ticker(trade.symbol) or {}
+            last = float(tk.get("lastPrice", 0) or 0)
+            if last > 0:
+                exit_price = Decimal(str(last))
+        except Exception:
+            try:
+                from instruments.models import Instrument
+                inst = Instrument.objects.filter(symbol=trade.symbol).first()
+                if inst:
+                    lq = LiveQuote.objects.filter(instrument=inst).first()
+                    if lq and lq.last:
+                        exit_price = lq.last
+            except Exception:
+                pass
 
     if trade.side == "BUY":
         pnl = (exit_price - trade.entry_price) * trade.qty
     else:
         pnl = (trade.entry_price - exit_price) * trade.qty
+    if trade.asset_class == "options":
+        try:
+            from bot_program.asset_engine.options_bot import option_pnl_multiplier
+            pnl *= option_pnl_multiplier(trade)
+        except Exception:
+            pass
 
     trade.exit_price = exit_price
     trade.pnl = pnl
