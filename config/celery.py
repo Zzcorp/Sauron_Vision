@@ -273,6 +273,15 @@ app.conf.beat_schedule = {
         "schedule": crontab(hour=23, minute=15),  # nightly 23:15 UTC
     },
 
+    # Bars for the bot universe (1h + 4h) from each bot's own broker.
+    # MUST stay ahead of the signal scan: technical + SMC rules read 4h
+    # bars, and with none present every rule returns None and the bots
+    # can only HOLD.
+    "refresh-bot-bars": {
+        "task": "market_data.tasks.refresh_bot_bars_task",
+        "schedule": 600.0,
+    },
+
     # ── Phase 13.5 — multi-asset bot tick (every 5 min).
     #              Per-asset bots short-circuit themselves outside their
     #              relevant trading windows: ForexBot HOLDs over weekends

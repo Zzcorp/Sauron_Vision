@@ -10,6 +10,12 @@ logger = logging.getLogger(__name__)
 class PaperTrader:
     """Simulates order execution with realistic fills."""
 
+    # A quote older than this is not a market price any more. Paper fills
+    # and paper SL/TP marks read LiveQuote, which several pollers can leave
+    # frozen (a dead streamer, a rate-limited adapter); marking against a
+    # fossil silently fabricates P&L and corrupts grading.
+    MAX_QUOTE_AGE_SECONDS = 900
+
     def __init__(self, config):
         self.config = config
         self.slippage_bps = 5  # basis points
@@ -63,13 +69,27 @@ class PaperTrader:
         }
 
     def ticker(self, symbol):
-        """Return a simulated ticker using the latest live quote."""
+        """Return a simulated ticker using the latest live quote.
+
+        A quote older than MAX_QUOTE_AGE_SECONDS is reported as 0 — callers
+        already treat 0 as "no price" and skip, which is the safe outcome.
+        Returning the fossil instead would let SL/TP fire on a price that no
+        longer exists.
+        """
         try:
+            from django.utils import timezone
             from market_data.models import LiveQuote
             from instruments.models import Instrument
             instrument = Instrument.objects.filter(symbol=symbol).first()
             if instrument:
                 lq = LiveQuote.objects.get(instrument=instrument)
+                age = (timezone.now() - lq.updated_at).total_seconds()
+                if age > self.MAX_QUOTE_AGE_SECONDS:
+                    logger.warning(
+                        "[PAPER] %s quote is %.0fs old (max %ds) — reporting "
+                        "no price rather than marking against a stale quote",
+                        symbol, age, self.MAX_QUOTE_AGE_SECONDS)
+                    return {"lastPrice": "0", "symbol": symbol, "stale": True}
                 return {"lastPrice": str(lq.last), "symbol": symbol}
         except Exception:
             pass

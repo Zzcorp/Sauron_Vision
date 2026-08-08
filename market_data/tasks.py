@@ -175,3 +175,15 @@ def fetch_crypto_news_task():
     from market_data.adapters.crypto_news import fetch_crypto_news
     count = fetch_crypto_news()
     return {"status": "success", "articles": count}
+
+
+@shared_task
+def refresh_bot_bars_task():
+    """Write 1h/4h OHLCV bars for every symbol an enabled bot trades.
+
+    The rule layer reads 4h bars; without this task nothing produces them,
+    every rule returns None, and the bots can only ever HOLD. Bars come
+    from each bot's own broker so there is no feed/execution basis.
+    """
+    from market_data.bot_bars import refresh_bot_bars
+    return refresh_bot_bars()

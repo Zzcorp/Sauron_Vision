@@ -92,6 +92,20 @@ class AssetBot(ABC):
                 if (trade.metadata or {}).get("protected"):
                     continue
                 client = client_for_symbol(self.user, trade.symbol, self.cfg)
+
+                # Money-safety: the entry path refuses to trade when a LIVE
+                # config falls back to PaperTrader; managing must refuse too.
+                # Otherwise a stale LiveQuote read through PaperTrader can
+                # cross SL/TP, PaperTrader returns a synthetic FILLED order,
+                # and the row is stamped CLOSED while the real position is
+                # still open at the broker.
+                if not trade.paper and self._is_paper_client(client):
+                    logger.error(
+                        "[%s_bot] LIVE trade %s cannot be managed: broker "
+                        "unavailable (PaperTrader fallback) — leaving OPEN",
+                        self.asset_class, trade.symbol)
+                    continue
+
                 price = self._mark_price(trade, client)
                 if price is None or price <= 0:
                     continue
