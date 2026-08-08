@@ -96,6 +96,52 @@ class PositionSizer:
             'suggested_stop': round(current_price - atr, 6),
         }
 
+    def correlation_aware_scale(self, candidate_instrument, lookback_days=90):
+        """Return a 0..1 scale factor for sizing based on correlation to the open book.
+
+        Reads `Portfolio.max_correlation_threshold` (default 0.7). If the candidate's
+        peak absolute correlation to an existing position exceeds the threshold, the
+        scale factor is reduced linearly down to a floor of 0.25 at correlation 1.0.
+
+        Returns dict:
+            {
+                "scale": float in [0.25, 1.0],
+                "max_corr": float | None,
+                "peer": str | None,
+                "threshold": float,
+                "reason": str,
+            }
+        """
+        from portfolio.correlation import max_correlation_to_open_book
+
+        threshold = float(self.portfolio.max_correlation_threshold or 0.7)
+        max_corr, peer = max_correlation_to_open_book(
+            self.portfolio, candidate_instrument, lookback_days=lookback_days
+        )
+
+        if max_corr is None:
+            return {"scale": 1.0, "max_corr": None, "peer": None,
+                    "threshold": threshold, "reason": "no open positions or insufficient history"}
+
+        abs_corr = abs(max_corr)
+        if abs_corr <= threshold:
+            return {"scale": 1.0, "max_corr": round(max_corr, 4), "peer": peer,
+                    "threshold": threshold,
+                    "reason": f"correlation {abs_corr:.2f} within threshold {threshold:.2f}"}
+
+        # Linear scale from 1.0 at threshold → 0.25 at corr=1.0.
+        excess = abs_corr - threshold
+        room = max(1.0 - threshold, 1e-6)
+        scale = max(0.25, 1.0 - 0.75 * (excess / room))
+        return {
+            "scale": round(scale, 4),
+            "max_corr": round(max_corr, 4),
+            "peer": peer,
+            "threshold": threshold,
+            "reason": f"correlation {abs_corr:.2f} exceeds threshold {threshold:.2f} "
+                      f"(peer: {peer}) — scaling size to {scale:.0%}",
+        }
+
     def fixed_risk(self, entry_price, stop_loss, risk_pct=0.02):
         """Calculate position size for a fixed risk amount.
 

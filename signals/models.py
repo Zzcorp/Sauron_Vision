@@ -48,13 +48,26 @@ class Signal(models.Model):
     expired_at = models.DateTimeField(null=True)
     outcome = models.CharField(max_length=20, choices=OUTCOME_CHOICES, blank=True)
 
+    # Self-grading fields (Phase 1.0 — "the system grades itself")
+    realized_r = models.FloatField(null=True, blank=True)
+    mfe = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    mae = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    time_to_outcome_seconds = models.IntegerField(null=True, blank=True)
+
     class Meta:
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["-created_at"]),
             models.Index(fields=["instrument", "is_active"]),
+            models.Index(fields=["outcome", "expired_at"], name="signals_sig_outcome_idx"),
+            models.Index(fields=["signal_type", "expired_at"], name="signals_sig_type_idx"),
         ]
 
     def __str__(self):
         return f"[{self.direction.upper()}] {self.title} (score: {self.score:.2f})"
 from .models_smc import SmcSignal  # noqa: F401
+from .models_control import (  # noqa: F401
+    RuleControl, RuleAction, MetaAllocation, PromotionEvent, RuleMutation,
+)
+from .models_opportunity import OpportunitySetup, OpportunityFlag, DiscoveredSetup  # noqa: F401
+from .models_events import FastEvent  # noqa: F401

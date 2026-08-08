@@ -102,6 +102,42 @@ class TraderProfile(models.Model):
         ("comprehensive", "Comprehensive — Deep dive with alternatives"),
     ])
 
+    # ── Cross-asset orchestrator (Phase 15) ──────────
+    # User-controlled gate that prevents stacking themed exposure across asset
+    # classes (e.g. simultaneously long crypto + long EUR + short USD futures
+    # is one bet on dollar weakness, not three trades). Disabled by default;
+    # turn on when you want the system to refuse new entries that push your
+    # net theme exposure past your thresholds. Closes are never gated.
+    cross_asset_orchestrator_enabled = models.BooleanField(default=False,
+        help_text="Refuse new bot entries that stack same-theme exposure across asset classes.")
+    max_usd_theme_exposure = models.FloatField(default=3.0,
+        help_text="Max |net USD-theme units| across open positions. Each position contributes ±1.")
+    max_equity_theme_exposure = models.FloatField(default=3.0,
+        help_text="Max |net equity-beta units| across open positions. Each position contributes ±1.")
+    # Phase 24 — extra dimensions, opt-in (set to 0 to disable individually).
+    max_vol_theme_exposure = models.FloatField(default=0.0,
+        help_text="Max long-volatility (long-premium options) positions stacked. 0 = disabled.")
+    max_currency_exposure = models.FloatField(default=0.0,
+        help_text="Max |net exposure| to any single currency from forex pairs. 0 = disabled.")
+    max_sector_exposure = models.IntegerField(default=0,
+        help_text="Max concurrent stock/option positions in any single sector. 0 = disabled.")
+    # Phase 25 — when True, theme contributions are scaled by position notional
+    # relative to the config's default position size. A 2x-sized position
+    # contributes ±2 to its themes; default-sized = ±1; clamped to [0.1, 5.0].
+    size_weighted_orchestrator = models.BooleanField(default=False,
+        help_text="Weight orchestrator theme contributions by position notional. Off = each position contributes ±1.")
+
+    # Phase 27 — tax-lot accounting method. Used by tax_lots.close_lots_for
+    # when a trade closes to decide which open lot(s) to consume first.
+    TAX_LOT_METHOD_CHOICES = [
+        ("FIFO", "FIFO — First In, First Out (US default)"),
+        ("LIFO", "LIFO — Last In, First Out"),
+        ("HIFO", "HIFO — Highest Cost In, First Out (tax-loss optimal)"),
+    ]
+    tax_lot_method = models.CharField(
+        max_length=4, choices=TAX_LOT_METHOD_CHOICES, default="FIFO",
+        help_text="Lot-consumption order on sales for cost-basis bookkeeping.")
+
     # ── Meta ─────────────────────────────────────────
     # ── Theme ────────────────────────────────────
     theme_mode = models.CharField(max_length=10, default="dark", choices=[

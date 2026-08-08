@@ -156,6 +156,16 @@ def create_daily_snapshot():
         currency = (pos.instrument.currency or "USD") if pos.instrument else "USD"
         exposure_by_currency[currency] = exposure_by_currency.get(currency, 0) + value
 
+    # Phase-2 addition: compute the correlation matrix across open positions.
+    # Best-effort: a degenerate matrix never blocks the snapshot from being written.
+    try:
+        from portfolio.correlation import portfolio_correlation
+        cm = portfolio_correlation(portfolio)
+        correlation_matrix = cm.to_dict()
+    except Exception as e:
+        logger.warning("correlation matrix computation failed: %s — saving empty", e)
+        correlation_matrix = {}
+
     # Create or update the snapshot for today
     snap, created = PortfolioSnapshot.objects.update_or_create(
         portfolio=portfolio,
@@ -171,7 +181,7 @@ def create_daily_snapshot():
             "exposure_by_asset_class": exposure_by_asset_class,
             "exposure_by_sector": exposure_by_sector,
             "exposure_by_currency": exposure_by_currency,
-            "correlation_matrix": {},
+            "correlation_matrix": correlation_matrix,
         },
     )
 
