@@ -136,7 +136,7 @@ def detect_position_overlap(*,
         return out
 
     rows = list(
-        AssetBotTrade.objects.filter(status="OPEN")
+        AssetBotTrade.objects.filter(status__in=("OPEN", "CLOSE_PENDING"))
         .exclude(rule_name="")
         .values("symbol", "side", "rule_name")
     )

@@ -277,7 +277,7 @@ class OptionsBot(AssetBot):
 
         # Skip if there's already an OPEN trade for this underlying.
         if AssetBotTrade.objects.filter(
-                config=self.cfg, symbol=symbol, status="OPEN").exists():
+                config=self.cfg, symbol=symbol, status__in=("OPEN", "CLOSE_PENDING")).exists():
             return None
 
         # Cooldown gate (same as base).
@@ -429,7 +429,7 @@ class OptionsBot(AssetBot):
         from bot_program.engine.broker_router import client_for_symbol
 
         cutoff = timezone.now().date() + timedelta(days=self._close_before_dte())
-        for trade in AssetBotTrade.objects.filter(config=self.cfg, status="OPEN"):
+        for trade in AssetBotTrade.objects.filter(config=self.cfg, status__in=("OPEN", "CLOSE_PENDING")):
             try:
                 meta = trade.metadata or {}
                 exp_str = meta.get("expiry")

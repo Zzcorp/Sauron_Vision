@@ -187,8 +187,21 @@ class AssetBot(ABC):
                     signal_id=str(trade.id), intent="EXIT",
                     bar_ts=timezone.now().strftime("%Y%m%d%H%M"),
                 )
-                self._cancel_protective_orders(trade, client)
-                self._submit_close_order(trade, client, client_order_id)
+                # Try the close FIRST and only strip the broker's protective
+                # legs if the close is rejected because they hold the shares.
+                # Cancelling up-front would leave a live, unprotected position
+                # whenever the close then fails.
+                try:
+                    self._submit_close_order(trade, client, client_order_id)
+                except Exception:
+                    if not (trade.metadata or {}).get("protective_order_ids"):
+                        raise
+                    logger.warning(
+                        "[%s_bot] close rejected for %s — cancelling "
+                        "protective legs and retrying once",
+                        self.asset_class, trade.symbol)
+                    self._cancel_protective_orders(trade, client)
+                    self._submit_close_order(trade, client, client_order_id)
             except Exception as e:
                 logger.error("[%s_bot] live close order failed for %s: %s — "
                              "marking CLOSE_PENDING",

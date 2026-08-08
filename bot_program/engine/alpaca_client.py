@@ -201,25 +201,35 @@ class AlpacaTrader:
             log.error("Alpaca order failed: %s", r.text)
             raise
         data = r.json()
+        # The POST response is the only place the bracket legs are guaranteed
+        # to appear — capture them BEFORE any polling replaces `data`.
+        legs = [str(leg.get("id")) for leg in (data.get("legs") or [])
+                if leg.get("id")]
+
         # Market orders return 'accepted' with a null fill price; poll briefly
         # so the recorded entry is the REAL fill, not the pre-order ticker.
         if not data.get("filled_avg_price") and data.get("id"):
-            data = self._await_fill(str(data["id"])) or data
+            polled = self._await_fill(str(data["id"]))
+            if polled:
+                legs = legs or [str(leg.get("id"))
+                                for leg in (polled.get("legs") or [])
+                                if leg.get("id")]
+                data = polled
         out = {
             "orderId": str(data.get("id", "")),
             "symbol": symbol,
             "side": side,
-            "executedQty": str(data.get("filled_qty", quantity) or quantity),
+            # Only report a fill quantity the broker actually confirmed —
+            # falling back to the requested size would record a position the
+            # broker may not hold (a bracket submits int(quantity)).
+            "executedQty": str(data.get("filled_qty") or "0"),
             "avgPrice": str(data.get("filled_avg_price", "0") or "0"),
             "status": data.get("status", "PENDING").upper(),
             "raw": data,
         }
         if bracket:
             out["protectedOnFill"] = True
-            out["protectiveOrders"] = [
-                str(leg.get("id")) for leg in (data.get("legs") or [])
-                if leg.get("id")
-            ]
+            out["protectiveOrders"] = legs
         return out
 
     def _await_fill(self, order_id: str, attempts: int = 5,
@@ -234,7 +244,10 @@ class AlpacaTrader:
         for _ in range(attempts):
             time.sleep(delay)
             try:
+                # nested=true is required for Alpaca to return the bracket's
+                # child legs under the parent order.
                 r = self._sess().get(f"{self.trading_base}/v2/orders/{order_id}",
+                                     params={"nested": "true"},
                                      timeout=self.timeout)
                 r.raise_for_status()
                 last = r.json()

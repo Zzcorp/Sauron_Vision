@@ -34,15 +34,21 @@ AGENT_GROUPS = [
         ("strategy_mutator", "Strategy Mutator", "balanced"),
         ("weekly_reviewer", "Weekly Reviewer", "deep"),
     ]),
+    # Keys MUST equal each agent's runtime agent_name — the resolver looks
+    # up overrides by that value, so a friendly-but-wrong key writes a row
+    # nothing ever reads.
     ("Sauron's Mind", [
-        ("brain_synthesizer", "Synthesizer", "balanced"),
-        ("brain_critic", "Critic", "deep"),
-        ("brain_strategist", "Strategist", "deep"),
-        ("brain_strategy_generator", "Strategy Generator", "deep"),
-        ("brain_earnings_reviewer", "Earnings Reviewer", "balanced"),
-        ("brain_research", "Research Chat", "balanced"),
+        ("sauron_mind", "Synthesizer", "balanced"),
+        ("critic", "Critic", "deep"),
+        ("strategist", "Strategist", "deep"),
+        ("strategy_generator", "Strategy Generator", "deep"),
+        ("earnings_reviewer", "Earnings Reviewer", "balanced"),
+        ("research", "Research Chat", "balanced"),
     ]),
 ]
+
+# Every key the UI may write, so a typo can't create a dead override row.
+KNOWN_AGENT_KEYS = {name for _, rows in AGENT_GROUPS for name, _, _ in rows}
 
 
 @staff_member_required
@@ -61,6 +67,11 @@ def ai_models_dashboard(request):
 
         if scope not in ("tier", "agent") or not key:
             messages.error(request, "Invalid selection.")
+        elif scope == "tier" and key not in TIERS:
+            messages.error(request, f"Unknown tier: {key}")
+        elif scope == "agent" and key not in KNOWN_AGENT_KEYS:
+            # Guards against a row that persists but resolves for nobody.
+            messages.error(request, f"Unknown agent: {key}")
         elif model_id and not known_model(model_id):
             messages.error(request, f"Unknown model id: {model_id}")
         elif effort and effort not in EFFORT_LEVELS:

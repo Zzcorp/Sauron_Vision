@@ -45,10 +45,13 @@ def _to_oanda_symbol(symbol: str) -> str:
 def _to_iso_ms(ts_str: str) -> int:
     """OANDA timestamps like '2026-04-30T13:00:00.000000000Z' → epoch ms."""
     # OANDA appends nanoseconds; truncate to microseconds for fromisoformat.
-    s = ts_str.rstrip("Z").rstrip("0")
+    # NB: rstrip("0") here would eat the entire fractional part of a
+    # whole-second candle ("...:00.000000000Z" -> "...:00.") and every
+    # timestamp would fail to parse, silently zeroing every bar.
+    s = ts_str.rstrip("Z")
     if "." in s:
         whole, frac = s.split(".", 1)
-        s = whole + "." + frac[:6]
+        s = whole + "." + (frac[:6].ljust(6, "0"))
     try:
         return int(datetime.fromisoformat(s).replace(tzinfo=timezone.utc).timestamp() * 1000)
     except ValueError:

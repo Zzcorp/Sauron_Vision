@@ -75,7 +75,7 @@ def execute_kill_switch(user=None, reason="manual"):
             logger.error("[KILL SWITCH] %s", msg)
 
     # ── 3. Close open multi-asset trades ─────────────────────────────────────
-    open_asset = AssetBotTrade.objects.filter(status="OPEN")
+    open_asset = AssetBotTrade.objects.filter(status__in=("OPEN", "CLOSE_PENDING"))
     if user:
         open_asset = open_asset.filter(config__user=user)
     for trade in open_asset:

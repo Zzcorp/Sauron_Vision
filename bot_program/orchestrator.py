@@ -320,7 +320,7 @@ def current_exposures(user) -> dict:
 
 def current_theme_exposure(user) -> dict:
     """Sum theme contributions across the user's open positions:
-      - AssetBotTrade rows status='OPEN'
+      - AssetBotTrade rows status in ('OPEN', 'CLOSE_PENDING')
       - BotTrade rows (legacy crypto bot) where exit_price is null
 
     Returns {'usd': float, 'equity': float}.

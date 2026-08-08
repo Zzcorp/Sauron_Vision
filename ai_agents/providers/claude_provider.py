@@ -27,7 +27,7 @@ class ClaudeProvider:
         token spend on models that support it; it is dropped for models
         that don't, so a tier swap can never send an invalid parameter.
         """
-        from ai_agents.catalog import pricing_for, supports_effort
+        from ai_agents.catalog import pricing_for, supports_effort, supports_thinking
 
         client = self._get_client()
 
@@ -35,11 +35,14 @@ class ClaudeProvider:
         if effort and supports_effort(model):
             kwargs["output_config"] = {"effort": effort}
 
-        # 8192: on the current models adaptive thinking is on by default and
-        # max_tokens caps thinking + response text together.
+        # max_tokens caps thinking AND response text together, and adaptive
+        # thinking is on by default on the current models — a budget sized
+        # for the answer alone truncates it. Thinking models get headroom.
+        max_tokens = 32000 if supports_thinking(model) else 8192
+
         response = client.messages.create(
             model=model,
-            max_tokens=8192,
+            max_tokens=max_tokens,
             system=system_prompt,
             messages=[
                 {"role": "user", "content": user_message}
@@ -51,6 +54,23 @@ class ClaudeProvider:
         # block, and a safety refusal can return no text at all — never index
         # content[0] blindly.
         text = next((b.text for b in response.content if b.type == "text"), "")
+
+        # A truncated or refused response is a FAILED call, not an empty
+        # success: without this every caller's parse_response would swallow
+        # it and log success=True with no output.
+        stop_reason = getattr(response, "stop_reason", None)
+        if stop_reason == "max_tokens":
+            logger.warning("Claude response truncated at max_tokens (%s, %s)",
+                           model, max_tokens)
+        elif stop_reason == "refusal":
+            details = getattr(response, "stop_details", None)
+            raise RuntimeError(
+                f"Claude declined the request (model={model}, "
+                f"category={getattr(details, 'category', None)})")
+        if not text:
+            raise RuntimeError(
+                f"Claude returned no text (model={model}, "
+                f"stop_reason={stop_reason})")
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
 

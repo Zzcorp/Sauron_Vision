@@ -43,7 +43,7 @@ def forensics_list(request):
     return render(request, "dashboard/forensics_list.html", {
         "page_id": "forensics",
         "page": page, "symbol": symbol, "rule": rule,
-        "total": qs.count(),
+        "total": page.paginator.count,
     })
 
 
@@ -92,9 +92,16 @@ def _audit_entries(trade):
     out = []
     for row in rows:
         data = row.data or {}
-        if str(data.get("trade_id")) == str(trade.id) or (
-                data.get("symbol") == trade.symbol
-                and data.get("asset_class") == trade.asset_class):
+        # trade_open/trade_close carry trade_id — match on it exactly.
+        # Only gate_reject lacks one, so the symbol fallback is scoped to
+        # that kind; applying it broadly attributed OTHER trades' rows to
+        # this one (and pushed the trade's own rows out of the window).
+        if row.kind == "gate_reject":
+            match = (data.get("symbol") == trade.symbol
+                     and data.get("asset_class") == trade.asset_class)
+        else:
+            match = str(data.get("trade_id")) == str(trade.id)
+        if match:
             out.append(row)
         if len(out) >= 12:
             break
@@ -133,15 +140,17 @@ def _rule_track_record(trade):
         config__user=trade.config.user, rule_name=trade.rule_name,
         asset_class=trade.asset_class, status="CLOSED",
         realized_r__isnull=False)
-    n = qs.count()
+    from django.db.models import Avg, Count, Q
+    agg = qs.aggregate(n=Count("id"), avg=Avg("realized_r"),
+                       wins=Count("id", filter=Q(realized_r__gt=0)))
+    n = agg["n"] or 0
     if not n:
         return None
-    rs = list(qs.values_list("realized_r", flat=True))
-    wins = sum(1 for r in rs if r and r > 0)
+    wins = agg["wins"] or 0
     return {
         "n": n, "wins": wins, "losses": n - wins,
         "win_rate": round(wins / n, 3),
-        "avg_r": round(sum(float(r or 0) for r in rs) / n, 3),
+        "avg_r": round(float(agg["avg"] or 0), 3),
     }
 
 
@@ -196,8 +205,12 @@ def forensics_detail(request, trade_id: int):
         "trade": trade,
         "reasons": [r.strip() for r in (trade.reason or "").split("·") if r.strip()],
         "signals": signals,
-        "signal_agree": [s for s in signals
-                         if (s.direction == "bullish") == (trade.side == "BUY")],
+        # Only an explicit bullish/bearish match counts — a NEUTRAL signal
+        # would otherwise read as "agreeing" with every SELL.
+        "signal_agree": [
+            s for s in signals
+            if s.direction == ("bullish" if trade.side == "BUY" else "bearish")
+        ],
         "gate_events": _gate_events(trade),
         "audit_entries": _audit_entries(trade),
         "rule_state": _rule_state(trade),

@@ -1,6 +1,7 @@
 """Paper trading engine — simulates fills without real orders."""
 import logging
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 from django.utils import timezone
 
@@ -15,6 +16,9 @@ class PaperTrader:
     # frozen (a dead streamer, a rate-limited adapter); marking against a
     # fossil silently fabricates P&L and corrupts grading.
     MAX_QUOTE_AGE_SECONDS = 900
+    # Bars arrive every 10 min from the bot bar feed; a 1h/4h bar up to 6h
+    # old is still a real traded price, unlike a frozen tick.
+    MAX_BAR_AGE_SECONDS = 6 * 3600
 
     def __init__(self, config):
         self.config = config
@@ -82,18 +86,44 @@ class PaperTrader:
             from instruments.models import Instrument
             instrument = Instrument.objects.filter(symbol=symbol).first()
             if instrument:
-                lq = LiveQuote.objects.get(instrument=instrument)
-                age = (timezone.now() - lq.updated_at).total_seconds()
-                if age > self.MAX_QUOTE_AGE_SECONDS:
-                    logger.warning(
-                        "[PAPER] %s quote is %.0fs old (max %ds) — reporting "
-                        "no price rather than marking against a stale quote",
+                lq = LiveQuote.objects.filter(instrument=instrument).first()
+                if lq is not None:
+                    age = (timezone.now() - lq.updated_at).total_seconds()
+                    if age <= self.MAX_QUOTE_AGE_SECONDS:
+                        return {"lastPrice": str(lq.last), "symbol": symbol}
+                    logger.info(
+                        "[PAPER] %s quote is %.0fs old (max %ds) — trying the "
+                        "bar feed before giving up",
                         symbol, age, self.MAX_QUOTE_AGE_SECONDS)
-                    return {"lastPrice": "0", "symbol": symbol, "stale": True}
-                return {"lastPrice": str(lq.last), "symbol": symbol}
+                # Quote missing or stale: fall back to the most recent bar.
+                # LiveQuote pollers only cover watchlist instruments, while
+                # the bar feed covers exactly the symbols bots trade — so
+                # without this a paper bot on a non-watchlist symbol would
+                # be permanently priceless.
+                bar_price = self._recent_bar_close(instrument)
+                if bar_price is not None:
+                    return {"lastPrice": str(bar_price), "symbol": symbol,
+                            "source": "bars"}
+                logger.warning(
+                    "[PAPER] no fresh quote or recent bar for %s — reporting "
+                    "no price rather than marking against a stale value",
+                    symbol)
+                return {"lastPrice": "0", "symbol": symbol, "stale": True}
         except Exception:
             pass
         return {"lastPrice": "0", "symbol": symbol}
+
+    def _recent_bar_close(self, instrument):
+        """Close of the newest bar within MAX_BAR_AGE_SECONDS, else None."""
+        from django.utils import timezone
+        from market_data.models import PriceData
+
+        cutoff = timezone.now() - timedelta(seconds=self.MAX_BAR_AGE_SECONDS)
+        bar = (PriceData.objects
+               .filter(instrument=instrument, timeframe__in=("1h", "4h"),
+                       timestamp__gte=cutoff)
+               .order_by("-timestamp").first())
+        return bar.close if bar else None
 
     def klines(self, symbol, interval="1h", limit=200):
         """Return historical OHLCV data from local PriceData."""

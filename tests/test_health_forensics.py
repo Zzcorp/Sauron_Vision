@@ -58,7 +58,7 @@ class HealthCheckTests(TestCase):
         from dashboard.views_system_health import check_bot_bars
         _instrument()
         _cfg(self.user)
-        c = check_bot_bars()
+        c = check_bot_bars(self.user)
         self.assertEqual(c["state"], "fail")
         self.assertIn("HOLD", c["detail"])
 
@@ -70,7 +70,7 @@ class HealthCheckTests(TestCase):
         PriceData.objects.create(
             instrument=inst, timeframe="4h", timestamp=timezone.now(),
             open=1, high=2, low=1, close=2, volume=10, source="test")
-        c = check_bot_bars()
+        c = check_bot_bars(self.user)
         self.assertEqual(c["state"], "ok")
 
     def test_close_pending_check_flags_stranded_positions(self):

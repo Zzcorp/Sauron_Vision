@@ -62,6 +62,36 @@ MODELS = {
         "effort": True,
         "notes": "Previous-generation Sonnet.",
     },
+    # Older-but-live models: still valid deploy-time pins, so they must be
+    # in the catalog or _validated would discard a deliberate choice with a
+    # misleading "retired" warning.
+    "claude-opus-4-7": {
+        "label": "Claude Opus 4.7",
+        "tier_hint": "deep",
+        "pricing": {"input": 5.0, "output": 25.0},
+        "context": 1_000_000,
+        "thinking": True,
+        "effort": True,
+        "notes": "Older Opus; still served.",
+    },
+    "claude-opus-4-6": {
+        "label": "Claude Opus 4.6",
+        "tier_hint": "deep",
+        "pricing": {"input": 5.0, "output": 25.0},
+        "context": 1_000_000,
+        "thinking": True,
+        "effort": True,
+        "notes": "Older Opus; adaptive thinking must be set explicitly.",
+    },
+    "claude-sonnet-4-5": {
+        "label": "Claude Sonnet 4.5",
+        "tier_hint": "balanced",
+        "pricing": {"input": 3.0, "output": 15.0},
+        "context": 1_000_000,
+        "thinking": False,
+        "effort": False,
+        "notes": "Legacy Sonnet; no effort parameter.",
+    },
     "claude-haiku-4-5": {
         "label": "Claude Haiku 4.5",
         "tier_hint": "fast",
@@ -115,6 +145,12 @@ def pricing_for(model_id: str) -> dict:
 
 def supports_effort(model_id: str) -> bool:
     return bool(MODELS.get(model_id, {}).get("effort"))
+
+
+def supports_thinking(model_id: str) -> bool:
+    """True when adaptive thinking is on by default, so max_tokens must
+    cover reasoning as well as the answer."""
+    return bool(MODELS.get(model_id, {}).get("thinking"))
 
 
 def choices() -> list[tuple[str, str]]:

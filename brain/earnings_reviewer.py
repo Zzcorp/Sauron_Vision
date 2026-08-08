@@ -53,7 +53,7 @@ def _held_symbols() -> set[str]:
     out: set[str] = set()
     try:
         from bot_program.models import AssetBotTrade
-        for s in AssetBotTrade.objects.filter(status="OPEN").values_list(
+        for s in AssetBotTrade.objects.filter(status__in=("OPEN", "CLOSE_PENDING")).values_list(
                 "symbol", flat=True):
             if s:
                 out.add(s.upper())
@@ -169,7 +169,7 @@ def _build_review_snapshot(instrument, event) -> dict:
         from bot_program.models import AssetBotTrade
         snap["open_bot_trades"] = list(
             AssetBotTrade.objects.filter(
-                symbol__iexact=instrument.symbol, status="OPEN",
+                symbol__iexact=instrument.symbol, status__in=("OPEN", "CLOSE_PENDING"),
             ).values("id", "side", "qty", "entry_price",
                       "stop_loss", "take_profit", "rule_name")
         )

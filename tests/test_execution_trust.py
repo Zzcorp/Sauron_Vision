@@ -125,6 +125,7 @@ class ClosePendingTests(TestCase):
 
         trade = _trade(self.cfg, status="CLOSE_PENDING")
         client = MagicMock()
+        client.get_positions = MagicMock(return_value=[{"symbol": "AAPL"}])
         client.market_order = MagicMock(side_effect=RuntimeError("still down"))
         with patch("bot_program.engine.broker_router.client_for_symbol",
                     return_value=client):
@@ -142,6 +143,7 @@ class ClosePendingTests(TestCase):
         trade = _trade(self.cfg, status="CLOSE_PENDING",
                        metadata={"close_retry_attempts": ALERT_AFTER_ATTEMPTS - 1})
         client = MagicMock()
+        client.get_positions = MagicMock(return_value=[{"symbol": "AAPL"}])
         client.market_order = MagicMock(side_effect=RuntimeError("down"))
         with patch("bot_program.engine.broker_router.client_for_symbol",
                     return_value=client):
@@ -206,12 +208,16 @@ class BrokerSideStopsTests(TestCase):
         trade.refresh_from_db()
         self.assertEqual(trade.status, "OPEN")
 
-    def test_manual_close_cancels_resting_protective_orders(self):
+    def test_resting_legs_cancelled_only_when_the_close_is_rejected(self):
+        """Cancelling up-front would leave a live UNPROTECTED position
+        whenever the close then failed, so protection is stripped only
+        after the broker rejects (it holds the shares against the legs)."""
         from bot_program.asset_engine.stock_bot import StockBot
 
         trade = _trade(self.cfg, metadata={"protective_order_ids": ["sl1", "tp1"]})
         client = MagicMock()
-        client.market_order = MagicMock(return_value={"orderId": "1"})
+        client.market_order = MagicMock(
+            side_effect=[RuntimeError("held qty"), {"orderId": "1"}])
         StockBot(self.cfg)._close_trade(trade, Decimal("101"), client,
                                          reason="MANUAL")
         cancelled = [c.args[0] for c in client.cancel_order.call_args_list]

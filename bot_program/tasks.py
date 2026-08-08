@@ -271,7 +271,6 @@ def run_daily_postgres_backup():
 # ─── Retry pending closes ───────────────────────────────────────────────────
 
 @shared_task
-@guarded_task("pipeline_asset_bots")
 def retry_pending_closes():
     """Drain AssetBotTrade rows stuck in CLOSE_PENDING.
 
@@ -279,8 +278,10 @@ def retry_pending_closes():
     failed — the position is STILL OPEN at the broker. Every 5 minutes we
     resubmit the close; only a broker success finalises the row as CLOSED.
 
-    Beat-scheduled every 5 min. Tests call `retry_all_pending_closes()`
-    directly to bypass the component guard.
+    Deliberately NOT gated by the pipeline_asset_bots component: switching
+    the bots off is the operator's natural reaction to a failed close (and
+    is exactly what the kill switch does), and that must not disable the
+    only drain for stranded live positions.
     """
     from .pending_closes import retry_all_pending_closes
     return retry_all_pending_closes()

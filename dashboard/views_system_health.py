@@ -54,7 +54,15 @@ def check_beat_registration() -> dict:
     autodiscover_tasks() only imports <app>.tasks; a task module outside
     that convention is enqueued into the void ("Received unregistered
     task") and its work silently never happens.
+
+    Cached: importing every task module costs ~0.5s cold in the web
+    process, and the answer only changes on deploy.
     """
+    from django.core.cache import cache
+
+    cached = cache.get("health:beat_registration")
+    if cached:
+        return cached
     try:
         from config.celery import app
         app.loader.import_default_modules()
@@ -69,47 +77,74 @@ def check_beat_registration() -> dict:
         return _check("beat", "Beat schedule", "warn",
                       f"could not inspect: {e}")
     if missing:
-        return _check("beat", "Beat schedule", "fail",
-                      f"{len(missing)} of {total} entries unregistered: "
-                      + ", ".join(missing[:3]),
-                      "Add the module to app.conf.imports in config/celery.py")
-    return _check("beat", "Beat schedule", "ok",
-                  f"all {total} entries resolve to registered tasks")
+        result = _check("beat", "Beat schedule", "fail",
+                        f"{len(missing)} of {total} entries unregistered: "
+                        + ", ".join(missing[:3]),
+                        "Add the module to app.conf.imports in config/celery.py")
+    else:
+        result = _check("beat", "Beat schedule", "ok",
+                        f"all {total} entries resolve to registered tasks")
+    cache.set("health:beat_registration", result, 300)
+    return result
 
 
-def check_bot_bars() -> dict:
-    """The bars the rule layer reads. No 4h bars = every rule HOLDs."""
+def check_bot_bars(user) -> dict:
+    """The bars the rule layer reads. No 4h bars = that symbol's rules HOLD.
+
+    Checked PER SYMBOL: a global max would let one freshly-fed symbol mask
+    every other symbol being stale, which is the exact failure this exists
+    to catch.
+    """
     from bot_program.models import AssetBotConfig
     from instruments.models import Instrument
     from market_data.models import PriceData
 
     symbols = set()
-    for cfg in AssetBotConfig.objects.filter(enabled=True):
+    for cfg in AssetBotConfig.objects.filter(user=user, enabled=True):
         symbols.update(cfg.symbols or [])
     if not symbols:
         return _check("bars", "Bot bars (4h)", "ok",
                       "no enabled bot configs — nothing to feed")
 
-    inst_ids = list(Instrument.objects.filter(symbol__in=symbols)
-                    .values_list("id", flat=True))
-    latest = (PriceData.objects
-              .filter(instrument_id__in=inst_ids, timeframe="4h")
-              .aggregate(m=Max("timestamp"))["m"])
-    covered = (PriceData.objects
-               .filter(instrument_id__in=inst_ids, timeframe="4h")
-               .values("instrument_id").distinct().count())
+    inst_by_symbol = {
+        i.symbol: i.id for i in Instrument.objects.filter(symbol__in=symbols)
+    }
+    latest_by_inst = {
+        row["instrument_id"]: row["m"]
+        for row in (PriceData.objects
+                    .filter(instrument_id__in=inst_by_symbol.values(),
+                            timeframe="4h")
+                    .values("instrument_id").annotate(m=Max("timestamp")))
+    }
 
-    if latest is None:
+    missing, stale, fresh = [], [], []
+    for symbol in sorted(symbols):
+        inst_id = inst_by_symbol.get(symbol)
+        latest = latest_by_inst.get(inst_id) if inst_id else None
+        if latest is None:
+            missing.append(symbol)
+        elif _age(latest) > BAR_STALE_SECONDS:
+            stale.append(f"{symbol} ({_fmt_age(_age(latest))})")
+        else:
+            fresh.append(symbol)
+
+    if missing and not fresh and not stale:
         return _check("bars", "Bot bars (4h)", "fail",
                       f"no 4h bars for any of {len(symbols)} bot symbols — "
                       f"every rule returns HOLD",
                       "Run market_data.tasks.refresh_bot_bars_task")
-    age = _age(latest)
-    state = "ok" if age <= BAR_STALE_SECONDS else "warn"
-    return _check("bars", "Bot bars (4h)", state,
-                  f"{covered}/{len(symbols)} symbols covered · newest bar "
-                  f"{_fmt_age(age)}",
-                  "" if state == "ok" else "Bar feed may be failing — check logs")
+    if missing or stale:
+        detail = f"{len(fresh)}/{len(symbols)} symbols fresh"
+        if missing:
+            detail += " · missing: " + ", ".join(missing[:4])
+        if stale:
+            detail += " · stale: " + ", ".join(stale[:4])
+        return _check("bars", "Bot bars (4h)",
+                      "fail" if missing else "warn", detail,
+                      "Those symbols' rules cannot fire — check the bar feed "
+                      "and that an Instrument row exists for each")
+    return _check("bars", "Bot bars (4h)", "ok",
+                  f"all {len(symbols)} bot symbols have fresh 4h bars")
 
 
 def check_quote_freshness() -> dict:
@@ -146,7 +181,9 @@ def check_close_pending(user) -> dict:
     if not n:
         return _check("close_pending", "Stranded closes", "ok",
                       "no trades awaiting a retried close")
-    worst = max((t.metadata or {}).get("close_retry_attempts", 0) for t in qs)
+    # int(... or 0): the key can exist with a null value.
+    worst = max(int((t.metadata or {}).get("close_retry_attempts") or 0)
+                for t in qs)
     return _check("close_pending", "Stranded closes", "fail",
                   f"{n} trade(s) still open at the broker after a failed "
                   f"close (worst: {worst} retries)",
@@ -162,21 +199,29 @@ def check_bot_heartbeats(user) -> dict:
     if not configs:
         return _check("bots", "Bot activity", "ok", "no enabled bots")
 
-    quiet = []
-    for cfg in configs:
-        last = (AssetBotTrade.objects.filter(config=cfg)
-                .aggregate(m=Max("opened_at"))["m"])
-        age = _age(last)
-        if age is None or age > 86400:
-            quiet.append(f"{cfg.name} ({_fmt_age(age)})")
-    if quiet and len(quiet) == len(configs):
-        return _check("bots", "Bot activity", "warn",
-                      f"none of {len(configs)} enabled bots traded in 24h",
-                      "Normal if signals are quiet — check bars and signals "
-                      "if it persists")
-    return _check("bots", "Bot activity", "ok",
-                  f"{len(configs) - len(quiet)}/{len(configs)} bots traded "
-                  f"in the last 24h")
+    # One query for the whole fleet instead of one per config.
+    last_by_config = {
+        row["config_id"]: row["m"]
+        for row in (AssetBotTrade.objects
+                    .filter(config__in=configs)
+                    .values("config_id").annotate(m=Max("opened_at")))
+    }
+    quiet = [f"{cfg.name} ({_fmt_age(_age(last_by_config.get(cfg.id)))})"
+             for cfg in configs
+             if _age(last_by_config.get(cfg.id)) is None
+             or _age(last_by_config.get(cfg.id)) > 86400]
+
+    active = len(configs) - len(quiet)
+    if not quiet:
+        return _check("bots", "Bot activity", "ok",
+                      f"all {len(configs)} bots traded in the last 24h")
+    # Warn on ANY silent bot, not only a fully silent fleet — 9 dead bots
+    # out of 10 previously rendered green.
+    return _check("bots", "Bot activity", "warn",
+                  f"{active}/{len(configs)} bots traded in 24h · quiet: "
+                  + ", ".join(quiet[:4]),
+                  "Normal if signals are quiet — check bars and signals if "
+                  "it persists")
 
 
 def check_live_mode_readiness(user) -> dict:
@@ -186,23 +231,33 @@ def check_live_mode_readiness(user) -> dict:
     from bot_program.engine.paper_trader import PaperTrader
     from bot_program.models import AssetBotConfig
 
-    broken = []
+    # Asset classes with no wired execution broker route to paper by design
+    # (broker_router._broker_for_asset_class) — flagging them would make the
+    # page permanently red for a condition no credential can fix.
+    PAPER_BY_DESIGN = {"commodity"}
+
+    broken, expected = [], []
     for cfg in AssetBotConfig.objects.filter(user=user, enabled=True, mode="live"):
-        symbol = (cfg.symbols or [None])[0]
-        if not symbol:
+        if cfg.asset_class in PAPER_BY_DESIGN:
+            expected.append(cfg.name)
             continue
-        try:
-            if isinstance(client_for_symbol(user, symbol, cfg), PaperTrader):
-                broken.append(cfg.name)
-        except Exception:
-            broken.append(cfg.name)
+        # EVERY symbol, not just the first: one config can span venues, and
+        # a per-symbol fallback is exactly the silent failure we're hunting.
+        for symbol in (cfg.symbols or []):
+            try:
+                if isinstance(client_for_symbol(user, symbol, cfg), PaperTrader):
+                    broken.append(f"{cfg.name}/{symbol}")
+            except Exception:
+                broken.append(f"{cfg.name}/{symbol}")
     if broken:
         return _check("live_ready", "Live broker credentials", "fail",
-                      "live bots falling back to paper: " + ", ".join(broken),
+                      "live bots falling back to paper: " + ", ".join(broken[:6]),
                       "Add or fix broker credentials — these bots refuse to "
                       "trade rather than record fake live fills")
-    return _check("live_ready", "Live broker credentials", "ok",
-                  "all live bots have a real broker route")
+    detail = "all live bots have a real broker route"
+    if expected:
+        detail += f" ({len(expected)} paper-only by asset class)"
+    return _check("live_ready", "Live broker credentials", "ok", detail)
 
 
 def check_signal_flow() -> dict:
@@ -238,17 +293,23 @@ def check_ai_models() -> dict:
 
 @login_required
 def system_health(request):
+    # Per-user checks are safe for anyone; the platform-wide ones expose
+    # internal task paths, feed names and configured model ids, which the
+    # dashboards that own that data gate behind staff.
+    plan = [
+        (check_bot_bars, True, False),
+        (check_close_pending, True, False),
+        (check_live_mode_readiness, True, False),
+        (check_bot_heartbeats, True, False),
+        (check_beat_registration, False, True),
+        (check_quote_freshness, False, True),
+        (check_signal_flow, False, True),
+        (check_ai_models, False, True),
+    ]
     checks = []
-    for fn, needs_user in (
-        (check_beat_registration, False),
-        (check_bot_bars, False),
-        (check_quote_freshness, False),
-        (check_close_pending, True),
-        (check_live_mode_readiness, True),
-        (check_bot_heartbeats, True),
-        (check_signal_flow, False),
-        (check_ai_models, False),
-    ):
+    for fn, needs_user, staff_only in plan:
+        if staff_only and not request.user.is_staff:
+            continue
         try:
             checks.append(fn(request.user) if needs_user else fn())
         except Exception as e:  # a broken check must never break the page

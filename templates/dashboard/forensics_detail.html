@@ -16,13 +16,13 @@
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">EXIT</span>
-        <span class="oc-strip-value">{{ trade.exit_price|default:"—" }}</span>
+        <span class="oc-strip-value">{{ trade.exit_price|default_if_none:"—" }}</span>
         <span class="oc-strip-sub">{{ trade.outcome|default:"open" }}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">P&amp;L</span>
-        <span class="oc-strip-value">{{ trade.pnl|default:"—" }}</span>
-        <span class="oc-strip-sub">{{ trade.realized_r|default:"—" }}R</span>
+        <span class="oc-strip-value">{{ trade.pnl|default_if_none:"—" }}</span>
+        <span class="oc-strip-sub">{{ trade.realized_r|default_if_none:"—" }}R</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">RULE</span>

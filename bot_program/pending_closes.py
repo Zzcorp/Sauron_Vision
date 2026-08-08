@@ -23,6 +23,11 @@ logger = logging.getLogger(__name__)
 
 # Alert again after this many consecutive failed retries.
 ALERT_AFTER_ATTEMPTS = 3
+# Stop resubmitting after this many failures. A close that can never succeed
+# (delisted symbol, revoked credentials, closed account) must not fire a live
+# market order every 5 minutes forever, nor storm the alert channel; the row
+# moves to ERROR for a human instead.
+MAX_RETRY_ATTEMPTS = 12
 
 
 def _mark_price(trade, client) -> Decimal:
@@ -57,14 +62,61 @@ def _pnl(trade, price: Decimal) -> Decimal:
     return pnl
 
 
+def broker_still_holds(trade, client):
+    """Does the broker still report this position? None = cannot tell.
+
+    Resubmitting a market close blindly is how a retry turns into a NEW
+    naked position in the opposite direction: if the original close
+    actually filled (and only the response was lost), or a protective leg
+    fired in between, the account is already flat.
+    """
+    fn = getattr(client, "get_positions", None)
+    if not callable(fn):
+        return None
+    try:
+        positions = list(fn() or [])
+    except Exception as e:
+        logger.warning("close retry: get_positions() failed for %s: %s",
+                       trade.symbol, e)
+        return None
+
+    symbols, opt_underlyings, typed = set(), set(), False
+    for p in positions:
+        sym = (p.get("symbol") if isinstance(p, dict)
+               else getattr(p, "symbol", None))
+        sec = (p.get("sec_type") if isinstance(p, dict)
+               else getattr(p, "sec_type", None))
+        if not sym:
+            continue
+        symbols.add(str(sym).upper())
+        if sec is not None:
+            typed = True
+            if str(sec).upper() == "OPT":
+                opt_underlyings.add(str(sym).upper())
+
+    if trade.asset_class == "options":
+        occ = str((trade.metadata or {}).get("occ_symbol") or "").upper()
+        if occ and occ in symbols:
+            return True
+        if trade.symbol.upper() in opt_underlyings:
+            return True
+        # Same rule as reconciliation: without an OCC symbol or a sec-typed
+        # feed we cannot see options at all — don't guess.
+        return False if (occ or typed) else None
+    return trade.symbol.upper() in symbols
+
+
 def _submit_close(trade, client) -> None:
     """Resubmit the broker close. Raises on failure."""
     from bot_program.engine.idempotency import make_client_order_id
 
+    # Stable across retries (unlike a minute bucket), so a broker that
+    # dedups on client order id rejects a duplicate close instead of
+    # opening a reverse position.
     client_order_id = make_client_order_id(
         config_id=trade.config_id, symbol=trade.symbol,
         signal_id=str(trade.id), intent="EXIT",
-        bar_ts=timezone.now().strftime("%Y%m%d%H%M"),
+        bar_ts="retry",
     )
     if trade.asset_class == "options":
         from bot_program.asset_engine.options_bot import submit_option_close
@@ -104,29 +156,14 @@ def _alert_stranded(trade, attempts: int, error: str) -> None:
         logger.warning("stranded-position alert failed for #%s: %s", trade.id, e)
 
 
-def retry_trade_close(trade) -> bool:
-    """Retry one CLOSE_PENDING trade. True when it ended CLOSED."""
-    from bot_program.engine.broker_router import client_for_symbol
-
-    client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
-    try:
-        _submit_close(trade, client)
-    except Exception as e:
-        attempts = _attempts(trade) + 1
-        _record_attempt(trade, ok=False, error=str(e))
-        trade.save(update_fields=["metadata"])
-        logger.error("close retry #%s failed for trade %s (attempt %d): %s",
-                     trade.id, trade.symbol, attempts, e)
-        if attempts % ALERT_AFTER_ATTEMPTS == 0:
-            _alert_stranded(trade, attempts, str(e))
-        return False
-
+def _finalise_closed(trade, client, *, reason: str) -> None:
+    """Mark the row CLOSED at the current mark and run the close hooks."""
     price = _mark_price(trade, client)
     trade.exit_price = price
     trade.pnl = _pnl(trade, price)
     trade.status = "CLOSED"
     trade.closed_at = timezone.now()
-    trade.reason = ((trade.reason or "") + " | closed:RETRY").strip()[:1000]
+    trade.reason = ((trade.reason or "") + f" | closed:{reason}").strip()[:1000]
     _record_attempt(trade, ok=True)
     trade.save()
 
@@ -147,6 +184,60 @@ def retry_trade_close(trade) -> bool:
     except Exception as e:
         logger.warning("close retry tax_lots failed for #%s: %s", trade.id, e)
 
+
+def _give_up(trade, error: str) -> None:
+    """Terminal state after MAX_RETRY_ATTEMPTS — stop firing live orders."""
+    trade.status = "ERROR"
+    trade.reason = ((trade.reason or "")
+                    + " | close-abandoned").strip()[:1000]
+    trade.save(update_fields=["status", "reason"])
+    try:
+        from alerts.models import Notification
+        Notification.objects.create(
+            user=trade.config.user, notification_type="bot",
+            title=f"⛔ Close abandoned: {trade.symbol}",
+            body=(f"{trade.asset_class} trade #{trade.id} failed to close "
+                  f"{MAX_RETRY_ATTEMPTS} times and is no longer being retried. "
+                  f"Last error: {error[:160]}. Verify and close it manually "
+                  f"at the broker."),
+            url="/forensics/",
+        )
+    except Exception as e:
+        logger.warning("close-abandoned alert failed for #%s: %s", trade.id, e)
+
+
+def retry_trade_close(trade) -> bool:
+    """Retry one CLOSE_PENDING trade. True when it ended CLOSED."""
+    from bot_program.engine.broker_router import client_for_symbol
+
+    client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
+
+    # If the broker says the position is already gone, the original close
+    # (or a protective leg) did fill — finalise instead of sending another
+    # order that would open a naked reverse position.
+    if broker_still_holds(trade, client) is False:
+        logger.info("close retry: broker no longer holds #%s (%s) — "
+                    "finalising without a new order", trade.id, trade.symbol)
+        _finalise_closed(trade, client, reason="RETRY_ALREADY_FLAT")
+        return True
+
+    try:
+        _submit_close(trade, client)
+    except Exception as e:
+        attempts = _attempts(trade) + 1
+        _record_attempt(trade, ok=False, error=str(e))
+        trade.save(update_fields=["metadata"])
+        logger.error("close retry #%s failed for trade %s (attempt %d): %s",
+                     trade.id, trade.symbol, attempts, e)
+        if attempts >= MAX_RETRY_ATTEMPTS:
+            logger.error("close retry #%s abandoned after %d attempts",
+                         trade.id, attempts)
+            _give_up(trade, str(e))
+        elif attempts % ALERT_AFTER_ATTEMPTS == 0:
+            _alert_stranded(trade, attempts, str(e))
+        return False
+
+    _finalise_closed(trade, client, reason="RETRY")
     logger.info("close retry succeeded for trade #%s (%s)", trade.id, trade.symbol)
     return True
 

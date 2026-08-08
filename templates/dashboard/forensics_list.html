@@ -57,8 +57,8 @@
                 {% else %}{{ t.status }}{% endif %}
                 {% if t.paper %}<span style="color:var(--text-muted);"> · paper</span>{% endif %}
             </td>
-            <td>{{ t.pnl|default:"—" }}</td>
-            <td>{{ t.realized_r|default:"—" }}</td>
+            <td>{{ t.pnl|default_if_none:"—" }}</td>
+            <td>{{ t.realized_r|default_if_none:"—" }}</td>
             <td><a href="{% url 'forensics_detail' t.id %}" class="btn btn-sm">Why?</a></td>
         </tr>
         {% endfor %}
