@@ -8,9 +8,36 @@ from django.contrib.auth.models import User
 logger = logging.getLogger(__name__)
 
 
+class _NewsletterWriterAgent:
+    """Concrete BaseAgent for newsletter prose — defined lazily so the module
+    imports without pulling the ai_agents app at import time."""
+
+    def __new__(cls):
+        from ai_agents.base_agent import BaseAgent
+
+        class NewsletterWriterAgent(BaseAgent):
+            agent_name = "newsletter_writer"
+            default_tier = "fast"  # short marketing prose — haiku tier
+
+            def get_system_prompt(self) -> str:
+                return (
+                    "You are the newsletter writer for the Sauron Vision "
+                    "trading-intelligence platform. Write professional, "
+                    "concise, data-driven markdown. Never invent numbers — "
+                    "use only the figures provided in the context."
+                )
+
+            def build_context(self, **kwargs) -> str:
+                return kwargs["prompt"]
+
+            def parse_response(self, raw_response: str) -> dict:
+                return {"markdown": raw_response.strip()}
+
+        return NewsletterWriterAgent()
+
+
 def generate_newsletter_with_ai(newsletter, context_type="weekly"):
     """Use Claude to generate newsletter content."""
-    from ai_agents.base_agent import BaseAgent
 
     # Gather context
     from signals.models import Signal
@@ -58,9 +85,16 @@ Write a professional, concise newsletter in markdown format with sections:
 Keep it under 500 words. Professional tone, data-driven."""
 
     try:
-        agent = BaseAgent(agent_name="newsletter_writer", model="claude-haiku-4-5-20251001")
-        result = agent.call_api(prompt)
-        newsletter.content_markdown = result
+        # BaseAgent is abstract (no agent_name kwarg, no call_api method) —
+        # the previous direct instantiation always threw and every newsletter
+        # landed in the failed branch. Run a concrete agent so the call also
+        # lands in the AgentTask cost ledger like every other agent.
+        agent = _NewsletterWriterAgent()
+        result = agent.run(prompt=prompt)
+        content = (result or {}).get("markdown", "")
+        if not content:
+            raise ValueError("empty newsletter from AI provider")
+        newsletter.content_markdown = content
         newsletter.ai_prompt = prompt
         newsletter.status = "ai_generated"
         newsletter.save()
