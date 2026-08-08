@@ -62,7 +62,7 @@ def _tab_bar_metrics(user) -> dict:
         from portfolio.models import Position
         portfolio = get_or_create_default_portfolio(user=user)
         n_open_bot = AssetBotTrade.objects.filter(
-            config__user=user, status="OPEN").count()
+            config__user=user, status__in=("OPEN", "CLOSE_PENDING")).count()
         n_open_pos = Position.objects.filter(
             portfolio=portfolio, closed_at__isnull=True).count()
         n_open = n_open_bot + n_open_pos
@@ -286,7 +286,7 @@ def command_tab_live(request):
 
         # Open trades + bots-active (inputs to live_opens cell).
         n_opens = AssetBotTrade.objects.filter(
-            config__user=user, status="OPEN").count()
+            config__user=user, status__in=("OPEN", "CLOSE_PENDING")).count()
         n_bots_enabled = AssetBotConfig.objects.filter(
             user=user, enabled=True).count()
         n_bots_total = AssetBotConfig.objects.filter(user=user).count()
@@ -602,7 +602,7 @@ def command_tab_bots(request):
     rows = []
     now = timezone.now()
     for cfg in configs:
-        open_n = AssetBotTrade.objects.filter(config=cfg, status="OPEN").count()
+        open_n = AssetBotTrade.objects.filter(config=cfg, status__in=("OPEN", "CLOSE_PENDING")).count()
         since_24h = now - timedelta(hours=24)
         closed_24h = AssetBotTrade.objects.filter(
             config=cfg, status="CLOSED", closed_at__gte=since_24h)

@@ -167,13 +167,27 @@ class AlpacaTrader:
         return out
 
     def market_order(self, symbol: str, side: str, quantity: float, **kwargs) -> dict:
+        """Market order, optionally as a BRACKET with broker-side SL/TP.
+
+        Passing stop_loss/take_profit submits a bracket order: Alpaca holds
+        the protective legs itself, so the position stays protected even when
+        this bot is not running. Bracket orders require GTC and whole shares.
+        """
+        stop_loss = kwargs.get("stop_loss")
+        take_profit = kwargs.get("take_profit")
+        bracket = bool(stop_loss and take_profit) and float(quantity) >= 1
         body = {
             "symbol": symbol,
-            "qty": str(quantity),
+            # Bracket legs are only valid on whole-share orders.
+            "qty": str(int(quantity)) if bracket else str(quantity),
             "side": side.lower(),  # alpaca uses lowercase
             "type": "market",
-            "time_in_force": "day",
+            "time_in_force": "gtc" if bracket else "day",
         }
+        if bracket:
+            body["order_class"] = "bracket"
+            body["stop_loss"] = {"stop_price": f"{float(stop_loss):.2f}"}
+            body["take_profit"] = {"limit_price": f"{float(take_profit):.2f}"}
         # Phase-33 idempotency — Alpaca dedups via client_order_id (max 48 chars).
         coid = kwargs.get("client_order_id")
         if coid:
@@ -187,7 +201,11 @@ class AlpacaTrader:
             log.error("Alpaca order failed: %s", r.text)
             raise
         data = r.json()
-        return {
+        # Market orders return 'accepted' with a null fill price; poll briefly
+        # so the recorded entry is the REAL fill, not the pre-order ticker.
+        if not data.get("filled_avg_price") and data.get("id"):
+            data = self._await_fill(str(data["id"])) or data
+        out = {
             "orderId": str(data.get("id", "")),
             "symbol": symbol,
             "side": side,
@@ -196,3 +214,50 @@ class AlpacaTrader:
             "status": data.get("status", "PENDING").upper(),
             "raw": data,
         }
+        if bracket:
+            out["protectedOnFill"] = True
+            out["protectiveOrders"] = [
+                str(leg.get("id")) for leg in (data.get("legs") or [])
+                if leg.get("id")
+            ]
+        return out
+
+    def _await_fill(self, order_id: str, attempts: int = 5,
+                    delay: float = 0.6) -> Optional[dict]:
+        """Poll an order until it reports a fill price (or attempts run out).
+
+        Returns the last order payload seen, or None on error. Bounded and
+        best-effort: a still-unfilled order just falls back to the ticker.
+        """
+        import time
+        last = None
+        for _ in range(attempts):
+            time.sleep(delay)
+            try:
+                r = self._sess().get(f"{self.trading_base}/v2/orders/{order_id}",
+                                     timeout=self.timeout)
+                r.raise_for_status()
+                last = r.json()
+            except Exception as e:
+                log.warning("Alpaca fill poll failed for %s: %s", order_id, e)
+                return last
+            if last.get("filled_avg_price"):
+                return last
+            if str(last.get("status", "")).lower() in (
+                    "canceled", "expired", "rejected"):
+                return last
+        return last
+
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel a resting order (e.g. a bracket leg). True when accepted."""
+        r = self._sess().delete(f"{self.trading_base}/v2/orders/{order_id}",
+                                timeout=self.timeout)
+        if r.status_code in (200, 204):
+            return True
+        # 404/422 = already gone or not cancelable; treat as done, don't raise.
+        if r.status_code in (404, 422):
+            log.info("Alpaca cancel %s: already inactive (%s)", order_id,
+                     r.status_code)
+            return False
+        r.raise_for_status()
+        return False

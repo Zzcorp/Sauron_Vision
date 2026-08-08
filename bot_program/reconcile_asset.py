@@ -99,7 +99,7 @@ def reconcile_user(user) -> dict:
     from .engine.broker_router import client_for_symbol
 
     qs = (AssetBotTrade.objects
-          .filter(config__user=user, status="OPEN", paper=False)
+          .filter(config__user=user, status__in=("OPEN", "CLOSE_PENDING"), paper=False)
           .select_related("config"))
     out = {"checked": 0, "closed_as_orphan": 0,
            "broker_unavailable": 0, "errors": 0}
@@ -209,7 +209,7 @@ def reconcile_all_users() -> dict:
 
     user_ids = sorted(set(
         AssetBotTrade.objects
-        .filter(status="OPEN", paper=False)
+        .filter(status__in=("OPEN", "CLOSE_PENDING"), paper=False)
         .values_list("config__user_id", flat=True)
     ))
     totals = {"users": 0, "checked": 0, "closed_as_orphan": 0,

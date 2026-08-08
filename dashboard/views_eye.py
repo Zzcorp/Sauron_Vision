@@ -136,7 +136,7 @@ def _open_positions(user) -> list:
     try:
         from bot_program.models import AssetBotTrade
         rows = (AssetBotTrade.objects
-                .filter(config__user=user, status="OPEN")
+                .filter(config__user=user, status__in=("OPEN", "CLOSE_PENDING"))
                 .select_related("config")
                 .order_by("-opened_at")[:50])
         for t in rows:
@@ -253,7 +253,7 @@ def _bot_health(user) -> list:
     try:
         from bot_program.models import AssetBotConfig, AssetBotTrade
         for cfg in AssetBotConfig.objects.filter(user=user).order_by("asset_class", "name"):
-            open_n = AssetBotTrade.objects.filter(config=cfg, status="OPEN").count()
+            open_n = AssetBotTrade.objects.filter(config=cfg, status__in=("OPEN", "CLOSE_PENDING")).count()
             out.append({
                 "name": cfg.name, "asset_class": cfg.asset_class,
                 "mode": cfg.mode, "enabled": cfg.enabled,

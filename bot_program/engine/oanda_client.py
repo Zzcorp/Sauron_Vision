@@ -213,6 +213,18 @@ class OANDATrader:
             "timeInForce": "FOK",
             "positionFill": "DEFAULT",
         }
+        # Broker-side protection: OANDA attaches SL/TP to the trade created by
+        # this order, so the position stays protected when the bot is down.
+        stop_loss = kwargs.get("stop_loss")
+        take_profit = kwargs.get("take_profit")
+        protected = False
+        if stop_loss and take_profit:
+            digits = 3 if instr.endswith("_JPY") else 5
+            order["stopLossOnFill"] = {
+                "price": f"{float(stop_loss):.{digits}f}", "timeInForce": "GTC"}
+            order["takeProfitOnFill"] = {
+                "price": f"{float(take_profit):.{digits}f}", "timeInForce": "GTC"}
+            protected = True
         # Phase-33 idempotency — OANDA's clientExtensions.id provides dedup.
         coid = kwargs.get("client_order_id")
         if coid:
@@ -229,7 +241,7 @@ class OANDATrader:
             raise
         data = r.json()
         fill = data.get("orderFillTransaction", {})
-        return {
+        out = {
             "orderId": str(fill.get("id") or data.get("orderCreateTransaction", {}).get("id", "")),
             "symbol": symbol,
             "side": side,
@@ -238,3 +250,22 @@ class OANDATrader:
             "status": "FILLED" if fill else "PENDING",
             "raw": data,
         }
+        if protected and fill:
+            out["protectedOnFill"] = True
+            # SL/TP ride on the trade itself; closing the trade cancels them,
+            # so there are no standalone order ids to track.
+            out["protectiveOrders"] = []
+        return out
+
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel a pending order. OANDA's on-fill SL/TP are attached to the
+        trade (cancelled automatically when it closes), so this is only for
+        standalone orders."""
+        r = self._sess().put(
+            f"{self.base}/v3/accounts/{self.account_id}/orders/{order_id}/cancel",
+            timeout=self.timeout,
+        )
+        if r.status_code in (200, 404):
+            return r.status_code == 200
+        r.raise_for_status()
+        return False

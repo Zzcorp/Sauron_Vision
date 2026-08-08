@@ -84,6 +84,13 @@ class AssetBot(ABC):
         closed = 0
         for trade in AssetBotTrade.objects.filter(config=self.cfg, status="OPEN"):
             try:
+                # Broker-side protected trades: the broker owns SL/TP (bracket
+                # or on-fill orders). Managing them here too would double-close
+                # — our market order flattens, then the broker's resting stop
+                # fires later and opens a REVERSE position. Reconciliation
+                # detects the broker-side close and finalises the row.
+                if (trade.metadata or {}).get("protected"):
+                    continue
                 client = client_for_symbol(self.user, trade.symbol, self.cfg)
                 price = self._mark_price(trade, client)
                 if price is None or price <= 0:
@@ -101,9 +108,9 @@ class AssetBot(ABC):
                         and price <= trade.take_profit)
                 )
                 if hit_sl or hit_tp:
-                    self._close_trade(trade, price, client,
-                                       reason="TP" if hit_tp else "SL")
-                    closed += 1
+                    if self._close_trade(trade, price, client,
+                                          reason="TP" if hit_tp else "SL"):
+                        closed += 1
             except Exception as e:
                 logger.warning("[%s_bot] manage(%s) failed: %s",
                                self.asset_class, trade.symbol, e)
@@ -132,16 +139,30 @@ class AssetBot(ABC):
         client.market_order(trade.symbol, close_side, float(trade.qty),
                             client_order_id=client_order_id)
 
-    def _close_trade(self, trade, price: Decimal, client, *, reason: str):
-        """Close a trade — pnl is realised in the config's base_currency."""
-        pnl = self._trade_pnl(trade, price)
+    def _cancel_protective_orders(self, trade, client):
+        """Best-effort cancel of resting broker-side SL/TP orders before a
+        manual/expiry/kill flatten — a stop left behind would fire against a
+        flat book and open a brand-new reverse position."""
+        ids = (trade.metadata or {}).get("protective_order_ids") or []
+        cancel = getattr(client, "cancel_order", None)
+        if not ids or not callable(cancel):
+            return
+        for oid in ids:
+            try:
+                cancel(oid)
+            except Exception as e:
+                logger.warning("[%s_bot] cancel protective order %s failed: %s",
+                               self.asset_class, oid, e)
 
-        trade.exit_price = price
-        trade.pnl = pnl
-        trade.status = "CLOSED"
-        trade.closed_at = timezone.now()
-        trade.reason = (trade.reason + f" | closed:{reason}").strip()
+    def _close_trade(self, trade, price: Decimal, client, *, reason: str) -> bool:
+        """Close a trade — pnl is realised in the config's base_currency.
 
+        The broker order is attempted FIRST; the row is finalised CLOSED only
+        when that succeeded (or the trade is paper). On broker failure the row
+        moves to CLOSE_PENDING — the position is still live at the broker —
+        and the retry_pending_closes beat task drains it. Returns True when
+        the trade ended CLOSED.
+        """
         if not trade.paper:
             try:
                 # Phase-33 idempotency on close — id derived from trade.id so
@@ -152,10 +173,34 @@ class AssetBot(ABC):
                     signal_id=str(trade.id), intent="EXIT",
                     bar_ts=timezone.now().strftime("%Y%m%d%H%M"),
                 )
+                self._cancel_protective_orders(trade, client)
                 self._submit_close_order(trade, client, client_order_id)
             except Exception as e:
-                logger.warning("[%s_bot] live close order failed for %s: %s",
-                               self.asset_class, trade.symbol, e)
+                logger.error("[%s_bot] live close order failed for %s: %s — "
+                             "marking CLOSE_PENDING",
+                             self.asset_class, trade.symbol, e)
+                trade.status = "CLOSE_PENDING"
+                if "close-failed" not in (trade.reason or ""):
+                    trade.reason = ((trade.reason or "")
+                                    + f" | close-failed:{reason}").strip()[:1000]
+                trade.save(update_fields=["status", "reason"])
+                self._notify_close_pending(trade, reason)
+                try:
+                    from dashboard.consumers import push_eye_event
+                    push_eye_event(self.user, "close_pending", {
+                        "trade_id": trade.id, "asset_class": self.asset_class,
+                        "symbol": trade.symbol,
+                    })
+                except Exception:
+                    pass
+                return False
+
+        pnl = self._trade_pnl(trade, price)
+        trade.exit_price = price
+        trade.pnl = pnl
+        trade.status = "CLOSED"
+        trade.closed_at = timezone.now()
+        trade.reason = ((trade.reason or "") + f" | closed:{reason}").strip()[:1000]
         trade.save()
 
         # Phase-17: self-grade on close. Failure here never blocks the close.
@@ -206,13 +251,37 @@ class AssetBot(ABC):
         except Exception as e:
             logger.warning("[%s_bot] WS push (close) failed: %s",
                            self.asset_class, e)
+        return True
+
+    def _notify_close_pending(self, trade, reason: str):
+        """Best-effort alert for a failed live close, deduped per trade/hour."""
+        try:
+            from datetime import timedelta as _td
+            from alerts.models import Notification as _N
+            title = f"⏳ Close pending: {trade.symbol}"
+            recent = _N.objects.filter(
+                user=self.user, notification_type="bot", title=title,
+                created_at__gte=timezone.now() - _td(hours=1),
+            ).exists()
+            if not recent:
+                _N.objects.create(
+                    user=self.user, notification_type="bot", title=title,
+                    body=(f"Broker close order failed for {self.asset_class} "
+                          f"trade #{trade.id} ({reason}). The position is "
+                          f"still open at the broker; retrying every 5 min."),
+                    url="/eye/fills/",
+                )
+        except Exception as e:
+            logger.warning("[%s_bot] close-pending notification failed: %s",
+                           self.asset_class, e)
 
     # ── gating ───────────────────────────────────────────────────────────
 
     def can_open_new(self) -> tuple[bool, str]:
         from bot_program.models import AssetBotTrade
+        # CLOSE_PENDING still holds capital/exposure at the broker.
         open_count = AssetBotTrade.objects.filter(
-            config=self.cfg, status="OPEN").count()
+            config=self.cfg, status__in=("OPEN", "CLOSE_PENDING")).count()
         if open_count >= self.cfg.max_concurrent_positions:
             return (False,
                     f"max {self.cfg.max_concurrent_positions} concurrent positions reached")
@@ -255,9 +324,11 @@ class AssetBot(ABC):
         from bot_program.models import AssetBotTrade
         from bot_program.engine.broker_router import client_for_symbol
 
-        # Skip if a trade for this symbol is already open under this config.
+        # Skip if a trade for this symbol is already open (or awaiting a
+        # retried close — the broker position is still live) under this config.
         if AssetBotTrade.objects.filter(
-                config=self.cfg, symbol=symbol, status="OPEN").exists():
+                config=self.cfg, symbol=symbol,
+                status__in=("OPEN", "CLOSE_PENDING")).exists():
             return None
 
         # Cooldown: skip if a CLOSED trade for this symbol was created within cool_down_minutes.
@@ -372,6 +443,7 @@ class AssetBot(ABC):
 
         paper = (self.cfg.mode == "paper")
         order_id = ""
+        entry_meta = {}
         if not paper:
             # Phase-33 idempotency — deterministic clientOrderId derived from
             # (config, symbol, signal/rule, minute-bucket). Retrying the same
@@ -385,9 +457,15 @@ class AssetBot(ABC):
                 bar_ts=bar_ts,
             )
             try:
+                # Brokers that support it attach SL/TP atomically (Alpaca
+                # bracket, OANDA on-fill, IBKR bracket) so the position is
+                # protected even when this worker is down. Clients without
+                # the capability ignore the kwargs; bot-side management then
+                # remains the safety net.
                 res = client.market_order(
                     symbol, decision.direction, float(qty),
                     client_order_id=client_order_id,
+                    stop_loss=float(sl), take_profit=float(tp),
                 )
                 order_id = str(res.get("orderId", ""))
                 # Detect broker-side dedup rejections: log + skip trade row.
@@ -398,6 +476,27 @@ class AssetBot(ABC):
                                     self.asset_class, symbol, status,
                                     client_order_id)
                     return None
+
+                # Real fills: prefer the broker's average fill price and
+                # filled quantity over the pre-order ticker, so slippage
+                # flows into P&L and grading.
+                fill_px = float(res.get("avgPrice") or 0)
+                fill_qty = float(res.get("executedQty") or 0)
+                if fill_px > 0:
+                    price = fill_px
+                    entry_meta["fill_source"] = "broker"
+                else:
+                    entry_meta["fill_source"] = "ticker"
+                if fill_qty > 0:
+                    qty = fill_qty
+
+                # Broker-side protection bookkeeping. "protected" trades are
+                # skipped by bot-side SL/TP management (no double-close).
+                protective_ids = [str(x) for x in
+                                  (res.get("protectiveOrders") or [])]
+                if protective_ids or res.get("protectedOnFill"):
+                    entry_meta["protected"] = True
+                    entry_meta["protective_order_ids"] = protective_ids
             except Exception as e:
                 logger.error("[%s_bot] live order failed for %s: %s",
                              self.asset_class, symbol, e)
@@ -415,6 +514,7 @@ class AssetBot(ABC):
             reason=" · ".join(decision.reasons)[:1000],
             rule_name=decision.rule_name,
             paper=paper, broker_order_id=order_id,
+            metadata=entry_meta,
         )
 
         # Phase-20: notify on open

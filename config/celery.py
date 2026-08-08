@@ -315,6 +315,14 @@ app.conf.beat_schedule = {
     #              worker-died-mid-order drift. Every 15 min during NYSE
     #              hours — extending to 24/7 is fine but mostly noise outside
     #              market hours since broker positions don't change.
+    # Drain trades stuck in CLOSE_PENDING (broker close failed; the position
+    # is still live at the broker). Every 5 min, all day — a stranded live
+    # position is not a market-hours-only problem.
+    "retry-pending-closes": {
+        "task": "bot_program.tasks.retry_pending_closes",
+        "schedule": 300.0,
+    },
+
     "reconcile-asset-bot-trades": {
         "task": "bot_program.tasks.reconcile_all_asset_bot_trades",
         "schedule": crontab(minute="*/15", hour="13-21"),

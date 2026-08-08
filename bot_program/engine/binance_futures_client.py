@@ -99,11 +99,17 @@ class BinanceFuturesClient:
         self._leverage_set.add(symbol)
 
     def market_order(self, symbol: str, side: str, quantity: float,
-                     reduce_only: bool = False) -> dict:
+                     reduce_only: bool = False, **kwargs) -> dict:
+        """**kwargs absorbs the shared interface's optional arguments
+        (client_order_id, stop_loss/take_profit) so a caller that passes them
+        doesn't TypeError here; futures protection is not wired yet."""
         params = {
             "symbol": symbol, "side": side, "type": "MARKET",
             "quantity": f"{quantity:.8f}".rstrip("0").rstrip("."),
         }
+        coid = kwargs.get("client_order_id")
+        if coid:
+            params["newClientOrderId"] = str(coid)[:36]
         if reduce_only:
             params["reduceOnly"] = "true"
         r = requests.post(f"{self.base}/fapi/v1/order",

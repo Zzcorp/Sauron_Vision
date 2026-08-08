@@ -294,7 +294,7 @@ def current_exposures(user) -> dict:
     try:
         from .models import AssetBotTrade
         qs = AssetBotTrade.objects.filter(
-            config__user=user, status="OPEN"
+            config__user=user, status__in=("OPEN", "CLOSE_PENDING")
         ).select_related("config")
         for t in qs:
             right = (t.metadata or {}).get("right", "") if t.asset_class == "options" else ""
@@ -331,7 +331,7 @@ def current_theme_exposure(user) -> dict:
     try:
         from .models import AssetBotTrade
         for t in AssetBotTrade.objects.filter(
-                config__user=user, status="OPEN"
+                config__user=user, status__in=("OPEN", "CLOSE_PENDING")
         ).only("asset_class", "symbol", "side", "metadata"):
             if t.asset_class == "options":
                 meta = t.metadata or {}

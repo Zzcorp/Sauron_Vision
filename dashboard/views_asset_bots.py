@@ -19,7 +19,7 @@ def asset_bots_dashboard(request):
 
     rows = []
     for cfg in configs:
-        open_count = AssetBotTrade.objects.filter(config=cfg, status="OPEN").count()
+        open_count = AssetBotTrade.objects.filter(config=cfg, status__in=("OPEN", "CLOSE_PENDING")).count()
         since_24h = timezone.now() - timedelta(hours=24)
         closed_24h = AssetBotTrade.objects.filter(
             config=cfg, status="CLOSED", closed_at__gte=since_24h)
@@ -33,7 +33,7 @@ def asset_bots_dashboard(request):
 
     open_trades = list(
         AssetBotTrade.objects
-        .filter(config__user=request.user, status="OPEN")
+        .filter(config__user=request.user, status__in=("OPEN", "CLOSE_PENDING"))
         .select_related("config")
         .order_by("-opened_at")[:30]
     )

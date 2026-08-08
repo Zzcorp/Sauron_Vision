@@ -266,3 +266,21 @@ def run_daily_postgres_backup():
     """
     from core.backups import run_postgres_backup
     return run_postgres_backup()
+
+
+# ─── Retry pending closes ───────────────────────────────────────────────────
+
+@shared_task
+@guarded_task("pipeline_asset_bots")
+def retry_pending_closes():
+    """Drain AssetBotTrade rows stuck in CLOSE_PENDING.
+
+    A CLOSE_PENDING row means the bot decided to flatten but the broker order
+    failed — the position is STILL OPEN at the broker. Every 5 minutes we
+    resubmit the close; only a broker success finalises the row as CLOSED.
+
+    Beat-scheduled every 5 min. Tests call `retry_all_pending_closes()`
+    directly to bypass the component guard.
+    """
+    from .pending_closes import retry_all_pending_closes
+    return retry_all_pending_closes()

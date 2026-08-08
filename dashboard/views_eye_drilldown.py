@@ -160,7 +160,7 @@ def eye_exposure(request):
     # Per-trade contribution table.
     rows = []
     qs = (AssetBotTrade.objects
-          .filter(config__user=request.user, status="OPEN")
+          .filter(config__user=request.user, status__in=("OPEN", "CLOSE_PENDING"))
           .select_related("config")
           .order_by("asset_class", "symbol"))
     for t in qs:

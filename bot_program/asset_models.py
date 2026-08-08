@@ -90,6 +90,10 @@ class AssetBotTrade(models.Model):
     SIDE_CHOICES = [("BUY", "Buy"), ("SELL", "Sell")]
     STATUS_CHOICES = [
         ("OPEN", "Open"),
+        # Broker close order failed — the position is still open at the
+        # broker while the bot wants it flat. Drained by the
+        # retry_pending_closes beat task; counts as exposure everywhere.
+        ("CLOSE_PENDING", "Close pending"),
         ("CLOSED", "Closed"),
         ("CANCELED", "Canceled"),
         ("ERROR", "Error"),
@@ -108,7 +112,7 @@ class AssetBotTrade(models.Model):
     stop_loss = models.DecimalField(max_digits=18, decimal_places=8, null=True, blank=True)
     take_profit = models.DecimalField(max_digits=18, decimal_places=8, null=True, blank=True)
 
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="OPEN")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="OPEN")
     pnl = models.DecimalField(max_digits=14, decimal_places=4, default=0,
         help_text="Realized P&L in the config's base_currency.")
     composite_score = models.FloatField(default=0)

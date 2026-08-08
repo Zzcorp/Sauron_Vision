@@ -194,6 +194,16 @@ def _close_asset_trade(trade, now):
         # has no option order path) and strand the row OPEN forever.
         if not trade.paper:
             client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
+            # Cancel resting broker-side SL/TP first: a stop left behind after
+            # we flatten would fire against a flat book and open a reverse
+            # position — the opposite of what a kill switch is for.
+            for oid in (trade.metadata or {}).get("protective_order_ids") or []:
+                cancel = getattr(client, "cancel_order", None)
+                if callable(cancel):
+                    try:
+                        cancel(oid)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("[KILL SWITCH] cancel %s failed: %s", oid, e)
             if is_options:
                 # A plain market_order here would trade the underlying's STOCK,
                 # opening a new position instead of closing the option.
