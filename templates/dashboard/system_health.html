@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}System Health — Sauron Vision{% endblock %}
+{% block page_title %}🩺 SYSTEM HEALTH{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">OVERALL</span>
+        <span class="oc-strip-value" style="color:{% if overall == 'ok' %}var(--success){% elif overall == 'warn' %}var(--accent-gold){% else %}var(--danger){% endif %};">
+            {% if overall == 'ok' %}HEALTHY{% elif overall == 'warn' %}DEGRADED{% else %}ACTION NEEDED{% endif %}
+        </span>
+        <span class="oc-strip-sub">{{ checks|length }} checks</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PASSING</span>
+        <span class="oc-strip-value" style="color:var(--success);">{{ counts.ok }}</span>
+        <span class="oc-strip-sub">nothing to do</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">DEGRADED</span>
+        <span class="oc-strip-value" style="color:var(--accent-gold);">{{ counts.warn }}</span>
+        <span class="oc-strip-sub">worth a look</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">FAILING</span>
+        <span class="oc-strip-value" style="color:var(--danger);">{{ counts.fail }}</span>
+        <span class="oc-strip-sub">needs action</span>
+    </div>
+</div>
+
+<div class="card fade-in-up">
+    <div class="card-header">
+        <span class="card-title">Checks</span>
+        <span style="color:var(--text-muted); font-size:12px;">
+            silent-failure surfaces: unregistered beat tasks, missing bars,
+            frozen feeds, stranded closes, paper fallbacks
+        </span>
+    </div>
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th style="width:60px;">State</th><th>Check</th><th>Detail</th><th>What to do</th></tr></thead>
+        <tbody>
+        {% for c in checks %}
+        <tr>
+            <td>
+                {% if c.state == 'ok' %}<span style="color:var(--success);">● OK</span>
+                {% elif c.state == 'warn' %}<span style="color:var(--accent-gold);">● WARN</span>
+                {% else %}<span style="color:var(--danger);">● FAIL</span>{% endif %}
+            </td>
+            <td><strong>{{ c.label }}</strong></td>
+            <td>{{ c.detail }}</td>
+            <td style="color:var(--text-muted); font-size:12px;">{{ c.hint }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}

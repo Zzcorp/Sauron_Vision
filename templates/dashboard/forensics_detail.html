@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}{{ trade.symbol }} #{{ trade.id }} — Forensics{% endblock %}
+{% block page_title %}🔬 {{ trade.symbol }} · {{ trade.side }} · TRADE #{{ trade.id }}{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">STATUS</span>
+        <span class="oc-strip-value" style="{% if trade.status == 'CLOSE_PENDING' %}color:var(--danger);{% endif %}">{{ trade.status }}</span>
+        <span class="oc-strip-sub">{% if trade.paper %}paper{% else %}live{% endif %} · {{ trade.asset_class }}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ENTRY</span>
+        <span class="oc-strip-value">{{ trade.entry_price }}</span>
+        <span class="oc-strip-sub">qty {{ trade.qty }}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">EXIT</span>
+        <span class="oc-strip-value">{{ trade.exit_price|default:"—" }}</span>
+        <span class="oc-strip-sub">{{ trade.outcome|default:"open" }}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">P&amp;L</span>
+        <span class="oc-strip-value">{{ trade.pnl|default:"—" }}</span>
+        <span class="oc-strip-sub">{{ trade.realized_r|default:"—" }}R</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RULE</span>
+        <span class="oc-strip-value" style="font-size:14px;">{{ trade.rule_name|default:"—" }}</span>
+        <span class="oc-strip-sub">score {{ trade.composite_score|floatformat:3 }}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PROTECTION</span>
+        <span class="oc-strip-value" style="font-size:14px;">
+            {% if trade.metadata.protected %}BROKER{% else %}BOT{% endif %}
+        </span>
+        <span class="oc-strip-sub">SL {{ trade.stop_loss|default:"—" }} · TP {{ trade.take_profit|default:"—" }}</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:20px;">
+    <div class="card-header"><span class="card-title">Lifecycle</span></div>
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th style="width:170px;">When</th><th style="width:180px;">Event</th><th>Detail</th></tr></thead>
+        <tbody>
+        {% for e in lifecycle %}
+        <tr>
+            <td>{% if e.at %}{{ e.at|date:"Y-m-d H:i:s" }}{% else %}—{% endif %}</td>
+            <td><strong>{{ e.label }}</strong></td>
+            <td>{{ e.detail }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:20px;">
+    <div class="card-header"><span class="card-title">Why it fired</span></div>
+    {% if reasons %}
+    <ul style="padding:8px 32px; line-height:1.9;">
+        {% for r in reasons %}<li>{{ r }}</li>{% endfor %}
+    </ul>
+    {% else %}
+    <p style="padding:16px; color:var(--text-muted);">No recorded reason string.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:20px;">
+    <div class="card-header">
+        <span class="card-title">Signals it saw</span>
+        <span style="color:var(--text-muted); font-size:12px;">
+            {{ signal_agree|length }} of {{ signals|length }} agreed with the trade direction
+        </span>
+    </div>
+    {% if signals %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Created</th><th>Rule</th><th>Direction</th><th>Score</th><th>Title</th><th>Outcome</th></tr></thead>
+        <tbody>
+        {% for s in signals %}
+        <tr>
+            <td>{{ s.created_at|date:"m-d H:i" }}</td>
+            <td style="font-size:12px;">{{ s.rule_name }}</td>
+            <td>{{ s.direction }}</td>
+            <td>{{ s.score|floatformat:3 }}</td>
+            <td style="font-size:12px;">{{ s.title|truncatechars:60 }}</td>
+            <td>{{ s.outcome|default:"active" }}{% if s.realized_r is not None %} · {{ s.realized_r }}R{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="padding:16px; color:var(--text-muted);">No signals recorded near the entry.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:20px;">
+    <div class="card-header"><span class="card-title">Sizing &amp; rule state</span></div>
+    {% if rule_state %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Admin multiplier</th><th>Allocator weight</th><th>Effective</th><th>Promotion stage</th></tr></thead>
+        <tbody><tr>
+            <td>{{ rule_state.weight_multiplier }}</td>
+            <td>{{ rule_state.allocator_weight }}</td>
+            <td><strong>{{ rule_state.effective }}</strong></td>
+            <td>{{ rule_state.stage|default:"—" }}</td>
+        </tr></tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="padding:16px; color:var(--text-muted);">No RuleControl row — the rule ran unweighted.</p>
+    {% endif %}
+
+    {% if track_record %}
+    <div style="padding:0 16px 16px; color:var(--text-muted); font-size:13px;">
+        Track record for this rule on {{ trade.asset_class }}:
+        <strong>{{ track_record.n }}</strong> closed ·
+        {{ track_record.wins }}W/{{ track_record.losses }}L ·
+        win rate {{ track_record.win_rate }} ·
+        avg {{ track_record.avg_r }}R
+    </div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:20px;">
+    <div class="card-header"><span class="card-title">Orchestrator gate decisions</span></div>
+    {% if gate_events %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>When</th><th>Decision</th><th>Side</th><th>Reason</th></tr></thead>
+        <tbody>
+        {% for g in gate_events %}
+        <tr>
+            <td>{{ g.created_at|date:"m-d H:i:s" }}</td>
+            <td>{% if g.decision == 'allow' %}<span style="color:var(--success);">allow</span>
+                {% else %}<span style="color:var(--danger);">{{ g.decision }}</span>{% endif %}</td>
+            <td>{{ g.side }}</td>
+            <td style="font-size:12px;">{{ g.reason }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="padding:16px; color:var(--text-muted);">
+        No gate events near this entry (allows are sampled at 10%).
+    </p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:20px;">
+    <div class="card-header"><span class="card-title">Audit trail</span></div>
+    {% if audit_entries %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>#</th><th>When</th><th>Kind</th><th>Data</th></tr></thead>
+        <tbody>
+        {% for a in audit_entries %}
+        <tr>
+            <td>{{ a.id }}</td>
+            <td>{{ a.created_at|date:"m-d H:i:s" }}</td>
+            <td>{{ a.kind }}</td>
+            <td style="font-size:11px; color:var(--text-muted);">{{ a.data }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="padding:16px; color:var(--text-muted);">No audit rows matched this trade.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up">
+    <div class="card-header"><span class="card-title">Raw metadata</span></div>
+    {% if metadata_items %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th style="width:240px;">Key</th><th>Value</th></tr></thead>
+        <tbody>
+        {% for k, v in metadata_items %}
+        <tr><td>{{ k }}</td><td style="font-size:12px;">{{ v }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="padding:16px; color:var(--text-muted);">No metadata recorded.</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -2484,6 +2484,8 @@
             <a href="{% url 'command_center' %}" class="nav-link {% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Operations Center</span></a>
             <a href="{% url 'bot_performance_dashboard' %}" class="nav-link {% if page_id == 'bot_performance' %}active{% endif %}"><span class="icon">▲</span> <span class="label-text">Bot Performance</span></a>
             <a href="{% url 'bot_backtest_list' %}" class="nav-link {% if page_id == 'bot_backtest' %}active{% endif %}"><span class="icon">⊟</span> <span class="label-text">Bot Backtest</span></a>
+            <a href="{% url 'forensics_list' %}" class="nav-link {% if page_id == 'forensics' %}active{% endif %}"><span class="icon">◎</span> <span class="label-text">Trade Forensics</span></a>
+            <a href="{% url 'system_health' %}" class="nav-link {% if page_id == 'system_health' %}active{% endif %}"><span class="icon">✚</span> <span class="label-text">System Health</span></a>
             <div class="nav-section">Markets</div>
             <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' or page_id == 'quotes' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Instruments & Quotes</span></a>
             <a href="{% url 'economic_calendar' %}" class="nav-link {% if page_id == 'calendar' %}active{% endif %}"><span class="icon">◇</span> <span class="label-text">Economic Calendar</span></a>
