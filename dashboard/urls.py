@@ -59,6 +59,7 @@ from .views_events import events_dashboard
 from .views_asset_bots import asset_bots_dashboard
 from .views_rule_control import rule_control_dashboard
 from .views_calibration import calibration_dashboard
+from .views_ai_models import ai_models_dashboard
 from .views_allocator import allocator_dashboard
 from .views_eye import eye_dashboard, eye_partial
 from .views_eye_drilldown import eye_gate_events, eye_fills, eye_exposure
@@ -146,6 +147,7 @@ urlpatterns = [
     path("admin-dashboard/actuator/rollback/", hq_rollback_rule_action, name="hq_rollback_rule_action"),
     path("rule-control/", rule_control_dashboard, name="rule_control_dashboard"),
     path("calibration/", calibration_dashboard, name="calibration_dashboard"),
+    path("ai-models/", ai_models_dashboard, name="ai_models_dashboard"),
     path("allocator/", allocator_dashboard, name="allocator_dashboard"),
 
     # ── Phase 7: Meta-Allocator ──────────────────────────────

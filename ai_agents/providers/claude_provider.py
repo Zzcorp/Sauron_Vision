@@ -8,17 +8,6 @@ logger = logging.getLogger(__name__)
 class ClaudeProvider:
     """Claude API provider for Sauron Vision agents."""
 
-    # Pricing per million tokens (USD)
-    PRICING = {
-        "claude-haiku-4-5-20251001": {"input": 1.0, "output": 5.0},
-        "claude-haiku-4-5": {"input": 1.0, "output": 5.0},
-        "claude-sonnet-5": {"input": 3.0, "output": 15.0},
-        "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
-        "claude-opus-5": {"input": 5.0, "output": 25.0},
-        "claude-opus-4-8": {"input": 5.0, "output": 25.0},
-        "claude-opus-4-6": {"input": 5.0, "output": 25.0},
-    }
-
     def __init__(self):
         self.api_key = os.getenv("ANTHROPIC_API_KEY", "")
         self.client = None
@@ -29,13 +18,24 @@ class ClaudeProvider:
             self.client = anthropic.Anthropic(api_key=self.api_key)
         return self.client
 
-    def complete(self, system_prompt: str, user_message: str, model: str = "claude-sonnet-5") -> tuple:
+    def complete(self, system_prompt: str, user_message: str,
+                 model: str = "claude-sonnet-5", effort: str = None) -> tuple:
         """
         Call Claude API and return (response_text, usage_dict).
+
+        `effort` (low|medium|high|xhigh|max) controls thinking depth and
+        token spend on models that support it; it is dropped for models
+        that don't, so a tier swap can never send an invalid parameter.
         """
+        from ai_agents.catalog import pricing_for, supports_effort
+
         client = self._get_client()
 
-        # 8192: on sonnet-5/opus-5 adaptive thinking is on by default and
+        kwargs = {}
+        if effort and supports_effort(model):
+            kwargs["output_config"] = {"effort": effort}
+
+        # 8192: on the current models adaptive thinking is on by default and
         # max_tokens caps thinking + response text together.
         response = client.messages.create(
             model=model,
@@ -44,6 +44,7 @@ class ClaudeProvider:
             messages=[
                 {"role": "user", "content": user_message}
             ],
+            **kwargs,
         )
 
         # Adaptive-thinking models may put a thinking block before the text
@@ -53,8 +54,9 @@ class ClaudeProvider:
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
 
-        # Calculate cost
-        pricing = self.PRICING.get(model, {"input": 3.0, "output": 15.0})
+        # Cost from the shared catalog, so a model added there is priced
+        # correctly everywhere instead of silently billing at a stale rate.
+        pricing = pricing_for(model)
         cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
 
         usage = {

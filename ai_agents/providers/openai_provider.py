@@ -18,7 +18,7 @@ class OpenAIProvider:
             self.client = openai.OpenAI(api_key=self.api_key)
         return self.client
 
-    def complete(self, system_prompt: str, user_message: str, model: str = "gpt-4o") -> tuple:
+    def complete(self, system_prompt: str, user_message: str, model: str = "gpt-4o", effort: str = None) -> tuple:
         """Call OpenAI API and return (response_text, usage_dict)."""
         client = self._get_client()
 

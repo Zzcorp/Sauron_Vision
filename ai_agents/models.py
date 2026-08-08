@@ -215,3 +215,34 @@ class AgentPrediction(models.Model):
     def __str__(self):
         status = 'correct' if self.was_correct else ('wrong' if self.was_correct is False else 'pending')
         return f"{self.agent} {self.prediction_type}: {self.predicted_value} [{status}]"
+
+
+class AIModelSetting(models.Model):
+    """Runtime model/effort selection, editable without a redeploy.
+
+    One row per tier ("fast"/"balanced"/"deep") or per agent name. Agent
+    rows win over tier rows; a tier row wins over the env var; the env var
+    wins over the code default. See ai_agents.catalog for the resolver.
+    """
+
+    SCOPE_CHOICES = [("tier", "Tier"), ("agent", "Agent")]
+
+    scope = models.CharField(max_length=8, choices=SCOPE_CHOICES)
+    # "fast"/"balanced"/"deep" for tier rows; the agent_name for agent rows.
+    key = models.CharField(max_length=60)
+    model_id = models.CharField(max_length=60, blank=True)
+    # Blank = use the tier default for models that support effort.
+    effort = models.CharField(max_length=8, blank=True, default="")
+    updated_by = models.ForeignKey(
+        "auth.User", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="ai_model_settings",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = "ai_agents"
+        unique_together = [("scope", "key")]
+        ordering = ["scope", "key"]
+
+    def __str__(self):
+        return f"{self.scope}:{self.key} → {self.model_id or '(default)'}"

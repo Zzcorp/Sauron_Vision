@@ -18,7 +18,7 @@ class OllamaProvider:
             self.client = ollama.Client(host=self.base_url)
         return self.client
 
-    def complete(self, system_prompt: str, user_message: str, model: str = "llama3.3:8b") -> tuple:
+    def complete(self, system_prompt: str, user_message: str, model: str = "llama3.3:8b", effort: str = None) -> tuple:
         """Call Ollama and return (response_text, usage_dict)."""
         client = self._get_client()
 

@@ -2505,6 +2505,7 @@
             <a href="{% url 'ai_tasks_list' %}" class="nav-link {% if page_id == 'ai_tasks' %}active{% endif %}"><span class="icon">▸</span> <span class="label-text">Agent Tasks</span></a>
             <a href="{% url 'ai_journal_dashboard' %}" class="nav-link {% if page_id == 'ai_insights' %}active{% endif %}"><span class="icon">✎</span> <span class="label-text">AI Journal</span></a>
             <a href="{% url 'calibration_dashboard' %}" class="nav-link {% if page_id == 'calibration' %}active{% endif %}"><span class="icon">◔</span> <span class="label-text">Agent Calibration</span></a>
+            {% if request.user.is_staff %}<a href="{% url 'ai_models_dashboard' %}" class="nav-link {% if page_id == 'ai_models' %}active{% endif %}"><span class="icon">⚙</span> <span class="label-text">Model Selection</span></a>{% endif %}
             {# Phase 64.5: standalone "AI Chat" merged into /research/ — link removed. #}
             <a href="{% url 'intelligence_hub' %}" class="nav-link {% if page_id == 'intelligence' %}active{% endif %}"><span class="icon">◯</span> <span class="label-text">Intelligence Hub</span></a>
             <a href="{% url 'briefing_dashboard' %}" class="nav-link {% if page_id == 'briefing' %}active{% endif %}"><span class="icon">✦</span> <span class="label-text">Strategist Briefing</span></a>

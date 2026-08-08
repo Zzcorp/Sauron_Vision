@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}AI Models — Sauron Vision{% endblock %}
+{% block page_title %}🧠 AI MODEL SELECTION{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    {% for row in tier_rows %}
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">{{ row.tier|upper }} TIER</span>
+        <span class="oc-strip-value" style="font-size:15px;">{{ row.label }}</span>
+        <span class="oc-strip-sub">effort {{ row.effort }}{% if row.override %} · overridden{% endif %}</span>
+    </div>
+    {% endfor %}
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">AI SPEND 30D</span>
+        <span class="oc-strip-value">${{ total_cost_30d }}</span>
+        <span class="oc-strip-sub">across all agents</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MODELS AVAILABLE</span>
+        <span class="oc-strip-value">{{ catalog|length }}</span>
+        <span class="oc-strip-sub">in catalog</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Tiers</span></div>
+    <p style="padding:0 16px; color:var(--text-muted); font-size:13px;">
+        Every agent runs on a tier unless it has its own override below.
+        Resolution order: agent override → tier setting → environment variable → code default.
+    </p>
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr>
+            <th>Tier</th><th>Active model</th><th>Effort</th>
+            <th>Code default</th><th>Change</th>
+        </tr></thead>
+        <tbody>
+        {% for row in tier_rows %}
+        <tr>
+            <td><strong>{{ row.tier|upper }}</strong></td>
+            <td>
+                {{ row.label }}
+                {% if row.unknown %}<span style="color:var(--danger);"> ⚠ not in catalog</span>{% endif %}
+                <div style="color:var(--text-muted); font-size:11px;">{{ row.resolved }}</div>
+            </td>
+            <td>{{ row.effort }}</td>
+            <td style="color:var(--text-muted);">{{ row.code_default }}</td>
+            <td>
+                <form method="post" style="display:flex; gap:6px; align-items:center;">
+                    {% csrf_token %}
+                    <input type="hidden" name="scope" value="tier">
+                    <input type="hidden" name="key" value="{{ row.tier }}">
+                    <select name="model_id" class="form-input" style="min-width:190px;">
+                        <option value="">— default —</option>
+                        {% for m in catalog %}
+                        <option value="{{ m.id }}"
+                            {% if row.override and row.override.model_id == m.id %}selected{% endif %}>
+                            {{ m.label }}</option>
+                        {% endfor %}
+                    </select>
+                    <select name="effort" class="form-input" style="min-width:100px;">
+                        <option value="">auto</option>
+                        {% for e in effort_levels %}
+                        <option value="{{ e }}"
+                            {% if row.override and row.override.effort == e %}selected{% endif %}>{{ e }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+{% for group in agent_groups %}
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">{{ group.name }}</span></div>
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr>
+            <th>Agent</th><th>Tier</th><th>Active model</th><th>Effort</th><th>Override</th>
+        </tr></thead>
+        <tbody>
+        {% for row in group.rows %}
+        <tr>
+            <td>{{ row.label }}<div style="color:var(--text-muted); font-size:11px;">{{ row.name }}</div></td>
+            <td>{{ row.tier }}</td>
+            <td>
+                {{ row.model_label }}
+                {% if row.override %}<span style="color:var(--accent-gold);"> ●</span>{% endif %}
+                {% if row.unknown %}<span style="color:var(--danger);"> ⚠</span>{% endif %}
+            </td>
+            <td>{{ row.effort }}</td>
+            <td>
+                <form method="post" style="display:flex; gap:6px; align-items:center;">
+                    {% csrf_token %}
+                    <input type="hidden" name="scope" value="agent">
+                    <input type="hidden" name="key" value="{{ row.name }}">
+                    <select name="model_id" class="form-input" style="min-width:180px;">
+                        <option value="">— use tier —</option>
+                        {% for m in catalog %}
+                        <option value="{{ m.id }}"
+                            {% if row.override and row.override.model_id == m.id %}selected{% endif %}>
+                            {{ m.label }}</option>
+                        {% endfor %}
+                    </select>
+                    <select name="effort" class="form-input" style="min-width:95px;">
+                        <option value="">auto</option>
+                        {% for e in effort_levels %}
+                        <option value="{{ e }}"
+                            {% if row.override and row.override.effort == e %}selected{% endif %}>{{ e }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-sm">Save</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endfor %}
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Catalog</span></div>
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr>
+            <th>Model</th><th>$/M in</th><th>$/M out</th><th>Context</th>
+            <th>Effort</th><th>Notes</th>
+        </tr></thead>
+        <tbody>
+        {% for m in catalog %}
+        <tr>
+            <td>{{ m.label }}<div style="color:var(--text-muted); font-size:11px;">{{ m.id }}</div></td>
+            <td>${{ m.pricing.input }}</td>
+            <td>${{ m.pricing.output }}</td>
+            <td>{{ m.context }}</td>
+            <td>{% if m.effort %}yes{% else %}—{% endif %}</td>
+            <td style="color:var(--text-muted); font-size:12px;">{{ m.notes }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<div class="card fade-in-up">
+    <div class="card-header"><span class="card-title">Spend by model · last 30 days</span></div>
+    {% if usage %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Model</th><th>Calls</th><th>Cost</th><th>Avg secs</th></tr></thead>
+        <tbody>
+        {% for u in usage %}
+        <tr>
+            <td>{{ u.label }}
+                {% if not u.known %}<span style="color:var(--danger);"> ⚠ retired/unknown</span>{% endif %}</td>
+            <td>{{ u.calls }}</td>
+            <td>${{ u.cost|floatformat:4 }}</td>
+            <td>{{ u.avg_secs|floatformat:1 }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="padding:16px; color:var(--text-muted);">No agent calls in the last 30 days.</p>
+    {% endif %}
+</div>
+{% endblock %}

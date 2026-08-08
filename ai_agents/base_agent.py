@@ -16,9 +16,14 @@ class BaseAgent(ABC):
     default_tier: str = "balanced"  # "fast", "balanced", or "deep"
 
     def __init__(self, provider: str = None, model: str = None):
+        from .catalog import resolve_agent, resolve_effort
+
         ai_config = settings.AI_CONFIG
         self.provider_name = provider or ai_config["default_provider"]
-        self.model = model or ai_config["models"].get(self.default_tier, "claude-sonnet-5")
+        # Explicit model arg > per-agent override > tier setting > env > default.
+        self.model = model or resolve_agent(self.agent_name, self.default_tier)
+        self.effort = resolve_effort(self.model, self.default_tier,
+                                      self.agent_name)
         self.provider = self._get_provider()
 
     def _get_provider(self):
@@ -62,6 +67,7 @@ class BaseAgent(ABC):
                 system_prompt=system_prompt,
                 user_message=context,
                 model=self.model,
+                effort=getattr(self, "effort", None),
             )
 
             result = self.parse_response(raw_response)

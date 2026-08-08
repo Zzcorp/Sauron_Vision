@@ -20,7 +20,8 @@ class DailyBriefingAgent:
         from django.conf import settings
         ai_config = settings.AI_CONFIG
         provider_name = ai_config["default_provider"]
-        model = ai_config["models"].get(self.default_tier, "claude-sonnet-5")
+        from ai_agents.catalog import resolve_agent
+        model = resolve_agent(self.agent_name, self.default_tier)
         self._provider_name = provider_name
         self._model = model
         self._provider = self._get_provider(provider_name)
@@ -95,7 +96,8 @@ class MondayPlanAgent:
         from django.conf import settings
         ai_config = settings.AI_CONFIG
         provider_name = ai_config["default_provider"]
-        model = ai_config["models"].get(self.default_tier, "claude-sonnet-5")
+        from ai_agents.catalog import resolve_agent
+        model = resolve_agent(self.agent_name, self.default_tier)
         self._provider_name = provider_name
         self._model = model
         self._provider = self._get_provider(provider_name)
