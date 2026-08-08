@@ -45,7 +45,7 @@ def asset_bots_dashboard(request):
     )
 
     # Phase 63 — top-line aggregates
-    n_enabled = sum(1 for c in configs if getattr(c, "is_enabled", False))
+    n_enabled = sum(1 for c in configs if c.enabled)
     classes = sorted(set(c.asset_class for c in configs))
     pnl_24h_total = sum(float(r["pnl_24h"] or 0) for r in rows)
     n_open_total = sum(r["open_positions"] for r in rows)

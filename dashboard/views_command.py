@@ -288,7 +288,7 @@ def command_tab_live(request):
         n_opens = AssetBotTrade.objects.filter(
             config__user=user, status="OPEN").count()
         n_bots_enabled = AssetBotConfig.objects.filter(
-            user=user, is_enabled=True).count()
+            user=user, enabled=True).count()
         n_bots_total = AssetBotConfig.objects.filter(user=user).count()
 
         # Last 12 closes — sparkline of the realized-R sequence.

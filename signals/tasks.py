@@ -193,3 +193,39 @@ def propose_rule_actions():
     proposals = propose_actions_from_decay(lookback_days=2)
     logger.info("Actuator: %d new proposal(s), %d stale expired.", proposals, expired)
     return {"status": "ok", "new_proposals": proposals, "expired_proposals": expired}
+
+
+@shared_task
+@guarded_task("pipeline_opportunity_scanner")
+def scan_opportunities():
+    """Phase 10 — match every active OpportunitySetup against every active
+    instrument, creating OpportunityFlags for matches (daily 09:00 UTC)."""
+    from signals.opportunity_scanner import scan_all_setups
+
+    result = scan_all_setups()
+    logger.info("Opportunity scan: %s", result)
+    return result
+
+
+@shared_task
+@guarded_task("pipeline_opportunity_scanner")
+def resolve_opportunity_flags():
+    """Phase 10 — resolve OpportunityFlags whose evaluation horizon has
+    passed, grading each setup's hit/miss record (nightly 23:15 UTC)."""
+    from signals.opportunity_scanner import resolve_pending_flags
+
+    result = resolve_pending_flags()
+    logger.info("Opportunity flag resolution: %s", result)
+    return result
+
+
+@shared_task
+@guarded_task("pipeline_pattern_miner")
+def mine_patterns():
+    """Phase 11 — mine historical multi-modal data for candidate setups
+    (DiscoveredSetup rows, weekly Sunday 06:00 UTC)."""
+    from signals.pattern_miner import mine_all_active
+
+    result = mine_all_active()
+    logger.info("Pattern mining: %s", result)
+    return result

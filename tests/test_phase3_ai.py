@@ -24,7 +24,7 @@ def _mock_claude(response_dict, input_tokens=120, output_tokens=80):
     text = json.dumps(response_dict)
     usage = {"input_tokens": input_tokens, "output_tokens": output_tokens, "cost_usd": 0.001}
 
-    def fake_complete(self, system_prompt, user_message, model="claude-sonnet-4-20250514"):
+    def fake_complete(self, system_prompt, user_message, model="claude-sonnet-5"):
         return text, usage
     return fake_complete
 

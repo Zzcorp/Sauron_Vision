@@ -36,3 +36,38 @@ def scan_smc_universe(symbols=None, timeframes=None):
         except Exception:
             continue
     return {"scanned_symbols": len(symbols), "persisted_cards": total}
+
+
+@shared_task(name="signals.tasks_lifecycle.run_signal_lifecycle")
+def run_signal_lifecycle():
+    """One evaluation pass over every active plain Signal row (Phase 1).
+
+    Stamps MFE/MAE and closes stop/target/expiry outcomes so realized_r is
+    populated in production — the decay detector, actuator, meta-allocator,
+    promotion pipeline and evolution all read from it. Mirrors the SmcSignal
+    lifecycle pass above.
+    """
+    import logging
+
+    from signals.models import Signal
+    from signals.performance import evaluate_signal_outcome
+
+    logger = logging.getLogger(__name__)
+
+    counts = {"evaluated": 0, "closed": 0, "no_price": 0, "errors": 0}
+    qs = (Signal.objects.filter(is_active=True)
+          .select_related("instrument", "instrument__live_quote"))
+    for sig in qs:
+        # One bad row must not starve the rest of the pass.
+        try:
+            outcome = evaluate_signal_outcome(sig)
+        except Exception:
+            logger.exception("signal lifecycle failed for Signal pk=%s", sig.pk)
+            counts["errors"] += 1
+            continue
+        counts["evaluated"] += 1
+        if outcome is None:
+            counts["no_price"] += 1
+        elif outcome != "active":
+            counts["closed"] += 1
+    return counts

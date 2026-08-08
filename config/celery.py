@@ -9,9 +9,26 @@ app = Celery("sauron_vision")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 
+# autodiscover_tasks() only imports each app's `tasks` module. Task modules
+# living outside that convention must be imported explicitly, or beat
+# enqueues their entries into the void ("Received unregistered task") and
+# they never run on any worker.
+app.conf.imports = (
+    "market_data.cleanup_tasks",
+    "market_data.funding_alerts",
+    "signals.tasks_lifecycle",
+)
+
 # ============================================================
 # Task routing — fast vs slow queues
 # ============================================================
+# Anything not matched by task_routes below (brain.*, alerts.*,
+# bot_program.*, most signals.*) lands on the default queue. It MUST be one
+# the documented workers consume (-Q fast,default / -Q slow,ai) — without
+# this line Celery publishes unrouted tasks to an implicit "celery" queue
+# that no worker subscribes to, and half the beat schedule silently rots.
+app.conf.task_default_queue = "default"
+
 app.conf.task_routes = {
     # Tier 1-2: Fast queue (price fetching, news, signals)
     "market_data.tasks.*": {"queue": "fast"},
@@ -326,6 +343,12 @@ app.conf.beat_schedule = {
     },
         "smc-lifecycle-pass": {
         "task": "signals.tasks_lifecycle.run_smc_lifecycle",
+        "schedule": 300.0,
+    },
+    # Phase 1 — plain-Signal lifecycle: stamp MFE/MAE, close stop/target/
+    # expiry, populate realized_r for the whole self-improvement loop.
+    "signal-lifecycle-pass": {
+        "task": "signals.tasks_lifecycle.run_signal_lifecycle",
         "schedule": 300.0,
     },
     "smc-universe-scan": {

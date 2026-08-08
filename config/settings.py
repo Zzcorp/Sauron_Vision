@@ -352,8 +352,10 @@ AI_CONFIG = {
     "default_provider": os.getenv("AI_DEFAULT_PROVIDER", "claude"),
     "models": {
         "fast": os.getenv("AI_MODEL_FAST", "claude-haiku-4-5-20251001"),
-        "balanced": os.getenv("AI_MODEL_BALANCED", "claude-sonnet-4-20250514"),
-        "deep": os.getenv("AI_MODEL_DEEP", "claude-opus-4-6"),
+        # claude-sonnet-4-20250514 retired 2026-06-15 (404s); sonnet-5 is the
+        # designated drop-in. opus-5 is the current Opus at the same price as 4.8.
+        "balanced": os.getenv("AI_MODEL_BALANCED", "claude-sonnet-5"),
+        "deep": os.getenv("AI_MODEL_DEEP", "claude-opus-5"),
     },
     "providers": {
         "claude": {

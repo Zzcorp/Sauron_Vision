@@ -18,7 +18,7 @@ class BaseAgent(ABC):
     def __init__(self, provider: str = None, model: str = None):
         ai_config = settings.AI_CONFIG
         self.provider_name = provider or ai_config["default_provider"]
-        self.model = model or ai_config["models"].get(self.default_tier, "claude-sonnet-4-20250514")
+        self.model = model or ai_config["models"].get(self.default_tier, "claude-sonnet-5")
         self.provider = self._get_provider()
 
     def _get_provider(self):
