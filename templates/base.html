@@ -2492,6 +2492,8 @@
             <a href="{% url 'strategies_list' %}" class="nav-link {% if page_id == 'strategies' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategies</span></a>
             <a href="{% url 'news_feed' %}" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon">▤</span> <span class="label-text">News & Sentiment</span></a>
             <a href="{% url 'backtest_list' %}" class="nav-link {% if page_id == 'backtest' %}active{% endif %}"><span class="icon">&#x25A1;</span> <span class="label-text">Backtesting</span></a>
+            <a href="{% url 'performance_dashboard' %}" class="nav-link {% if page_id == 'performance' %}active{% endif %}"><span class="icon">◮</span> <span class="label-text">Signal Performance</span></a>
+            <a href="{% url 'risk_dashboard' %}" class="nav-link {% if page_id == 'risk' %}active{% endif %}"><span class="icon">⚠</span> <span class="label-text">Risk Depth</span></a>
             <div class="nav-section">Automation</div>
             <a href="{% url 'bot_home' %}" class="nav-link {% if page_id == 'bot_program' %}active{% endif %}"><span class="icon">⟳</span> <span class="label-text">Bot Program</span></a>
             <div class="nav-section">Portfolio</div>
@@ -2501,6 +2503,8 @@
             <div class="nav-section">AI Agents</div>
             <a href="{% url 'ai_insights' %}" class="nav-link {% if page_id == 'ai' %}active{% endif %}"><span class="icon">◬</span> <span class="label-text">AI Insights</span></a>
             <a href="{% url 'ai_tasks_list' %}" class="nav-link {% if page_id == 'ai_tasks' %}active{% endif %}"><span class="icon">▸</span> <span class="label-text">Agent Tasks</span></a>
+            <a href="{% url 'ai_journal_dashboard' %}" class="nav-link {% if page_id == 'ai_insights' %}active{% endif %}"><span class="icon">✎</span> <span class="label-text">AI Journal</span></a>
+            <a href="{% url 'calibration_dashboard' %}" class="nav-link {% if page_id == 'calibration' %}active{% endif %}"><span class="icon">◔</span> <span class="label-text">Agent Calibration</span></a>
             {# Phase 64.5: standalone "AI Chat" merged into /research/ — link removed. #}
             <a href="{% url 'intelligence_hub' %}" class="nav-link {% if page_id == 'intelligence' %}active{% endif %}"><span class="icon">◯</span> <span class="label-text">Intelligence Hub</span></a>
             <a href="{% url 'briefing_dashboard' %}" class="nav-link {% if page_id == 'briefing' %}active{% endif %}"><span class="icon">✦</span> <span class="label-text">Strategist Briefing</span></a>

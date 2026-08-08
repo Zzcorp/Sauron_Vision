@@ -9,6 +9,16 @@ from django.db.models import Avg, Sum, Count
 
 @login_required
 def dashboard(request):
+    """Legacy redirect — the old 'COMMAND CENTER' home page was superseded by
+    the Operations Center (/command/, Phase 62+). The URL is kept as a 302 so
+    old bookmarks, the intro hand-off, and LOGIN_REDIRECT_URL all land on the
+    current home. The full legacy page remains at legacy_dashboard below.
+    """
+    return redirect("command_center")
+
+
+@login_required
+def legacy_dashboard(request):
     from instruments.models import Instrument
     from signals.models import Signal
     from strategies.models import Strategy
@@ -2149,7 +2159,13 @@ def ai_chat_page(request):
 
 @login_required
 def intro_page(request):
-    """Login intro animation — shows loading sequence then redirects to dashboard."""
+    """Login intro animation — plays once per browser session, then hands off
+    to the Operations Center. Repeat visits within the session skip straight
+    through (a fresh login flushes the session and replays it); the page
+    itself also carries a Skip button."""
+    if request.session.get("sauron_intro_seen"):
+        return redirect("command_center")
+    request.session["sauron_intro_seen"] = True
     return render(request, "dashboard/intro.html")
 
 

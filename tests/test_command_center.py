@@ -200,9 +200,11 @@ class BackwardCompatTests(TestCase):
         self.user = _user()
         self.client.force_login(self.user)
 
-    def test_old_dashboard_still_works(self):
+    def test_old_dashboard_redirects_to_operations_center(self):
+        # '/' is the legacy COMMAND CENTER page, superseded by /command/.
+        # Old bookmarks (and LOGIN_REDIRECT_URL) must land on the new home.
         r = self.client.get("/")
-        self.assertEqual(r.status_code, 200)
+        self.assertRedirects(r, "/command/")
 
     def test_old_eye_still_works(self):
         r = self.client.get("/eye/")

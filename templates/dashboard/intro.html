@@ -190,6 +190,17 @@
 
     <!-- Greeting -->
     <div class="intro-greeting" id="greeting">Welcome back, {{ request.user.username }}</div>
+
+    <a href="/command/" id="introSkip"
+       style="position:fixed; bottom:28px; right:32px; z-index:50;
+              font-family:'Share Tech Mono','JetBrains Mono',monospace;
+              font-size:12px; letter-spacing:2px; text-transform:uppercase;
+              color:rgba(255,255,255,.45); text-decoration:none;
+              border:1px solid rgba(255,255,255,.18); border-radius:4px;
+              padding:8px 14px; transition:color .2s, border-color .2s;"
+       onmouseover="this.style.color='rgba(255,255,255,.9)';this.style.borderColor='rgba(255,255,255,.45)';"
+       onmouseout="this.style.color='rgba(255,255,255,.45)';this.style.borderColor='rgba(255,255,255,.18)';">
+        Skip &#x2192;</a>
 </div>
 
 <script>
@@ -306,7 +317,7 @@
         if (idx >= steps.length) {
             greet.classList.add('show');
             setTimeout(function() {
-                window.location.href = '/';
+                window.location.href = '/command/';
             }, 800);
             return;
         }
