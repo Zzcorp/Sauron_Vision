@@ -37,6 +37,34 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 
 # ============================================================
+# Phase 33 — Sentry error tracking (no-op when SENTRY_DSN unset)
+# ============================================================
+SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
+if SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.django import DjangoIntegration
+        from sentry_sdk.integrations.celery import CeleryIntegration
+        from sentry_sdk.integrations.redis import RedisIntegration
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            integrations=[
+                DjangoIntegration(),
+                CeleryIntegration(),
+                RedisIntegration(),
+            ],
+            # Sample 10% of transactions for perf monitoring; tune in prod.
+            traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+            # Don't send PII — Sauron handles broker credentials.
+            send_default_pii=False,
+            environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
+            release=os.getenv("SENTRY_RELEASE") or None,
+        )
+    except ImportError:
+        # sentry-sdk not installed — silently skip. Document in requirements.
+        pass
+
+# ============================================================
 # Applications
 # ============================================================
 INSTALLED_APPS = [
@@ -68,6 +96,7 @@ INSTALLED_APPS = [
     "dashboard",
     "backtester",
     "bot_program",
+    "brain",
 ]
 
 MIDDLEWARE = [
@@ -253,6 +282,16 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 # REST Framework
 # ============================================================
 REST_FRAMEWORK = {
+    # Authenticated-by-default. Every API view requires a logged-in session
+    # unless it explicitly opts out with permission_classes = [AllowAny].
+    # The dashboard is server-rendered and login-gated, so its in-page JS calls
+    # carry the session cookie and authenticate via SessionAuthentication.
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
         "rest_framework.filters.SearchFilter",

@@ -10,6 +10,8 @@ class AssetClass:
     ETF = "etf"
     CRYPTO = "crypto"
     BOND = "bond"
+    OPTIONS = "options"
+    CFD = "cfd"
 
     CHOICES = [
         (STOCK, "Stock"),
@@ -19,6 +21,8 @@ class AssetClass:
         (ETF, "ETF"),
         (CRYPTO, "Cryptocurrency"),
         (BOND, "Bond"),
+        (OPTIONS, "Options"),
+        (CFD, "CFD"),
     ]
 
 

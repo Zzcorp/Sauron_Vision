@@ -1,0 +1,79 @@
+# Production Dockerfile (Phase 30) — multi-stage, non-root, no source bind-mount.
+# Build:  docker build -f Dockerfile.prod -t sauron-vision:prod .
+# Run:    via docker-compose.prod.yml
+
+# ── Build stage ─────────────────────────────────────────────────────────
+FROM python:3.12-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt ./
+RUN pip wheel --no-cache-dir --wheel-dir=/build/wheels -r requirements.txt \
+    && pip wheel --no-cache-dir --wheel-dir=/build/wheels gunicorn uvicorn[standard]
+
+
+# ── Runtime stage ───────────────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DJANGO_SETTINGS_MODULE=config.settings \
+    PORT=8000
+
+# Runtime libs only (no compilers).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system sauron \
+    && useradd --system --gid sauron --create-home --home /home/sauron sauron
+
+WORKDIR /app
+
+COPY --from=builder /build/wheels /wheels
+RUN pip install --no-cache-dir --no-index --find-links=/wheels \
+    -r /wheels/requirements.txt 2>/dev/null \
+    || pip install --no-cache-dir --no-index --find-links=/wheels /wheels/*.whl \
+    && rm -rf /wheels
+
+COPY --chown=sauron:sauron . /app
+
+# Compile Python bytecode to fail fast on syntax errors.
+RUN python -m compileall -q /app/config /app/bot_program /app/signals \
+    /app/dashboard /app/portfolio /app/instruments /app/market_data \
+    /app/alerts /app/core /app/ai_agents 2>/dev/null || true
+
+# Static files dir owned by app user.
+RUN mkdir -p /app/staticfiles /app/media /app/logs \
+    && chown -R sauron:sauron /app/staticfiles /app/media /app/logs
+
+USER sauron
+
+EXPOSE 8000
+
+# Healthcheck — the platform exposes /healthz/ via core.health.health_check,
+# falls back to a TCP probe if the URL doesn't respond.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8000/healthz/ \
+    || python -c "import socket; s=socket.socket(); s.connect(('localhost',8000)); s.close()" \
+    || exit 1
+
+# Default: ASGI server. Override in compose for celery worker / beat.
+CMD ["gunicorn", "config.asgi:application", \
+     "-k", "uvicorn.workers.UvicornWorker", \
+     "--workers", "3", \
+     "--bind", "0.0.0.0:8000", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "--timeout", "120"]

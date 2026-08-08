@@ -44,3 +44,6 @@ frontend/dist/
 # Celery
 celerybeat-schedule
 celerybeat.pid
+
+# Claude Code local state
+.claude/

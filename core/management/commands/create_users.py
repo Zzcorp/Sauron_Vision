@@ -1,39 +1,69 @@
-"""Create Sauron Vision platform users."""
+"""Create Sauron Vision platform users.
+
+Passwords are NEVER hardcoded in source. Each user's password is read from an
+environment variable named ``SAURON_PW_<USERNAME>`` (username uppercased, with any
+non-alphanumeric character replaced by ``_``). Users whose password env var is
+unset are skipped — so running this command without configured secrets is a safe
+no-op and never leaks credentials.
+
+Examples (PowerShell):
+    $env:SAURON_PW_EMILE_M = "..."
+    $env:SAURON_PW_ZZ      = "..."   # superuser
+    python manage.py create_users
+
+The superuser flag is the only role baked into source; it is not a secret.
+"""
+import os
+import re
+
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
 
 
+# (username, is_superuser, is_staff). Passwords come from env — see module docstring.
+PLATFORM_USERS = [
+    ("Emile_M", False, False),
+    ("Cesar_M", False, False),
+    ("RS_UG", False, False),
+    ("ElChaman", False, False),
+    ("Anonymous_Z", False, False),
+    ("zz", True, True),
+]
+
+
+def _env_key(username: str) -> str:
+    return "SAURON_PW_" + re.sub(r"[^A-Za-z0-9]", "_", username).upper()
+
+
 class Command(BaseCommand):
-    help = "Create platform users for Sauron Vision"
+    help = "Create/update platform users. Passwords are read from SAURON_PW_<USERNAME> env vars."
 
     def handle(self, *args, **options):
-        users = [
-            {"username": "Emile_M", "password": "Lechienvert78!", "is_superuser": False, "is_staff": False},
-            {"username": "Cesar_M", "password": "Lechienjaune21!", "is_superuser": False, "is_staff": False},
-            {"username": "RS_UG", "password": "Thewhitedog44!", "is_superuser": False, "is_staff": False},
-            {"username": "ElChaman", "password": "Totem92!", "is_superuser": False, "is_staff": False},
-            {"username": "Anonymous_Z", "password": "Spartan26!", "is_superuser": False, "is_staff": False},
-            {"username": "zz", "password": "Corp78!", "is_superuser": True, "is_staff": True},
-        ]
+        created, updated, skipped = 0, 0, 0
 
-        for u in users:
-            if User.objects.filter(username=u["username"]).exists():
-                user = User.objects.get(username=u["username"])
-                user.set_password(u["password"])
-                user.is_superuser = u["is_superuser"]
-                user.is_staff = u["is_staff"]
-                user.save()
-                self.stdout.write(f"  Updated: {u['username']} {'(superuser)' if u['is_superuser'] else ''}")
-            else:
-                user = User.objects.create_user(
-                    username=u["username"],
-                    password=u["password"],
-                    is_superuser=u["is_superuser"],
-                    is_staff=u["is_staff"],
-                )
-                self.stdout.write(self.style.SUCCESS(
-                    f"  Created: {u['username']} {'(superuser)' if u['is_superuser'] else ''}"
+        for username, is_superuser, is_staff in PLATFORM_USERS:
+            env_key = _env_key(username)
+            password = os.environ.get(env_key)
+            if not password:
+                self.stdout.write(self.style.WARNING(
+                    f"  Skipped: {username} — set {env_key} to create/update this user."
                 ))
+                skipped += 1
+                continue
+
+            user, was_created = User.objects.get_or_create(username=username)
+            user.set_password(password)
+            user.is_superuser = is_superuser
+            user.is_staff = is_staff
+            user.save()
+
+            tag = " (superuser)" if is_superuser else ""
+            if was_created:
+                created += 1
+                self.stdout.write(self.style.SUCCESS(f"  Created: {username}{tag}"))
+            else:
+                updated += 1
+                self.stdout.write(f"  Updated: {username}{tag}")
 
             try:
                 from portfolio.trader_profile import TraderProfile
@@ -47,4 +77,10 @@ class Command(BaseCommand):
             except Exception:
                 pass
 
-        self.stdout.write(self.style.SUCCESS(f"\n  All {len(users)} users ready."))
+        self.stdout.write(self.style.SUCCESS(
+            f"\n  Done — {created} created, {updated} updated, {skipped} skipped."
+        ))
+        if skipped:
+            self.stdout.write(
+                "  Set the SAURON_PW_<USERNAME> environment variables for any skipped users."
+            )

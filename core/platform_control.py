@@ -98,6 +98,68 @@ DEFAULT_COMPONENTS = [
     {"key": "agent_weekly_review", "name": "Weekly Review", "description": "Deep weekly analysis (Saturday 10:00 UTC)", "category": "agent"},
     {"key": "agent_optimization", "name": "Strategy Optimization", "description": "Strategy parameter tuning (Saturday 14:00 UTC)", "category": "agent"},
     {"key": "agent_monday_plan", "name": "Monday Planner", "description": "Monday game plan generation (Sunday 18:00 UTC)", "category": "agent"},
+
+    # ── Phase 3 — AI operational ──────────────────────────────
+    {"key": "feature_ai_pretrade_gate", "name": "AI Pre-Trade Sanity Gate",
+     "description": "Claude reviews each proposed trade before opening (regime/news/decay). Slow & costs tokens — leave OFF unless you want it.",
+     "category": "agent"},
+    {"key": "pipeline_ai_journal", "name": "AI Signal Journal",
+     "description": "Auto-generate journal entry when a signal closes with |R| ≥ 0.5",
+     "category": "agent"},
+    {"key": "pipeline_ai_decay", "name": "AI Decay Investigator",
+     "description": "Investigate decaying rules nightly (DecayInvestigatorAgent)",
+     "category": "agent"},
+
+    # ── Phase 5 — closed-loop actuator ────────────────────────
+    {"key": "pipeline_actuator", "name": "Rule Actuator (proposer)",
+     "description": "Daily task that reads decay investigations and proposes RuleActions. Proposals are NEVER auto-applied; admin must confirm.",
+     "category": "pipeline"},
+    {"key": "actuator_mode_live", "name": "Actuator Live Mode",
+     "description": "Off (default) = shadow / preview only — admin cannot apply proposals. On = admin can apply (and rollback). Even in live mode, every action requires explicit admin confirmation.",
+     "category": "system"},
+
+    # ── Phase 6 — calibration loop ────────────────────────────
+    {"key": "pipeline_calibration", "name": "Calibration Auto-Resolver",
+     "description": "Nightly task that resolves AgentPredictions whose ground truth is available. Powers the agent trust scores consumed by the risk gate.",
+     "category": "pipeline"},
+
+    # ── Phase 7 — meta-allocator ──────────────────────────────
+    {"key": "pipeline_meta_allocator", "name": "Meta-Allocator (proposer)",
+     "description": "Weekly task that proposes new per-rule capital weights using a 3-method ensemble (uniform, inverse-vol, expectancy) blended by data quality. Always proposes in shadow state.",
+     "category": "pipeline"},
+    {"key": "meta_allocator_mode_live", "name": "Meta-Allocator Live Mode",
+     "description": "Off (default) = shadow / preview only. On = admin can apply allocations. Caps + smoothing + active-only rules are enforced regardless of mode.",
+     "category": "system"},
+
+    # ── Phase 9 — strategy evolution ──────────────────────────
+    {"key": "pipeline_evolution", "name": "Strategy Evolution (proposer)",
+     "description": "Weekly task that scans decaying parameter-aware rules and proposes mutations. Mutations require admin approval. Approved mutations fork into RESEARCH stage and walk the Phase-8 pipeline before reaching live capital.",
+     "category": "pipeline"},
+
+    # ── Phase 8 — promotion pipeline ──────────────────────────
+    {"key": "pipeline_promotion", "name": "Promotion Pipeline (auto-evaluate)",
+     "description": "Daily task that walks every rule and auto-promotes eligible rules / auto-demotes degrading ones. Strict gates: research → paper → live_small → live_full.",
+     "category": "pipeline"},
+
+    # ── Phase 10 — opportunity scanner ─────────────────────────
+    {"key": "pipeline_opportunity_scanner", "name": "Opportunity Scanner",
+     "description": "Daily multi-modal scanner: matches registered OpportunitySetups against every active instrument. Each match creates an OpportunityFlag + a linked Signal that flows through Phase 1–9. Resolves flags after their horizon.",
+     "category": "pipeline"},
+
+    # ── Phase 11 — pattern miner ──────────────────────────────
+    {"key": "pipeline_pattern_miner", "name": "Pattern Miner (auto-discover setups)",
+     "description": "Weekly task that mines historical price + news + calendar + macro data for repeating setup patterns. Each surviving frequent itemset becomes a DiscoveredSetup row. Admin reviews + activates promising ones, which then walk the Phase-8 promotion ladder before reaching live capital.",
+     "category": "pipeline"},
+
+    # ── Phase 12 — real-time event engine ─────────────────────
+    {"key": "pipeline_event_engine", "name": "Event-Driven Engine",
+     "description": "Real-time fast-rule dispatcher. When OFF, the Celery wrapper task short-circuits — direct synchronous calls to `dispatch_event()` still work. Sub-second latency from streamer event to Signal row.",
+     "category": "pipeline"},
+
+    # ── Phase 13 — multi-asset bot framework ──────────────────
+    {"key": "pipeline_asset_bots", "name": "Multi-Asset Bots (stocks/forex/commodities)",
+     "description": "Phase-13 framework: per-(user, asset_class) bot configs that consume Phase-1 Signals and route trades through Phase-4 broker_router (Alpaca for stocks, OANDA for forex, paper-only for commodities). Crypto bot is unchanged.",
+     "category": "pipeline"},
 ]
 
 
