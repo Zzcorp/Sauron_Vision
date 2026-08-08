@@ -88,16 +88,119 @@ class AIMemory(models.Model):
         return "\n".join(lines)
 
 
+class TradeJournalEntry(models.Model):
+    """Phase-3: AI-generated journal entry for a closed Signal, BotTrade, or Position.
+
+    Linked via three optional FKs — exactly one of signal / bot_trade / position
+    is expected to be set per entry (enforced by `clean()`, not the DB).
+    """
+    GRADE_CHOICES = [(g, g) for g in ["A", "B", "C", "D", "F", "N/A"]]
+
+    signal = models.ForeignKey(
+        "signals.Signal", on_delete=models.CASCADE, null=True, blank=True,
+        related_name="journal_entries",
+    )
+    bot_trade = models.ForeignKey(
+        "bot_program.BotTrade", on_delete=models.CASCADE, null=True, blank=True,
+        related_name="journal_entries",
+    )
+    position = models.ForeignKey(
+        "portfolio.Position", on_delete=models.CASCADE, null=True, blank=True,
+        related_name="journal_entries",
+    )
+
+    grade = models.CharField(max_length=4, choices=GRADE_CHOICES, default="N/A")
+    summary = models.TextField(blank=True)
+    key_takeaway = models.CharField(max_length=400, blank=True)
+    lessons = models.JSONField(default=list)
+    tags = models.JSONField(default=list)
+    emotional_state = models.CharField(max_length=20, blank=True)
+
+    structured_output = models.JSONField(default=dict)
+    agent_task = models.ForeignKey(
+        AgentTask, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="journal_entries",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["grade", "-created_at"]),
+        ]
+
+    def __str__(self):
+        target = self.signal or self.bot_trade or self.position
+        return f"[{self.grade}] journal: {target}"
+
+
+class DecayInvestigation(models.Model):
+    """Phase-3: AI-generated investigation when a rule's expectancy decays."""
+    rule_name = models.CharField(max_length=100, db_index=True)
+    recent_expectancy = models.FloatField(null=True, blank=True)
+    baseline_expectancy = models.FloatField(null=True, blank=True)
+    recent_n = models.IntegerField(default=0)
+    baseline_n = models.IntegerField(default=0)
+
+    hypothesis = models.TextField(blank=True)
+    contributing_factors = models.JSONField(default=list)
+    recommended_action = models.CharField(max_length=400, blank=True)
+
+    structured_output = models.JSONField(default=dict)
+    agent_task = models.ForeignKey(
+        AgentTask, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="decay_investigations",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["rule_name", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"decay[{self.rule_name}]: {self.recommended_action[:50]}"
+
+
 class AgentPrediction(models.Model):
-    """Track individual agent predictions for calibration."""
+    """Track individual agent predictions for calibration.
+
+    Phase-6 calibration loop: every prediction has an `expected_resolution_at`
+    deadline and (optionally) a linked Signal / RuleAction. A nightly resolver
+    looks up ground truth and stamps `actual_value`, `was_correct`, and `score`
+    (continuous; e.g. realized_r for trade predictions).
+
+    The `score` field is the unified granular metric — `was_correct` is the
+    bool reduction for backwards compatibility.
+    """
     agent = models.CharField(max_length=50, db_index=True)
-    prediction_type = models.CharField(max_length=30)  # direction, target_price, urgency
+    prediction_type = models.CharField(max_length=30)  # direction | trade_outcome | decay_continues | ...
     instrument_symbol = models.CharField(max_length=20, blank=True)
     predicted_value = models.CharField(max_length=100)
     actual_value = models.CharField(max_length=100, blank=True)
-    confidence = models.FloatField(default=0.5)
+    confidence = models.FloatField(default=0.5,
+                                    help_text="Probability assigned to predicted_value (0.0–1.0).")
     was_correct = models.BooleanField(null=True)  # null = not yet evaluated
+    score = models.FloatField(null=True, blank=True,
+                              help_text="Granular correctness; for trade outcomes = realized_r.")
     evaluation_notes = models.TextField(blank=True)
+
+    # Phase-6: ground-truth resolution
+    expected_resolution_at = models.DateTimeField(null=True, blank=True, db_index=True,
+                                                   help_text="Earliest time ground truth is expected.")
+    linked_signal = models.ForeignKey(
+        "signals.Signal", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="agent_predictions",
+    )
+    linked_rule_action = models.ForeignKey(
+        "signals.RuleAction", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="agent_predictions",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     evaluated_at = models.DateTimeField(null=True, blank=True)
 
@@ -106,6 +209,7 @@ class AgentPrediction(models.Model):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['agent', '-created_at']),
+            models.Index(fields=['was_correct', 'expected_resolution_at']),
         ]
 
     def __str__(self):

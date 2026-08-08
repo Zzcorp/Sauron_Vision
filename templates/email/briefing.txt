@@ -1,0 +1,17 @@
+SAURON BRIEFING — {{ b.posture|upper }}
+{{ b.created_at|date:"l, F j, Y" }} (UTC)
+
+{{ b.outlook_md }}
+
+{% if b.posture_rationale %}Posture: {{ b.posture_rationale }}
+
+{% endif %}{% if b.watchlist %}WATCHLIST:
+{% for w in b.watchlist %}- [{{ w.kind }}] {{ w.ref }} — {{ w.what_to_watch }}
+{% endfor %}
+{% endif %}{% if b.ideas %}IDEAS:
+{% for i in b.ideas %}{{ forloop.counter }}. {{ i.summary }}{% if i.confidence %} (conf {{ i.confidence|floatformat:2 }}){% endif %}{% if i.hypothesis_kind %} [graded]{% endif %}
+{% endfor %}{% endif %}
+
+—
+View on Sauron: /briefing/
+Adjust delivery preferences at /notifications/

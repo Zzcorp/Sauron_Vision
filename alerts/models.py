@@ -95,6 +95,12 @@ class UserNotificationPrefs(models.Model):
     receive_portfolio_alerts = models.BooleanField(default=True)
     receive_weekly_newsletter = models.BooleanField(default=True)
     receive_monthly_newsletter = models.BooleanField(default=True)
+    # Phase-20 bot/orchestrator events: fills, gate rejections, drawdown alerts.
+    receive_bot_alerts = models.BooleanField(default=True,
+        help_text="Bot fills, orchestrator gate rejections, drawdown limit warnings.")
+    # Phase-43 daily strategist briefing push (06:00 UTC).
+    receive_strategist_briefing = models.BooleanField(default=False,
+        help_text="Daily Sauron's Mind strategist briefing — outlook + posture + ideas.")
 
     # Quiet hours (UTC)
     quiet_start = models.TimeField(null=True, blank=True)
@@ -116,6 +122,7 @@ class Notification(models.Model):
         ("portfolio", "Portfolio Alert"),
         ("system", "System Message"),
         ("newsletter", "Newsletter"),
+        ("bot", "Bot Event"),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")

@@ -851,3 +851,90 @@ def generate_monday_plan():
         "active_strategies": len(active_strategies),
         "events_this_week": len(upcoming_events),
     }
+
+
+# ─── Phase 3: signal journal + decay investigation ─────────────────────────
+
+def _ai_enabled() -> bool:
+    """True iff Claude API key is configured. Tasks no-op silently otherwise."""
+    import os
+    return bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
+
+
+@shared_task
+@guarded_task("pipeline_ai_journal")
+def journal_closed_signal_task(signal_id: int):
+    """Phase-3: auto-generate a TradeJournalEntry for a closed Signal."""
+    if not _ai_enabled():
+        return {"status": "skipped", "reason": "no_anthropic_api_key"}
+
+    from signals.models import Signal
+    from ai_agents.agents.signal_journal import journal_closed_signal
+
+    sig = Signal.objects.filter(id=signal_id).first()
+    if sig is None:
+        return {"status": "skipped", "reason": "signal_not_found", "signal_id": signal_id}
+
+    entry = journal_closed_signal(sig)
+    if entry is None:
+        return {"status": "skipped", "reason": "below_threshold_or_active",
+                "signal_id": signal_id}
+    return {"status": "ok", "signal_id": signal_id, "entry_id": entry.id,
+            "grade": entry.grade}
+
+
+@shared_task
+@guarded_task("pipeline_calibration")
+def resolve_pending_calibrations():
+    """Phase 6: nightly auto-resolver for AgentPredictions whose deadlines have passed.
+
+    Walks every unresolved prediction past its `expected_resolution_at`,
+    looks up ground truth (Signal closure or 30d rule expectancy), stamps
+    `actual_value`, `was_correct`, `score`, and `evaluated_at`.
+
+    The trust scores consumed by the risk gate read from these resolved
+    predictions, so this task is the heartbeat of the calibration loop.
+    """
+    from ai_agents.calibration import resolve_pending_predictions
+    result = resolve_pending_predictions()
+    logger.info("Calibration auto-resolver: resolved=%d failed=%d",
+                result.get("resolved", 0), result.get("failed", 0))
+    return {"status": "ok", **result}
+
+
+@shared_task
+@guarded_task("pipeline_ai_decay")
+def investigate_decaying_rules():
+    """Phase-3 nightly task: investigate every rule that decay_flag flags as decaying."""
+    if not _ai_enabled():
+        return {"status": "skipped", "reason": "no_anthropic_api_key"}
+
+    from signals.models import Signal
+    from signals.performance import decay_flag
+    from ai_agents.agents.decay_investigator import investigate_decaying_rule
+
+    rules = (
+        Signal.objects
+        .filter(is_active=False).exclude(outcome="").exclude(rule_name="")
+        .values_list("rule_name", flat=True).distinct()
+    )
+
+    decaying = [r for r in rules if r and decay_flag(r)["is_decaying"]]
+    investigations = []
+    for rn in decaying:
+        try:
+            inv = investigate_decaying_rule(rn)
+            if inv:
+                investigations.append({"rule_name": rn, "investigation_id": inv.id,
+                                       "action": inv.recommended_action})
+        except Exception as e:
+            logger.warning("decay investigation failed for %s: %s", rn, e)
+
+    return {
+        "status": "ok",
+        "rules_scanned": Signal.objects.filter(is_active=False).exclude(outcome="").exclude(rule_name="").values("rule_name").distinct().count(),
+        "decaying": len(decaying),
+        "investigations_created": len(investigations),
+        "investigations": investigations,
+    }
+

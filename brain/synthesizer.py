@@ -1,0 +1,478 @@
+"""Phase 37.2 — Sauron's Mind synthesizer.
+
+Every 30 minutes:
+  1. Gather a structured "world snapshot" — recent observations, portfolio
+     state, exposure, rule track records, regime probes (Hurst/GARCH on
+     top holdings).
+  2. Call Claude with a tight system prompt + JSON schema in the response.
+  3. Parse to a BrainReport row.
+  4. Mark the consumed observations.
+  5. Emit 1-3 falsifiable AgentPredictions for Phase-6 calibration.
+
+Designed to **never block** — any exception becomes an error-stamped
+BrainReport row so downstream agents see "no fresh report" and degrade.
+"""
+from __future__ import annotations
+
+import json
+import logging
+from datetime import timedelta
+from decimal import Decimal
+from typing import Any
+
+from django.utils import timezone
+
+from ai_agents.base_agent import BaseAgent
+
+logger = logging.getLogger(__name__)
+
+
+# ── Snapshot builder (no Claude call) ─────────────────────────────────────
+
+def _build_world_snapshot(*, max_obs: int = 80) -> dict:
+    """Compact JSON-ready dict the synthesizer reads from.
+
+    Designed to fit in ~3-4K input tokens at typical workloads.
+    """
+    from .models import BrainObservation
+    from instruments.models import Instrument
+
+    snap: dict[str, Any] = {
+        "as_of": timezone.now().isoformat(),
+    }
+
+    # 1. Unconsumed observations, grouped by kind, capped per kind.
+    obs_qs = (BrainObservation.objects
+              .filter(consumed_by_brain_at__isnull=True)
+              .order_by("-created_at")[:max_obs])
+    obs_list = list(obs_qs.values("id", "kind", "payload", "source_agent",
+                                    "created_at"))
+    snap["observations"] = [
+        {**o, "created_at": o["created_at"].isoformat()} for o in obs_list
+    ]
+    snap["observations_count_by_kind"] = {}
+    for o in obs_list:
+        snap["observations_count_by_kind"][o["kind"]] = (
+            snap["observations_count_by_kind"].get(o["kind"], 0) + 1)
+
+    # 2. Open positions across all users — keep it light, just the shape.
+    try:
+        from portfolio.models import Position
+        open_pos = list(Position.objects.filter(closed_at__isnull=True)
+                          .select_related("instrument", "strategy")
+                          .order_by("-opened_at")[:30])
+        snap["open_positions"] = [
+            {
+                "symbol": p.instrument.symbol,
+                "asset_class": getattr(p.instrument, "asset_class", ""),
+                "side": getattr(p, "side", ""),
+                "rule_name": getattr(p.strategy, "name", "") if p.strategy else "",
+                "unrealized_r": float(p.unrealized_pnl or 0),
+            }
+            for p in open_pos
+        ]
+    except Exception:
+        snap["open_positions"] = []
+
+    # 3. Per-rule recent track record.
+    try:
+        from bot_program.bot_grading import bot_performance_summary
+        rows = bot_performance_summary(days=14, min_n=1)
+        snap["rule_track_records"] = [
+            {
+                "rule_name": r["rule_name"],
+                "asset_class": r["asset_class"],
+                "n": r["n"],
+                "win_rate": round(float(r["win_rate"] or 0), 4),
+                "avg_r": round(float(r["avg_r"] or 0), 4),
+                "expectancy": round(float(r.get("expectancy") or 0), 4),
+            }
+            for r in rows[:30]
+        ]
+    except Exception:
+        snap["rule_track_records"] = []
+
+    # 4. Regime probes for top tracked instruments — sample to keep tokens low.
+    try:
+        from signals.quant_primitives import (
+            hurst_exponent, hurst_regime_label, garch_lite_forecast,
+        )
+        from market_data.models import PriceData
+        candidates = list(
+            Instrument.objects.filter(is_active=True)[:8]
+        )
+        regime_probes = []
+        for inst in candidates:
+            closes = list(PriceData.objects
+                          .filter(instrument=inst, timeframe="1d")
+                          .order_by("-timestamp").values_list("close", flat=True)[:150])
+            closes = [float(c) for c in reversed(closes)]
+            if len(closes) < 30:
+                continue
+            h = hurst_exponent(closes, max_lag=20)
+            sigma = garch_lite_forecast(closes)
+            regime_probes.append({
+                "symbol": inst.symbol,
+                "asset_class": inst.asset_class,
+                "hurst": round(h, 3) if h is not None else None,
+                "regime": hurst_regime_label(h),
+                "vol_forecast_pct": round(sigma * 100, 3) if sigma is not None else None,
+                "n_closes": len(closes),
+            })
+        snap["regime_probes"] = regime_probes
+    except Exception:
+        snap["regime_probes"] = []
+
+    # 5. Recent decay alerts.
+    try:
+        from bot_program.track_record_models import RuleTrackRecordAlert
+        decay_qs = (RuleTrackRecordAlert.objects
+                    .filter(resolved_at__isnull=True)
+                    .order_by("-detected_at")[:10])
+        snap["unresolved_decay_alerts"] = [
+            {
+                "rule_name": a.rule_name,
+                "asset_class": a.asset_class,
+                "triggers": a.triggers,
+                "recent_avg_r": float(a.recent_avg_r or 0),
+                "baseline_avg_r": float(a.baseline_avg_r or 0),
+                "detected_at": a.detected_at.isoformat(),
+            }
+            for a in decay_qs
+        ]
+    except Exception:
+        snap["unresolved_decay_alerts"] = []
+
+    return snap
+
+
+# ── The agent ─────────────────────────────────────────────────────────────
+
+SCHEMA_HINT = """{
+  "regime_label": "risk_on|risk_off|mean_reverting|trending|blow_off|unknown",
+  "regime_confidence": 0.0..1.0,
+  "portfolio_health_score": 0.0..1.0,
+  "top_concerns": [
+    {"kind": "string", "severity": 0.0..1.0, "ref": "string", "text": "string"}
+  ],
+  "theme_pressures": {"<theme_name>": 0.0..1.0},
+  "rule_status_overlay": {"<rule_name>": "active|watch|pause_recommended"},
+  "narrative_md": "1-3 short paragraphs in markdown. Tell, don't lecture.",
+  "predictions": [
+    {"prediction_type": "regime_persistence|rule_decay_continues|rule_recovers|...",
+     "predicted_value": "string concise label",
+     "confidence": 0.0..1.0,
+     "horizon_hours": int,
+     "rationale": "one sentence"}
+  ]
+}"""
+
+
+class SauronMindAgent(BaseAgent):
+    """Central coordination synthesizer.
+
+    Uses the `deep` tier (Opus 4.7) — this agent is THE central coordinator;
+    every downstream agent inherits its mistakes. Quality > frequency-
+    optimized cost. ~$15-20/day at 30-min cadence; cheap insurance against
+    one bad correlated decision propagating across all rules.
+    """
+
+    agent_name = "sauron_mind"
+    default_tier = "deep"  # Opus 4.7
+
+    def get_system_prompt(self) -> str:
+        return (
+            "You are Sauron's Mind — the central synthesizer for Sauron Vision, "
+            "an autonomous multi-asset trading platform.\n\n"
+            "You receive a structured snapshot of: recent system observations "
+            "(gate rejects, fills, decay alerts, mutations), open positions, "
+            "per-rule recent track records, regime probes (Hurst exponent + "
+            "GARCH-lite vol forecasts) on tracked instruments, and unresolved "
+            "decay alerts.\n\n"
+            "Your job:\n"
+            "1. Read the macro/regime context from the regime_probes — most "
+            "Hurst < 0.45 across the book = mean-reverting; > 0.55 = trending.\n"
+            "2. Cross-reference with rule track records: if trend rules are "
+            "decaying AND regime is mean-reverting, the rules aren't broken, "
+            "the regime shifted.\n"
+            "3. Identify the 3 most actionable concerns. Examples: a theme is "
+            "saturated, a rule is decaying for regime reasons (recommend WATCH "
+            "not pause), a rule is decaying outright (recommend PAUSE).\n"
+            "4. Emit 1-3 falsifiable predictions the platform can grade later. "
+            "Bad: 'markets will be volatile'. Good: 'rule X continues decaying "
+            "(recent_avg_r < 0) over next 48h, confidence 0.65'.\n\n"
+            "Tone: terse, concrete, ZERO hedging. You are Sauron, not a "
+            "weather forecaster.\n\n"
+            "Respond ONLY with valid JSON in this exact schema:\n"
+            f"{SCHEMA_HINT}\n\n"
+            "Do not include code fences. Do not include any text before or "
+            "after the JSON."
+        )
+
+    def build_context(self, **kwargs) -> str:
+        snap = kwargs.get("snapshot") or _build_world_snapshot()
+        return (
+            "World snapshot (JSON):\n\n"
+            f"{json.dumps(snap, indent=2, default=str)}\n\n"
+            "Synthesize the BrainReport JSON now."
+        )
+
+    def parse_response(self, raw_response: str) -> dict:
+        text = (raw_response or "").strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if lines:
+                lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                text = "\n".join(lines)
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"non-JSON brain output: {e}: {text[:200]}")
+        if not isinstance(data, dict):
+            raise ValueError(f"brain returned non-dict: {type(data).__name__}")
+        return data
+
+
+# ── Persistence + calibration ─────────────────────────────────────────────
+
+ALLOWED_REGIMES = {
+    "risk_on", "risk_off", "mean_reverting", "trending", "blow_off", "unknown",
+}
+ALLOWED_RULE_STATUSES = {"active", "watch", "pause_recommended"}
+
+
+def _persist_report(parsed: dict, snapshot: dict, *, model: str,
+                     tokens_in: int, tokens_out: int, cost_usd: float,
+                     n_consumed: int, error: str = "") -> "BrainReport":
+    """Write a BrainReport row, validating + clamping the parsed payload.
+
+    Always succeeds — bad fields fall back to safe defaults rather than raise.
+    """
+    from .models import BrainReport
+
+    regime = parsed.get("regime_label") or "unknown"
+    if regime not in ALLOWED_REGIMES:
+        regime = "unknown"
+    try:
+        regime_conf = max(0.0, min(1.0, float(parsed.get("regime_confidence", 0))))
+    except (TypeError, ValueError):
+        regime_conf = 0.0
+    try:
+        health = max(0.0, min(1.0, float(parsed.get("portfolio_health_score", 0.5))))
+    except (TypeError, ValueError):
+        health = 0.5
+
+    concerns = parsed.get("top_concerns")
+    if not isinstance(concerns, list):
+        concerns = []
+    concerns = [c for c in concerns if isinstance(c, dict)][:5]
+
+    pressures = parsed.get("theme_pressures")
+    if not isinstance(pressures, dict):
+        pressures = {}
+    # Clamp values 0..1; drop non-floatable.
+    cleaned_pressures = {}
+    for k, v in pressures.items():
+        try:
+            cleaned_pressures[str(k)] = max(0.0, min(1.0, float(v)))
+        except (TypeError, ValueError):
+            continue
+
+    overlay = parsed.get("rule_status_overlay")
+    if not isinstance(overlay, dict):
+        overlay = {}
+    cleaned_overlay = {
+        str(k): v for k, v in overlay.items()
+        if isinstance(v, str) and v in ALLOWED_RULE_STATUSES
+    }
+
+    narrative = parsed.get("narrative_md") or ""
+    if not isinstance(narrative, str):
+        narrative = ""
+
+    valid_until = timezone.now() + timedelta(minutes=45)  # 30min cadence + grace
+
+    report = BrainReport.objects.create(
+        regime_label=regime,
+        regime_confidence=regime_conf,
+        portfolio_health_score=health,
+        top_concerns=concerns,
+        theme_pressures=cleaned_pressures,
+        rule_status_overlay=cleaned_overlay,
+        narrative_md=narrative[:8000],
+        model_used=model,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        cost_usd=Decimal(str(round(cost_usd, 6))),
+        n_observations_consumed=n_consumed,
+        valid_until=valid_until,
+        error=error,
+    )
+    return report
+
+
+def _emit_predictions(report, parsed: dict) -> int:
+    """Convert the parsed predictions into AgentPrediction rows for Phase-6
+    calibration AND Phase-38 Hypothesis rows for the market.
+
+    Each prediction gets:
+      - one AgentPrediction (calibration grading)
+      - one Hypothesis linked back to the AgentPrediction so resolve_due()
+        in the hypothesis market mirrors the outcome both ways
+
+    Mapping prediction_type → hypothesis resolution_criteria:
+      regime_persistence    → {kind: regime_holds, regime: predicted_value}
+      rule_decay_continues  → {kind: rule_avg_r, rule_name: predicted_value,
+                                 comparator: "<", threshold: 0}
+      rule_recovers         → {kind: rule_avg_r, rule_name: predicted_value,
+                                 comparator: ">=", threshold: 0}
+    """
+    try:
+        from ai_agents.models import AgentPrediction
+    except Exception:
+        return 0
+
+    try:
+        from .hypotheses import post_hypothesis
+    except Exception:
+        post_hypothesis = None
+
+    preds = parsed.get("predictions")
+    if not isinstance(preds, list):
+        return 0
+
+    n = 0
+    now = timezone.now()
+    for p in preds[:5]:
+        if not isinstance(p, dict):
+            continue
+        try:
+            ptype = str(p.get("prediction_type") or "brain_call")[:30]
+            pval = str(p.get("predicted_value") or "")[:100]
+            try:
+                conf = max(0.0, min(1.0, float(p.get("confidence", 0.5))))
+            except (TypeError, ValueError):
+                conf = 0.5
+            try:
+                horizon_hours = max(1, int(p.get("horizon_hours", 12)))
+            except (TypeError, ValueError):
+                horizon_hours = 12
+            rationale = (p.get("rationale") or "")[:500]
+            ap = AgentPrediction.objects.create(
+                agent="sauron_mind",
+                prediction_type=ptype,
+                predicted_value=pval,
+                confidence=conf,
+                expected_resolution_at=now + timedelta(hours=horizon_hours),
+                evaluation_notes=rationale,
+            )
+
+            # Mirror as a Hypothesis where we can grade it.
+            if post_hypothesis is not None:
+                criteria = _prediction_to_hypothesis_criteria(ptype, pval)
+                if criteria:
+                    try:
+                        post_hypothesis(
+                            claim_text=f"[{ptype}] {pval}",
+                            source_agent="sauron_mind",
+                            claim_payload={"prediction_type": ptype,
+                                            "predicted_value": pval,
+                                            "rationale": rationale},
+                            resolution_criteria=criteria,
+                            confidence=conf,
+                            horizon_hours=horizon_hours,
+                            brain_report=report,
+                            agent_prediction=ap,
+                        )
+                    except Exception:  # pragma: no cover
+                        pass
+            n += 1
+        except Exception:  # pragma: no cover
+            continue
+    return n
+
+
+def _prediction_to_hypothesis_criteria(ptype: str, pval: str) -> Optional[dict]:
+    """Translate a brain prediction type → hypothesis resolution_criteria.
+
+    Returns None when the prediction can't be auto-graded by the existing
+    resolvers — the AgentPrediction still gets created, but no Hypothesis
+    is posted.
+    """
+    if ptype == "regime_persistence" and pval:
+        return {"kind": "regime_holds", "regime": pval}
+    if ptype == "rule_decay_continues" and pval:
+        return {"kind": "rule_avg_r", "rule_name": pval,
+                "comparator": "<", "threshold": 0.0, "window_days": 7}
+    if ptype == "rule_recovers" and pval:
+        return {"kind": "rule_avg_r", "rule_name": pval,
+                "comparator": ">=", "threshold": 0.0, "window_days": 7}
+    return None
+
+
+# ── Top-level entry point ─────────────────────────────────────────────────
+
+def synthesize_now() -> dict:
+    """Run one synthesis cycle. Always returns a dict summary; never raises.
+
+    Used by both the Celery beat and the admin "Run now" button.
+    """
+    from .models import BrainObservation
+
+    snapshot = _build_world_snapshot()
+    obs_ids = [o["id"] for o in snapshot.get("observations", [])]
+
+    try:
+        agent = SauronMindAgent()
+        # We run the agent manually (not via .run()) because we want to
+        # control persistence + handle errors as data, not exceptions.
+        system_prompt = agent.get_system_prompt()
+        context = agent.build_context(snapshot=snapshot)
+        raw, usage = agent.provider.complete(
+            system_prompt=system_prompt,
+            user_message=context,
+            model=agent.model,
+        )
+        parsed = agent.parse_response(raw)
+    except Exception as e:
+        logger.warning("[brain] synthesis failed: %s", e)
+        report = _persist_report(
+            parsed={}, snapshot=snapshot, model="error",
+            tokens_in=0, tokens_out=0, cost_usd=0.0,
+            n_consumed=0, error=str(e)[:1000],
+        )
+        # Phase-46 — staff alert on streak of consecutive failures.
+        try:
+            from .health import maybe_alert_brain_failures
+            maybe_alert_brain_failures()
+        except Exception:  # pragma: no cover
+            pass
+        return {"ok": False, "error": str(e), "report_id": report.id}
+
+    # Mark consumed.
+    if obs_ids:
+        BrainObservation.objects.filter(id__in=obs_ids).update(
+            consumed_by_brain_at=timezone.now())
+
+    report = _persist_report(
+        parsed=parsed, snapshot=snapshot,
+        model=agent.model,
+        tokens_in=usage.get("input_tokens", 0),
+        tokens_out=usage.get("output_tokens", 0),
+        cost_usd=float(usage.get("cost_usd", 0)),
+        n_consumed=len(obs_ids),
+    )
+    n_predictions = _emit_predictions(report, parsed)
+
+    return {
+        "ok": True, "report_id": report.id,
+        "regime": report.regime_label,
+        "regime_confidence": report.regime_confidence,
+        "n_observations_consumed": len(obs_ids),
+        "n_predictions": n_predictions,
+        "tokens_in": report.tokens_in,
+        "tokens_out": report.tokens_out,
+        "cost_usd": float(report.cost_usd),
+    }

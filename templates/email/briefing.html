@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sauron Vision — Daily Briefing</title>
+</head>
+<body style="margin:0;padding:0;background:#0a0a0a;font-family:'Helvetica Neue',Arial,sans-serif;color:#e8e8e8;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#0a0a0a;padding:20px 0;">
+  <tr>
+    <td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="640" style="max-width:640px;background:#111;border:1px solid #2a2a2a;border-radius:6px;">
+
+        <!-- Header strip -->
+        <tr>
+          <td style="padding:22px 28px 14px;border-bottom:1px solid #2a2a2a;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+              <tr>
+                <td style="font-family:'Courier New',monospace;font-size:11px;letter-spacing:3px;color:#888;text-transform:uppercase;">
+                  Sauron Vision · Daily Briefing
+                </td>
+                <td align="right" style="font-family:'Courier New',monospace;font-size:11px;color:#888;">
+                  {{ b.created_at|date:"Y-m-d" }} UTC
+                </td>
+              </tr>
+            </table>
+            <h1 style="margin:14px 0 6px;font-size:22px;font-weight:600;color:#f5f5f5;letter-spacing:0.5px;">
+              The Eye sees:
+              {% if b.posture == "defensive" %}
+                <span style="color:#e85a4f;">DEFENSIVE</span>
+              {% elif b.posture == "aggressive" %}
+                <span style="color:#9ec77f;">AGGRESSIVE</span>
+              {% else %}
+                <span style="color:#c9a64f;">BALANCED</span>
+              {% endif %}
+            </h1>
+            {% if b.posture_rationale %}
+              <p style="margin:0;font-size:12px;color:#999;font-style:italic;">{{ b.posture_rationale }}</p>
+            {% endif %}
+          </td>
+        </tr>
+
+        {% if b.error %}
+        <!-- Error banner -->
+        <tr>
+          <td style="padding:18px 28px;background:#2a1a1a;border-bottom:1px solid #2a2a2a;">
+            <p style="margin:0;font-size:13px;color:#e85a4f;">
+              <strong>Synthesis error:</strong> {{ b.error|truncatechars:300 }}
+            </p>
+          </td>
+        </tr>
+        {% else %}
+        <!-- Outlook -->
+        <tr>
+          <td style="padding:24px 28px;font-size:14px;line-height:1.7;color:#d8d8d8;">
+            {{ b.outlook_md|linebreaksbr }}
+          </td>
+        </tr>
+
+        {% if b.watchlist %}
+        <tr>
+          <td style="padding:0 28px 4px;">
+            <div style="font-family:'Courier New',monospace;font-size:11px;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:8px;">
+              Watchlist
+            </div>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="font-size:13px;">
+              {% for w in b.watchlist %}
+              <tr>
+                <td style="padding:6px 8px 6px 0;color:#888;font-family:'Courier New',monospace;font-size:11px;text-transform:uppercase;width:90px;vertical-align:top;">{{ w.kind }}</td>
+                <td style="padding:6px 12px 6px 0;color:#f5f5f5;font-weight:600;width:140px;vertical-align:top;">{{ w.ref }}</td>
+                <td style="padding:6px 0;color:#bbb;vertical-align:top;">{{ w.what_to_watch }}</td>
+              </tr>
+              {% endfor %}
+            </table>
+          </td>
+        </tr>
+        {% endif %}
+
+        {% if b.ideas %}
+        <tr>
+          <td style="padding:18px 28px 8px;">
+            <div style="font-family:'Courier New',monospace;font-size:11px;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:8px;">
+              Ideas
+            </div>
+            <ol style="margin:0;padding-left:20px;font-size:14px;line-height:1.6;color:#d8d8d8;">
+              {% for i in b.ideas %}
+              <li style="margin-bottom:6px;">
+                {{ i.summary }}
+                <span style="color:#888;font-size:11px;">
+                  {% if i.confidence %}— conf {{ i.confidence|floatformat:2 }}{% endif %}
+                  {% if i.hypothesis_kind %} · <span style="color:#c9a64f;">graded</span>{% endif %}
+                  {% if i.horizon_hours %} · {{ i.horizon_hours }}h{% endif %}
+                </span>
+              </li>
+              {% endfor %}
+            </ol>
+          </td>
+        </tr>
+        {% endif %}
+        {% endif %}
+
+        <!-- Footer -->
+        <tr>
+          <td style="padding:20px 28px;border-top:1px solid #2a2a2a;font-size:11px;color:#777;">
+            <p style="margin:0 0 6px;">
+              <a href="/briefing/" style="color:#c9a64f;text-decoration:none;">View on Sauron →</a>
+            </p>
+            <p style="margin:0;">
+              Adjust delivery preferences at <a href="/notifications/" style="color:#888;text-decoration:underline;">/notifications/</a>
+              · model: {{ b.model_used }}
+              · cost ${{ b.cost_usd|floatformat:5 }}
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>
