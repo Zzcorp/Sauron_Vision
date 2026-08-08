@@ -1,0 +1,127 @@
+{# BOTS tab — per-AssetBotConfig overview with health + cooldown. #}
+
+{# ── 1. Top stat strip ────────────────────────────────────────────── #}
+<div class="oc-strip">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CONFIGS</span>
+        <span class="oc-strip-value">{{ n_configs }}</span>
+        <span class="oc-strip-sub">across all asset classes</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ENABLED</span>
+        <span class="oc-strip-value {% if n_enabled %}up{% endif %}">{{ n_enabled }}</span>
+        <span class="oc-strip-sub">currently scanning</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">LIVE-MODE</span>
+        <span class="oc-strip-value {% if n_live %}up{% endif %}">{{ n_live }}</span>
+        <span class="oc-strip-sub">real-money bots</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ALIVE 6H</span>
+        <span class="oc-strip-value {% if n_alive %}up{% else %}down{% endif %}">{{ n_alive }}</span>
+        <span class="oc-strip-sub">recent trade activity</span>
+    </div>
+</div>
+
+{# ── 2. Per-bot health + activity table ─────────────────────────── #}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="card-title">Bot configurations</span>
+        <a href="{% url 'asset_bots_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">full asset-bot dashboard →</a>
+    </div>
+    {% if rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr>
+            <th>health</th><th>asset</th><th>name</th><th>mode</th>
+            <th>open</th><th>opens 24h</th><th>closes 24h</th><th>P&amp;L 24h</th>
+            <th>cooldown</th><th>last activity</th><th>action</th>
+        </tr></thead>
+        <tbody>
+        {% for r in rows %}
+            <tr>
+                <td>
+                    {% if r.config.enabled %}
+                        {% if r.is_alive %}
+                            <span title="Recent activity (within 6h)" style="display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-family:var(--font-mono);font-size:11px;">
+                                <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);"></span>
+                                ALIVE
+                            </span>
+                        {% else %}
+                            <span title="No trade activity in last 6h — may be in cooldown / waiting" style="display:inline-flex;align-items:center;gap:6px;color:#ffb000;font-family:var(--font-mono);font-size:11px;">
+                                <span style="width:8px;height:8px;border-radius:50%;background:#ffb000;"></span>
+                                IDLE
+                            </span>
+                        {% endif %}
+                    {% else %}
+                        <span title="Disabled" style="display:inline-flex;align-items:center;gap:6px;color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">
+                            <span style="width:8px;height:8px;border-radius:50%;background:var(--text-muted);"></span>
+                            OFF
+                        </span>
+                    {% endif %}
+                </td>
+                <td><span class="badge badge-medium">{{ r.config.get_asset_class_display }}</span></td>
+                <td><strong>{{ r.config.name }}</strong></td>
+                <td>
+                    <span class="badge badge-{% if r.config.mode == 'live' %}bearish{% else %}bullish{% endif %}">
+                        {{ r.config.mode }}
+                    </span>
+                </td>
+                <td>{{ r.open_count }}</td>
+                <td>{{ r.opens_24h }}</td>
+                <td>{{ r.closed_24h }}</td>
+                <td class="{% if r.pnl_24h > 0 %}up{% elif r.pnl_24h < 0 %}down{% endif %}">{{ r.pnl_24h|floatformat:2 }}</td>
+                <td>
+                    {% if r.cooldown_remaining_min > 0 %}
+                        <span style="color:#ffb000;font-family:var(--font-mono);font-size:11px;">
+                            {{ r.cooldown_remaining_min }}m
+                        </span>
+                    {% else %}
+                        <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">—</span>
+                    {% endif %}
+                </td>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+                    {% if r.last_activity %}{{ r.last_activity|timesince }} ago{% else %}—{% endif %}
+                </td>
+                <td style="display:flex;gap:6px;">
+                    <form method="post" action="{% url 'hq_toggle_asset_bot' %}" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="config_id" value="{{ r.config.id }}">
+                        {% if r.config.mode == 'live' and not r.config.enabled %}<input type="password" name="pin" placeholder="PIN" autocomplete="off" style="width:60px;padding:4px;font-size:11px;">{% endif %}
+                        <button class="btn btn-sm" type="submit">Toggle</button>
+                    </form>
+                    <form method="post" action="{% url 'hq_run_asset_bot' %}" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="config_id" value="{{ r.config.id }}">
+                        <button class="btn btn-sm" type="submit">▶ Tick</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p class="oc-empty">No bot configurations yet. Create one from the <a href="{% url 'admin_dashboard' %}" style="color:var(--accent);">Admin HQ</a>.</p>
+    {% endif %}
+</div>
+
+{# ── 3. Quick links to operations dashboards ─────────────────────── #}
+<div class="grid grid-3" style="gap:14px;">
+    <a href="{% url 'bot_performance_dashboard' %}" class="card" style="padding:18px;text-align:center;text-decoration:none;display:block;transition:transform 0.2s, border-color 0.2s;">
+        <div style="font-size:24px;margin-bottom:4px;color:var(--accent);">▣</div>
+        <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;">Bot Performance</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Per-rule × asset-class · graded outcomes</div>
+    </a>
+    <a href="{% url 'bot_backtest_list' %}" class="card" style="padding:18px;text-align:center;text-decoration:none;display:block;transition:transform 0.2s, border-color 0.2s;">
+        <div style="font-size:24px;margin-bottom:4px;color:var(--accent);">⌬</div>
+        <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;">Backtest</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Walk-forward · transaction costs · slippage</div>
+    </a>
+    <a href="{% url 'allocator_dashboard' %}" class="card" style="padding:18px;text-align:center;text-decoration:none;display:block;transition:transform 0.2s, border-color 0.2s;">
+        <div style="font-size:24px;margin-bottom:4px;color:var(--accent);">◈</div>
+        <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;">Allocator</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Multi-method ensemble · weight multipliers</div>
+    </a>
+</div>

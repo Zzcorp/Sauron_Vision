@@ -8,6 +8,13 @@ class DashboardConsumer(AsyncWebsocketConsumer):
     """Push live updates to dashboard clients."""
 
     async def connect(self):
+        # Reject anonymous sockets — only authenticated sessions get the live
+        # feed (the ASGI app wraps this router in AuthMiddlewareStack, so
+        # scope["user"] is populated). Mirrors EyeConsumer.
+        user = self.scope.get("user")
+        if user is None or not getattr(user, "is_authenticated", False):
+            await self.close()
+            return
         self.group_name = "dashboard_live"
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
@@ -15,7 +22,8 @@ class DashboardConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({"type": "connected", "message": "Sauron Vision live feed active"}))
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(self.group_name, self.channel_name)
+        if hasattr(self, "group_name"):
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
     async def receive(self, text_data):
         """Handle incoming messages (subscribe to instruments)."""
@@ -128,3 +136,65 @@ def push_news_notification(article_data):
             "dashboard_live",
             {"type": "news_update", "data": article_data}
         )
+
+
+# ── Phase 23 — per-user Eye WebSocket ─────────────────────────────────────
+
+class EyeConsumer(AsyncWebsocketConsumer):
+    """Per-user Eye dashboard push.
+
+    Each user is in their own group `eye_user_<id>`; only their own
+    orchestrator/trade events arrive. Unauthenticated connections are
+    closed immediately so we never broadcast to anonymous sessions.
+    """
+
+    async def connect(self):
+        user = self.scope.get("user")
+        if user is None or not getattr(user, "is_authenticated", False):
+            await self.close()
+            return
+        self.group_name = f"eye_user_{user.id}"
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+        await self.send(text_data=json.dumps({"type": "eye_connected"}))
+
+    async def disconnect(self, close_code):
+        if hasattr(self, "group_name"):
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def eye_event(self, event):
+        """Group handler — called by `push_eye_event`."""
+        await self.send(text_data=json.dumps({
+            "type": "eye_event",
+            "kind": event.get("kind", ""),
+            "data": event.get("data", {}),
+        }))
+
+
+def push_eye_event(user, kind: str, data: dict = None) -> bool:
+    """Push a per-user Eye event from any sync caller (orchestrator, AssetBot).
+
+    Returns True if a channel-layer dispatch happened. Safely returns False on:
+      - missing/anonymous user
+      - no channel_layer configured (dev environments without Redis)
+      - any dispatch error (logged, never raises)
+    """
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    if not getattr(user, "id", None):
+        return False
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        layer = get_channel_layer()
+        if layer is None:
+            return False
+        async_to_sync(layer.group_send)(
+            f"eye_user_{user.id}",
+            {"type": "eye_event", "kind": kind, "data": data or {}},
+        )
+        return True
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("push_eye_event failed: %s", e)
+        return False

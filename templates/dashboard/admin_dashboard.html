@@ -41,6 +41,482 @@
     <form method="post" action="{% url 'admin_bulk_toggle' %}">{% csrf_token %}<input type="hidden" name="category" value="agent"><input type="hidden" name="action" value="disable"><button type="submit" class="btn btn-danger" style="width:100%;">Stop All Agents</button></form>
 </div>
 
+<!-- ═══ AI OPERATIONAL TOGGLES ═══ -->
+<div class="section-label fade-in-up">AI Operational Layer</div>
+<div class="grid grid-3" style="margin-bottom:24px;">
+
+    {% if ai_gate_component %}
+    <div class="card fade-in-up" style="border-color:{% if ai_gate_component.is_enabled %}var(--accent){% else %}var(--text-muted){% endif %};">
+        <div style="display:flex;flex-direction:column;height:100%;justify-content:space-between;">
+            <div>
+                <div style="font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:1px;color:{% if ai_gate_component.is_enabled %}var(--accent){% else %}var(--text-muted){% endif %};">
+                    {% if ai_gate_component.is_enabled %}AI PRE-TRADE GATE: ON{% else %}AI PRE-TRADE GATE: OFF{% endif %}
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:6px;line-height:1.4;">
+                    Claude reviews each proposed trade. Adds 1–3s latency + token cost per call.
+                </div>
+            </div>
+            <form method="post" action="{% url 'admin_toggle_component' %}" style="margin-top:12px;">
+                {% csrf_token %}<input type="hidden" name="key" value="feature_ai_pretrade_gate">
+                {% if ai_gate_component.is_enabled %}
+                <button type="submit" class="btn btn-danger btn-sm" style="width:100%;">DISABLE AI GATE</button>
+                {% else %}
+                <button type="submit" class="btn btn-primary btn-sm" style="width:100%;">ENABLE AI GATE</button>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if ai_journal_component %}
+    <div class="card fade-in-up" style="border-color:{% if ai_journal_component.is_enabled %}var(--accent){% else %}var(--text-muted){% endif %};">
+        <div style="display:flex;flex-direction:column;height:100%;justify-content:space-between;">
+            <div>
+                <div style="font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:1px;color:{% if ai_journal_component.is_enabled %}var(--accent){% else %}var(--text-muted){% endif %};">
+                    {% if ai_journal_component.is_enabled %}AI JOURNAL: ON{% else %}AI JOURNAL: OFF{% endif %}
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:6px;line-height:1.4;">
+                    Auto-generates a journal entry when a signal closes with |R| ≥ 0.5.
+                </div>
+            </div>
+            <form method="post" action="{% url 'admin_toggle_component' %}" style="margin-top:12px;">
+                {% csrf_token %}<input type="hidden" name="key" value="pipeline_ai_journal">
+                {% if ai_journal_component.is_enabled %}
+                <button type="submit" class="btn btn-danger btn-sm" style="width:100%;">DISABLE</button>
+                {% else %}
+                <button type="submit" class="btn btn-primary btn-sm" style="width:100%;">ENABLE</button>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if ai_decay_component %}
+    <div class="card fade-in-up" style="border-color:{% if ai_decay_component.is_enabled %}var(--accent){% else %}var(--text-muted){% endif %};">
+        <div style="display:flex;flex-direction:column;height:100%;justify-content:space-between;">
+            <div>
+                <div style="font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:1px;color:{% if ai_decay_component.is_enabled %}var(--accent){% else %}var(--text-muted){% endif %};">
+                    {% if ai_decay_component.is_enabled %}DECAY INVESTIGATOR: ON{% else %}DECAY INVESTIGATOR: OFF{% endif %}
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:6px;line-height:1.4;">
+                    Nightly Claude analysis of decaying rules (02:30 UTC schedule).
+                </div>
+            </div>
+            <form method="post" action="{% url 'admin_toggle_component' %}" style="margin-top:12px;">
+                {% csrf_token %}<input type="hidden" name="key" value="pipeline_ai_decay">
+                {% if ai_decay_component.is_enabled %}
+                <button type="submit" class="btn btn-danger btn-sm" style="width:100%;">DISABLE</button>
+                {% else %}
+                <button type="submit" class="btn btn-primary btn-sm" style="width:100%;">ENABLE</button>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ═══ HQ CONSOLE — Run-Now Commands ═══ -->
+<div class="section-label fade-in-up">HQ Console — Run Now</div>
+<div class="card fade-in-up" style="margin-bottom:24px;padding:16px;">
+    <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:12px;">
+        Manually trigger any scheduled task. Each runs synchronously and reports back via flash message.
+    </div>
+    <div class="grid grid-3" style="gap:8px;">
+        <form method="post" action="{% url 'hq_run_signal_scan' %}">{% csrf_token %}<button type="submit" class="btn btn-sm" style="width:100%;">▶ Run Signal Scan</button></form>
+        <form method="post" action="{% url 'hq_run_full_universe_scan' %}">{% csrf_token %}<button type="submit" class="btn btn-sm" style="width:100%;">▶ Full Universe Scan</button></form>
+        <form method="post" action="{% url 'hq_run_smc_lifecycle' %}">{% csrf_token %}<button type="submit" class="btn btn-sm" style="width:100%;">▶ SMC Lifecycle Pass</button></form>
+        <form method="post" action="{% url 'hq_run_grade_signals' %}">{% csrf_token %}<button type="submit" class="btn btn-sm" style="width:100%;">▶ Grade Signals</button></form>
+        <form method="post" action="{% url 'hq_run_decay_investigation' %}">{% csrf_token %}<button type="submit" class="btn btn-sm" style="width:100%;">▶ Investigate Decay</button></form>
+        <form method="post" action="{% url 'hq_run_daily_snapshot' %}">{% csrf_token %}<button type="submit" class="btn btn-sm" style="width:100%;">▶ Daily Snapshot</button></form>
+        <form method="post" action="{% url 'hq_run_recalc_exposure' %}">{% csrf_token %}<button type="submit" class="btn btn-sm" style="width:100%;">▶ Recalc Exposure</button></form>
+        <form method="post" action="{% url 'hq_run_nightly_cleanup' %}">{% csrf_token %}<button type="submit" class="btn btn-sm" style="width:100%;">▶ Nightly Cleanup</button></form>
+        <form method="post" action="{% url 'hq_run_seed_components' %}">{% csrf_token %}<button type="submit" class="btn btn-sm" style="width:100%;">↻ Seed Components</button></form>
+    </div>
+</div>
+
+<!-- ═══ BROKER CREDENTIALS ═══ -->
+<div class="section-label fade-in-up">Broker Credentials</div>
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Connected accounts</span></div>
+    {% if broker_rows %}
+    <div class="table-wrapper"><table>
+        <thead><tr><th>User</th><th>Binance</th><th>OANDA</th><th>Alpaca</th><th>Actions</th></tr></thead>
+        <tbody>
+            {% for row in broker_rows %}
+            <tr>
+                <td style="font-weight:600;">{{ row.username }}</td>
+                <td>
+                    {% if row.binance %}
+                        {% if row.binance.connected %}
+                        <span style="color:var(--accent);font-family:var(--font-mono);font-size:11px;">CONNECTED</span>
+                        <span style="color:var(--text-muted);font-size:10px;">{% if row.binance.testnet %}testnet{% else %}live{% endif %}</span>
+                        {% else %}
+                        <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">NO KEY</span>
+                        {% endif %}
+                    {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+                </td>
+                <td>
+                    {% if row.oanda %}
+                        {% if row.oanda.connected %}
+                        <span style="color:var(--accent);font-family:var(--font-mono);font-size:11px;">CONNECTED</span>
+                        <span style="color:var(--text-muted);font-size:10px;">{% if row.oanda.practice %}practice{% else %}live{% endif %}</span>
+                        {% else %}<span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">NO KEY</span>{% endif %}
+                    {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+                </td>
+                <td>
+                    {% if row.alpaca %}
+                        {% if row.alpaca.connected %}
+                        <span style="color:var(--accent);font-family:var(--font-mono);font-size:11px;">CONNECTED</span>
+                        <span style="color:var(--text-muted);font-size:10px;">{% if row.alpaca.paper %}paper{% else %}live{% endif %}</span>
+                        {% else %}<span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">NO KEY</span>{% endif %}
+                    {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+                </td>
+                <td style="display:flex;gap:6px;flex-wrap:wrap;">
+                    {% if row.binance.connected %}<form method="post" action="{% url 'hq_disconnect_broker' %}">{% csrf_token %}<input type="hidden" name="target_username" value="{{ row.username }}"><input type="hidden" name="broker" value="binance"><button class="btn btn-sm btn-danger" type="submit">× Binance</button></form>{% endif %}
+                    {% if row.oanda.connected %}<form method="post" action="{% url 'hq_disconnect_broker' %}">{% csrf_token %}<input type="hidden" name="target_username" value="{{ row.username }}"><input type="hidden" name="broker" value="oanda"><button class="btn btn-sm btn-danger" type="submit">× OANDA</button></form>{% endif %}
+                    {% if row.alpaca.connected %}<form method="post" action="{% url 'hq_disconnect_broker' %}">{% csrf_token %}<input type="hidden" name="target_username" value="{{ row.username }}"><input type="hidden" name="broker" value="alpaca"><button class="btn btn-sm btn-danger" type="submit">× Alpaca</button></form>{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}
+        <p style="padding:16px;color:var(--text-muted);font-family:var(--font-mono);font-size:12px;">No broker accounts configured yet — use the forms below to add credentials.</p>
+    {% endif %}
+</div>
+
+<div class="grid grid-2" style="margin-bottom:24px;gap:16px;">
+    <div class="card fade-in-up">
+        <div class="card-header"><span class="card-title">Add / Update OANDA Credentials</span></div>
+        <form method="post" action="{% url 'hq_save_oanda' %}" style="padding:16px;display:grid;gap:10px;">
+            {% csrf_token %}
+            <input type="text" name="target_username" placeholder="Username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="text" name="oanda_api_key" placeholder="OANDA API key" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="text" name="oanda_account_id" placeholder="OANDA account ID (e.g. 101-001-1234567-001)" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="practice" checked> Practice (demo) endpoint</label>
+            <button type="submit" class="btn btn-primary btn-sm">Save OANDA</button>
+        </form>
+    </div>
+
+    <div class="card fade-in-up">
+        <div class="card-header"><span class="card-title">Add / Update Alpaca Credentials</span></div>
+        <form method="post" action="{% url 'hq_save_alpaca' %}" style="padding:16px;display:grid;gap:10px;">
+            {% csrf_token %}
+            <input type="text" name="target_username" placeholder="Username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="text" name="alpaca_api_key" placeholder="Alpaca API key" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="text" name="alpaca_api_secret" placeholder="Alpaca API secret" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="paper" checked> Paper trading endpoint</label>
+            <button type="submit" class="btn btn-primary btn-sm">Save Alpaca</button>
+        </form>
+    </div>
+</div>
+
+<!-- ═══ RULE ACTUATOR — Closed-Loop Self-Adjustment ═══ -->
+<div class="section-label fade-in-up">Rule Actuator (Self-Adjusting)</div>
+<div class="card fade-in-up" style="margin-bottom:24px;border-color:{% if actuator_live_component.is_enabled %}var(--accent-gold){% else %}var(--text-muted){% endif %};">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div>
+            <div style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:1px;color:{% if actuator_live_component.is_enabled %}var(--accent-gold){% else %}var(--text-muted){% endif %};">
+                {% if actuator_live_component.is_enabled %}LIVE MODE — admin can apply{% else %}SHADOW MODE — apply disabled{% endif %}
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;line-height:1.4;">
+                Even in live mode, every action requires explicit admin confirmation.
+                Daily cap: 3 pauses, 5 reductions. All actions reversible.
+                <a href="{% url 'rule_control_dashboard' %}" style="color:var(--accent);">Full audit log →</a>
+            </div>
+        </div>
+        <form method="post" action="{% url 'admin_toggle_component' %}">
+            {% csrf_token %}<input type="hidden" name="key" value="actuator_mode_live">
+            {% if actuator_live_component.is_enabled %}
+            <button type="submit" class="btn btn-danger btn-sm">DISABLE LIVE MODE</button>
+            {% else %}
+            <button type="submit" class="btn btn-primary btn-sm">PROMOTE TO LIVE</button>
+            {% endif %}
+        </form>
+    </div>
+
+    {% if actuator_proposed %}
+    <div style="padding:12px 16px;font-size:11px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.05em;">Pending proposals</div>
+    <div class="table-wrapper"><table>
+        <thead><tr><th>Rule</th><th>Action</th><th>Proposed</th><th>Source</th><th>Rationale</th><th>Decide</th></tr></thead>
+        <tbody>
+        {% for a in actuator_proposed %}
+        <tr>
+            <td style="font-weight:600;">{{ a.rule_name|truncatechars:32 }}</td>
+            <td><span class="badge badge-{% if a.action == 'pause_rule' %}bearish{% else %}medium{% endif %}">{{ a.get_action_display }}</span></td>
+            <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ a.proposed_at|timesince }} ago</td>
+            <td style="font-size:11px;">{% if a.source_investigation_id %}#{{ a.source_investigation_id }}{% else %}manual{% endif %}</td>
+            <td style="font-size:11px;color:var(--text-muted);">{{ a.rationale|truncatechars:100 }}</td>
+            <td style="display:flex;gap:6px;">
+                <form method="post" action="{% url 'hq_apply_rule_action' %}">{% csrf_token %}<input type="hidden" name="action_id" value="{{ a.id }}"><button class="btn btn-sm btn-primary" type="submit" {% if not actuator_live_component.is_enabled %}disabled title="Promote to LIVE mode first"{% endif %}>Apply</button></form>
+                <form method="post" action="{% url 'hq_reject_rule_action' %}">{% csrf_token %}<input type="hidden" name="action_id" value="{{ a.id }}"><button class="btn btn-sm btn-danger" type="submit">Reject</button></form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}
+    <div style="padding:16px;color:var(--text-muted);font-family:var(--font-mono);font-size:12px;">No pending proposals. The actuator runs daily at 03:00 UTC after the decay-investigation pass.</div>
+    {% endif %}
+
+    {% if actuator_applied %}
+    <div style="padding:12px 16px;font-size:11px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.05em;border-top:1px solid var(--border);">Applied actions (rollback-able)</div>
+    <div class="table-wrapper"><table>
+        <thead><tr><th>Rule</th><th>Action</th><th>Applied</th><th>By</th><th>Snapshot</th><th>Rollback</th></tr></thead>
+        <tbody>
+        {% for a in actuator_applied %}
+        <tr>
+            <td style="font-weight:600;">{{ a.rule_name|truncatechars:32 }}</td>
+            <td><span class="badge badge-medium">{{ a.get_action_display }}</span></td>
+            <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ a.applied_at|timesince }} ago</td>
+            <td style="font-size:11px;">{{ a.confirmed_by.username|default:"—" }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">prev: {{ a.previous_status|default:"active" }} ×{{ a.previous_weight|default:"1.0"|floatformat:2 }}</td>
+            <td><form method="post" action="{% url 'hq_rollback_rule_action' %}">{% csrf_token %}<input type="hidden" name="action_id" value="{{ a.id }}"><button class="btn btn-sm btn-danger" type="submit">↶ Rollback</button></form></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% endif %}
+</div>
+
+<!-- ═══ ASSET BOTS — Stocks / Forex / Commodities ═══ -->
+<div class="section-label fade-in-up">Asset Bots (Phase 13)</div>
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div>
+            <div style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:1px;">PER-ASSET-CLASS BOTS · STOCK · FOREX · COMMODITY</div>
+            <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;line-height:1.4;">
+                Each config trades one asset class via Phase-4 broker_router (Alpaca / OANDA / paper).
+                Decisions consume Phase-1 Signals; trades respect Phase-5/7/8 multipliers.
+                Crypto bot is separate and unchanged.
+                <a href="{% url 'asset_bots_dashboard' %}" style="color:var(--accent);">Full view →</a>
+            </div>
+        </div>
+        <form method="post" action="{% url 'hq_run_all_asset_bots' %}">
+            {% csrf_token %}<button class="btn btn-sm" type="submit">▶ Tick All</button>
+        </form>
+    </div>
+    <div style="padding:16px;">
+        <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">Create / update asset bot</div>
+        <form method="post" action="{% url 'hq_create_asset_bot' %}" style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;">
+            {% csrf_token %}
+            <select name="asset_class" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+                <option value="stock">Stocks (Alpaca)</option>
+                <option value="forex">Forex (OANDA)</option>
+                <option value="commodity">Commodities (paper-only)</option>
+            </select>
+            <input type="text" name="name" placeholder="Bot name" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <select name="mode" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+                <option value="paper">Paper</option>
+                <option value="live">Live</option>
+            </select>
+            <input type="password" name="pin" placeholder="PIN (required for Live)" autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+
+            <input type="text" name="symbols" placeholder='Symbols JSON: ["AAPL","MSFT","GOOG"]' required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;grid-column:1/4;">
+
+            <input type="number" name="capital" step="100" placeholder="Capital" value="10000" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="text" name="base_currency" placeholder="Base ccy" value="USD" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="number" step="0.1" name="position_size_pct" placeholder="Pos size %" value="2" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+
+            <input type="number" name="max_concurrent_positions" placeholder="Max pos" value="5" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="number" step="0.1" name="max_daily_loss_pct" placeholder="Daily loss %" value="2" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="number" step="0.1" name="stop_loss_pct" placeholder="Stop %" value="1.5" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+
+            <input type="number" step="0.1" name="take_profit_pct" placeholder="Target %" value="3" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="number" step="0.05" min="0" max="1" name="entry_score_min" placeholder="Min entry score" value="0.6" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="text" name="extras" placeholder="Extras JSON" value="{}" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;">
+
+            <button type="submit" class="btn btn-primary btn-sm" style="grid-column:1/4;">Create / Update</button>
+        </form>
+    </div>
+</div>
+
+<!-- ═══ EVENT ENGINE — Real-Time Fast Rules ═══ -->
+<div class="section-label fade-in-up">Event Engine (real-time)</div>
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div>
+            <div style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:1px;">SUB-SECOND DISPATCH · STREAMER → FAST RULE → SIGNAL</div>
+            <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;line-height:1.4;">
+                Streamers call <code>dispatch_event(event_type, payload)</code> directly or via the Celery wrapper. Fires registered FastRules; matches create Signals that flow through Phase 1–11.
+                <a href="{% url 'events_dashboard' %}" style="color:var(--accent);">Full view →</a>
+            </div>
+        </div>
+    </div>
+    <div style="padding:16px;">
+        <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">Fire test event</div>
+        <form method="post" action="{% url 'hq_fire_test_event' %}" style="display:grid;grid-template-columns:200px 1fr 120px;gap:10px;">
+            {% csrf_token %}
+            <input type="text" name="event_type" placeholder="event_type (e.g. price_tick)" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="text" name="payload" placeholder='Payload JSON: {"symbol":"AAPL","last":200.5}' required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;">
+            <button type="submit" class="btn btn-sm">▶ Fire</button>
+        </form>
+    </div>
+</div>
+
+<!-- ═══ PATTERN MINER — Auto-Discover Setups from History ═══ -->
+<div class="section-label fade-in-up">Pattern Miner (auto-discover setups)</div>
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div>
+            <div style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:1px;">FREQUENT-ITEMSET MINING · INTERESTING MOVES → DISCOVERED SETUPS</div>
+            <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;line-height:1.4;">
+                Mines historical multi-modal data for repeating patterns preceding ≥1.5σ moves.
+                Discoveries activate as draft OpportunitySetups (require admin enable).
+                <a href="{% url 'discoveries_dashboard' %}" style="color:var(--accent);">Full view →</a>
+            </div>
+        </div>
+        <form method="post" action="{% url 'hq_run_pattern_miner' %}">
+            {% csrf_token %}<button type="submit" class="btn btn-sm">▶ Mine Now</button>
+        </form>
+    </div>
+</div>
+
+<!-- ═══ OPPORTUNITY SCANNER — Multi-Modal Setup Matching ═══ -->
+<div class="section-label fade-in-up">Opportunity Scanner</div>
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div>
+            <div style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:1px;">MULTI-MODAL · PRICE × NEWS × CALENDAR × MACRO</div>
+            <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;line-height:1.4;">
+                Matches registered OpportunitySetups against active instruments. Each match creates a Signal that flows through Phase 1–9.
+                <a href="{% url 'opportunities_dashboard' %}" style="color:var(--accent);">Full view →</a>
+            </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+            <form method="post" action="{% url 'hq_run_opportunity_scan' %}">{% csrf_token %}<button class="btn btn-sm" type="submit">▶ Scan Now</button></form>
+            <form method="post" action="{% url 'hq_resolve_opportunities' %}">{% csrf_token %}<button class="btn btn-sm" type="submit">✓ Resolve</button></form>
+        </div>
+    </div>
+    <div style="padding:16px;">
+        <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">Create new setup</div>
+        <form method="post" action="{% url 'hq_create_opportunity_setup' %}" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            {% csrf_token %}
+            <input type="text" name="name" placeholder="Setup name" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <select name="direction" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+                <option value="bullish">Bullish</option><option value="bearish">Bearish</option>
+            </select>
+            <textarea name="description" placeholder="Description" rows="2" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;grid-column:1/3;"></textarea>
+            <textarea name="conditions" placeholder='Conditions JSON: [{"kind":"price_pattern","params":{"pattern":"above_ma","ma_period":50}}]' rows="3" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;grid-column:1/3;"></textarea>
+            <input type="text" name="asset_classes" placeholder='Asset classes JSON: ["stock","etf"] (empty = all)' style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;">
+            <input type="text" name="sizing" placeholder='Sizing JSON: {"stop_pct":2.0,"target_rr":2.0}' style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;">
+            <input type="number" step="0.01" min="0" max="1" name="min_match_score" placeholder="Min score (0-1)" value="0.7" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="number" min="1" name="suggested_horizon_days" placeholder="Horizon (days)" value="5" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <button type="submit" class="btn btn-primary btn-sm" style="grid-column:1/3;">Create setup</button>
+        </form>
+    </div>
+</div>
+
+<!-- ═══ STRATEGY EVOLUTION — Generate New Rules from Decaying Ones ═══ -->
+<div class="section-label fade-in-up">Strategy Evolution</div>
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div>
+            <div style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:1px;">PARAMETER MUTATION → FORK → PROMOTION GATE</div>
+            <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;line-height:1.4;">
+                Decaying parameter-aware rules get N mutants generated, scored heuristically, top-K saved as proposals.
+                Forks start at RESEARCH and walk Phase-8 ladder. Originals untouched.
+                <a href="{% url 'evolution_dashboard' %}" style="color:var(--accent);">Full view →</a>
+            </div>
+        </div>
+        <form method="post" action="{% url 'hq_run_evolution' %}">
+            {% csrf_token %}<button type="submit" class="btn btn-sm">▶ Propose Now</button>
+        </form>
+    </div>
+</div>
+
+<!-- ═══ PROMOTION PIPELINE — Strict Gates Before Live Capital ═══ -->
+<div class="section-label fade-in-up">Promotion Pipeline</div>
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div>
+            <div style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:1px;">RESEARCH → PAPER → LIVE_SMALL → LIVE_FULL</div>
+            <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;line-height:1.4;">
+                Auto-evaluator runs daily 04:30 UTC. Promotes eligible rules, demotes degraded ones.
+                Manual promote/demote available at <a href="{% url 'promotions_dashboard' %}" style="color:var(--accent);">/promotions/</a>.
+            </div>
+        </div>
+        <form method="post" action="{% url 'hq_run_promotions' %}">
+            {% csrf_token %}<button type="submit" class="btn btn-sm">▶ Run Now</button>
+        </form>
+    </div>
+</div>
+
+<!-- ═══ META-ALLOCATOR — Capital Distribution Across Rules ═══ -->
+<div class="section-label fade-in-up">Meta-Allocator (Multi-Strategy)</div>
+<div class="card fade-in-up" style="margin-bottom:24px;border-color:{% if allocator_live_component.is_enabled %}var(--accent-gold){% else %}var(--text-muted){% endif %};">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div>
+            <div style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:1px;color:{% if allocator_live_component.is_enabled %}var(--accent-gold){% else %}var(--text-muted){% endif %};">
+                {% if allocator_live_component.is_enabled %}LIVE MODE — admin can apply{% else %}SHADOW MODE — preview only{% endif %}
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;line-height:1.4;">
+                3-method ensemble · sample-tier blending · 30% smoothing · caps [1%, 30%] · skips paused/reduced rules.
+                <a href="{% url 'allocator_dashboard' %}" style="color:var(--accent);">Full view →</a>
+            </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+            <form method="post" action="{% url 'hq_propose_allocation' %}">
+                {% csrf_token %}<button type="submit" class="btn btn-sm">▶ Propose Now</button>
+            </form>
+            <form method="post" action="{% url 'admin_toggle_component' %}">
+                {% csrf_token %}<input type="hidden" name="key" value="meta_allocator_mode_live">
+                {% if allocator_live_component.is_enabled %}
+                <button type="submit" class="btn btn-danger btn-sm">DISABLE LIVE</button>
+                {% else %}
+                <button type="submit" class="btn btn-primary btn-sm">PROMOTE TO LIVE</button>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+
+    {% if allocator_shadows %}
+    <div style="padding:12px 16px;font-size:11px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.05em;">Shadow allocations</div>
+    <div class="table-wrapper"><table>
+        <thead><tr><th>#</th><th>Tier</th><th>Rules</th><th>Blend (u·iv·e)</th><th>Proposed</th><th>Decide</th></tr></thead>
+        <tbody>
+        {% for a in allocator_shadows %}
+        <tr>
+            <td>#{{ a.id }}</td>
+            <td><span class="badge badge-medium">{{ a.sample_tier }}</span></td>
+            <td>{{ a.rules_considered }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">
+                {{ a.ensemble_blend.uniform|floatformat:2 }} ·
+                {{ a.ensemble_blend.inverse_vol|floatformat:2 }} ·
+                {{ a.ensemble_blend.expectancy|floatformat:2 }}
+            </td>
+            <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ a.proposed_at|timesince }} ago</td>
+            <td style="display:flex;gap:6px;">
+                <form method="post" action="{% url 'hq_apply_allocation' %}">{% csrf_token %}<input type="hidden" name="allocation_id" value="{{ a.id }}"><button class="btn btn-sm btn-primary" type="submit" {% if not allocator_live_component.is_enabled %}disabled title="Promote to LIVE first"{% endif %}>Apply</button></form>
+                <form method="post" action="{% url 'hq_reject_allocation' %}">{% csrf_token %}<input type="hidden" name="allocation_id" value="{{ a.id }}"><button class="btn btn-sm btn-danger" type="submit">Reject</button></form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}
+    <div style="padding:16px;color:var(--text-muted);font-family:var(--font-mono);font-size:12px;">No pending allocations. Runs weekly Sunday 04:00 UTC; click "Propose Now" to trigger immediately.</div>
+    {% endif %}
+
+    {% if allocator_applied %}
+    <div style="padding:12px 16px;font-size:11px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.05em;border-top:1px solid var(--border);">Recently applied (rollback-able)</div>
+    <div class="table-wrapper"><table>
+        <thead><tr><th>#</th><th>Applied</th><th>By</th><th>Rules</th><th>Rollback</th></tr></thead>
+        <tbody>
+        {% for a in allocator_applied %}
+        <tr>
+            <td>#{{ a.id }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ a.applied_at|timesince }} ago</td>
+            <td style="font-size:11px;">{{ a.confirmed_by.username|default:"—" }}</td>
+            <td>{{ a.previous_weights|length }}</td>
+            <td><form method="post" action="{% url 'hq_rollback_allocation' %}">{% csrf_token %}<input type="hidden" name="allocation_id" value="{{ a.id }}"><button class="btn btn-sm btn-danger" type="submit">↶ Rollback</button></form></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% endif %}
+</div>
+
 <!-- Component Controls -->
 {% for cat_name, cat_components in components_by_category.items %}
 <div class="section-label fade-in-up">{{ cat_name|upper }}</div>

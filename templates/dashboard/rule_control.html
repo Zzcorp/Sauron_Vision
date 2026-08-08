@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Rule Control — Sauron Vision{% endblock %}
+{% block page_title %}🛠️  RULE CONTROL · {% if live_mode %}LIVE{% else %}SHADOW{% endif %}{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RULES</span>
+        <span class="oc-strip-value">{{ controls|length }}</span>
+        <span class="oc-strip-sub">tracked under control</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PROPOSED</span>
+        <span class="oc-strip-value {% if proposed %}up{% endif %}">{{ proposed|length }}</span>
+        <span class="oc-strip-sub">awaiting decision</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">APPLIED</span>
+        <span class="oc-strip-value">{{ applied|length }}</span>
+        <span class="oc-strip-sub">rollback-able</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">HISTORY</span>
+        <span class="oc-strip-value">{{ history|length }}</span>
+        <span class="oc-strip-sub">last 50 actions</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MODE</span>
+        <span class="oc-strip-value {% if live_mode %}up{% else %}down{% endif %}">{% if live_mode %}LIVE{% else %}SHADOW{% endif %}</span>
+        <span class="oc-strip-sub">{% if live_mode %}actions affect prod{% else %}log-only{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ROLE</span>
+        <span class="oc-strip-value">{% if is_admin %}ADMIN{% else %}VIEWER{% endif %}</span>
+        <span class="oc-strip-sub">{% if is_admin %}can apply/reject{% else %}read-only{% endif %}</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Current rule states</span></div>
+    {% if controls %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Rule</th><th>Status</th><th>Weight</th><th>Paused until</th><th>Notes</th></tr></thead>
+      <tbody>
+        {% for c in controls %}
+          <tr>
+            <td>{{ c.rule_name }}</td>
+            <td><span class="badge badge-{% if c.status == 'active' %}bullish{% elif c.status == 'paused' %}bearish{% else %}medium{% endif %}">{{ c.get_status_display }}</span></td>
+            <td>×{{ c.weight_multiplier|floatformat:2 }}</td>
+            <td>{% if c.paused_until %}{{ c.paused_until|date:"M d, Y" }}{% else %}—{% endif %}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ c.notes|truncatechars:80 }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon">🛡️</div>
+        <p>NO RULE CONTROLS — all rules run with default settings until the actuator proposes a change.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Pending proposals</span></div>
+    {% if proposed %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Rule</th><th>Action</th><th>Proposed</th><th>Rationale</th>{% if is_admin %}<th>Decide</th>{% endif %}</tr></thead>
+      <tbody>
+        {% for a in proposed %}
+          <tr>
+            <td>{{ a.rule_name }}</td>
+            <td><span class="badge badge-{% if a.action == 'pause_rule' %}bearish{% else %}medium{% endif %}">{{ a.get_action_display }}</span></td>
+            <td>{{ a.proposed_at|timesince }} ago</td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ a.rationale|truncatechars:140 }}</td>
+            {% if is_admin %}
+            <td style="display:flex;gap:6px;">
+                <form method="post" action="{% url 'hq_apply_rule_action' %}">{% csrf_token %}<input type="hidden" name="action_id" value="{{ a.id }}"><button class="btn btn-sm btn-primary" type="submit" {% if not live_mode %}disabled title="Promote to LIVE mode first"{% endif %}>Apply</button></form>
+                <form method="post" action="{% url 'hq_reject_rule_action' %}">{% csrf_token %}<input type="hidden" name="action_id" value="{{ a.id }}"><button class="btn btn-sm btn-danger" type="submit">Reject</button></form>
+            </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon">📭</div>
+        <p>NO PENDING PROPOSALS — the actuator runs daily at 03:00 UTC.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Action history</span></div>
+    {% if history %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Rule</th><th>Action</th><th>State</th><th>When</th><th>By</th>{% if is_admin %}<th>Rollback</th>{% endif %}</tr></thead>
+      <tbody>
+        {% for a in history %}
+          <tr>
+            <td>{{ a.rule_name }}</td>
+            <td>{{ a.get_action_display }}</td>
+            <td><span class="badge badge-{% if a.state == 'applied' %}bullish{% elif a.state == 'rolled_back' or a.state == 'rejected' %}bearish{% else %}medium{% endif %}">{{ a.get_state_display }}</span></td>
+            <td>{{ a.proposed_at|date:"M d H:i" }}</td>
+            <td style="font-size: 11px;">{{ a.confirmed_by.username|default:"—" }}</td>
+            {% if is_admin %}
+            <td>
+              {% if a.state == 'applied' %}
+              <form method="post" action="{% url 'hq_rollback_rule_action' %}">{% csrf_token %}<input type="hidden" name="action_id" value="{{ a.id }}"><button class="btn btn-sm btn-danger" type="submit">↶ Rollback</button></form>
+              {% endif %}
+            </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No actions yet.</p>
+    {% endif %}
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+</style>
+{% endblock %}

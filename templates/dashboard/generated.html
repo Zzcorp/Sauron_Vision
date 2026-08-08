@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}Generated strategies · Sauron's Mind{% endblock %}
+{% block content %}
+<div class="page-content">
+    {# ── Top stat strip — 6 cells ────────────────────────────────── #}
+    <div class="oc-strip" style="margin-bottom:18px;">
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">PENDING</span>
+            <span class="oc-strip-value {% if n_pending %}up{% endif %}">{{ n_pending }}</span>
+            <span class="oc-strip-sub">{% if oldest_pending %}oldest {{ oldest_pending.created_at|timesince }} ago{% else %}none waiting{% endif %}</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">APPROVED</span>
+            <span class="oc-strip-value up">{{ n_approved }}</span>
+            <span class="oc-strip-sub">{{ approval_rate }}% of resolved</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">REJECTED</span>
+            <span class="oc-strip-value down">{{ n_rejected }}</span>
+            <span class="oc-strip-sub">{{ n_expired }} expired</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">NEW · 30D</span>
+            <span class="oc-strip-value">{{ n_new_30d }}</span>
+            <span class="oc-strip-sub">{{ n_total }} all-time</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">DEMOTIONS</span>
+            <span class="oc-strip-value down">{{ n_demotions_open }}</span>
+            <span class="oc-strip-sub">{{ n_demotions_30d }} fired · 30d</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">GEN COST · 30D</span>
+            <span class="oc-strip-value">${{ cost_30d }}</span>
+            <span class="oc-strip-sub">opus 4.7 generation</span>
+        </div>
+    </div>
+
+    {# ── Status donut ────────────────────────────────────────────── #}
+    {% if status_donut %}
+    <div class="card" style="margin-bottom:18px;">
+        <div class="card-header"><span class="card-title">Status mix · {{ n_total }} all-time</span></div>
+        <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:6px 0;">
+            <svg class="oc-donut" viewBox="0 0 100 100" id="genDonut">
+                <circle cx="50" cy="50" r="35" fill="none" stroke="var(--bg-card-hover)" stroke-width="14"/>
+            </svg>
+            <div class="oc-donut-legend" style="flex:1;min-width:180px;">
+                {% for d in status_donut %}
+                    <div class="oc-donut-legend-row">
+                        <span class="oc-donut-legend-key">
+                            <span class="oc-donut-legend-swatch" data-class="{{ d.key }}"></span>
+                            {{ d.key|upper }}
+                        </span>
+                        <span class="oc-donut-legend-pct">{{ d.n }} · {{ d.pct }}%</span>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div id="genDonutData" style="display:none;"
+             data-rows="{% for d in status_donut %}{{ d.key }}:{{ d.pct }}{% if not forloop.last %};{% endif %}{% endfor %}"></div>
+        <script>
+            (function() {
+                var rows = (document.getElementById('genDonutData').dataset.rows || '')
+                    .split(';').map(function(r){var p=r.split(':');return {k:p[0], pct:parseFloat(p[1])};})
+                    .filter(function(r){return !isNaN(r.pct);});
+                var colorOf = {pending:'#ffb000', approved:'#00e868', rejected:'#ff5e5e', expired:'#94a3b8'};
+                document.querySelectorAll('.oc-donut-legend-swatch').forEach(function(el){
+                    if (colorOf[el.dataset.class]) el.style.background = colorOf[el.dataset.class];
+                });
+                var svg = document.getElementById('genDonut');
+                if (!svg || rows.length === 0) return;
+                var ns = 'http://www.w3.org/2000/svg';
+                var cx=50, cy=50, r=35, c=2*Math.PI*r;
+                var offset = -c/4;
+                rows.forEach(function(row){
+                    var seg = document.createElementNS(ns, 'circle');
+                    var len = (row.pct/100) * c;
+                    seg.setAttribute('cx', cx); seg.setAttribute('cy', cy); seg.setAttribute('r', r);
+                    seg.setAttribute('fill','none');
+                    seg.setAttribute('stroke', colorOf[row.k] || '#5b9eff');
+                    seg.setAttribute('stroke-width', 14);
+                    seg.setAttribute('stroke-dasharray', len.toFixed(2) + ' ' + (c - len).toFixed(2));
+                    seg.setAttribute('stroke-dashoffset', offset.toFixed(2));
+                    svg.appendChild(seg);
+                    offset -= len;
+                });
+            })();
+        </script>
+    </div>
+    {% endif %}
+
+    {% if request.session.generated_result %}
+        <div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent);">
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;">Last generation cycle</div>
+            <pre style="white-space:pre-wrap;margin:6px 0 0;font-size:11px;">{{ request.session.generated_result }}</pre>
+        </div>
+    {% endif %}
+
+    {% if request.user.is_staff %}
+    <div style="display:flex;gap:8px;margin-bottom:20px;">
+        <form method="post" action="{% url 'generated_run_now' %}" style="display:inline;">
+            {% csrf_token %}
+            <button class="btn" type="submit">▶ Generate now (admin)</button>
+        </form>
+        <form method="post" action="{% url 'demoter_run_now' %}" style="display:inline;">
+            {% csrf_token %}
+            <button class="btn" type="submit">⊘ Run demoter pass (admin)</button>
+        </form>
+    </div>
+    {% if request.session.demoter_result %}
+        <div class="card" style="margin-bottom:14px;border-left:3px solid var(--down);">
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;">Last demoter pass</div>
+            <pre style="white-space:pre-wrap;margin:6px 0 0;font-size:11px;">{{ request.session.demoter_result }}</pre>
+        </div>
+    {% endif %}
+    {% endif %}
+
+    {% if demotions %}
+    <div class="card" style="margin-bottom:20px;border-left:3px solid var(--down);">
+        <div class="card-header"><span class="card-title">Recently auto-demoted (open)</span></div>
+        <table class="sv-perf-table">
+            <thead><tr><th>rule</th><th>criterion</th><th>demoted</th><th>metrics</th>{% if request.user.is_staff %}<th>action</th>{% endif %}</tr></thead>
+            <tbody>
+            {% for d in demotions %}
+                <tr>
+                    <td><strong>{{ d.rule_name }}</strong></td>
+                    <td><span class="badge badge-bearish">{{ d.criterion }}</span></td>
+                    <td>{{ d.demoted_at|date:"m-d H:i" }}</td>
+                    <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ d.metrics }}</td>
+                    {% if request.user.is_staff %}
+                    <td>
+                        <form method="post" action="{% url 'restore_rule_now' d.rule_name %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button class="btn btn-sm" type="submit">↻ Restore</button>
+                        </form>
+                    </td>
+                    {% endif %}
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <div class="card" style="margin-bottom:20px;">
+        <div class="card-header"><span class="card-title">Pending review</span></div>
+        {% if pending %}
+            {% for p in pending %}
+                <div style="border-bottom:1px solid var(--border);padding:14px 0;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <strong style="font-size:14px;">{{ p.proposed_name }}</strong>
+                        <span>
+                            <span class="badge badge-medium">{{ p.direction }}</span>
+                            <span style="color:var(--text-muted);font-size:11px;margin-left:6px;">conf {{ p.confidence|floatformat:2 }}</span>
+                        </span>
+                    </div>
+                    <div style="font-size:13px;line-height:1.5;color:var(--text-secondary);">{{ p.rationale_md }}</div>
+                    <div style="margin-top:6px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+                        inspiration: {{ p.inspiration_summary }} · classes: {{ p.asset_classes|join:", " }} · horizon {{ p.suggested_horizon_days }}d · min_match {{ p.min_match_score|floatformat:2 }}
+                    </div>
+                    <details style="margin-top:8px;">
+                        <summary style="cursor:pointer;font-size:11px;color:var(--text-muted);">conditions ({{ p.conditions|length }})</summary>
+                        <pre style="margin:6px 0 0;font-size:11px;background:var(--bg-elev);padding:8px;border-radius:4px;white-space:pre-wrap;">{{ p.conditions }}</pre>
+                    </details>
+                    {% if request.user.is_staff %}
+                    <div style="display:flex;gap:8px;margin-top:10px;">
+                        <form method="post" action="{% url 'generated_approve' p.id %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button class="btn btn-sm" type="submit" style="background:var(--accent);color:#000;">✓ Approve</button>
+                        </form>
+                        <form method="post" action="{% url 'generated_reject' p.id %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button class="btn btn-sm" type="submit">✗ Reject</button>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        {% else %}
+            <p style="color:var(--text-muted);">No pending proposals.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header"><span class="card-title">History</span></div>
+        <table class="sv-perf-table">
+            <thead><tr><th>created</th><th>name</th><th>direction</th><th>status</th><th>reviewed</th><th>by</th></tr></thead>
+            <tbody>
+            {% for h in history %}
+                <tr>
+                    <td>{{ h.created_at|date:"m-d H:i" }}</td>
+                    <td>{{ h.proposed_name }}</td>
+                    <td>{{ h.direction }}</td>
+                    <td>
+                        {% if h.status == "approved" %}<span style="color:var(--accent);">{{ h.status }}</span>
+                        {% elif h.status == "rejected" %}<span style="color:var(--down);">{{ h.status }}</span>
+                        {% else %}<span style="color:var(--text-muted);">{{ h.status }}</span>{% endif %}
+                    </td>
+                    <td>{% if h.reviewed_at %}{{ h.reviewed_at|date:"m-d H:i" }}{% endif %}</td>
+                    <td>{{ h.reviewed_by }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="6" style="color:var(--text-muted);">No proposals yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -104,6 +104,7 @@ def sauron_context(request):
         for s in active_signals.select_related("instrument").order_by("-score")[:5]:
             ticker.append({
                 "type": "signal", "symbol": s.instrument.symbol,
+                "title": s.title or "",
                 "direction": s.direction, "score": f"{s.score:.2f}",
                 "urgency": s.urgency, "url": "/signals/",
             })

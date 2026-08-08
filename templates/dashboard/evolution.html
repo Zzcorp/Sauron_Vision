@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Strategy Evolution — Sauron Vision{% endblock %}
+{% block page_title %}🧬 STRATEGY EVOLUTION{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SCHEMAS</span>
+        <span class="oc-strip-value">{{ schemas|length }}</span>
+        <span class="oc-strip-sub">parameter registries</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PROPOSED</span>
+        <span class="oc-strip-value {% if proposed %}up{% endif %}">{{ proposed|length }}</span>
+        <span class="oc-strip-sub">awaiting approval</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">APPLIED</span>
+        <span class="oc-strip-value">{{ applied|length }}</span>
+        <span class="oc-strip-sub">forked into RESEARCH</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">HISTORY</span>
+        <span class="oc-strip-value">{{ history|length }}</span>
+        <span class="oc-strip-sub">all mutations resolved</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SCORER</span>
+        <span class="oc-strip-value">WALK-FWD</span>
+        <span class="oc-strip-sub">70/30 train/test (P9.5)</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ROLE</span>
+        <span class="oc-strip-value">{% if is_admin %}ADMIN{% else %}VIEWER{% endif %}</span>
+        <span class="oc-strip-sub">{% if is_admin %}can apply/reject{% else %}read-only{% endif %}</span>
+    </div>
+</div>
+
+{% if not schemas %}
+<div class="card fade-in-up" style="margin-bottom: 24px; border-color: var(--accent-gold);">
+    <div style="padding: 16px;">
+        <div style="font-family: var(--font-display); font-size: 14px; color: var(--accent-gold); letter-spacing: 1px;">⚠ NO PARAMETER SCHEMAS REGISTERED</div>
+        <p style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin-top: 8px; line-height: 1.5;">
+            Phase 9 only evolves rules that have called <code>signals.evolution.register_schema(rule_name, schema)</code>.
+            Hand-coded rules without a schema are left alone — by design. Register a schema in your rule definition module to opt in.
+        </p>
+    </div>
+</div>
+{% endif %}
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Registered schemas</span></div>
+    {% if schemas %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Rule</th><th>Param count</th><th>Parameters</th></tr></thead>
+      <tbody>
+        {% for s in schemas %}
+          <tr>
+            <td>{{ s.rule_name }}</td>
+            <td>{{ s.n_params }}</td>
+            <td style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">{{ s.params|join:", " }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">None.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Pending mutations</span></div>
+    {% if proposed %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>#</th><th>Parent</th><th>Parent expectancy</th><th>Mutant score</th><th>Changed</th><th>Proposed</th>{% if is_admin %}<th>Decide</th>{% endif %}</tr></thead>
+      <tbody>
+        {% for m in proposed %}
+          <tr>
+            <td>#{{ m.id }}</td>
+            <td>{{ m.parent_rule|truncatechars:30 }}</td>
+            <td>{% if m.parent_expectancy is not None %}{{ m.parent_expectancy|floatformat:2 }}R{% else %}—{% endif %}</td>
+            <td class="{% if m.proposed_score and m.proposed_score > m.parent_expectancy %}up{% else %}down{% endif %}">
+                {% if m.proposed_score is not None %}{{ m.proposed_score|floatformat:2 }}R{% else %}—{% endif %}
+            </td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ m.parameters_changed|join:", "|truncatechars:60 }}</td>
+            <td style="font-size: 11px;">{{ m.proposed_at|timesince }} ago</td>
+            {% if is_admin %}
+            <td style="display:flex;gap:6px;">
+                <form method="post" action="{% url 'hq_apply_evolution' %}">{% csrf_token %}<input type="hidden" name="mutation_id" value="{{ m.id }}"><button class="btn btn-sm btn-primary" type="submit">Fork</button></form>
+                <form method="post" action="{% url 'hq_reject_evolution' %}">{% csrf_token %}<input type="hidden" name="mutation_id" value="{{ m.id }}"><button class="btn btn-sm btn-danger" type="submit">Reject</button></form>
+            </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p style="font-size: 11px; color: var(--text-muted); padding: 12px 16px;">
+        Forking creates a new RuleControl with the mutated parameters in RESEARCH stage. Phase 8 takes over from there;
+        the original rule keeps running until the fork outperforms it on the promotion ladder.
+    </p>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No pending mutations. Proposer runs Sundays at 05:00 UTC over decaying rules with registered schemas.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Decision history</span></div>
+    {% if history %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>#</th><th>Parent</th><th>State</th><th>Forked rule</th><th>Decided</th><th>By</th></tr></thead>
+      <tbody>
+        {% for m in history %}
+          <tr>
+            <td>#{{ m.id }}</td>
+            <td>{{ m.parent_rule|truncatechars:30 }}</td>
+            <td><span class="badge badge-{% if m.state == 'applied' %}bullish{% elif m.state == 'rejected' %}bearish{% else %}medium{% endif %}">{{ m.get_state_display }}</span></td>
+            <td>{{ m.forked_rule|default:"—"|truncatechars:36 }}</td>
+            <td>{% if m.applied_at %}{{ m.applied_at|date:"M d H:i" }}{% else %}—{% endif %}</td>
+            <td style="font-size: 11px;">{{ m.decided_by.username|default:"—" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No decisions yet.</p>
+    {% endif %}
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+.sv-perf-table .up { color: var(--accent-green); }
+.sv-perf-table .down { color: var(--accent-red); }
+</style>
+{% endblock %}

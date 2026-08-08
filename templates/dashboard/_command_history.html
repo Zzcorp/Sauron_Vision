@@ -1,0 +1,258 @@
+{# HISTORY tab — closed-trade analytics, decay alerts, with rich charts. #}
+
+{# ── 1. Top stat strip ────────────────────────────────────────────── #}
+<div class="oc-strip">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CLOSED 90D</span>
+        <span class="oc-strip-value">{{ n_closed }}</span>
+        <span class="oc-strip-sub">{{ n_wins }} wins</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">WIN RATE</span>
+        <span class="oc-strip-value">{{ win_rate }}%</span>
+        <span class="oc-strip-sub">90d rolling</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TOTAL R</span>
+        <span class="oc-strip-value {% if total_r > 0 %}up{% elif total_r < 0 %}down{% endif %}">{{ total_r }}R</span>
+        <span class="oc-strip-sub">summed across all rules</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">DECAY ALERTS</span>
+        <span class="oc-strip-value {% if decay_alerts %}down{% endif %}">{{ decay_alerts|length }}</span>
+        <span class="oc-strip-sub">unresolved</span>
+    </div>
+</div>
+
+{# ── 2. Cumulative R curve + Rolling 30d win rate (side by side) ──── #}
+<div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
+    <div class="card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">Cumulative R · last 90d</span>
+            <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+                {% if cum_r_points %}low {{ cum_r_min|floatformat:2 }} · high {{ cum_r_max|floatformat:2 }}{% endif %}
+            </span>
+        </div>
+        {% if cum_r_points %}
+            <svg class="oc-sparkline" viewBox="0 0 600 60" preserveAspectRatio="none" id="ocCumRSvg">
+                <defs>
+                    <linearGradient id="oc-spark-grad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.4"/>
+                        <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+                    </linearGradient>
+                </defs>
+                <path d=""/>
+            </svg>
+            <div id="ocCumRData" style="display:none;"
+                 data-points="{% for v in cum_r_points %}{{ v|floatformat:6 }}{% if not forloop.last %},{% endif %}{% endfor %}"
+                 data-min="{{ cum_r_min|floatformat:6 }}"
+                 data-max="{{ cum_r_max|floatformat:6 }}"></div>
+            <script>
+                (function() {
+                    var el = document.getElementById('ocCumRData');
+                    if (!el) return;
+                    var pts = (el.dataset.points || '').split(',').map(parseFloat).filter(function(v){return !isNaN(v);});
+                    if (pts.length < 2) return;
+                    var min = parseFloat(el.dataset.min);
+                    var max = parseFloat(el.dataset.max);
+                    var span = (max - min) || 1;
+                    var W = 600, H = 60, pad = 4;
+                    var lineCmds = [];
+                    for (var i = 0; i < pts.length; i++) {
+                        var x = (i / (pts.length - 1)) * (W - 2 * pad) + pad;
+                        var y = H - pad - ((pts[i] - min) / span) * (H - 2 * pad);
+                        lineCmds.push((i === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2));
+                    }
+                    var fillCmds = lineCmds.slice();
+                    fillCmds.push('L ' + (W - pad) + ' ' + (H - pad));
+                    fillCmds.push('L ' + pad + ' ' + (H - pad));
+                    fillCmds.push('Z');
+                    var svg = document.getElementById('ocCumRSvg');
+                    if (!svg) return;
+                    var path = svg.querySelector('path');
+                    if (path) path.setAttribute('d', lineCmds.join(' '));
+                    var ns = 'http://www.w3.org/2000/svg';
+                    var fill = document.createElementNS(ns, 'path');
+                    fill.setAttribute('d', fillCmds.join(' '));
+                    fill.setAttribute('class', 'oc-sparkline-fill');
+                    svg.insertBefore(fill, path);
+                    if (pts[pts.length-1] < pts[0]) svg.classList.add('bearish');
+                })();
+            </script>
+        {% else %}
+            <p class="oc-empty">No closed bot trades yet.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">Rolling 30d win-rate</span>
+            <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+                {% if win_rate_points %}{{ win_rate_points|length }} days · current {{ win_rate_points|last|default:"0" }}%{% endif %}
+            </span>
+        </div>
+        {% if win_rate_points %}
+            <svg class="oc-sparkline" viewBox="0 0 600 60" preserveAspectRatio="none" id="ocWrSvg">
+                <path d=""/>
+            </svg>
+            <div id="ocWrData" style="display:none;"
+                 data-points="{% for v in win_rate_points %}{{ v|floatformat:2 }}{% if not forloop.last %},{% endif %}{% endfor %}"></div>
+            <script>
+                (function() {
+                    var el = document.getElementById('ocWrData');
+                    if (!el) return;
+                    var pts = (el.dataset.points || '').split(',').map(parseFloat).filter(function(v){return !isNaN(v);});
+                    if (pts.length < 2) return;
+                    var min = 0, max = 100, span = 100;
+                    var W = 600, H = 60, pad = 4;
+                    var lineCmds = [];
+                    for (var i = 0; i < pts.length; i++) {
+                        var x = (i / (pts.length - 1)) * (W - 2 * pad) + pad;
+                        var y = H - pad - ((pts[i] - min) / span) * (H - 2 * pad);
+                        lineCmds.push((i === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2));
+                    }
+                    var svg = document.getElementById('ocWrSvg');
+                    if (!svg) return;
+                    var path = svg.querySelector('path');
+                    if (path) path.setAttribute('d', lineCmds.join(' '));
+                    /* Reference line at 50%. */
+                    var ns = 'http://www.w3.org/2000/svg';
+                    var ref = document.createElementNS(ns, 'line');
+                    ref.setAttribute('x1', pad); ref.setAttribute('x2', W - pad);
+                    var refY = H - pad - 0.5 * (H - 2 * pad);
+                    ref.setAttribute('y1', refY); ref.setAttribute('y2', refY);
+                    ref.setAttribute('stroke', 'rgba(255,255,255,0.06)');
+                    ref.setAttribute('stroke-dasharray', '3 3');
+                    svg.insertBefore(ref, path);
+                })();
+            </script>
+        {% else %}
+            <p class="oc-empty">Rolling win-rate fills as more days accumulate.</p>
+        {% endif %}
+    </div>
+</div>
+
+{# ── 3. Day-of-week heatmap + Top rules by Sharpe ─────────────────── #}
+<div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
+    <div class="card">
+        <div class="card-header"><span class="card-title">Day-of-week performance</span></div>
+        {% if dow_max_n > 0 %}
+            <div class="oc-heatmap">
+                {% for d in dow_stats %}
+                    <div class="oc-heatmap-cell"
+                         style="background: {% if d.avg_r > 0 %}rgba(0,232,104,{% widthratio d.n dow_max_n 35 %}%){% elif d.avg_r < 0 %}rgba(255,94,94,{% widthratio d.n dow_max_n 35 %}%){% else %}var(--bg-card){% endif %};">
+                        <div class="dow-label">{{ d.label }}</div>
+                        <div class="dow-n">{{ d.n }}</div>
+                        <div class="dow-r" style="color: {% if d.avg_r > 0 %}var(--accent){% elif d.avg_r < 0 %}#ff5e5e{% else %}var(--text-muted){% endif %};">{{ d.avg_r }}R</div>
+                    </div>
+                {% endfor %}
+            </div>
+            <p style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:8px;">
+                Cell darkness = trade count · color = avg R sign
+            </p>
+        {% else %}
+            <p class="oc-empty">No closed trades yet.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header"><span class="card-title">Top 5 rules by Sharpe</span></div>
+        {% if top_rules_sharpe %}
+            <table class="sv-perf-table">
+                <thead><tr><th>rule</th><th>n</th><th>avg R</th><th>Sharpe</th></tr></thead>
+                <tbody>
+                    {% for r in top_rules_sharpe %}
+                        <tr>
+                            <td><strong style="font-size:12px;">{{ r.rule_name|truncatechars:24 }}</strong></td>
+                            <td>{{ r.n }}</td>
+                            <td class="{% if r.avg_r > 0 %}up{% elif r.avg_r < 0 %}down{% endif %}">{{ r.avg_r }}</td>
+                            <td><strong>{{ r.sharpe }}</strong></td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="oc-empty">Need ≥5 closed trades per rule for Sharpe.</p>
+        {% endif %}
+    </div>
+</div>
+
+{# ── 4. Per-rule × asset_class table ──────────────────────────────── #}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="card-title">Per rule × asset_class · 90d</span>
+        <a href="{% url 'bot_performance_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">full track record →</a>
+    </div>
+    {% if by_rule %}
+        <div class="table-wrapper">
+        <table class="sv-perf-table">
+            <thead><tr><th>rule</th><th>asset</th><th>n</th><th>avg R</th><th>total P&amp;L</th></tr></thead>
+            <tbody>
+                {% for r in by_rule %}
+                    <tr>
+                        <td><strong>{{ r.rule_name|truncatechars:32 }}</strong></td>
+                        <td><span class="badge badge-medium">{{ r.asset_class }}</span></td>
+                        <td>{{ r.n }}</td>
+                        <td class="{% if r.avg_r > 0 %}up{% elif r.avg_r < 0 %}down{% endif %}">{{ r.avg_r|floatformat:2 }}</td>
+                        <td class="{% if r.total_pnl > 0 %}up{% elif r.total_pnl < 0 %}down{% endif %}">{{ r.total_pnl|floatformat:2 }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    {% else %}
+        <p class="oc-empty">No closed bot trades by rule yet.</p>
+    {% endif %}
+</div>
+
+{# ── 5. Decay alerts ──────────────────────────────────────────────── #}
+{% if decay_alerts %}
+<div class="card" style="margin-bottom:18px;border-left:3px solid #ff5e5e;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="card-title">Decay alerts (unresolved)</span>
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ decay_alerts|length }} active</span>
+    </div>
+    <table class="sv-perf-table">
+        <thead><tr><th>rule</th><th>asset</th><th>recent avg R</th><th>baseline avg R</th><th>triggers</th><th>detected</th></tr></thead>
+        <tbody>
+            {% for a in decay_alerts %}
+                <tr>
+                    <td><strong>{{ a.rule_name }}</strong></td>
+                    <td><span class="badge badge-medium">{{ a.asset_class }}</span></td>
+                    <td class="down">{{ a.recent_avg_r|floatformat:2 }}</td>
+                    <td>{{ a.baseline_avg_r|floatformat:2 }}</td>
+                    <td style="font-family:var(--font-mono);font-size:11px;">{{ a.triggers|join:", " }}</td>
+                    <td style="font-size:11px;">{{ a.detected_at|date:"m-d H:i" }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{# ── 6. Recent closed trades (last 30) ────────────────────────────── #}
+<div class="card">
+    <div class="card-header"><span class="card-title">Recent closed trades</span></div>
+    {% if recent_closed %}
+        <div class="table-wrapper">
+        <table class="sv-perf-table">
+            <thead><tr><th>closed</th><th>symbol</th><th>side</th><th>rule</th><th>R</th><th>P&amp;L</th><th>outcome</th></tr></thead>
+            <tbody>
+                {% for t in recent_closed %}
+                    <tr>
+                        <td style="font-family:var(--font-mono);font-size:11px;">{{ t.closed_at|date:"m-d H:i" }}</td>
+                        <td><strong>{{ t.symbol }}</strong></td>
+                        <td><span class="oc-mini-side {{ t.side }}">{{ t.side }}</span></td>
+                        <td style="font-size:11px;">{{ t.rule_name|truncatechars:24 }}</td>
+                        <td class="{% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{{ t.realized_r|floatformat:2 }}R</td>
+                        <td class="{% if t.pnl > 0 %}up{% elif t.pnl < 0 %}down{% endif %}">{{ t.pnl|floatformat:2 }}</td>
+                        <td style="font-size:11px;color:var(--text-muted);">{{ t.outcome }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    {% else %}
+        <p class="oc-empty">No recent closed trades.</p>
+    {% endif %}
+</div>

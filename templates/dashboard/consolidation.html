@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Consolidation runs · Sauron's Mind{% endblock %}
+{% block content %}
+<div class="page-content">
+    {# ── Top stat strip — 6 cells ─────────────────────────────────── #}
+    <div class="oc-strip" style="margin-bottom:18px;">
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">RUNS · 7D</span>
+            <span class="oc-strip-value">{{ n_7d }}</span>
+            <span class="oc-strip-sub">{{ n_30d }} in 30d</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">SUCCESS · 30D</span>
+            <span class="oc-strip-value {% if success_rate_30d >= 90 %}up{% elif success_rate_30d < 70 %}down{% endif %}">{{ success_rate_30d }}%</span>
+            <span class="oc-strip-sub">{{ n_errors_30d }} errored</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">NODES ADDED · 7D</span>
+            <span class="oc-strip-value up">+{{ sum_nodes_added_7d }}</span>
+            <span class="oc-strip-sub">graph growth</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">SUPERSEDED · 7D</span>
+            <span class="oc-strip-value">↻{{ sum_nodes_superseded_7d }}</span>
+            <span class="oc-strip-sub">version churn</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">HYP RESOLVED · 7D</span>
+            <span class="oc-strip-value">{{ sum_hyp_resolved_7d }}</span>
+            <span class="oc-strip-sub">market settled</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">OBS PRUNED · 7D</span>
+            <span class="oc-strip-value">{{ sum_obs_pruned_7d }}</span>
+            <span class="oc-strip-sub">queue compaction</span>
+        </div>
+    </div>
+
+    {# ── Latest run callout ─────────────────────────────────────────── #}
+    {% if latest_run %}
+    <div class="card" style="margin-bottom:18px;border-left:3px solid {% if latest_run.error %}var(--accent-red){% else %}var(--accent){% endif %};">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">Latest run · {{ latest_run.started_at|date:"Y-m-d H:i" }} UTC</span>
+            <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
+                {{ latest_run.started_at|timesince }} ago
+            </span>
+        </div>
+        <div class="grid grid-4" style="gap:12px;font-family:var(--font-mono);font-size:12px;">
+            <div><span style="color:var(--text-muted);font-size:9px;letter-spacing:1px;">NODES +</span><div class="up" style="font-size:18px;font-weight:700;">+{{ latest_run.n_nodes_added }}</div></div>
+            <div><span style="color:var(--text-muted);font-size:9px;letter-spacing:1px;">NODES ↻</span><div style="font-size:18px;font-weight:700;">{{ latest_run.n_nodes_superseded }}</div></div>
+            <div><span style="color:var(--text-muted);font-size:9px;letter-spacing:1px;">HYP RESOLVED</span><div style="font-size:18px;font-weight:700;">{{ latest_run.n_hypotheses_resolved }}</div></div>
+            <div><span style="color:var(--text-muted);font-size:9px;letter-spacing:1px;">OBS PRUNED</span><div style="font-size:18px;font-weight:700;">{{ latest_run.n_observations_pruned }}</div></div>
+        </div>
+        {% if latest_run.notes %}
+            <p style="margin:12px 0 0 0;font-size:12px;color:var(--text-secondary);font-style:italic;">{{ latest_run.notes|truncatechars:300 }}</p>
+        {% endif %}
+        {% if latest_run.error %}
+            <p style="margin:12px 0 0 0;color:var(--accent-red);font-size:12px;">⚠ {{ latest_run.error|truncatechars:300 }}</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if request.session.consolidation_result %}
+        <div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent);">
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;">Last manual run</div>
+            <pre style="white-space:pre-wrap;margin:6px 0 0;font-size:11px;">{{ request.session.consolidation_result }}</pre>
+        </div>
+    {% endif %}
+
+    {% if request.user.is_staff %}
+    <form method="post" action="{% url 'consolidation_run_now' %}" style="margin-bottom:20px;">
+        {% csrf_token %}
+        <button class="btn" type="submit">▶ Run consolidation now (admin)</button>
+    </form>
+    {% endif %}
+
+    <div class="card">
+        <div class="card-header"><span class="card-title">Recent runs</span></div>
+        <table class="sv-perf-table">
+            <thead><tr><th>started</th><th>nodes +</th><th>nodes ↻</th><th>hyp resolved</th><th>obs pruned</th><th>notes</th><th>error</th></tr></thead>
+            <tbody>
+            {% for r in runs %}
+                <tr>
+                    <td>{{ r.started_at|date:"m-d H:i" }}</td>
+                    <td>{{ r.n_nodes_added }}</td>
+                    <td>{{ r.n_nodes_superseded }}</td>
+                    <td>{{ r.n_hypotheses_resolved }}</td>
+                    <td>{{ r.n_observations_pruned }}</td>
+                    <td style="font-size:11px;color:var(--text-muted);">{{ r.notes|truncatechars:120 }}</td>
+                    <td>{% if r.error %}<span style="color:var(--down);">{{ r.error|truncatechars:60 }}</span>{% endif %}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="7" style="color:var(--text-muted);">No runs yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

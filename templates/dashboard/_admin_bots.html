@@ -19,7 +19,7 @@
             <td><span class="badge">{{ row.mode }}</span></td>
             <td>{{ row.market }}</td>
             <td>{% if row.enabled %}✅{% else %}⏸{% endif %}</td>
-            <td>{% if row.shadow %}👁{% else %}—{% endif %}</td>
+            <td>{% if row.shadow %}⊙{% else %}—{% endif %}</td>
             <td>{% if row.heartbeat_age %}{{ row.heartbeat_age|floatformat:0 }}s{% else %}—{% endif %}</td>
             <td>{{ row.open_trades }}</td>
             <td>{% if row.circuit %}<span style="color:var(--accent-red);">{{ row.circuit }}</span>{% else %}ok{% endif %}</td>

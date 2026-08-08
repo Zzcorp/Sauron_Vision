@@ -3,25 +3,36 @@
 {% block page_title %}INSTRUMENTS & LIVE QUOTES{% endblock %}
 
 {% block content %}
-<!-- Summary Stats -->
-<div class="grid grid-4" style="margin-bottom: 24px;">
-    <div class="stat-box fade-in-up delay-1">
-        <div class="stat-label">Tracked</div>
-        <div class="stat-value">{{ total|default:"0" }}</div>
-        <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">instruments</div>
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TRACKED</span>
+        <span class="oc-strip-value">{{ total|default:"0" }}</span>
+        <span class="oc-strip-sub">instruments in universe</span>
     </div>
-    <div class="stat-box fade-in-up delay-2">
-        <div class="stat-label">Live Data</div>
-        <div class="stat-value" style="color:var(--accent);">{{ with_quotes|default:"0" }}</div>
-        <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">with price feed</div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">LIVE FEED</span>
+        <span class="oc-strip-value up">{{ with_quotes|default:"0" }}</span>
+        <span class="oc-strip-sub">with price data</span>
     </div>
-    <div class="stat-box fade-in-up delay-3">
-        <div class="stat-label">Gainers</div>
-        <div class="stat-value" style="color:var(--accent);">{{ gainers|default:"0" }}</div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">GAINERS</span>
+        <span class="oc-strip-value up">{{ gainers|default:"0" }}</span>
+        <span class="oc-strip-sub">currently positive</span>
     </div>
-    <div class="stat-box fade-in-up delay-4">
-        <div class="stat-label">Losers</div>
-        <div class="stat-value" style="color:var(--accent-red);">{{ losers|default:"0" }}</div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">LOSERS</span>
+        <span class="oc-strip-value down">{{ losers|default:"0" }}</span>
+        <span class="oc-strip-sub">currently negative</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">EXCHANGES</span>
+        <span class="oc-strip-value">{{ exchanges|length }}</span>
+        <span class="oc-strip-sub">distinct venues</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">COUNTRIES</span>
+        <span class="oc-strip-value">{{ countries|length }}</span>
+        <span class="oc-strip-sub">distinct issuers</span>
     </div>
 </div>
 

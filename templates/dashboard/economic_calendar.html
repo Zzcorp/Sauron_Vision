@@ -3,27 +3,36 @@
 {% block page_title %}ECONOMIC CALENDAR{% endblock %}
 
 {% block content %}
-<!-- Outlook Summary Cards -->
-<div class="grid grid-4" style="margin-bottom: 24px;">
-    <div class="stat-box fade-in-up delay-1">
-        <div class="stat-label">This Week</div>
-        <div class="stat-value">{{ total_week|default:"0" }}</div>
-        <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">events ahead</div>
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">THIS WEEK</span>
+        <span class="oc-strip-value">{{ total_week|default:"0" }}</span>
+        <span class="oc-strip-sub">events ahead</span>
     </div>
-    <div class="stat-box fade-in-up delay-2">
-        <div class="stat-label">High Impact (7d)</div>
-        <div class="stat-value" style="color: var(--accent-red);">{{ high_impact_week|default:"0" }}</div>
-        <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">market-moving events</div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">HIGH IMPACT · 7D</span>
+        <span class="oc-strip-value down">{{ high_impact_week|default:"0" }}</span>
+        <span class="oc-strip-sub">market-movers</span>
     </div>
-    <div class="stat-box fade-in-up delay-3">
-        <div class="stat-label">30-Day Outlook</div>
-        <div class="stat-value">{{ total_month|default:"0" }}</div>
-        <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">total events</div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">30D OUTLOOK</span>
+        <span class="oc-strip-value">{{ total_month|default:"0" }}</span>
+        <span class="oc-strip-sub">total events</span>
     </div>
-    <div class="stat-box fade-in-up delay-4">
-        <div class="stat-label">High Impact (30d)</div>
-        <div class="stat-value" style="color: var(--accent-gold);">{{ high_impact_month|default:"0" }}</div>
-        <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">critical releases</div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">HIGH IMPACT · 30D</span>
+        <span class="oc-strip-value down">{{ high_impact_month|default:"0" }}</span>
+        <span class="oc-strip-sub">critical releases</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">REGIONS</span>
+        <span class="oc-strip-value">{{ top_countries|length }}</span>
+        <span class="oc-strip-sub">distinct issuers</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">REFRESH</span>
+        <span class="oc-strip-value">DAILY</span>
+        <span class="oc-strip-sub">fetched 06:00 UTC</span>
     </div>
 </div>
 

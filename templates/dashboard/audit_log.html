@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Audit Log — Sauron Vision{% endblock %}
+{% block page_title %}⊠ AUDIT LOG · IMMUTABLE TRADE DECISION CHAIN{% endblock %}
+
+{% block content %}
+
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TOTAL ENTRIES</span>
+        <span class="oc-strip-value">{{ total }}</span>
+        <span class="oc-strip-sub">all-time chain length</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CHAIN INTEGRITY</span>
+        <span class="oc-strip-value {% if integrity.ok %}up{% else %}down{% endif %}">{% if integrity.ok %}✓ OK{% else %}✗ BROKEN{% endif %}</span>
+        <span class="oc-strip-sub">last {{ sample_window }} verified</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TRADES OPEN/CLOSE</span>
+        <span class="oc-strip-value">{{ by_kind.trade_open|default:0 }} / {{ by_kind.trade_close|default:0 }}</span>
+        <span class="oc-strip-sub">trade lifecycle</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">GATE REJECTS</span>
+        <span class="oc-strip-value down">{{ by_kind.gate_reject|default:0 }}</span>
+        <span class="oc-strip-sub">orchestrator blocks</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PROPOSALS</span>
+        <span class="oc-strip-value">{{ by_kind.proposal_approved|default:0 }} / {{ by_kind.proposal_rejected|default:0 }}</span>
+        <span class="oc-strip-sub">approved / rejected</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RULE LIFECYCLE</span>
+        <span class="oc-strip-value">{{ by_kind.rule_demoted|default:0 }} / {{ by_kind.rule_restored|default:0 }}</span>
+        <span class="oc-strip-sub">demoted / restored</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <span class="card-title">Chain integrity</span>
+        <a href="{% url 'audit_export' %}" class="btn btn-sm">⬇ Export CSV</a>
+    </div>
+    <p class="form-hint" style="margin:0 0 8px;line-height:1.5;font-size:11px;">
+        Each row's <code>payload_hash</code> = sha256(<code>prev_hash</code> || kind || canonical(data)).
+        Mutating any past row breaks the chain — this verify recomputes hashes for the most recent
+        {{ sample_window }} entries and flags any breaks. Full-chain verify available via the audit module.
+    </p>
+    {% if integrity.breaks %}
+        <div style="margin-top:10px;padding:12px;background:rgba(255,68,68,0.08);border:1px solid rgba(255,68,68,0.4);border-radius:var(--radius);">
+            <strong style="color:#ff5e5e;">{{ integrity.breaks|length }} break(s) detected</strong>
+            <ul style="margin:8px 0 0 18px;font-family:var(--font-mono);font-size:11px;">
+                {% for b in integrity.breaks %}
+                    <li>row #{{ b.id }} — {{ b.type }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Recent Entries</span></div>
+    {% if recent %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>ID</th><th>When</th><th>User</th><th>Kind</th><th>Summary</th><th>Hash (prefix)</th></tr></thead>
+        <tbody>
+        {% for e in recent %}
+            <tr>
+                <td>#{{ e.id }}</td>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ e.created_at|date:"m-d H:i:s" }}</td>
+                <td style="font-size:11px;">{{ e.user.username|default:"—" }}</td>
+                <td><span class="badge badge-medium">{{ e.kind }}</span></td>
+                <td style="font-size:11px;color:var(--text-muted);max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    {% if e.kind == "trade_open" or e.kind == "trade_close" %}
+                        {{ e.data.asset_class }}/{{ e.data.symbol }} {{ e.data.side }}
+                        {% if e.kind == "trade_close" %}
+                            · {{ e.data.outcome }} · {{ e.data.realized_r|floatformat:2 }}R
+                        {% endif %}
+                    {% elif e.kind == "gate_reject" %}
+                        {{ e.data.asset_class }}/{{ e.data.symbol }} {{ e.data.side }} · {{ e.data.reason|truncatechars:120 }}
+                    {% else %}
+                        {{ e.data|stringformat:".s"|truncatechars:120 }}
+                    {% endif %}
+                </td>
+                <td style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">{{ e.payload_hash|slice:":12" }}…</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p class="eye-empty">No audit entries yet — they'll appear once bots open/close trades or the orchestrator gates an entry.</p>
+    {% endif %}
+</div>
+
+{% block extra_css %}
+<style>
+    .eye-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; font-style: italic; }
+    code { font-family: var(--font-mono); font-size: 11px; color: var(--accent); }
+</style>
+{% endblock %}
+{% endblock %}

@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Exposure Breakdown — Sauron Vision{% endblock %}
+{% block page_title %}⌬ EXPOSURE BREAKDOWN · ORCHESTRATOR'S VIEW{% endblock %}
+
+{% block content %}
+
+<div style="margin-bottom:14px;">
+    <a href="{% url 'eye_dashboard' %}" style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">← back to Eye</a>
+</div>
+
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">OPEN POSITIONS</span>
+        <span class="oc-strip-value">{{ n_open }}</span>
+        <span class="oc-strip-sub">contributing to gate</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">THEMES TRACKED</span>
+        <span class="oc-strip-value">{{ exposures.themes|length }}</span>
+        <span class="oc-strip-sub">dimensions in the model</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CURRENCIES</span>
+        <span class="oc-strip-value">{{ exposures.currencies|length }}</span>
+        <span class="oc-strip-sub">FX dimensions tracked</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SECTORS</span>
+        <span class="oc-strip-value">{{ exposures.sectors|length }}</span>
+        <span class="oc-strip-sub">equity sub-clusters</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SIZING MODE</span>
+        <span class="oc-strip-value {% if weighted %}up{% endif %}">{% if weighted %}WEIGHTED{% else %}±1{% endif %}</span>
+        <span class="oc-strip-sub">{% if weighted %}notional-scaled{% else %}flat per position{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">VOL-LONG</span>
+        <span class="oc-strip-value">{{ exposures.vol_long|default:0|floatformat:1 }}</span>
+        <span class="oc-strip-sub">orchestrator dimension</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="card-title">Aggregated Exposure</span>
+        {% if weighted %}<span class="eye-stat-pill pill-ok">size-weighted</span>{% else %}<span class="eye-stat-pill pill-off">±1 per position</span>{% endif %}
+    </div>
+    <p class="form-hint" style="margin:0 0 12px;font-size:11px;">
+        These totals are what `gate_new_entry` consults when blocking new trades.
+        The table below shows which open positions contribute and by how much.
+    </p>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+        <div style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-void);">
+            <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">themes</div>
+            {% for theme, val in exposures.themes.items %}
+                <div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;">
+                    <span>{{ theme }}</span><span class="{% if val > 0 %}up{% elif val < 0 %}down{% endif %}">{{ val|floatformat:1 }}</span>
+                </div>
+            {% endfor %}
+        </div>
+        <div style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-void);">
+            <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">currencies (forex)</div>
+            {% if exposures.currencies %}
+                {% for ccy, val in exposures.currencies.items %}
+                    <div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;">
+                        <span>{{ ccy }}</span><span class="{% if val > 0 %}up{% elif val < 0 %}down{% endif %}">{{ val|floatformat:1 }}</span>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <span class="eye-empty">no forex positions open</span>
+            {% endif %}
+        </div>
+        <div style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-void);">
+            <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">sectors</div>
+            {% if exposures.sectors %}
+                {% for sec, n in exposures.sectors.items %}
+                    <div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;">
+                        <span>{{ sec }}</span><span>{{ n }}</span>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <span class="eye-empty">no sector-tagged positions</span>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Per-Position Contributions ({{ n_open }} open)</span></div>
+    {% if rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr>
+            <th>Class</th><th>Symbol</th><th>Side</th><th>Weight</th>
+            <th>USD</th><th>Equity</th><th>Vol-long</th>
+            <th>Currencies</th><th>Sector</th>
+        </tr></thead>
+        <tbody>
+        {% for r in rows %}
+            <tr>
+                <td><span class="badge badge-medium">{{ r.asset_class }}</span></td>
+                <td><strong>{{ r.symbol }}</strong>{% if r.right %} {{ r.right }}{% endif %}</td>
+                <td><span class="badge badge-{% if r.side == 'BUY' %}bullish{% else %}bearish{% endif %}">{{ r.side }}</span></td>
+                <td>{{ r.weight }}×</td>
+                <td class="{% if r.themes.usd > 0 %}up{% elif r.themes.usd < 0 %}down{% endif %}">{{ r.themes.usd|floatformat:2 }}</td>
+                <td class="{% if r.themes.equity > 0 %}up{% elif r.themes.equity < 0 %}down{% endif %}">{{ r.themes.equity|floatformat:2 }}</td>
+                <td>{{ r.themes.vol_long|floatformat:2 }}</td>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+                    {% for ccy, v in r.currencies.items %}{{ ccy }}{{ v|floatformat:1 }} {% endfor %}
+                </td>
+                <td style="font-size:11px;color:var(--text-muted);">{{ r.sector|default:"—" }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p class="eye-empty">No open positions.</p>
+    {% endif %}
+</div>
+
+{% block extra_css %}
+<style>
+    .eye-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; font-style: italic; }
+    .eye-stat-pill { display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:12px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px; }
+    .pill-ok { background: rgba(0,232,104,0.10); color: var(--accent); }
+    .pill-off { background: var(--bg-card-hover); color: var(--text-muted); }
+</style>
+{% endblock %}
+{% endblock %}

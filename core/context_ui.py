@@ -15,14 +15,33 @@ def ui_extras(request):
         "ui_metrics": {},
         "ui_headband": [],
     }
-    # ── Watchlist (with live quotes joined) ────────────────
+    # ── Watchlist (with live quotes + 12-bar sparkline) ──
     try:
         from instruments.models import Instrument
-        from market_data.models import LiveQuote
-        qs = Instrument.objects.filter(is_watchlist=True, is_active=True)[:40]
+        from market_data.models import PriceData
+        qs = list(Instrument.objects.filter(is_watchlist=True, is_active=True)[:40])
+        # Bulk-fetch last 12 daily closes for all watchlist instruments in
+        # one query, then group by instrument id to avoid N+1.
+        inst_ids = [i.id for i in qs]
+        spark_rows = list(
+            PriceData.objects.filter(
+                instrument_id__in=inst_ids, timeframe="1d",
+            ).order_by("instrument_id", "-timestamp")
+            .values("instrument_id", "timestamp", "close")[:len(inst_ids) * 12]
+        )
+        spark_by_inst: dict = {}
+        for r in spark_rows:
+            spark_by_inst.setdefault(r["instrument_id"], []).append(float(r["close"]))
+        # Reverse so they're oldest-first, cap at 12.
+        for k in spark_by_inst:
+            spark_by_inst[k] = list(reversed(spark_by_inst[k]))[-12:]
+
         items = []
         for inst in qs:
             q = _safe(lambda: inst.live_quote, None)
+            spark = spark_by_inst.get(inst.id, [])
+            spark_min = min(spark) if spark else 0
+            spark_max = max(spark) if spark else 0
             items.append({
                 "symbol": inst.symbol,
                 "name": inst.name,
@@ -33,6 +52,9 @@ def ui_extras(request):
                 "ask": float(q.ask) if q and q.ask is not None else None,
                 "volume": int(q.volume) if q else 0,
                 "updated_at": q.updated_at.isoformat() if q and q.updated_at else None,
+                "spark": spark,
+                "spark_min": spark_min,
+                "spark_max": spark_max,
             })
         data["ui_watchlist"] = items
     except Exception:

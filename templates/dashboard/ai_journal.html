@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}AI Journal — Sauron Vision{% endblock %}
+{% block page_title %}🧠 AI JOURNAL · DECAY · COSTS{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">JOURNAL ENTRIES</span>
+        <span class="oc-strip-value">{{ journal_entries|length }}</span>
+        <span class="oc-strip-sub">recent (last 30)</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">DECAY INVESTIGATIONS</span>
+        <span class="oc-strip-value {% if investigations %}down{% endif %}">{{ investigations|length }}</span>
+        <span class="oc-strip-sub">edge erosion probes</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TASKS · 7D</span>
+        <span class="oc-strip-value">{{ tasks_7d_count }}</span>
+        <span class="oc-strip-sub">{{ tasks_7d_failures }} failures</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">COST · 7D</span>
+        <span class="oc-strip-value">${{ tasks_7d_cost|floatformat:2 }}</span>
+        <span class="oc-strip-sub">claude API spend</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">AGENTS USED</span>
+        <span class="oc-strip-value">{{ cost_breakdown|length }}</span>
+        <span class="oc-strip-sub">distinct in 7d</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">GRADES</span>
+        <span class="oc-strip-value">{{ grade_dist|length }}</span>
+        <span class="oc-strip-sub">distinct grade buckets</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Recent journal entries</span></div>
+    {% if journal_entries %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Time</th><th>Subject</th><th>Grade</th><th>Takeaway</th><th>Tags</th><th>Mood</th></tr></thead>
+      <tbody>
+        {% for e in journal_entries %}
+          <tr>
+            <td>{{ e.created_at|date:"M d H:i" }}</td>
+            <td>
+              {% if e.signal %}{{ e.signal.instrument.symbol }} · {{ e.signal.rule_name|truncatechars:24 }}
+              {% elif e.bot_trade %}{{ e.bot_trade.symbol }} (bot)
+              {% elif e.position %}{{ e.position.instrument.symbol }} (pos)
+              {% else %}—{% endif %}
+            </td>
+            <td><span class="badge badge-{% if e.grade == 'A' or e.grade == 'B' %}bullish{% elif e.grade == 'D' or e.grade == 'F' %}bearish{% else %}medium{% endif %}">{{ e.grade }}</span></td>
+            <td>{{ e.key_takeaway|truncatechars:80 }}</td>
+            <td style="font-size: 11px;">{{ e.tags|join:", "|truncatechars:40 }}</td>
+            <td style="font-size: 11px;">{{ e.emotional_state }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">📓</div>
+            <p>NO JOURNAL ENTRIES — entries are auto-generated when a signal closes with |R| ≥ 0.5.</p>
+        </div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Decay investigations</span></div>
+    {% if investigations %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Time</th><th>Rule</th><th>Recent</th><th>Baseline</th><th>Action</th><th>Hypothesis</th></tr></thead>
+      <tbody>
+        {% for i in investigations %}
+          <tr>
+            <td>{{ i.created_at|date:"M d H:i" }}</td>
+            <td>{{ i.rule_name|truncatechars:32 }}</td>
+            <td class="down">{{ i.recent_expectancy|floatformat:2 }}R (n={{ i.recent_n }})</td>
+            <td class="up">{{ i.baseline_expectancy|floatformat:2 }}R (n={{ i.baseline_n }})</td>
+            <td><span class="badge badge-medium">{{ i.recommended_action }}</span></td>
+            <td>{{ i.hypothesis|truncatechars:120 }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">🔬</div>
+            <p>NO INVESTIGATIONS — investigations run nightly when decay_flag fires for a rule.</p>
+        </div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Agent activity (last 7d) · {{ tasks_7d_failures }} failure(s)</span></div>
+    {% if cost_breakdown %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Agent</th><th>Calls</th><th>Failures</th><th>Avg duration</th><th>Total cost</th></tr></thead>
+      <tbody>
+        {% for row in cost_breakdown %}
+          <tr {% if row.fail_count %}style="background: rgba(255,64,64,0.05);"{% endif %}>
+            <td>{{ row.agent }}</td>
+            <td>{{ row.n }}</td>
+            <td>{{ row.fail_count }}</td>
+            <td>{{ row.avg_dur|floatformat:1 }}s</td>
+            <td>${{ row.total_cost|floatformat:4 }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p style="color: var(--text-muted); padding: 16px;">No agent activity in last 7 days.</p>
+    {% endif %}
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+.sv-perf-table .up { color: var(--accent-green); }
+.sv-perf-table .down { color: var(--accent-red); }
+</style>
+{% endblock %}

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Event Engine — Sauron Vision{% endblock %}
+{% block page_title %}⚡ EVENT ENGINE · REAL-TIME{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">FAST RULES</span>
+        <span class="oc-strip-value">{{ rules_summary|length }}</span>
+        <span class="oc-strip-sub">registered</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">EVENTS · 24H</span>
+        <span class="oc-strip-value">{{ events_24h }}</span>
+        <span class="oc-strip-sub">received</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">FIRED · 24H</span>
+        <span class="oc-strip-value up">{{ fired_24h }}</span>
+        <span class="oc-strip-sub">at least one rule matched</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">EVENT TYPES</span>
+        <span class="oc-strip-value">{{ by_type|length }}</span>
+        <span class="oc-strip-sub">distinct in 24h</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">LATENCY TARGET</span>
+        <span class="oc-strip-value">≤ 200ms</span>
+        <span class="oc-strip-sub">per-rule budget</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SHOWN</span>
+        <span class="oc-strip-value">{{ recent|length }}</span>
+        <span class="oc-strip-sub">most recent events</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Registered fast rules</span></div>
+    {% if rules_summary %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Rule</th><th>Class</th><th>Listens to</th><th>Cooldown</th></tr></thead>
+      <tbody>
+        {% for r in rules_summary %}
+          <tr>
+            <td>{{ r.rule_name }}</td>
+            <td style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">{{ r.class_name }}</td>
+            <td>{{ r.event_types|join:", " }}</td>
+            <td>{{ r.cooldown_seconds }}s</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No fast rules registered.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Event types (last 24h)</span></div>
+    {% if by_type %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Event type</th><th>Count</th><th>Avg dispatch (ms)</th></tr></thead>
+      <tbody>
+        {% for row in by_type %}
+          <tr>
+            <td>{{ row.event_type }}</td>
+            <td>{{ row.n }}</td>
+            <td>{{ row.avg_ms|floatformat:1 }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No events in the last 24 hours.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Recent events</span></div>
+    {% if recent %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Time</th><th>Type</th><th>Symbol</th><th>Eval'd / Fired</th><th>ms</th><th>Rules fired</th><th>Signals</th></tr></thead>
+      <tbody>
+        {% for e in recent %}
+          <tr>
+            <td>{{ e.received_at|date:"M d H:i:s" }}</td>
+            <td>{{ e.event_type }}</td>
+            <td>{{ e.symbol }}</td>
+            <td>{{ e.rules_evaluated }} / <strong>{{ e.rules_fired }}</strong></td>
+            <td>{{ e.dispatch_ms|floatformat:1 }}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ e.fired_rule_names|join:", "|truncatechars:60 }}</td>
+            <td>{{ e.signal_ids|length }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No recent events.</p>
+    {% endif %}
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+</style>
+{% endblock %}

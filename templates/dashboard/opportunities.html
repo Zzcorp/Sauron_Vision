@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Opportunities — Sauron Vision{% endblock %}
+{% block page_title %}🔭 OPPORTUNITY SCANNER{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SETUPS</span>
+        <span class="oc-strip-value">{{ setup_stats|length }}</span>
+        <span class="oc-strip-sub">opportunity templates</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">OPEN FLAGS</span>
+        <span class="oc-strip-value {% if open_flags %}up{% endif %}">{{ open_flags|length }}</span>
+        <span class="oc-strip-sub">currently firing</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RESOLVED</span>
+        <span class="oc-strip-value">{{ resolved_flags|length }}</span>
+        <span class="oc-strip-sub">recent · graded</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">EVALUATOR KINDS</span>
+        <span class="oc-strip-value">{{ evaluator_kinds|length }}</span>
+        <span class="oc-strip-sub">registered detectors</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SCAN BEAT</span>
+        <span class="oc-strip-value">HOURLY</span>
+        <span class="oc-strip-sub">runs each market hour</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ROLE</span>
+        <span class="oc-strip-value">{% if is_admin %}ADMIN{% else %}VIEWER{% endif %}</span>
+        <span class="oc-strip-sub">{% if is_admin %}can edit setups{% else %}read-only{% endif %}</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Registered setups</span></div>
+    {% if setup_stats %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Name</th><th>Direction</th><th>Conditions</th><th>Min score</th><th>Resolved</th><th>Hit rate</th><th>Pending</th><th>State</th>{% if is_admin %}<th>Toggle</th>{% endif %}</tr></thead>
+      <tbody>
+        {% for row in setup_stats %}
+          <tr>
+            <td>{{ row.setup.name|truncatechars:32 }}</td>
+            <td><span class="badge badge-{{ row.setup.direction }}">{{ row.setup.direction }}</span></td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ row.setup.conditions|length }}</td>
+            <td>{{ row.setup.min_match_score|floatformat:2 }}</td>
+            <td>{{ row.n_resolved }}</td>
+            <td>{% if row.hit_rate is not None %}{{ row.hit_rate|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td>{{ row.n_pending }}</td>
+            <td><span class="badge badge-{% if row.setup.is_active %}bullish{% else %}medium{% endif %}">{% if row.setup.is_active %}ACTIVE{% else %}PAUSED{% endif %}</span></td>
+            {% if is_admin %}
+            <td>
+              <form method="post" action="{% url 'hq_toggle_opportunity_setup' %}">{% csrf_token %}<input type="hidden" name="setup_id" value="{{ row.setup.id }}"><button class="btn btn-sm" type="submit">Toggle</button></form>
+            </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon">🔭</div>
+        <p>NO SETUPS REGISTERED — admin can create one from the Admin Dashboard's Opportunity panel.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Open flags (awaiting resolution)</span></div>
+    {% if open_flags %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Time</th><th>Setup</th><th>Instrument</th><th>Direction</th><th>Score</th><th>Entry</th><th>Stop</th><th>Target</th><th>Horizon</th></tr></thead>
+      <tbody>
+        {% for f in open_flags %}
+          <tr>
+            <td>{{ f.scanned_at|date:"M d H:i" }}</td>
+            <td>{{ f.setup.name|truncatechars:24 }}</td>
+            <td>{{ f.instrument.symbol }}</td>
+            <td><span class="badge badge-{{ f.direction }}">{{ f.direction }}</span></td>
+            <td>{{ f.score|floatformat:2 }}</td>
+            <td style="font-family: var(--font-mono); font-size: 11px;">{{ f.suggested_entry|default:"—" }}</td>
+            <td style="font-family: var(--font-mono); font-size: 11px; color: var(--accent-red);">{{ f.suggested_stop|default:"—" }}</td>
+            <td style="font-family: var(--font-mono); font-size: 11px; color: var(--accent-green);">{{ f.suggested_target|default:"—" }}</td>
+            <td>{{ f.horizon_days }}d</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No open flags. Daily scan runs at 09:00 UTC.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Resolved flags</span></div>
+    {% if resolved_flags %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Resolved</th><th>Setup</th><th>Instrument</th><th>Outcome</th><th>Price at flag</th><th>Resolved price</th><th>Notes</th></tr></thead>
+      <tbody>
+        {% for f in resolved_flags %}
+          <tr>
+            <td>{{ f.resolved_at|date:"M d H:i" }}</td>
+            <td>{{ f.setup.name|truncatechars:24 }}</td>
+            <td>{{ f.instrument.symbol }}</td>
+            <td><span class="badge badge-{% if f.outcome == 'hit' %}bullish{% elif f.outcome == 'miss' %}bearish{% else %}medium{% endif %}">{{ f.outcome }}</span></td>
+            <td style="font-family: var(--font-mono); font-size: 11px;">{{ f.price_at_flag|default:"—" }}</td>
+            <td style="font-family: var(--font-mono); font-size: 11px;">{{ f.resolved_price|default:"—" }}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ f.resolution_notes|truncatechars:60 }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No resolutions yet.</p>
+    {% endif %}
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+</style>
+{% endblock %}

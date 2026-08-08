@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ kind }}:{{ key }} · history{% endblock %}
+{% block content %}
+<div class="page-content">
+    <div class="page-header">
+        <h1>{{ kind }}:{{ key }}</h1>
+        <p class="page-subtitle">{{ history|length }} version(s) · oldest first</p>
+        <p><a href="{% url 'knowledge_dashboard' %}">← back to graph</a></p>
+    </div>
+    <table class="sv-perf-table">
+        <thead><tr><th>v</th><th>confidence</th><th>sources</th><th>payload</th><th>created</th><th>superseded</th></tr></thead>
+        <tbody>
+        {% for n in history %}
+            <tr>
+                <td><strong>{{ n.version }}</strong></td>
+                <td>{{ n.confidence|floatformat:2 }}</td>
+                <td>{{ n.source_agents|join:", " }}</td>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ n.payload }}</td>
+                <td>{{ n.created_at|date:"Y-m-d H:i" }}</td>
+                <td>{% if n.superseded_by_id %}→ v{{ n.superseded_by.version }}{% else %}<span style="color:var(--accent);">CURRENT</span>{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

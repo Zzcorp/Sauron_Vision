@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Gate Decisions — Sauron Vision{% endblock %}
+{% block page_title %}⌬ GATE DECISIONS · ORCHESTRATOR HISTORY{% endblock %}
+
+{% block content %}
+
+<div style="margin-bottom:14px;">
+    <a href="{% url 'eye_dashboard' %}" style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">← back to Eye</a>
+</div>
+
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TOTAL · {{ days }}D</span>
+        <span class="oc-strip-value">{{ total }}</span>
+        <span class="oc-strip-sub">filter window</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ALLOWS</span>
+        <span class="oc-strip-value up">{{ allows }}</span>
+        <span class="oc-strip-sub">sampled · 10% kept</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">REJECTS</span>
+        <span class="oc-strip-value down">{{ rejects }}</span>
+        <span class="oc-strip-sub">always logged</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">REJECTION RATE</span>
+        <span class="oc-strip-value {% if rejection_rate > 0.5 %}down{% endif %}">{% widthratio rejection_rate 1 100 %}%</span>
+        <span class="oc-strip-sub">of {{ total }} events</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ASSET CLASSES</span>
+        <span class="oc-strip-value">{{ asset_classes|length }}</span>
+        <span class="oc-strip-sub">distinct in window</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">FILTER</span>
+        <span class="oc-strip-value">{% if decision %}{{ decision|upper }}{% else %}ANY{% endif %}</span>
+        <span class="oc-strip-sub">{% if symbol %}sym {{ symbol }}{% elif asset_class %}{{ asset_class }}{% else %}all{% endif %}</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Filter</span></div>
+    <form method="get" style="display:grid;grid-template-columns:repeat(5,1fr) auto;gap:12px;align-items:end;">
+        <div>
+            <label class="form-label">DAYS</label>
+            <select name="days" class="form-input">
+                <option value="1"  {% if days == 1 %}selected{% endif %}>1</option>
+                <option value="7"  {% if days == 7 %}selected{% endif %}>7</option>
+                <option value="14" {% if days == 14 %}selected{% endif %}>14</option>
+                <option value="30" {% if days == 30 %}selected{% endif %}>30</option>
+                <option value="90" {% if days == 90 %}selected{% endif %}>90</option>
+                <option value="365" {% if days == 365 %}selected{% endif %}>365</option>
+            </select>
+        </div>
+        <div>
+            <label class="form-label">DECISION</label>
+            <select name="decision" class="form-input">
+                <option value="" {% if not decision %}selected{% endif %}>any</option>
+                <option value="reject" {% if decision == 'reject' %}selected{% endif %}>reject</option>
+                <option value="allow" {% if decision == 'allow' %}selected{% endif %}>allow</option>
+            </select>
+        </div>
+        <div>
+            <label class="form-label">ASSET CLASS</label>
+            <select name="asset_class" class="form-input">
+                <option value="">any</option>
+                {% for ac in asset_classes %}
+                    <option value="{{ ac }}" {% if asset_class == ac %}selected{% endif %}>{{ ac }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="form-label">SYMBOL</label>
+            <input type="text" name="symbol" value="{{ symbol }}" class="form-input" placeholder="EURUSD">
+        </div>
+        <div>
+            <label class="form-label">REASON CONTAINS</label>
+            <input type="text" name="q" value="{{ q }}" class="form-input" placeholder="equity / usd / sector...">
+        </div>
+        <button type="submit" class="btn btn-primary">▶ Filter</button>
+    </form>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Events ({{ page.paginator.count }} total)</span></div>
+    {% if page.object_list %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>When</th><th>Decision</th><th>Trade</th><th>Reason</th></tr></thead>
+        <tbody>
+        {% for ev in page.object_list %}
+            <tr>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ ev.created_at|date:"Y-m-d H:i:s" }}</td>
+                <td><span class="{% if ev.decision == 'reject' %}down{% else %}up{% endif %}">{{ ev.decision|upper }}</span></td>
+                <td>{{ ev.asset_class }}/{{ ev.symbol }} {{ ev.side }}{% if ev.right %} {{ ev.right }}{% endif %}</td>
+                <td style="font-size:11px;">{{ ev.reason }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+
+    <div style="margin-top:14px;display:flex;justify-content:center;gap:6px;font-family:var(--font-mono);font-size:11px;">
+        {% if page.has_previous %}
+            <a href="?{{ request.GET.urlencode }}{% if 'page' in request.GET %}{% else %}&page={{ page.previous_page_number }}{% endif %}" class="btn btn-sm">&lt; prev</a>
+        {% endif %}
+        <span style="padding:6px 10px;color:var(--text-muted);">page {{ page.number }} / {{ page.paginator.num_pages }}</span>
+        {% if page.has_next %}
+            <a href="?days={{ days }}&decision={{ decision }}&asset_class={{ asset_class }}&symbol={{ symbol }}&q={{ q }}&page={{ page.next_page_number }}" class="btn btn-sm">next &gt;</a>
+        {% endif %}
+    </div>
+    {% else %}
+        <p class="eye-empty">No gate events match the filter.</p>
+    {% endif %}
+</div>
+
+{% block extra_css %}
+<style>
+    .eye-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; font-style: italic; }
+</style>
+{% endblock %}
+{% endblock %}

@@ -1,12 +1,13 @@
-{# Chart widget — reusable candlestick + volume chart powered by TradingView lightweight-charts.
-   Usage:
-     {% include "_partials/chart_widget.html" with symbol="AAPL" chart_id="chart-aapl" height="400" timeframe="1d" %}
-   Parameters:
-     chart_id   — unique HTML id for this widget (default: sv-chart-widget)
-     symbol     — ticker symbol (default: "")
-     height     — height in px (default: 400)
-     timeframe  — initial timeframe: 1d, 1w, 1m, 3m, 1y (default: 1d)
-#}
+{% comment %}
+Chart widget — reusable candlestick + volume chart powered by TradingView lightweight-charts.
+Usage:
+  {% verbatim %}{% include "_partials/chart_widget.html" with symbol="AAPL" chart_id="chart-aapl" height="400" timeframe="1d" %}{% endverbatim %}
+Parameters:
+  chart_id   — unique HTML id for this widget (default: sv-chart-widget)
+  symbol     — ticker symbol (default: "")
+  height     — height in px (default: 400)
+  timeframe  — initial timeframe: 1d, 1w, 1m, 3m, 1y (default: 1d)
+{% endcomment %}
 {% load static %}
 
 {% with chart_id=chart_id|default:"sv-chart-widget" symbol=symbol|default:"" height=height|default:"400" timeframe=timeframe|default:"1d" %}

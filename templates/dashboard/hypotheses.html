@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}Hypothesis market · Sauron's Mind{% endblock %}
+{% block content %}
+<div class="page-content">
+    {# ── Top stat strip — 6 cells ────────────────────────────────── #}
+    <div class="oc-strip" style="margin-bottom:18px;">
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">PENDING</span>
+            <span class="oc-strip-value">{{ n_pending }}</span>
+            <span class="oc-strip-sub">{{ overdue }} overdue · {{ due_soon }} due 24h</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">CONFIRMED</span>
+            <span class="oc-strip-value up">{{ n_confirmed }}</span>
+            <span class="oc-strip-sub">{{ confirmed_rate }}% of resolved</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">REFUTED</span>
+            <span class="oc-strip-value down">{{ n_refuted }}</span>
+            <span class="oc-strip-sub">{{ refuted_rate }}% of resolved</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">UNRESOLVABLE</span>
+            <span class="oc-strip-value">{{ n_unresolvable }}</span>
+            <span class="oc-strip-sub">data couldn't decide</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">NEW · 7D</span>
+            <span class="oc-strip-value">{{ n_new_7d }}</span>
+            <span class="oc-strip-sub">{{ n_resolved_7d }} resolved · 7d</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">VOTES · 7D</span>
+            <span class="oc-strip-value">{{ n_votes_7d }}</span>
+            <span class="oc-strip-sub">critic + agent activity</span>
+        </div>
+    </div>
+
+    {# ── Outcome donut ────────────────────────────────────────── #}
+    {% if outcome_donut %}
+    <div class="card" style="margin-bottom:18px;">
+        <div class="card-header"><span class="card-title">Outcome mix · {{ n_resolved_total }} resolved</span></div>
+        <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:6px 0;">
+            <svg class="oc-donut" viewBox="0 0 100 100" id="hypDonut">
+                <circle cx="50" cy="50" r="35" fill="none" stroke="var(--bg-card-hover)" stroke-width="14"/>
+            </svg>
+            <div class="oc-donut-legend" style="flex:1;min-width:180px;">
+                {% for d in outcome_donut %}
+                    <div class="oc-donut-legend-row">
+                        <span class="oc-donut-legend-key">
+                            <span class="oc-donut-legend-swatch" data-class="{{ d.key }}"></span>
+                            {{ d.key|upper }}
+                        </span>
+                        <span class="oc-donut-legend-pct">{{ d.n }} · {{ d.pct }}%</span>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div id="hypDonutData" style="display:none;"
+             data-rows="{% for d in outcome_donut %}{{ d.key }}:{{ d.pct }}{% if not forloop.last %};{% endif %}{% endfor %}"></div>
+        <script>
+            (function() {
+                var rows = (document.getElementById('hypDonutData').dataset.rows || '')
+                    .split(';').map(function(r){var p=r.split(':');return {k:p[0], pct:parseFloat(p[1])};})
+                    .filter(function(r){return !isNaN(r.pct);});
+                var colorOf = {confirmed:'#00e868', refuted:'#ff5e5e', unresolvable:'#94a3b8'};
+                document.querySelectorAll('.oc-donut-legend-swatch').forEach(function(el){
+                    if (colorOf[el.dataset.class]) el.style.background = colorOf[el.dataset.class];
+                });
+                var svg = document.getElementById('hypDonut');
+                if (!svg || rows.length === 0) return;
+                var ns = 'http://www.w3.org/2000/svg';
+                var cx=50, cy=50, r=35, c=2*Math.PI*r;
+                var offset = -c/4;
+                rows.forEach(function(row){
+                    var seg = document.createElementNS(ns, 'circle');
+                    var len = (row.pct/100) * c;
+                    seg.setAttribute('cx', cx); seg.setAttribute('cy', cy); seg.setAttribute('r', r);
+                    seg.setAttribute('fill','none');
+                    seg.setAttribute('stroke', colorOf[row.k] || '#5b9eff');
+                    seg.setAttribute('stroke-width', 14);
+                    seg.setAttribute('stroke-dasharray', len.toFixed(2) + ' ' + (c - len).toFixed(2));
+                    seg.setAttribute('stroke-dashoffset', offset.toFixed(2));
+                    svg.appendChild(seg);
+                    offset -= len;
+                });
+            })();
+        </script>
+    </div>
+    {% endif %}
+
+    {% if request.session.critic_result %}
+        <div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent);">
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;">Last critic pass</div>
+            <pre style="white-space:pre-wrap;margin:6px 0 0;font-size:11px;">{{ request.session.critic_result }}</pre>
+        </div>
+    {% endif %}
+
+    {% if request.user.is_staff %}
+    <form method="post" action="{% url 'critic_run_now' %}" style="margin-bottom:20px;">
+        {% csrf_token %}
+        <button class="btn" type="submit">▶ Run critic pass now (admin)</button>
+    </form>
+    {% endif %}
+
+    <div class="grid grid-2" style="gap:14px;margin-bottom:20px;">
+        <div class="card">
+            <div class="card-header"><span class="card-title">Pending hypotheses</span></div>
+            <table class="sv-perf-table">
+                <thead><tr><th>source</th><th>claim</th><th>conf</th><th>deadline</th><th>votes</th></tr></thead>
+                <tbody>
+                {% for h in pending %}
+                    <tr>
+                        <td><span class="badge badge-medium">{{ h.source_agent }}</span></td>
+                        <td>{{ h.claim_text|truncatechars:80 }}</td>
+                        <td>{{ h.confidence|floatformat:2 }}</td>
+                        <td>{{ h.resolution_deadline|date:"m-d H:i" }}</td>
+                        <td>{{ h.votes.count }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="5" style="color:var(--text-muted);">No pending hypotheses.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><span class="card-title">Recently resolved</span></div>
+            <table class="sv-perf-table">
+                <thead><tr><th>source</th><th>claim</th><th>conf</th><th>outcome</th><th>resolved</th></tr></thead>
+                <tbody>
+                {% for h in resolved %}
+                    <tr>
+                        <td>{{ h.source_agent }}</td>
+                        <td>{{ h.claim_text|truncatechars:60 }}</td>
+                        <td>{{ h.confidence|floatformat:2 }}</td>
+                        <td>
+                            {% if h.outcome == "confirmed" %}<span style="color:var(--accent);">{{ h.outcome }}</span>
+                            {% elif h.outcome == "refuted" %}<span style="color:var(--down);">{{ h.outcome }}</span>
+                            {% else %}<span style="color:var(--text-muted);">{{ h.outcome }}</span>{% endif %}
+                        </td>
+                        <td>{{ h.resolved_at|date:"m-d H:i" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="5" style="color:var(--text-muted);">None resolved yet.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px;">
+        <div class="card-header"><span class="card-title">Agent trust leaderboard</span></div>
+        <p style="margin:0 0 10px;font-size:11px;color:var(--text-muted);">
+            <strong>Combined</strong> = 70% Brier (calibration) + 30% (1 - operator override rate). <strong>Brier-only</strong> is the pure objective signal.
+        </p>
+        <table class="sv-perf-table">
+            <thead><tr><th>agent</th><th>combined</th><th>brier-only</th><th>resolved</th><th>confirmed</th><th>total</th></tr></thead>
+            <tbody>
+            {% for r in leaderboard %}
+                <tr>
+                    <td><strong>{{ r.agent }}</strong></td>
+                    <td>{% if r.combined_trust is not None %}<strong>{{ r.combined_trust|floatformat:2 }}</strong>{% else %}—{% endif %}</td>
+                    <td style="color:var(--text-muted);">{% if r.brier_only_trust is not None %}{{ r.brier_only_trust|floatformat:2 }}{% else %}—{% endif %}</td>
+                    <td>{{ r.n_resolved }}</td>
+                    <td>{{ r.n_confirmed }}</td>
+                    <td>{{ r.n_total }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="6" style="color:var(--text-muted);">No agents yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><span class="card-title">Recent votes</span></div>
+        <table class="sv-perf-table">
+            <thead><tr><th>agent</th><th>stance</th><th>conf</th><th>on hypothesis</th><th>reasoning</th><th>at</th></tr></thead>
+            <tbody>
+            {% for v in recent_votes %}
+                <tr>
+                    <td>{{ v.agent }}</td>
+                    <td>
+                        {% if v.stance == "co_sign" %}<span style="color:var(--accent);">co_sign</span>
+                        {% elif v.stance == "dissent" %}<span style="color:var(--down);">dissent</span>
+                        {% else %}{{ v.stance }}{% endif %}
+                    </td>
+                    <td>{{ v.confidence|floatformat:2 }}</td>
+                    <td>{{ v.hypothesis.claim_text|truncatechars:60 }}</td>
+                    <td style="color:var(--text-muted);font-size:11px;">{{ v.reasoning|truncatechars:120 }}</td>
+                    <td>{{ v.created_at|date:"m-d H:i" }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="6" style="color:var(--text-muted);">No votes yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

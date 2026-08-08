@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Fills — Sauron Vision{% endblock %}
+{% block page_title %}▣ FILLS · BOT TRADE HISTORY{% endblock %}
+
+{% block content %}
+
+<div style="margin-bottom:14px;">
+    <a href="{% url 'eye_dashboard' %}" style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">← back to Eye</a>
+</div>
+
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TOTAL · {{ days }}D</span>
+        <span class="oc-strip-value">{{ total }}</span>
+        <span class="oc-strip-sub">filter window</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CLOSED</span>
+        <span class="oc-strip-value">{{ n_closed }}</span>
+        <span class="oc-strip-sub">{{ n_wins }} winners</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">WIN RATE</span>
+        <span class="oc-strip-value {% if win_rate >= 0.5 %}up{% elif win_rate < 0.4 %}down{% endif %}">{% widthratio win_rate 1 100 %}%</span>
+        <span class="oc-strip-sub">of closed</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TOTAL R</span>
+        <span class="oc-strip-value {% if total_r > 0 %}up{% elif total_r < 0 %}down{% endif %}">{% if total_r >= 0 %}+{% endif %}{{ total_r|floatformat:2 }}R</span>
+        <span class="oc-strip-sub">cumulative score</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">P&amp;L</span>
+        <span class="oc-strip-value {% if pnl_total > 0 %}up{% elif pnl_total < 0 %}down{% endif %}">{{ pnl_total|floatformat:2 }}</span>
+        <span class="oc-strip-sub">closed positions</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">FILTER</span>
+        <span class="oc-strip-value">{% if mode %}{{ mode|upper }}{% else %}ALL{% endif %}</span>
+        <span class="oc-strip-sub">{% if symbol %}{{ symbol }}{% elif asset_class %}{{ asset_class }}{% else %}all classes{% endif %}</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Filter</span></div>
+    <form method="get" style="display:grid;grid-template-columns:repeat(6,1fr) auto;gap:12px;align-items:end;">
+        <div>
+            <label class="form-label">DAYS</label>
+            <select name="days" class="form-input">
+                <option value="1"   {% if days == 1 %}selected{% endif %}>1</option>
+                <option value="7"   {% if days == 7 %}selected{% endif %}>7</option>
+                <option value="14"  {% if days == 14 %}selected{% endif %}>14</option>
+                <option value="30"  {% if days == 30 %}selected{% endif %}>30</option>
+                <option value="90"  {% if days == 90 %}selected{% endif %}>90</option>
+                <option value="365" {% if days == 365 %}selected{% endif %}>365</option>
+            </select>
+        </div>
+        <div>
+            <label class="form-label">CLASS</label>
+            <select name="asset_class" class="form-input">
+                <option value="">any</option>
+                {% for ac in asset_classes %}
+                    <option value="{{ ac }}" {% if asset_class == ac %}selected{% endif %}>{{ ac }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="form-label">SYMBOL</label>
+            <input type="text" name="symbol" value="{{ symbol }}" class="form-input" placeholder="AAPL">
+        </div>
+        <div>
+            <label class="form-label">SIDE</label>
+            <select name="side" class="form-input">
+                <option value="">any</option>
+                <option value="BUY" {% if side == 'BUY' %}selected{% endif %}>BUY</option>
+                <option value="SELL" {% if side == 'SELL' %}selected{% endif %}>SELL</option>
+            </select>
+        </div>
+        <div>
+            <label class="form-label">OUTCOME</label>
+            <select name="outcome" class="form-input">
+                <option value="">any</option>
+                <option value="hit_target" {% if outcome == 'hit_target' %}selected{% endif %}>hit_target</option>
+                <option value="stopped_out" {% if outcome == 'stopped_out' %}selected{% endif %}>stopped_out</option>
+                <option value="manual_close" {% if outcome == 'manual_close' %}selected{% endif %}>manual_close</option>
+                <option value="expired" {% if outcome == 'expired' %}selected{% endif %}>expired</option>
+            </select>
+        </div>
+        <div>
+            <label class="form-label">MODE</label>
+            <select name="mode" class="form-input">
+                <option value="">any</option>
+                <option value="paper" {% if mode == 'paper' %}selected{% endif %}>paper</option>
+                <option value="live" {% if mode == 'live' %}selected{% endif %}>live</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">▶ Filter</button>
+    </form>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Trades ({{ page.paginator.count }} total)</span></div>
+    {% if page.object_list %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Opened</th><th>Class</th><th>Symbol</th><th>Side</th><th>Status</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>R</th><th>Outcome</th><th>Mode</th></tr></thead>
+        <tbody>
+        {% for t in page.object_list %}
+            <tr>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ t.opened_at|date:"Y-m-d H:i" }}</td>
+                <td><span class="badge badge-medium">{{ t.asset_class }}</span></td>
+                <td><strong>{{ t.symbol }}</strong></td>
+                <td><span class="badge badge-{% if t.side == 'BUY' %}bullish{% else %}bearish{% endif %}">{{ t.side }}</span></td>
+                <td>{{ t.status }}</td>
+                <td>{{ t.entry_price|floatformat:4 }}</td>
+                <td>{{ t.exit_price|floatformat:4|default:"—" }}</td>
+                <td class="{% if t.pnl > 0 %}up{% elif t.pnl < 0 %}down{% endif %}">{{ t.pnl|floatformat:2 }}</td>
+                <td class="{% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{{ t.realized_r|floatformat:2|default:"—" }}</td>
+                <td>{{ t.outcome|default:"—" }}</td>
+                <td>{% if t.paper %}<span style="color:var(--text-muted);">paper</span>{% else %}<span style="color:var(--accent-gold);">LIVE</span>{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+
+    <div style="margin-top:14px;display:flex;justify-content:center;gap:6px;font-family:var(--font-mono);font-size:11px;">
+        {% if page.has_previous %}
+            <a href="?days={{ days }}&asset_class={{ asset_class }}&symbol={{ symbol }}&side={{ side }}&outcome={{ outcome }}&mode={{ mode }}&page={{ page.previous_page_number }}" class="btn btn-sm">&lt; prev</a>
+        {% endif %}
+        <span style="padding:6px 10px;color:var(--text-muted);">page {{ page.number }} / {{ page.paginator.num_pages }}</span>
+        {% if page.has_next %}
+            <a href="?days={{ days }}&asset_class={{ asset_class }}&symbol={{ symbol }}&side={{ side }}&outcome={{ outcome }}&mode={{ mode }}&page={{ page.next_page_number }}" class="btn btn-sm">next &gt;</a>
+        {% endif %}
+    </div>
+    {% else %}
+        <p class="eye-empty">No trades match the filter.</p>
+    {% endif %}
+</div>
+
+{% block extra_css %}
+<style>.eye-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; font-style: italic; }</style>
+{% endblock %}
+{% endblock %}

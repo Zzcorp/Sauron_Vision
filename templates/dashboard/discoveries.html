@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Pattern Discoveries — Sauron Vision{% endblock %}
+{% block page_title %}🔬 PATTERN DISCOVERIES{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PROPOSED</span>
+        <span class="oc-strip-value {% if proposed %}up{% endif %}">{{ proposed|length }}</span>
+        <span class="oc-strip-sub">awaiting activation</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ACTIVATED</span>
+        <span class="oc-strip-value up">{{ activated|length }}</span>
+        <span class="oc-strip-sub">live as setups</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">HISTORY</span>
+        <span class="oc-strip-value">{{ history|length }}</span>
+        <span class="oc-strip-sub">all decided discoveries</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">FEATURES</span>
+        <span class="oc-strip-value">{{ feature_keys|length }}</span>
+        <span class="oc-strip-sub">binary mining vocab</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MAPPABLE</span>
+        <span class="oc-strip-value">{{ mappable|length }}</span>
+        <span class="oc-strip-sub">→ evaluator conditions</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ALGO</span>
+        <span class="oc-strip-value">APRIORI</span>
+        <span class="oc-strip-sub">lift vs control</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Pending discoveries (highest lift first)</span></div>
+    {% if proposed %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>#</th><th>Asset</th><th>Direction</th><th>Features</th><th>Support</th><th>Lift</th><th>Mined</th>{% if is_admin %}<th>Decide</th>{% endif %}</tr></thead>
+      <tbody>
+        {% for d in proposed %}
+          <tr>
+            <td>#{{ d.id }}</td>
+            <td>{{ d.asset_class }}</td>
+            <td><span class="badge badge-{{ d.direction }}">{{ d.direction }}</span></td>
+            <td style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">{{ d.features|join:", "|truncatechars:80 }}</td>
+            <td>{{ d.n_supporting_moves }}/{{ d.n_total_moves }} ({{ d.support|floatformat:2 }})</td>
+            <td><strong>{{ d.lift|floatformat:2 }}×</strong></td>
+            <td style="font-size: 11px;">{{ d.mined_at|timesince }} ago</td>
+            {% if is_admin %}
+            <td style="display:flex;gap:6px;">
+                <form method="post" action="{% url 'hq_activate_discovery' %}">{% csrf_token %}<input type="hidden" name="discovery_id" value="{{ d.id }}"><button class="btn btn-sm btn-primary" type="submit">Activate</button></form>
+                <form method="post" action="{% url 'hq_reject_discovery' %}">{% csrf_token %}<input type="hidden" name="discovery_id" value="{{ d.id }}"><button class="btn btn-sm btn-danger" type="submit">Reject</button></form>
+            </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p style="font-size: 11px; color: var(--text-muted); padding: 12px 16px;">
+        Activating creates an OpportunitySetup with `is_active=False`. Review at <a href="{% url 'opportunities_dashboard' %}" style="color: var(--accent);">/opportunities/</a>, then enable.
+        Discovered setups still walk the Phase-8 RESEARCH→PAPER→LIVE_SMALL→LIVE_FULL ladder before any live capital.
+    </p>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon">🔬</div>
+        <p>NO PENDING DISCOVERIES — miner runs Sundays at 06:00 UTC. Click "▶ Mine Now" on the admin dashboard to trigger immediately.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Decision history</span></div>
+    {% if history %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>#</th><th>State</th><th>Asset</th><th>Dir</th><th>Features</th><th>Lift</th><th>Setup</th><th>Decided</th></tr></thead>
+      <tbody>
+        {% for d in history %}
+          <tr>
+            <td>#{{ d.id }}</td>
+            <td><span class="badge badge-{% if d.state == 'activated' %}bullish{% elif d.state == 'rejected' %}bearish{% else %}medium{% endif %}">{{ d.get_state_display }}</span></td>
+            <td>{{ d.asset_class }}</td>
+            <td>{{ d.direction }}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ d.features|join:", "|truncatechars:60 }}</td>
+            <td>{{ d.lift|floatformat:2 }}×</td>
+            <td style="font-size: 11px;">{% if d.activated_setup %}<a href="{% url 'opportunities_dashboard' %}">{{ d.activated_setup.name }}</a>{% else %}—{% endif %}</td>
+            <td style="font-size: 11px;">{% if d.decided_at %}{{ d.decided_at|date:"M d H:i" }}{% else %}—{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No decisions yet.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Feature library ({{ feature_keys|length }})</span></div>
+    <div style="padding: 16px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">
+        {{ feature_keys|join:" · " }}
+    </div>
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+</style>
+{% endblock %}

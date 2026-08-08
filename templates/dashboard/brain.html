@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Sauron's Mind · Brain{% endblock %}
+
+{% block content %}
+<div class="page-content">
+    {% if request.session.brain_run_result %}
+        <div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent);">
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;">Last manual run</div>
+            <pre style="white-space:pre-wrap;margin:6px 0 0;font-size:11px;">{{ request.session.brain_run_result }}</pre>
+        </div>
+    {% endif %}
+
+    {# ── Hero strip — 6 cells ── #}
+    <div class="oc-strip" style="margin-bottom:18px;">
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">REGIME</span>
+            <span class="oc-strip-value">{% if latest %}{{ latest.regime_label|upper }}{% else %}—{% endif %}</span>
+            <span class="oc-strip-sub">{% if latest %}conf {{ latest.regime_confidence|floatformat:2 }}{% endif %}</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">PORTFOLIO HEALTH</span>
+            <span class="oc-strip-value {% if latest and latest.portfolio_health_score >= 0.6 %}up{% elif latest and latest.portfolio_health_score < 0.4 %}down{% endif %}">
+                {% if latest %}{{ latest.portfolio_health_score|floatformat:2 }}{% else %}—{% endif %}
+            </span>
+            <span class="oc-strip-sub">brain assessment</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">BRAIN TRUST</span>
+            <span class="oc-strip-value">{% if trust_score is not None %}{{ trust_score|floatformat:2 }}{% else %}—{% endif %}</span>
+            <span class="oc-strip-sub">brier-graded reliability</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">PREDICTIONS</span>
+            <span class="oc-strip-value">{{ n_resolved }}</span>
+            <span class="oc-strip-sub">{{ n_correct }} correct · {{ n_pending }} pending</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">ACCURACY</span>
+            <span class="oc-strip-value {% if accuracy and accuracy >= 0.6 %}up{% elif accuracy and accuracy < 0.4 %}down{% endif %}">{% if accuracy is not None %}{% widthratio accuracy 1 100 %}%{% else %}—{% endif %}</span>
+            <span class="oc-strip-sub">last {{ n_resolved }} resolved</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">OBS QUEUED</span>
+            <span class="oc-strip-value">{{ obs_unconsumed|length }}</span>
+            <span class="oc-strip-sub">{{ obs_total }} total · {{ obs_unconsumed|length }} kinds</span>
+        </div>
+    </div>
+
+    {# ── Latest report — narrative + concerns ── #}
+    {% if latest %}
+    <div class="card" style="margin-bottom:14px;">
+        <div class="card-header"><span class="card-title">Latest synthesis · {{ latest.created_at|date:"Y-m-d H:i" }} UTC</span></div>
+        {% if latest.error %}
+            <div style="color:var(--down);">Synthesis error: {{ latest.error|truncatechars:200 }}</div>
+        {% else %}
+            <div style="font-size:13px;line-height:1.5;white-space:pre-wrap;">{{ latest.narrative_md }}</div>
+            {% if latest.top_concerns %}
+                <div style="margin-top:14px;">
+                    <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Top concerns</div>
+                    <ul style="margin:0;padding-left:18px;">
+                        {% for c in latest.top_concerns %}
+                            <li><strong>[{{ c.kind }}]</strong> {{ c.text }} <span style="color:var(--text-muted);">(severity {{ c.severity|floatformat:2 }})</span></li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+            {% if latest.theme_pressures %}
+                <div style="margin-top:14px;">
+                    <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Theme pressures</div>
+                    <table class="sv-perf-table" style="width:auto;">
+                        {% for k, v in latest.theme_pressures.items %}
+                            <tr><td style="padding-right:14px;">{{ k }}</td><td>{{ v|floatformat:2 }}</td></tr>
+                        {% endfor %}
+                    </table>
+                </div>
+            {% endif %}
+            {% if latest.rule_status_overlay %}
+                <div style="margin-top:14px;">
+                    <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Rule overlay</div>
+                    <table class="sv-perf-table" style="width:auto;">
+                        {% for k, v in latest.rule_status_overlay.items %}
+                            <tr>
+                                <td style="padding-right:14px;">{{ k }}</td>
+                                <td>
+                                    {% if v == "pause_recommended" %}<span style="color:var(--down);">{{ v }}</span>
+                                    {% elif v == "watch" %}<span style="color:var(--accent);">{{ v }}</span>
+                                    {% else %}{{ v }}{% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </table>
+                </div>
+            {% endif %}
+            <div style="margin-top:14px;font-size:11px;color:var(--text-muted);">
+                model: {{ latest.model_used }} · tokens {{ latest.tokens_in }} in / {{ latest.tokens_out }} out · cost ${{ latest.cost_usd|floatformat:5 }} · consumed {{ latest.n_observations_consumed }} obs
+            </div>
+        {% endif %}
+    </div>
+    {% else %}
+        <div class="card" style="margin-bottom:14px;">
+            <p style="color:var(--text-muted);">No BrainReport yet. The synthesizer runs every 30 minutes; or trigger one manually below.</p>
+        </div>
+    {% endif %}
+
+    {% if request.user.is_staff %}
+    <form method="post" action="{% url 'brain_run_now' %}" style="margin-bottom:20px;">
+        {% csrf_token %}
+        <button class="btn" type="submit">▶ Run synthesis now (admin)</button>
+    </form>
+    {% endif %}
+
+    {# ── Calibration ── #}
+    <div class="card" style="margin-bottom:14px;">
+        <div class="card-header"><span class="card-title">Brain calibration</span></div>
+        <p style="font-size:13px;">
+            {% if accuracy is not None %}
+                {{ n_correct }}/{{ n_resolved }} resolved correctly
+                ({{ accuracy|floatformat:2 }})
+                · trust score {{ trust_score|default:"—" }}
+            {% else %}
+                <span style="color:var(--text-muted);">No resolved predictions yet.</span>
+            {% endif %}
+        </p>
+    </div>
+
+    {# ── Observation queue ── #}
+    <div class="card" style="margin-bottom:14px;">
+        <div class="card-header"><span class="card-title">Unconsumed observations</span></div>
+        {% if obs_unconsumed %}
+            <table class="sv-perf-table" style="width:auto;">
+                <thead><tr><th>kind</th><th>count</th></tr></thead>
+                <tbody>
+                {% for row in obs_unconsumed %}
+                    <tr><td>{{ row.kind }}</td><td>{{ row.n }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p style="color:var(--text-muted);">Queue empty — all caught up.</p>
+        {% endif %}
+    </div>
+
+    {# ── Timeline ── #}
+    <div class="card">
+        <div class="card-header"><span class="card-title">Recent reports</span></div>
+        <table class="sv-perf-table">
+            <thead><tr><th>time</th><th>regime</th><th>conf</th><th>health</th><th>concerns</th><th>obs</th><th>tokens</th><th>cost</th></tr></thead>
+            <tbody>
+                {% for r in timeline %}
+                <tr>
+                    <td>{{ r.created_at|date:"m-d H:i" }}</td>
+                    <td>{% if r.error %}<span style="color:var(--down);">ERROR</span>{% else %}{{ r.regime_label }}{% endif %}</td>
+                    <td>{{ r.regime_confidence|floatformat:2 }}</td>
+                    <td>{{ r.portfolio_health_score|floatformat:2 }}</td>
+                    <td>{{ r.top_concerns|length }}</td>
+                    <td>{{ r.n_observations_consumed }}</td>
+                    <td>{{ r.tokens_in }}/{{ r.tokens_out }}</td>
+                    <td>${{ r.cost_usd|floatformat:4 }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="8" style="color:var(--text-muted);">No reports yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

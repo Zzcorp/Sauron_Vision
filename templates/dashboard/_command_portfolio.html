@@ -1,0 +1,219 @@
+{# PORTFOLIO tab — strategic snapshot enriched with sparkline + donut. #}
+
+{# ── 1. Top stat strip ────────────────────────────────────────────── #}
+<div class="oc-strip">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PORTFOLIO VALUE</span>
+        <span class="oc-strip-value">{{ portfolio.current_value|floatformat:2 }}</span>
+        <span class="oc-strip-sub">{{ portfolio.currency }} · cash {{ cash_pct }}%</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">UNREALIZED P&amp;L</span>
+        <span class="oc-strip-value {% if total_unrealized > 0 %}up{% elif total_unrealized < 0 %}down{% endif %}">{{ total_unrealized|floatformat:2 }}</span>
+        <span class="oc-strip-sub">{{ open_positions_total }} open positions</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">WIN RATE</span>
+        <span class="oc-strip-value">{{ win_rate }}%</span>
+        <span class="oc-strip-sub">{{ n_winning }}W / {{ n_losing }}L · {{ n_closed }} closed</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PROFIT FACTOR</span>
+        <span class="oc-strip-value {% if profit_factor >= 1 %}up{% elif profit_factor > 0 %}down{% endif %}">{{ profit_factor }}</span>
+        <span class="oc-strip-sub">avg win {{ avg_win }} · avg loss {{ avg_loss }}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SHARPE 30D</span>
+        <span class="oc-strip-value {% if sharpe_30d and sharpe_30d > 0 %}up{% elif sharpe_30d and sharpe_30d < 0 %}down{% endif %}">{% if sharpe_30d is not None %}{{ sharpe_30d }}{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">{% if sortino_30d is not None %}sortino {{ sortino_30d }}{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MAX DRAWDOWN</span>
+        <span class="oc-strip-value down">{{ max_drawdown|floatformat:2 }}%</span>
+        <span class="oc-strip-sub">all-time low watermark</span>
+    </div>
+</div>
+
+{# ── 2. Equity curve sparkline ────────────────────────────────────── #}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="card-title">Equity curve · last 30 days</span>
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+            {% if equity_points %}low {{ equity_min|floatformat:0 }} · high {{ equity_max|floatformat:0 }} · {{ equity_points|length }} pts{% endif %}
+        </span>
+    </div>
+    {% if equity_points %}
+        <svg class="oc-sparkline" viewBox="0 0 600 60" preserveAspectRatio="none">
+            <defs>
+                <linearGradient id="oc-spark-grad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.4"/>
+                    <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+                </linearGradient>
+            </defs>
+            {# path set client-side from data-points below #}
+            <path d=""/>
+        </svg>
+        <div id="ocEquitySparkData" style="display:none;"
+             data-points="{% for v in equity_points %}{{ v|floatformat:6 }}{% if not forloop.last %},{% endif %}{% endfor %}"
+             data-min="{{ equity_min|floatformat:6 }}"
+             data-max="{{ equity_max|floatformat:6 }}"></div>
+        <script>
+            (function() {
+                var el = document.getElementById('ocEquitySparkData');
+                if (!el) return;
+                var pts = (el.dataset.points || '').split(',').map(parseFloat).filter(function(v){return !isNaN(v);});
+                if (pts.length < 2) return;
+                var min = parseFloat(el.dataset.min);
+                var max = parseFloat(el.dataset.max);
+                var span = (max - min) || 1;
+                var W = 600, H = 60, pad = 4;
+                var lineCmds = [];
+                for (var i = 0; i < pts.length; i++) {
+                    var x = (i / (pts.length - 1)) * (W - 2 * pad) + pad;
+                    var y = H - pad - ((pts[i] - min) / span) * (H - 2 * pad);
+                    lineCmds.push((i === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2));
+                }
+                var fillCmds = lineCmds.slice();
+                fillCmds.push('L ' + (W - pad) + ' ' + (H - pad));
+                fillCmds.push('L ' + pad + ' ' + (H - pad)); fillCmds.push('Z');
+                var svg = el.previousElementSibling;
+                if (svg && svg.tagName === 'svg' || svg.querySelector) {
+                    var path = svg.querySelector('path');
+                    if (path) path.setAttribute('d', lineCmds.join(' '));
+                    var ns = 'http://www.w3.org/2000/svg';
+                    var fill = document.createElementNS(ns, 'path');
+                    fill.setAttribute('d', fillCmds.join(' '));
+                    fill.setAttribute('class', 'oc-sparkline-fill');
+                    svg.insertBefore(fill, path);
+                }
+            })();
+        </script>
+    {% else %}
+        <p class="oc-empty">No portfolio snapshots yet — equity curve fills as daily snapshots accumulate.</p>
+    {% endif %}
+</div>
+
+{# ── 3. Allocation donut + winners/losers ─────────────────────────── #}
+<div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
+    <div class="card">
+        <div class="card-header"><span class="card-title">Allocation</span></div>
+        {% if allocation %}
+            <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+                <svg class="oc-donut" viewBox="0 0 100 100" id="ocAllocDonut">
+                    <circle cx="50" cy="50" r="35" fill="none" stroke="var(--bg-card-hover)" stroke-width="14"/>
+                </svg>
+                <div class="oc-donut-legend" style="flex:1;min-width:160px;">
+                    {% for a in allocation %}
+                        <div class="oc-donut-legend-row">
+                            <span class="oc-donut-legend-key">
+                                <span class="oc-donut-legend-swatch" data-class="{{ a.asset_class }}"></span>
+                                {{ a.asset_class|upper }}
+                            </span>
+                            <span class="oc-donut-legend-pct">{{ a.pct }}%</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div id="ocAllocData" style="display:none;"
+                 data-rows="{% for a in allocation %}{{ a.asset_class }}:{{ a.pct }}{% if not forloop.last %};{% endif %}{% endfor %}"></div>
+            <script>
+                (function() {
+                    var rows = (document.getElementById('ocAllocData').dataset.rows || '')
+                        .split(';').map(function(r){var p=r.split(':');return {k:p[0], pct:parseFloat(p[1])};})
+                        .filter(function(r){return !isNaN(r.pct);});
+                    var palette = ['#00e868','#ffb000','#ff5e5e','#5b9eff','#c084fc','#22d3ee','#94a3b8'];
+                    var colorOf = {};
+                    rows.forEach(function(r,i){colorOf[r.k] = palette[i % palette.length];});
+                    document.querySelectorAll('.oc-donut-legend-swatch').forEach(function(el){
+                        el.style.background = colorOf[el.dataset.class] || palette[0];
+                    });
+                    var svg = document.getElementById('ocAllocDonut');
+                    if (!svg || rows.length === 0) return;
+                    var ns = 'http://www.w3.org/2000/svg';
+                    var cx=50, cy=50, r=35, c=2*Math.PI*r;
+                    var offset = -c/4; /* start at 12 o'clock */
+                    rows.forEach(function(row){
+                        var seg = document.createElementNS(ns, 'circle');
+                        var len = (row.pct/100) * c;
+                        seg.setAttribute('cx', cx); seg.setAttribute('cy', cy); seg.setAttribute('r', r);
+                        seg.setAttribute('fill','none');
+                        seg.setAttribute('stroke', colorOf[row.k]);
+                        seg.setAttribute('stroke-width', 14);
+                        seg.setAttribute('stroke-dasharray', len.toFixed(2) + ' ' + (c - len).toFixed(2));
+                        seg.setAttribute('stroke-dashoffset', offset.toFixed(2));
+                        seg.setAttribute('transform', 'rotate(0 50 50)');
+                        svg.appendChild(seg);
+                        offset -= len;
+                    });
+                })();
+            </script>
+        {% else %}
+            <p class="oc-empty">No open positions — allocation will fill once positions open.</p>
+        {% endif %}
+    </div>
+
+    <div class="card oc-expandable">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">Top 5 winners / losers</span>
+            <button class="oc-expand-btn" aria-expanded="false">+</button>
+        </div>
+        <table class="sv-perf-table">
+            <thead><tr><th>symbol</th><th>side</th><th>P&amp;L</th></tr></thead>
+            <tbody>
+                {% for p in best_trades|slice:":3" %}
+                    <tr>
+                        <td><strong>{{ p.instrument.symbol }}</strong></td>
+                        <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
+                        <td class="up">+{{ p.unrealized_pnl|floatformat:2 }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="3" class="oc-empty">No closed trades yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div class="oc-expand-target">
+            <strong style="font-size:12px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:1px;">Worst 5</strong>
+            <table class="sv-perf-table" style="margin-top:6px;">
+                <tbody>
+                    {% for p in worst_trades|slice:":5" %}
+                        <tr>
+                            <td><strong>{{ p.instrument.symbol }}</strong></td>
+                            <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
+                            <td class="down">{{ p.unrealized_pnl|floatformat:2 }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{# ── 4. Open positions table ──────────────────────────────────────── #}
+<div class="card">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="card-title">Open positions</span>
+        <a href="{% url 'positions_list' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">all positions →</a>
+    </div>
+    {% if open_positions %}
+        <div class="table-wrapper">
+        <table class="sv-perf-table">
+            <thead><tr><th>symbol</th><th>side</th><th>qty</th><th>entry</th><th>last</th><th>unreal P&amp;L</th><th>unreal %</th></tr></thead>
+            <tbody>
+                {% for p in open_positions %}
+                    <tr>
+                        <td><strong>{{ p.instrument.symbol }}</strong></td>
+                        <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
+                        <td>{{ p.quantity|floatformat:4 }}</td>
+                        <td>{{ p.entry_price|floatformat:4 }}</td>
+                        <td>{{ p.current_price|floatformat:4 }}</td>
+                        <td class="oc-mini-pnl {% if p.unrealized_pnl > 0 %}up{% elif p.unrealized_pnl < 0 %}down{% endif %}">{{ p.unrealized_pnl|floatformat:2 }}</td>
+                        <td class="{% if p.unrealized_pnl_pct > 0 %}up{% elif p.unrealized_pnl_pct < 0 %}down{% endif %}">{{ p.unrealized_pnl_pct|floatformat:2 }}%</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    {% else %}
+        <p class="oc-empty">No open positions.</p>
+    {% endif %}
+</div>

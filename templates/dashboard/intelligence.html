@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block title %}Intelligence hub · Sauron's Mind{% endblock %}
+{% block content %}
+<div class="page-content">
+    {# ── Hero strip — 8 cells of headline numbers ── #}
+    <div class="oc-strip" style="margin-bottom:18px;">
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">REGIME</span>
+            <span class="oc-strip-value">{% if latest_report %}{{ latest_report.regime_label|upper }}{% else %}—{% endif %}</span>
+            <span class="oc-strip-sub">{% if latest_report %}conf {{ latest_report.regime_confidence|floatformat:2 }}{% endif %}</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">POSTURE</span>
+            <span class="oc-strip-value {% if latest_briefing.posture == 'aggressive' %}up{% elif latest_briefing.posture == 'defensive' %}down{% endif %}">
+                {% if latest_briefing %}{{ latest_briefing.posture|upper }}{% else %}—{% endif %}
+            </span>
+            <span class="oc-strip-sub">{% if latest_briefing %}{{ latest_briefing.created_at|date:"M d" }}{% endif %}</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">BRAIN TRUST</span>
+            <span class="oc-strip-value">{% if trust is not None %}{{ trust|floatformat:2 }}{% else %}—{% endif %}</span>
+            <span class="oc-strip-sub">band <strong>{{ band|upper }}</strong></span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">OBS QUEUED</span>
+            <span class="oc-strip-value">{{ n_unconsumed_obs }}</span>
+            <span class="oc-strip-sub">awaiting next synth</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">PENDING HYP</span>
+            <span class="oc-strip-value">{{ pending_hypotheses|length }}</span>
+            <span class="oc-strip-sub">{{ recent_resolved|length }} recently resolved</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">PROPOSALS</span>
+            <span class="oc-strip-value {% if pending_proposals %}up{% endif %}">{{ pending_proposals|length }}</span>
+            <span class="oc-strip-sub">awaiting admin review</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">DEMOTIONS</span>
+            <span class="oc-strip-value {% if open_demotions %}down{% endif %}">{{ open_demotions|length }}</span>
+            <span class="oc-strip-sub">rules paused by auto-demoter</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">KNOWLEDGE KINDS</span>
+            <span class="oc-strip-value">{{ node_counts|length }}</span>
+            <span class="oc-strip-sub">{% if last_consolidation %}last consol {{ last_consolidation.started_at|timesince }} ago{% else %}no runs yet{% endif %}</span>
+        </div>
+    </div>
+
+    {# ── Today's briefing snippet ── #}
+    {% if latest_briefing and not latest_briefing.error %}
+    <div class="card" style="margin-bottom:14px;">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">Today's briefing</span>
+            <a href="{% url 'briefing_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">full briefing →</a>
+        </div>
+        <div style="font-size:13px;line-height:1.6;white-space:pre-wrap;">{{ latest_briefing.outlook_md|truncatechars:600 }}</div>
+        {% if latest_briefing.posture_rationale %}
+            <p style="margin:10px 0 0;color:var(--text-muted);font-size:12px;font-style:italic;">{{ latest_briefing.posture_rationale }}</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# ── Two-column: pending hypotheses + recent resolved ── #}
+    <div class="grid grid-2" style="gap:14px;margin-bottom:14px;">
+        <div class="card">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="card-title">Open bets</span>
+                <a href="{% url 'hypotheses_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">market →</a>
+            </div>
+            <table class="sv-perf-table">
+                <thead><tr><th>source</th><th>claim</th><th>conf</th><th>deadline</th></tr></thead>
+                <tbody>
+                {% for h in pending_hypotheses %}
+                    <tr>
+                        <td><span class="badge badge-medium">{{ h.source_agent }}</span></td>
+                        <td>{{ h.claim_text|truncatechars:50 }}</td>
+                        <td>{{ h.confidence|floatformat:2 }}</td>
+                        <td style="font-size:11px;">{{ h.resolution_deadline|date:"m-d H:i" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4" style="color:var(--text-muted);">No pending hypotheses.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><span class="card-title">Recently resolved</span></div>
+            <table class="sv-perf-table">
+                <thead><tr><th>source</th><th>claim</th><th>outcome</th></tr></thead>
+                <tbody>
+                {% for h in recent_resolved %}
+                    <tr>
+                        <td>{{ h.source_agent }}</td>
+                        <td>{{ h.claim_text|truncatechars:50 }}</td>
+                        <td>
+                            {% if h.outcome == "confirmed" %}<span style="color:var(--accent);">{{ h.outcome }}</span>
+                            {% elif h.outcome == "refuted" %}<span style="color:var(--down);">{{ h.outcome }}</span>
+                            {% else %}<span style="color:var(--text-muted);">{{ h.outcome }}</span>{% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="3" style="color:var(--text-muted);">None resolved yet.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {# ── Generated proposals + auto-demotions ── #}
+    <div class="grid grid-2" style="gap:14px;margin-bottom:14px;">
+        <div class="card">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="card-title">Pending generated proposals</span>
+                <a href="{% url 'generated_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">review →</a>
+            </div>
+            <table class="sv-perf-table">
+                <thead><tr><th>name</th><th>direction</th><th>conf</th><th>created</th></tr></thead>
+                <tbody>
+                {% for p in pending_proposals %}
+                    <tr>
+                        <td><strong>{{ p.proposed_name|truncatechars:40 }}</strong></td>
+                        <td>{{ p.direction }}</td>
+                        <td>{{ p.confidence|floatformat:2 }}</td>
+                        <td style="font-size:11px;">{{ p.created_at|date:"m-d H:i" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4" style="color:var(--text-muted);">No pending proposals.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card" style="{% if open_demotions %}border-left:3px solid var(--down);{% endif %}">
+            <div class="card-header"><span class="card-title">Open auto-demotions</span></div>
+            <table class="sv-perf-table">
+                <thead><tr><th>rule</th><th>criterion</th><th>at</th></tr></thead>
+                <tbody>
+                {% for d in open_demotions %}
+                    <tr>
+                        <td><strong>{{ d.rule_name|truncatechars:40 }}</strong></td>
+                        <td><span class="badge badge-bearish">{{ d.criterion }}</span></td>
+                        <td style="font-size:11px;">{{ d.demoted_at|date:"m-d H:i" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="3" style="color:var(--text-muted);">All clean.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {# ── Operator overrides (last 7d) ── #}
+    {% if recent_overrides_list or override_counts %}
+    <div class="card" style="margin-bottom:14px;">
+        <div class="card-header"><span class="card-title">Operator overrides (last 7d)</span></div>
+        {% if override_counts %}
+            <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;margin-bottom:10px;">
+                {% for agent, count in override_counts.items %}
+                <div>
+                    <span style="color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:1px;">{{ agent }}:</span>
+                    <strong style="color:var(--down);">{{ count }}</strong> overrides
+                    {% with rate=agent_override_rates|dictsort:0 %}{% endwith %}
+                    {% if agent_override_rates|length %}
+                        {% for a, r in agent_override_rates.items %}
+                            {% if a == agent and r is not None %}
+                                <span style="color:var(--text-muted);">· 30d rate {{ r|floatformat:2 }}</span>
+                            {% endif %}
+                        {% endfor %}
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+        {% if recent_overrides_list %}
+            <table class="sv-perf-table">
+                <thead><tr><th>kind</th><th>target</th><th>by</th><th>at</th></tr></thead>
+                <tbody>
+                {% for ov in recent_overrides_list %}
+                <tr>
+                    <td><span class="badge badge-bearish">{{ ov.kind }}</span></td>
+                    <td style="font-size:11px;">{% firstof ov.data.proposed_name ov.data.rule_name "—" %}</td>
+                    <td>{% firstof ov.data.reviewed_by ov.data.restored_by "—" %}</td>
+                    <td style="font-size:11px;color:var(--text-muted);">{{ ov.created_at|date:"m-d H:i" }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# ── Anomalies (last 24h) ── #}
+    {% if recent_anomaly_obs %}
+    <div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent);">
+        <div class="card-header"><span class="card-title">Anomalies detected (last 24h)</span></div>
+        <table class="sv-perf-table">
+            <thead><tr><th>detector</th><th>what</th><th>at</th></tr></thead>
+            <tbody>
+            {% for obs in recent_anomaly_obs %}
+                <tr>
+                    <td><span class="badge badge-medium">{{ obs.payload.detector }}</span></td>
+                    <td style="font-size:12px;">{{ obs.payload.text|default:obs.payload.key|truncatechars:120 }}</td>
+                    <td style="font-size:11px;color:var(--text-muted);">{{ obs.created_at|date:"m-d H:i" }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {# ── Knowledge graph snapshot ── #}
+    <div class="card" style="margin-bottom:14px;">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">Knowledge graph (current)</span>
+            <a href="{% url 'knowledge_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">explore →</a>
+        </div>
+        {% if node_counts %}
+            <div style="display:flex;flex-wrap:wrap;gap:14px;">
+                {% for nc in node_counts %}
+                <div style="font-family:var(--font-mono);font-size:12px;">
+                    <span style="color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">{{ nc.kind }}:</span>
+                    <strong style="color:var(--accent);">{{ nc.n }}</strong>
+                </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p style="color:var(--text-muted);">Graph empty — wait for first nightly consolidation.</p>
+        {% endif %}
+    </div>
+
+    {# ── System pulse — last consolidation ── #}
+    {% if last_consolidation %}
+    <div class="card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">System pulse</span>
+            <a href="{% url 'consolidation_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">runs →</a>
+        </div>
+        <p style="margin:0;font-size:12px;color:var(--text-muted);">
+            Last consolidation: {{ last_consolidation.started_at|date:"Y-m-d H:i" }} UTC
+            · nodes +{{ last_consolidation.n_nodes_added }}/sup {{ last_consolidation.n_nodes_superseded }}
+            · {{ last_consolidation.n_hypotheses_resolved }} hypotheses resolved
+            · {{ last_consolidation.n_observations_pruned }} obs pruned
+        </p>
+        {% if last_consolidation.error %}
+            <p style="margin:6px 0 0;color:var(--down);font-size:12px;">⚠ {{ last_consolidation.error|truncatechars:200 }}</p>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

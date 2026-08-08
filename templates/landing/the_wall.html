@@ -791,6 +791,552 @@
         .sauron-keypad button:active { transform: scale(0.95); background: var(--bg2); }
         .sauron-keypad button.kp-fn { color: var(--text3); font-size: 14px; }
         .sauron-keypad button.kp-fn:hover { color: var(--accent-red); border-color: #581818; }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* PHASE-33+ ADDITIONS — pipeline, hash-chain, theme-pulse, etc. */
+        /* ══════════════════════════════════════════════════════════════ */
+
+        /* Pipeline diagram — 5 nodes flowing left → right with glowing
+           data packets travelling between them. */
+        .pipeline {
+            position: relative;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            padding: 36px 12px;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            background: linear-gradient(180deg, rgba(0,232,104,0.025), rgba(0,232,104,0.005));
+            overflow: hidden;
+        }
+        .pipeline::before {
+            content: ''; position: absolute; inset: 0;
+            background: radial-gradient(ellipse at center, rgba(0,232,104,0.05), transparent 70%);
+            pointer-events: none;
+        }
+        .pipe-node {
+            position: relative; z-index: 2;
+            display: flex; flex-direction: column; align-items: center;
+            gap: 10px; padding: 14px 10px; text-align: center;
+            background: var(--bg2);
+            border: 1px solid var(--border-glow);
+            border-radius: 12px;
+            transition: transform 0.4s, border-color 0.4s, box-shadow 0.4s;
+        }
+        .pipe-node:hover {
+            transform: translateY(-3px);
+            border-color: var(--accent-dim);
+            box-shadow: 0 8px 24px rgba(0,232,104,0.12);
+        }
+        .pipe-icon {
+            width: 44px; height: 44px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 50%;
+            background: var(--accent-glow);
+            border: 1px solid var(--accent-dim);
+            position: relative;
+        }
+        .pipe-icon::after {
+            content: ''; position: absolute; inset: -4px;
+            border-radius: 50%;
+            border: 1px solid var(--accent);
+            opacity: 0.35;
+            animation: pipeRing 2.4s ease-out infinite;
+        }
+        .pipe-node:nth-child(2) .pipe-icon::after { animation-delay: 0.3s; }
+        .pipe-node:nth-child(3) .pipe-icon::after { animation-delay: 0.6s; }
+        .pipe-node:nth-child(4) .pipe-icon::after { animation-delay: 0.9s; }
+        .pipe-node:nth-child(5) .pipe-icon::after { animation-delay: 1.2s; }
+        @keyframes pipeRing {
+            0% { transform: scale(1); opacity: 0.35; }
+            100% { transform: scale(1.7); opacity: 0; }
+        }
+        .pipe-icon svg { width: 22px; height: 22px; stroke: var(--accent); }
+        .pipe-title {
+            font-family: var(--font-d); font-size: 12px; font-weight: 700;
+            letter-spacing: 1.2px; color: var(--text);
+        }
+        .pipe-sub {
+            font-family: var(--font-m); font-size: 10px; color: var(--text2);
+            letter-spacing: 0.5px;
+        }
+        /* Connector "data packets" */
+        .pipe-flow {
+            position: absolute; top: 50%; transform: translateY(-50%);
+            left: 0; right: 0; height: 2px; pointer-events: none; z-index: 1;
+            background: linear-gradient(90deg, transparent, rgba(0,232,104,0.18), transparent);
+            background-size: 200% 100%;
+            animation: pipeFlow 4s linear infinite;
+        }
+        @keyframes pipeFlow {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        @media (max-width: 768px) {
+            .pipeline { grid-template-columns: 1fr; gap: 16px; }
+            .pipe-flow { display: none; }
+        }
+
+        /* Hash-chain visual — used in Trust section */
+        .hash-chain {
+            display: flex; gap: 14px; align-items: center;
+            justify-content: center; flex-wrap: wrap;
+            padding: 28px 12px;
+        }
+        .hash-block {
+            position: relative;
+            font-family: var(--font-m); font-size: 11px; color: var(--text2);
+            padding: 12px 14px; min-width: 130px;
+            background: var(--bg2);
+            border: 1px solid var(--border-glow);
+            border-radius: 8px;
+            text-align: left;
+            transition: border-color 0.3s, transform 0.3s;
+        }
+        .hash-block:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+        .hash-block::before {
+            content: '#' attr(data-idx);
+            position: absolute; top: -10px; left: 10px;
+            font-family: var(--font-m); font-size: 9px;
+            color: var(--text3); background: var(--bg);
+            padding: 1px 6px; border-radius: 4px;
+        }
+        .hash-block .hash-row {
+            display: flex; justify-content: space-between; gap: 8px;
+            font-size: 10px; line-height: 1.5;
+        }
+        .hash-block .hash-key { color: var(--text3); }
+        .hash-block .hash-val { color: var(--accent); }
+        .hash-block .hash-shimmer {
+            display: inline-block;
+            background: linear-gradient(90deg,
+                rgba(0,232,104,0.4) 0%,
+                rgba(64,255,144,1) 50%,
+                rgba(0,232,104,0.4) 100%);
+            background-size: 200% 100%;
+            -webkit-background-clip: text; background-clip: text;
+            color: transparent;
+            animation: hashShimmer 3s linear infinite;
+        }
+        @keyframes hashShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+        .hash-link {
+            color: var(--accent-dim); font-family: var(--font-m); font-size: 18px;
+            opacity: 0.7;
+            animation: hashPulse 2s ease-in-out infinite;
+        }
+        @keyframes hashPulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+        @media (max-width: 768px) { .hash-link { transform: rotate(90deg); } }
+
+        /* Theme-exposure pulse bars (orchestrator card) */
+        .theme-bars { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+        .theme-bar-row {
+            display: flex; align-items: center; gap: 10px;
+            font-family: var(--font-m); font-size: 11px;
+        }
+        .theme-bar-row .lbl { width: 80px; color: var(--text2); letter-spacing: 1px; }
+        .theme-bar-row .bar {
+            flex: 1; height: 6px;
+            background: var(--bg3); border-radius: 3px; overflow: hidden;
+            position: relative;
+        }
+        .theme-bar-row .bar::after {
+            content: ''; position: absolute; top: 0; left: 0; height: 100%;
+            background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+            box-shadow: 0 0 8px var(--accent);
+            animation: themeFill 3s ease-in-out infinite;
+        }
+        .theme-bar-row.usd .bar::after { width: 60%; }
+        .theme-bar-row.equity .bar::after { width: 40%; animation-delay: 0.3s; }
+        .theme-bar-row.vol .bar::after { width: 25%; animation-delay: 0.6s; background: linear-gradient(90deg, #5a3070, var(--purple)); box-shadow: 0 0 8px var(--purple); }
+        @keyframes themeFill {
+            0%, 100% { opacity: 0.85; transform: scaleX(1); transform-origin: left; }
+            50% { opacity: 1; transform: scaleX(1.02); }
+        }
+
+        /* Broker tile orbital shimmer */
+        .broker-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 16px; margin-top: 28px;
+        }
+        .broker-tile {
+            position: relative; padding: 22px 18px;
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            text-align: center;
+            overflow: hidden;
+            transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
+        }
+        .broker-tile::before {
+            content: ''; position: absolute; inset: -50% -50% auto auto;
+            width: 200%; height: 200%;
+            background: conic-gradient(from 0deg, transparent 0deg, rgba(0,232,104,0.1) 60deg, transparent 120deg);
+            animation: brokerOrbit 8s linear infinite;
+            pointer-events: none; opacity: 0;
+            transition: opacity 0.4s;
+        }
+        .broker-tile:hover { border-color: var(--accent-dim); transform: translateY(-4px); box-shadow: 0 10px 28px rgba(0,232,104,0.10); }
+        .broker-tile:hover::before { opacity: 1; }
+        @keyframes brokerOrbit { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+        .broker-name {
+            font-family: var(--font-d); font-size: 14px; font-weight: 700;
+            letter-spacing: 1px; color: var(--text);
+            position: relative; z-index: 1;
+        }
+        .broker-meta {
+            font-family: var(--font-m); font-size: 10px; color: var(--text2);
+            margin-top: 6px; letter-spacing: 0.6px;
+            position: relative; z-index: 1;
+        }
+        .broker-tile.live .broker-name { color: var(--accent); }
+
+        /* Telemetry "tick" line under stat numbers */
+        .tick-strip {
+            display: flex; justify-content: center; gap: 4px; margin-top: 8px;
+        }
+        .tick-strip span {
+            display: block; width: 3px; height: 12px;
+            background: var(--accent-dim); border-radius: 2px;
+            animation: tickRise 1.4s ease-in-out infinite;
+        }
+        .tick-strip span:nth-child(2) { animation-delay: 0.15s; }
+        .tick-strip span:nth-child(3) { animation-delay: 0.3s; }
+        .tick-strip span:nth-child(4) { animation-delay: 0.45s; }
+        .tick-strip span:nth-child(5) { animation-delay: 0.6s; }
+        @keyframes tickRise {
+            0%, 100% { transform: scaleY(0.4); background: var(--accent-dim); }
+            50% { transform: scaleY(1); background: var(--accent); }
+        }
+
+        /* "Pillar" stat — used in trust + scale sections */
+        .pillar-row {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px; margin-top: 32px;
+        }
+        .pillar {
+            position: relative;
+            padding: 22px 18px;
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            transition: border-color 0.3s, transform 0.3s;
+            overflow: hidden;
+        }
+        .pillar:hover { border-color: var(--accent-dim); transform: translateY(-3px); }
+        .pillar-num {
+            font-family: var(--font-d); font-weight: 800;
+            font-size: 36px; line-height: 1;
+            background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+            -webkit-background-clip: text; background-clip: text;
+            color: transparent;
+        }
+        .pillar-lbl {
+            font-family: var(--font-m); font-size: 11px;
+            letter-spacing: 1.5px; color: var(--text2);
+            text-transform: uppercase; margin-top: 6px;
+        }
+        .pillar-desc {
+            font-family: var(--font-h); font-size: 12px;
+            color: var(--text3); margin-top: 8px; line-height: 1.5;
+        }
+        .pillar::after {
+            content: ''; position: absolute; bottom: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--accent-dim), var(--accent), var(--accent-dim));
+            background-size: 200% 100%;
+            animation: pillarFlow 4s linear infinite;
+            opacity: 0.6;
+        }
+        @keyframes pillarFlow { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+        /* ── Interactive orchestrator demo (v2) ────────────────────── */
+        .demo-frame {
+            position: relative;
+            margin: 36px auto 0;
+            max-width: 1080px;
+            padding: 22px 22px 18px;
+            background: linear-gradient(180deg, var(--bg2), var(--bg3));
+            border: 1px solid var(--border-glow);
+            border-radius: 16px;
+            box-shadow: 0 0 0 1px rgba(0,232,104,0.04) inset,
+                        0 18px 48px rgba(0,0,0,0.45);
+            overflow: hidden;
+        }
+        .demo-frame::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: 0.5;
+        }
+        .demo-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 14px; gap: 12px; flex-wrap: wrap;
+        }
+        .demo-title {
+            font-family: var(--font-d); font-size: 11px; font-weight: 700;
+            letter-spacing: 2.5px; color: var(--text2);
+        }
+        .demo-counters {
+            display: flex; gap: 14px;
+            font-family: var(--font-m); font-size: 11px; letter-spacing: 1px;
+        }
+        .demo-counters .ok { color: var(--accent); }
+        .demo-counters .rej { color: var(--accent-red); }
+
+        /* Scenario preset buttons */
+        .demo-presets {
+            display: flex; gap: 8px; flex-wrap: wrap;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 14px;
+        }
+        .demo-preset-btn {
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 1px;
+            padding: 6px 12px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            color: var(--text2);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .demo-preset-btn:hover {
+            color: var(--accent); border-color: var(--accent-dim);
+            background: rgba(0,232,104,0.05);
+        }
+        .demo-preset-btn.active {
+            color: var(--accent); border-color: var(--accent);
+            background: rgba(0,232,104,0.10);
+            box-shadow: 0 0 12px rgba(0,232,104,0.15);
+        }
+        .demo-preset-btn .ico { color: var(--accent); margin-right: 4px; }
+
+        /* Cap sliders */
+        .demo-controls {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 18px;
+        }
+        @media (max-width: 640px) { .demo-controls { grid-template-columns: 1fr; gap: 12px; } }
+        .demo-control { display: flex; flex-direction: column; gap: 6px; }
+        .demo-control label {
+            display: flex; justify-content: space-between;
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 1.5px;
+            color: var(--text2); text-transform: uppercase;
+        }
+        .demo-control label .val { color: var(--accent); font-weight: 700; }
+        .demo-control input[type="range"] {
+            width: 100%; height: 4px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            -webkit-appearance: none; appearance: none;
+            outline: none;
+            cursor: pointer;
+        }
+        .demo-control input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none;
+            width: 14px; height: 14px; border-radius: 50%;
+            background: var(--accent); border: 1px solid var(--bg);
+            box-shadow: 0 0 8px var(--accent);
+            cursor: pointer;
+        }
+        .demo-control input[type="range"]::-moz-range-thumb {
+            width: 14px; height: 14px; border-radius: 50%;
+            background: var(--accent); border: 1px solid var(--bg);
+            box-shadow: 0 0 8px var(--accent);
+            cursor: pointer;
+        }
+
+        /* Main demo body — three columns: exposure | stage | log */
+        .demo-body {
+            display: grid;
+            grid-template-columns: 200px 1fr 240px;
+            gap: 16px;
+            align-items: stretch;
+        }
+        @media (max-width: 900px) { .demo-body { grid-template-columns: 1fr; } }
+
+        /* LIVE EXPOSURE PANEL (left) */
+        .demo-exposure-panel {
+            padding: 14px;
+            background: rgba(0,0,0,0.35);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+        }
+        .demo-exp-title {
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 2px;
+            color: var(--text3); text-transform: uppercase; margin-bottom: 12px;
+        }
+        .demo-exp-bar {
+            margin-bottom: 14px;
+        }
+        .demo-exp-bar-head {
+            display: flex; justify-content: space-between; align-items: baseline;
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 1px;
+            color: var(--text2); margin-bottom: 5px;
+        }
+        .demo-exp-bar-head .v { color: var(--accent); font-weight: 700; }
+        .demo-exp-bar-track {
+            position: relative;
+            height: 6px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .demo-exp-bar-fill {
+            position: absolute; top: 0; left: 50%; height: 100%;
+            background: var(--accent);
+            box-shadow: 0 0 8px var(--accent);
+            transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                        background 0.3s, box-shadow 0.3s, left 0.4s;
+        }
+        .demo-exp-bar-fill.over {
+            background: var(--accent-red);
+            box-shadow: 0 0 12px var(--accent-red);
+        }
+        .demo-exp-bar-track::before {
+            content: ''; position: absolute; top: 0; bottom: 0; left: 50%;
+            width: 1px; background: var(--text3); opacity: 0.6;
+        }
+
+        /* STAGE (center) */
+        .demo-stage {
+            position: relative;
+            height: 240px;
+            background:
+                radial-gradient(ellipse at 18% 50%, rgba(0,232,104,0.08), transparent 50%),
+                radial-gradient(ellipse at 82% 50%, rgba(232,48,48,0.05), transparent 50%);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .demo-stage::before, .demo-stage::after {
+            content: ''; position: absolute; left: 0; right: 0;
+            height: 1px; background: linear-gradient(90deg, transparent, var(--border-glow), transparent);
+        }
+        .demo-stage::before { top: 0; }
+        .demo-stage::after { bottom: 0; }
+        .demo-stage-label {
+            position: absolute; top: 50%; transform: translateY(-50%);
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 2px;
+            color: var(--text3); text-transform: uppercase;
+            writing-mode: vertical-rl;
+        }
+        .demo-stage-label.left { left: 8px; }
+        .demo-stage-label.right { right: 8px; }
+        .demo-gate {
+            position: absolute; top: 8%; bottom: 8%; left: 50%; width: 2px;
+            transform: translateX(-50%);
+            background: linear-gradient(180deg, transparent, var(--accent-dim), transparent);
+            box-shadow: 0 0 12px rgba(0,232,104,0.3);
+        }
+        .demo-gate-label {
+            position: absolute; top: -8px; left: 50%;
+            transform: translateX(-50%);
+            font-family: var(--font-m); font-size: 9px;
+            letter-spacing: 2px; color: var(--accent);
+            background: var(--bg2); padding: 2px 8px; border-radius: 8px;
+            border: 1px solid var(--accent-dim);
+            white-space: nowrap;
+        }
+        .demo-dot {
+            position: absolute;
+            width: 12px; height: 12px; border-radius: 50%;
+            box-shadow: 0 0 10px currentColor;
+        }
+        .demo-dot-tag {
+            position: absolute;
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 0.5px;
+            color: var(--text); white-space: nowrap;
+            background: rgba(6,14,10,0.85);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 1px 6px;
+            transform: translateX(8px);
+            pointer-events: none;
+        }
+
+        /* DECISION LOG (right) — most-recent gate decisions, persistent */
+        .demo-log-panel {
+            padding: 12px 12px 8px;
+            background: rgba(0,0,0,0.35);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            display: flex; flex-direction: column;
+        }
+        .demo-log-title {
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 2px;
+            color: var(--text3); text-transform: uppercase; margin-bottom: 8px;
+            display: flex; justify-content: space-between;
+        }
+        .demo-log-title .live-pulse {
+            color: var(--accent);
+            animation: liveBlink 1.4s ease-in-out infinite;
+        }
+        @keyframes liveBlink { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+        .demo-log-list {
+            flex: 1;
+            display: flex; flex-direction: column;
+            gap: 5px; min-height: 200px;
+            overflow: hidden;
+        }
+        .demo-log-row {
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 0.4px;
+            padding: 5px 8px;
+            border-radius: 4px;
+            border-left: 2px solid var(--border);
+            background: rgba(0,0,0,0.15);
+            color: var(--text2);
+            line-height: 1.35;
+            opacity: 0; transform: translateY(-6px);
+            animation: logRowIn 0.35s cubic-bezier(0.16,1,0.3,1) forwards;
+        }
+        @keyframes logRowIn {
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .demo-log-row.pass {
+            border-left-color: var(--accent);
+            color: var(--accent);
+        }
+        .demo-log-row.rej {
+            border-left-color: var(--accent-red);
+            color: var(--accent-red);
+        }
+        .demo-log-row .reason {
+            display: block; color: var(--text3); font-size: 9px; margin-top: 1px;
+        }
+        .demo-empty-log {
+            color: var(--text3); font-style: italic; font-size: 10px;
+            text-align: center; padding: 24px 0;
+        }
+
+        /* Helper hint below */
+        .demo-hint {
+            margin-top: 10px;
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 0.5px;
+            color: var(--text3); text-align: center;
+        }
+        .demo-hint strong { color: var(--accent); }
+
+        /* Section subtitle / heading helper */
+        .new-pill {
+            display: inline-block; margin-left: 10px;
+            padding: 2px 8px; border-radius: 10px;
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 1.5px;
+            background: rgba(216,176,32,0.1); color: var(--gold);
+            border: 1px solid rgba(216,176,32,0.3);
+            vertical-align: middle;
+            animation: newPillPulse 2s ease-in-out infinite;
+        }
+        @keyframes newPillPulse {
+            0%, 100% { box-shadow: 0 0 0 rgba(216,176,32,0.3); }
+            50% { box-shadow: 0 0 12px rgba(216,176,32,0.45); }
+        }
     </style>
 </head>
 <body>
@@ -820,10 +1366,13 @@
         <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="3.5"/>
         <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
         <circle cx="400" cy="400" r="160" fill="none" stroke="#00e868" stroke-width="2.5"/>
-        <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="3"/>
-        <circle cx="400" cy="400" r="40" fill="url(#wallPupilFill)" filter="url(#wallEyeGlow)"/>
-        <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.18" filter="url(#wallEyeGlow)"/>
-        <circle cx="400" cy="400" r="8" fill="#00e868" opacity="0.4"/>
+        <!-- Pupil group — translated by JS to track cursor (Phase-trio upgrade) -->
+        <g id="wallPupilGroup" style="transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);">
+            <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="3"/>
+            <circle cx="400" cy="400" r="40" fill="url(#wallPupilFill)" filter="url(#wallEyeGlow)"/>
+            <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.18" filter="url(#wallEyeGlow)"/>
+            <circle cx="400" cy="400" r="8" fill="#00e868" opacity="0.4"/>
+        </g>
         <path d="M 10,400 Q 200,100 400,160 Q 600,100 790,400" fill="none" stroke="#00e868" stroke-width="2" opacity="0.6"/>
         <path d="M 10,400 Q 200,700 400,640 Q 600,700 790,400" fill="none" stroke="#00e868" stroke-width="2" opacity="0.6"/>
     </g>
@@ -854,9 +1403,10 @@
     </a>
     <div class="nav-links">
         <a href="#platform">Platform</a>
-        <a href="#signals">Signals</a>
-        <a href="#agents">AI Agents</a>
-        <a href="#technology">Technology</a>
+        <a href="#pipeline">Pipeline</a>
+        <a href="#demo">Demo</a>
+        <a href="#brokers">Brokers</a>
+        <a href="#trust">Trust</a>
         <a href="{% url 'login' %}" class="btn-access">Access Terminal</a>
     </div>
 </nav>
@@ -875,14 +1425,15 @@
         </h1>
         <p class="hero-subtitle reveal delay-3">The All-Seeing Trading Intelligence Platform</p>
         <p class="hero-desc reveal delay-4">
-            Multi-asset surveillance across global equities, forex, commodities, and crypto.
-            Autonomous AI agents, real-time signal generation, and institutional-grade risk analytics
-            &mdash; engineered for decisive capital allocation.
+            Autonomous, multi-asset trading across stocks, forex, commodities, options, crypto, and CFDs &mdash;
+            unified by a closed-loop intelligence engine that generates signals, gates risk across themes,
+            executes through six brokers, grades every outcome, and feeds the result back into the next decision.
+            Built end-to-end. <span class="hash-shimmer">667 tests green.</span>
         </p>
-        <div class="hero-badge reveal delay-5">Institutional-Grade Intelligence</div>
+        <div class="hero-badge reveal delay-5">Institutional-Grade · Production-Hardened · Fully Auditable</div>
         <div class="hero-cta reveal delay-6">
             <a href="{% url 'login' %}" class="btn-primary">Initialize Session</a>
-            <a href="#platform" class="btn-outline">Explore Platform</a>
+            <a href="#pipeline" class="btn-outline">See How It Works</a>
         </div>
     </div>
     <div class="scroll-indicator">
@@ -905,104 +1456,158 @@
     <div class="container">
         <div class="stats-bar reveal">
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="14">0</span></div>
-                <div class="stat-label">Global Exchanges</div>
+                <div class="stat-number"><span class="count-up" data-target="6">0</span></div>
+                <div class="stat-label">Asset Classes</div>
+                <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
             <div class="stat-cell">
                 <div class="stat-number"><span class="count-up" data-target="6">0</span></div>
-                <div class="stat-label">Asset Classes</div>
+                <div class="stat-label">Broker Adapters</div>
+                <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="8">0</span></div>
-                <div class="stat-label">AI Agents</div>
+                <div class="stat-number"><span class="count-up" data-target="12">0</span></div>
+                <div class="stat-label">Signal Evaluators</div>
+                <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="24">0</span>/7</div>
-                <div class="stat-label">Surveillance</div>
+                <div class="stat-number"><span class="count-up" data-target="667">0</span></div>
+                <div class="stat-label">Tests Passing</div>
+                <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
         </div>
 
         <div class="section-label reveal">The Platform</div>
-        <h2 class="section-title reveal delay-1">Complete Market Dominance</h2>
+        <h2 class="section-title reveal delay-1">A Closed-Loop Intelligence Engine</h2>
         <p class="section-desc reveal delay-2">
-            A unified command center that aggregates market intelligence from every corner of the
-            financial world. From equities and bonds to crypto and commodities &mdash; nothing escapes the Eye.
+            Sauron isn't a signal feed or a bot framework &mdash; it's the synthesis of both, plus everything
+            that connects them. Twelve evaluators fuse price, news, macro, COT, options flow and 13F filings
+            into composite signals. A multi-dimensional risk gate prevents stacked exposure across asset classes.
+            Six broker adapters route execution. Every trade is graded, every gate decision audited, every dollar
+            tracked. Then the results feed back into how the next decision gets made.
         </p>
 
         <div class="features-grid">
             <div class="feature-card reveal delay-1">
                 <div class="feature-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
-                        <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+                    <!-- Sauron sigil — hexagonal frame, eye with vertical slit pupil, cardinal ticks -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,2 21,7 21,17 12,22 3,17 3,7"/>
+                        <ellipse cx="12" cy="12" rx="5.5" ry="3"/>
+                        <ellipse cx="12" cy="12" rx="1.2" ry="2.6" fill="var(--accent)" stroke="none"/>
+                        <line x1="12" y1="2" x2="12" y2="4"/>
+                        <line x1="12" y1="20" x2="12" y2="22"/>
+                        <line x1="3.5" y1="9.5" x2="5.2" y2="10.5"/>
+                        <line x1="20.5" y1="9.5" x2="18.8" y2="10.5"/>
                     </svg>
                 </div>
-                <div class="feature-title">Real-Time Dashboard</div>
+                <div class="feature-title">Sauron's Eye Dashboard</div>
                 <div class="feature-text">
-                    Multi-panel command center with live quotes, portfolio tracking,
-                    TradingView charts, and customizable layout presets. Every data point, one glance.
+                    Single real-time pane: live theme exposure (USD, equity, vol, currencies, sectors),
+                    open positions across every asset class, gate decisions, recent fills, bot health,
+                    24h P&amp;L. WebSocket push for instant updates &mdash; HTMX 10s poll as fallback.
                 </div>
             </div>
             <div class="feature-card reveal delay-2">
                 <div class="feature-icon blue">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10A15.3 15.3 0 0 1 12 2z"/>
+                    <!-- Hexagram sigil — six-pointed star = orchestrator watching 6 dimensions -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,2.5 20.5,17.5 3.5,17.5"/>
+                        <polygon points="12,21.5 3.5,6.5 20.5,6.5"/>
+                        <circle cx="12" cy="12" r="1.4" fill="var(--blue)" stroke="none"/>
                     </svg>
                 </div>
-                <div class="feature-title">Multi-Asset Coverage</div>
+                <div class="feature-title">Cross-Asset Orchestrator</div>
                 <div class="feature-text">
-                    Stocks, forex, commodities, crypto, bonds, and indices.
-                    14 global exchanges monitored simultaneously with sub-second latency.
+                    A risk gate that thinks in <em>themes</em>, not just positions. Refuses new trades
+                    that stack USD-beta, equity-beta, vol-long, per-currency or per-sector exposure
+                    beyond your caps. Optionally size-weighted by notional. Closes never gated.
                 </div>
             </div>
             <div class="feature-card reveal delay-3">
                 <div class="feature-icon gold">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M2 20h20"/><path d="M5 20V10l4-6h6l4 6v10"/><path d="M9 20v-4h6v4"/><line x1="12" y1="4" x2="12" y2="8"/>
+                    <!-- Recursive seal — outer + inner diamond + central crosshair (closed-loop grading) -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,2 22,12 12,22 2,12"/>
+                        <polygon points="12,7 17,12 12,17 7,12"/>
+                        <line x1="12" y1="10.5" x2="12" y2="13.5"/>
+                        <line x1="10.5" y1="12" x2="13.5" y2="12"/>
+                        <circle cx="12" cy="12" r="0.9" fill="var(--gold)" stroke="none"/>
                     </svg>
                 </div>
-                <div class="feature-title">Portfolio Engine</div>
+                <div class="feature-title">Self-Grading Loop</div>
                 <div class="feature-text">
-                    Real-time P&L, exposure analytics, Value-at-Risk calculations,
-                    and automated daily snapshots. Monte Carlo simulations for stress testing.
+                    Every signal AND every bot trade is automatically graded in R-multiples,
+                    win rate, expectancy, holding period. A daily decay detector flags rules
+                    whose recent 7d underperforms their 30d baseline &mdash; before the drawdown gets real.
                 </div>
             </div>
             <div class="feature-card reveal delay-4">
                 <div class="feature-icon purple">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.5V11h-4V9.5A4 4 0 0 1 12 2z"/><path d="M10 11h4v2a2 2 0 0 1-4 0v-2z"/>
-                        <line x1="12" y1="15" x2="12" y2="19"/><path d="M8 19h8"/><circle cx="7" cy="7" r="1" fill="var(--purple)" opacity="0.3"/><circle cx="17" cy="7" r="1" fill="var(--purple)" opacity="0.3"/>
+                    <!-- Mutation lineage tree — hex frame with branching genealogy inside -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,2 21,7 21,17 12,22 3,17 3,7"/>
+                        <line x1="12" y1="6" x2="12" y2="9"/>
+                        <line x1="12" y1="9" x2="8" y2="13"/>
+                        <line x1="12" y1="9" x2="16" y2="13"/>
+                        <line x1="8" y1="13" x2="6" y2="17"/>
+                        <line x1="8" y1="13" x2="10" y2="17"/>
+                        <line x1="16" y1="13" x2="14" y2="17"/>
+                        <line x1="16" y1="13" x2="18" y2="17"/>
+                        <circle cx="12" cy="6" r="0.9" fill="var(--purple)" stroke="none"/>
+                        <circle cx="6" cy="17" r="0.7" fill="var(--purple)" stroke="none"/>
+                        <circle cx="10" cy="17" r="0.7" fill="var(--purple)" stroke="none"/>
+                        <circle cx="14" cy="17" r="0.7" fill="var(--purple)" stroke="none"/>
+                        <circle cx="18" cy="17" r="0.7" fill="var(--purple)" stroke="none"/>
                     </svg>
                 </div>
-                <div class="feature-title">Autonomous Bots</div>
+                <div class="feature-title">Strategy Evolution + AI Mutator</div>
                 <div class="feature-text">
-                    Paper trading and live execution engines with circuit breakers,
-                    kill switches, and reconciliation. Shadow mode for risk-free validation.
+                    Phase-9 evolution mutates rule parameters; opt-in Claude-powered mutator proposes
+                    grounded changes given recent track record. Walk-forward backtester
+                    (with transaction costs + slippage) confirms before deployment. Auto-promotion through
+                    research → paper → live-small → live-full.
                 </div>
             </div>
             <div class="feature-card reveal delay-5">
-                <div class="feature-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M4 22V4c0-1.1.9-2 2-2h8l6 6v14c0 1.1-.9 2-2 2H6a2 2 0 0 1-2-2z"/><polyline points="14 2 14 8 20 8"/>
-                        <line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="12" y2="17"/>
+                <div class="feature-icon red">
+                    <!-- Vertical hash chain — 3 stacked blocks linked by short connectors -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <rect x="6" y="2.5" width="12" height="4.5"/>
+                        <line x1="9" y1="4" x2="15" y2="4"/>
+                        <rect x="6" y="9.75" width="12" height="4.5"/>
+                        <line x1="9" y1="11.25" x2="15" y2="11.25"/>
+                        <rect x="6" y="17" width="12" height="4.5"/>
+                        <line x1="9" y1="18.5" x2="15" y2="18.5"/>
+                        <line x1="9" y1="7" x2="9" y2="9.75"/>
+                        <line x1="15" y1="7" x2="15" y2="9.75"/>
+                        <line x1="9" y1="14.25" x2="9" y2="17"/>
+                        <line x1="15" y1="14.25" x2="15" y2="17"/>
                     </svg>
                 </div>
-                <div class="feature-title">News Intelligence</div>
+                <div class="feature-title">Compliance &amp; Audit Trail</div>
                 <div class="feature-text">
-                    AI-powered news aggregation from Reuters, Bloomberg, SEC filings,
-                    and social media. Sentiment scoring and urgency classification in real time.
+                    Append-only sha256 hash-chained <code>AuditLogEntry</code> captures every trade open,
+                    close, and gate reject. Tamper detection via verify-chain. FIFO/LIFO/HIFO tax-lot
+                    bookkeeping with Form-8949-ready CSV export. Daily <code>pg_dump</code> with 30-day retention.
                 </div>
             </div>
             <div class="feature-card reveal delay-6">
-                <div class="feature-icon red">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="9" x2="12" y2="13"/><circle cx="12" cy="16" r="0.5" fill="var(--accent-red)"/>
+                <div class="feature-icon">
+                    <!-- Beacon — small triangular tower transmitting concentric arc waves -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,18 8,22 16,22"/>
+                        <line x1="12" y1="18" x2="12" y2="14"/>
+                        <circle cx="12" cy="13.5" r="1.4" fill="var(--accent)" stroke="none"/>
+                        <path d="M 7.5 11 Q 12 7.5 16.5 11"/>
+                        <path d="M 5 8.5 Q 12 2 19 8.5"/>
                     </svg>
                 </div>
-                <div class="feature-title">Risk Management</div>
+                <div class="feature-title">Real-Time Notifications</div>
                 <div class="feature-text">
-                    Historical, parametric, and Monte Carlo VaR. Stress testing across 6 scenarios.
-                    Position sizing with Kelly criterion and ATR-based allocation.
+                    Telegram, email, Discord, in-app bell &mdash; one toggle per channel. Fires on bot fills,
+                    orchestrator rejections, drawdown limits, track-record decay. Graceful degrade
+                    when credentials missing; Sentry catches what notifications can't.
                 </div>
             </div>
         </div>
@@ -1032,19 +1637,21 @@
             </div>
             <div class="split-content reveal-right">
                 <div class="section-label">Signal Engine</div>
-                <h2 class="section-title">Precision Signal<br>Generation</h2>
+                <h2 class="section-title">12 Evaluators.<br>One Composite Score.</h2>
                 <div class="sep sep-left"></div>
                 <p class="section-desc" style="margin-bottom:0;">
-                    Multi-factor signal engine combining technical analysis, sentiment data,
-                    and machine learning models. Each signal scored, classified, and delivered
-                    with institutional-grade confidence metrics.
+                    The opportunity scanner fuses twelve evaluator kinds into multi-modal setups.
+                    Each setup is admin-editable, weighted, and emits an
+                    <code>OpportunityFlag</code> only when the composite score crosses your threshold.
+                    Every flag becomes a Signal that gets graded against its actual outcome &mdash;
+                    so the platform learns which evaluators carry weight in which regime.
                 </p>
                 <ul class="check-list">
-                    <li><span class="check-mark">&#x2713;</span>Technical + fundamental + sentiment fusion</li>
-                    <li><span class="check-mark">&#x2713;</span>Real-time watchlist and full universe scanning</li>
-                    <li><span class="check-mark">&#x2713;</span>Regime detection via Hurst exponent analysis</li>
-                    <li><span class="check-mark">&#x2713;</span>Sector rotation and earnings prediction models</li>
-                    <li><span class="check-mark">&#x2713;</span>Multi-timeframe confluence with deduplication</li>
+                    <li><span class="check-mark">&#x2713;</span>price_pattern · macro_regime · macro_trend · volatility_regime</li>
+                    <li><span class="check-mark">&#x2713;</span>news_volume · news_sentiment · sentiment_snapshot · cot_report</li>
+                    <li><span class="check-mark">&#x2713;</span>options_flow · correlation_pair · institutional_filings · calendar_event</li>
+                    <li><span class="check-mark">&#x2713;</span>Apriori pattern miner auto-discovers high-lift combinations from history</li>
+                    <li><span class="check-mark">&#x2713;</span>Self-grading: every signal scored in MFE/MAE/realized_r/duration</li>
                 </ul>
             </div>
         </div>
@@ -1094,19 +1701,21 @@
             </div>
             <div class="split-content reveal-left" style="direction: ltr;">
                 <div class="section-label">Artificial Intelligence</div>
-                <h2 class="section-title">Autonomous AI<br>Agent Fleet</h2>
+                <h2 class="section-title">Calibrated AI<br>You Can Override</h2>
                 <div class="sep sep-left"></div>
                 <p class="section-desc" style="margin-bottom:0;">
-                    Eight specialized AI agents powered by Claude, GPT-4, and local models.
-                    Multi-model consensus, RAG-augmented memory, and calibrated prediction tracking
-                    ensure every decision is data-grounded.
+                    Specialised agents powered by Claude with multi-model consensus, RAG-augmented memory,
+                    and Brier-score calibration tracking. Every agent prediction is scored against
+                    real outcomes &mdash; bad agents lose trust automatically. AI is a layer that
+                    <strong>adds confidence</strong>, never gates execution. Four autonomy levels
+                    from <em>Observe</em> to <em>Full Auto</em> &mdash; you choose.
                 </p>
                 <ul class="check-list">
-                    <li><span class="check-mark">&#x2713;</span>Daily briefings, anomaly detection, strategy review</li>
-                    <li><span class="check-mark">&#x2713;</span>Multi-model consensus with Jaccard agreement scoring</li>
-                    <li><span class="check-mark">&#x2713;</span>RAG pipeline with TF-IDF retrieval over historical data</li>
-                    <li><span class="check-mark">&#x2713;</span>Agent calibration tracking with Brier score evaluation</li>
-                    <li><span class="check-mark">&#x2713;</span>Natural language trade entry and voice commands</li>
+                    <li><span class="check-mark">&#x2713;</span>PreTradeSanity · SignalJournal · DecayInvestigator · AnomalyDetector</li>
+                    <li><span class="check-mark">&#x2713;</span>StrategyAdvisor · StrategyMutator · MacroInterpreter · NewsAnalyst</li>
+                    <li><span class="check-mark">&#x2713;</span>WeeklyReviewer · MarketCommentator · EarningsAnalyst · SpeechAnalyst</li>
+                    <li><span class="check-mark">&#x2713;</span>RAG over historical signals + per-agent Brier-calibration scoring</li>
+                    <li><span class="check-mark">&#x2713;</span>AI mutator (opt-in) proposes parameter tweaks grounded in track-record</li>
                 </ul>
             </div>
         </div>
@@ -1140,20 +1749,674 @@
             </div>
             <div class="split-content reveal-right">
                 <div class="section-label">Strategy Engine</div>
-                <h2 class="section-title">Backtest. Optimize.<br>Deploy.</h2>
+                <h2 class="section-title">Backtest the Bot,<br>Not Just the Rule.</h2>
                 <div class="sep sep-left"></div>
                 <p class="section-desc" style="margin-bottom:0;">
-                    Build, backtest, and deploy trading strategies with a visual wizard.
-                    Monte Carlo simulations quantify tail risk. Paper trading validates
-                    before capital is committed.
+                    Walk-forward backtester replays historical Signals through your
+                    <code>AssetBotConfig</code> &mdash; SL/TP %, cooldowns, sizing &mdash; and walks PriceData bars
+                    bar-by-bar to find each exit. With realistic transaction costs + slippage and an optional
+                    train/test split, you see how the <em>bot</em> would have done, not just whether the
+                    rule was profitable in theory. A config that wins on train but loses on test is overfit
+                    and not shippable. The Eye tells you that before any capital moves.
                 </p>
                 <ul class="check-list">
-                    <li><span class="check-mark">&#x2713;</span>Visual strategy builder with drag-and-drop rules</li>
-                    <li><span class="check-mark">&#x2713;</span>10,000-path Monte Carlo simulation engine</li>
-                    <li><span class="check-mark">&#x2713;</span>Paper trading with realistic slippage modeling</li>
-                    <li><span class="check-mark">&#x2713;</span>Automated rebalancing and stop-loss management</li>
-                    <li><span class="check-mark">&#x2713;</span>Kelly criterion and volatility-based position sizing</li>
+                    <li><span class="check-mark">&#x2713;</span>Walk-forward train/test split with overfit-aware scoring</li>
+                    <li><span class="check-mark">&#x2713;</span>Configurable transaction costs + entry/exit slippage</li>
+                    <li><span class="check-mark">&#x2713;</span>Per-trade R, win rate, profit factor, Sharpe-R, max drawdown</li>
+                    <li><span class="check-mark">&#x2713;</span>Auto-promotion: research → paper → live-small → live-full</li>
+                    <li><span class="check-mark">&#x2713;</span>Auto-demotion when post-promotion performance degrades</li>
                 </ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- PIPELINE — animated 5-stage flow                                   -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="pipeline">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">The Pipeline <span class="new-pill">CLOSED-LOOP</span></div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            From Tick to Trade to Truth
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            Every trade flows through five stages. Each stage's output is logged, audited,
+            and fed back to make the next decision smarter. No black box &mdash; every step is inspectable
+            from the Eye.
+        </p>
+
+        <div class="pipeline reveal-scale delay-4" style="margin-top: 36px;">
+            <div class="pipe-flow"></div>
+
+            <div class="pipe-node">
+                <div class="pipe-icon">
+                    <!-- 4-direction compass sigil — composite signal converging from N/S/E/W into a diamond -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.3" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,8 16,12 12,16 8,12"/>
+                        <line x1="12" y1="8" x2="12" y2="3"/>
+                        <line x1="16" y1="12" x2="21" y2="12"/>
+                        <line x1="12" y1="16" x2="12" y2="21"/>
+                        <line x1="8" y1="12" x2="3" y2="12"/>
+                        <circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"/>
+                    </svg>
+                </div>
+                <div class="pipe-title">SIGNAL</div>
+                <div class="pipe-sub">12 evaluators<br>fuse → composite</div>
+            </div>
+
+            <div class="pipe-node">
+                <div class="pipe-icon">
+                    <!-- Portcullis — vertical bars between two horizontals (the gate, literally) -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.3" stroke-linecap="square" stroke-linejoin="miter">
+                        <line x1="3" y1="5" x2="21" y2="5"/>
+                        <line x1="3" y1="20" x2="21" y2="20"/>
+                        <line x1="3" y1="5" x2="3" y2="20"/>
+                        <line x1="21" y1="5" x2="21" y2="20"/>
+                        <line x1="9" y1="5" x2="9" y2="20"/>
+                        <line x1="15" y1="5" x2="15" y2="20"/>
+                        <line x1="3" y1="12.5" x2="21" y2="12.5"/>
+                    </svg>
+                </div>
+                <div class="pipe-title">RISK GATE</div>
+                <div class="pipe-sub">5-dimension<br>orchestrator</div>
+            </div>
+
+            <div class="pipe-node">
+                <div class="pipe-icon">
+                    <!-- Targeting reticle — concentric circles + crosshair = execution precision -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.3" stroke-linecap="square" stroke-linejoin="miter">
+                        <circle cx="12" cy="12" r="9.5"/>
+                        <circle cx="12" cy="12" r="4.5"/>
+                        <line x1="12" y1="0.5" x2="12" y2="5.5"/>
+                        <line x1="12" y1="18.5" x2="12" y2="23.5"/>
+                        <line x1="0.5" y1="12" x2="5.5" y2="12"/>
+                        <line x1="18.5" y1="12" x2="23.5" y2="12"/>
+                        <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
+                    </svg>
+                </div>
+                <div class="pipe-title">EXECUTE</div>
+                <div class="pipe-sub">6 broker adapters<br>idempotent orders</div>
+            </div>
+
+            <div class="pipe-node">
+                <div class="pipe-icon">
+                    <!-- Tier ascent — triangle with 2 internal level marks (grading levels) -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.3" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,3 21,21 3,21"/>
+                        <line x1="6.5" y1="15" x2="17.5" y2="15"/>
+                        <line x1="9" y1="9" x2="15" y2="9"/>
+                    </svg>
+                </div>
+                <div class="pipe-title">GRADE</div>
+                <div class="pipe-sub">R-multiple, win-rate,<br>holding period</div>
+            </div>
+
+            <div class="pipe-node">
+                <div class="pipe-icon">
+                    <!-- Hexagram (Star of David) — the alchemical sigil of transformation = learning -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.3" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,3 20,17 4,17"/>
+                        <polygon points="12,21 4,7 20,7"/>
+                        <circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"/>
+                    </svg>
+                </div>
+                <div class="pipe-title">LEARN</div>
+                <div class="pipe-sub">decay alerts +<br>auto-promote/demote</div>
+            </div>
+        </div>
+
+        <p class="section-desc reveal delay-5" style="margin: 32px auto 0; font-size: 13px; color: var(--text2); max-width: 720px;">
+            <span class="hash-shimmer">Closed-loop</span> means a rule that wins for 30 days then drifts negative
+            for 7 will fire a notification, get auto-demoted from <em>live-full</em> back to <em>live-small</em>,
+            and surface in the audit log &mdash; without anyone watching.
+        </p>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- INTERACTIVE ORCHESTRATOR DEMO — touch the gate without signing up   -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="demo">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">Touch the Gate <span class="new-pill">LIVE</span></div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            Feel the Orchestrator
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            Synthetic trades stream in from the left. Each carries a random USD-beta,
+            equity-beta and sector load. Drop the caps and watch which trades the gate refuses
+            in real time. This is the same logic <code>gate_new_entry()</code> runs against your
+            actual bots once you're inside.
+        </p>
+
+        <div class="demo-frame reveal-scale delay-4">
+            <div class="demo-header">
+                <div class="demo-title">▶ ORCHESTRATOR_GATE · LIVE_SIM</div>
+                <div class="demo-counters">
+                    <span class="ok">PASS <span id="demoPass">0</span></span>
+                    <span class="rej">REJECT <span id="demoRej">0</span></span>
+                    <span style="color:var(--text2);">RATE <span id="demoRate">0%</span></span>
+                </div>
+            </div>
+
+            <!-- Scenario presets — let visitors trigger specific patterns -->
+            <div class="demo-presets">
+                <button type="button" class="demo-preset-btn active" data-preset="random">
+                    <span class="ico">▦</span>Random mix
+                </button>
+                <button type="button" class="demo-preset-btn" data-preset="usd-bull">
+                    <span class="ico">▲</span>Stack USD-long bias
+                </button>
+                <button type="button" class="demo-preset-btn" data-preset="eur-cross">
+                    <span class="ico">⌬</span>Pile into EUR
+                </button>
+                <button type="button" class="demo-preset-btn" data-preset="tech-rotate">
+                    <span class="ico">▣</span>Sector concentration
+                </button>
+                <button type="button" class="demo-preset-btn" data-preset="balanced">
+                    <span class="ico">⊕</span>Balanced book
+                </button>
+            </div>
+
+            <div class="demo-controls">
+                <div class="demo-control">
+                    <label>USD cap <span class="val" id="demoUsdLabel">3.0</span></label>
+                    <input type="range" id="demoUsd" min="0.5" max="6" step="0.5" value="3"/>
+                </div>
+                <div class="demo-control">
+                    <label>Equity cap <span class="val" id="demoEqLabel">3.0</span></label>
+                    <input type="range" id="demoEq" min="0.5" max="6" step="0.5" value="3"/>
+                </div>
+                <div class="demo-control">
+                    <label>Sector cap <span class="val" id="demoSecLabel">3</span></label>
+                    <input type="range" id="demoSec" min="1" max="6" step="1" value="3"/>
+                </div>
+            </div>
+
+            <div class="demo-body">
+                <!-- LEFT: live exposure bars -->
+                <div class="demo-exposure-panel">
+                    <div class="demo-exp-title">Live Exposure</div>
+
+                    <div class="demo-exp-bar">
+                        <div class="demo-exp-bar-head">
+                            <span>USD</span>
+                            <span class="v" id="expUsd">+0.0</span>
+                        </div>
+                        <div class="demo-exp-bar-track">
+                            <div class="demo-exp-bar-fill" id="expUsdFill" style="width:0;left:50%;"></div>
+                        </div>
+                    </div>
+
+                    <div class="demo-exp-bar">
+                        <div class="demo-exp-bar-head">
+                            <span>Equity</span>
+                            <span class="v" id="expEq">+0.0</span>
+                        </div>
+                        <div class="demo-exp-bar-track">
+                            <div class="demo-exp-bar-fill" id="expEqFill" style="width:0;left:50%;"></div>
+                        </div>
+                    </div>
+
+                    <div class="demo-exp-bar">
+                        <div class="demo-exp-bar-head">
+                            <span>Top sector</span>
+                            <span class="v" id="expSec">—</span>
+                        </div>
+                        <div class="demo-exp-bar-track">
+                            <div class="demo-exp-bar-fill" id="expSecFill" style="width:0;left:0;"></div>
+                        </div>
+                    </div>
+
+                    <div style="font-family:var(--font-m);font-size:9px;color:var(--text3);letter-spacing:1px;margin-top:8px;line-height:1.4;">
+                        Bars centred on zero. Fill turns
+                        <span style="color:var(--accent-red);">red</span> when the next
+                        same-sign trade would breach your cap.
+                    </div>
+                </div>
+
+                <!-- CENTER: stage -->
+                <div class="demo-stage" id="demoStage">
+                    <div class="demo-stage-label left">SIGNAL</div>
+                    <div class="demo-stage-label right">ORDER</div>
+                    <div class="demo-gate"><div class="demo-gate-label">GATE</div></div>
+                </div>
+
+                <!-- RIGHT: decision log -->
+                <div class="demo-log-panel">
+                    <div class="demo-log-title">
+                        <span>Decision Log</span>
+                        <span class="live-pulse">● LIVE</span>
+                    </div>
+                    <div class="demo-log-list" id="demoLogList">
+                        <div class="demo-empty-log">awaiting first trade…</div>
+                    </div>
+                </div>
+            </div>
+
+            <p class="demo-hint">
+                Each row is a trade the gate just judged. <strong>Green = passed</strong>,
+                <strong style="color:var(--accent-red);">red = refused</strong>, with the
+                exact cap that tripped. Same logic as production
+                <code style="color:var(--accent);">gate_new_entry()</code>.
+            </p>
+        </div>
+    </div>
+</section>
+
+<script>
+(function() {
+    /* Phase-trio orchestrator demo (v2). Three columns: live exposure
+       bars (left) · stage (center) · persistent decision log (right).
+       Scenario presets bias which trades stream so visitors can see
+       specific failure modes. */
+    var stage = document.getElementById('demoStage');
+    if (!stage) return;
+    var passEl = document.getElementById('demoPass');
+    var rejEl  = document.getElementById('demoRej');
+    var rateEl = document.getElementById('demoRate');
+    var usdSlider = document.getElementById('demoUsd');
+    var eqSlider  = document.getElementById('demoEq');
+    var secSlider = document.getElementById('demoSec');
+    var usdLbl = document.getElementById('demoUsdLabel');
+    var eqLbl  = document.getElementById('demoEqLabel');
+    var secLbl = document.getElementById('demoSecLabel');
+    var logList = document.getElementById('demoLogList');
+
+    // Exposure bar elements
+    var expUsdEl = document.getElementById('expUsd');
+    var expEqEl  = document.getElementById('expEq');
+    var expSecEl = document.getElementById('expSec');
+    var expUsdFill = document.getElementById('expUsdFill');
+    var expEqFill  = document.getElementById('expEqFill');
+    var expSecFill = document.getElementById('expSecFill');
+
+    function syncLabels() {
+        usdLbl.textContent = parseFloat(usdSlider.value).toFixed(1);
+        eqLbl.textContent  = parseFloat(eqSlider.value).toFixed(1);
+        secLbl.textContent = secSlider.value;
+        renderExposure(); // re-evaluate over/under cap on slider change
+    }
+    usdSlider.addEventListener('input', syncLabels);
+    eqSlider.addEventListener('input', syncLabels);
+    secSlider.addEventListener('input', syncLabels);
+
+    // Live exposure state
+    var exp = { usd: 0, equity: 0, sectors: {} };
+
+    function topSector() {
+        var best = null, bestN = 0;
+        Object.keys(exp.sectors).forEach(function(k) {
+            if (exp.sectors[k] > bestN) { best = k; bestN = exp.sectors[k]; }
+        });
+        return [best, bestN];
+    }
+
+    function renderExposure() {
+        var usdCap = parseFloat(usdSlider.value);
+        var eqCap  = parseFloat(eqSlider.value);
+        var secCap = parseInt(secSlider.value, 10);
+
+        // USD bar — bipolar around zero
+        var usdRatio = Math.min(1, Math.abs(exp.usd) / usdCap);
+        expUsdEl.textContent = (exp.usd >= 0 ? '+' : '') + exp.usd.toFixed(1);
+        expUsdEl.style.color = Math.abs(exp.usd) > usdCap ? 'var(--accent-red)' : 'var(--accent)';
+        if (exp.usd >= 0) {
+            expUsdFill.style.left = '50%';
+            expUsdFill.style.width = (usdRatio * 50) + '%';
+        } else {
+            expUsdFill.style.left = (50 - usdRatio * 50) + '%';
+            expUsdFill.style.width = (usdRatio * 50) + '%';
+        }
+        expUsdFill.classList.toggle('over', Math.abs(exp.usd) > usdCap);
+
+        // Equity bar
+        var eqRatio = Math.min(1, Math.abs(exp.equity) / eqCap);
+        expEqEl.textContent = (exp.equity >= 0 ? '+' : '') + exp.equity.toFixed(1);
+        expEqEl.style.color = Math.abs(exp.equity) > eqCap ? 'var(--accent-red)' : 'var(--accent)';
+        if (exp.equity >= 0) {
+            expEqFill.style.left = '50%';
+            expEqFill.style.width = (eqRatio * 50) + '%';
+        } else {
+            expEqFill.style.left = (50 - eqRatio * 50) + '%';
+            expEqFill.style.width = (eqRatio * 50) + '%';
+        }
+        expEqFill.classList.toggle('over', Math.abs(exp.equity) > eqCap);
+
+        // Top sector — unipolar, fills from left
+        var s = topSector();
+        if (s[0]) {
+            expSecEl.textContent = s[0] + ' ' + s[1];
+            expSecFill.style.width = Math.min(100, (s[1] / secCap) * 100) + '%';
+            expSecFill.classList.toggle('over', s[1] > secCap);
+            expSecEl.style.color = s[1] > secCap ? 'var(--accent-red)' : 'var(--accent)';
+        } else {
+            expSecEl.textContent = '—';
+            expSecFill.style.width = '0%';
+            expSecFill.classList.remove('over');
+        }
+    }
+
+    // Asset universe — broad enough to feel real
+    var sectors = ['tech', 'finance', 'energy', 'health', 'consumer', 'realestate'];
+    var assetsRandom = [
+        ['stock','AAPL','BUY','tech'], ['stock','MSFT','BUY','tech'], ['stock','NVDA','BUY','tech'],
+        ['stock','JPM','BUY','finance'], ['stock','GS','SELL','finance'],
+        ['stock','XOM','BUY','energy'], ['stock','CVX','BUY','energy'],
+        ['stock','PFE','BUY','health'], ['stock','UNH','BUY','health'],
+        ['stock','KO','SELL','consumer'], ['stock','WMT','BUY','consumer'],
+        ['forex','EURUSD','BUY',''], ['forex','USDJPY','BUY',''], ['forex','GBPUSD','SELL',''],
+        ['forex','EURGBP','BUY',''], ['forex','AUDUSD','SELL',''], ['forex','USDCHF','BUY',''],
+        ['commodity','GC','BUY',''], ['commodity','CL','BUY',''], ['commodity','SI','BUY',''],
+        ['options','AAPL','BUY','tech'], ['options','TSLA','BUY','consumer'],
+    ];
+    var assetsUsdLong = [
+        ['forex','USDJPY','BUY',''], ['forex','USDCAD','BUY',''], ['forex','USDCHF','BUY',''],
+        ['forex','EURUSD','SELL',''], ['forex','GBPUSD','SELL',''],
+        ['stock','XOM','BUY','energy'], ['stock','JPM','BUY','finance'],
+    ];
+    var assetsEurStack = [
+        ['forex','EURUSD','BUY',''], ['forex','EURGBP','BUY',''], ['forex','EURJPY','BUY',''],
+        ['forex','EURCHF','BUY',''], ['forex','EURAUD','BUY',''], ['forex','EURCAD','BUY',''],
+    ];
+    var assetsTechStack = [
+        ['stock','AAPL','BUY','tech'], ['stock','MSFT','BUY','tech'], ['stock','NVDA','BUY','tech'],
+        ['stock','GOOGL','BUY','tech'], ['stock','META','BUY','tech'], ['options','AAPL','BUY','tech'],
+    ];
+    var assetsBalanced = [
+        ['stock','AAPL','BUY','tech'], ['stock','JPM','SELL','finance'],
+        ['forex','EURUSD','BUY',''], ['forex','USDJPY','SELL',''],
+        ['commodity','GC','BUY',''], ['stock','PFE','SELL','health'],
+    ];
+    var ASSET_POOLS = {
+        'random': assetsRandom,
+        'usd-bull': assetsUsdLong,
+        'eur-cross': assetsEurStack,
+        'tech-rotate': assetsTechStack,
+        'balanced': assetsBalanced,
+    };
+    var currentPool = 'random';
+
+    function classify(assetClass, symbol, side, knownSector) {
+        var sign = side === 'BUY' ? +1 : -1;
+        var c = { usd: 0, equity: 0, sector: '' };
+        if (assetClass === 'forex') {
+            // 6-letter pair. Both sides may carry USD or EUR.
+            var base = symbol.substring(0, 3), quote = symbol.substring(3);
+            if (base === 'USD') c.usd = +1 * sign;
+            else if (quote === 'USD') c.usd = -1 * sign;
+        } else if (assetClass === 'stock' || assetClass === 'options') {
+            c.equity = +1 * sign;
+            c.sector = knownSector || sectors[Math.floor(Math.random() * sectors.length)];
+        } else if (assetClass === 'commodity') {
+            if (symbol === 'GC' || symbol === 'SI' || symbol === 'XAUUSD') c.usd = -1 * sign;
+            else c.equity = 0.5 * sign;
+        }
+        return c;
+    }
+
+    var passN = 0, rejN = 0;
+
+    function logRow(passed, label, reason) {
+        // Drop the empty-state row on first add
+        var empty = logList.querySelector('.demo-empty-log');
+        if (empty) empty.remove();
+
+        var row = document.createElement('div');
+        row.className = 'demo-log-row ' + (passed ? 'pass' : 'rej');
+        row.innerHTML = (passed ? '✓ ' : '✗ ') + label +
+            (reason ? '<span class="reason">' + reason + '</span>' : '');
+        logList.insertBefore(row, logList.firstChild);
+        // Cap log to 8 rows
+        while (logList.children.length > 8) {
+            logList.removeChild(logList.lastChild);
+        }
+    }
+
+    function spawn() {
+        var pool = ASSET_POOLS[currentPool];
+        var a = pool[Math.floor(Math.random() * pool.length)];
+        var contrib = classify(a[0], a[1], a[2], a[3]);
+
+        var afterUsd = exp.usd + contrib.usd;
+        var afterEq  = exp.equity + contrib.equity;
+        var afterSec = (exp.sectors[contrib.sector] || 0) + (contrib.sector ? 1 : 0);
+
+        var usdCap = parseFloat(usdSlider.value);
+        var eqCap  = parseFloat(eqSlider.value);
+        var secCap = parseInt(secSlider.value, 10);
+
+        var rejected = false, reason = '';
+        if (Math.abs(afterUsd) > usdCap && Math.abs(afterUsd) > Math.abs(exp.usd)) {
+            rejected = true;
+            reason = 'USD cap |' + afterUsd.toFixed(1) + '| > ' + usdCap.toFixed(1);
+        } else if (Math.abs(afterEq) > eqCap && Math.abs(afterEq) > Math.abs(exp.equity)) {
+            rejected = true;
+            reason = 'Equity cap |' + afterEq.toFixed(1) + '| > ' + eqCap.toFixed(1);
+        } else if (contrib.sector && afterSec > secCap) {
+            rejected = true;
+            reason = contrib.sector + ' sector ' + afterSec + ' > ' + secCap;
+        }
+
+        var label = a[0].toUpperCase() + ' ' + a[1] + ' ' + a[2];
+
+        var dot = document.createElement('div');
+        dot.className = 'demo-dot';
+        dot.style.color = '#30a0e8';
+        dot.style.background = '#30a0e8';
+        var top = 30 + Math.random() * 180;
+        dot.style.top = top + 'px';
+        dot.style.left = '0px';
+        stage.appendChild(dot);
+
+        var stageW = stage.clientWidth;
+        var startTime = performance.now();
+        var duration = 2800;
+        var settled = false;
+
+        function step(now) {
+            var t = (now - startTime) / duration;
+            if (t > 1) t = 1;
+            dot.style.left = (stageW * t) + 'px';
+
+            if (!settled && t >= 0.5) {
+                settled = true;
+                if (rejected) {
+                    dot.style.color = '#e83030';
+                    dot.style.background = '#e83030';
+                    setTimeout(function() {
+                        dot.style.transition = 'top 0.7s ease-in, opacity 0.7s';
+                        dot.style.top = (top + 90) + 'px';
+                        dot.style.opacity = '0';
+                    }, 100);
+                    rejN++; rejEl.textContent = rejN;
+                    logRow(false, label, reason);
+                } else {
+                    dot.style.color = '#00e868';
+                    dot.style.background = '#00e868';
+                    exp.usd = afterUsd;
+                    exp.equity = afterEq;
+                    if (contrib.sector) exp.sectors[contrib.sector] = afterSec;
+                    passN++; passEl.textContent = passN;
+                    logRow(true, label, '');
+                    renderExposure();
+                }
+                var total = passN + rejN;
+                if (total > 0) {
+                    rateEl.textContent = Math.round((rejN / total) * 100) + '%';
+                }
+            }
+            if (t < 1) {
+                requestAnimationFrame(step);
+            } else {
+                setTimeout(function() { if (dot.parentNode) dot.parentNode.removeChild(dot); }, 800);
+            }
+        }
+        requestAnimationFrame(step);
+    }
+
+    // Slow exposure decay so caps stay relevant + visitor can experiment
+    setInterval(function() {
+        exp.usd *= 0.95; exp.equity *= 0.95;
+        Object.keys(exp.sectors).forEach(function(k) {
+            exp.sectors[k] = Math.max(0, exp.sectors[k] - 0.4);
+        });
+        renderExposure();
+    }, 1500);
+
+    // Preset buttons — switch the asset pool + reset exposure for clarity
+    document.querySelectorAll('.demo-preset-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.demo-preset-btn').forEach(function(b) {
+                b.classList.remove('active');
+            });
+            btn.classList.add('active');
+            currentPool = btn.getAttribute('data-preset');
+            // Reset exposure on preset change so the demo starts fresh
+            exp = { usd: 0, equity: 0, sectors: {} };
+            passN = 0; rejN = 0;
+            passEl.textContent = '0'; rejEl.textContent = '0'; rateEl.textContent = '0%';
+            logList.innerHTML = '<div class="demo-empty-log">awaiting first trade…</div>';
+            renderExposure();
+        });
+    });
+
+    // Initial render
+    syncLabels();
+
+    // Spawn rate — slower for clarity. Only run when section is visible.
+    var spawnInterval = null;
+    var io = new IntersectionObserver(function(entries) {
+        entries.forEach(function(e) {
+            if (e.isIntersecting && !spawnInterval) {
+                spawnInterval = setInterval(spawn, 1100);
+            } else if (!e.isIntersecting && spawnInterval) {
+                clearInterval(spawnInterval);
+                spawnInterval = null;
+            }
+        });
+    }, { threshold: 0.2 });
+    io.observe(document.getElementById('demo'));
+})();
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- BROKERS                                                            -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="brokers">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">Execution Network</div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            Six Brokers. One Adapter Pattern.
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            Every broker speaks the same duck-typed interface (<code>ping · ticker · klines · order_book ·
+            market_order · account · balance</code>). Routing per-symbol via the broker_router based on
+            the instrument's asset_class. Encrypted credentials at rest (Fernet). Paper-mode default.
+        </p>
+
+        <div class="broker-grid reveal delay-4">
+            <div class="broker-tile live">
+                <div class="broker-name">BINANCE</div>
+                <div class="broker-meta">spot · futures · crypto</div>
+            </div>
+            <div class="broker-tile live">
+                <div class="broker-name">ALPACA</div>
+                <div class="broker-meta">stocks · ETFs · paper/live</div>
+            </div>
+            <div class="broker-tile live">
+                <div class="broker-name">OANDA</div>
+                <div class="broker-meta">forex · 28 pairs · practice</div>
+            </div>
+            <div class="broker-tile live">
+                <div class="broker-name">IBKR</div>
+                <div class="broker-meta">options · futures · CFDs · stocks</div>
+            </div>
+            <div class="broker-tile">
+                <div class="broker-name">PAPER</div>
+                <div class="broker-meta">simulated · always-on default</div>
+            </div>
+            <div class="broker-tile">
+                <div class="broker-name">+ MORE</div>
+                <div class="broker-meta">add via duck-typed adapter</div>
+            </div>
+        </div>
+
+        <div class="pillar-row reveal delay-5">
+            <div class="pillar">
+                <div class="pillar-num">15min</div>
+                <div class="pillar-lbl">Reconcile</div>
+                <div class="pillar-desc">Open positions checked vs broker every 15 min during market hours.
+                Manual closes and liquidations are detected, not lost.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num">SHA-256</div>
+                <div class="pillar-lbl">client_order_id</div>
+                <div class="pillar-desc">Deterministic order IDs prevent double-fills if a worker dies
+                mid-call. Binance, Alpaca and OANDA dedup server-side.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num">06:30</div>
+                <div class="pillar-lbl">UTC Snapshot</div>
+                <div class="pillar-desc">Daily decay scan at 06:15 UTC. Daily <code>pg_dump</code> at 03:30 UTC
+                with 30-day retention. The platform looks after itself.</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- TRUST & COMPLIANCE                                                 -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="trust">
+    <div class="container">
+        <div class="split">
+            <div class="split-content reveal-left">
+                <div class="section-label">Trust &amp; Compliance <span class="new-pill">PHASE 28</span></div>
+                <h2 class="section-title">Every Decision.<br>Hashed. Forever.</h2>
+                <div class="sep sep-left"></div>
+                <p class="section-desc" style="margin-bottom:0;">
+                    The audit log is append-only and hash-chained. Every trade open, trade close,
+                    and gate rejection produces a row whose <code>payload_hash</code> =
+                    <code>sha256(prev_hash &middot; kind &middot; canonical(data))</code>. Mutating any past row breaks the
+                    chain &mdash; verify exposes the tamper. Combined with FIFO/LIFO/HIFO tax-lot bookkeeping
+                    and Form-8949 CSV export, the platform is ready for taxable-account live deployment.
+                </p>
+                <ul class="check-list">
+                    <li><span class="check-mark">&#x2713;</span><code>save()</code> refuses to update existing rows; <code>delete()</code> raises</li>
+                    <li><span class="check-mark">&#x2713;</span><code>verify_chain()</code> walks forward, recomputes, flags any breaks</li>
+                    <li><span class="check-mark">&#x2713;</span>Tax lots: open on every BUY · consume on close · ST/LT (≥365d) auto-classified</li>
+                    <li><span class="check-mark">&#x2713;</span>Encrypted broker credentials (Fernet); paper-mode is the default</li>
+                    <li><span class="check-mark">&#x2713;</span>Sentry-instrumented; structured Celery + Django integration</li>
+                </ul>
+            </div>
+
+            <div class="split-visual reveal-right">
+                <div class="visual-grid"></div>
+                <div class="hash-chain" style="position: relative; z-index: 2;">
+                    <div class="hash-block" data-idx="N-2">
+                        <div class="hash-row"><span class="hash-key">kind</span><span class="hash-val">trade_open</span></div>
+                        <div class="hash-row"><span class="hash-key">prev</span><span class="hash-val">a1c4&hellip;</span></div>
+                        <div class="hash-row"><span class="hash-key">hash</span><span class="hash-val">7e2b&hellip;</span></div>
+                    </div>
+                    <span class="hash-link">→</span>
+                    <div class="hash-block" data-idx="N-1">
+                        <div class="hash-row"><span class="hash-key">kind</span><span class="hash-val">gate_reject</span></div>
+                        <div class="hash-row"><span class="hash-key">prev</span><span class="hash-val">7e2b&hellip;</span></div>
+                        <div class="hash-row"><span class="hash-key">hash</span><span class="hash-val">9f1d&hellip;</span></div>
+                    </div>
+                    <span class="hash-link">→</span>
+                    <div class="hash-block" data-idx="N">
+                        <div class="hash-row"><span class="hash-key">kind</span><span class="hash-val">trade_close</span></div>
+                        <div class="hash-row"><span class="hash-key">prev</span><span class="hash-val">9f1d&hellip;</span></div>
+                        <div class="hash-row"><span class="hash-key">hash</span><span class="hash-shimmer">b34c&hellip;</span></div>
+                    </div>
+                </div>
+                <div class="split-visual-inner">AUDIT CHAIN</div>
             </div>
         </div>
     </div>
@@ -1164,30 +2427,34 @@
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <section class="wall-section" id="technology">
     <div class="container" style="text-align: center;">
-        <div class="section-label reveal">Built With</div>
+        <div class="section-label reveal">The Stack</div>
         <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
-            Enterprise-Grade Stack
+            Production-Hardened
         </h2>
         <div class="sep reveal delay-2"></div>
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
-            Engineered on battle-tested infrastructure. Every component chosen for
-            reliability, performance, and security at institutional scale.
+            Battle-tested OSS. Multi-stage Docker build, non-root runtime, ASGI worker
+            for Channels. <code>gunicorn</code> + <code>uvicorn</code> serving HTTP and WebSockets;
+            Sentry-instrumented; Celery beat for the recurring tasks; Channels for the per-user Eye push;
+            a <code>pg_dump</code> nightly with 30-day retention. The platform looks after itself.
         </p>
         <div class="tech-grid reveal delay-4">
-            <span class="tech-badge">Python</span>
+            <span class="tech-badge">Python 3.12</span>
             <span class="tech-badge">Django</span>
+            <span class="tech-badge">Channels</span>
+            <span class="tech-badge">HTMX</span>
             <span class="tech-badge">PostgreSQL</span>
             <span class="tech-badge">Redis</span>
-            <span class="tech-badge">Celery</span>
-            <span class="tech-badge">WebSockets</span>
-            <span class="tech-badge">Claude AI</span>
-            <span class="tech-badge">GPT-4</span>
-            <span class="tech-badge">TF-IDF / NLP</span>
-            <span class="tech-badge">TradingView</span>
-            <span class="tech-badge">REST API</span>
-            <span class="tech-badge">HTMX</span>
+            <span class="tech-badge">Celery + Beat</span>
+            <span class="tech-badge">gunicorn + uvicorn</span>
+            <span class="tech-badge">Anthropic Claude</span>
+            <span class="tech-badge">Fernet</span>
+            <span class="tech-badge">Sentry SDK</span>
+            <span class="tech-badge">ib_insync</span>
+            <span class="tech-badge">pandas / numpy</span>
             <span class="tech-badge">Docker</span>
-            <span class="tech-badge">Render</span>
+            <span class="tech-badge">cryptography</span>
+            <span class="tech-badge">pytest / Django test</span>
         </div>
     </div>
 </section>
@@ -1199,42 +2466,56 @@
     <div class="container" style="text-align: center;">
         <div class="section-label reveal">Intelligence Network</div>
         <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
-            Connected to Everything
+            Twelve Lenses. One Eye.
         </h2>
         <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            Each evaluator pulls from real data feeds (SEC, CFTC, FRED, news APIs, broker depth, etc.)
+            and outputs a normalised score the scanner can compose. Add a new evaluator with one
+            <code>register_kind()</code> call &mdash; the scanner picks it up automatically.
+        </p>
 
-        <div class="features-grid sources-grid">
-            <div class="feature-card reveal delay-1" style="padding: 24px 16px; text-align: center;">
+        <div class="theme-bars reveal delay-4" style="max-width: 580px; margin: 28px auto 0;">
+            <div class="theme-bar-row usd"><span class="lbl">USD beta</span><span class="bar"></span></div>
+            <div class="theme-bar-row equity"><span class="lbl">Equity</span><span class="bar"></span></div>
+            <div class="theme-bar-row vol"><span class="lbl">Vol-long</span><span class="bar"></span></div>
+        </div>
+        <div style="font-family: var(--font-m); font-size: 10px; color: var(--text3); letter-spacing: 1.5px; margin-top: 6px;">
+            ▲ live theme exposure pulse from the orchestrator gate
+        </div>
+
+        <div class="features-grid sources-grid" style="margin-top: 36px;">
+            <div class="feature-card reveal delay-1" style="padding: 22px 16px; text-align: center;">
                 <div class="feature-title" style="font-size: 11px;">SEC EDGAR</div>
-                <div class="feature-text" style="font-size: 12px;">13F & insider filings</div>
+                <div class="feature-text" style="font-size: 12px;">13F &middot; insider &middot; 10-Q</div>
             </div>
-            <div class="feature-card reveal delay-2" style="padding: 24px 16px; text-align: center;">
-                <div class="feature-title" style="font-size: 11px;">Reddit / StockTwits</div>
-                <div class="feature-text" style="font-size: 12px;">Social sentiment</div>
-            </div>
-            <div class="feature-card reveal delay-3" style="padding: 24px 16px; text-align: center;">
+            <div class="feature-card reveal delay-2" style="padding: 22px 16px; text-align: center;">
                 <div class="feature-title" style="font-size: 11px;">CFTC / COT</div>
-                <div class="feature-text" style="font-size: 12px;">Commitments of traders</div>
+                <div class="feature-text" style="font-size: 12px;">commitments of traders</div>
             </div>
-            <div class="feature-card reveal delay-4" style="padding: 24px 16px; text-align: center;">
-                <div class="feature-title" style="font-size: 11px;">On-Chain</div>
-                <div class="feature-text" style="font-size: 12px;">Blockchain analytics</div>
+            <div class="feature-card reveal delay-3" style="padding: 22px 16px; text-align: center;">
+                <div class="feature-title" style="font-size: 11px;">FRED Macro</div>
+                <div class="feature-text" style="font-size: 12px;">CPI · GDP · rates · DXY</div>
             </div>
-            <div class="feature-card reveal delay-1" style="padding: 24px 16px; text-align: center;">
-                <div class="feature-title" style="font-size: 11px;">TradingView</div>
-                <div class="feature-text" style="font-size: 12px;">Technical scanner</div>
+            <div class="feature-card reveal delay-4" style="padding: 22px 16px; text-align: center;">
+                <div class="feature-title" style="font-size: 11px;">News APIs</div>
+                <div class="feature-text" style="font-size: 12px;">volume + sentiment</div>
             </div>
-            <div class="feature-card reveal delay-2" style="padding: 24px 16px; text-align: center;">
-                <div class="feature-title" style="font-size: 11px;">FinViz</div>
-                <div class="feature-text" style="font-size: 12px;">Stock screener</div>
+            <div class="feature-card reveal delay-1" style="padding: 22px 16px; text-align: center;">
+                <div class="feature-title" style="font-size: 11px;">Options Flow</div>
+                <div class="feature-text" style="font-size: 12px;">unusual activity scanner</div>
             </div>
-            <div class="feature-card reveal delay-3" style="padding: 24px 16px; text-align: center;">
-                <div class="feature-title" style="font-size: 11px;">DeFi Llama</div>
-                <div class="feature-text" style="font-size: 12px;">TVL & protocol data</div>
-            </div>
-            <div class="feature-card reveal delay-4" style="padding: 24px 16px; text-align: center;">
+            <div class="feature-card reveal delay-2" style="padding: 22px 16px; text-align: center;">
                 <div class="feature-title" style="font-size: 11px;">Economic Calendar</div>
-                <div class="feature-text" style="font-size: 12px;">Central bank events</div>
+                <div class="feature-text" style="font-size: 12px;">earnings + central bank</div>
+            </div>
+            <div class="feature-card reveal delay-3" style="padding: 22px 16px; text-align: center;">
+                <div class="feature-title" style="font-size: 11px;">Reddit / StockTwits</div>
+                <div class="feature-text" style="font-size: 12px;">social sentiment snapshot</div>
+            </div>
+            <div class="feature-card reveal delay-4" style="padding: 22px 16px; text-align: center;">
+                <div class="feature-title" style="font-size: 11px;">IBKR / Twelve Data</div>
+                <div class="feature-text" style="font-size: 12px;">price + volatility regime</div>
             </div>
         </div>
     </div>
@@ -1248,12 +2529,37 @@
         <div class="sep reveal"></div>
         <h2 class="cta-title reveal delay-1">Ready to See<br><span style="color:var(--accent);">Everything</span>?</h2>
         <p class="cta-desc reveal delay-2">
-            The markets never sleep. Neither does Sauron.
-            Initialize your session and take command.
+            Sauron starts in <strong>paper mode</strong>. Wire up your brokers when you've watched
+            it run. Flip the orchestrator on when you're ready. Promote rules from research to
+            live-full when their walk-forward backtest agrees with their live track record.
+            <em>Cautious by default &mdash; aggressive when you ask.</em>
         </p>
-        <a href="{% url 'login' %}" class="btn-primary reveal delay-3" style="display:inline-flex;">
-            Initialize Session
-        </a>
+
+        <div class="pillar-row reveal delay-3" style="max-width: 880px; margin: 32px auto;">
+            <div class="pillar">
+                <div class="pillar-num">PAPER</div>
+                <div class="pillar-lbl">Default Mode</div>
+                <div class="pillar-desc">No live trades until you flip <code>mode="live"</code> per config.
+                Everything visible without a single broker key.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num">OPT-IN</div>
+                <div class="pillar-lbl">Orchestrator</div>
+                <div class="pillar-desc">Risk gate is OFF by default. Enable on profile, set caps,
+                watch the Eye. Flip off if it's too tight.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num">REVERSIBLE</div>
+                <div class="pillar-lbl">Every Action</div>
+                <div class="pillar-desc">Rule pauses, allocator changes, stage promotions &mdash; all have
+                propose/apply/rollback flows in the actuator.</div>
+            </div>
+        </div>
+
+        <div class="hero-cta reveal delay-4" style="justify-content: center; margin-top: 12px;">
+            <a href="{% url 'login' %}" class="btn-primary">Initialize Session</a>
+            <a href="#hero" class="btn-outline">Back to Top</a>
+        </div>
     </div>
 </section>
 
@@ -1517,19 +2823,47 @@
     }, { threshold: 0.5 });
     countEls.forEach(function(el) { countObserver.observe(el); });
 
-    // ── Parallax on mouse move (eye + glow shadow at different depths) ──
+    // ── Parallax + pupil-tracking on mouse move ──────────────────────
+    // The globe-eye-fixed (giant Sauron eye) drifts subtly with cursor;
+    // its pupil group additionally tracks toward the cursor for the
+    // "all-seeing" effect. Disabled when the user prefers reduced motion.
     var globe = document.querySelector('.globe-eye-fixed');
     var eyeShadow = document.querySelector('.eye-glow-shadow');
+    var pupilGroup = document.getElementById('wallPupilGroup');
+    var prefersReducedMotion = window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // Pupil-cursor track: max 18px in viewBox units (40-radius pupil inside
+    // 60-radius iris ring leaves room without clipping).
+    var PUPIL_RANGE_X = 22;
+    var PUPIL_RANGE_Y = 14;
     document.addEventListener('mousemove', function(e) {
-        var mx = (e.clientX / W - 0.5) * 2;
+        var mx = (e.clientX / W - 0.5) * 2;  // -1..+1
         var my = (e.clientY / H - 0.5) * 2;
-        if (globe) {
+        if (globe && !prefersReducedMotion) {
             globe.style.transform = 'translate(calc(-50% + ' + (mx*15) + 'px), calc(-50% + ' + (my*15) + 'px))';
         }
-        if (eyeShadow) {
+        if (eyeShadow && !prefersReducedMotion) {
             eyeShadow.style.transform = 'translate(calc(-50% + ' + (mx*32) + 'px), calc(-50% + ' + (my*32) + 'px))';
         }
+        if (pupilGroup && !prefersReducedMotion) {
+            // Clamp at 1.0 so the pupil maxes out at the edges, not beyond.
+            var px = Math.max(-1, Math.min(1, mx));
+            var py = Math.max(-1, Math.min(1, my));
+            pupilGroup.style.transform =
+                'translate(' + (px * PUPIL_RANGE_X) + 'px, ' + (py * PUPIL_RANGE_Y) + 'px)';
+        }
     });
+    // On touch devices, idle-drift the pupil so it still feels alive.
+    if (pupilGroup && !prefersReducedMotion && 'ontouchstart' in window) {
+        var t0 = Date.now();
+        setInterval(function() {
+            var phase = (Date.now() - t0) / 1000;
+            var px = Math.sin(phase * 0.4) * 0.7;
+            var py = Math.cos(phase * 0.3) * 0.5;
+            pupilGroup.style.transform =
+                'translate(' + (px * PUPIL_RANGE_X) + 'px, ' + (py * PUPIL_RANGE_Y) + 'px)';
+        }, 80);
+    }
 
     // ── Smooth scroll for anchor links ───────────────────────────────
     document.querySelectorAll('a[href^="#"]').forEach(function(a) {

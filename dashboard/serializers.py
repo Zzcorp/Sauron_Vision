@@ -11,7 +11,14 @@ from ai_agents.models import AgentTask
 class InstrumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Instrument
-        fields = "__all__"
+        # Explicit allowlist — never "__all__". The `metadata` JSON field carries
+        # per-instrument broker routing/contract config (e.g. metadata["ibkr"])
+        # and must not be exposed through the API.
+        fields = [
+            "id", "symbol", "name", "asset_class", "exchange", "currency",
+            "sector", "country", "is_active", "is_watchlist", "trading_hours",
+            "created_at", "updated_at",
+        ]
 
 
 class LiveQuoteSerializer(serializers.ModelSerializer):

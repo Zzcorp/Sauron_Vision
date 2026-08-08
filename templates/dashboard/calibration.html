@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Calibration — Sauron Vision{% endblock %}
+{% block page_title %}🎯 AGENT CALIBRATION · TRUST SCORES{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">AGENTS TRACKED</span>
+        <span class="oc-strip-value">{{ rows|length }}</span>
+        <span class="oc-strip-sub">distinct prediction sources</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RESOLVED</span>
+        <span class="oc-strip-value">{{ resolved_total }}</span>
+        <span class="oc-strip-sub">brier-graded</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PENDING</span>
+        <span class="oc-strip-value">{{ pending_total }}</span>
+        <span class="oc-strip-sub">awaiting resolution</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RESOLVER</span>
+        <span class="oc-strip-value">03:30</span>
+        <span class="oc-strip-sub">UTC daily beat</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RECENT RESOLVED</span>
+        <span class="oc-strip-value">{{ recent_resolved|length }}</span>
+        <span class="oc-strip-sub">last 30 entries shown</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">DUE SOON</span>
+        <span class="oc-strip-value">{{ recent_pending|length }}</span>
+        <span class="oc-strip-sub">earliest pending shown</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Per-agent reliability</span></div>
+    {% if rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Agent</th><th>Resolved</th><th>Pending</th><th>Accuracy</th><th>Brier</th><th>Trust ×</th><th>Verdict</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td>{{ r.agent }}</td>
+            <td>{{ r.total }}</td>
+            <td>{{ r.pending }}</td>
+            <td>{% if r.accuracy is not None %}{{ r.accuracy|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td>{% if r.brier is not None %}{{ r.brier|floatformat:3 }}{% else %}—{% endif %}</td>
+            <td><strong style="color: {% if r.trust >= 1.15 %}var(--accent-green){% elif r.trust < 0.95 %}var(--accent-red){% else %}inherit{% endif %};">{{ r.trust|floatformat:2 }}×</strong></td>
+            <td style="font-size: 11px; color: var(--text-muted);">
+                {% if r.trust >= 1.15 %}Boosted — well-calibrated and accurate.
+                {% elif r.trust >= 1.0 %}Trusted — average reliability.
+                {% elif r.trust >= 0.7 %}Damped — below-average accuracy.
+                {% else %}Strongly damped — agent often wrong.{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p style="font-size: 11px; color: var(--text-muted); padding: 12px 16px;">
+        Trust × is consumed by the risk gate: AI sanity scale is dampened toward 1.0 when trust &lt; 1.0,
+        amplified when trust &gt; 1.0. Brier score: 0 = perfect, 0.25 = random, lower is better.
+    </p>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon">🎯</div>
+        <p>NO AGENT PREDICTIONS YET — predictions accumulate as the AI gate, decay investigator, and other agents fire. Resolution lags by 7d (trades) or 30d (decay).</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Recent resolutions</span></div>
+    {% if recent_resolved %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Agent</th><th>Type</th><th>Predicted</th><th>Actual</th><th>Confidence</th><th>Score</th><th>Correct?</th><th>Resolved</th></tr></thead>
+      <tbody>
+        {% for p in recent_resolved %}
+          <tr>
+            <td>{{ p.agent }}</td>
+            <td>{{ p.prediction_type }}</td>
+            <td>{{ p.predicted_value|truncatechars:30 }}</td>
+            <td>{{ p.actual_value|truncatechars:30 }}</td>
+            <td>{{ p.confidence|floatformat:2 }}</td>
+            <td class="{% if p.score and p.score > 0 %}up{% elif p.score and p.score < 0 %}down{% endif %}">{% if p.score is not None %}{{ p.score|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td>{% if p.was_correct %}<span style="color: var(--accent-green);">✓</span>{% else %}<span style="color: var(--accent-red);">✗</span>{% endif %}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ p.evaluated_at|timesince }} ago</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No resolutions yet.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Pending — awaiting ground truth</span></div>
+    {% if recent_pending %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Agent</th><th>Type</th><th>Predicted</th><th>Confidence</th><th>Created</th><th>Resolves</th></tr></thead>
+      <tbody>
+        {% for p in recent_pending %}
+          <tr>
+            <td>{{ p.agent }}</td>
+            <td>{{ p.prediction_type }}</td>
+            <td>{{ p.predicted_value|truncatechars:30 }}</td>
+            <td>{{ p.confidence|floatformat:2 }}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ p.created_at|timesince }} ago</td>
+            <td style="font-size: 11px;">{% if p.expected_resolution_at %}~{{ p.expected_resolution_at|date:"M d" }}{% else %}—{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No pending predictions.</p>
+    {% endif %}
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+.sv-perf-table .up { color: var(--accent-green); }
+.sv-perf-table .down { color: var(--accent-red); }
+</style>
+{% endblock %}

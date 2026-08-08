@@ -6,7 +6,7 @@
 <!-- UPGRADE-8: Change PIN -->
 <div class="card" style="margin-bottom:20px;border-left:3px solid var(--accent-gold);">
   <div class="card-header">
-    <div class="card-title">🔒 SECURITY — ACCESS PIN</div>
+    <div class="card-title">⊠ SECURITY — ACCESS PIN</div>
     <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">2nd factor</span>
   </div>
   <p style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);margin-bottom:14px;">
@@ -227,8 +227,106 @@
         </div>
     </div>
 
+    <div class="card fade-in-up delay-5">
+        <div class="card-header"><span class="card-title">⌬ Cross-Asset Orchestrator</span></div>
+
+        <p class="form-hint" style="margin:0 0 14px;line-height:1.55;font-size:11px;">
+            When enabled, the system refuses new bot entries that pile up the same
+            theme exposure across asset classes (e.g. long crypto + long EUR + long
+            gold + short USD futures = one bet on dollar weakness, not four trades).
+            Closes are never gated — only new entries.
+            Each open position contributes ±1 to a theme; new entries are blocked
+            when they would push net exposure past your cap.
+        </p>
+
+        <div style="margin-bottom:14px;">
+            <label class="toggle-label">
+                <input type="checkbox" name="cross_asset_orchestrator_enabled"
+                       {% if profile.cross_asset_orchestrator_enabled %}checked{% endif %}>
+                <span>Enable cross-asset orchestrator (theme caps)</span>
+            </label>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+            <div>
+                <label class="form-label">USD-THEME CAP</label>
+                <input type="number" step="0.5" min="0"
+                       name="max_usd_theme_exposure"
+                       value="{{ profile.max_usd_theme_exposure }}"
+                       class="form-input">
+                <div class="form-hint">Max |net USD exposure units|. Default 3.0.</div>
+            </div>
+            <div>
+                <label class="form-label">EQUITY-THEME CAP</label>
+                <input type="number" step="0.5" min="0"
+                       name="max_equity_theme_exposure"
+                       value="{{ profile.max_equity_theme_exposure }}"
+                       class="form-input">
+                <div class="form-hint">Max |net equity exposure units|. Default 3.0.</div>
+            </div>
+        </div>
+
+        <p class="form-hint" style="margin:14px 0 8px;font-size:11px;">
+            <strong>Advanced themes</strong> — Phase-24 additions. Set 0 to disable a dimension.
+        </p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;">
+            <div>
+                <label class="form-label">VOL-LONG CAP</label>
+                <input type="number" step="1" min="0"
+                       name="max_vol_theme_exposure"
+                       value="{{ profile.max_vol_theme_exposure }}"
+                       class="form-input">
+                <div class="form-hint">Max simultaneous long-premium options.</div>
+            </div>
+            <div>
+                <label class="form-label">PER-CURRENCY CAP</label>
+                <input type="number" step="0.5" min="0"
+                       name="max_currency_exposure"
+                       value="{{ profile.max_currency_exposure }}"
+                       class="form-input">
+                <div class="form-hint">Max |net| to any single FX currency.</div>
+            </div>
+            <div>
+                <label class="form-label">PER-SECTOR CAP</label>
+                <input type="number" step="1" min="0"
+                       name="max_sector_exposure"
+                       value="{{ profile.max_sector_exposure }}"
+                       class="form-input">
+                <div class="form-hint">Max concurrent positions per sector.</div>
+            </div>
+        </div>
+
+        <div style="margin-top:6px;padding-top:14px;border-top:1px solid var(--border);">
+            <label class="toggle-label">
+                <input type="checkbox" name="size_weighted_orchestrator"
+                       {% if profile.size_weighted_orchestrator %}checked{% endif %}>
+                <span>Size-weighted exposure</span>
+            </label>
+            <div class="form-hint" style="margin-left:28px;">
+                Weight each open position's theme contribution by its notional vs the config's
+                default size. A 2× position counts ±2 toward its themes; default-sized counts ±1
+                (clamped to [0.1, 5]). Off = each position counts ±1 (legacy behaviour).
+                Sector concentration is always count-based regardless.
+            </div>
+        </div>
+
+        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+            <label class="form-label">TAX-LOT METHOD</label>
+            <select name="tax_lot_method" class="form-input" style="max-width:420px;">
+                <option value="FIFO" {% if profile.tax_lot_method == "FIFO" %}selected{% endif %}>FIFO — First In, First Out (US default)</option>
+                <option value="LIFO" {% if profile.tax_lot_method == "LIFO" %}selected{% endif %}>LIFO — Last In, First Out</option>
+                <option value="HIFO" {% if profile.tax_lot_method == "HIFO" %}selected{% endif %}>HIFO — Highest Cost In, First Out (tax-loss optimal)</option>
+            </select>
+            <div class="form-hint">
+                Order in which open lots are consumed when a position closes. Affects realised
+                short-term vs long-term gains. View your lots at <a href="{% url 'tax_lots_dashboard' %}" style="color:var(--accent);">/tax-lots/</a>.
+            </div>
+        </div>
+    </div>
+
     <div class="card fade-in-up delay-6">
-        <div class="card-header"><span class="card-title">🔔 Notifications</span></div>
+        <div class="card-header"><span class="card-title">◉ Notifications</span></div>
 
         <div style="margin-bottom:16px;">
             <label class="form-label">NOTIFICATION CHANNEL</label>

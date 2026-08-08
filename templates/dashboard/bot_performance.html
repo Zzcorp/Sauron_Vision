@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Bot Performance — Sauron Vision{% endblock %}
+{% block page_title %}▲ BOT PERFORMANCE · REINFORCEMENT LOOP{% endblock %}
+
+{% block content %}
+
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CLOSED · {{ days }}D</span>
+        <span class="oc-strip-value">{{ n_total }}</span>
+        <span class="oc-strip-sub">{{ n_wins }}W / {{ n_losses }}L</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">WIN RATE</span>
+        <span class="oc-strip-value {% if win_rate_total >= 0.5 %}up{% elif win_rate_total < 0.4 %}down{% endif %}">{% widthratio win_rate_total 1 100 %}%</span>
+        <span class="oc-strip-sub">across all rules</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">AVG R</span>
+        <span class="oc-strip-value {% if avg_r_overall > 0 %}up{% elif avg_r_overall < 0 %}down{% endif %}">{% if avg_r_overall >= 0 %}+{% endif %}{{ avg_r_overall|floatformat:3 }}R</span>
+        <span class="oc-strip-sub">cumulative {% if sum_r >= 0 %}+{% endif %}{{ sum_r }}R</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RULES TRACKED</span>
+        <span class="oc-strip-value">{{ n_rules }}</span>
+        <span class="oc-strip-sub">{{ n_classes }} asset classes</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">BEST RULE</span>
+        <span class="oc-strip-value up">{% if best_rule %}+{{ best_rule.avg_r|floatformat:2 }}R{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">{% if best_rule %}{{ best_rule.rule_name|truncatechars:18 }}{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">WORST RULE</span>
+        <span class="oc-strip-value down">{% if worst_rule %}{{ worst_rule.avg_r|floatformat:2 }}R{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">{% if worst_rule %}{{ worst_rule.rule_name|truncatechars:18 }}{% endif %}</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <p class="form-hint" style="margin:0;line-height:1.5;font-size:11px;">
+        Per-rule × asset-class statistics on closed bot trades over the last <strong>{{ days }}</strong> days.
+        These are the bot's own outcomes — distinct from Phase-1 signal grading at <a href="{% url 'performance_dashboard' %}" style="color:var(--accent);">/performance/</a>,
+        which tells you whether a signal moved favourably regardless of how the bot traded it.
+        A rule can grade well as a signal but poorly as a bot trade if stops are mis-placed
+        or sizing fights the volatility regime.
+    </p>
+    <form method="get" style="margin-top:14px;display:flex;gap:10px;align-items:center;">
+        <label class="form-label" style="margin:0;">DAYS</label>
+        <select name="days" class="form-input" style="width:auto;" onchange="this.form.submit()">
+            <option value="30"  {% if days == 30 %}selected{% endif %}>30</option>
+            <option value="60"  {% if days == 60 %}selected{% endif %}>60</option>
+            <option value="90"  {% if days == 90 %}selected{% endif %}>90</option>
+            <option value="180" {% if days == 180 %}selected{% endif %}>180</option>
+            <option value="365" {% if days == 365 %}selected{% endif %}>365</option>
+        </select>
+    </form>
+</div>
+
+{# ── Roll-up by asset class ───────────────────────── #}
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">By Asset Class</span></div>
+    {% if class_rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Class</th><th>n</th><th>Win rate</th><th>Avg R</th></tr></thead>
+        <tbody>
+        {% for c in class_rows %}
+            <tr>
+                <td><span class="badge badge-medium">{{ c.asset_class }}</span></td>
+                <td>{{ c.n }}</td>
+                <td>{{ c.win_rate|floatformat:2 }}</td>
+                <td class="{% if c.avg_r > 0 %}up{% elif c.avg_r < 0 %}down{% endif %}">{{ c.avg_r|floatformat:3 }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="eye-empty">No closed bot trades yet.</p>
+    {% endif %}
+</div>
+
+{# ── Per-rule × asset-class ───────────────────────── #}
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Rule × Asset-Class Performance</span></div>
+    {% if rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Rule</th><th>Class</th><th>n</th><th>Wins</th><th>Losses</th><th>Win rate</th><th>Avg R</th><th>Avg dur (min)</th><th>Last traded</th></tr></thead>
+        <tbody>
+        {% for r in rows %}
+            <tr>
+                <td><strong>{{ r.rule_name }}</strong></td>
+                <td><span class="badge badge-medium">{{ r.asset_class }}</span></td>
+                <td>{{ r.n }}</td>
+                <td>{{ r.n_wins }}</td>
+                <td>{{ r.n_losses }}</td>
+                <td>{{ r.win_rate|floatformat:2 }}</td>
+                <td class="{% if r.avg_r > 0 %}up{% elif r.avg_r < 0 %}down{% endif %}">{{ r.avg_r|floatformat:3 }}</td>
+                <td>{{ r.avg_duration_min|default:"—" }}</td>
+                <td style="font-size:11px;color:var(--text-muted);">{{ r.last_traded_at|date:"Y-m-d H:i" }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="eye-empty">No graded bot trades in the last {{ days }} days.</p>
+    {% endif %}
+</div>
+
+{# ── Recently graded trades ───────────────────────── #}
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Recently Graded Trades</span></div>
+    {% if recent %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Closed</th><th>Class</th><th>Symbol</th><th>Side</th><th>Rule</th><th>Outcome</th><th>R</th><th>Dur (min)</th><th>P&amp;L</th></tr></thead>
+        <tbody>
+        {% for t in recent %}
+            <tr>
+                <td style="font-size:11px;color:var(--text-muted);">{{ t.closed_at|date:"m-d H:i" }}</td>
+                <td><span class="badge badge-medium">{{ t.asset_class }}</span></td>
+                <td><strong>{{ t.symbol }}</strong></td>
+                <td><span class="badge badge-{% if t.side == 'BUY' %}bullish{% else %}bearish{% endif %}">{{ t.side }}</span></td>
+                <td style="font-size:11px;">{{ t.rule_name|default:"—" }}</td>
+                <td>
+                    {% if t.outcome == "hit_target" %}
+                        <span style="color:var(--accent);">✓ TP</span>
+                    {% elif t.outcome == "stopped_out" %}
+                        <span style="color:#ff5e5e;">✗ SL</span>
+                    {% elif t.outcome == "expired" %}
+                        <span style="color:var(--accent-gold);">⌛ EXP</span>
+                    {% else %}
+                        <span style="color:var(--text-muted);">{{ t.outcome }}</span>
+                    {% endif %}
+                </td>
+                <td class="{% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{{ t.realized_r|floatformat:2|default:"—" }}</td>
+                <td>{{ t.duration_minutes|default:"—" }}</td>
+                <td class="{% if t.pnl > 0 %}up{% elif t.pnl < 0 %}down{% endif %}">{{ t.pnl|floatformat:2 }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="eye-empty">No recently graded bot trades.</p>
+    {% endif %}
+</div>
+
+{% block extra_css %}
+<style>
+    .eye-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; font-style: italic; }
+</style>
+{% endblock %}
+{% endblock %}

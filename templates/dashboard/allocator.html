@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Meta-Allocator — Sauron Vision{% endblock %}
+{% block page_title %}🎚️  META-ALLOCATOR · {% if live_mode %}LIVE{% else %}SHADOW{% endif %}{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PENDING SHADOW</span>
+        <span class="oc-strip-value {% if shadows %}up{% endif %}">{{ shadows|length }}</span>
+        <span class="oc-strip-sub">awaiting decision</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">APPLIED</span>
+        <span class="oc-strip-value">{{ applied|length }}</span>
+        <span class="oc-strip-sub">rollback-able</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">HISTORY</span>
+        <span class="oc-strip-value">{{ history|length }}</span>
+        <span class="oc-strip-sub">recent allocator events</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RULES</span>
+        <span class="oc-strip-value">{{ rule_states|length }}</span>
+        <span class="oc-strip-sub">under allocator control</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MODE</span>
+        <span class="oc-strip-value {% if live_mode %}up{% else %}down{% endif %}">{% if live_mode %}LIVE{% else %}SHADOW{% endif %}</span>
+        <span class="oc-strip-sub">{% if live_mode %}weights affect sizing{% else %}log-only{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ROLE</span>
+        <span class="oc-strip-value">{% if is_admin %}ADMIN{% else %}VIEWER{% endif %}</span>
+        <span class="oc-strip-sub">{% if is_admin %}can propose/apply{% else %}read-only{% endif %}</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Current rule allocator weights</span></div>
+    {% if rule_states %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Rule</th><th>Status</th><th>Admin × (weight_multiplier)</th><th>Allocator × (allocator_weight)</th><th>Effective ×</th></tr></thead>
+      <tbody>
+        {% for c in rule_states %}
+          <tr>
+            <td>{{ c.rule_name }}</td>
+            <td><span class="badge badge-{% if c.status == 'active' %}bullish{% elif c.status == 'paused' %}bearish{% else %}medium{% endif %}">{{ c.get_status_display }}</span></td>
+            <td>{{ c.weight_multiplier|floatformat:2 }}</td>
+            <td>{% if c.status == 'active' %}{{ c.allocator_weight|floatformat:2 }}{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}</td>
+            <td><strong>{{ c.weight_multiplier|floatformat:2 }} × {{ c.allocator_weight|floatformat:2 }}</strong></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p style="font-size: 11px; color: var(--text-muted); padding: 12px 16px;">
+        Effective sizing multiplier = admin × allocator. Admin lane (Phase 5) handles paused/reduced;
+        allocator lane (Phase 7) fine-tunes weights for active rules only.
+    </p>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon">🎚️</div>
+        <p>NO RULE CONTROLS YET — propose an allocation to bootstrap.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Pending shadow allocations</span></div>
+    {% if shadows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>#</th><th>Tier</th><th>Rules</th><th>Blend</th><th>Proposed</th>{% if is_admin %}<th>Decide</th>{% endif %}</tr></thead>
+      <tbody>
+        {% for a in shadows %}
+          <tr>
+            <td>#{{ a.id }}</td>
+            <td><span class="badge badge-medium">{{ a.sample_tier }}</span></td>
+            <td>{{ a.rules_considered }}</td>
+            <td style="font-size: 11px; font-family: var(--font-mono);">
+                u={{ a.ensemble_blend.uniform|floatformat:2 }} ·
+                iv={{ a.ensemble_blend.inverse_vol|floatformat:2 }} ·
+                e={{ a.ensemble_blend.expectancy|floatformat:2 }}
+            </td>
+            <td>{{ a.proposed_at|timesince }} ago</td>
+            {% if is_admin %}
+            <td style="display:flex;gap:6px;">
+                <form method="post" action="{% url 'hq_apply_allocation' %}">{% csrf_token %}<input type="hidden" name="allocation_id" value="{{ a.id }}"><button class="btn btn-sm btn-primary" type="submit" {% if not live_mode %}disabled title="Promote to LIVE first"{% endif %}>Apply</button></form>
+                <form method="post" action="{% url 'hq_reject_allocation' %}">{% csrf_token %}<input type="hidden" name="allocation_id" value="{{ a.id }}"><button class="btn btn-sm btn-danger" type="submit">Reject</button></form>
+            </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No pending allocations. The allocator runs weekly on Sundays at 04:00 UTC.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Applied allocations (rollback-able)</span></div>
+    {% if applied %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>#</th><th>Tier</th><th>Applied</th><th>By</th><th>Rules updated</th>{% if is_admin %}<th>Rollback</th>{% endif %}</tr></thead>
+      <tbody>
+        {% for a in applied %}
+          <tr>
+            <td>#{{ a.id }}</td>
+            <td><span class="badge badge-medium">{{ a.sample_tier }}</span></td>
+            <td>{{ a.applied_at|timesince }} ago</td>
+            <td>{{ a.confirmed_by.username|default:"—" }}</td>
+            <td>{{ a.previous_weights|length }}</td>
+            {% if is_admin %}
+            <td><form method="post" action="{% url 'hq_rollback_allocation' %}">{% csrf_token %}<input type="hidden" name="allocation_id" value="{{ a.id }}"><button class="btn btn-sm btn-danger" type="submit">↶ Rollback</button></form></td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No allocations applied yet.</p>
+    {% endif %}
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+</style>
+{% endblock %}

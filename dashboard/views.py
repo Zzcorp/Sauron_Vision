@@ -4,7 +4,7 @@ from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from datetime import timedelta
 from django.db import models
-from django.db.models import Avg, Sum
+from django.db.models import Avg, Sum, Count
 
 
 @login_required
@@ -314,29 +314,197 @@ def economic_calendar(request):
 
 @login_required
 def signals_list(request):
+    """Phase 63 — enriched signals dashboard.
+
+    Adds: 24h fresh count · direction donut · score-distribution histogram ·
+    asset-class breakdown · win-rate by signal_type (Phase 1 grading) ·
+    urgency mix.
+    """
+    from collections import defaultdict
+    from datetime import timedelta
+    from django.utils import timezone as _tz
     from signals.models import Signal
+
     active_only = request.GET.get("active") == "1"
     qs = Signal.objects.select_related("instrument").order_by("-created_at")
     if active_only:
         qs = qs.filter(is_active=True)
     active_qs = Signal.objects.filter(is_active=True)
+
+    n_active = active_qs.count()
+    n_bull = active_qs.filter(direction="bullish").count()
+    n_bear = active_qs.filter(direction="bearish").count()
+    avg_score = active_qs.aggregate(avg=Avg("score"))["avg"] or 0
+
+    # 24h freshness.
+    cutoff_24h = _tz.now() - timedelta(hours=24)
+    n_24h = Signal.objects.filter(created_at__gte=cutoff_24h).count()
+    n_high_urg = active_qs.filter(urgency__in=["high", "critical"]).count()
+
+    # Score-distribution histogram (active signals, bucketed by 0.1).
+    score_buckets = [0] * 10  # 0.0-0.1, 0.1-0.2, ..., 0.9-1.0
+    for s in active_qs.only("score"):
+        idx = min(9, max(0, int(float(s.score or 0) * 10)))
+        score_buckets[idx] += 1
+    score_max = max(score_buckets) if score_buckets else 0
+
+    # Direction donut.
+    n_neutral = max(0, n_active - n_bull - n_bear)
+    direction_donut = []
+    if n_bull > 0:
+        direction_donut.append({"key": "bullish", "n": n_bull,
+                                 "pct": round(n_bull / max(n_active, 1) * 100, 1)})
+    if n_bear > 0:
+        direction_donut.append({"key": "bearish", "n": n_bear,
+                                 "pct": round(n_bear / max(n_active, 1) * 100, 1)})
+    if n_neutral > 0:
+        direction_donut.append({"key": "neutral", "n": n_neutral,
+                                 "pct": round(n_neutral / max(n_active, 1) * 100, 1)})
+
+    # Asset-class breakdown of active signals.
+    by_class = (active_qs.values("instrument__asset_class")
+                .annotate(n=Count("id")).order_by("-n"))
+    asset_breakdown = [
+        {"asset_class": r["instrument__asset_class"] or "other", "n": r["n"]}
+        for r in by_class
+    ]
+
+    # Urgency mix.
+    urgency_mix = list(active_qs.values("urgency")
+                        .annotate(n=Count("id")).order_by("-n"))
+
+    # Win rate by signal_type — uses Phase-1 self-grading on closed signals.
+    closed = (Signal.objects
+              .filter(is_active=False, realized_r__isnull=False)
+              .exclude(signal_type=""))
+    type_stats: dict = defaultdict(lambda: {"n": 0, "wins": 0, "total_r": 0.0})
+    for s in closed.only("signal_type", "realized_r"):
+        d = type_stats[s.signal_type]
+        d["n"] += 1
+        if float(s.realized_r) > 0:
+            d["wins"] += 1
+        d["total_r"] += float(s.realized_r)
+    perf_by_type = []
+    for t, d in type_stats.items():
+        if d["n"] < 3:  # noise floor
+            continue
+        perf_by_type.append({
+            "signal_type": t, "n": d["n"],
+            "win_rate": round(d["wins"] / d["n"] * 100, 1),
+            "avg_r": round(d["total_r"] / d["n"], 3),
+            "total_r": round(d["total_r"], 2),
+        })
+    perf_by_type.sort(key=lambda r: r["avg_r"], reverse=True)
+
     return render(request, "dashboard/signals_list.html", {
         "page_id": "signals", "signals": qs[:100], "active_only": active_only,
-        "active_count": active_qs.count(),
-        "bullish_count": active_qs.filter(direction="bullish").count(),
-        "bearish_count": active_qs.filter(direction="bearish").count(),
-        "avg_score": "{:.2f}".format(active_qs.aggregate(avg=Avg("score"))["avg"] or 0),
+        "active_count": n_active,
+        "bullish_count": n_bull,
+        "bearish_count": n_bear,
+        "avg_score": "{:.2f}".format(avg_score),
+        "n_24h": n_24h,
+        "n_high_urg": n_high_urg,
+        "score_buckets": score_buckets,
+        "score_max": score_max,
+        "direction_donut": direction_donut,
+        "asset_breakdown": asset_breakdown,
+        "urgency_mix": urgency_mix,
+        "perf_by_type": perf_by_type[:8],
     })
 
 
 @login_required
 def strategies_list(request):
+    """Phase 63 — enriched strategy engine dashboard.
+
+    Adds: status mix donut · top P&L performers · aggregate sharpe ·
+    horizon breakdown · activity over last 30d.
+    """
+    from datetime import timedelta
+    from django.utils import timezone as _tz
     from strategies.models import Strategy
+
     qs = Strategy.objects.prefetch_related("legs").order_by("-created_at")
-    status = request.GET.get("status")
-    if status:
-        qs = qs.filter(status=status)
-    return render(request, "dashboard/strategies_list.html", {"page_id": "strategies", "strategies": qs[:50]})
+    status_filter = request.GET.get("status")
+    qs_filtered = qs.filter(status=status_filter) if status_filter else qs
+
+    all_strats = list(Strategy.objects.all())
+    n_total = len(all_strats)
+    n_active = sum(1 for s in all_strats if s.status == "active")
+    n_proposed = sum(1 for s in all_strats if s.status == "proposed")
+    n_completed = sum(1 for s in all_strats if s.status == "completed")
+    n_paused = sum(1 for s in all_strats if s.status == "paused")
+    n_rejected = sum(1 for s in all_strats if s.status == "rejected")
+    n_approved = sum(1 for s in all_strats if s.status == "approved")
+
+    cutoff_30 = _tz.now() - timedelta(days=30)
+    n_30d = Strategy.objects.filter(created_at__gte=cutoff_30).count()
+
+    # Aggregate stats — only over completed/active that have realized P&L.
+    realized = [s for s in all_strats
+                if s.status in ("active", "completed") and s.pnl_pct]
+    avg_pnl_pct = sum(s.pnl_pct for s in realized) / len(realized) if realized else 0
+    avg_dd = (sum(s.max_drawdown for s in realized) / len(realized)) if realized else 0
+    sharpe_vals = [s.sharpe_ratio for s in realized if s.sharpe_ratio is not None]
+    avg_sharpe = sum(sharpe_vals) / len(sharpe_vals) if sharpe_vals else None
+    n_winners = sum(1 for s in realized if s.pnl_pct > 0)
+    n_losers = sum(1 for s in realized if s.pnl_pct < 0)
+    win_rate = round(n_winners / len(realized) * 100, 1) if realized else 0
+
+    # Status donut.
+    status_donut = []
+    for k, v in [("active", n_active), ("proposed", n_proposed),
+                  ("approved", n_approved), ("completed", n_completed),
+                  ("paused", n_paused), ("rejected", n_rejected)]:
+        if v > 0:
+            status_donut.append({"key": k, "n": v,
+                                  "pct": round(v / max(n_total, 1) * 100, 1)})
+
+    # Horizon breakdown.
+    horizon_rows: dict = {}
+    for s in all_strats:
+        horizon_rows.setdefault(s.time_horizon or "—",
+                                  {"n": 0, "pnl": 0, "pos": 0, "neg": 0})
+        d = horizon_rows[s.time_horizon or "—"]
+        d["n"] += 1
+        d["pnl"] += float(s.pnl_pct or 0)
+        if (s.pnl_pct or 0) > 0:
+            d["pos"] += 1
+        elif (s.pnl_pct or 0) < 0:
+            d["neg"] += 1
+    horizon_breakdown = sorted(
+        [{"horizon": k, **v, "avg_pnl": round(v["pnl"] / max(v["n"], 1), 2)}
+         for k, v in horizon_rows.items()],
+        key=lambda r: -r["n"]
+    )
+
+    # Top 5 performers + worst 5.
+    by_pnl = sorted(realized, key=lambda s: s.pnl_pct, reverse=True)
+    top_performers = by_pnl[:5]
+    worst_performers = list(reversed(by_pnl[-5:])) if len(by_pnl) > 5 else []
+
+    return render(request, "dashboard/strategies_list.html", {
+        "page_id": "strategies",
+        "strategies": qs_filtered[:50],
+        "status_filter": status_filter,
+        "n_total": n_total,
+        "n_active": n_active,
+        "n_proposed": n_proposed,
+        "n_completed": n_completed,
+        "n_paused": n_paused,
+        "n_rejected": n_rejected,
+        "n_30d": n_30d,
+        "n_winners": n_winners,
+        "n_losers": n_losers,
+        "win_rate": win_rate,
+        "avg_pnl_pct": round(avg_pnl_pct, 2),
+        "avg_dd": round(avg_dd, 2),
+        "avg_sharpe": round(avg_sharpe, 2) if avg_sharpe is not None else None,
+        "status_donut": status_donut,
+        "horizon_breakdown": horizon_breakdown,
+        "top_performers": top_performers,
+        "worst_performers": worst_performers,
+    })
 
 
 @login_required
@@ -348,37 +516,299 @@ def strategy_detail(request, pk):
 
 @login_required
 def news_feed(request):
+    """Phase 63 — enriched news & sentiment dashboard.
+
+    Adds: 24h volume · sentiment distribution donut · top mentioned tickers ·
+    sentiment trend (24h hourly buckets) · urgency mix · top sources.
+    """
+    from collections import Counter, defaultdict
+    from datetime import timedelta
+    from django.utils import timezone as _tz
     from scraping.models import NewsArticle
-    return render(request, "dashboard/news_feed.html", {"page_id": "news", "articles": NewsArticle.objects.prefetch_related("ai_affected_instruments").order_by("-published_at")[:100]})
+
+    qs = NewsArticle.objects.prefetch_related("ai_affected_instruments")
+    articles = list(qs.order_by("-published_at")[:100])
+    now = _tz.now()
+    cutoff_24h = now - timedelta(hours=24)
+
+    recent_24h = list(qs.filter(published_at__gte=cutoff_24h)
+                        .only("ai_sentiment_score", "ai_urgency", "source",
+                              "published_at"))
+    n_24h = len(recent_24h)
+
+    bull = sum(1 for a in recent_24h if a.ai_sentiment_score is not None
+               and a.ai_sentiment_score > 0.2)
+    bear = sum(1 for a in recent_24h if a.ai_sentiment_score is not None
+               and a.ai_sentiment_score < -0.2)
+    neut = sum(1 for a in recent_24h if a.ai_sentiment_score is not None
+               and -0.2 <= a.ai_sentiment_score <= 0.2)
+    unscored = n_24h - bull - bear - neut
+
+    sentiment_donut = []
+    for k, v in [("bullish", bull), ("neutral", neut), ("bearish", bear),
+                  ("unscored", unscored)]:
+        if v > 0:
+            sentiment_donut.append({
+                "key": k, "n": v,
+                "pct": round(v / max(n_24h, 1) * 100, 1),
+            })
+
+    scored = [a for a in recent_24h if a.ai_sentiment_score is not None]
+    avg_sent = sum(a.ai_sentiment_score for a in scored) / len(scored) if scored else 0
+
+    # Sentiment trend — 24 hourly buckets, mean sentiment per bucket.
+    hourly_sum: dict = defaultdict(float)
+    hourly_n: dict = defaultdict(int)
+    for a in scored:
+        h = int((now - a.published_at).total_seconds() // 3600)
+        if 0 <= h < 24:
+            hourly_sum[h] += a.ai_sentiment_score
+            hourly_n[h] += 1
+    sent_trend = []
+    for h in range(23, -1, -1):  # oldest first → newest
+        if hourly_n[h]:
+            sent_trend.append({
+                "hour": h,
+                "avg": round(hourly_sum[h] / hourly_n[h], 3),
+                "n": hourly_n[h],
+            })
+        else:
+            sent_trend.append({"hour": h, "avg": 0, "n": 0})
+
+    # Urgency mix.
+    urg_counter: Counter = Counter()
+    for a in recent_24h:
+        if a.ai_urgency:
+            urg_counter[a.ai_urgency] += 1
+    urgency_mix = [{"urgency": u, "n": n}
+                    for u, n in urg_counter.most_common()]
+
+    # Top mentioned tickers (uses prefetched affected instruments on the head).
+    ticker_counter: Counter = Counter()
+    for a in articles[:60]:  # head of feed only
+        for inst in a.ai_affected_instruments.all():
+            ticker_counter[inst.symbol] += 1
+    top_tickers = [{"symbol": s, "n": n}
+                    for s, n in ticker_counter.most_common(8)]
+
+    # Top sources (24h).
+    src_counter: Counter = Counter(a.source for a in recent_24h if a.source)
+    top_sources = [{"source": s, "n": n}
+                    for s, n in src_counter.most_common(6)]
+
+    n_critical = sum(1 for a in recent_24h if a.ai_urgency in ("critical", "high"))
+
+    return render(request, "dashboard/news_feed.html", {
+        "page_id": "news",
+        "articles": articles,
+        "n_24h": n_24h,
+        "n_critical": n_critical,
+        "bull_24h": bull,
+        "bear_24h": bear,
+        "avg_sent_24h": round(avg_sent, 3),
+        "sentiment_donut": sentiment_donut,
+        "sent_trend": sent_trend,
+        "urgency_mix": urgency_mix,
+        "top_tickers": top_tickers,
+        "top_sources": top_sources,
+    })
 
 
 @login_required
 def portfolio_overview(request):
+    """Phase 63 — enriched portfolio dashboard.
+
+    Adds: equity sparkline · allocation donut · win/loss/profit-factor stats ·
+    Sharpe 30d · top contributors/detractors. Reuses the same rendering
+    patterns as the Operations Center PORTFOLIO tab.
+    """
+    from collections import defaultdict
+    from datetime import timedelta
+    from django.utils import timezone as _tz
     from portfolio.services import get_or_create_default_portfolio
-    from portfolio.models import PortfolioSnapshot
+    from portfolio.models import PortfolioSnapshot, Position
     portfolio = get_or_create_default_portfolio()
+
+    open_positions = Position.objects.filter(
+        portfolio=portfolio, closed_at__isnull=True).select_related("instrument")
+    closed_positions = list(
+        Position.objects.filter(portfolio=portfolio, closed_at__isnull=False)
+        .select_related("instrument", "strategy")
+    )
+
+    # Win/loss / profit factor / unrealized stats.
+    n_closed = len(closed_positions)
+    winning = [p for p in closed_positions if float(p.unrealized_pnl or 0) > 0]
+    losing = [p for p in closed_positions if float(p.unrealized_pnl or 0) <= 0]
+    win_rate = round(len(winning) / n_closed * 100, 1) if n_closed else 0
+    avg_win = (sum(float(p.unrealized_pnl) for p in winning) / len(winning)) if winning else 0
+    avg_loss = (sum(float(p.unrealized_pnl) for p in losing) / len(losing)) if losing else 0
+    profit_factor = round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else 0
+    total_unrealized = sum(float(p.unrealized_pnl or 0) for p in open_positions)
+
+    latest_snapshot = (PortfolioSnapshot.objects.filter(portfolio=portfolio)
+                        .order_by("-date").first())
+    max_drawdown = float(latest_snapshot.max_drawdown) if latest_snapshot else 0.0
+
+    # Equity curve sparkline — last 30 days.
+    cutoff_30d = _tz.now().date() - timedelta(days=30)
+    equity_rows = list(
+        PortfolioSnapshot.objects.filter(
+            portfolio=portfolio, date__gte=cutoff_30d)
+        .order_by("date")
+        .values_list("date", "total_value")
+    )
+    equity_points = [float(v) for _, v in equity_rows]
+
+    # 30d Sharpe / Sortino approximation.
+    sharpe_30d = sortino_30d = None
+    rets = [float(s.daily_pnl_pct or 0) for s in
+            PortfolioSnapshot.objects.filter(
+                portfolio=portfolio, date__gte=cutoff_30d)]
+    if len(rets) >= 5:
+        mean = sum(rets) / len(rets)
+        var = sum((r - mean) ** 2 for r in rets) / len(rets)
+        std = var ** 0.5
+        if std > 0:
+            sharpe_30d = round((mean / std) * (252 ** 0.5), 2)
+        downside = [r for r in rets if r < 0]
+        if downside:
+            d_var = sum(r ** 2 for r in downside) / len(downside)
+            d_std = d_var ** 0.5
+            if d_std > 0:
+                sortino_30d = round((mean / d_std) * (252 ** 0.5), 2)
+
+    # Allocation donut — by asset class from current open positions + cash.
+    alloc_by_class = defaultdict(float)
+    for p in open_positions:
+        ac = getattr(p.instrument, "asset_class", "") or "other"
+        alloc_by_class[ac] += abs(float(p.quantity or 0) * float(p.current_price or 0))
+    alloc_by_class["cash"] = float(portfolio.cash_available or 0)
+    alloc_total = sum(alloc_by_class.values()) or 1.0
+    allocation = sorted(
+        ({"asset_class": k, "value": v, "pct": round(v / alloc_total * 100, 1)}
+         for k, v in alloc_by_class.items() if v > 0),
+        key=lambda r: r["value"], reverse=True,
+    )
+
+    # Top 3 contributors / detractors among CLOSED positions.
+    closed_sorted = sorted(closed_positions,
+                            key=lambda p: float(p.unrealized_pnl or 0),
+                            reverse=True)
+    top_contributors = closed_sorted[:3]
+    top_detractors = list(reversed(closed_sorted[-3:])) if len(closed_sorted) >= 3 else []
+
     return render(request, "dashboard/portfolio_overview.html", {
         "page_id": "portfolio", "portfolio": portfolio,
         "snapshots": PortfolioSnapshot.objects.filter(portfolio=portfolio).order_by("-date")[:30],
-        "open_positions_count": portfolio.positions.filter(closed_at__isnull=True).count(),
+        "open_positions_count": open_positions.count(),
+        "open_positions": list(open_positions[:8]),
+        "total_unrealized": total_unrealized,
+        "n_closed": n_closed,
+        "n_winning": len(winning),
+        "n_losing": len(losing),
+        "win_rate": win_rate,
+        "avg_win": round(avg_win, 2),
+        "avg_loss": round(avg_loss, 2),
+        "profit_factor": profit_factor,
+        "max_drawdown": max_drawdown,
+        "sharpe_30d": sharpe_30d,
+        "sortino_30d": sortino_30d,
+        "equity_points": equity_points,
+        "equity_min": min(equity_points) if equity_points else 0,
+        "equity_max": max(equity_points) if equity_points else 0,
+        "allocation": allocation,
+        "top_contributors": top_contributors,
+        "top_detractors": top_detractors,
     })
 
 
 @login_required
 def positions_list(request):
+    """Phase 63 — enriched positions dashboard.
+
+    Adds: open exposure totals, direction donut, asset-class breakdown,
+    monthly P&L bars, profit factor, avg W/L, current open P&L sum.
+    """
+    from collections import defaultdict
     from portfolio.services import get_or_create_default_portfolio
     from portfolio.models import Position
     portfolio = get_or_create_default_portfolio()
     tab = request.GET.get("tab", "open")
-    open_positions = portfolio.positions.filter(closed_at__isnull=True).select_related("instrument", "strategy")
-    closed_positions = portfolio.positions.filter(closed_at__isnull=False).select_related("instrument", "strategy")
+    open_positions = list(portfolio.positions.filter(closed_at__isnull=True)
+                                              .select_related("instrument", "strategy"))
+    closed_positions = list(portfolio.positions.filter(closed_at__isnull=False)
+                                                .select_related("instrument", "strategy"))
 
-    total_closed = closed_positions.count()
-    winning = [p for p in closed_positions if float(p.unrealized_pnl) > 0]
-    win_rate = round(len(winning) / total_closed * 100, 1) if total_closed > 0 else 0
-    total_realized = sum(float(p.unrealized_pnl) for p in closed_positions)
-    best_trade = max(closed_positions, key=lambda p: float(p.unrealized_pnl)) if total_closed > 0 else None
-    worst_trade = min(closed_positions, key=lambda p: float(p.unrealized_pnl)) if total_closed > 0 else None
+    total_closed = len(closed_positions)
+    winning = [p for p in closed_positions if float(p.unrealized_pnl or 0) > 0]
+    losing = [p for p in closed_positions if float(p.unrealized_pnl or 0) < 0]
+    n_winning = len(winning)
+    n_losing = len(losing)
+    win_rate = round(n_winning / total_closed * 100, 1) if total_closed > 0 else 0
+    total_realized = sum(float(p.unrealized_pnl or 0) for p in closed_positions)
+    best_trade = max(closed_positions, key=lambda p: float(p.unrealized_pnl or 0)) if total_closed else None
+    worst_trade = min(closed_positions, key=lambda p: float(p.unrealized_pnl or 0)) if total_closed else None
+
+    # Profit factor + avg win/loss
+    gross_win = sum(float(p.unrealized_pnl or 0) for p in winning)
+    gross_loss = abs(sum(float(p.unrealized_pnl or 0) for p in losing))
+    profit_factor = round(gross_win / gross_loss, 2) if gross_loss > 0 else (0 if gross_win == 0 else 99.99)
+    avg_win = round(gross_win / max(n_winning, 1), 2)
+    avg_loss = round(-gross_loss / max(n_losing, 1), 2)
+
+    # Open P&L + exposure
+    open_unrealized = sum(float(p.unrealized_pnl or 0) for p in open_positions)
+    open_exposure = sum(
+        abs(float(p.quantity or 0) * float(p.current_price or 0))
+        for p in open_positions)
+
+    # Direction donut over open positions
+    n_long = sum(1 for p in open_positions if p.direction == "long")
+    n_short = sum(1 for p in open_positions if p.direction == "short")
+    n_open_total = n_long + n_short
+    direction_donut = []
+    if n_long:
+        direction_donut.append({"key": "long", "n": n_long,
+                                  "pct": round(n_long / max(n_open_total, 1) * 100, 1)})
+    if n_short:
+        direction_donut.append({"key": "short", "n": n_short,
+                                  "pct": round(n_short / max(n_open_total, 1) * 100, 1)})
+
+    # Asset-class breakdown over open positions
+    by_class: dict = defaultdict(
+        lambda: {"n": 0, "exposure": 0.0, "unrealized": 0.0})
+    for p in open_positions:
+        cls = (p.instrument.asset_class
+               if p.instrument else None) or "other"
+        d = by_class[cls]
+        d["n"] += 1
+        d["exposure"] += abs(float(p.quantity or 0) * float(p.current_price or 0))
+        d["unrealized"] += float(p.unrealized_pnl or 0)
+    asset_breakdown = sorted(
+        [{"asset_class": k, **v,
+          "exposure_pct": round(v["exposure"] / max(open_exposure, 1) * 100, 1)}
+         for k, v in by_class.items()],
+        key=lambda r: -r["exposure"]
+    )
+
+    # Monthly P&L (last 12 months) — bucket closed by month
+    from datetime import timedelta as _td
+    now = timezone.now()
+    monthly_pnl: dict = defaultdict(float)
+    for p in closed_positions:
+        if p.closed_at:
+            key = p.closed_at.strftime("%Y-%m")
+            monthly_pnl[key] += float(p.unrealized_pnl or 0)
+    monthly_rows = []
+    for i in range(11, -1, -1):
+        month = (now - _td(days=i * 30)).replace(day=1)
+        key = month.strftime("%Y-%m")
+        monthly_rows.append({
+            "month": month.strftime("%b"),
+            "pnl": round(monthly_pnl.get(key, 0), 2),
+        })
+    monthly_max = max((abs(r["pnl"]) for r in monthly_rows), default=0)
 
     return render(request, "dashboard/positions_list.html", {
         "page_id": "positions",
@@ -386,36 +816,234 @@ def positions_list(request):
         "positions": open_positions,
         "closed_positions": closed_positions,
         "total_closed": total_closed,
+        "n_winning": n_winning,
+        "n_losing": n_losing,
         "win_rate": win_rate,
         "total_realized": "{:.2f}".format(total_realized),
         "best_trade": best_trade,
         "worst_trade": worst_trade,
+        "profit_factor": profit_factor,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "open_unrealized": round(open_unrealized, 2),
+        "open_exposure": round(open_exposure, 2),
+        "direction_donut": direction_donut,
+        "asset_breakdown": asset_breakdown,
+        "monthly_rows": monthly_rows,
+        "monthly_max": monthly_max,
     })
 
 
 @login_required
 def ai_insights(request):
+    """Phase 63 — enriched AI intelligence dashboard.
+
+    Adds: per-agent breakdown · provider mix donut · 7d cost trend ·
+    failure rate · top error agents · model-tier distribution.
+    """
+    from collections import Counter, defaultdict
     from ai_agents.models import AgentTask
+
     now = timezone.now()
     day_ago = now - timedelta(hours=24)
-    tasks_24h_qs = AgentTask.objects.filter(created_at__gte=day_ago)
-    total_24h = tasks_24h_qs.count()
-    success_24h = tasks_24h_qs.filter(success=True).count()
+    week_ago = now - timedelta(days=7)
+
+    tasks_24h = list(AgentTask.objects.filter(created_at__gte=day_ago)
+                      .only("agent", "provider", "model", "success",
+                            "cost_usd", "duration_seconds", "created_at",
+                            "input_tokens", "output_tokens"))
+    total_24h = len(tasks_24h)
+    success_24h = sum(1 for t in tasks_24h if t.success)
+    fail_24h = total_24h - success_24h
+
+    cost_24h = sum(float(t.cost_usd) for t in tasks_24h)
+    in_tok_24h = sum(t.input_tokens for t in tasks_24h)
+    out_tok_24h = sum(t.output_tokens for t in tasks_24h)
+    avg_dur = (sum(t.duration_seconds for t in tasks_24h) / total_24h) if total_24h else 0
+
+    # Per-agent breakdown (24h).
+    agent_rows: dict = defaultdict(
+        lambda: {"n": 0, "ok": 0, "cost": 0.0, "tokens": 0})
+    for t in tasks_24h:
+        d = agent_rows[t.agent or "—"]
+        d["n"] += 1
+        if t.success:
+            d["ok"] += 1
+        d["cost"] += float(t.cost_usd)
+        d["tokens"] += t.input_tokens + t.output_tokens
+    by_agent = sorted(
+        [{"agent": k, **v,
+          "success_rate": round(v["ok"] / max(v["n"], 1) * 100, 1),
+          "cost": round(v["cost"], 4)}
+         for k, v in agent_rows.items()],
+        key=lambda r: -r["n"]
+    )
+
+    # Provider mix donut (24h).
+    prov_counter: Counter = Counter(t.provider or "—" for t in tasks_24h)
+    provider_donut = []
+    for p, n in prov_counter.most_common():
+        provider_donut.append({
+            "key": p, "n": n,
+            "pct": round(n / max(total_24h, 1) * 100, 1),
+        })
+
+    # Cost trend — last 7 days bucketed by date.
+    cost_per_day: dict = defaultdict(float)
+    n_per_day: dict = defaultdict(int)
+    week_qs = AgentTask.objects.filter(created_at__gte=week_ago).only(
+        "created_at", "cost_usd")
+    for t in week_qs:
+        d = t.created_at.date()
+        cost_per_day[d] += float(t.cost_usd)
+        n_per_day[d] += 1
+    cost_trend = []
+    for i in range(6, -1, -1):
+        d = (now - timedelta(days=i)).date()
+        cost_trend.append({
+            "date": d.strftime("%m-%d"),
+            "cost": round(cost_per_day.get(d, 0), 3),
+            "n": n_per_day.get(d, 0),
+        })
+    max_day_cost = max((r["cost"] for r in cost_trend), default=0)
+
+    # Top failing agents (24h).
+    fail_counter: Counter = Counter(
+        t.agent for t in tasks_24h if not t.success and t.agent)
+    top_failures = [{"agent": a, "n": n}
+                     for a, n in fail_counter.most_common(5)]
+
+    # Recent latest briefing (Strategist/Reviewer).
+    latest_briefing = AgentTask.objects.filter(
+        agent__in=["strategy_advisor", "weekly_reviewer"],
+        success=True
+    ).first()
+
     return render(request, "dashboard/ai_insights.html", {
         "page_id": "ai",
         "tasks_24h": total_24h,
+        "success_24h": success_24h,
+        "fail_24h": fail_24h,
         "success_rate": round(success_24h / total_24h * 100) if total_24h > 0 else 0,
-        "cost_24h": "{:.2f}".format(sum(float(t.cost_usd) for t in tasks_24h_qs)),
-        "avg_duration": "{:.1f}".format(sum(t.duration_seconds for t in tasks_24h_qs) / total_24h if total_24h > 0 else 0),
-        "latest_briefing": AgentTask.objects.filter(agent__in=["strategy_advisor", "weekly_reviewer"], success=True).first(),
+        "cost_24h": "{:.2f}".format(cost_24h),
+        "in_tok_24h": in_tok_24h,
+        "out_tok_24h": out_tok_24h,
+        "avg_duration": "{:.1f}".format(avg_dur),
+        "by_agent": by_agent,
+        "provider_donut": provider_donut,
+        "cost_trend": cost_trend,
+        "max_day_cost": max_day_cost,
+        "top_failures": top_failures,
+        "latest_briefing": latest_briefing,
         "recent_tasks": AgentTask.objects.order_by("-created_at")[:20],
     })
 
 
 @login_required
 def ai_tasks_list(request):
+    """Phase 63 — enriched agent task log.
+
+    Adds: 24h/7d aggregates, per-agent breakdown, success/cost trend,
+    longest tasks, latest failures.
+    """
+    from collections import defaultdict
     from ai_agents.models import AgentTask
-    return render(request, "dashboard/ai_tasks_list.html", {"page_id": "ai_tasks", "tasks": AgentTask.objects.order_by("-created_at")[:200]})
+
+    now = timezone.now()
+    day_ago = now - timedelta(hours=24)
+    week_ago = now - timedelta(days=7)
+
+    qs_24h = list(AgentTask.objects.filter(created_at__gte=day_ago)
+                   .only("agent", "provider", "model", "success",
+                         "cost_usd", "duration_seconds", "created_at",
+                         "input_tokens", "output_tokens"))
+    qs_7d = list(AgentTask.objects.filter(created_at__gte=week_ago)
+                  .only("agent", "success", "cost_usd",
+                        "duration_seconds", "created_at"))
+
+    # 24h aggregates
+    n_24h = len(qs_24h)
+    n_ok_24h = sum(1 for t in qs_24h if t.success)
+    n_fail_24h = n_24h - n_ok_24h
+    cost_24h = sum(float(t.cost_usd) for t in qs_24h)
+    in_tok_24h = sum(t.input_tokens for t in qs_24h)
+    out_tok_24h = sum(t.output_tokens for t in qs_24h)
+
+    # 7d aggregates
+    n_7d = len(qs_7d)
+    cost_7d = sum(float(t.cost_usd) for t in qs_7d)
+    success_rate_7d = round(
+        sum(1 for t in qs_7d if t.success) / max(n_7d, 1) * 100, 1)
+    avg_dur_7d = (sum(t.duration_seconds for t in qs_7d) / max(n_7d, 1))
+
+    # Per-agent breakdown (last 7d).
+    agent_rows: dict = defaultdict(
+        lambda: {"n": 0, "ok": 0, "cost": 0.0, "dur": 0.0})
+    for t in qs_7d:
+        d = agent_rows[t.agent or "—"]
+        d["n"] += 1
+        if t.success:
+            d["ok"] += 1
+        d["cost"] += float(t.cost_usd)
+        d["dur"] += t.duration_seconds
+    by_agent = sorted(
+        [{"agent": k, **v,
+          "success_rate": round(v["ok"] / max(v["n"], 1) * 100, 1),
+          "avg_dur": round(v["dur"] / max(v["n"], 1), 1),
+          "cost": round(v["cost"], 4)}
+         for k, v in agent_rows.items()],
+        key=lambda r: -r["n"]
+    )
+
+    # Recent failures (last 5).
+    recent_failures = list(
+        AgentTask.objects.filter(success=False)
+        .order_by("-created_at")[:5]
+    )
+
+    # Top-5 longest tasks (last 7d).
+    longest = sorted(qs_7d, key=lambda t: -t.duration_seconds)[:5]
+    longest_rows = [{
+        "agent": t.agent, "duration": round(t.duration_seconds, 1),
+        "created_at": t.created_at, "success": t.success,
+    } for t in longest]
+
+    # 7d cost trend by date.
+    cost_per_day: dict = defaultdict(float)
+    n_per_day: dict = defaultdict(int)
+    for t in qs_7d:
+        d = t.created_at.date()
+        cost_per_day[d] += float(t.cost_usd)
+        n_per_day[d] += 1
+    cost_trend = []
+    for i in range(6, -1, -1):
+        d = (now - timedelta(days=i)).date()
+        cost_trend.append({
+            "date": d.strftime("%m-%d"),
+            "cost": round(cost_per_day.get(d, 0), 3),
+            "n": n_per_day.get(d, 0),
+        })
+    max_day_cost = max((r["cost"] for r in cost_trend), default=0)
+
+    return render(request, "dashboard/ai_tasks_list.html", {
+        "page_id": "ai_tasks",
+        "tasks": AgentTask.objects.order_by("-created_at")[:200],
+        "n_24h": n_24h,
+        "n_ok_24h": n_ok_24h,
+        "n_fail_24h": n_fail_24h,
+        "cost_24h": "{:.2f}".format(cost_24h),
+        "in_tok_24h": in_tok_24h,
+        "out_tok_24h": out_tok_24h,
+        "n_7d": n_7d,
+        "cost_7d": "{:.2f}".format(cost_7d),
+        "success_rate_7d": success_rate_7d,
+        "avg_dur_7d": "{:.1f}".format(avg_dur_7d),
+        "by_agent": by_agent,
+        "recent_failures": recent_failures,
+        "longest_rows": longest_rows,
+        "cost_trend": cost_trend,
+        "max_day_cost": max_day_cost,
+    })
 
 
 @login_required
@@ -473,6 +1101,32 @@ def profile(request):
         profile_obj.notify_news_critical = "notify_news_critical" in request.POST
         profile_obj.notify_portfolio = "notify_portfolio" in request.POST
         profile_obj.notify_weekly_review = "notify_weekly_review" in request.POST
+
+        # Phase-15 cross-asset orchestrator
+        profile_obj.cross_asset_orchestrator_enabled = (
+            "cross_asset_orchestrator_enabled" in request.POST)
+        try:
+            profile_obj.max_usd_theme_exposure = float(
+                request.POST.get("max_usd_theme_exposure", 3.0) or 3.0)
+            profile_obj.max_equity_theme_exposure = float(
+                request.POST.get("max_equity_theme_exposure", 3.0) or 3.0)
+            # Phase-24 additions (0 = disabled).
+            profile_obj.max_vol_theme_exposure = float(
+                request.POST.get("max_vol_theme_exposure", 0) or 0)
+            profile_obj.max_currency_exposure = float(
+                request.POST.get("max_currency_exposure", 0) or 0)
+            profile_obj.max_sector_exposure = int(
+                request.POST.get("max_sector_exposure", 0) or 0)
+        except ValueError:
+            pass  # keep current values on parse failure
+        # Phase-25 — size-weighted exposure toggle.
+        profile_obj.size_weighted_orchestrator = (
+            "size_weighted_orchestrator" in request.POST)
+
+        # Phase-27 — tax-lot consumption method.
+        method = request.POST.get("tax_lot_method", "").strip().upper()
+        if method in ("FIFO", "LIFO", "HIFO"):
+            profile_obj.tax_lot_method = method
 
         profile_obj.save()
         messages.success(request, "Profile updated successfully.")
@@ -743,6 +1397,73 @@ def admin_dashboard(request):
     context["master_enabled"] = master_enabled
     context["components_by_category"] = components_by_category
 
+    # Phase-3/4 HQ additions: surface broker accounts + AI-related components
+    # so the template can render dedicated sections without re-querying.
+    from bot_program.models import BinanceAccount, OANDAAccount, AlpacaAccount
+    broker_rows = []
+    for u in User.objects.order_by("username"):
+        binance = getattr(u, "binance_account", None)
+        oanda = getattr(u, "oanda_account", None)
+        alpaca = getattr(u, "alpaca_account", None)
+        if not (binance or oanda or alpaca):
+            continue
+        broker_rows.append({
+            "username": u.username,
+            "binance": {
+                "connected": bool(binance and binance.api_key_enc),
+                "testnet": bool(binance and binance.testnet),
+            } if binance else None,
+            "oanda": {
+                "connected": bool(oanda and oanda.api_key_enc),
+                "practice": bool(oanda and oanda.practice),
+            } if oanda else None,
+            "alpaca": {
+                "connected": bool(alpaca and alpaca.api_key_enc),
+                "paper": bool(alpaca and alpaca.paper),
+            } if alpaca else None,
+        })
+    context["broker_rows"] = broker_rows
+
+    # Pull the AI-gate component out separately so the template can render a
+    # prominent toggle (rather than buried inside the agent table).
+    context["ai_gate_component"] = PlatformComponent.objects.filter(
+        key="feature_ai_pretrade_gate"
+    ).first()
+    context["ai_journal_component"] = PlatformComponent.objects.filter(
+        key="pipeline_ai_journal"
+    ).first()
+    context["ai_decay_component"] = PlatformComponent.objects.filter(
+        key="pipeline_ai_decay"
+    ).first()
+
+    # Phase-5 actuator panel: pending proposals, applied (rollback-able) actions,
+    # and the live-mode toggle.
+    from signals.models import RuleAction, MetaAllocation
+    context["actuator_live_component"] = PlatformComponent.objects.filter(
+        key="actuator_mode_live"
+    ).first()
+    context["actuator_proposed"] = list(
+        RuleAction.objects.filter(state=RuleAction.STATE_PROPOSED)
+        .order_by("-proposed_at")[:10]
+    )
+    context["actuator_applied"] = list(
+        RuleAction.objects.filter(state=RuleAction.STATE_APPLIED)
+        .order_by("-applied_at")[:10]
+    )
+
+    # Phase-7 meta-allocator panel.
+    context["allocator_live_component"] = PlatformComponent.objects.filter(
+        key="meta_allocator_mode_live"
+    ).first()
+    context["allocator_shadows"] = list(
+        MetaAllocation.objects.filter(state=MetaAllocation.STATE_SHADOW)
+        .order_by("-proposed_at")[:5]
+    )
+    context["allocator_applied"] = list(
+        MetaAllocation.objects.filter(state=MetaAllocation.STATE_APPLIED)
+        .order_by("-applied_at")[:5]
+    )
+
     return render(request, "dashboard/admin_dashboard.html", context)
 
 
@@ -843,23 +1564,75 @@ def instrument_detail(request, symbol):
 
 @login_required
 def backtest_list(request):
-    """List all backtests for the current user."""
+    """Phase 63 — enriched backtest engine dashboard.
+
+    Adds: status mix · strategy-type breakdown · top performers · win-rate
+    distribution · best/worst run callouts.
+    """
     import json as _json
+    from collections import Counter, defaultdict
     from backtester.models import BacktestRun
     from instruments.models import Instrument
 
-    runs = list(BacktestRun.objects.filter(user=request.user).order_by("-created_at")[:50])
+    runs = list(BacktestRun.objects.filter(user=request.user)
+                 .order_by("-created_at")[:50])
     total = len(runs)
     completed = [r for r in runs if r.status == "completed"]
-    avg_return = round(sum(r.total_return_pct or 0 for r in completed) / max(len(completed), 1), 2)
-    best = max((r.total_return_pct or 0 for r in completed), default=0)
-    avg_sharpe = round(sum(r.sharpe_ratio or 0 for r in completed) / max(len(completed), 1), 2)
+    n_completed = len(completed)
+    n_running = sum(1 for r in runs if r.status == "running")
+    n_failed = sum(1 for r in runs if r.status == "failed")
+    n_pending = sum(1 for r in runs if r.status == "pending")
 
-    instruments = list(Instrument.objects.filter(is_active=True).order_by("symbol").values("id", "symbol", "name", "asset_class"))
+    avg_return = round(
+        sum(r.total_return_pct or 0 for r in completed) / max(n_completed, 1), 2)
+    best = max((r.total_return_pct or 0 for r in completed), default=0)
+    worst = min((r.total_return_pct or 0 for r in completed), default=0)
+    avg_sharpe = round(
+        sum(r.sharpe_ratio or 0 for r in completed) / max(n_completed, 1), 2)
+    avg_win_rate = round(
+        sum(r.win_rate or 0 for r in completed) / max(n_completed, 1), 1)
+    avg_dd = round(
+        sum(r.max_drawdown_pct or 0 for r in completed) / max(n_completed, 1), 2)
+
+    # Status donut.
+    status_donut = []
+    for k, v in [("completed", n_completed), ("running", n_running),
+                  ("failed", n_failed), ("pending", n_pending)]:
+        if v > 0:
+            status_donut.append({"key": k, "n": v,
+                                  "pct": round(v / max(total, 1) * 100, 1)})
+
+    # Strategy-type breakdown.
+    strat_rows: dict = defaultdict(
+        lambda: {"n": 0, "ret": 0.0, "wins": 0})
+    for r in completed:
+        d = strat_rows[r.strategy_type or "—"]
+        d["n"] += 1
+        d["ret"] += r.total_return_pct or 0
+        if (r.total_return_pct or 0) > 0:
+            d["wins"] += 1
+    strategy_breakdown = sorted(
+        [{"strategy_type": k, **v,
+          "avg_ret": round(v["ret"] / max(v["n"], 1), 2),
+          "win_rate": round(v["wins"] / max(v["n"], 1) * 100, 1)}
+         for k, v in strat_rows.items()],
+        key=lambda r: -r["n"]
+    )
+
+    # Top 5 + worst 5 by return.
+    by_ret = sorted(completed, key=lambda r: r.total_return_pct or 0,
+                    reverse=True)
+    top_runs = by_ret[:5]
+    worst_runs = list(reversed(by_ret[-5:])) if len(by_ret) > 5 else []
+
+    instruments = list(Instrument.objects.filter(is_active=True)
+                        .order_by("symbol")
+                        .values("id", "symbol", "name", "asset_class"))
     strategies = []
     try:
         from strategies.models import Strategy
-        strategies = list(Strategy.objects.all().values("id", "name", "time_horizon"))
+        strategies = list(Strategy.objects.all()
+                           .values("id", "name", "time_horizon"))
     except Exception:
         pass
 
@@ -867,10 +1640,20 @@ def backtest_list(request):
         "page_id": "backtest",
         "runs": runs,
         "total": total,
-        "completed_count": len(completed),
+        "completed_count": n_completed,
+        "n_running": n_running,
+        "n_failed": n_failed,
+        "n_pending": n_pending,
         "avg_return": avg_return,
         "best_return": round(best, 2),
+        "worst_return": round(worst, 2),
         "avg_sharpe": avg_sharpe,
+        "avg_win_rate": avg_win_rate,
+        "avg_dd": avg_dd,
+        "status_donut": status_donut,
+        "strategy_breakdown": strategy_breakdown,
+        "top_runs": top_runs,
+        "worst_runs": worst_runs,
         "instruments_json": _json.dumps(instruments),
         "strategies_json": _json.dumps(strategies, default=str),
     })
@@ -1107,6 +1890,20 @@ def user_notifications(request):
             prefs.receive_portfolio_alerts = "receive_portfolio_alerts" in request.POST
             prefs.receive_weekly_newsletter = "receive_weekly_newsletter" in request.POST
             prefs.receive_monthly_newsletter = "receive_monthly_newsletter" in request.POST
+            prefs.receive_bot_alerts = "receive_bot_alerts" in request.POST
+            prefs.receive_strategist_briefing = "receive_strategist_briefing" in request.POST
+            # Phase-44 — quiet hours (UTC). Empty string clears the window.
+            qs = (request.POST.get("quiet_start") or "").strip()
+            qe = (request.POST.get("quiet_end") or "").strip()
+            from datetime import datetime as _dt
+            try:
+                prefs.quiet_start = _dt.strptime(qs, "%H:%M").time() if qs else None
+            except ValueError:
+                prefs.quiet_start = None
+            try:
+                prefs.quiet_end = _dt.strptime(qe, "%H:%M").time() if qe else None
+            except ValueError:
+                prefs.quiet_end = None
             prefs.save()
             messages.success(request, "Notification preferences saved.")
 
@@ -1340,18 +2137,14 @@ Be concise, data-driven, and professional. Use markdown formatting."""
 
 @login_required
 def ai_chat_page(request):
-    """AI chat page."""
-    from ai_agents.models import AgentTask
-    from django.utils import timezone
-    from datetime import timedelta
-    now = timezone.now()
-    day_ago = now - timedelta(hours=24)
-    ai_24h = AgentTask.objects.filter(created_at__gte=day_ago)
-    return render(request, "dashboard/ai_chat.html", {
-        "page_id": "ai_chat",
-        "ai_tasks_24h": ai_24h.count(),
-        "ai_cost_24h": "{:.2f}".format(sum(float(t.cost_usd) for t in ai_24h)),
-    })
+    """Phase 64.5 — legacy redirect.
+
+    The standalone "AI Chat" page was a generic Claude pass-through with no
+    Sauron context. It's been merged into /research/ which now shows live
+    Mind context next to the conversation. The URL is kept as a 302 redirect
+    so old bookmarks continue to land somewhere useful.
+    """
+    return redirect("research_view")
 
 
 @login_required

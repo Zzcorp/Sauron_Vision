@@ -3,48 +3,248 @@
 {% block page_title %}◎ PORTFOLIO{% endblock %}
 
 {% block content %}
-<div class="grid grid-4" style="margin-bottom: 24px;">
-    <div class="stat-box fade-in-up delay-1">
-        <div class="stat-label">Total Value</div>
-        <div class="stat-value">€{{ portfolio.current_value|default:"10,000" }}</div>
+
+{# ── 1. Top stat strip — 8 cells ──────────────────────────────── #}
+<div class="oc-strip">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TOTAL VALUE</span>
+        <span class="oc-strip-value">{{ portfolio.current_value|floatformat:2 }}</span>
+        <span class="oc-strip-sub">{{ portfolio.currency }}</span>
     </div>
-    <div class="stat-box fade-in-up delay-2">
-        <div class="stat-label">Cash Available</div>
-        <div class="stat-value">€{{ portfolio.cash_available|default:"10,000" }}</div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CASH</span>
+        <span class="oc-strip-value">{{ portfolio.cash_available|floatformat:2 }}</span>
+        <span class="oc-strip-sub">available to deploy</span>
     </div>
-    <div class="stat-box fade-in-up delay-3">
-        <div class="stat-label">Open Positions</div>
-        <div class="stat-value">{{ open_positions_count|default:"0" }}</div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">OPEN</span>
+        <span class="oc-strip-value">{{ open_positions_count }}</span>
+        <span class="oc-strip-sub">positions</span>
     </div>
-    <div class="stat-box fade-in-up delay-4">
-        <div class="stat-label">Max Daily Loss</div>
-        <div class="stat-value" style="color: var(--accent-red);">{{ portfolio.max_daily_loss_pct|default:"3.0" }}%</div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">UNREALIZED P&amp;L</span>
+        <span class="oc-strip-value {% if total_unrealized > 0 %}up{% elif total_unrealized < 0 %}down{% endif %}">{{ total_unrealized|floatformat:2 }}</span>
+        <span class="oc-strip-sub">across open positions</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">WIN RATE</span>
+        <span class="oc-strip-value">{{ win_rate }}%</span>
+        <span class="oc-strip-sub">{{ n_winning }}W / {{ n_losing }}L · {{ n_closed }} closed</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PROFIT FACTOR</span>
+        <span class="oc-strip-value {% if profit_factor >= 1 %}up{% endif %}">{{ profit_factor }}</span>
+        <span class="oc-strip-sub">avg win {{ avg_win }} · avg loss {{ avg_loss }}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SHARPE 30D</span>
+        <span class="oc-strip-value {% if sharpe_30d and sharpe_30d > 0 %}up{% elif sharpe_30d and sharpe_30d < 0 %}down{% endif %}">{% if sharpe_30d is not None %}{{ sharpe_30d }}{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">{% if sortino_30d is not None %}sortino {{ sortino_30d }}{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MAX DRAWDOWN</span>
+        <span class="oc-strip-value down">{{ max_drawdown|floatformat:2 }}%</span>
+        <span class="oc-strip-sub">all-time low watermark</span>
     </div>
 </div>
 
-<div class="grid grid-2">
-    <div class="card fade-in-up delay-3">
-        <div class="card-header"><span class="card-title">Risk Limits</span></div>
+{# ── 2. Equity curve sparkline ────────────────────────────────── #}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="card-title">Equity curve · last 30 days</span>
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+            {% if equity_points %}low {{ equity_min|floatformat:0 }} · high {{ equity_max|floatformat:0 }} · {{ equity_points|length }} pts{% endif %}
+        </span>
+    </div>
+    {% if equity_points %}
+        <svg class="oc-sparkline" viewBox="0 0 600 60" preserveAspectRatio="none" id="pfEquitySvg">
+            <defs>
+                <linearGradient id="pf-spark-grad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.4"/>
+                    <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+                </linearGradient>
+            </defs>
+            <path d=""/>
+        </svg>
+        <div id="pfEquityData" style="display:none;"
+             data-points="{% for v in equity_points %}{{ v|floatformat:6 }}{% if not forloop.last %},{% endif %}{% endfor %}"
+             data-min="{{ equity_min|floatformat:6 }}"
+             data-max="{{ equity_max|floatformat:6 }}"></div>
+        <script>
+        (function() {
+            var el = document.getElementById('pfEquityData');
+            if (!el) return;
+            var pts = (el.dataset.points || '').split(',').map(parseFloat).filter(function(v){return !isNaN(v);});
+            if (pts.length < 2) return;
+            var min = parseFloat(el.dataset.min), max = parseFloat(el.dataset.max);
+            var span = (max - min) || 1;
+            var W = 600, H = 60, pad = 4;
+            var lineCmds = [], i, x, y;
+            for (i = 0; i < pts.length; i++) {
+                x = (i / (pts.length - 1)) * (W - 2 * pad) + pad;
+                y = H - pad - ((pts[i] - min) / span) * (H - 2 * pad);
+                lineCmds.push((i === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2));
+            }
+            var fillCmds = lineCmds.slice();
+            fillCmds.push('L ' + (W - pad) + ' ' + (H - pad));
+            fillCmds.push('L ' + pad + ' ' + (H - pad)); fillCmds.push('Z');
+            var svg = document.getElementById('pfEquitySvg');
+            var path = svg.querySelector('path');
+            path.setAttribute('d', lineCmds.join(' '));
+            var ns = 'http://www.w3.org/2000/svg';
+            var fill = document.createElementNS(ns, 'path');
+            fill.setAttribute('d', fillCmds.join(' '));
+            fill.setAttribute('fill', 'url(#pf-spark-grad)');
+            fill.setAttribute('opacity', '0.18');
+            svg.insertBefore(fill, path);
+        })();
+        </script>
+    {% else %}
+        <p class="oc-empty">No portfolio snapshots yet — equity curve fills as daily snapshots accumulate.</p>
+    {% endif %}
+</div>
+
+{# ── 3. Allocation donut + Top contributors/detractors ──────── #}
+<div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
+    <div class="card">
+        <div class="card-header"><span class="card-title">Allocation</span></div>
+        {% if allocation %}
+            <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+                <svg class="oc-donut" viewBox="0 0 100 100" id="pfAllocDonut">
+                    <circle cx="50" cy="50" r="35" fill="none" stroke="var(--bg-card-hover)" stroke-width="14"/>
+                </svg>
+                <div class="oc-donut-legend" style="flex:1;min-width:160px;">
+                    {% for a in allocation %}
+                        <div class="oc-donut-legend-row">
+                            <span class="oc-donut-legend-key">
+                                <span class="oc-donut-legend-swatch pf-swatch" data-class="{{ a.asset_class }}"></span>
+                                {{ a.asset_class|upper }}
+                            </span>
+                            <span class="oc-donut-legend-pct">{{ a.pct }}%</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div id="pfAllocData" style="display:none;"
+                 data-rows="{% for a in allocation %}{{ a.asset_class }}:{{ a.pct }}{% if not forloop.last %};{% endif %}{% endfor %}"></div>
+            <script>
+            (function() {
+                var rows = (document.getElementById('pfAllocData').dataset.rows || '')
+                    .split(';').map(function(r){var p=r.split(':');return {k:p[0], pct:parseFloat(p[1])};})
+                    .filter(function(r){return !isNaN(r.pct);});
+                var palette = ['#00e868','#ffb000','#ff5e5e','#5b9eff','#c084fc','#22d3ee','#94a3b8'];
+                var colorOf = {};
+                rows.forEach(function(r,i){colorOf[r.k] = palette[i % palette.length];});
+                document.querySelectorAll('.pf-swatch').forEach(function(el){
+                    if (colorOf[el.dataset.class]) el.style.background = colorOf[el.dataset.class];
+                });
+                var svg = document.getElementById('pfAllocDonut');
+                if (!svg || rows.length === 0) return;
+                var ns = 'http://www.w3.org/2000/svg';
+                var cx=50, cy=50, r=35, c=2*Math.PI*r;
+                var offset = -c/4;
+                rows.forEach(function(row){
+                    var seg = document.createElementNS(ns, 'circle');
+                    var len = (row.pct/100) * c;
+                    seg.setAttribute('cx', cx); seg.setAttribute('cy', cy); seg.setAttribute('r', r);
+                    seg.setAttribute('fill','none');
+                    seg.setAttribute('stroke', colorOf[row.k]);
+                    seg.setAttribute('stroke-width', 14);
+                    seg.setAttribute('stroke-dasharray', len.toFixed(2) + ' ' + (c - len).toFixed(2));
+                    seg.setAttribute('stroke-dashoffset', offset.toFixed(2));
+                    svg.appendChild(seg);
+                    offset -= len;
+                });
+            })();
+            </script>
+        {% else %}
+            <p class="oc-empty">No open positions yet — allocation will fill once positions open.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header"><span class="card-title">Top contributors / detractors</span></div>
+        {% if top_contributors %}
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Top 3 contributors</div>
+            {% for p in top_contributors %}
+            <div class="oc-mini-row">
+                <span class="oc-mini-sym">{{ p.instrument.symbol }}</span>
+                <span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span>
+                <span class="oc-mini-meta">{% if p.strategy %}{{ p.strategy.name|truncatechars:18 }}{% else %}—{% endif %}</span>
+                <span class="oc-mini-pnl up">+{{ p.unrealized_pnl|floatformat:2 }}</span>
+            </div>
+            {% endfor %}
+        {% endif %}
+        {% if top_detractors %}
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-top:14px;margin-bottom:6px;">Top 3 detractors</div>
+            {% for p in top_detractors %}
+            <div class="oc-mini-row">
+                <span class="oc-mini-sym">{{ p.instrument.symbol }}</span>
+                <span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span>
+                <span class="oc-mini-meta">{% if p.strategy %}{{ p.strategy.name|truncatechars:18 }}{% else %}—{% endif %}</span>
+                <span class="oc-mini-pnl down">{{ p.unrealized_pnl|floatformat:2 }}</span>
+            </div>
+            {% endfor %}
+        {% endif %}
+        {% if not top_contributors and not top_detractors %}
+            <p class="oc-empty">No closed positions yet — contributors fill as trades close.</p>
+        {% endif %}
+    </div>
+</div>
+
+{# ── 4. Open positions snapshot ───────────────────────────────── #}
+{% if open_positions %}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="card-title">Open positions</span>
+        <a href="{% url 'positions_list' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">all positions →</a>
+    </div>
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>symbol</th><th>side</th><th>qty</th><th>entry</th><th>last</th><th>unreal P&amp;L</th><th>%</th></tr></thead>
+        <tbody>
+            {% for p in open_positions %}
+            <tr>
+                <td><strong>{{ p.instrument.symbol }}</strong></td>
+                <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
+                <td>{{ p.quantity|floatformat:4 }}</td>
+                <td>{{ p.entry_price|floatformat:4 }}</td>
+                <td>{{ p.current_price|floatformat:4 }}</td>
+                <td class="oc-mini-pnl {% if p.unrealized_pnl > 0 %}up{% elif p.unrealized_pnl < 0 %}down{% endif %}">{{ p.unrealized_pnl|floatformat:2 }}</td>
+                <td class="{% if p.unrealized_pnl_pct > 0 %}up{% elif p.unrealized_pnl_pct < 0 %}down{% endif %}">{{ p.unrealized_pnl_pct|floatformat:2 }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+
+{# ── 5. Risk limits + recent snapshots ───────────────────────── #}
+<div class="grid grid-2" style="gap:14px;">
+    <div class="card">
+        <div class="card-header"><span class="card-title">Risk limits</span></div>
         <ul class="kv-list">
             <li><span class="label">Max Total Exposure</span><span class="value">{{ portfolio.max_total_exposure_pct|default:"100" }}%</span></li>
             <li><span class="label">Max Single Position</span><span class="value">{{ portfolio.max_single_position_pct|default:"10" }}%</span></li>
             <li><span class="label">Max Sector Exposure</span><span class="value">{{ portfolio.max_sector_exposure_pct|default:"30" }}%</span></li>
             <li><span class="label">Correlation Threshold</span><span class="value">{{ portfolio.max_correlation_threshold|default:"0.7" }}</span></li>
+            <li><span class="label">Max Daily Loss</span><span class="value down">{{ portfolio.max_daily_loss_pct|default:"3.0" }}%</span></li>
             <li><span class="label">Base Currency</span><span class="value">{{ portfolio.currency|default:"EUR" }}</span></li>
         </ul>
     </div>
-    <div class="card fade-in-up delay-4">
-        <div class="card-header"><span class="card-title">Performance History</span></div>
+    <div class="card">
+        <div class="card-header"><span class="card-title">Recent snapshots</span></div>
         {% if snapshots %}
         <div class="table-wrapper">
         <table>
-            <thead><tr><th>Date</th><th>Value</th><th>Daily P&L</th><th>Cumulative</th></tr></thead>
+            <thead><tr><th>date</th><th>value</th><th>daily P&amp;L</th><th>cumulative</th></tr></thead>
             <tbody>
             {% for snap in snapshots %}
             <tr>
                 <td>{{ snap.date|date:"M d" }}</td>
-                <td style="font-family: var(--font-mono);">€{{ snap.total_value }}</td>
-                <td style="color: {% if snap.daily_pnl_pct >= 0 %}var(--accent-green){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ snap.daily_pnl_pct|floatformat:2 }}%</td>
+                <td style="font-family: var(--font-mono);">{{ snap.total_value }}</td>
+                <td class="{% if snap.daily_pnl_pct >= 0 %}up{% else %}down{% endif %}" style="font-family: var(--font-mono);">{{ snap.daily_pnl_pct|floatformat:2 }}%</td>
                 <td style="font-family: var(--font-mono);">{{ snap.cumulative_pnl_pct|floatformat:2 }}%</td>
             </tr>
             {% endfor %}
@@ -57,7 +257,7 @@
     </div>
 </div>
 
-<div class="card" style="margin-top:24px;">
+<div class="card" style="margin-top:18px;">
   <div class="card-header"><div class="card-title">Portfolio Analytics</div></div>
   <div class="sv-metrics-wrapper" hx-get="/htmx/metrics/portfolio/" hx-trigger="load, every 60s"></div>
 </div>

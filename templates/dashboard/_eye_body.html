@@ -1,0 +1,229 @@
+{# Sauron's Eye body partial — fetched via HTMX every 10s. #}
+
+{# ── Top stat strip ───────────────────────────────── #}
+<div class="grid grid-4" style="margin-bottom: 24px;">
+    <div class="stat-box fade-in-up delay-1">
+        <div class="stat-label">Open Positions</div>
+        <div class="stat-value">{{ open_positions|length }}</div>
+    </div>
+    <div class="stat-box fade-in-up delay-2">
+        <div class="stat-label">P&amp;L 24h</div>
+        <div class="stat-value {% if pnl_24h.total > 0 %}up{% elif pnl_24h.total < 0 %}down{% endif %}">
+            {{ pnl_24h.total|floatformat:2 }}
+        </div>
+    </div>
+    <div class="stat-box fade-in-up delay-3">
+        <div class="stat-label">Gate events (recent)</div>
+        <div class="stat-value">{{ gate_events|length }}</div>
+    </div>
+    <div class="stat-box fade-in-up delay-4">
+        <div class="stat-label">Active bots</div>
+        <div class="stat-value">{{ bot_health|length }}</div>
+    </div>
+</div>
+
+{# ── Theme exposure (orchestrator's view) ────────── #}
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <span class="card-title">⌬ Cross-Asset Theme Exposure</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+            {% if theme_exposure.size_weighted %}
+                <span class="eye-stat-pill pill-ok" title="Phase-25: contributions are scaled by position notional vs config default">size-weighted</span>
+            {% endif %}
+            <span class="eye-stat-pill {% if theme_exposure.enabled %}pill-ok{% else %}pill-off{% endif %}">
+                {% if theme_exposure.enabled %}orchestrator: ON{% else %}orchestrator: OFF{% endif %}
+            </span>
+            <a href="{% url 'eye_exposure' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">breakdown →</a>
+        </div>
+    </div>
+
+    <div class="grid grid-2" style="gap: 14px; margin-top: 12px;">
+        {% for theme, data in theme_exposure.exposure.items %}
+        <div style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-void);">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+                <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;">
+                    {{ theme }}-theme
+                </span>
+                <span class="eye-stat-pill pill-{{ data.status }}">
+                    {{ data.value|floatformat:1 }} / ±{{ data.cap|floatformat:1 }}
+                </span>
+            </div>
+            <div style="height:6px;background:var(--bg-card-hover);border-radius:3px;overflow:hidden;">
+                {% widthratio data.value|stringformat:"f"|cut:"-" data.cap 100 as pct %}
+                <div style="height:100%;width:{% if pct %}{{ pct|default:0 }}{% else %}0{% endif %}%;
+                            background: {% if data.status == 'over' %}#ff5e5e{% elif data.status == 'near' %}var(--accent-gold){% else %}var(--accent){% endif %};"></div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    {% if theme_exposure.extras.vol_long %}
+    <div style="margin-top:12px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-void);">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+            <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;">vol-long (options stacked)</span>
+            <span class="eye-stat-pill pill-{{ theme_exposure.extras.vol_long.status }}">
+                {{ theme_exposure.extras.vol_long.value|floatformat:1 }} / {{ theme_exposure.extras.vol_long.cap|floatformat:0 }}
+            </span>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if theme_exposure.extras.currencies %}
+    <div style="margin-top:12px;">
+        <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">per-currency exposure (forex)</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+            {% for c in theme_exposure.extras.currencies %}
+                <span class="eye-stat-pill pill-{{ c.status }}">{{ c.ccy }} {{ c.value|floatformat:1 }} / ±{{ c.cap|floatformat:1 }}</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if theme_exposure.extras.sectors %}
+    <div style="margin-top:12px;">
+        <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">sector concentration</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+            {% for s in theme_exposure.extras.sectors %}
+                <span class="eye-stat-pill pill-{{ s.status }}">{{ s.sector }} {{ s.value }}/{{ s.cap }}</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if not theme_exposure.enabled %}
+    <p class="form-hint" style="margin-top:12px;">
+        Orchestrator is off. Enable it on your <a href="{% url 'profile' %}" style="color:var(--accent);">Profile</a> to gate stacked-theme entries.
+    </p>
+    {% endif %}
+</div>
+
+{# ── Two-column: open positions + gate events ────── #}
+<div class="grid grid-2" style="gap: 16px; margin-bottom: 24px;">
+
+    {# Open positions (all classes) #}
+    <div class="card fade-in-up">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">▣ Open Positions (All Classes)</span>
+            <a href="{% url 'eye_fills' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">all fills →</a>
+        </div>
+        {% if open_positions %}
+        <div class="table-wrapper">
+        <table class="sv-perf-table">
+            <thead><tr><th>Asset</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>SL</th><th>TP</th><th>Mode</th></tr></thead>
+            <tbody>
+            {% for p in open_positions %}
+                <tr>
+                    <td><span class="badge badge-medium">{{ p.asset_class }}</span></td>
+                    <td><strong>{{ p.symbol }}</strong></td>
+                    <td><span class="badge badge-{% if p.side == 'BUY' %}bullish{% else %}bearish{% endif %}">{{ p.side }}</span></td>
+                    <td>{{ p.qty }}</td>
+                    <td>{{ p.entry_price|floatformat:4 }}</td>
+                    <td style="color:var(--text-muted);">{{ p.stop_loss|floatformat:4|default:"—" }}</td>
+                    <td style="color:var(--text-muted);">{{ p.take_profit|floatformat:4|default:"—" }}</td>
+                    <td>{% if p.paper %}<span style="color:var(--text-muted);">paper</span>{% else %}<span style="color:var(--accent-gold);">LIVE</span>{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <p class="eye-empty">No open positions across any asset class.</p>
+        {% endif %}
+    </div>
+
+    {# Gate events #}
+    <div class="card fade-in-up">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">⌬ Recent Gate Decisions</span>
+            <a href="{% url 'eye_gate_events' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">history →</a>
+        </div>
+        {% if gate_events %}
+        <div class="table-wrapper">
+        <table class="sv-perf-table">
+            <thead><tr><th>When</th><th>Decision</th><th>Trade</th><th>Reason</th></tr></thead>
+            <tbody>
+            {% for ev in gate_events %}
+                <tr>
+                    <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ ev.created_at|date:"H:i:s" }}</td>
+                    <td><span class="gate-{{ ev.decision }}">{{ ev.decision|upper }}</span></td>
+                    <td>{{ ev.asset_class }}/{{ ev.symbol }} {{ ev.side }}{% if ev.right %} {{ ev.right }}{% endif %}</td>
+                    <td style="font-size:11px;color:var(--text-muted);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ ev.reason }}">{{ ev.reason }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <p class="eye-empty">No gate decisions logged yet.</p>
+        {% endif %}
+    </div>
+
+</div>
+
+{# ── Two-column: bot health + 24h pnl by class ───── #}
+<div class="grid grid-2" style="gap: 16px; margin-bottom: 24px;">
+
+    {# Bot health #}
+    <div class="card fade-in-up">
+        <div class="card-header"><span class="card-title">⬢ Bot Health</span></div>
+        {% if bot_health %}
+        <div class="table-wrapper">
+        <table class="sv-perf-table">
+            <thead><tr><th>Bot</th><th>Class</th><th>Mode</th><th>Open</th><th>Status</th></tr></thead>
+            <tbody>
+            {% for b in bot_health %}
+                <tr>
+                    <td>{{ b.name }}</td>
+                    <td><span class="badge badge-medium">{{ b.asset_class }}</span></td>
+                    <td>{{ b.mode }}</td>
+                    <td>{{ b.open_count }}</td>
+                    <td>{% if b.enabled %}<span style="color:var(--accent);">ON</span>{% else %}<span style="color:var(--text-muted);">OFF</span>{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <p class="eye-empty">No bots configured.</p>
+        {% endif %}
+    </div>
+
+    {# P&L by class + Rule control summary #}
+    <div class="card fade-in-up">
+        <div class="card-header"><span class="card-title">▲ 24h P&amp;L · Rule Control</span></div>
+        <div style="margin-bottom: 14px;">
+            <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">P&amp;L by asset class</div>
+            {% if pnl_24h.by_class %}
+                {% for ac, info in pnl_24h.by_class.items %}
+                    <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
+                        <span>{{ ac }}</span>
+                        <span class="{% if info.pnl > 0 %}up{% elif info.pnl < 0 %}down{% endif %}">
+                            {{ info.pnl|floatformat:2 }} <span style="color:var(--text-muted);font-size:10px;">({{ info.count }})</span>
+                        </span>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <p class="eye-empty">No closed trades in last 24h.</p>
+            {% endif %}
+        </div>
+
+        <div>
+            <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">Rule control state</div>
+            <div style="display:flex;gap:14px;flex-wrap:wrap;">
+                <span class="eye-stat-pill pill-{% if rule_control.paused_rules %}over{% else %}ok{% endif %}">
+                    paused: {{ rule_control.paused_rules }}
+                </span>
+                <span class="eye-stat-pill pill-{% if rule_control.reduced_rules %}near{% else %}ok{% endif %}">
+                    reduced: {{ rule_control.reduced_rules }}
+                </span>
+                <span class="eye-stat-pill pill-ok">
+                    actions/24h: {{ rule_control.live_actions_24h }}
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<p style="text-align:center;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
+    Auto-refresh every 10s · {{ now|date:"Y-m-d H:i:s" }}
+</p>

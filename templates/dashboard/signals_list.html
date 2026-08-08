@@ -3,31 +3,198 @@
 {% block page_title %}⚡ SIGNAL INTELLIGENCE{% endblock %}
 
 {% block content %}
-<div class="grid grid-4" style="margin-bottom: 24px;">
-    <div class="stat-box fade-in-up delay-1">
-        <div class="stat-label">Active Signals</div>
-        <div class="stat-value">{{ active_count|default:"0" }}</div>
+{# ── 1. Top stat strip — 6 cells ─────────────────────────────────── #}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ACTIVE SIGNALS</span>
+        <span class="oc-strip-value">{{ active_count }}</span>
+        <span class="oc-strip-sub">{{ n_24h }} fresh in last 24h</span>
     </div>
-    <div class="stat-box fade-in-up delay-2">
-        <div class="stat-label">Bullish</div>
-        <div class="stat-value" style="color: var(--accent-green);">{{ bullish_count|default:"0" }}</div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">BULLISH</span>
+        <span class="oc-strip-value up">{{ bullish_count }}</span>
+        <span class="oc-strip-sub">{% if active_count %}{% widthratio bullish_count active_count 100 %}%{% else %}—{% endif %} of active</span>
     </div>
-    <div class="stat-box fade-in-up delay-3">
-        <div class="stat-label">Bearish</div>
-        <div class="stat-value" style="color: var(--accent-red);">{{ bearish_count|default:"0" }}</div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">BEARISH</span>
+        <span class="oc-strip-value down">{{ bearish_count }}</span>
+        <span class="oc-strip-sub">{% if active_count %}{% widthratio bearish_count active_count 100 %}%{% else %}—{% endif %} of active</span>
     </div>
-    <div class="stat-box fade-in-up delay-4">
-        <div class="stat-label">Avg Score</div>
-        <div class="stat-value">{{ avg_score|default:"0.00" }}</div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">AVG SCORE</span>
+        <span class="oc-strip-value">{{ avg_score }}</span>
+        <span class="oc-strip-sub">conviction baseline</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">HIGH URGENCY</span>
+        <span class="oc-strip-value {% if n_high_urg %}up{% endif %}">{{ n_high_urg }}</span>
+        <span class="oc-strip-sub">act-now candidates</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TYPES TRACKED</span>
+        <span class="oc-strip-value">{{ perf_by_type|length }}</span>
+        <span class="oc-strip-sub">with ≥3 closed graded</span>
     </div>
 </div>
 
-<div class="card fade-in-up delay-3">
-    <div class="card-header">
-        <span class="card-title">All Signals</span>
+{# ── 2. Score distribution histogram + direction donut ──────────── #}
+<div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
+    <div class="card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">Score distribution</span>
+            <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+                {{ active_count }} active · 0.0 → 1.0 buckets
+            </span>
+        </div>
+        {% if score_max %}
+            <div style="display:flex;align-items:flex-end;gap:6px;height:120px;padding:8px 4px 0;">
+                {% for n in score_buckets %}
+                    <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;">
+                        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-bottom:3px;">{{ n }}</span>
+                        <div style="width:100%;background:{% if forloop.counter0 < 4 %}var(--accent-red){% elif forloop.counter0 < 7 %}var(--accent-gold){% else %}var(--accent-green){% endif %};opacity:0.85;border-radius:2px 2px 0 0;
+                                    height:{% widthratio n score_max 100 %}%;min-height:{% if n %}3px{% else %}0{% endif %};"></div>
+                        <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);margin-top:4px;">{{ forloop.counter0 }}.{{ forloop.counter0|add:1 }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+            <p style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:8px;text-align:center;">
+                low conviction · medium · high conviction
+            </p>
+        {% else %}
+            <p class="oc-empty">No active signals to bucket.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header"><span class="card-title">Direction mix</span></div>
+        {% if direction_donut %}
+            <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+                <svg class="oc-donut" viewBox="0 0 100 100" id="sigDirDonut">
+                    <circle cx="50" cy="50" r="35" fill="none" stroke="var(--bg-card-hover)" stroke-width="14"/>
+                </svg>
+                <div class="oc-donut-legend" style="flex:1;min-width:140px;">
+                    {% for d in direction_donut %}
+                        <div class="oc-donut-legend-row">
+                            <span class="oc-donut-legend-key">
+                                <span class="oc-donut-legend-swatch" data-class="{{ d.key }}"></span>
+                                {{ d.key|upper }}
+                            </span>
+                            <span class="oc-donut-legend-pct">{{ d.n }} · {{ d.pct }}%</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div id="sigDirData" style="display:none;"
+                 data-rows="{% for d in direction_donut %}{{ d.key }}:{{ d.pct }}{% if not forloop.last %};{% endif %}{% endfor %}"></div>
+            <script>
+                (function() {
+                    var rows = (document.getElementById('sigDirData').dataset.rows || '')
+                        .split(';').map(function(r){var p=r.split(':');return {k:p[0], pct:parseFloat(p[1])};})
+                        .filter(function(r){return !isNaN(r.pct);});
+                    var colorOf = {bullish:'#00e868', bearish:'#ff5e5e', neutral:'#94a3b8'};
+                    document.querySelectorAll('#sigDirDonut ~ * .oc-donut-legend-swatch, .oc-donut-legend-swatch').forEach(function(el){
+                        if (colorOf[el.dataset.class]) el.style.background = colorOf[el.dataset.class];
+                    });
+                    var svg = document.getElementById('sigDirDonut');
+                    if (!svg || rows.length === 0) return;
+                    var ns = 'http://www.w3.org/2000/svg';
+                    var cx=50, cy=50, r=35, c=2*Math.PI*r;
+                    var offset = -c/4;
+                    rows.forEach(function(row){
+                        var seg = document.createElementNS(ns, 'circle');
+                        var len = (row.pct/100) * c;
+                        seg.setAttribute('cx', cx); seg.setAttribute('cy', cy); seg.setAttribute('r', r);
+                        seg.setAttribute('fill','none');
+                        seg.setAttribute('stroke', colorOf[row.k] || '#5b9eff');
+                        seg.setAttribute('stroke-width', 14);
+                        seg.setAttribute('stroke-dasharray', len.toFixed(2) + ' ' + (c - len).toFixed(2));
+                        seg.setAttribute('stroke-dashoffset', offset.toFixed(2));
+                        svg.appendChild(seg);
+                        offset -= len;
+                    });
+                })();
+            </script>
+        {% else %}
+            <p class="oc-empty">No active signals.</p>
+        {% endif %}
+    </div>
+</div>
+
+{# ── 3. Asset breakdown · urgency mix · win-rate by type ─────────── #}
+<div class="grid grid-3" style="gap:14px;margin-bottom:18px;">
+    <div class="card">
+        <div class="card-header"><span class="card-title">By asset class</span></div>
+        {% if asset_breakdown %}
+            <table class="sv-perf-table">
+                <thead><tr><th>class</th><th>active</th><th>share</th></tr></thead>
+                <tbody>
+                    {% for a in asset_breakdown %}
+                        <tr>
+                            <td><strong>{{ a.asset_class|upper }}</strong></td>
+                            <td>{{ a.n }}</td>
+                            <td><span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">{% if active_count %}{% widthratio a.n active_count 100 %}%{% else %}—{% endif %}</span></td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="oc-empty">No active signals.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header"><span class="card-title">Urgency mix</span></div>
+        {% if urgency_mix %}
+            <table class="sv-perf-table">
+                <thead><tr><th>urgency</th><th>active</th><th>share</th></tr></thead>
+                <tbody>
+                    {% for u in urgency_mix %}
+                        <tr>
+                            <td><span class="badge badge-{{ u.urgency }}">{{ u.urgency|upper }}</span></td>
+                            <td>{{ u.n }}</td>
+                            <td><span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">{% if active_count %}{% widthratio u.n active_count 100 %}%{% else %}—{% endif %}</span></td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="oc-empty">No active signals.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">Win rate by type</span>
+            <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">phase-1 graded</span>
+        </div>
+        {% if perf_by_type %}
+            <table class="sv-perf-table">
+                <thead><tr><th>type</th><th>N</th><th>win%</th><th>avg R</th></tr></thead>
+                <tbody>
+                    {% for r in perf_by_type %}
+                        <tr>
+                            <td><strong>{{ r.signal_type }}</strong></td>
+                            <td>{{ r.n }}</td>
+                            <td class="{% if r.win_rate >= 50 %}up{% else %}down{% endif %}">{{ r.win_rate }}%</td>
+                            <td class="{% if r.avg_r > 0 %}up{% elif r.avg_r < 0 %}down{% endif %}">{{ r.avg_r }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="oc-empty">Need ≥3 closed graded signals per type.</p>
+        {% endif %}
+    </div>
+</div>
+
+{# ── 4. Signal table ─────────────────────────────────────────────── #}
+<div class="card">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="card-title">{% if active_only %}Active signals{% else %}All signals{% endif %} <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">({{ signals|length }} shown)</span></span>
         <div>
             <a href="?active=1" class="btn btn-sm {% if active_only %}btn-primary{% endif %}">Active Only</a>
             <a href="{% url 'signals_list' %}" class="btn btn-sm">All</a>
+            <a href="{% url 'performance_dashboard' %}" class="btn btn-sm">🎯 Performance</a>
         </div>
     </div>
     {% if signals %}
@@ -68,8 +235,8 @@
     {% endif %}
 </div>
 
-<div class="card" style="margin-top:24px;">
-  <div class="card-header"><div class="card-title">Signal Analytics</div></div>
-  <div class="sv-metrics-wrapper" hx-get="/htmx/metrics/signals/" hx-trigger="load, every 60s"></div>
+<div class="card" style="margin-top:18px;">
+    <div class="card-header"><div class="card-title">Signal Analytics</div></div>
+    <div class="sv-metrics-wrapper" hx-get="/htmx/metrics/signals/" hx-trigger="load, every 60s"></div>
 </div>
 {% endblock %}

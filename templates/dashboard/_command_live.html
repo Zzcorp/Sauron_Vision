@@ -1,0 +1,169 @@
+{% comment %}
+LIVE tab — Operations Center enrichment + Eye body partial.
+Layered rendering:
+  1. Top strip: brain regime · gate ratio · deployed/cash split
+  2. Recent fills (24h) + Brain top concerns side-by-side
+  3. Original Eye body (theme exposure, open positions, etc.)
+{% endcomment %}
+
+{# ── 1. Top strip — 8 cells: regime · gate · exposure · session pulse #}
+<div class="oc-strip">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">REGIME</span>
+        <span class="oc-strip-value oc-regime-{{ brain_regime }}">{{ brain_regime|default:"unknown"|upper }}</span>
+        <span class="oc-strip-sub">conf {{ brain_regime_conf|default:"0"|floatformat:2 }} · trust <span class="oc-trust-{{ brain_trust_band }}">{{ brain_trust_band|upper }}</span> · {{ brain_age_str }} ago</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">GATE 24H</span>
+        <span class="oc-strip-value">{{ gate_accept_rate|default:"—" }}%</span>
+        <span class="oc-strip-sub">{{ gate_n_allow }} allow · {{ gate_n_reject }} reject</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">DEPLOYED</span>
+        <span class="oc-strip-value">{{ live_deployed|floatformat:0 }}</span>
+        <span class="oc-strip-sub">{{ live_deployed_pct }}% · cash {{ live_cash_pct }}%</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">OPEN POS</span>
+        <span class="oc-strip-value">{{ live_opens }}</span>
+        <span class="oc-strip-sub">{{ live_bots_enabled }}/{{ live_bots_total }} bots enabled</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">24H R</span>
+        <span class="oc-strip-value {% if live_24h_sum_r > 0 %}up{% elif live_24h_sum_r < 0 %}down{% endif %}">{% if live_24h_sum_r >= 0 %}+{% endif %}{{ live_24h_sum_r }}R</span>
+        <span class="oc-strip-sub">{{ live_24h_n }} closed · {{ live_24h_win_rate }}% win</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">W / L 24H</span>
+        <span class="oc-strip-value"><span class="up">{{ live_24h_wins }}</span> / <span class="down">{{ live_24h_losses }}</span></span>
+        <span class="oc-strip-sub">trade tally last 24h</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RULES</span>
+        <span class="oc-strip-value">{{ live_rules_active }}</span>
+        <span class="oc-strip-sub">{{ live_rules_paused }} paused · {{ live_rules_research }} research</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CONCERNS</span>
+        <span class="oc-strip-value {% if brain_top_concerns %}down{% endif %}">{{ brain_top_concerns|length }}</span>
+        <span class="oc-strip-sub">flagged by brain</span>
+    </div>
+</div>
+
+{# ── 1.5 Session pulse: 12-trade R sparkline + best/worst callouts ─── #}
+<div class="grid grid-3" style="gap:14px;margin:14px 0 18px 0;">
+    <div class="card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">Session pulse · last {{ live_24h_spark|length }} closes</span>
+            {% if live_24h_spark %}
+                <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+                    Σ {% if live_24h_sum_r >= 0 %}+{% endif %}{{ live_24h_sum_r }}R
+                </span>
+            {% endif %}
+        </div>
+        {% if live_24h_spark %}
+            <div style="display:flex;align-items:center;gap:3px;height:60px;padding:6px 4px 0;">
+                {% for r in live_24h_spark %}
+                    <div title="{{ r|floatformat:2 }}R"
+                         style="flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;">
+                        {% if r > 0 %}
+                            <div style="width:100%;flex:1;display:flex;align-items:flex-end;">
+                                <div style="width:100%;background:var(--accent);opacity:0.85;border-radius:2px 2px 0 0;height:{% if live_24h_spark_max %}{% widthratio r live_24h_spark_max 100 %}{% else %}0{% endif %}%;min-height:3px;"></div>
+                            </div>
+                            <div style="width:100%;flex:1;"></div>
+                        {% elif r < 0 %}
+                            <div style="width:100%;flex:1;"></div>
+                            <div style="width:100%;flex:1;display:flex;align-items:flex-start;">
+                                <div style="width:100%;background:var(--accent-red);opacity:0.85;border-radius:0 0 2px 2px;height:{% if live_24h_spark_min %}{% widthratio r live_24h_spark_min 100 %}{% else %}0{% endif %}%;min-height:3px;"></div>
+                            </div>
+                        {% else %}
+                            <div style="width:100%;height:1px;background:var(--text-muted);opacity:0.4;"></div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+            <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:6px;">
+                <span>oldest</span><span>{{ live_24h_n }} total in 24h</span><span>newest</span>
+            </div>
+        {% else %}
+            <p class="oc-empty">No graded closes in last 24h.</p>
+        {% endif %}
+    </div>
+
+    <div class="card" style="border-left:2px solid var(--accent);">
+        <div class="card-header"><span class="card-title">Best 24h</span></div>
+        {% if live_24h_best %}
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;">
+                <strong style="font-family:var(--font-display);font-size:18px;color:var(--accent);">{{ live_24h_best.config.symbol }}</strong>
+                <span class="up" style="font-family:var(--font-mono);font-weight:700;font-size:16px;">+{{ live_24h_best.realized_r|floatformat:2 }}R</span>
+            </div>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);line-height:1.6;">
+                {{ live_24h_best.config.rule_name|default:"—"|truncatechars:32 }}<br>
+                {{ live_24h_best.outcome|default:"—" }} · {{ live_24h_best.closed_at|date:"H:i" }}
+            </div>
+        {% else %}
+            <p class="oc-empty">No graded winner yet.</p>
+        {% endif %}
+    </div>
+
+    <div class="card" style="border-left:2px solid var(--accent-red);">
+        <div class="card-header"><span class="card-title">Worst 24h</span></div>
+        {% if live_24h_worst %}
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;">
+                <strong style="font-family:var(--font-display);font-size:18px;color:var(--text-primary);">{{ live_24h_worst.config.symbol }}</strong>
+                <span class="down" style="font-family:var(--font-mono);font-weight:700;font-size:16px;">{{ live_24h_worst.realized_r|floatformat:2 }}R</span>
+            </div>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);line-height:1.6;">
+                {{ live_24h_worst.config.rule_name|default:"—"|truncatechars:32 }}<br>
+                {{ live_24h_worst.outcome|default:"—" }} · {{ live_24h_worst.closed_at|date:"H:i" }}
+            </div>
+        {% else %}
+            <p class="oc-empty">No graded loser — clean session.</p>
+        {% endif %}
+    </div>
+</div>
+
+{# ── 2. Recent fills (last 24h) + Brain concerns side-by-side ──────── #}
+<div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
+    <div class="card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">Recent fills (24h)</span>
+            <a href="{% url 'eye_fills' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">all fills →</a>
+        </div>
+        {% if live_recent_fills %}
+            {% for t in live_recent_fills %}
+                <div class="oc-mini-row">
+                    <span class="oc-mini-sym">{{ t.symbol }}</span>
+                    <span class="oc-mini-side {{ t.side }}">{{ t.side }}</span>
+                    <span class="oc-mini-meta">{{ t.rule_name|default:"—"|truncatechars:20 }} · {{ t.outcome|default:"—" }}</span>
+                    <span class="oc-mini-pnl {% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{{ t.realized_r|floatformat:2 }}R</span>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p class="oc-empty">No fills in the last 24h.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="card-title">Brain top concerns</span>
+            <a href="{% url 'brain_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">brain →</a>
+        </div>
+        {% if brain_top_concerns %}
+            <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7;">
+                {% for c in brain_top_concerns %}
+                    <li>
+                        <strong style="color:var(--accent);text-transform:uppercase;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;">{{ c.kind }}</strong>
+                        · {{ c.text|truncatechars:120 }}
+                        {% if c.severity %}<span style="color:var(--text-muted);font-size:11px;">(severity {{ c.severity|floatformat:2 }})</span>{% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p class="oc-empty">No active concerns from the brain.</p>
+        {% endif %}
+    </div>
+</div>
+
+{# ── 3. Eye body content (theme exposure, open positions, etc.) ────── #}
+{% include "dashboard/_eye_body.html" %}

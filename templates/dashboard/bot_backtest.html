@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Bot Backtest — Sauron Vision{% endblock %}
+{% block page_title %}⊟ BOT BACKTEST · WALK-FORWARD SIMULATION{% endblock %}
+
+{% block content %}
+
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TOTAL RUNS</span>
+        <span class="oc-strip-value">{{ n_total_runs }}</span>
+        <span class="oc-strip-sub">{{ n_completed }} done · {{ n_failed }} fail · {{ n_running }} running</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CONFIGS</span>
+        <span class="oc-strip-value">{{ n_configs }}</span>
+        <span class="oc-strip-sub">AssetBotConfigs available</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">AVG TRADES</span>
+        <span class="oc-strip-value">{{ avg_trades }}</span>
+        <span class="oc-strip-sub">per completed run</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">AVG WIN RATE</span>
+        <span class="oc-strip-value {% if avg_win_rate >= 0.5 %}up{% elif avg_win_rate < 0.4 %}down{% endif %}">{% widthratio avg_win_rate 1 100 %}%</span>
+        <span class="oc-strip-sub">across runs</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">AVG TOTAL R</span>
+        <span class="oc-strip-value {% if avg_total_r > 0 %}up{% elif avg_total_r < 0 %}down{% endif %}">{% if avg_total_r >= 0 %}+{% endif %}{{ avg_total_r }}R</span>
+        <span class="oc-strip-sub">{% if best_run %}best +{{ best_run.stats.total_r|default:0|floatformat:2 }}R{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">LAST RUN</span>
+        <span class="oc-strip-value">{% if last_run %}{{ last_run.created_at|timesince|truncatechars:8 }}{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">{% if last_run %}{{ last_run.status|upper }}{% endif %}</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Run a Backtest</span></div>
+    <p class="form-hint" style="margin:0 0 14px;line-height:1.5;font-size:11px;">
+        Replays Phase-1 Signal rows in the chosen window through the bot's
+        SL/TP %, walks PriceData bars forward to find the exit, and aggregates
+        per-trade R-multiples. Tells you whether <em>this config</em> would
+        have been profitable on this universe — distinct from Phase-9.5 which
+        evaluates the rule itself.
+    </p>
+
+    {% if not configs %}
+        <p class="eye-empty">No AssetBotConfigs found. Create one from the
+        admin HQ first.</p>
+    {% else %}
+    <form method="post" action="{% url 'bot_backtest_run' %}">
+        {% csrf_token %}
+        <div style="display:grid;grid-template-columns:1.5fr 1fr 1fr auto;gap:14px;align-items:end;margin-bottom:14px;">
+            <div>
+                <label class="form-label">CONFIG</label>
+                <select name="config_id" class="form-input" required>
+                    {% for c in configs %}
+                        <option value="{{ c.id }}">
+                            {{ c.asset_class|upper }} · {{ c.name }} ({{ c.symbols|join:", "|truncatechars:30 }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="form-label">START (UTC)</label>
+                <input type="date" name="start" class="form-input" required>
+            </div>
+            <div>
+                <label class="form-label">END (UTC)</label>
+                <input type="date" name="end" class="form-input" required>
+            </div>
+            <button type="submit" class="btn btn-primary" style="white-space:nowrap;">▶ Run</button>
+        </div>
+
+        {# Phase-22 realism knobs — defaults are zero so existing flows are unchanged. #}
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;align-items:end;">
+            <div>
+                <label class="form-label">TX COST % (round-trip)</label>
+                <input type="number" name="transaction_cost_pct" step="0.01" min="0" max="5"
+                       value="0" class="form-input">
+                <div class="form-hint">e.g. 0.10 = 10 bps</div>
+            </div>
+            <div>
+                <label class="form-label">SLIPPAGE % (one-way)</label>
+                <input type="number" name="slippage_pct" step="0.01" min="0" max="5"
+                       value="0" class="form-input">
+                <div class="form-hint">applied at entry + exit</div>
+            </div>
+            <div>
+                <label class="form-label">WALK-FORWARD</label>
+                <label class="toggle-label" style="margin:0;">
+                    <input type="checkbox" name="walk_forward">
+                    <span>Split train / test</span>
+                </label>
+            </div>
+            <div>
+                <label class="form-label">TRAIN PCT</label>
+                <input type="number" name="train_pct" step="0.05" min="0.1" max="0.9"
+                       value="0.7" class="form-input">
+                <div class="form-hint">0.7 = 70/30</div>
+            </div>
+        </div>
+    </form>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Recent Runs</span></div>
+    {% if runs %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>ID</th><th>When</th><th>Config</th><th>Class</th><th>n</th><th>Win rate</th><th>Total R</th><th>Max DD R</th><th>Profit factor</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+        {% for r in runs %}
+            <tr>
+                <td>#{{ r.id }}</td>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ r.created_at|date:"m-d H:i" }}</td>
+                <td>{{ r.config_name_snapshot }}</td>
+                <td><span class="badge badge-medium">{{ r.asset_class_snapshot }}</span></td>
+                <td>{{ r.stats.n|default:"—" }}</td>
+                <td>{{ r.stats.win_rate|floatformat:2|default:"—" }}</td>
+                <td class="{% if r.stats.total_r > 0 %}up{% elif r.stats.total_r < 0 %}down{% endif %}">{{ r.stats.total_r|floatformat:2|default:"—" }}</td>
+                <td>{{ r.stats.max_drawdown_r|floatformat:2|default:"—" }}</td>
+                <td>{{ r.stats.profit_factor|floatformat:2|default:"—" }}</td>
+                <td>
+                    {% if r.status == "complete" %}<span style="color:var(--accent);">✓</span>
+                    {% elif r.status == "error" %}<span style="color:#ff5e5e;">✗</span>
+                    {% else %}<span style="color:var(--text-muted);">{{ r.status }}</span>{% endif %}
+                </td>
+                <td><a href="{% url 'bot_backtest_detail' r.id %}" class="btn btn-sm">Open</a></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p class="eye-empty">No runs yet. Launch one above.</p>
+    {% endif %}
+</div>
+
+{% block extra_css %}
+<style>
+    .eye-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; font-style: italic; }
+</style>
+{% endblock %}
+{% endblock %}

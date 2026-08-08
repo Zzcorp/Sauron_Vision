@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Risk Depth — Sauron Vision{% endblock %}
+{% block page_title %}🛡️  RISK DEPTH{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">OPEN POSITIONS</span>
+        <span class="oc-strip-value">{% if correlation %}{{ correlation.symbols|length }}{% else %}0{% endif %}</span>
+        <span class="oc-strip-sub">in correlation matrix</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">VAR · 95%</span>
+        <span class="oc-strip-value down">
+            {% if var_snapshot.var_pct is not None %}{{ var_snapshot.var_pct|floatformat:2 }}%{% else %}—{% endif %}
+        </span>
+        <span class="oc-strip-sub">value-at-risk daily</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SHARPE</span>
+        <span class="oc-strip-value {% if risk_metrics.sharpe_ratio and risk_metrics.sharpe_ratio > 0 %}up{% elif risk_metrics.sharpe_ratio and risk_metrics.sharpe_ratio < 0 %}down{% endif %}">
+            {% if risk_metrics.sharpe_ratio is not None %}{{ risk_metrics.sharpe_ratio|floatformat:2 }}{% else %}—{% endif %}
+        </span>
+        <span class="oc-strip-sub">risk-adjusted return</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MAX DRAWDOWN</span>
+        <span class="oc-strip-value down">
+            {% if risk_metrics.max_drawdown_pct is not None %}{{ risk_metrics.max_drawdown_pct|floatformat:2 }}%{% else %}—{% endif %}
+        </span>
+        <span class="oc-strip-sub">all-time low</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MAX CORR THRESHOLD</span>
+        <span class="oc-strip-value">{{ max_corr_threshold|floatformat:2 }}</span>
+        <span class="oc-strip-sub">portfolio gate limit</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">KELLY RULES</span>
+        <span class="oc-strip-value">{{ kelly_rows|length }}</span>
+        <span class="oc-strip-sub">graded rule history (180d)</span>
+    </div>
+</div>
+
+{% if bot_state %}
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Bot drawdown throttle ({{ bot_state.mode }})</span></div>
+    <div class="grid grid-4" style="padding: 12px 16px;">
+        <div>
+            <div class="stat-label">Daily P&amp;L (USDT)</div>
+            <div class="stat-value" style="color: {% if bot_state.daily_pnl_usdt >= 0 %}var(--accent-green){% else %}var(--accent-red){% endif %};">
+                {{ bot_state.daily_pnl_usdt|floatformat:2 }}
+            </div>
+        </div>
+        <div>
+            <div class="stat-label">Daily Loss Limit</div>
+            <div class="stat-value">−{{ bot_state.daily_loss_limit_usdt|floatformat:2 }}</div>
+        </div>
+        <div>
+            <div class="stat-label">Drawdown vs Limit</div>
+            <div class="stat-value">{{ bot_state.drawdown_fraction|floatformat:2 }}</div>
+        </div>
+        <div>
+            <div class="stat-label">Size Scale</div>
+            <div class="stat-value" style="color: {% if bot_state.drawdown_scale >= 0.95 %}var(--accent-green){% elif bot_state.drawdown_scale >= 0.5 %}var(--accent-gold){% else %}var(--accent-red){% endif %};">
+                {{ bot_state.drawdown_scale|floatformat:2 }}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header">
+        <span class="card-title">Correlation matrix — open positions</span>
+        <span style="color: var(--text-muted); font-size: 12px;">
+            threshold {{ max_corr_threshold|floatformat:2 }}
+        </span>
+    </div>
+    {% if correlation and correlation.symbols %}
+        <div class="table-wrapper">
+        <table class="sv-perf-table">
+          <thead>
+            <tr>
+              <th></th>
+              {% for s in correlation.symbols %}<th>{{ s }}</th>{% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in correlation.matrix %}
+              <tr>
+                <td><strong>{{ correlation.symbols|slice:forloop.counter0|last }}</strong></td>
+                {% for cell in row %}
+                  <td style="background: rgba({% if cell > 0 %}0,200,80{% else %}220,60,60{% endif %},{{ cell|floatformat:2 }});">
+                    {{ cell|floatformat:2 }}
+                  </td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+        <p style="color: var(--text-muted); font-size: 12px; padding: 8px 16px;">
+            {{ correlation.n_observations }} daily observations · {{ correlation.lookback_days }}d lookback
+            {% if correlation.missing %} · missing: {{ correlation.missing|join:", " }}{% endif %}
+        </p>
+    {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">📐</div>
+            <p>NO OPEN POSITIONS — correlation matrix populates once positions are opened.</p>
+        </div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Kelly sizing — derived from realized signal history</span></div>
+    {% if kelly_rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Rule</th><th>Win rate</th><th>Avg win (R)</th><th>Avg loss (R)</th><th>n</th><th>Full Kelly</th><th>Half Kelly</th><th>Sample</th></tr></thead>
+      <tbody>
+        {% for r in kelly_rows %}
+          <tr>
+            <td>{{ r.rule_name|truncatechars:36 }}</td>
+            <td>{{ r.win_rate|floatformat:2 }}</td>
+            <td class="up">{{ r.avg_win_pct|floatformat:2 }}</td>
+            <td class="down">{{ r.avg_loss_pct|floatformat:2 }}</td>
+            <td>{{ r.n }}</td>
+            <td>{{ r.full_kelly|floatformat:3 }}</td>
+            <td><strong>{{ r.half_kelly|floatformat:3 }}</strong></td>
+            <td>{% if r.is_empirical %}empirical{% else %}fallback{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p style="color: var(--text-muted); font-size: 12px; padding: 8px 16px;">
+        Half Kelly is capped at 25% of capital. Bridges Phase-1 self-grading into Phase-2 sizing.
+    </p>
+    {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">📊</div>
+            <p>NO RULES WITH ENOUGH HISTORY — needs at least 10 closed signals per rule.</p>
+        </div>
+    {% endif %}
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+.sv-perf-table .up { color: var(--accent-green); }
+.sv-perf-table .down { color: var(--accent-red); }
+</style>
+{% endblock %}

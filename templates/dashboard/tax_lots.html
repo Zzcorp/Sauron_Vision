@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Tax Lots — Sauron Vision{% endblock %}
+{% block page_title %}▦ TAX LOTS · COST-BASIS BOOKKEEPING{% endblock %}
+
+{% block content %}
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <span class="card-title">{{ year }} realised — {{ mode }}</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+            <form method="get" style="display:inline-flex;gap:6px;align-items:center;">
+                <select name="year" class="form-input" style="padding:4px 8px;font-size:11px;" onchange="this.form.submit()">
+                    {% for y in available_years %}
+                        <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+                <select name="mode" class="form-input" style="padding:4px 8px;font-size:11px;" onchange="this.form.submit()">
+                    <option value="live"  {% if mode == "live" %}selected{% endif %}>live</option>
+                    <option value="paper" {% if mode == "paper" %}selected{% endif %}>paper</option>
+                </select>
+            </form>
+            <a href="{% url 'tax_lots_export' %}?year={{ year }}&mode={{ mode }}" class="btn btn-sm">⬇ Form 8949 CSV</a>
+        </div>
+    </div>
+
+    <div class="oc-strip" style="margin-top:8px;">
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">REALISED · {{ year }}</span>
+            <span class="oc-strip-value {% if realised_total > 0 %}up{% elif realised_total < 0 %}down{% endif %}">{{ realised_total|floatformat:2 }}</span>
+            <span class="oc-strip-sub">{{ n_consumptions }} sale{{ n_consumptions|pluralize }} this year</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">SHORT-TERM</span>
+            <span class="oc-strip-value {% if short_term > 0 %}up{% elif short_term < 0 %}down{% endif %}">{{ short_term|floatformat:2 }}</span>
+            <span class="oc-strip-sub">held &lt; 365d</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">LONG-TERM</span>
+            <span class="oc-strip-value {% if long_term > 0 %}up{% elif long_term < 0 %}down{% endif %}">{{ long_term|floatformat:2 }}</span>
+            <span class="oc-strip-sub">held ≥ 365d (qualified rate)</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">OPEN LOTS</span>
+            <span class="oc-strip-value">{{ n_open_lots }}</span>
+            <span class="oc-strip-sub">{{ n_distinct_symbols }} distinct symbol{{ n_distinct_symbols|pluralize }}</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">COST BASIS · OPEN</span>
+            <span class="oc-strip-value">{{ total_cost_basis_open|floatformat:2 }}</span>
+            <span class="oc-strip-sub">capital deployed</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">OLDEST LOT</span>
+            <span class="oc-strip-value">{% if oldest_lot %}{{ oldest_lot|timesince|truncatechars:8 }}{% else %}—{% endif %}</span>
+            <span class="oc-strip-sub">{% if oldest_lot %}opened {{ oldest_lot|date:"Y-m-d" }}{% endif %}</span>
+        </div>
+    </div>
+</div>
+
+{# ── ST vs LT realised donut ────────────────────────────────────── #}
+{% if st_lt_donut %}
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Realised · short-term vs long-term · {{ year }}</span></div>
+    <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:6px 0;">
+        <svg class="oc-donut" viewBox="0 0 100 100" id="tlDonut">
+            <circle cx="50" cy="50" r="35" fill="none" stroke="var(--bg-card-hover)" stroke-width="14"/>
+        </svg>
+        <div class="oc-donut-legend" style="flex:1;min-width:200px;">
+            {% for d in st_lt_donut %}
+                <div class="oc-donut-legend-row">
+                    <span class="oc-donut-legend-key">
+                        <span class="oc-donut-legend-swatch" data-class="{{ d.key }}"></span>
+                        {% if d.key == 'short_term' %}SHORT-TERM{% else %}LONG-TERM{% endif %}
+                    </span>
+                    <span class="oc-donut-legend-pct">{{ d.n|floatformat:0 }} · {{ d.pct }}%</span>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+    <div id="tlDonutData" style="display:none;"
+         data-rows="{% for d in st_lt_donut %}{{ d.key }}:{{ d.pct }}{% if not forloop.last %};{% endif %}{% endfor %}"></div>
+    <script>
+        (function() {
+            var rows = (document.getElementById('tlDonutData').dataset.rows || '')
+                .split(';').map(function(r){var p=r.split(':');return {k:p[0], pct:parseFloat(p[1])};})
+                .filter(function(r){return !isNaN(r.pct);});
+            var colorOf = {short_term:'#ffb000', long_term:'#00e868'};
+            document.querySelectorAll('.oc-donut-legend-swatch').forEach(function(el){
+                if (colorOf[el.dataset.class]) el.style.background = colorOf[el.dataset.class];
+            });
+            var svg = document.getElementById('tlDonut');
+            if (!svg || rows.length === 0) return;
+            var ns = 'http://www.w3.org/2000/svg';
+            var cx=50, cy=50, r=35, c=2*Math.PI*r;
+            var offset = -c/4;
+            rows.forEach(function(row){
+                var seg = document.createElementNS(ns, 'circle');
+                var len = (row.pct/100) * c;
+                seg.setAttribute('cx', cx); seg.setAttribute('cy', cy); seg.setAttribute('r', r);
+                seg.setAttribute('fill','none');
+                seg.setAttribute('stroke', colorOf[row.k] || '#5b9eff');
+                seg.setAttribute('stroke-width', 14);
+                seg.setAttribute('stroke-dasharray', len.toFixed(2) + ' ' + (c - len).toFixed(2));
+                seg.setAttribute('stroke-dashoffset', offset.toFixed(2));
+                svg.appendChild(seg);
+                offset -= len;
+            });
+        })();
+    </script>
+</div>
+{% endif %}
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Open Lots by Symbol</span></div>
+    {% if sym_rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Symbol</th><th>Class</th><th>Lots</th><th>Qty</th><th>Cost basis</th></tr></thead>
+        <tbody>
+        {% for r in sym_rows %}
+            <tr>
+                <td><strong>{{ r.symbol }}</strong></td>
+                <td><span class="badge badge-medium">{{ r.asset_class }}</span></td>
+                <td>{{ r.lots }}</td>
+                <td>{{ r.qty }}</td>
+                <td>{{ r.cost_basis_total|floatformat:2 }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p class="eye-empty">No open lots in {{ mode }} mode.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">All Open Lots ({{ open_lots|length }})</span></div>
+    {% if open_lots %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Opened</th><th>Symbol</th><th>Class</th><th>Qty rem / init</th><th>Cost basis / unit</th><th>Method</th></tr></thead>
+        <tbody>
+        {% for lot in open_lots %}
+            <tr>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ lot.opened_at|date:"Y-m-d" }}</td>
+                <td><strong>{{ lot.symbol }}</strong></td>
+                <td><span class="badge badge-medium">{{ lot.asset_class }}</span></td>
+                <td>{{ lot.qty_remaining }} / {{ lot.qty_initial }}</td>
+                <td>{{ lot.cost_basis_per_unit }}</td>
+                <td style="font-size:11px;">{{ lot.method_at_open }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p class="eye-empty">No open lots in {{ mode }} mode.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Recent Sales (Consumptions)</span></div>
+    {% if recent_consumptions %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Sold</th><th>Symbol</th><th>Qty</th><th>Sale price</th><th>Held</th><th>Period</th><th>Gain</th></tr></thead>
+        <tbody>
+        {% for c in recent_consumptions %}
+            <tr>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ c.sold_at|date:"Y-m-d H:i" }}</td>
+                <td><strong>{{ c.lot.symbol }}</strong></td>
+                <td>{{ c.qty_consumed }}</td>
+                <td>{{ c.sale_price_per_unit }}</td>
+                <td>{{ c.holding_period_days }}d</td>
+                <td>{% if c.long_term %}<span class="up">LT</span>{% else %}<span style="color:var(--accent-gold);">ST</span>{% endif %}</td>
+                <td class="{% if c.realized_gain > 0 %}up{% elif c.realized_gain < 0 %}down{% endif %}">{{ c.realized_gain|floatformat:2 }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p class="eye-empty">No sales in {{ year }} {{ mode }}.</p>
+    {% endif %}
+</div>
+
+<p class="form-hint" style="line-height:1.5;font-size:11px;">
+    Lot-consumption order is set on your <a href="{% url 'profile' %}" style="color:var(--accent);">profile</a>
+    (FIFO / LIFO / HIFO). Lots are opened on every long entry (BUY-side AssetBotTrade);
+    closing the trade consumes lots in your chosen order. Short trades + wash-sale rules are out of scope.
+</p>
+
+{% block extra_css %}
+<style>.eye-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; font-style: italic; }</style>
+{% endblock %}
+{% endblock %}

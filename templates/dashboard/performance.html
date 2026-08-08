@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Performance — Sauron Vision{% endblock %}
+{% block page_title %}🎯 SELF-GRADING · {{ window }}D WINDOW{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CLOSED · {{ window }}D</span>
+        <span class="oc-strip-value">{{ overall.n_closed|default:"0" }}</span>
+        <span class="oc-strip-sub">graded by lifecycle tracker</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">HIT RATE</span>
+        <span class="oc-strip-value {% if overall.hit_rate and overall.hit_rate >= 0.5 %}up{% elif overall.hit_rate and overall.hit_rate < 0.4 %}down{% endif %}">
+            {% if overall.hit_rate is not None %}{% widthratio overall.hit_rate 1 100 %}%{% else %}—{% endif %}
+        </span>
+        <span class="oc-strip-sub">target hit / closed</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">EXPECTANCY</span>
+        <span class="oc-strip-value {% if overall.expectancy_r and overall.expectancy_r > 0 %}up{% elif overall.expectancy_r and overall.expectancy_r < 0 %}down{% endif %}">
+            {% if overall.expectancy_r is not None %}{% if overall.expectancy_r >= 0 %}+{% endif %}{{ overall.expectancy_r|floatformat:2 }}R{% else %}—{% endif %}
+        </span>
+        <span class="oc-strip-sub">avg per signal</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">AVG DURATION</span>
+        <span class="oc-strip-value">{% if overall.avg_duration_h is not None %}{{ overall.avg_duration_h|floatformat:1 }}h{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">signal → close</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">DECAYING RULES</span>
+        <span class="oc-strip-value {% if decaying_count %}down{% endif %}">{{ decaying_count }}</span>
+        <span class="oc-strip-sub">edge eroding</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SAMPLE</span>
+        <span class="oc-strip-value">{% if overall.is_empirical %}EMPIRICAL{% else %}FALLBACK{% endif %}</span>
+        <span class="oc-strip-sub">{% if overall.is_empirical %}n ≥ floor{% else %}n &lt; floor — defaults{% endif %}</span>
+    </div>
+</div>
+
+<div class="card fade-in-up delay-2" style="margin-bottom: 24px;">
+    <div class="card-header">
+        <span class="card-title">Window</span>
+        <div>
+            <a href="?window=7" class="btn btn-sm {% if window == 7 %}btn-primary{% endif %}">7d</a>
+            <a href="?window=14" class="btn btn-sm {% if window == 14 %}btn-primary{% endif %}">14d</a>
+            <a href="?window=30" class="btn btn-sm {% if window == 30 %}btn-primary{% endif %}">30d</a>
+            <a href="?window=90" class="btn btn-sm {% if window == 90 %}btn-primary{% endif %}">90d</a>
+        </div>
+    </div>
+    {% if overall.n_closed == 0 %}
+        <div class="empty-state">
+            <div class="empty-icon">🔍</div>
+            <p>NO CLOSED SIGNALS IN WINDOW — grade_signals will populate this view as the lifecycle tracker resolves outcomes.</p>
+        </div>
+    {% else %}
+        <div class="table-wrapper">
+        <table class="sv-perf-table">
+          <thead><tr><th>n</th><th>Hit rate</th><th>Expectancy</th><th>Avg duration</th><th>Sample</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>{{ overall.n_closed }}</td>
+              <td>{% if overall.hit_rate is not None %}{{ overall.hit_rate|floatformat:2 }}{% else %}—{% endif %}</td>
+              <td class="{% if overall.expectancy_r and overall.expectancy_r > 0 %}up{% elif overall.expectancy_r and overall.expectancy_r < 0 %}down{% endif %}">
+                {% if overall.expectancy_r is not None %}{{ overall.expectancy_r|floatformat:2 }}R{% else %}—{% endif %}
+              </td>
+              <td>{% if overall.avg_duration_h is not None %}{{ overall.avg_duration_h|floatformat:1 }}h{% else %}—{% endif %}</td>
+              <td>{% if overall.is_empirical %}empirical{% else %}fallback{% endif %}</td>
+            </tr>
+          </tbody>
+        </table>
+        </div>
+    {% endif %}
+</div>
+
+{% for g in groupings %}
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">By {{ g.label }}</span></div>
+    {% if g.rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>{{ g.label }}</th><th>n</th><th>Hit rate</th><th>Expectancy</th><th>Avg duration</th><th>Sample</th></tr></thead>
+      <tbody>
+        {% for r in g.rows %}
+          <tr>
+            <td>{{ r.key }}</td>
+            <td>{{ r.n_closed }}</td>
+            <td>{% if r.hit_rate is not None %}{{ r.hit_rate|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td class="{% if r.expectancy_r and r.expectancy_r > 0 %}up{% elif r.expectancy_r and r.expectancy_r < 0 %}down{% endif %}">
+              {% if r.expectancy_r is not None %}{{ r.expectancy_r|floatformat:2 }}R{% else %}—{% endif %}
+            </td>
+            <td>{% if r.avg_duration_h is not None %}{{ r.avg_duration_h|floatformat:1 }}h{% else %}—{% endif %}</td>
+            <td>{% if r.is_empirical %}empirical{% else %}fallback{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p style="color: var(--text-muted); padding: 16px;">No closed signals for this grouping.</p>
+    {% endif %}
+</div>
+{% endfor %}
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">SmcSignal setup performance</span></div>
+    {% if setups %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Setup</th><th>n</th><th>Hit rate</th><th>Expectancy</th><th>Sample</th></tr></thead>
+      <tbody>
+        {% for s in setups %}
+          <tr>
+            <td>{{ s.name }}</td>
+            <td>{{ s.n_closed }}</td>
+            <td>{% if s.hit_rate is not None %}{{ s.hit_rate|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td class="{% if s.expectancy_r and s.expectancy_r > 0 %}up{% elif s.expectancy_r and s.expectancy_r < 0 %}down{% endif %}">
+              {% if s.expectancy_r is not None %}{{ s.expectancy_r|floatformat:2 }}R{% else %}—{% endif %}
+            </td>
+            <td>{% if s.is_empirical %}empirical{% else %}fallback{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p style="color: var(--text-muted); padding: 16px;">No closed SMC signals in window.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header">
+        <span class="card-title">Decay watch — recent 14d vs baseline 90d</span>
+    </div>
+    {% if decay_rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Rule</th><th>Recent expectancy</th><th>Recent n</th><th>Baseline expectancy</th><th>Baseline n</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for d in decay_rows %}
+          <tr {% if d.is_decaying %}style="background: rgba(255, 64, 64, 0.08);"{% endif %}>
+            <td>{{ d.rule_name|truncatechars:40 }}</td>
+            <td>{% if d.recent_expectancy is not None %}{{ d.recent_expectancy|floatformat:2 }}R{% else %}—{% endif %}</td>
+            <td>{{ d.recent_n }}</td>
+            <td>{% if d.baseline_expectancy is not None %}{{ d.baseline_expectancy|floatformat:2 }}R{% else %}—{% endif %}</td>
+            <td>{{ d.baseline_n }}</td>
+            <td>
+              {% if d.is_decaying %}
+                <span class="badge badge-bearish">DECAYING</span>
+              {% else %}
+                <span class="badge badge-medium">stable</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p style="color: var(--text-muted); padding: 16px;">No rules with closed signals yet.</p>
+    {% endif %}
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+.sv-perf-table .up { color: var(--accent-green); }
+.sv-perf-table .down { color: var(--accent-red); }
+</style>
+{% endblock %}

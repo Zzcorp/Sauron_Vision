@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Earnings reviews · Sauron's Mind{% endblock %}
+{% block content %}
+<div class="page-content">
+    {# ── Top stat strip — 6 cells ────────────────────────────────── #}
+    <div class="oc-strip" style="margin-bottom:18px;">
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">REVIEWS · 7D</span>
+            <span class="oc-strip-value">{{ n_7d }}</span>
+            <span class="oc-strip-sub">{{ n_30d }} in 30d</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">SUCCESS · 30D</span>
+            <span class="oc-strip-value {% if success_rate_30d >= 90 %}up{% elif success_rate_30d < 70 %}down{% endif %}">{{ success_rate_30d }}%</span>
+            <span class="oc-strip-sub">{{ n_errors_30d }} errored</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">COST · 30D</span>
+            <span class="oc-strip-value">${{ cost_30d }}</span>
+            <span class="oc-strip-sub">{{ in_tok_30d }} → {{ out_tok_30d }} tok</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">SYMBOLS · 30D</span>
+            <span class="oc-strip-value">{{ top_symbols|length }}</span>
+            <span class="oc-strip-sub">distinct held names</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">TOTAL HISTORY</span>
+            <span class="oc-strip-value">{{ n_total }}</span>
+            <span class="oc-strip-sub">all-time count</span>
+        </div>
+        <div class="oc-strip-cell">
+            <span class="oc-strip-label">DIR MIX · 30D</span>
+            <span class="oc-strip-value">{{ direction_donut|length }}</span>
+            <span class="oc-strip-sub">distinct outcomes</span>
+        </div>
+    </div>
+
+    {# ── Direction donut + top symbols ──────────────────────────── #}
+    {% if direction_donut or top_symbols %}
+    <div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
+        <div class="card">
+            <div class="card-header"><span class="card-title">Direction mix · 30d</span></div>
+            {% if direction_donut %}
+                <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+                    <svg class="oc-donut" viewBox="0 0 100 100" id="erDonut">
+                        <circle cx="50" cy="50" r="35" fill="none" stroke="var(--bg-card-hover)" stroke-width="14"/>
+                    </svg>
+                    <div class="oc-donut-legend" style="flex:1;min-width:140px;">
+                        {% for d in direction_donut %}
+                            <div class="oc-donut-legend-row">
+                                <span class="oc-donut-legend-key">
+                                    <span class="oc-donut-legend-swatch" data-class="{{ d.key }}"></span>
+                                    {{ d.key|upper }}
+                                </span>
+                                <span class="oc-donut-legend-pct">{{ d.n }} · {{ d.pct }}%</span>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div id="erDonutData" style="display:none;"
+                     data-rows="{% for d in direction_donut %}{{ d.key }}:{{ d.pct }}{% if not forloop.last %};{% endif %}{% endfor %}"></div>
+                <script>
+                    (function() {
+                        var rows = (document.getElementById('erDonutData').dataset.rows || '')
+                            .split(';').map(function(r){var p=r.split(':');return {k:p[0], pct:parseFloat(p[1])};})
+                            .filter(function(r){return !isNaN(r.pct);});
+                        var colorOf = {bullish:'#00e868', bearish:'#ff5e5e', neutral:'#94a3b8'};
+                        document.querySelectorAll('.oc-donut-legend-swatch').forEach(function(el){
+                            if (colorOf[el.dataset.class]) el.style.background = colorOf[el.dataset.class];
+                        });
+                        var svg = document.getElementById('erDonut');
+                        if (!svg || rows.length === 0) return;
+                        var ns = 'http://www.w3.org/2000/svg';
+                        var cx=50, cy=50, r=35, c=2*Math.PI*r;
+                        var offset = -c/4;
+                        rows.forEach(function(row){
+                            var seg = document.createElementNS(ns, 'circle');
+                            var len = (row.pct/100) * c;
+                            seg.setAttribute('cx', cx); seg.setAttribute('cy', cy); seg.setAttribute('r', r);
+                            seg.setAttribute('fill','none');
+                            seg.setAttribute('stroke', colorOf[row.k] || '#5b9eff');
+                            seg.setAttribute('stroke-width', 14);
+                            seg.setAttribute('stroke-dasharray', len.toFixed(2) + ' ' + (c - len).toFixed(2));
+                            seg.setAttribute('stroke-dashoffset', offset.toFixed(2));
+                            svg.appendChild(seg);
+                            offset -= len;
+                        });
+                    })();
+                </script>
+            {% else %}
+                <p class="oc-empty">No graded reviews in the last 30 days.</p>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <div class="card-header"><span class="card-title">Top symbols · 30d</span></div>
+            {% if top_symbols %}
+                <table class="sv-perf-table">
+                    <thead><tr><th>symbol</th><th>reviews</th></tr></thead>
+                    <tbody>
+                        {% for s in top_symbols %}
+                            <tr>
+                                <td><strong>{{ s.symbol }}</strong></td>
+                                <td>{{ s.n }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="oc-empty">No reviews recorded.</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if request.session.earnings_reviewer_result %}
+        <div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent);">
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;">Last manual run</div>
+            <pre style="white-space:pre-wrap;margin:6px 0 0;font-size:11px;">{{ request.session.earnings_reviewer_result }}</pre>
+        </div>
+    {% endif %}
+
+    {% if request.user.is_staff %}
+    <form method="post" action="{% url 'earnings_reviewer_run_now' %}" style="margin-bottom:20px;">
+        {% csrf_token %}
+        <button class="btn" type="submit">▶ Scan held earnings now (admin)</button>
+    </form>
+    {% endif %}
+
+    {% if reviews %}
+        {% for r in reviews %}
+        <div class="card" style="margin-bottom:14px;{% if r.implied_direction == 'bearish' %}border-left:3px solid var(--down);{% elif r.implied_direction == 'bullish' %}border-left:3px solid var(--accent);{% endif %}">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="card-title">{{ r.instrument.symbol }} · {{ r.event_datetime|date:"Y-m-d" }}</span>
+                <span>
+                    {% if r.implied_direction == "bullish" %}<span class="badge badge-bullish">BULLISH</span>
+                    {% elif r.implied_direction == "bearish" %}<span class="badge badge-bearish">BEARISH</span>
+                    {% elif r.implied_direction == "neutral" %}<span class="badge badge-medium">NEUTRAL</span>
+                    {% else %}<span class="badge badge-medium">UNKNOWN</span>{% endif %}
+                    <span style="color:var(--text-muted);font-size:11px;margin-left:6px;">conf {{ r.implied_confidence|floatformat:2 }}</span>
+                </span>
+            </div>
+            {% if r.error %}
+                <p style="color:var(--down);">Reviewer error: {{ r.error|truncatechars:200 }}</p>
+            {% else %}
+                <p style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin:0 0 10px;">{{ r.event_title }}</p>
+                <div style="font-size:13px;line-height:1.6;white-space:pre-wrap;">{{ r.summary_md }}</div>
+
+                {% if r.suggested_action %}
+                <div style="margin-top:12px;padding:10px 12px;background:var(--accent-glow);border-left:3px solid var(--accent);font-size:13px;">
+                    <strong>Suggested action:</strong> {{ r.suggested_action }}
+                </div>
+                {% endif %}
+
+                {% if r.key_themes %}
+                <div style="margin-top:14px;">
+                    <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Key themes</div>
+                    <ul style="margin:0;padding-left:18px;font-size:13px;">
+                        {% for t in r.key_themes %}
+                        <li><strong>[{{ t.kind }}]</strong> {{ t.text }} <span style="color:var(--text-muted);font-size:11px;">(severity {{ t.severity|floatformat:2 }})</span></li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+
+                {% if r.risk_signals %}
+                <div style="margin-top:12px;">
+                    <div style="font-family:var(--font-mono);font-size:11px;color:var(--down);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Risk signals</div>
+                    <ul style="margin:0;padding-left:18px;font-size:13px;color:var(--text-secondary);">
+                        {% for risk in r.risk_signals %}
+                        <li>{{ risk }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+
+                <div style="margin-top:14px;font-size:11px;color:var(--text-muted);">
+                    {% if r.input_price_move_pct %}price move {{ r.input_price_move_pct|floatformat:2 }}% · {% endif %}{{ r.input_news_count }} articles · model: {{ r.model_used }} · tokens {{ r.tokens_in }}/{{ r.tokens_out }} · cost ${{ r.cost_usd|floatformat:5 }}
+                </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="card">
+            <p style="color:var(--text-muted);">No earnings reviews yet. The agent runs every 4h and only triggers when you hold a position whose company just reported earnings.</p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

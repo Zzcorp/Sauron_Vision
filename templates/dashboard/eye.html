@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Sauron's Eye — Sauron Vision{% endblock %}
+{% block page_title %}⊙ SAURON'S EYE · ALL-SEEING DASHBOARD{% endblock %}
+
+{% block content %}
+<div id="eye-body"
+     hx-get="{% url 'eye_partial' %}"
+     hx-trigger="every 10s, eyeUpdate from:body"
+     hx-swap="innerHTML">
+    {% include "dashboard/_eye_body.html" %}
+</div>
+
+<div id="eye-ws-status" style="position:fixed;bottom:14px;right:14px;z-index:50;
+     padding:4px 10px;border-radius:12px;font-family:var(--font-mono);font-size:10px;
+     letter-spacing:1px;background:var(--bg-card-hover);color:var(--text-muted);
+     border:1px solid var(--border);transition:opacity 0.3s;opacity:0.6;">
+    LIVE: connecting
+</div>
+
+<script>
+(function() {
+    /* Phase-23 — open the per-user Eye WebSocket. Each push from the
+       orchestrator/AssetBot triggers an immediate HTMX refresh of the body.
+       The 10s `every 10s` poll stays as a fallback when WS is offline. */
+    if (typeof WebSocket === "undefined") return;
+    var statusEl = document.getElementById("eye-ws-status");
+    var proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    var url = proto + "//" + window.location.host + "/ws/eye/";
+    var ws, reconnectTimer = null, lastEventAt = null;
+    function setStatus(text, color) {
+        if (!statusEl) return;
+        statusEl.textContent = "LIVE: " + text;
+        statusEl.style.color = color || "var(--text-muted)";
+    }
+    function connect() {
+        try { ws = new WebSocket(url); } catch (e) { setStatus("offline", "#ff5e5e"); return; }
+        ws.onopen = function() { setStatus("on", "var(--accent)"); };
+        ws.onmessage = function(evt) {
+            try {
+                var msg = JSON.parse(evt.data);
+                if (msg.type === "eye_event") {
+                    lastEventAt = new Date();
+                    setStatus("on · " + (msg.kind || "event"), "var(--accent)");
+                    /* Trigger HTMX refresh so the body reflects the new event immediately. */
+                    document.body.dispatchEvent(new Event("eyeUpdate"));
+                }
+            } catch (e) { /* ignore */ }
+        };
+        ws.onclose = function() {
+            setStatus("offline", "#ff5e5e");
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(connect, 5000);  /* exponential would be nicer */
+        };
+        ws.onerror = function() { setStatus("error", "var(--accent-gold)"); };
+    }
+    connect();
+})();
+</script>
+
+{% block extra_css %}
+<style>
+    .eye-stat-pill {
+        display:inline-flex;align-items:center;gap:8px;
+        padding:4px 10px;border-radius:12px;
+        font-family:var(--font-mono);font-size:11px;letter-spacing:1px;
+    }
+    .pill-ok    { background: rgba(0,232,104,0.10); color: var(--accent); }
+    .pill-near  { background: rgba(255,176,0,0.12); color: var(--accent-gold); }
+    .pill-over  { background: rgba(255,68,68,0.14); color: #ff5e5e; }
+    .pill-off   { background: var(--bg-card-hover); color: var(--text-muted); }
+    .gate-allow { color: var(--accent); }
+    .gate-reject{ color: #ff5e5e; }
+    .eye-empty  { color: var(--text-muted); font-size: 12px; padding: 8px 0; font-style: italic; }
+</style>
+{% endblock %}
+{% endblock %}

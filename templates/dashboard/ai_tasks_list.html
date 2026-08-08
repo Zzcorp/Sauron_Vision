@@ -3,9 +3,134 @@
 {% block page_title %}▸ AGENT TASK LOG{% endblock %}
 
 {% block content %}
+{# ── 1. Top stat strip — 6 cells ─────────────────────────────────── #}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TASKS 24H</span>
+        <span class="oc-strip-value">{{ n_24h }}</span>
+        <span class="oc-strip-sub">{{ n_ok_24h }} ok · {{ n_fail_24h }} fail</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">COST 24H</span>
+        <span class="oc-strip-value">${{ cost_24h }}</span>
+        <span class="oc-strip-sub">{{ in_tok_24h }} → {{ out_tok_24h }} tok</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TASKS 7D</span>
+        <span class="oc-strip-value">{{ n_7d }}</span>
+        <span class="oc-strip-sub">${{ cost_7d }} total</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SUCCESS 7D</span>
+        <span class="oc-strip-value {% if success_rate_7d >= 90 %}up{% elif success_rate_7d < 70 %}down{% endif %}">{{ success_rate_7d }}%</span>
+        <span class="oc-strip-sub">last 7 days</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">AVG LATENCY</span>
+        <span class="oc-strip-value">{{ avg_dur_7d }}s</span>
+        <span class="oc-strip-sub">per call · 7d</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">AGENTS</span>
+        <span class="oc-strip-value">{{ by_agent|length }}</span>
+        <span class="oc-strip-sub">distinct in 7d</span>
+    </div>
+</div>
+
+{# ── 2. 7-day cost trend ─────────────────────────────────────────── #}
+<div class="card" style="margin-bottom:14px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="card-title">Cost trend · last 7 days</span>
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+            {% if max_day_cost %}peak ${{ max_day_cost }}{% endif %}
+        </span>
+    </div>
+    {% if cost_trend %}
+        <div style="display:flex;align-items:flex-end;gap:6px;height:120px;padding:8px 4px 0;">
+            {% for d in cost_trend %}
+                <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;">
+                    <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-bottom:3px;">${{ d.cost }}</span>
+                    <div style="width:100%;background:var(--accent);opacity:0.85;border-radius:2px 2px 0 0;
+                                height:{% if max_day_cost %}{% widthratio d.cost max_day_cost 100 %}{% else %}0{% endif %}%;min-height:{% if d.cost %}3px{% else %}0{% endif %};"></div>
+                    <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);margin-top:4px;">{{ d.date }}</span>
+                    <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);">{{ d.n }} task{{ d.n|pluralize }}</span>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p class="oc-empty">No cost data yet.</p>
+    {% endif %}
+</div>
+
+{# ── 3. By-agent breakdown · top failures · longest tasks ────────── #}
+<div class="grid grid-3" style="gap:14px;margin-bottom:14px;">
+    <div class="card">
+        <div class="card-header"><span class="card-title">By agent · 7d</span></div>
+        {% if by_agent %}
+            <table class="sv-perf-table">
+                <thead><tr><th>agent</th><th>N</th><th>success%</th><th>avg dur</th><th>cost</th></tr></thead>
+                <tbody>
+                    {% for a in by_agent %}
+                        <tr>
+                            <td><strong>{{ a.agent }}</strong></td>
+                            <td>{{ a.n }}</td>
+                            <td class="{% if a.success_rate >= 90 %}up{% elif a.success_rate < 70 %}down{% endif %}">{{ a.success_rate }}%</td>
+                            <td style="font-family:var(--font-mono);">{{ a.avg_dur }}s</td>
+                            <td style="font-family:var(--font-mono);">${{ a.cost }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="oc-empty">No agent activity in the last 7d.</p>
+        {% endif %}
+    </div>
+
+    <div class="card" style="border-left:2px solid var(--accent-red);">
+        <div class="card-header"><span class="card-title">Recent failures</span></div>
+        {% if recent_failures %}
+            <table class="sv-perf-table">
+                <thead><tr><th>time</th><th>agent</th><th>error</th></tr></thead>
+                <tbody>
+                    {% for t in recent_failures %}
+                        <tr>
+                            <td style="font-size: 11px; color: var(--text-muted); white-space: nowrap;">{{ t.created_at|date:"M d H:i" }}</td>
+                            <td><strong>{{ t.agent }}</strong></td>
+                            <td style="font-size: 11px; color: var(--accent-red);">{{ t.error|default:"(no error message)"|truncatechars:50 }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="oc-empty up">All clean — no recent failures.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header"><span class="card-title">Longest tasks · 7d</span></div>
+        {% if longest_rows %}
+            <table class="sv-perf-table">
+                <thead><tr><th>agent</th><th>time</th><th>duration</th></tr></thead>
+                <tbody>
+                    {% for r in longest_rows %}
+                        <tr>
+                            <td><strong>{{ r.agent }}</strong></td>
+                            <td style="font-size: 11px; color: var(--text-muted);">{{ r.created_at|date:"M d H:i" }}</td>
+                            <td style="font-family: var(--font-mono);">{{ r.duration }}s {% if not r.success %}<span class="down">●</span>{% endif %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="oc-empty">No tasks yet.</p>
+        {% endif %}
+    </div>
+</div>
+
+{# ── 4. Full agent task log table ────────────────────────────────── #}
 <div class="card fade-in-up">
     <div class="card-header">
-        <span class="card-title">All Agent Tasks</span>
+        <span class="card-title">All agent tasks <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">({{ tasks|length }} shown)</span></span>
     </div>
     {% if tasks %}
     <div class="table-wrapper">

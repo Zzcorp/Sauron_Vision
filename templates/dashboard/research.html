@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}Research · Ask Sauron{% endblock %}
+{% block content %}
+<style>
+    /* Two-pane layout: Mind context on the left, conversation on the right */
+    .ask-grid {
+        display: grid;
+        grid-template-columns: 320px minmax(0, 1fr);
+        gap: 16px;
+        align-items: start;
+    }
+    @media (max-width: 1180px) { .ask-grid { grid-template-columns: 1fr; } }
+    .mind-pane .card { margin-bottom: 14px; }
+    .mind-kv { display: flex; justify-content: space-between; padding: 5px 0;
+               font-family: var(--font-mono); font-size: 12px;
+               border-bottom: 1px dashed var(--border); }
+    .mind-kv:last-child { border-bottom: 0; }
+    .mind-kv .k { color: var(--text-muted); text-transform: uppercase; font-size: 9px; letter-spacing: 1.5px; }
+    .mind-kv .v { color: var(--text-primary); font-weight: 600; }
+    .mind-band-high { color: var(--accent); }
+    .mind-band-medium { color: var(--accent-gold); }
+    .mind-band-low { color: var(--accent-red); }
+    .mind-band-unknown { color: var(--text-muted); }
+    .mind-concerns { margin: 6px 0 0 0; padding-left: 16px; font-size: 12px; line-height: 1.5; }
+    .mind-concerns li { margin-bottom: 4px; }
+    .mind-concerns .ck { font-family: var(--font-mono); font-size: 9px;
+                         color: var(--accent); text-transform: uppercase;
+                         letter-spacing: 1px; margin-right: 4px; }
+</style>
+<div class="page-content">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:14px;">
+        <form method="post" action="{% url 'research_new_conversation' %}" style="margin:0;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm">+ New conversation</button>
+        </form>
+    </div>
+
+    {% if request.session.research_save_result %}
+        {% with res=request.session.research_save_result %}
+        <div class="card" style="margin-bottom:14px;border-left:3px solid {% if res.ok %}var(--accent){% else %}var(--down){% endif %};">
+            {% if res.ok %}
+                <div style="font-size:12px;">✓ Draft saved as <strong>{{ res.proposed_name }}</strong> · proposal #{{ res.proposal_id }} — review at <a href="{% url 'generated_dashboard' %}" style="color:var(--accent);">/generated/ →</a></div>
+            {% else %}
+                <div style="font-size:12px;color:var(--down);">⚠ {{ res.error }}</div>
+            {% endif %}
+        </div>
+        {% endwith %}
+    {% endif %}
+
+    <div class="ask-grid">
+
+    {# ────── LEFT PANE: Mind context (was the AI Insights / /brain/ page) ── #}
+    <aside class="mind-pane">
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Sauron's Mind</span>
+                <a href="{% url 'brain_dashboard' %}" style="font-family:var(--font-mono);font-size:10px;color:var(--accent);">FULL ↗</a>
+            </div>
+            {% if mind_latest %}
+                <div class="mind-kv">
+                    <span class="k">regime</span>
+                    <span class="v">{{ mind_latest.regime_label|upper }}</span>
+                </div>
+                <div class="mind-kv">
+                    <span class="k">conf</span>
+                    <span class="v">{{ mind_latest.regime_confidence|floatformat:2 }}</span>
+                </div>
+                <div class="mind-kv">
+                    <span class="k">portfolio health</span>
+                    <span class="v {% if mind_latest.portfolio_health_score >= 0.6 %}up{% elif mind_latest.portfolio_health_score < 0.4 %}down{% endif %}">{{ mind_latest.portfolio_health_score|floatformat:2 }}</span>
+                </div>
+                <div class="mind-kv">
+                    <span class="k">brain trust</span>
+                    <span class="v mind-band-{{ mind_trust_band }}">{% if mind_trust is not None %}{{ mind_trust|floatformat:2 }} · {{ mind_trust_band|upper }}{% else %}—{% endif %}</span>
+                </div>
+                <div class="mind-kv">
+                    <span class="k">obs queued</span>
+                    <span class="v">{{ mind_obs_unconsumed }}</span>
+                </div>
+                <div class="mind-kv">
+                    <span class="k">last synth</span>
+                    <span class="v">{{ mind_latest.created_at|date:"M d H:i" }}</span>
+                </div>
+            {% else %}
+                <p style="color:var(--text-muted);font-size:12px;margin:0;">No brain report yet — Mind synthesizes every 30 min.</p>
+            {% endif %}
+        </div>
+
+        {% if mind_top_concerns %}
+        <div class="card">
+            <div class="card-header"><span class="card-title">Top concerns</span></div>
+            <ul class="mind-concerns">
+                {% for c in mind_top_concerns %}
+                    <li>
+                        <span class="ck">{{ c.kind }}</span>
+                        {{ c.text|truncatechars:120 }}
+                        {% if c.severity %}<span style="color:var(--text-muted);font-size:10px;"> · sev {{ c.severity|floatformat:2 }}</span>{% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        {% if mind_latest and mind_latest.theme_pressures %}
+        <div class="card">
+            <div class="card-header"><span class="card-title">Theme pressures</span></div>
+            <table class="sv-perf-table" style="margin:0;">
+                <tbody>
+                {% for k, v in mind_latest.theme_pressures.items %}
+                    <tr>
+                        <td style="font-family:var(--font-mono);font-size:11px;">{{ k }}</td>
+                        <td style="font-family:var(--font-mono);font-size:12px;font-weight:700;text-align:right;" class="{% if v > 0 %}up{% elif v < 0 %}down{% endif %}">{{ v|floatformat:2 }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <div class="card" style="font-size:11px;color:var(--text-muted);">
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">Try asking</div>
+            <div style="line-height:1.7;">
+                · Why is {% if mind_latest %}regime <strong>{{ mind_latest.regime_label }}</strong>{% else %}the current regime{% endif %}?<br>
+                · What's your read on USD this week?<br>
+                · How have your regime calls graded over the last month?<br>
+                · What rule should I trust most right now?
+            </div>
+        </div>
+    </aside>
+
+    {# ────── RIGHT PANE: conversation ───────────────────────────────────── #}
+    <section>
+    <div class="card" style="margin-bottom:14px;min-height:200px;">
+        {% if messages_list %}
+            {% for m in messages_list %}
+                <div style="margin-bottom:18px;{% if m.role == 'user' %}padding-left:10px;border-left:2px solid var(--accent-dim);{% else %}padding-left:10px;border-left:2px solid var(--accent);{% endif %}">
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:2px;margin-bottom:6px;">
+                        {% if m.role == 'user' %}You{% else %}Sauron{% endif %}
+                        <span style="color:var(--text-muted);margin-left:6px;">· {{ m.created_at|date:"M j, H:i" }}</span>
+                    </div>
+                    {% if m.error %}
+                        <div style="color:var(--down);font-size:13px;">{{ m.content }}</div>
+                    {% else %}
+                        <div style="font-size:14px;line-height:1.65;white-space:pre-wrap;">{{ m.rendered_content|default:m.content }}</div>
+                    {% endif %}
+                    {% if m.has_draft %}
+                        <div style="margin-top:10px;padding:10px 12px;background:var(--accent-glow);border-left:3px solid var(--accent);font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+                            <span><strong>Strategy draft proposed.</strong> Save it to the Phase-41 review queue (lands inactive — admin must approve before scanning).</span>
+                            <form method="post" action="{% url 'research_save_as_draft' m.id %}" style="margin:0;">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm" style="background:var(--accent);color:#000;">+ Save as draft</button>
+                            </form>
+                        </div>
+                    {% endif %}
+                    {% if m.actions %}
+                        <div style="margin-top:10px;padding:8px 12px;background:var(--bg-elev);border-left:3px solid var(--accent-dim);font-size:12px;">
+                            <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Suggested actions</div>
+                            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                                {% for a in m.actions %}
+                                <form method="post" action="{{ a.url }}" style="margin:0;">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm"
+                                        style="{% if a.css == 'primary' %}background:var(--accent);color:#000;{% elif a.css == 'danger' %}background:var(--down);color:#fff;{% endif %}">
+                                        {{ a.label }}
+                                    </button>
+                                </form>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% endif %}
+                    {% if m.role == 'assistant' and m.tokens_in %}
+                        <div style="font-size:10px;color:var(--text-muted);margin-top:6px;font-family:var(--font-mono);">
+                            {{ m.model_used }} · {{ m.tokens_in }}/{{ m.tokens_out }} tok · ${{ m.cost_usd|floatformat:5 }}
+                        </div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        {% else %}
+            <p style="color:var(--text-muted);">
+                Ask Sauron anything about its current view of the markets, why a rule is paused, what
+                it sees in regime, or how its recent calls graded. Try:
+            </p>
+            <ul style="color:var(--text-muted);font-size:13px;margin:8px 0 0 0;padding-left:20px;">
+                <li>"What's your read on USD this week?"</li>
+                <li>"Why is rule starter_stock_momentum on watch?"</li>
+                <li>"How have your regime calls graded over the last month?"</li>
+                <li>"What's the bull case on AAPL into earnings?"</li>
+            </ul>
+        {% endif %}
+    </div>
+
+    {# ── Input form ── #}
+    <form method="post" action="{% url 'research_ask' %}" style="margin-bottom:20px;">
+        {% csrf_token %}
+        <div style="margin-bottom:10px;">
+            <textarea name="question" placeholder="Ask Sauron a question..." rows="3" maxlength="2000"
+                      class="form-input" style="width:100%;font-size:14px;line-height:1.5;resize:vertical;" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Send</button>
+        <span style="margin-left:10px;font-size:11px;color:var(--text-muted);">
+            Sauron is read-only here — it can answer, not act. Use /command/ for actions.
+        </span>
+    </form>
+
+    {# ── Past conversations ── #}
+    {% if past_conversations %}
+    <div class="card">
+        <div class="card-header"><span class="card-title">Past conversations</span></div>
+        <table class="sv-perf-table">
+            <thead><tr><th>title</th><th>started</th><th>last activity</th><th>turns</th></tr></thead>
+            <tbody>
+            {% for c in past_conversations %}
+                <tr>
+                    <td>{{ c.title|default:"(untitled)"|truncatechars:80 }}</td>
+                    <td style="font-size:11px;">{{ c.started_at|date:"Y-m-d H:i" }}</td>
+                    <td style="font-size:11px;">{{ c.last_message_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ c.messages.count }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    </section>
+
+    </div>{# /.ask-grid #}
+</div>
+{% endblock %}

@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Backtest #{{ run.id }} — Sauron Vision{% endblock %}
+{% block page_title %}⊟ BACKTEST #{{ run.id }} · {{ run.config_name_snapshot }}{% endblock %}
+
+{% block content %}
+
+<div style="margin-bottom:14px;">
+    <a href="{% url 'bot_backtest_list' %}" style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">← back to runs</a>
+</div>
+
+{% if run.status == "error" %}
+<div class="card fade-in-up" style="border-color:#ff5e5e;">
+    <div class="card-header"><span class="card-title" style="color:#ff5e5e;">▲ Error</span></div>
+    <pre style="white-space:pre-wrap;font-size:11px;color:var(--text-secondary);">{{ run.error }}</pre>
+</div>
+{% else %}
+
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TRADES</span>
+        <span class="oc-strip-value">{{ run.stats.n|default:0 }}</span>
+        <span class="oc-strip-sub">simulated entries</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">WIN RATE</span>
+        <span class="oc-strip-value {% if run.stats.win_rate >= 0.5 %}up{% elif run.stats.win_rate < 0.4 %}down{% endif %}">{% widthratio run.stats.win_rate|default:0 1 100 %}%</span>
+        <span class="oc-strip-sub">target hit / closed</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TOTAL R</span>
+        <span class="oc-strip-value {% if run.stats.total_r > 0 %}up{% elif run.stats.total_r < 0 %}down{% endif %}">{% if run.stats.total_r >= 0 %}+{% endif %}{{ run.stats.total_r|floatformat:2|default:"—" }}R</span>
+        <span class="oc-strip-sub">cumulative score</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MAX DD</span>
+        <span class="oc-strip-value down">{{ run.stats.max_drawdown_r|floatformat:2|default:"—" }}R</span>
+        <span class="oc-strip-sub">worst path</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PROFIT FACTOR</span>
+        <span class="oc-strip-value {% if run.stats.profit_factor and run.stats.profit_factor >= 1 %}up{% elif run.stats.profit_factor and run.stats.profit_factor > 0 %}down{% endif %}">{{ run.stats.profit_factor|floatformat:2|default:"—" }}</span>
+        <span class="oc-strip-sub">gross W / gross L</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SHARPE</span>
+        <span class="oc-strip-value {% if run.stats.sharpe and run.stats.sharpe > 0 %}up{% elif run.stats.sharpe and run.stats.sharpe < 0 %}down{% endif %}">{{ run.stats.sharpe|floatformat:2|default:"—" }}</span>
+        <span class="oc-strip-sub">risk-adjusted</span>
+    </div>
+</div>
+
+{% if run.stats.walk_forward %}
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header">
+        <span class="card-title">Walk-Forward · Train vs Test</span>
+    </div>
+    <p class="form-hint" style="margin:0 0 14px;font-size:11px;">
+        Split at <strong>{{ run.stats.walk_forward.split_at|truncatechars:16 }}</strong>.
+        A config that wins big in train but loses in test is overfit and not shippable.
+    </p>
+    <div class="grid grid-2" style="gap:14px;">
+        <div style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-void);">
+            <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">TRAIN</div>
+            <div style="display:flex;flex-direction:column;gap:4px;font-size:12px;">
+                <div style="display:flex;justify-content:space-between;"><span>n</span><span>{{ run.stats.walk_forward.train.n }}</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Win rate</span><span>{{ run.stats.walk_forward.train.win_rate|floatformat:2 }}</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Total R</span><span class="{% if run.stats.walk_forward.train.total_r > 0 %}up{% elif run.stats.walk_forward.train.total_r < 0 %}down{% endif %}">{{ run.stats.walk_forward.train.total_r|floatformat:2 }}</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Profit factor</span><span>{{ run.stats.walk_forward.train.profit_factor|floatformat:2|default:"—" }}</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Max DD R</span><span>{{ run.stats.walk_forward.train.max_drawdown_r|floatformat:2 }}</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Sharpe R</span><span>{{ run.stats.walk_forward.train.sharpe_r|floatformat:2 }}</span></div>
+            </div>
+        </div>
+        <div style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-void);">
+            <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">TEST</div>
+            <div style="display:flex;flex-direction:column;gap:4px;font-size:12px;">
+                <div style="display:flex;justify-content:space-between;"><span>n</span><span>{{ run.stats.walk_forward.test.n }}</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Win rate</span><span>{{ run.stats.walk_forward.test.win_rate|floatformat:2 }}</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Total R</span><span class="{% if run.stats.walk_forward.test.total_r > 0 %}up{% elif run.stats.walk_forward.test.total_r < 0 %}down{% endif %}">{{ run.stats.walk_forward.test.total_r|floatformat:2 }}</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Profit factor</span><span>{{ run.stats.walk_forward.test.profit_factor|floatformat:2|default:"—" }}</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Max DD R</span><span>{{ run.stats.walk_forward.test.max_drawdown_r|floatformat:2 }}</span></div>
+                <div style="display:flex;justify-content:space-between;"><span>Sharpe R</span><span>{{ run.stats.walk_forward.test.sharpe_r|floatformat:2 }}</span></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="grid grid-3" style="margin-bottom:24px;">
+    <div class="card fade-in-up">
+        <div class="card-header"><span class="card-title">Distribution</span></div>
+        <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;">
+            <div style="display:flex;justify-content:space-between;"><span>Avg R</span><span>{{ run.stats.avg_r|floatformat:3 }}</span></div>
+            <div style="display:flex;justify-content:space-between;"><span>Avg win R</span><span class="up">{{ run.stats.avg_win_r|floatformat:3 }}</span></div>
+            <div style="display:flex;justify-content:space-between;"><span>Avg loss R</span><span class="down">{{ run.stats.avg_loss_r|floatformat:3 }}</span></div>
+            <div style="display:flex;justify-content:space-between;"><span>Profit factor</span><span>{{ run.stats.profit_factor|floatformat:3|default:"—" }}</span></div>
+            <div style="display:flex;justify-content:space-between;"><span>Sharpe (R)</span><span>{{ run.stats.sharpe_r|floatformat:3 }}</span></div>
+            <div style="display:flex;justify-content:space-between;"><span>Max consec losses</span><span>{{ run.stats.max_consecutive_losses }}</span></div>
+        </div>
+    </div>
+
+    <div class="card fade-in-up">
+        <div class="card-header"><span class="card-title">Outcomes</span></div>
+        <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;">
+            <div style="display:flex;justify-content:space-between;"><span>✓ Hit target</span><span class="up">{{ run.stats.by_outcome.hit_target|default:0 }}</span></div>
+            <div style="display:flex;justify-content:space-between;"><span>✗ Stopped out</span><span class="down">{{ run.stats.by_outcome.stopped_out|default:0 }}</span></div>
+            <div style="display:flex;justify-content:space-between;"><span>⌛ Expired</span><span style="color:var(--text-muted);">{{ run.stats.by_outcome.expired|default:0 }}</span></div>
+        </div>
+    </div>
+
+    <div class="card fade-in-up">
+        <div class="card-header"><span class="card-title">Run Info</span></div>
+        <div style="font-size:11px;color:var(--text-secondary);line-height:1.6;">
+            <div>Class: <strong>{{ run.asset_class_snapshot }}</strong></div>
+            <div>Start: {{ run.params.start|truncatechars:16 }}</div>
+            <div>End: {{ run.params.end|truncatechars:16 }}</div>
+            <div>Symbols: {{ run.params.symbols|join:", "|truncatechars:60 }}</div>
+            <div>TX cost: {{ run.params.transaction_cost_pct|default:"0" }}% · Slippage: {{ run.params.slippage_pct|default:"0" }}%</div>
+            {% if run.params.walk_forward %}<div>Walk-forward: {{ run.params.train_pct|floatformat:2 }} train</div>{% endif %}
+            <div>Created: {{ run.created_at|date:"Y-m-d H:i" }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Simulated Trades ({{ trades|length }})</span></div>
+    {% if trades %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Symbol</th><th>Side</th><th>Rule</th><th>Entry</th><th>Exit</th><th>Outcome</th><th>R</th><th>Dur (min)</th></tr></thead>
+        <tbody>
+        {% for t in trades %}
+            <tr>
+                <td><strong>{{ t.symbol }}</strong></td>
+                <td><span class="badge badge-{% if t.side == 'BUY' %}bullish{% else %}bearish{% endif %}">{{ t.side }}</span></td>
+                <td style="font-size:11px;">{{ t.rule_name|default:"—" }}</td>
+                <td>{{ t.entry_price|floatformat:4 }}</td>
+                <td>{{ t.exit_price|floatformat:4 }}</td>
+                <td>
+                    {% if t.outcome == "hit_target" %}<span style="color:var(--accent);">✓ TP</span>
+                    {% elif t.outcome == "stopped_out" %}<span style="color:#ff5e5e;">✗ SL</span>
+                    {% else %}<span style="color:var(--accent-gold);">⌛ EXP</span>{% endif %}
+                </td>
+                <td class="{% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{{ t.realized_r|floatformat:2 }}</td>
+                <td>{{ t.duration_minutes }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p class="eye-empty">No trades simulated — check that signals + price data exist for this window.</p>
+    {% endif %}
+</div>
+
+{% endif %}
+
+{% block extra_css %}
+<style>
+    .eye-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; font-style: italic; }
+</style>
+{% endblock %}
+{% endblock %}

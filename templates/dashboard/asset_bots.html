@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Asset Bots — Sauron Vision{% endblock %}
+{% block page_title %}⬢ ASSET BOTS · STOCKS · FOREX · COMMODITIES{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CONFIGS</span>
+        <span class="oc-strip-value">{{ configs|length }}</span>
+        <span class="oc-strip-sub">{{ n_enabled }}/{{ configs|length }} enabled</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ASSET CLASSES</span>
+        <span class="oc-strip-value">{{ n_classes }}</span>
+        <span class="oc-strip-sub">{{ classes_str }}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">OPEN TRADES</span>
+        <span class="oc-strip-value">{{ n_open_total }}</span>
+        <span class="oc-strip-sub">across all configs</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CLOSED · 24H</span>
+        <span class="oc-strip-value">{{ n_trades_24h }}</span>
+        <span class="oc-strip-sub">finished trades</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">P&amp;L · 24H</span>
+        <span class="oc-strip-value {% if pnl_24h_total > 0 %}up{% elif pnl_24h_total < 0 %}down{% endif %}">{{ pnl_24h_total }}</span>
+        <span class="oc-strip-sub">non-crypto bots</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CRYPTO BOT</span>
+        <span class="oc-strip-value">SEPARATE</span>
+        <span class="oc-strip-sub">runs on Binance independently</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Bot configurations</span></div>
+    {% if rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Asset class</th><th>Name</th><th>Mode</th><th>Symbols</th><th>Capital</th><th>Open</th><th>P&amp;L 24h</th><th>Enabled</th><th>Action</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td><span class="badge badge-medium">{{ r.config.get_asset_class_display }}</span></td>
+            <td>{{ r.config.name }}</td>
+            <td><span class="badge badge-{% if r.config.mode == 'live' %}bearish{% else %}bullish{% endif %}">{{ r.config.mode }}</span></td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ r.config.symbols|join:", "|truncatechars:40 }}</td>
+            <td>{{ r.config.capital }} {{ r.config.base_currency }}</td>
+            <td>{{ r.open_positions }}</td>
+            <td class="{% if r.pnl_24h > 0 %}up{% elif r.pnl_24h < 0 %}down{% endif %}">{{ r.pnl_24h|floatformat:2 }}</td>
+            <td>{% if r.config.enabled %}<span style="color: var(--accent);">ON</span>{% else %}<span style="color: var(--text-muted);">OFF</span>{% endif %}</td>
+            <td style="display:flex;gap:6px;">
+                <form method="post" action="{% url 'hq_toggle_asset_bot' %}">{% csrf_token %}<input type="hidden" name="config_id" value="{{ r.config.id }}">{% if r.config.mode == 'live' and not r.config.enabled %}<input type="password" name="pin" placeholder="PIN" autocomplete="off" style="width:60px;padding:4px;font-size:11px;margin-right:4px;">{% endif %}<button class="btn btn-sm" type="submit">Toggle</button></form>
+                <form method="post" action="{% url 'hq_run_asset_bot' %}">{% csrf_token %}<input type="hidden" name="config_id" value="{{ r.config.id }}"><button class="btn btn-sm" type="submit">▶ Tick</button></form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon">⬢</div>
+        <p>NO ASSET BOTS CONFIGURED — create one from the admin dashboard's Asset Bots panel.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Open positions</span></div>
+    {% if open_trades %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Asset</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Stop</th><th>Target</th><th>Score</th><th>Rule</th><th>Opened</th></tr></thead>
+      <tbody>
+        {% for t in open_trades %}
+          <tr>
+            <td>{{ t.asset_class }}</td>
+            <td>{{ t.symbol }}</td>
+            <td><span class="badge badge-{% if t.side == 'BUY' %}bullish{% else %}bearish{% endif %}">{{ t.side }}</span></td>
+            <td>{{ t.qty }}</td>
+            <td>{{ t.entry_price }}</td>
+            <td style="color: var(--accent-red);">{{ t.stop_loss|default:"—" }}</td>
+            <td style="color: var(--accent-green);">{{ t.take_profit|default:"—" }}</td>
+            <td>{{ t.composite_score|floatformat:2 }}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ t.rule_name|truncatechars:30 }}</td>
+            <td style="font-size: 11px;">{{ t.opened_at|timesince }} ago</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No open positions.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Recently closed</span></div>
+    {% if recent_closed %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Closed</th><th>Asset</th><th>Symbol</th><th>Side</th><th>Entry → Exit</th><th>P&amp;L</th><th>Reason</th></tr></thead>
+      <tbody>
+        {% for t in recent_closed %}
+          <tr>
+            <td style="font-size: 11px;">{{ t.closed_at|date:"M d H:i" }}</td>
+            <td>{{ t.asset_class }}</td>
+            <td>{{ t.symbol }}</td>
+            <td>{{ t.side }}</td>
+            <td>{{ t.entry_price }} → {{ t.exit_price }}</td>
+            <td class="{% if t.pnl > 0 %}up{% elif t.pnl < 0 %}down{% endif %}">{{ t.pnl|floatformat:2 }}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ t.reason|truncatechars:60 }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No closed trades yet.</p>
+    {% endif %}
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+.sv-perf-table .up { color: var(--accent-green); }
+.sv-perf-table .down { color: var(--accent-red); }
+</style>
+{% endblock %}

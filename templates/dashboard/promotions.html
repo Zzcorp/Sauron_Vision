@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Promotion Pipeline — Sauron Vision{% endblock %}
+{% block page_title %}🚦 PROMOTION PIPELINE{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RESEARCH</span>
+        <span class="oc-strip-value">{{ stage_counts.research|default:"0" }}</span>
+        <span class="oc-strip-sub">earliest stage</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PAPER</span>
+        <span class="oc-strip-value">{{ stage_counts.paper|default:"0" }}</span>
+        <span class="oc-strip-sub">size-factor 0</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">LIVE · SMALL</span>
+        <span class="oc-strip-value up">{{ stage_counts.live_small|default:"0" }}</span>
+        <span class="oc-strip-sub">scaled-down sizing</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">LIVE · FULL</span>
+        <span class="oc-strip-value up">{{ stage_counts.live_full|default:"0" }}</span>
+        <span class="oc-strip-sub">full sizing</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TOTAL RULES</span>
+        <span class="oc-strip-value">{{ rows|length }}</span>
+        <span class="oc-strip-sub">RuleControl tracked</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RECENT EVENTS</span>
+        <span class="oc-strip-value">{{ history|length }}</span>
+        <span class="oc-strip-sub">last 50 promotions/demotions</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Per-rule pipeline state</span></div>
+    {% if rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Rule</th><th>Stage</th><th>Days in stage</th><th>n (90d)</th><th>Expectancy (90d)</th><th>Hit rate</th><th>Baseline</th><th>Status</th>{% if is_admin %}<th>Action</th>{% endif %}</tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td>{{ r.rule|truncatechars:40 }}</td>
+            <td><span class="badge badge-{% if r.stage == 'live_full' %}bullish{% elif r.stage == 'live_small' %}medium{% elif r.stage == 'paper' %}medium{% else %}bearish{% endif %}">{{ r.stage_display }}</span></td>
+            <td>{% if r.stage_entered %}{{ r.stage_entered|timesince }}{% else %}—{% endif %}</td>
+            <td>{{ r.n_recent }}</td>
+            <td class="{% if r.expectancy_recent and r.expectancy_recent > 0 %}up{% elif r.expectancy_recent and r.expectancy_recent < 0 %}down{% endif %}">
+                {% if r.expectancy_recent is not None %}{{ r.expectancy_recent|floatformat:2 }}R{% else %}—{% endif %}
+            </td>
+            <td>{% if r.hit_rate_recent is not None %}{{ r.hit_rate_recent|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td>{% if r.baseline is not None %}{{ r.baseline|floatformat:2 }}R{% else %}—{% endif %}</td>
+            <td style="font-size: 11px;">
+              {% if r.due_demote %}<span style="color: var(--accent-red);">⚠ degraded — auto-demote pending</span>
+              {% elif r.eligible_promote %}<span style="color: var(--accent-green);">✓ eligible to promote</span>
+              {% else %}<span style="color: var(--text-muted);">stable</span>{% endif %}
+            </td>
+            {% if is_admin %}
+            <td style="display:flex;gap:6px;">
+                <form method="post" action="{% url 'hq_promote_rule' %}">{% csrf_token %}<input type="hidden" name="rule_name" value="{{ r.rule }}"><button class="btn btn-sm btn-primary" type="submit" {% if r.stage == 'live_full' %}disabled{% endif %}>↑</button></form>
+                <form method="post" action="{% url 'hq_demote_rule' %}">{% csrf_token %}<input type="hidden" name="rule_name" value="{{ r.rule }}"><button class="btn btn-sm btn-danger" type="submit" {% if r.stage == 'research' %}disabled{% endif %}>↓</button></form>
+            </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon">🚦</div>
+        <p>NO RULES UNDER PIPELINE — RuleControl rows appear as rules accumulate signals or as the actuator/allocator acts on them.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Recent transitions</span></div>
+    {% if history %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Time</th><th>Rule</th><th>From → To</th><th>Reason</th><th>Expectancy</th><th>n</th><th>By</th></tr></thead>
+      <tbody>
+        {% for e in history %}
+          <tr>
+            <td>{{ e.created_at|date:"M d H:i" }}</td>
+            <td>{{ e.rule_name|truncatechars:32 }}</td>
+            <td><strong>{{ e.from_stage }}</strong> → <strong>{{ e.to_stage }}</strong></td>
+            <td><span class="badge badge-{% if 'demote' in e.reason %}bearish{% else %}medium{% endif %}">{{ e.get_reason_display }}</span></td>
+            <td>{% if e.expectancy_at_transition is not None %}{{ e.expectancy_at_transition|floatformat:2 }}R{% else %}—{% endif %}</td>
+            <td>{{ e.n_at_transition }}</td>
+            <td style="font-size: 11px;">{{ e.triggered_by.username|default:"auto" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No transitions yet.</p>
+    {% endif %}
+</div>
+
+<style>
+.sv-perf-table { width: 100%; border-collapse: collapse;
+                 font-family: var(--font-mono); font-size: 0.85rem; }
+.sv-perf-table th, .sv-perf-table td { padding: 8px 10px; text-align: left;
+                                        border-bottom: 1px solid var(--border); }
+.sv-perf-table th { color: var(--text-muted); text-transform: uppercase;
+                    font-size: 0.7rem; letter-spacing: 0.05em; }
+.sv-perf-table .up { color: var(--accent-green); }
+.sv-perf-table .down { color: var(--accent-red); }
+</style>
+{% endblock %}
