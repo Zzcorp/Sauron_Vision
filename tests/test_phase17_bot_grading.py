@@ -321,11 +321,36 @@ class DecideTrackRecordTests(TestCase):
                               entry=100, exit=110, sl=95, tp=110, qty=10,
                               rule_name="rule_l")
             grade_bot_trade(t)
+        # A strong raw signal still gets in, but discounted for the rule's
+        # measured record rather than taken at face value.
+        self._seed_signal("AAA", "stock", "rule_l", score=0.95)
+        d = StockBot(cfg).decide("AAA")
+        self.assertEqual(d.direction, "BUY")
+        self.assertLess(d.score, 0.95)
+
+    def test_a_losing_rule_needs_a_stronger_signal_to_clear_the_bar(self):
+        """The discount is not cosmetic. A score that would have entered on
+        a neutral rule falls below the entry threshold once the rule's own
+        losing record is priced in — which is the whole point of weighting
+        the vote instead of counting it."""
+        from bot_program.asset_engine import StockBot
+        from bot_program.bot_grading import grade_bot_trade
+        cfg = _abc(self.user, "stock", name="ST", symbols=["AAA"],
+                   extras={"use_bot_track_record": True})
+        for i in range(8):
+            grade_bot_trade(_closed_trade(
+                cfg, symbol=f"L{i}", side="BUY", entry=100, exit=95,
+                sl=95, tp=110, qty=10, rule_name="rule_l"))
+        for i in range(2):
+            grade_bot_trade(_closed_trade(
+                cfg, symbol=f"W{i}", side="BUY", entry=100, exit=110,
+                sl=95, tp=110, qty=10, rule_name="rule_l"))
+        # 0.80 clears entry_score_min=0.6 on its face; weighted by a rule
+        # that loses 8 of 10, it does not.
         self._seed_signal("AAA", "stock", "rule_l", score=0.80)
         d = StockBot(cfg).decide("AAA")
-        # Score should be penalised below the raw 0.80.
-        self.assertEqual(d.direction, "BUY")
-        self.assertLess(d.score, 0.80)
+        self.assertEqual(d.direction, "HOLD")
+        self.assertIn("below", d.reasons[0])
 
 
 # ── Dashboard rendering ──────────────────────────────────────────────────

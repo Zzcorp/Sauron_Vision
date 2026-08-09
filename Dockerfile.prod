@@ -1,6 +1,6 @@
-# Production Dockerfile (Phase 30) — multi-stage, non-root, no source bind-mount.
+# Production Dockerfile — multi-stage, non-root, no source bind-mount.
 # Build:  docker build -f Dockerfile.prod -t sauron-vision:prod .
-# Run:    via docker-compose.prod.yml
+# Run:    via deploy/docker-compose.yml (see deploy/RUNBOOK.md)
 
 # ── Build stage ─────────────────────────────────────────────────────────
 FROM python:3.12-slim AS builder

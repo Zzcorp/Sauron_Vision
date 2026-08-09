@@ -41,12 +41,20 @@ def fetch_live_quotes(self, watchlist_only=True):
     if not is_any_market_open():
         return {"status": "skipped", "reason": "markets_closed"}
 
-    qs = Instrument.objects.filter(is_active=True, asset_class="stock")
+    from signals.universe import quote_targets
+
     if watchlist_only:
-        qs = qs.filter(is_watchlist=True)
+        # "watchlist_only" now means "the scan universe" — the watchlist plus
+        # every enabled bot's symbols. A quote is what the mark and the paper
+        # fill path read, so a traded symbol without one is a bot that can
+        # decide but never act.
+        targets = quote_targets("stock", limit=20)
+    else:
+        targets = list(Instrument.objects.filter(
+            is_active=True, asset_class="stock")[:20])
 
     fetched = 0
-    for inst in qs[:20]:  # Limit to 20 per run to avoid rate limits
+    for inst in targets:
         try:
             result = save_quote_to_db(inst.symbol)
             if result:
@@ -72,7 +80,7 @@ def fetch_forex_quotes():
     if not is_forex_open():
         return {"status": "skipped", "reason": "forex_closed"}
 
-    forex_instruments = Instrument.objects.filter(asset_class="forex", is_active=True, is_watchlist=True)
+    from signals.universe import quote_targets
     fetched = 0
 
     # Alpha Vantage's free tier allows 25 requests A DAY. At the old 120s
@@ -86,7 +94,7 @@ def fetch_forex_quotes():
         return {"status": "skipped", "reason": "alpha_vantage daily budget spent",
                 "hint": "OANDA practice streaming is free and broker-grade"}
 
-    for inst in forex_instruments[:budget]:
+    for inst in quote_targets("forex", limit=budget):
         from_cur = inst.symbol[:3]
         to_cur = inst.symbol[3:]
         rate = fetch_forex_rate(from_cur, to_cur)

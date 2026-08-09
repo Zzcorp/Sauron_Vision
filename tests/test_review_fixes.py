@@ -353,9 +353,15 @@ class HealthAccuracyTests(TestCase):
         self.assertEqual(check_live_mode_readiness(self.user)["state"], "ok")
 
     def test_heartbeat_check_warns_when_some_bots_are_silent(self):
+        from bot_program.asset_engine.safety import write_heartbeat
         from dashboard.views_system_health import check_bot_heartbeats
         cfg_a = _cfg(self.user, name="A", symbols=["AAA"])
-        _cfg(self.user, name="B", symbols=["BBB"])
+        cfg_b = _cfg(self.user, name="B", symbols=["BBB"])
+        # Both bots are alive and ticking; the difference is that only A
+        # found something to trade. A bot that ticks and holds is quiet,
+        # not broken — that distinction is what this asserts.
+        write_heartbeat(cfg_a)
+        write_heartbeat(cfg_b)
         _trade(cfg_a)  # only A traded
         self.assertEqual(check_bot_heartbeats(self.user)["state"], "warn")
 

@@ -92,13 +92,7 @@ class AssetBot(ABC):
         closed = 0
         for trade in AssetBotTrade.objects.filter(config=self.cfg, status="OPEN"):
             try:
-                # Broker-side protected trades: the broker owns SL/TP (bracket
-                # or on-fill orders). Managing them here too would double-close
-                # — our market order flattens, then the broker's resting stop
-                # fires later and opens a REVERSE position. Reconciliation
-                # detects the broker-side close and finalises the row.
-                if (trade.metadata or {}).get("protected"):
-                    continue
+                protected = bool((trade.metadata or {}).get("protected"))
                 client = client_for_symbol(self.user, trade.symbol, self.cfg)
 
                 # Money-safety: the entry path refuses to trade when a LIVE
@@ -118,15 +112,29 @@ class AssetBot(ABC):
                 if price is None or price <= 0:
                     continue
 
-                # Exit management. Most of a trend system's P&L comes from
-                # exits, not entries: a trailing stop locks in a move that
-                # would otherwise round-trip, and a time stop releases
-                # capital from a thesis that simply never played out.
-                self._update_trailing_stop(trade, price)
+                # The time stop runs for protected trades too. It is the one
+                # exit the broker knows nothing about: a bracket holds SL and
+                # TP, but nothing at the broker will release capital from a
+                # thesis that simply never moved. _close_trade cancels the
+                # resting legs if the flatten is rejected, so there is no
+                # window where the position sits live and unprotected.
                 if self._time_stop_hit(trade):
                     if self._close_trade(trade, price, client, reason="TIME"):
                         closed += 1
                     continue
+
+                # Past here the broker owns SL/TP for protected trades
+                # (bracket or on-fill orders). Managing those here too would
+                # double-close — our market order flattens, then the broker's
+                # resting stop fires later and opens a REVERSE position.
+                # Reconciliation detects the broker-side close and finalises
+                # the row.
+                if protected:
+                    continue
+
+                # Exits carry most of a trend system's P&L: a trailing stop
+                # locks in a move that would otherwise round-trip.
+                self._update_trailing_stop(trade, price)
 
                 hit_sl = (
                     (trade.side == "BUY" and trade.stop_loss is not None
@@ -151,6 +159,24 @@ class AssetBot(ABC):
 
     # ── exit management ──────────────────────────────────────────────────
 
+    def _extras_float(self, key: str, default: float = 0.0) -> float:
+        """Read a numeric knob out of cfg.extras without ever raising.
+
+        extras is user-editable JSON. A typo there ("2%" instead of 0.02)
+        used to raise out of the exit block and take SL/TP checking down
+        with it — the trade would then run unmanaged until reconciliation
+        noticed. A bad value now just means "knob off".
+        """
+        extras = getattr(self.cfg, "extras", None) or {}
+        raw = extras.get(key, default)
+        try:
+            return float(raw if raw is not None else default)
+        except (TypeError, ValueError):
+            logger.warning("[%s_bot] cfg %s: extras[%r]=%r is not numeric — "
+                           "treating as %s", self.asset_class, self.cfg.id,
+                           key, raw, default)
+            return float(default)
+
     def _update_trailing_stop(self, trade, price: Decimal) -> bool:
         """Ratchet the stop toward price once the trade is in profit.
 
@@ -158,8 +184,7 @@ class AssetBot(ABC):
         Skipped for broker-protected trades — the resting stop lives at the
         broker and moving only our copy would desynchronise the two.
         """
-        extras = getattr(self.cfg, "extras", None) or {}
-        trail_pct = float(extras.get("trail_pct", 0) or 0)
+        trail_pct = self._extras_float("trail_pct")
         if trail_pct <= 0 or (trade.metadata or {}).get("protected"):
             return False
         if trade.stop_loss is None:
@@ -184,8 +209,7 @@ class AssetBot(ABC):
         Capital tied up in a thesis that never resolved is capital not
         available to the next setup.
         """
-        extras = getattr(self.cfg, "extras", None) or {}
-        max_hold = float(extras.get("max_hold_hours", 0) or 0)
+        max_hold = self._extras_float("max_hold_hours")
         if max_hold <= 0 or trade.opened_at is None:
             return False
         age_hours = (timezone.now() - trade.opened_at).total_seconds() / 3600.0
@@ -552,7 +576,8 @@ class AssetBot(ABC):
 
         # A planned move smaller than the round trip is negative-EV however
         # good the signal is.
-        ok, cost_reason = passes_cost_filter(self.cfg, symbol, price, tp)
+        ok, cost_reason = passes_cost_filter(self.cfg, symbol, price, tp,
+                                              stop=sl)
         if not ok:
             logger.info("[%s_bot] skipping %s — %s",
                         self.asset_class, symbol, cost_reason)
@@ -570,6 +595,9 @@ class AssetBot(ABC):
         order_id = ""
         entry_meta = dict(level_meta)
         entry_meta["cost_check"] = cost_reason
+        # Frozen at entry so a trailing stop cannot rewrite the risk
+        # denominator that realized_r (and therefore sizing) depends on.
+        entry_meta["initial_stop_loss"] = round(float(sl), 8)
         if not paper:
             # Phase-33 idempotency — deterministic clientOrderId derived from
             # (config, symbol, signal/rule, minute-bucket). Retrying the same
@@ -770,7 +798,8 @@ class AssetBot(ABC):
             verdict = weighted_consensus(
                 bullish, bearish, asset_class=self.asset_class,
                 min_net_weight=float(
-                    extras.get("min_net_weight", default_threshold)))
+                    extras.get("min_net_weight", default_threshold)),
+                min_signals=self.cfg.min_signals_for_entry)
             if verdict["direction"] == "HOLD":
                 return BotDecision("HOLD", 0, [verdict["detail"]])
             side = bullish if verdict["direction"] == "BUY" else bearish

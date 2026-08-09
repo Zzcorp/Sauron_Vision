@@ -59,7 +59,19 @@ def grade_bot_trade(trade) -> bool:
 
     entry = float(trade.entry_price or 0)
     exit_p = float(trade.exit_price or 0)
-    sl = float(trade.stop_loss) if trade.stop_loss is not None else 0.0
+    # The INITIAL stop, not the current one: a trailing stop mutates
+    # trade.stop_loss, and grading against the trailed value makes pnl and
+    # risk the same quantity — every trailing exit would score ~1.0R no
+    # matter the true multiple, inflating the track record that sizes live
+    # positions. entry_meta records the stop the trade was opened with.
+    _initial_sl = (trade.metadata or {}).get("initial_stop_loss")
+    if _initial_sl is not None:
+        try:
+            sl = float(_initial_sl)
+        except (TypeError, ValueError):
+            sl = float(trade.stop_loss) if trade.stop_loss is not None else 0.0
+    else:
+        sl = float(trade.stop_loss) if trade.stop_loss is not None else 0.0
     tp = float(trade.take_profit) if trade.take_profit is not None else 0.0
     qty = float(trade.qty or 0)
 

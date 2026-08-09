@@ -42,6 +42,10 @@ DEFAULT_COST_BPS = {
     "options": 60.0,    # wide spreads dominate; per-contract fees on top
 }
 DEFAULT_MIN_EDGE_RATIO = 2.0  # planned move must beat cost by this multiple
+# Reward:risk the setup must still clear once the round trip is paid out
+# of the winner and added to the loser. A 2:1 planned system that drops
+# below this is being run for the broker's benefit, not the book's.
+DEFAULT_MIN_NET_RR = 1.5
 
 
 def _extras(cfg) -> dict:
@@ -130,11 +134,30 @@ def round_trip_cost_fraction(cfg, symbol: str) -> float:
     return float(bps) / 10_000.0
 
 
-def passes_cost_filter(cfg, symbol: str, price: float, target: float) -> tuple:
+def passes_cost_filter(cfg, symbol: str, price: float, target: float,
+                       *, stop: float | None = None,
+                       cost_fraction: float | None = None) -> tuple:
     """(ok, reason) — is the planned move worth more than the round trip?
 
-    Without this, a fixed take-profit percentage smaller than the spread
-    plus fees is a guaranteed loser no matter how good the signal is.
+    Two checks, because the gross one alone cannot bite on the ATR path.
+    An ATR target is 2x the ATR stop and the stop is floored at
+    MIN_STOP_FRACTION, so the planned move is always >= 0.4% of notional —
+    comfortably above `min_edge_ratio x cost` for every asset class in
+    DEFAULT_COST_BPS. The filter would pass everything and read as if it
+    were protecting the book.
+
+    What actually decides whether a setup survives its costs is the reward
+    and the risk *net of* them: the winner pays the round trip out of its
+    target and the loser pays it on top of its stop. So when `stop` is
+    known we also require
+
+        (reward - cost) / (risk + cost) >= min_net_rr
+
+    which rejects exactly the trades the gross check misses — tight stops
+    on instruments whose spread is a large fraction of 1R.
+
+    `cost_fraction` overrides the asset-class table with a measured cost
+    (e.g. an option's own bid/ask spread), as a fraction of notional.
     """
     extras = _extras(cfg)
     if not extras.get("use_cost_filter", True):
@@ -143,7 +166,8 @@ def passes_cost_filter(cfg, symbol: str, price: float, target: float) -> tuple:
         return False, "no price"
 
     min_ratio = float(extras.get("min_edge_ratio", DEFAULT_MIN_EDGE_RATIO))
-    cost = round_trip_cost_fraction(cfg, symbol)
+    cost = (float(cost_fraction) if cost_fraction is not None
+            else round_trip_cost_fraction(cfg, symbol))
     move = abs(target - price) / price
     if cost <= 0:
         return True, "no cost model"
@@ -152,4 +176,17 @@ def passes_cost_filter(cfg, symbol: str, price: float, target: float) -> tuple:
         return (False,
                 f"planned move {move * 100:.2f}% is only {ratio:.1f}x the "
                 f"{cost * 100:.2f}% round-trip cost (need {min_ratio:.1f}x)")
+
+    if stop is not None:
+        risk = abs(price - float(stop)) / price
+        if risk > 0:
+            min_net_rr = float(extras.get("min_net_rr", DEFAULT_MIN_NET_RR))
+            net_rr = (move - cost) / (risk + cost)
+            if net_rr < min_net_rr:
+                return (False,
+                        f"reward:risk falls to {net_rr:.2f} after the "
+                        f"{cost * 100:.2f}% round trip "
+                        f"(gross {move / risk:.2f}, need {min_net_rr:.2f})")
+            return True, (f"edge {ratio:.1f}x cost, net R:R {net_rr:.2f}")
+
     return True, f"edge {ratio:.1f}x cost"

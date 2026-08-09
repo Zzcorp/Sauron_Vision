@@ -36,6 +36,7 @@ from typing import Optional
 from django.utils import timezone
 
 from .base import AssetBot, BotDecision
+from .risk_levels import passes_cost_filter
 
 logger = logging.getLogger(__name__)
 
@@ -348,6 +349,26 @@ class OptionsBot(AssetBot):
 
         sl = premium * (1 - self.cfg.stop_loss_pct / 100)
         tp = premium * (1 + self.cfg.take_profit_pct / 100)
+
+        # Cost filter. Options are the one asset class where the round trip
+        # is routinely a double-digit percentage of the position: a 1.00/1.20
+        # market costs ~18% of mid to enter and exit. The equity path already
+        # subtracts costs before deciding a setup is worth taking; running
+        # options without it means buying premium that has to move ~20%
+        # before the trade is even flat. The contract's own quoted spread is
+        # the honest cost here — far better than an asset-class average.
+        cost_fraction = None
+        if contract.bid and contract.ask and premium > 0:
+            spread = float(Decimal(contract.ask) - Decimal(contract.bid))
+            if spread > 0:
+                cost_fraction = spread / premium
+        ok, cost_reason = passes_cost_filter(
+            self.cfg, symbol, premium, tp, stop=sl,
+            cost_fraction=cost_fraction)
+        if not ok:
+            logger.info("[options_bot] %s strike %s skipped: %s", symbol,
+                        contract.strike, cost_reason)
+            return None
 
         paper = (self.cfg.mode == "paper")
         order_id = ""

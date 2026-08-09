@@ -238,7 +238,7 @@ class WeightedConsensusTests(TestCase):
         bull = [_signal(self.inst, "bullish", 0.7, "good_rule")]
         bear = [_signal(self.inst, "bearish", 0.7, "unproven")]
         with patch("bot_program.asset_engine.aggregation.rule_weight",
-                    side_effect=lambda r, a="": 1.8 if r == "good_rule" else 1.0):
+                    side_effect=lambda r, a="", **kw: 1.8 if r == "good_rule" else 1.0):
             verdict = weighted_consensus(bull, bear, asset_class="stock",
                                           min_net_weight=0.5)
         self.assertEqual(verdict["direction"], "BUY")

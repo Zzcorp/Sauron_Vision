@@ -32,11 +32,18 @@ MAX_WEIGHT = 2.0
 DEFAULT_MIN_NET_WEIGHT = 0.6
 
 
-def rule_weight(rule_name: str, asset_class: str = "") -> float:
+def rule_weight(rule_name: str, asset_class: str = "",
+                *, signal_stats: dict | None = None) -> float:
     """Evidence weight for a rule, centred on 1.0.
 
     >1 means the rule has demonstrated positive expectancy; <1 means it has
     demonstrated the opposite. Absent evidence, exactly 1.0.
+
+    `signal_stats` is the already-computed output of
+    `calculate_signal_stats(days=180, group_by="rule_name")`. Pass it when
+    weighting several rules at once: that call aggregates six months of
+    signals, and running it per rule turned one decision into thousands of
+    queries. Omitted, it is computed here for the single-rule case.
     """
     if not rule_name:
         return 1.0
@@ -58,9 +65,9 @@ def rule_weight(rule_name: str, asset_class: str = "") -> float:
 
     # Signal record as a fallback/complement — a much larger sample.
     try:
-        from signals.performance import calculate_signal_stats
-        stats = calculate_signal_stats(days=180, group_by="rule_name") or {}
-        row = stats.get(rule_name)
+        if signal_stats is None:
+            signal_stats = _signal_stats()
+        row = (signal_stats or {}).get(rule_name)
         if row and (row.get("n_closed") or 0) >= MIN_SAMPLES:
             expectancy = row.get("expectancy_r")
             if expectancy is not None:
@@ -76,35 +83,74 @@ def rule_weight(rule_name: str, asset_class: str = "") -> float:
     return max(MIN_WEIGHT, min(MAX_WEIGHT, weight))
 
 
+def _signal_stats() -> dict:
+    try:
+        from signals.performance import calculate_signal_stats
+        return calculate_signal_stats(days=180, group_by="rule_name") or {}
+    except Exception as e:
+        logger.debug("[aggregation] calculate_signal_stats failed: %s", e)
+        return {}
+
+
 def weighted_consensus(bullish, bearish, *, asset_class: str = "",
-                       min_net_weight: float = DEFAULT_MIN_NET_WEIGHT) -> dict:
+                       min_net_weight: float = DEFAULT_MIN_NET_WEIGHT,
+                       min_signals: int = 1) -> dict:
     """Weigh both sides by evidence and return the net verdict.
 
     `bullish` / `bearish` are Signal-like objects exposing `score` and
     `rule_name`. Returns a dict with the direction, the net weight, the
     winning side's weighted score and its top rule.
+
+    `min_signals` is a hard floor on how many distinct rules must agree,
+    mirroring the config's min_signals_for_entry. Without it a single rule
+    that has earned a 2.0 weight can clear a threshold meant to represent
+    two independent confirmations — the config would read as "2 signals"
+    while the bot traded on one.
     """
+    # One stats aggregation for the whole decision, shared by every rule.
+    stats = _signal_stats()
+    weights: dict[str, float] = {}
+
+    def weight_for(rule: str) -> float:
+        if rule not in weights:
+            weights[rule] = rule_weight(rule, asset_class, signal_stats=stats)
+        return weights[rule]
+
     def side_weight(signals):
         total, best, best_rule = 0.0, 0.0, ""
+        rules = set()
         for s in signals:
-            w = rule_weight(getattr(s, "rule_name", ""), asset_class)
-            contribution = float(getattr(s, "score", 0) or 0) * w
+            rule = getattr(s, "rule_name", "")
+            contribution = float(getattr(s, "score", 0) or 0) * weight_for(rule)
             total += contribution
+            rules.add(rule)
             if contribution > best:
-                best, best_rule = contribution, getattr(s, "rule_name", "")
-        return total, best_rule
+                best, best_rule = contribution, rule
+        return total, best_rule, len(rules)
 
-    bull_weight, bull_rule = side_weight(bullish)
-    bear_weight, bear_rule = side_weight(bearish)
+    bull_weight, bull_rule, bull_rules = side_weight(bullish)
+    bear_weight, bear_rule, bear_rules = side_weight(bearish)
     net = bull_weight - bear_weight
 
     if net >= min_net_weight:
+        if bull_rules < min_signals:
+            return {"direction": "HOLD", "net_weight": round(net, 4),
+                    "score": 0.0, "rule_name": "",
+                    "detail": (f"bull evidence {net:+.2f} clears "
+                               f"{min_net_weight:.2f} but only {bull_rules} "
+                               f"rule(s) agree, need {min_signals}")}
         weighted_score = bull_weight / max(len(bullish), 1)
         return {"direction": "BUY", "net_weight": round(net, 4),
                 "score": min(1.0, round(weighted_score, 4)),
                 "rule_name": bull_rule,
                 "detail": f"bull {bull_weight:.2f} vs bear {bear_weight:.2f}"}
     if -net >= min_net_weight:
+        if bear_rules < min_signals:
+            return {"direction": "HOLD", "net_weight": round(-net, 4),
+                    "score": 0.0, "rule_name": "",
+                    "detail": (f"bear evidence {-net:+.2f} clears "
+                               f"{min_net_weight:.2f} but only {bear_rules} "
+                               f"rule(s) agree, need {min_signals}")}
         weighted_score = bear_weight / max(len(bearish), 1)
         return {"direction": "SELL", "net_weight": round(-net, 4),
                 "score": min(1.0, round(weighted_score, 4)),
