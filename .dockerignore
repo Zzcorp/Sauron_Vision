@@ -1,0 +1,50 @@
+# The build context is the whole repo, and COPY . /app takes everything not
+# listed here. Without this file the image ships the operator's filled-in
+# .env — SECRET_KEY, FERNET_KEY, DB password and every broker API key —
+# baked into a layer, readable by anyone who can pull or docker save it.
+.env
+.env.*
+!.env.production.example
+
+.git
+.gitignore
+.github
+
+# A dev SQLite database in the image shadows nothing but wastes space and
+# leaks whatever was in it.
+db.sqlite3
+*.sqlite3
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Collected at build time inside the image; a host copy would overwrite it.
+staticfiles/
+media/
+logs/
+*.log
+
+.venv/
+venv/
+env/
+**/node_modules/
+
+.idea/
+.vscode/
+.DS_Store
+
+# Local scratch, notes and dumps.
+*.dump
+*.bak
+
+# A dev Celery filesystem-broker spool. If this ships in the image each
+# container gets its own private queue and beat publishes where no worker
+# is listening - a silent split-brain instead of a loud Redis error.
+.celery/
+test_backups/
+.claude/
+*.sql

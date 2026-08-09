@@ -216,15 +216,19 @@ class ComposeProdStructureTests(TestCase):
             self.assertIn("healthcheck", self.data["services"][svc],
                           msg=f"{svc} has no healthcheck")
 
-    def test_optional_services_are_behind_profiles(self):
-        """A first deploy should have as few moving parts as possible; the
-        streamers and the backup job are opt-in."""
+    def test_only_the_streamers_are_behind_profiles(self):
+        """A first deploy should have as few moving parts as possible, so the
+        market-data streamers are opt-in. Backups are NOT: "optional extras"
+        is the wrong category for the only thing standing between a disk
+        failure and losing every trade, position and credential recorded."""
         if self.data is None:
             self.skipTest("PyYAML not installed")
-        for svc, profile in (("stream-binance", "streamers"),
-                             ("stream-oanda", "streamers"),
-                             ("backup", "backup")):
-            self.assertIn(profile, self.data["services"][svc].get("profiles", []))
+        for svc in ("stream-binance", "stream-oanda"):
+            self.assertIn("streamers",
+                          self.data["services"][svc].get("profiles", []))
+        for name, svc in self.data["services"].items():
+            if svc.get("profiles") and not name.startswith("stream-"):
+                self.fail(f"{name} is opt-in but should start with the stack")
 
     def test_data_lives_on_named_volumes(self):
         if self.data is None:

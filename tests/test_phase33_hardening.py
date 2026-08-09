@@ -29,10 +29,22 @@ def _user(name="ph33_u"):
 # ── 33.1 ─────────────────────────────────────────────────────────────────
 
 class HealthcheckURLTests(TestCase):
-    def test_dockerfile_targets_healthz(self):
-        text = (REPO / "Dockerfile.prod").read_text()
-        self.assertIn("/healthz/", text)
-        self.assertNotIn("http://localhost:8000/health/", text)
+    def test_the_image_declares_no_healthcheck(self):
+        """The probe belongs on the web service, not the image. Every service
+        is built from this one image -- both Celery workers, beat and the
+        five streamers -- and none of them serve HTTP, so an image-level HTTP
+        probe reported all of them `unhealthy` forever and buried the single
+        signal that meant anything."""
+        text = (REPO / "Dockerfile.prod").read_text(encoding="utf-8",
+                                                     errors="replace")
+        self.assertNotIn("\nHEALTHCHECK", text)
+
+    def test_the_web_service_probes_healthz(self):
+        import yaml
+        compose = yaml.safe_load(
+            (REPO / "deploy" / "docker-compose.yml").read_text(encoding="utf-8"))
+        probe = str(compose["services"]["web"]["healthcheck"]["test"])
+        self.assertIn("/healthz/", probe)
 
     def test_healthz_route_renders_200(self):
         # Sanity — anonymous request should reach the health endpoint.
@@ -337,13 +349,14 @@ class BeatScheduleTests(TestCase):
             "bot_program.tasks.reconcile_all_asset_bot_trades",
         )
 
-    def test_backup_in_beat(self):
+    def test_no_in_app_backup_is_scheduled(self):
+        """The in-app nightly dump shells out to pg_dump, which is not in the
+        application image, and returns ok=False instead of raising -- so it
+        recorded a SUCCESS in django-celery-results every night while
+        producing nothing, and wrote to a path in no volume. The `backup`
+        service in deploy/docker-compose.yml is the single real path."""
         from config.celery import app
-        self.assertIn("daily-postgres-backup", app.conf.beat_schedule)
-        self.assertEqual(
-            app.conf.beat_schedule["daily-postgres-backup"]["task"],
-            "bot_program.tasks.run_daily_postgres_backup",
-        )
+        self.assertNotIn("daily-postgres-backup", app.conf.beat_schedule)
 
 
 # ── 33.5 ─────────────────────────────────────────────────────────────────

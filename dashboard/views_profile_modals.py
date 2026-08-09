@@ -45,10 +45,12 @@ def change_password(request):
 @require_POST
 def change_pin_modal(request):
     """JSON-returning version of the PIN change endpoint for the modal."""
-    try:
-        from portfolio.trader_profile import get_or_create_profile
-    except Exception:
-        return JsonResponse({"ok": False, "error": "profile module unavailable"})
+    # No bare `except` here. This import used to fail — get_or_create_profile
+    # did not exist — and the handler reported "profile module unavailable",
+    # which reads like a transient hiccup rather than "this feature has never
+    # worked". Setting a PIN is a prerequisite for arming any bot live, so a
+    # failure here has to be a 500 someone can see, not a polite string.
+    from portfolio.trader_profile import get_or_create_profile
     profile = get_or_create_profile(request.user)
     current_pin = request.POST.get("current_pin", "")
     new_pin = request.POST.get("new_pin", "")

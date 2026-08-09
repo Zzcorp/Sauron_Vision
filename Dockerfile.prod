@@ -54,7 +54,24 @@ RUN python -m compileall -q /app/config /app/bot_program /app/signals \
     /app/dashboard /app/portfolio /app/instruments /app/market_data \
     /app/alerts /app/core /app/ai_agents 2>/dev/null || true
 
-# Static files dir owned by app user.
+# Static files are baked into the image so every service shares them.
+# Running collectstatic in the one-shot `migrate` service instead wrote them
+# into a filesystem that is then discarded - `web` is a different container
+# with an empty /app/staticfiles, so WhiteNoise found nothing and the whole
+# app rendered as raw HTML behind a perfectly valid certificate.
+#
+# Runs offline: collectstatic touches no database. DB_ENGINE=sqlite matches
+# the branch in settings.py exactly; any other spelling falls through to the
+# auto-detect branch, which opens a TCP probe to a database host that does
+# not exist yet on every single build.
+RUN DJANGO_SETTINGS_MODULE=config.settings \
+    SECRET_KEY=build-only-never-used-at-runtime \
+    DEBUG=False DB_ENGINE=sqlite ALLOWED_HOSTS=localhost \
+    python manage.py collectstatic --noinput
+
+# After collectstatic, so this chown covers what it just wrote. Otherwise the
+# tree is root-owned: WhiteNoise only reads it so the site works, but any
+# later collectstatic run as `sauron` inside the container fails on EACCES.
 RUN mkdir -p /app/staticfiles /app/media /app/logs \
     && chown -R sauron:sauron /app/staticfiles /app/media /app/logs
 
@@ -62,12 +79,11 @@ USER sauron
 
 EXPOSE 8000
 
-# Healthcheck — the platform exposes /healthz/ via core.health.health_check,
-# falls back to a TCP probe if the URL doesn't respond.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -f http://localhost:8000/healthz/ \
-    || python -c "import socket; s=socket.socket(); s.connect(('localhost',8000)); s.close()" \
-    || exit 1
+# NB: no image-level HEALTHCHECK. Every service is built from this image -
+# the two Celery workers, beat and the five streamers included - and none of
+# those serve HTTP, so an HTTP probe here marks all of them `unhealthy`
+# forever and buries the one signal that matters. The web service declares
+# its own healthcheck in deploy/docker-compose.yml.
 
 # Default: ASGI server. Override in compose for celery worker / beat.
 CMD ["gunicorn", "config.asgi:application", \

@@ -1,0 +1,7 @@
+# The backup sidecar. It is postgres:16-alpine plus rclone, because the base
+# image has pg_dump but no rclone -- so with BACKUP_REMOTE set, deploy/backup.sh
+# printed "rclone is not installed" once a day into a log nobody reads while
+# every dump sat on the same disk as the database it was backing up.
+FROM postgres:16-alpine
+
+RUN apk add --no-cache rclone

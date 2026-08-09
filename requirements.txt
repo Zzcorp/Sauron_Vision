@@ -18,7 +18,7 @@ gunicorn>=22.0
 psycopg2-binary>=2.9
 
 # Celery & Task Queue
-celery>=5.4
+celery>=5.4,<6
 django-celery-beat>=2.7
 django-celery-results>=2.5
 redis>=5.1
@@ -68,3 +68,9 @@ reportlab>=4.2
 # Auto-instruments Django + Celery + Redis when SENTRY_DSN is set.
 sentry-sdk[django,celery]>=2.0
 PyYAML>=6.0
+
+# IBKR. bot_program/engine/ibkr_client.py, broker_router.py and
+# ibkr_data_feed.py import this; without it the import fails, the
+# router falls through to PaperTrader, and a bot the UI labels 'ibkr'
+# quietly records paper fills as if they were real.
+ib_insync>=0.9.86

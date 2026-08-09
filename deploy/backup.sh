@@ -19,6 +19,23 @@ DB_HOST=${DB_HOST:-postgres}
 
 mkdir -p "$BACKUP_DIR"
 
+# Verify the offsite target ONCE, before the loop, and check the remote itself
+# rather than just the binary. A misnamed remote or an unmounted config is
+# indistinguishable from a working one until the day you need to restore.
+if [ -n "${BACKUP_REMOTE:-}" ]; then
+	if ! command -v rclone >/dev/null 2>&1; then
+		echo "[backup] FATAL: BACKUP_REMOTE is set but rclone is missing" >&2
+		sleep 60   # under restart:unless-stopped a bare exit is a tight loop
+		exit 1
+	fi
+	if ! rclone lsd "$BACKUP_REMOTE" >/dev/null 2>&1; then
+		echo "[backup] FATAL: $BACKUP_REMOTE unreachable - rclone config not mounted, or the remote is misnamed" >&2
+		sleep 60
+		exit 1
+	fi
+	echo "[backup] offsite target $BACKUP_REMOTE verified"
+fi
+
 while true; do
 	STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 	FILE="$BACKUP_DIR/sauron-$STAMP.dump"

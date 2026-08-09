@@ -166,3 +166,40 @@ class TraderProfile(models.Model):
         if self.trade_indices: markets.append("Indices")
         if self.trade_bonds: markets.append("Bonds")
         return markets
+
+    # ── Trading PIN ──────────────────────────────────────────────────
+    # The PIN is the second factor on every money-arming action: flipping a
+    # bot to live, changing broker credentials, releasing the kill switch.
+    # A fresh superuser has no TraderProfile row at all, so these have to
+    # work from nothing.
+
+    def set_pin(self, raw_pin: str) -> None:
+        """Store a new PIN. Hashed with Django's password hasher — the raw
+        value is never written anywhere, including the audit log."""
+        from django.contrib.auth.hashers import make_password
+        self.access_pin_hash = make_password(raw_pin)
+
+    def check_pin(self, raw_pin: str) -> bool:
+        """Verify a PIN. False when no PIN has been set — an unset PIN must
+        never read as 'anything matches'."""
+        from django.contrib.auth.hashers import check_password
+        if not self.access_pin_hash:
+            return False
+        return check_password(raw_pin or "", self.access_pin_hash)
+
+    @property
+    def has_pin(self) -> bool:
+        return bool(self.access_pin_hash)
+
+
+def get_or_create_profile(user):
+    """The profile for `user`, creating it if this is the first look.
+
+    Nothing creates TraderProfile rows on signup — there is no post_save
+    receiver — so every caller has to be able to make one. Without this the
+    PIN modal raised ImportError, which a bare `except` downgraded to a
+    cosmetic 'profile module unavailable', and no PIN could ever be set on a
+    fresh install. No PIN means no bot can be armed live.
+    """
+    profile, _ = TraderProfile.objects.get_or_create(user=user)
+    return profile

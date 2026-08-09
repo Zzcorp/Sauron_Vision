@@ -11,7 +11,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv("SECRET_KEY", "insecure-dev-key-change-me")
 DEBUG = os.getenv("DEBUG", "True").lower() in ("true", "1", "yes")
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+# Split and STRIP: "a.com, b.com" otherwise yields " b.com", which matches
+# no request and answers every page on the second name with a bare 400.
+ALLOWED_HOSTS = [h.strip() for h
+                in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+                if h.strip()]
 
 # Key for broker-credential encryption at rest (bot_program.models).
 # Kept SEPARATE from SECRET_KEY so rotating the latter — or moving to a new
@@ -34,9 +38,22 @@ if not DEBUG:
     # Also allow wildcard subdomains
     CSRF_TRUSTED_ORIGINS.append("https://*.onrender.com")
 
+# The container healthcheck probes http://127.0.0.1:8000/healthz/ from
+# inside the container, so the loopback names must be allowed or every probe
+# is a 400 DisallowedHost and the service reports unhealthy forever. This
+# widens nothing publicly: Caddy is the only listener exposed, and it
+# forwards the real Host.
+for _local in ("127.0.0.1", "localhost"):
+    if _local not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(_local)
+
 # Security headers for production
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
+    # ...but not for the health probe. It speaks plain HTTP to the loopback
+    # and would otherwise be answered with a 301 to https on port 8000,
+    # where nothing is listening. TLS terminates at Caddy, one hop earlier.
+    SECURE_REDIRECT_EXEMPT = [r"^healthz/?$"]
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
@@ -212,19 +229,36 @@ else:
 # ============================================================
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-try:
-    from urllib.parse import urlparse as _urlparse
-    import socket as _sock
-    _parsed = _urlparse(REDIS_URL)
-    _redis_host = _parsed.hostname or "localhost"
-    _redis_port = _parsed.port or 6379
-    _rs = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
-    _rs.settimeout(2)
-    _rs.connect((_redis_host, _redis_port))
-    _rs.close()
+# In production Redis is a hard dependency, not something to degrade away from.
+#
+# This probe runs ONCE, at import. It exists so a developer with no Redis can
+# still run the app, and that convenience is actively dangerous in production:
+# if a container starts while Redis is briefly unreachable — a host reboot,
+# which unattended-upgrades will cause — the process silently pins itself to a
+# LocMemCache, an InMemoryChannelLayer and a filesystem:// Celery broker for
+# its entire lifetime. It reports healthy. Beat then publishes into a private
+# per-container queue no worker reads, WebSockets stop crossing processes, and
+# retry_pending_closes — the only drain for a stranded live position — never
+# runs again. Nothing is logged, because the notices below are DEBUG-only.
+#
+# Failing loudly instead lets Celery do what it is designed to do: report the
+# connection error and retry until Redis is back.
+if DEBUG:
+    try:
+        from urllib.parse import urlparse as _urlparse
+        import socket as _sock
+        _parsed = _urlparse(REDIS_URL)
+        _redis_host = _parsed.hostname or "localhost"
+        _redis_port = _parsed.port or 6379
+        _rs = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+        _rs.settimeout(2)
+        _rs.connect((_redis_host, _redis_port))
+        _rs.close()
+        _redis_available = True
+    except (ConnectionRefusedError, OSError, ValueError):
+        _redis_available = False
+else:
     _redis_available = True
-except (ConnectionRefusedError, OSError, ValueError):
-    _redis_available = False
 
 if _redis_available:
     CACHES = {
@@ -277,6 +311,9 @@ else:
     if DEBUG:
         import sys
         print("[ Sauron Vision ] Redis not available — Celery using filesystem broker", file=sys.stderr)
+# A worker started before Redis is reachable must wait, not exit. Celery 6
+# changed this default, which is why requirements.txt pins below 6.
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_RESULT_BACKEND = "django-db"
 CELERY_CACHE_BACKEND = "default"
 CELERY_ACCEPT_CONTENT = ["json"]

@@ -349,12 +349,15 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute="*/15", hour="13-21"),
     },
 
-    # ── Phase 33.5 — daily PostgreSQL backup at 03:30 UTC. Skipped on
-    #              sqlite dev box; otherwise pg_dump -Fc + 30-day retention.
-    "daily-postgres-backup": {
-        "task": "bot_program.tasks.run_daily_postgres_backup",
-        "schedule": crontab(hour=3, minute=30),
-    },
+    # NB: there is deliberately no in-app "daily-postgres-backup" entry.
+    # core.backups.run_postgres_backup shells out to pg_dump, which is not in
+    # the application image (Dockerfile.prod installs libpq5, not the client
+    # binaries), and it returns {"ok": False} instead of raising -- so it
+    # recorded a SUCCESS in django-celery-results every night while producing
+    # nothing. Even repaired it wrote to /app/backups, which is in no volume
+    # and dies with the next rebuild. The `backup` service in
+    # deploy/docker-compose.yml is the single real path: it runs in an image
+    # that has both pg_dump and rclone, and writes to a named volume.
 
     # ── Phase 8 — promotion pipeline: walk every rule, auto-promote
     #              the eligible and auto-demote the degrading.

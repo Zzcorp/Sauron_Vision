@@ -153,10 +153,16 @@ class DeploymentStackTests(TestCase):
     def test_beat_uses_the_database_scheduler(self):
         self.assertIn("DatabaseScheduler", self.services["beat"]["command"])
 
-    def test_streamers_and_backup_are_opt_in(self):
+    def test_only_the_streamers_are_opt_in(self):
+        """Backups deliberately are NOT. "Optional extras" is the wrong
+        category for the only thing standing between a disk failure and
+        losing every trade, position and credential the platform recorded."""
         for name, svc in self.services.items():
-            if name.startswith("stream-") or name == "backup":
+            if name.startswith("stream-"):
                 self.assertTrue(svc.get("profiles"), name)
+            else:
+                self.assertFalse(svc.get("profiles"),
+                                 msg=f"{name} must start with the stack")
 
     def test_required_secrets_fail_loudly_when_unset(self):
         raw = (BASE / "deploy" / "docker-compose.yml").read_text(encoding="utf-8")
