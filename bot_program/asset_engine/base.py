@@ -109,6 +109,17 @@ class AssetBot(ABC):
                 price = self._mark_price(trade, client)
                 if price is None or price <= 0:
                     continue
+
+                # Exit management. Most of a trend system's P&L comes from
+                # exits, not entries: a trailing stop locks in a move that
+                # would otherwise round-trip, and a time stop releases
+                # capital from a thesis that simply never played out.
+                self._update_trailing_stop(trade, price)
+                if self._time_stop_hit(trade):
+                    if self._close_trade(trade, price, client, reason="TIME"):
+                        closed += 1
+                    continue
+
                 hit_sl = (
                     (trade.side == "BUY" and trade.stop_loss is not None
                      and price <= trade.stop_loss)
@@ -129,6 +140,52 @@ class AssetBot(ABC):
                 logger.warning("[%s_bot] manage(%s) failed: %s",
                                self.asset_class, trade.symbol, e)
         return closed
+
+    # ── exit management ──────────────────────────────────────────────────
+
+    def _update_trailing_stop(self, trade, price: Decimal) -> bool:
+        """Ratchet the stop toward price once the trade is in profit.
+
+        Opt-in via extras['trail_pct']; only ever tightens, never loosens.
+        Skipped for broker-protected trades — the resting stop lives at the
+        broker and moving only our copy would desynchronise the two.
+        """
+        extras = getattr(self.cfg, "extras", None) or {}
+        trail_pct = float(extras.get("trail_pct", 0) or 0)
+        if trail_pct <= 0 or (trade.metadata or {}).get("protected"):
+            return False
+        if trade.stop_loss is None:
+            return False
+        # Only trail once the position is actually in profit, otherwise the
+        # stop marches up on a losing trade and cuts it early.
+        in_profit = (price > trade.entry_price if trade.side == "BUY"
+                     else price < trade.entry_price)
+        if not in_profit:
+            return False
+        try:
+            from bot_program.engine.trailing import update_trailing_stop
+            return bool(update_trailing_stop(trade, price, trail_pct))
+        except Exception as e:
+            logger.warning("[%s_bot] trailing stop failed for %s: %s",
+                           self.asset_class, trade.symbol, e)
+            return False
+
+    def _time_stop_hit(self, trade) -> bool:
+        """True when a trade has been open longer than extras['max_hold_hours'].
+
+        Capital tied up in a thesis that never resolved is capital not
+        available to the next setup.
+        """
+        extras = getattr(self.cfg, "extras", None) or {}
+        max_hold = float(extras.get("max_hold_hours", 0) or 0)
+        if max_hold <= 0 or trade.opened_at is None:
+            return False
+        age_hours = (timezone.now() - trade.opened_at).total_seconds() / 3600.0
+        if age_hours < max_hold:
+            return False
+        logger.info("[%s_bot] time stop on %s after %.1fh (max %.1fh)",
+                    self.asset_class, trade.symbol, age_hours, max_hold)
+        return True
 
     # ── overridable marking / pnl / close-order hooks ────────────────────
     # OptionsBot overrides all three: its trades are premium-denominated and
@@ -463,14 +520,28 @@ class AssetBot(ABC):
         if qty <= 0:
             return None
 
-        sl = price * (1 - self.cfg.stop_loss_pct / 100) if decision.direction == "BUY" \
-            else price * (1 + self.cfg.stop_loss_pct / 100)
-        tp = price * (1 + self.cfg.take_profit_pct / 100) if decision.direction == "BUY" \
-            else price * (1 - self.cfg.take_profit_pct / 100)
+        # Volatility-normalised levels: a fixed 2% stop is a different bet on
+        # every instrument and in every regime, and it makes realized_r
+        # incomparable across the book. Falls back to the configured
+        # percentages when no ATR is available.
+        from bot_program.asset_engine.risk_levels import (
+            passes_cost_filter, stop_and_target,
+        )
+        sl, tp, level_meta = stop_and_target(
+            self.cfg, symbol, price, decision.direction)
+
+        # A planned move smaller than the round trip is negative-EV however
+        # good the signal is.
+        ok, cost_reason = passes_cost_filter(self.cfg, symbol, price, tp)
+        if not ok:
+            logger.info("[%s_bot] skipping %s — %s",
+                        self.asset_class, symbol, cost_reason)
+            return None
 
         paper = (self.cfg.mode == "paper")
         order_id = ""
-        entry_meta = {}
+        entry_meta = dict(level_meta)
+        entry_meta["cost_check"] = cost_reason
         if not paper:
             # Phase-33 idempotency — deterministic clientOrderId derived from
             # (config, symbol, signal/rule, minute-bucket). Retrying the same
@@ -656,6 +727,31 @@ class AssetBot(ABC):
                    and s.score >= self.cfg.entry_score_min]
         bearish = [s for s in active if s.direction == "bearish"
                    and s.score >= self.cfg.entry_score_min]
+
+        # Evidence-weighted path (opt-out): weigh each rule's vote by its own
+        # measured expectancy instead of counting heads, and net the two
+        # sides so one stale counter-signal can't veto a strong setup.
+        extras = getattr(self.cfg, "extras", None) or {}
+        if extras.get("use_weighted_consensus", True):
+            from bot_program.asset_engine.aggregation import weighted_consensus
+            # Default threshold mirrors what the headcount rule demanded
+            # (min_signals_for_entry × entry_score_min), so weighting is a
+            # strict generalisation of the config rather than a new bar.
+            default_threshold = (self.cfg.min_signals_for_entry
+                                 * self.cfg.entry_score_min)
+            verdict = weighted_consensus(
+                bullish, bearish, asset_class=self.asset_class,
+                min_net_weight=float(
+                    extras.get("min_net_weight", default_threshold)))
+            if verdict["direction"] == "HOLD":
+                return BotDecision("HOLD", 0, [verdict["detail"]])
+            side = bullish if verdict["direction"] == "BUY" else bearish
+            return BotDecision(
+                verdict["direction"], verdict["score"],
+                reasons=([verdict["detail"]]
+                          + [f"{s.rule_name}: {s.title}" for s in side[:3]]),
+                rule_name=verdict["rule_name"] or "asset_bot_weighted_consensus",
+            )
 
         if len(bullish) >= self.cfg.min_signals_for_entry and not bearish:
             avg = sum(s.score for s in bullish) / len(bullish)

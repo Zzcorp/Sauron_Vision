@@ -105,17 +105,21 @@ def _create_signals_and_notify(results):
 @shared_task
 @guarded_task("pipeline_signals")
 def run_signal_scan():
-    """Tier 2: Run signal scan on watchlist."""
-    from instruments.models import Instrument
+    """Tier 2: signal scan over the watchlist AND every enabled bot's symbols.
+
+    Scanning only the watchlist starved the bots: their symbols got bars but
+    never got Signal rows, so decide() could only ever return HOLD.
+    """
     from signals.engine import SignalEngine
+    from signals.universe import scan_universe
 
-    logger.info("Running signal scan on watchlist")
-
-    instruments = Instrument.objects.filter(is_watchlist=True, is_active=True)
+    instruments = scan_universe()
+    logger.info("Running signal scan on %d instruments (watchlist + bot symbols)",
+                instruments.count())
     results = SignalEngine().scan_all(instruments=instruments)
 
     new_count = _create_signals_and_notify(results)
-    logger.info("Watchlist scan complete — %d new signal(s) created.", new_count)
+    logger.info("Scan complete — %d new signal(s) created.", new_count)
     return {"status": "ok", "new_signals": new_count}
 
 
