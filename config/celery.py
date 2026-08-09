@@ -105,25 +105,32 @@ app.conf.beat_schedule = {
         "schedule": 60.0,
         "kwargs": {"watchlist_only": True},
     },
+    # Alpha Vantage free tier is 25 requests A DAY; the task now budgets
+    # them, and this cadence spends the budget across the session instead
+    # of exhausting it in the first half hour. For real forex ticks enable
+    # the OANDA streamer — free, broker-grade, already written.
     "fetch-forex-live": {
         "task": "market_data.tasks.fetch_forex_quotes",
-        "schedule": 120.0,
+        "schedule": 1800.0,
     },
     "fetch-commodity-live": {
         "task": "market_data.tasks.fetch_commodity_quotes",
         "schedule": 300.0,
     },
+    # CoinGecko's demo tier is ~10k calls/month; 120s exceeded it. The
+    # Binance streamer is the real-time source when enabled.
     "fetch-crypto-prices": {
         "task": "market_data.tasks.fetch_crypto_quotes",
-        "schedule": 120.0,
+        "schedule": 300.0,
     },
     "fetch-crypto-news": {
         "task": "market_data.tasks.fetch_crypto_news_task",
         "schedule": 600.0,
     },
+    # Marketaux free tier is 100 requests/day; 180s was ~5x over it.
     "fetch-breaking-news": {
         "task": "scraping.tasks.fetch_breaking_news",
-        "schedule": 180.0,
+        "schedule": 900.0,
     },
     "ai-process-new-news": {
         "task": "ai_agents.tasks.process_unanalyzed_news",

@@ -126,13 +126,11 @@ def save_quote_to_db(symbol):
     except Instrument.DoesNotExist:
         return None
 
-    obj, _ = LiveQuote.objects.update_or_create(
-        instrument=instrument,
-        defaults={
-            "last": quote["last"],
-            "change_pct": quote["change_pct"],
-            "volume": quote["volume"],
-            "source": "yfinance",
-        }
-    )
-    return obj
+    # yfinance is ~15 minutes delayed for most US listings, so it must not
+    # overwrite a live stream (Finnhub/IBKR/Alpaca) that wrote recently.
+    from market_data.quotes import write_quote
+    if not write_quote(symbol, last=quote["last"], source="yfinance",
+                        change_pct=quote["change_pct"],
+                        volume=quote["volume"], instrument=instrument):
+        return None
+    return LiveQuote.objects.filter(instrument=instrument).first()

@@ -1,9 +1,33 @@
 """Celery tasks for market data — REAL implementations."""
+import os
 from celery import shared_task
 from core.task_gate import guarded_task
 import logging
 
 logger = logging.getLogger(__name__)
+
+# ── daily API budgets ───────────────────────────────────────────────────
+# Free tiers are per-day, not per-minute; a per-minute limiter happily
+# burns a 25/day allowance before breakfast.
+AV_DAILY_LIMIT = int(os.getenv("ALPHA_VANTAGE_DAILY_LIMIT", "20"))
+
+
+def _budget_key(provider: str) -> str:
+    from django.utils import timezone
+    return f"apibudget:{provider}:{timezone.now():%Y%m%d}"
+
+
+def _daily_budget_remaining(provider: str, *, limit: int) -> int:
+    from django.core.cache import cache
+    used = cache.get(_budget_key(provider), 0)
+    return max(0, limit - int(used))
+
+
+def _record_api_call(provider: str, n: int = 1) -> None:
+    from django.core.cache import cache
+    key = _budget_key(provider)
+    cache.set(key, int(cache.get(key, 0)) + n, 60 * 60 * 26)
+
 
 
 @shared_task(bind=True, max_retries=3)
@@ -51,21 +75,26 @@ def fetch_forex_quotes():
     forex_instruments = Instrument.objects.filter(asset_class="forex", is_active=True, is_watchlist=True)
     fetched = 0
 
-    for inst in forex_instruments[:10]:
+    # Alpha Vantage's free tier allows 25 requests A DAY. At the old 120s
+    # cadence x 10 pairs this ran ~288x over the cap, so every call after
+    # the first few returned a throttle notice and forex quotes silently
+    # stopped updating. Budget the day's calls and spend them evenly.
+    from market_data.quotes import write_quote
+
+    budget = _daily_budget_remaining("alpha_vantage", limit=AV_DAILY_LIMIT)
+    if budget <= 0:
+        return {"status": "skipped", "reason": "alpha_vantage daily budget spent",
+                "hint": "OANDA practice streaming is free and broker-grade"}
+
+    for inst in forex_instruments[:budget]:
         from_cur = inst.symbol[:3]
         to_cur = inst.symbol[3:]
         rate = fetch_forex_rate(from_cur, to_cur)
-        if rate:
-            LiveQuote.objects.update_or_create(
-                instrument=inst,
-                defaults={
-                    "last": rate["rate"],
-                    "bid": rate.get("bid", rate["rate"]),
-                    "ask": rate.get("ask", rate["rate"]),
-                    "change_pct": 0,
-                    "source": "alpha_vantage",
-                }
-            )
+        _record_api_call("alpha_vantage")
+        if rate and write_quote(inst.symbol, last=rate["rate"],
+                                 source="alpha_vantage",
+                                 bid=rate.get("bid"), ask=rate.get("ask"),
+                                 instrument=inst):
             fetched += 1
 
     return {"status": "success", "fetched": fetched}

@@ -45,6 +45,9 @@ DECAY_RATIO = 0.5
 # Maximum lifetime for an open Signal before forced expiry.
 SIGNAL_TTL_DAYS = 7
 
+# A quote older than this is not a mark-to-market price any more.
+MAX_QUOTE_AGE_SECONDS = 900
+
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -144,8 +147,18 @@ def evaluate_signal_outcome(signal, current_price=None):
         return signal.outcome or None
 
     if current_price is None:
+        # A stale quote here is not harmless: this function stamps
+        # realized_r, which feeds decay -> actuator -> allocator and
+        # ultimately multiplies live position size. Marking outcomes
+        # against a frozen feed silently corrupts sizing.
         try:
-            current_price = signal.instrument.live_quote.last
+            quote = signal.instrument.live_quote
+            age = (timezone.now() - quote.updated_at).total_seconds()
+            if age > MAX_QUOTE_AGE_SECONDS:
+                logger.debug("signal %s: quote %.0fs old — not resolving",
+                             signal.pk, age)
+                return None
+            current_price = quote.last
         except Exception:
             return None
 

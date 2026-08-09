@@ -80,23 +80,14 @@ def discover_symbols(override: list[str] | None) -> list[str]:
 @sync_to_async
 def update_live_quote(symbol: str, last: float, change_pct: float,
                       bid: float, ask: float, volume: float):
-    from instruments.models import Instrument
-    from market_data.models import LiveQuote
+    from market_data.quotes import write_quote
     try:
-        inst = Instrument.objects.filter(symbol__iexact=symbol).first()
-        if not inst:
-            return
-        LiveQuote.objects.update_or_create(
-            instrument=inst,
-            defaults=dict(
-                last=Decimal(str(last)),
-                change_pct=Decimal(str(round(change_pct, 4))),
-                bid=Decimal(str(bid)) if bid else None,
-                ask=Decimal(str(ask)) if ask else None,
-                volume=int(volume) if volume else 0,
-                source="binance_ws",
-            ),
-        )
+        # Binance streams BTCUSDT while the Instrument row is BTCUSD, so a
+        # direct symbol match silently dropped every tick. write_quote()
+        # resolves the equivalent symbol and applies source precedence.
+        write_quote(symbol, last=last, source="binance_ws",
+                    change_pct=change_pct, bid=bid or None, ask=ask or None,
+                    volume=volume or 0)
     except Exception as e:
         log.debug("update_live_quote(%s) failed: %s", symbol, e)
 
