@@ -170,9 +170,13 @@ class OptionsRiskDenominatorTests(TestCase):
         from bot_program.models import AssetBotTrade
         inst = _instrument("SPY")
         contract = self._contract(inst)
+        # One contract risks |2.00 - 1.30| x 100 = $70. At the default 0.25%
+        # risk budget that needs $28,000 of equity before a single contract
+        # is affordable — arithmetic, not a defect. Fund it so the test
+        # exercises the metadata, not the affordability floor.
         cfg = _cfg(self.user, asset_class="options", name="OPT",
                    symbols=["SPY"], stop_loss_pct=30.0, take_profit_pct=90.0,
-                   cool_down_minutes=0)
+                   cool_down_minutes=0, capital=Decimal("50000"))
         bot = OptionsBot(cfg)
         client = MagicMock()
         with patch.object(OptionsBot, "decide",

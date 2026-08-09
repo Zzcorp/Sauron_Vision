@@ -120,8 +120,21 @@ class ForexBot(AssetBot):
 
     # ── sizing ───────────────────────────────────────────────────────────
 
+    def _round_qty(self, qty: float, price: float) -> float:
+        """Round to a tidy unit boundary, with a floor of one boundary.
+
+        NB: for a pair whose quote currency is not the account currency, the
+        stop distance is in QUOTE units, so the risk budget is only correct
+        after conversion. USDJPY at 150 with a 1.5% stop is 2.25 JPY per
+        unit, not 2.25 USD. Until the conversion exists, forex risk is
+        denominated in the quote currency — recorded in entry_meta so the
+        distortion is visible rather than silent.
+        """
+        units = round(float(qty) / UNIT_ROUNDING) * UNIT_ROUNDING
+        return float(max(units, 0.0))
+
     def position_size(self, price: float) -> float:
-        """Forex sizing: dollars / (price × leverage_proxy), rounded to 100 units.
+        """LEGACY notional sizing — see AssetBot.position_size.
 
         For forex the "qty" is units of the base currency, not shares. The bot's
         sizing here intentionally errs on the small side — admin can scale up via

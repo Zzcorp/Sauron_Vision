@@ -117,6 +117,12 @@ class IdempotencyTests(TestCase):
         from signals.models import Signal
 
         u = _user("idem_u")
+        # A live broker order requires a rule promoted to a live stage — an
+        # unregistered rule is confined to the paper venue however the config
+        # is set, so without this the entry never reaches market_order.
+        from signals.models_control import RuleControl
+        RuleControl.objects.get_or_create(rule_name="r1",
+                                          defaults={"promotion_stage": "live_full"})
         cfg = _abc(u, "stock", name="ST", symbols=["AAPL"], mode="live")
         inst, _ = Instrument.objects.get_or_create(
             symbol="AAPL", defaults={"name": "AAPL", "asset_class": "stock"})
@@ -153,6 +159,9 @@ class IdempotencyTests(TestCase):
         from signals.models import Signal
 
         u = _user("idem_dedup_u")
+        from signals.models_control import RuleControl
+        RuleControl.objects.get_or_create(rule_name="r1",
+                                          defaults={"promotion_stage": "live_full"})
         cfg = _abc(u, "stock", name="ST", symbols=["AAPL"], mode="live")
         inst, _ = Instrument.objects.get_or_create(
             symbol="AAPL", defaults={"name": "AAPL", "asset_class": "stock"})

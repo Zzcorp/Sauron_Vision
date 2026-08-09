@@ -7,11 +7,14 @@ positions into that risk is rarely intentional. Default is conservative
 
 Sizing rounds to whole shares in live mode; fractional ok in paper.
 """
+import logging
 from datetime import timedelta
 
 from django.utils import timezone
 
 from .base import AssetBot, BotDecision
+
+logger = logging.getLogger(__name__)
 
 
 # Default lookahead window: skip entries when earnings are this close.
@@ -77,12 +80,31 @@ class StockBot(AssetBot):
     # ── sizing ───────────────────────────────────────────────────────────
 
     def position_size(self, price: float) -> float:
-        """Dollar-based, rounded to whole shares (paper mode tolerates fractional)."""
+        """LEGACY notional sizing — see AssetBot.position_size. Not on the
+        entry path; _round_qty below is."""
         cap = float(self.cfg.capital)
         dollars = cap * (self.cfg.position_size_pct / 100.0)
         if price <= 0:
             return 0.0
-        # Whole shares for live; fractional ok in paper.
         if self.cfg.mode == "live":
             return float(int(dollars / price))
         return round(dollars / price, 4)
+
+    def _round_qty(self, qty: float, price: float) -> float:
+        """Whole shares live; fractional tolerated in paper.
+
+        int() truncation is why a live $10,000 config at 2% could not buy a
+        $201 stock: int(200/201) == 0, and a zero qty exits the entry path
+        with no log line. Risk sizing makes that far less likely — a 1.5%
+        stop on a 0.25% risk budget buys ~$1,667 of notional, not $200 — but
+        the floor still bites on very expensive shares, so it now says so.
+        """
+        if self.cfg.mode == "live":
+            whole = float(int(qty))
+            if whole <= 0 and qty > 0:
+                logger.info(
+                    "[stock_bot] %s at %.2f rounds to 0 whole shares from "
+                    "%.4f — the risk budget is smaller than one share",
+                    self.cfg.name, price, qty)
+            return whole
+        return round(float(qty), 4)

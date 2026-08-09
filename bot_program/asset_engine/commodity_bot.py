@@ -27,8 +27,18 @@ class CommodityBot(AssetBot):
             # Don't .save() — caller might prefer ephemeral override; runners
             # set this every tick anyway.
 
+    def _round_qty(self, qty: float, price: float) -> float:
+        """Fractional contracts allowed (paper-only for now).
+
+        Real commodity sizing needs contract specs (CL = 1000 bbl, GC =
+        100 oz); when a live broker is added those belong in
+        _value_per_unit, so that risk sizing counts a point of price as the
+        dollars it actually is.
+        """
+        return round(float(qty), 4)
+
     def position_size(self, price: float) -> float:
-        """Dollar-based, fractional contracts allowed (paper-only).
+        """LEGACY notional sizing — see AssetBot.position_size.
 
         Real commodity sizing depends on contract specs (CL = 1000 bbl, GC =
         100 oz, etc.) — those go in `extras = {"contract_size": 1000}` per

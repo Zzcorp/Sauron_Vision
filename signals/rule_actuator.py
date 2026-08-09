@@ -69,6 +69,78 @@ def is_rule_active(rule_name: str) -> bool:
     return ctrl.is_effectively_active()
 
 
+def stage_policy(rule_name: str) -> dict:
+    """What the promotion stage permits, as a VENUE decision.
+
+    The stage lane used to be a size multiplier, and that produced an
+    absurdity: SIZE_FACTORS maps both `research` and `paper` to 0.0, the bot
+    applied it with `qty *= rule_size_multiplier(...)`, and a qty of 0 exits
+    the entry path. So a rule at PAPER stage could not take the paper trade
+    the ladder was asking it for, and the evidence required to promote out of
+    paper could never be produced. The ladder was closed on itself.
+
+    A stage is not a size. It is a statement about which venue a rule has
+    earned:
+
+        research    no orders at all — the rule is being watched, not traded
+        paper       trades at full nominal size, forced onto the paper venue
+        live_small  live, quarter size
+        live_full   live, full size
+
+    A rule with no RuleControl row is treated as PAPER: it may trade, but
+    only on the paper venue, whatever the config's mode says. That is fail
+    SAFE rather than fail closed. The old default was 1.0 — an unregistered,
+    never-evaluated rule placed a live order at full size on its first ever
+    firing. Failing all the way closed would be safe too, but it walls off
+    the paper evidence the ladder needs to promote anything, so a brand-new
+    rule would never be able to earn its way up.
+
+    The distinction that matters is preserved: no rule reaches real money
+    without an explicit promotion someone made.
+
+    Returns {stage, may_trade, force_paper, live_size_factor, reason}.
+    """
+    from signals.promotion_pipeline import STAGE_ORDER
+
+    ctrl = _control_for(rule_name) if rule_name else None
+    stage = getattr(ctrl, "promotion_stage", None)
+    if ctrl is None or stage not in STAGE_ORDER:
+        return {"stage": "paper", "may_trade": True, "force_paper": True,
+                "live_size_factor": 0.0,
+                "reason": (f"rule {rule_name!r} has no promotion record — "
+                           "paper venue only until it is promoted")}
+    if stage == "research":
+        return {"stage": stage, "may_trade": False, "force_paper": True,
+                "live_size_factor": 0.0,
+                "reason": "research stage — signals only, no orders"}
+    if stage == "paper":
+        return {"stage": stage, "may_trade": True, "force_paper": True,
+                "live_size_factor": 0.0,
+                "reason": "paper stage — full size on the paper venue"}
+    if stage == "live_small":
+        return {"stage": stage, "may_trade": True, "force_paper": False,
+                "live_size_factor": 0.25, "reason": "live_small — quarter size"}
+    return {"stage": stage, "may_trade": True, "force_paper": False,
+            "live_size_factor": 1.0, "reason": "live_full — full size"}
+
+
+def admin_allocator_multiplier(rule_name: str) -> float:
+    """The admin and allocator lanes only, with the promotion lane removed.
+
+    `rule_size_multiplier` folds all three together, which is right for
+    scoring a signal and wrong for sizing a trade — see `stage_policy`.
+    Unknown rules return 1.0 here because the stage lane is what fails closed.
+    """
+    if not rule_name:
+        return 1.0
+    ctrl = _control_for(rule_name)
+    if ctrl is None:
+        return 1.0
+    admin_w = float(ctrl.weight_multiplier or 1.0) if ctrl.status == "reduced" else 1.0
+    alloc_w = float(ctrl.allocator_weight or 1.0)
+    return admin_w * alloc_w
+
+
 def rule_size_multiplier(rule_name: str) -> float:
     """Multiplicative scaling for sizing/score.
 

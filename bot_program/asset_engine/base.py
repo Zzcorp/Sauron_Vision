@@ -576,24 +576,11 @@ class AssetBot(ABC):
         if price <= 0:
             return None
 
-        qty = self.position_size(price)
-        if qty <= 0:
-            return None
-
-        # Apply Phase-5/7/8 rule_size_multiplier (admin × allocator × promotion).
-        if decision.rule_name:
-            try:
-                from signals.rule_actuator import rule_size_multiplier
-                qty *= rule_size_multiplier(decision.rule_name)
-            except Exception:
-                pass
-        if qty <= 0:
-            return None
-
+        # ── Levels FIRST, because the stop is an input to the size ───────
         # Volatility-normalised levels: a fixed 2% stop is a different bet on
         # every instrument and in every regime, and it makes realized_r
         # incomparable across the book. Falls back to the configured
-        # percentages when no ATR is available.
+        # percentages when no ATR is available, so this never returns None.
         from bot_program.asset_engine.risk_levels import (
             passes_cost_filter, stop_and_target,
         )
@@ -609,6 +596,47 @@ class AssetBot(ABC):
                         self.asset_class, symbol, cost_reason)
             return None
 
+        # ── What the promotion stage permits ─────────────────────────────
+        # A stage is a venue, not a size. Applying it as a multiplier meant
+        # `paper` mapped to 0.0 and a paper-stage rule could never take the
+        # paper trade the ladder was asking for.
+        stage = {"may_trade": True, "force_paper": False,
+                 "live_size_factor": 1.0, "stage": "", "reason": ""}
+        if decision.rule_name:
+            from signals.rule_actuator import stage_policy
+            stage = stage_policy(decision.rule_name)
+            if not stage["may_trade"]:
+                logger.info("[%s_bot] %s not traded: %s", self.asset_class,
+                            symbol, stage["reason"])
+                return None
+
+        # ── Size by RISK, not by notional ────────────────────────────────
+        sizing = self._size_for_entry(symbol, price, sl, decision)
+        qty = sizing["qty"]
+        sl = sizing["stop"]          # may have been widened; place THIS one
+
+        # Admin and allocator lanes still scale the bet. The promotion lane
+        # does not — it decided the venue above.
+        if decision.rule_name:
+            try:
+                from signals.rule_actuator import admin_allocator_multiplier
+                qty *= admin_allocator_multiplier(decision.rule_name)
+            except Exception as e:
+                logger.error("[%s_bot] sizing multiplier failed for %s: %s — "
+                             "refusing to trade at unscaled size",
+                             self.asset_class, symbol, e)
+                return None
+        if not stage["force_paper"]:
+            qty *= float(stage["live_size_factor"])
+
+        qty = self._round_qty(qty, price)
+        if qty <= 0:
+            logger.info("[%s_bot] %s sized to zero (risk budget %.2f%% of "
+                        "%s, stop %.3f%% away) — skipping", self.asset_class,
+                        symbol, sizing["risk_fraction"] * 100, self.cfg.capital,
+                        abs(price - sl) / price * 100 if price else 0)
+            return None
+
         # Shadow mode: everything is computed, nothing is submitted and no
         # row is written. The way to validate a change against live data
         # for 24-48h without risking money.
@@ -617,13 +645,24 @@ class AssetBot(ABC):
             log_shadow_entry(self.cfg, symbol, decision, price, qty)
             return None
 
-        paper = (self.cfg.mode == "paper")
+        # A paper-STAGE rule trades on the paper venue even in a live config:
+        # that is the whole point of the stage, and it is how the evidence to
+        # promote it gets produced.
+        paper = (self.cfg.mode == "paper") or bool(stage["force_paper"])
         order_id = ""
         entry_meta = dict(level_meta)
         entry_meta["cost_check"] = cost_reason
         # Frozen at entry so a trailing stop cannot rewrite the risk
-        # denominator that realized_r (and therefore sizing) depends on.
+        # denominator that realized_r (and therefore sizing) depends on. This
+        # is the POST-floor stop — the one actually placed.
         entry_meta["initial_stop_loss"] = round(float(sl), 8)
+        entry_meta["risk_fraction"] = sizing["risk_fraction"]
+        entry_meta["risk_dollars"] = sizing["risk_dollars"]
+        entry_meta["notional_fraction"] = sizing["notional_fraction"]
+        if sizing["stop_widened"]:
+            entry_meta["stop_widened"] = True
+        if stage.get("stage"):
+            entry_meta["promotion_stage"] = stage["stage"]
         if not paper:
             # Phase-33 idempotency — deterministic clientOrderId derived from
             # (config, symbol, signal/rule, minute-bucket). Retrying the same
@@ -776,12 +815,44 @@ class AssetBot(ABC):
     # ── default sizing ──────────────────────────────────────────────────
 
     def position_size(self, price: float) -> float:
-        """Default: dollar-based. Override per asset class for lot conventions."""
+        """LEGACY notional sizing. Kept only for callers outside the entry
+        path (backtests, the admin preview) — `_size_for_entry` is what sizes
+        a real trade, because this cannot see the stop and therefore cannot
+        control risk. See asset_engine/sizing.py for why that matters."""
         cap = float(self.cfg.capital)
         dollars = cap * (self.cfg.position_size_pct / 100.0)
         if price <= 0:
             return 0.0
         return round(dollars / price, 6)
+
+    # ── risk-denominated sizing ──────────────────────────────────────────
+
+    def _value_per_unit(self, symbol: str) -> float:
+        """Account-currency loss per point of price, per unit held.
+
+        1.0 for anything quoted directly in the account currency. OptionsBot
+        overrides it with the contract multiplier, because its entry and stop
+        are premium-per-share while its P&L is premium x shares.
+        """
+        return 1.0
+
+    def _size_for_entry(self, symbol: str, price: float, stop: float,
+                        decision) -> dict:
+        """Units to buy so that a stop-out costs a fixed fraction of equity."""
+        from bot_program.asset_engine.sizing import size_position
+        return size_position(
+            self.cfg, asset_class=self.asset_class, entry=price, stop=stop,
+            direction=decision.direction,
+            value_per_unit=self._value_per_unit(symbol),
+        )
+
+    def _round_qty(self, qty: float, price: float) -> float:
+        """Snap a size to what the venue will actually accept.
+
+        Applied LAST, after every multiplier, so rounding never silently
+        rescales the risk budget by more than one tick of granularity.
+        """
+        return round(float(qty), 6)
 
     # ── default decision: consume Phase-1 Signal rows ────────────────────
 

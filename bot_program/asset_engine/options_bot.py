@@ -358,22 +358,73 @@ class OptionsBot(AssetBot):
             return None
         premium = float(mid)
 
-        # Number of contracts: size against position_size_pct, premium × multiplier.
+        # Levels first: the stop is an input to the size, not an afterthought.
+        stop_pct, target_pct = self._premium_level_pcts()
+        sl = premium * (1 - stop_pct / 100)
+        tp = premium * (1 + target_pct / 100)
+
+        # What the promotion stage permits — a venue, not a size.
+        stage = {"may_trade": True, "force_paper": False,
+                 "live_size_factor": 1.0, "stage": "", "reason": ""}
+        if decision.rule_name:
+            from signals.rule_actuator import stage_policy
+            stage = stage_policy(decision.rule_name)
+            if not stage["may_trade"]:
+                logger.info("[options_bot] %s not traded: %s",
+                            symbol, stage["reason"])
+                return None
+
+        # Contracts sized by RISK. entry and stop are premium per share while
+        # P&L is premium x the multiplier, so the multiplier is exactly the
+        # account-currency value of one point of price per contract.
+        from bot_program.asset_engine.sizing import risk_fraction, qty_for_risk
         cap = float(self.cfg.capital)
-        dollars = cap * (self.cfg.position_size_pct / 100.0)
-        contract_cost = premium * float(contract.multiplier or 100)
-        n_contracts = int(dollars / contract_cost) if contract_cost > 0 else 0
+        multiplier = float(contract.multiplier or 100)
+        f = risk_fraction(self.cfg)
+        raw = qty_for_risk(cap, f, premium, sl, value_per_unit=multiplier)
+        if decision.rule_name:
+            try:
+                from signals.rule_actuator import admin_allocator_multiplier
+                raw *= admin_allocator_multiplier(decision.rule_name)
+            except Exception as e:
+                logger.error("[options_bot] sizing multiplier failed for %s: "
+                             "%s — refusing to trade unscaled", symbol, e)
+                return None
+        if not stage["force_paper"]:
+            raw *= float(stage["live_size_factor"])
+
+        n_contracts = int(raw)
         if n_contracts <= 0:
+            # Not a bug — arithmetic. One contract risks
+            # |premium - stop| x multiplier; if that already exceeds the risk
+            # budget, the honest answer is that this account cannot trade
+            # this contract at this risk level.
+            per_contract = abs(premium - sl) * multiplier
+            logger.info(
+                "[options_bot] %s strike %s skipped: one contract risks "
+                "$%.2f (%.2f%% of $%s) but the budget is $%.2f (%.2f%%). "
+                "Raise extras['risk_per_trade_pct'], pick cheaper premium, "
+                "or fund more capital.",
+                symbol, contract.strike, per_contract,
+                (per_contract / cap * 100) if cap else 0, cap, cap * f, f * 100)
             return None
 
-        # Greeks-aware cap: don't accumulate more than ~1× share-equivalent
-        # delta exposure than the position_size_pct would buy in shares.
-        # |delta| × n_contracts × multiplier should stay <= dollars / underlying_px.
+        dollars = n_contracts * premium * multiplier
+
+        # Greeks-aware cap: refuse contracts whose delta exposure dwarfs what
+        # this config would ever hold in shares. The reference has to be the
+        # configured share-equivalent budget, NOT `dollars` — `dollars` is
+        # now derived from n_contracts, so comparing the two would be
+        # self-referential and the cap would never bind.
+        share_equiv_budget = cap * (self.cfg.position_size_pct / 100.0)
         if contract.delta is not None and contract.delta != 0:
-            delta_per_contract = abs(contract.delta) * float(contract.multiplier or 100)
-            # Hard cap: if a single contract already exceeds 2× our notional
-            # share-equivalent budget (deep ITM), skip.
-            if delta_per_contract * premium > dollars * 2:
+            delta_per_contract = abs(contract.delta) * multiplier
+            if delta_per_contract * premium > share_equiv_budget * 2:
+                logger.info("[options_bot] %s strike %s skipped: one contract "
+                            "carries %.0f delta-dollars against a %.0f "
+                            "share-equivalent budget",
+                            symbol, contract.strike,
+                            delta_per_contract * premium, share_equiv_budget)
                 return None
 
         client = client_for_symbol(self.user, symbol, self.cfg)
@@ -385,10 +436,6 @@ class OptionsBot(AssetBot):
                          "for %s — refusing to trade", self.cfg.id, symbol)
             self._notify_paper_fallback(symbol)
             return None
-
-        stop_pct, target_pct = self._premium_level_pcts()
-        sl = premium * (1 - stop_pct / 100)
-        tp = premium * (1 + target_pct / 100)
 
         # Cost filter. Options are the one asset class where the round trip
         # is routinely a double-digit percentage of the position: a 1.00/1.20
@@ -419,7 +466,8 @@ class OptionsBot(AssetBot):
                         contract.strike, cost_reason)
             return None
 
-        paper = (self.cfg.mode == "paper")
+        # A paper-STAGE rule trades on the paper venue even in a live config.
+        paper = (self.cfg.mode == "paper") or bool(stage["force_paper"])
         order_id = ""
         if not paper:
             try:

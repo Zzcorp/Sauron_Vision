@@ -29,6 +29,13 @@ def _instrument(symbol="AAPL", asset_class="stock"):
 
 
 def _signal(inst, rule="r1", direction="bullish", score=0.9):
+    # These are live-execution tests, so the rule has to be promoted to a
+    # live stage. An unregistered rule is confined to the paper venue
+    # whatever the config's mode says — that is the point of the stage — and
+    # a paper entry never reaches the broker at all.
+    from signals.models_control import RuleControl
+    RuleControl.objects.get_or_create(
+        rule_name=rule, defaults={"promotion_stage": "live_full"})
     from signals.models import Signal
     return Signal.objects.create(
         instrument=inst, signal_type="composite", direction=direction,
