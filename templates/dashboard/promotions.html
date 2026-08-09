@@ -56,7 +56,11 @@
             <td>{% if r.baseline is not None %}{{ r.baseline|floatformat:2 }}R{% else %}—{% endif %}</td>
             <td style="font-size: 11px;">
               {% if r.due_demote %}<span style="color: var(--accent-red);">⚠ degraded — auto-demote pending</span>
-              {% elif r.eligible_promote %}<span style="color: var(--accent-green);">✓ eligible to promote</span>
+              {% elif r.eligible_promote and r.evidence_ok is False %}
+                <span style="color: var(--accent-gold);">⏸ held — {{ r.evidence_reason }}</span>
+              {% elif r.eligible_promote %}
+                <span style="color: var(--accent-green);">✓ eligible to promote</span>
+                {% if r.evidence_reason %}<div style="color: var(--text-muted);">{{ r.evidence_reason }}</div>{% endif %}
               {% else %}<span style="color: var(--text-muted);">stable</span>{% endif %}
             </td>
             {% if is_admin %}

@@ -16,6 +16,15 @@ def promotions_dashboard(request):
     rows = []
     for ctrl in rules:
         s = _stats_since(ctrl.rule_name, days_window=90)
+
+        # Recent live/paper stats say a rule *may* advance; walk-forward
+        # evidence says whether it has earned real money exposure.
+        eligible = is_eligible_for_promotion(ctrl.rule_name)
+        evidence_ok, evidence_reason = (None, "")
+        if eligible:
+            from signals.promotion_evidence import gate_promotion
+            evidence_ok, evidence_reason = gate_promotion(ctrl.rule_name, eligible)
+
         rows.append({
             "rule": ctrl.rule_name,
             "stage": ctrl.promotion_stage,
@@ -25,8 +34,11 @@ def promotions_dashboard(request):
             "n_recent": s["n"],
             "expectancy_recent": s["expectancy"],
             "hit_rate_recent": s["hit_rate"],
-            "eligible_promote": is_eligible_for_promotion(ctrl.rule_name),
+            "eligible_promote": eligible,
             "due_demote": is_due_for_demotion(ctrl.rule_name),
+            # Why a rule that looks eligible is still not going live.
+            "evidence_ok": evidence_ok,
+            "evidence_reason": evidence_reason,
         })
 
     stage_counts = Counter(r["stage"] for r in rows)

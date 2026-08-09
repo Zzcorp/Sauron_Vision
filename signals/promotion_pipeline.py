@@ -345,6 +345,7 @@ def auto_evaluate_all_rules() -> dict:
 
     promoted: list[str] = []
     demoted: list[str] = []
+    blocked: list[dict] = []
     for ctrl in RuleControl.objects.all():
         # Skip rules that are admin-paused; admin lane wins.
         if ctrl.status == "paused":
@@ -357,11 +358,24 @@ def auto_evaluate_all_rules() -> dict:
                 continue
             target = is_eligible_for_promotion(ctrl.rule_name)
             if target is not None:
-                _transition(ctrl.rule_name, target, user=None, reason="auto_promote")
+                # A good recent live/paper record is a small, recent sample.
+                # Before risking real money, require out-of-sample evidence
+                # from the backtester that already drives the same decide().
+                from signals.promotion_evidence import gate_promotion
+                allowed, why = gate_promotion(ctrl.rule_name, target)
+                if not allowed:
+                    logger.info("[promotion] %s held at %s — %s",
+                                ctrl.rule_name, ctrl.promotion_stage, why)
+                    blocked.append({"rule_name": ctrl.rule_name,
+                                     "target": target, "reason": why})
+                    continue
+                _transition(ctrl.rule_name, target, user=None,
+                            reason=f"auto_promote ({why})")
                 promoted.append(ctrl.rule_name)
         except Exception as e:
             logger.warning("[promotion] auto-evaluation failed for %s: %s",
                            ctrl.rule_name, e)
 
-    return {"promoted": promoted, "demoted": demoted,
-            "n_promoted": len(promoted), "n_demoted": len(demoted)}
+    return {"promoted": promoted, "demoted": demoted, "blocked": blocked,
+            "n_promoted": len(promoted), "n_demoted": len(demoted),
+            "n_blocked": len(blocked)}
