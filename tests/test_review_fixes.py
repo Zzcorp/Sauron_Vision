@@ -114,14 +114,24 @@ class CloseOrderingTests(TestCase):
         self.user = _user("co_u")
         self.cfg = _cfg(self.user)
 
-    def test_protective_legs_are_not_cancelled_when_close_succeeds(self):
+    def test_protective_legs_are_cancelled_after_the_close_never_before(self):
+        """The invariant is the ORDER, not the absence. Cancelling up front
+        leaves a live unprotected position whenever the close then fails —
+        but leaving the legs resting after a successful close is its own
+        bug: the stop later fires against a flat book and opens a reverse
+        position no row in our database describes. Close first, then strip.
+        """
         from bot_program.asset_engine.stock_bot import StockBot
         trade = _trade(self.cfg, metadata={"protective_order_ids": ["sl1"]})
         client = MagicMock()
         client.market_order = MagicMock(return_value={"orderId": "1"})
         StockBot(self.cfg)._close_trade(trade, Decimal("101"), client,
                                          reason="MANUAL")
-        client.cancel_order.assert_not_called()
+        names = [c[0] for c in client.mock_calls]
+        self.assertIn("market_order", names)
+        self.assertIn("cancel_order", names)
+        self.assertLess(names.index("market_order"), names.index("cancel_order"))
+        client.cancel_order.assert_called_once_with("sl1")
 
     def test_legs_cancelled_then_close_retried_when_broker_rejects(self):
         """Alpaca rejects a close while the bracket holds the shares — the

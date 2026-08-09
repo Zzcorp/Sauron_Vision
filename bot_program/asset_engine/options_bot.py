@@ -413,6 +413,13 @@ class OptionsBot(AssetBot):
                 "iv_at_entry": contract.iv,
                 "occ_symbol": contract.symbol or "",
                 "underlying_signal_direction": decision.direction,
+                # Frozen at entry: a trailing stop rewrites trade.stop_loss,
+                # and grading against the trailed value makes pnl and risk
+                # the same quantity, so every trailed winner scores ~1R.
+                # These are premium-denominated like entry_price, which is
+                # the scale grade_bot_trade works in for options.
+                "initial_stop_loss": round(float(sl), 8),
+                "cost_check": cost_reason,
             },
         )
         return {"trade_id": trade.id, "symbol": symbol,

@@ -145,6 +145,82 @@ class RiskDenominatorTests(TestCase):
                                float(t.stop_loss), places=4)
 
 
+class OptionsRiskDenominatorTests(TestCase):
+    """The options bot builds its own metadata dict rather than reusing the
+    base entry_meta, so the initial-stop fix skipped it entirely — and
+    options are where the fix matters most, because a 30% premium stop with
+    a trail attached is exactly the shape that grades every winner as 1R."""
+
+    def setUp(self):
+        self.user = _user("oi_u")
+
+    def _contract(self, inst):
+        from bot_program.options_models import OptionContract
+        return OptionContract.objects.create(
+            underlying=inst, symbol="SPY  C00500000",
+            strike=Decimal("500"),
+            expiry=(timezone.now() + timedelta(days=30)).date(),
+            right="C", multiplier=100, delta=0.40, iv=0.25,
+            bid=Decimal("1.95"), ask=Decimal("2.05"),
+            last_price=Decimal("2.00"))
+
+    def test_options_entry_records_the_stop_it_opened_with(self):
+        from bot_program.asset_engine.options_bot import OptionsBot
+        from bot_program.asset_engine.base import BotDecision
+        from bot_program.models import AssetBotTrade
+        inst = _instrument("SPY")
+        contract = self._contract(inst)
+        cfg = _cfg(self.user, asset_class="options", name="OPT",
+                   symbols=["SPY"], stop_loss_pct=30.0, take_profit_pct=90.0,
+                   cool_down_minutes=0)
+        bot = OptionsBot(cfg)
+        client = MagicMock()
+        with patch.object(OptionsBot, "decide",
+                          return_value=BotDecision("BUY", 0.9, [], "r1")),              patch.object(OptionsBot, "select_contract", return_value=contract),              patch("bot_program.engine.broker_router.client_for_symbol",
+                   return_value=client):
+            bot.scan_symbol("SPY")
+        t = AssetBotTrade.objects.filter(config=cfg).first()
+        self.assertIsNotNone(t, "options entry did not open a trade")
+        self.assertIn("initial_stop_loss", t.metadata or {})
+        # Premium-denominated, same scale as entry_price — not the underlying.
+        self.assertAlmostEqual(float(t.metadata["initial_stop_loss"]),
+                               float(t.stop_loss), places=4)
+        self.assertLess(float(t.metadata["initial_stop_loss"]),
+                        float(t.entry_price))
+
+
+class QuietTickQueryBudgetTests(TestCase):
+    """Hoisting the stats aggregation to the top of weighted_consensus made
+    every tick pay for six months of history — including the overwhelming
+    majority where nothing clears entry_score_min and there is not a single
+    vote to weigh. Fixing a query bomb by moving it earlier is not fixing
+    it."""
+
+    def setUp(self):
+        self.user = _user("qt_u")
+        self.inst = _instrument("QTSYM")
+
+    def test_no_votes_means_no_aggregation(self):
+        from bot_program.asset_engine import aggregation
+        calls = []
+        with patch.object(aggregation, "_signal_stats",
+                          side_effect=lambda: (calls.append(1), {})[1]):
+            verdict = aggregation.weighted_consensus([], [],
+                                                     asset_class="stock")
+        self.assertEqual(verdict["direction"], "HOLD")
+        self.assertEqual(calls, [])
+
+    def test_one_vote_still_aggregates_exactly_once(self):
+        from bot_program.asset_engine import aggregation
+        calls = []
+        with patch.object(aggregation, "_signal_stats",
+                          side_effect=lambda: (calls.append(1), {})[1]):
+            aggregation.weighted_consensus(
+                [_signal(self.inst, "bullish", 0.8, f"r{i}") for i in range(5)],
+                [], asset_class="stock")
+        self.assertEqual(len(calls), 1)
+
+
 # ── 2. The headcount the config promises must be the headcount enforced ──
 
 class HeadcountFloorTests(TestCase):
@@ -301,6 +377,70 @@ class LiveExitManagementTests(TestCase):
                    return_value=client):
             StockBot(cfg).manage_positions()
         self.assertEqual(AssetBotTrade.objects.get(pk=t.pk).status, "OPEN")
+
+
+class OrphanedBracketLegTests(TestCase):
+    """Closing a bracketed position does not retire the bracket. The legs
+    stay resting at the broker, and the stop eventually fires against a
+    flat book — opening a brand-new position in the opposite direction that
+    no row in our database describes, so nothing manages or closes it.
+
+    Cancelling was only attempted when the close was REJECTED. Routing the
+    time stop through protected trades made the successful-close path the
+    common one, so the gap had to be shut."""
+
+    def setUp(self):
+        self.user = _user("ob_u")
+
+    def _live_close(self, **trade_kw):
+        from bot_program.asset_engine import StockBot
+        cfg = _cfg(self.user, name="OB", mode="live")
+        t = _trade(cfg, paper=False,
+                   metadata={"protected": True,
+                             "protective_order_ids": ["leg-sl", "leg-tp"]},
+                   **trade_kw)
+        client = MagicMock()
+        client.ticker = MagicMock(return_value={"lastPrice": "101"})
+        StockBot(cfg)._close_trade(t, Decimal("101"), client, reason="TIME")
+        return client
+
+    def test_legs_are_cancelled_after_a_successful_close(self):
+        client = self._live_close()
+        cancelled = {c.args[0] for c in client.cancel_order.call_args_list}
+        self.assertEqual(cancelled, {"leg-sl", "leg-tp"})
+
+    def test_a_broker_that_cannot_cancel_does_not_break_the_close(self):
+        """cancel_order is best-effort — a broker that rejects it must not
+        leave the row OPEN while the position is actually flat."""
+        from bot_program.asset_engine import StockBot
+        from bot_program.models import AssetBotTrade
+        cfg = _cfg(self.user, name="OB2", mode="live")
+        t = _trade(cfg, paper=False,
+                   metadata={"protected": True,
+                             "protective_order_ids": ["leg-sl"]})
+        client = MagicMock()
+        client.cancel_order = MagicMock(side_effect=RuntimeError("nope"))
+        self.assertTrue(
+            StockBot(cfg)._close_trade(t, Decimal("101"), client, reason="TIME"))
+        self.assertEqual(AssetBotTrade.objects.get(pk=t.pk).status, "CLOSED")
+
+    def test_a_rejected_close_still_cancels_then_retries(self):
+        """The original path has to survive: legs are stripped only after
+        the close is refused, never speculatively — cancelling up front
+        would leave a live, unprotected position whenever the close then
+        fails."""
+        from bot_program.asset_engine import StockBot
+        cfg = _cfg(self.user, name="OB3", mode="live")
+        t = _trade(cfg, paper=False,
+                   metadata={"protected": True,
+                             "protective_order_ids": ["leg-sl"]})
+        client = MagicMock()
+        client.market_order = MagicMock(
+            side_effect=[RuntimeError("held by bracket"), {"status": "FILLED"}])
+        self.assertTrue(
+            StockBot(cfg)._close_trade(t, Decimal("101"), client, reason="TIME"))
+        client.cancel_order.assert_called_once_with("leg-sl")
+        self.assertEqual(client.market_order.call_count, 2)
 
 
 # ── 5. The cost filter has to be able to reject something ────────────────

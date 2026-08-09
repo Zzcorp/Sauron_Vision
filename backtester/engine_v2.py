@@ -28,6 +28,12 @@ class BacktestPosition:
     reasons: list = field(default_factory=list)
     high_water: float = 0.0  # for trailing
     low_water: float = 1e18  # for trailing
+    # The stop this position OPENED with. `stop_loss` is ratcheted by the
+    # trailing logic, so it is not the risk the trade was taken with —
+    # measuring R against it makes pnl and risk the same quantity and every
+    # trailing winner scores ~1R, which is how a strategy that trails comes
+    # to look identical to one that does not.
+    initial_stop_loss: float = 0.0
 
 
 @dataclass
@@ -113,7 +119,8 @@ class BacktestEngineV2:
         fill = self._apply_slippage(price, side, qty)
         pos = BacktestPosition(
             symbol=symbol, side=side, entry_price=fill, qty=qty,
-            stop_loss=sl, take_profit=tp, entry_idx=idx, entry_ts=ts,
+            stop_loss=sl, initial_stop_loss=sl,
+            take_profit=tp, entry_idx=idx, entry_ts=ts,
             score=getattr(decision, "score", 0.0),
             reasons=list(getattr(decision, "reasons", [])),
             high_water=fill, low_water=fill,
@@ -133,7 +140,8 @@ class BacktestEngineV2:
             pnl = (pos.entry_price - fill) * pos.qty
             pnl_pct = (pos.entry_price - fill) / pos.entry_price * 100
 
-        risk_per_unit = abs(pos.entry_price - pos.stop_loss)
+        risk_per_unit = abs(pos.entry_price - (pos.initial_stop_loss
+                                                or pos.stop_loss))
         r_mult = ((fill - pos.entry_price) / risk_per_unit) if risk_per_unit > 0 else 0
         if pos.side == "SELL":
             r_mult = -r_mult
@@ -159,20 +167,14 @@ class BacktestEngineV2:
             return
         pos = self.open_positions[symbol]
         high, low = float(bar["high"]), float(bar["low"])
-        pos.high_water = max(pos.high_water, high)
-        pos.low_water = min(pos.low_water, low)
 
-        # Trailing stop adjustment (if configured)
-        if trail_pct and trail_pct > 0:
-            if pos.side == "BUY":
-                trail_sl = pos.high_water * (1 - trail_pct / 100)
-                if trail_sl > pos.stop_loss:
-                    pos.stop_loss = trail_sl
-            else:
-                trail_sl = pos.low_water * (1 + trail_pct / 100)
-                if trail_sl < pos.stop_loss:
-                    pos.stop_loss = trail_sl
-
+        # Exits resolve against the levels as they stood when this bar
+        # OPENED. Ratcheting the stop on this bar's high and then testing
+        # this bar's low against the new level assumes the high came first
+        # — a coin flip the backtest always wins. That look-ahead turns
+        # round-trip bars into exits at the trailed price and flatters
+        # every trailing strategy, which then clears a promotion gate the
+        # live version cannot.
         if pos.side == "BUY":
             if low <= pos.stop_loss:
                 self._close_position(pos, pos.stop_loss, ts, "SL")
@@ -187,6 +189,20 @@ class BacktestEngineV2:
             if low <= pos.take_profit:
                 self._close_position(pos, pos.take_profit, ts, "TP")
                 return
+
+        # Survived the bar: now record its extremes and ratchet the stop
+        # for the NEXT one.
+        pos.high_water = max(pos.high_water, high)
+        pos.low_water = min(pos.low_water, low)
+        if trail_pct and trail_pct > 0:
+            if pos.side == "BUY":
+                trail_sl = pos.high_water * (1 - trail_pct / 100)
+                if trail_sl > pos.stop_loss:
+                    pos.stop_loss = trail_sl
+            else:
+                trail_sl = pos.low_water * (1 + trail_pct / 100)
+                if trail_sl < pos.stop_loss:
+                    pos.stop_loss = trail_sl
 
     def _update_equity(self, current_prices, ts):
         equity = self.capital

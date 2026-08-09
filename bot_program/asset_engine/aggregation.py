@@ -107,13 +107,19 @@ def weighted_consensus(bullish, bearish, *, asset_class: str = "",
     two independent confirmations — the config would read as "2 signals"
     while the bot traded on one.
     """
-    # One stats aggregation for the whole decision, shared by every rule.
-    stats = _signal_stats()
+    # One stats aggregation for the whole decision, shared by every rule —
+    # and computed only if some rule actually needs weighing. Most ticks
+    # find nothing above entry_score_min on either side, and a decision
+    # with no votes to weigh should not pay for six months of history.
+    stats_cache: list = []
     weights: dict[str, float] = {}
 
     def weight_for(rule: str) -> float:
         if rule not in weights:
-            weights[rule] = rule_weight(rule, asset_class, signal_stats=stats)
+            if not stats_cache:
+                stats_cache.append(_signal_stats())
+            weights[rule] = rule_weight(rule, asset_class,
+                                        signal_stats=stats_cache[0])
         return weights[rule]
 
     def side_weight(signals):

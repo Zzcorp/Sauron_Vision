@@ -291,6 +291,13 @@ class AssetBot(ABC):
                         self.asset_class, trade.symbol)
                     self._cancel_protective_orders(trade, client)
                     self._submit_close_order(trade, client, client_order_id)
+                else:
+                    # The close went through, so the bracket's resting legs
+                    # are now orphaned. Left alone, the stop eventually
+                    # fires against a flat book and opens a brand-new
+                    # position in the opposite direction — unmonitored,
+                    # because no row in our database describes it.
+                    self._cancel_protective_orders(trade, client)
             except Exception as e:
                 logger.error("[%s_bot] live close order failed for %s: %s — "
                              "marking CLOSE_PENDING",
