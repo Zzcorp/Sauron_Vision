@@ -4,10 +4,13 @@ from __future__ import annotations
 import logging
 from celery import shared_task
 
+from ai_agents.spend import guard as spend_guard
+
 logger = logging.getLogger(__name__)
 
 
 @shared_task(name="brain.tasks.run_sauron_mind")
+@spend_guard(tier="balanced", estimated_usd=0.15)
 def run_sauron_mind() -> dict:
     """Beat task — every 30min. Runs one synthesis cycle."""
     from .synthesizer import synthesize_now
@@ -23,6 +26,7 @@ def resolve_brain_predictions() -> dict:
 
 
 @shared_task(name="brain.tasks.run_critic_pass")
+@spend_guard(tier="deep", estimated_usd=0.4)
 def run_critic_pass(*, max_n: int = 5) -> dict:
     """Beat task — every 30 min. Audits up to `max_n` pending hypotheses
     via the Opus 4.7 critic agent. Bounded cost ($0.50-1.50/day target)."""
@@ -39,6 +43,7 @@ def run_consolidation() -> dict:
 
 
 @shared_task(name="brain.tasks.run_strategist")
+@spend_guard(tier="deep", estimated_usd=0.3)
 def run_strategist() -> dict:
     """Beat task — daily 06:00 UTC. Produces a user-facing briefing using
     the full Sauron stack (brain + knowledge graph + hypothesis market)."""
@@ -47,6 +52,7 @@ def run_strategist() -> dict:
 
 
 @shared_task(name="brain.tasks.run_strategy_generator")
+@spend_guard(tier="deep", estimated_usd=0.3)
 def run_strategy_generator(*, max_proposals: int = 3) -> dict:
     """Beat task — weekly Sun 04:00 UTC. Proposes 1-3 new OpportunitySetups
     by composing existing evaluators in novel ways. Land at is_active=False
@@ -65,6 +71,7 @@ def run_auto_demoter() -> dict:
 
 
 @shared_task(name="brain.tasks.run_earnings_reviewer")
+@spend_guard(tier="balanced", estimated_usd=0.2)
 def run_earnings_reviewer() -> dict:
     """Beat task — every 4h. Walks recent earnings events for held symbols
     and dispatches the EarningsReviewerAgent (Opus 4.7) to produce a deep

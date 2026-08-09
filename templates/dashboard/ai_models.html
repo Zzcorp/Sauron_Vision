@@ -17,6 +17,14 @@
         <span class="oc-strip-sub">across all agents</span>
     </div>
     <div class="oc-strip-cell">
+        <span class="oc-strip-label">TODAY</span>
+        <span class="oc-strip-value"{% if budget_remaining == 0 %} style="color:var(--danger);"{% endif %}>${{ budget_spent_today }}</span>
+        <span class="oc-strip-sub">
+            {% if budget_remaining is None %}no daily cap
+            {% else %}${{ budget_remaining }} left of ${{ budget_daily }}{% endif %}
+        </span>
+    </div>
+    <div class="oc-strip-cell">
         <span class="oc-strip-label">MODELS AVAILABLE</span>
         <span class="oc-strip-value">{{ catalog|length }}</span>
         <span class="oc-strip-sub">in catalog</span>

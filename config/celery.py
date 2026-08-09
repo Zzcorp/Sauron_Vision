@@ -50,9 +50,11 @@ app.conf.task_routes = {
 app.conf.beat_schedule = {
 
     # ── PHASE 37: Sauron's Mind synthesizer ───────────────────
+    # Hourly, not half-hourly: the world does not change materially every
+    # 30 minutes, and this is the largest recurring AI cost in the system.
     "sauron-mind-synthesize": {
         "task": "brain.tasks.run_sauron_mind",
-        "schedule": 1800.0,  # every 30 minutes
+        "schedule": 3600.0,
     },
     "sauron-mind-resolve-predictions": {
         "task": "brain.tasks.resolve_brain_predictions",
@@ -60,9 +62,11 @@ app.conf.beat_schedule = {
     },
 
     # ── PHASE 38: Critic + nightly consolidation ──────────────
+    # The critic is deep-tier and the single most expensive recurring call.
+    # Hypotheses do not arrive fast enough to justify 48 passes a day.
     "sauron-critic-pass": {
         "task": "brain.tasks.run_critic_pass",
-        "schedule": 1800.0,  # every 30 min, bounded by max_n
+        "schedule": 7200.0,
     },
     "sauron-consolidation-nightly": {
         "task": "brain.tasks.run_consolidation",
@@ -84,9 +88,10 @@ app.conf.beat_schedule = {
         "task": "brain.tasks.run_earnings_reviewer",
         "schedule": 14400.0,  # every 4 hours
     },
+    # Deterministic detectors, no LLM call — cheap, so it stays frequent.
     "sauron-anomaly-scanner": {
         "task": "brain.tasks.run_anomaly_scanner",
-        "schedule": 1800.0,  # every 30 min, paired with brain synthesis
+        "schedule": 1800.0,
     },
 
     # ── UPGRADE-5: Funding alerts + retention ─────────────────

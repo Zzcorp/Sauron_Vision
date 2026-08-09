@@ -141,8 +141,14 @@ def ai_models_dashboard(request):
         u["known"] = known_model(u["model"])
     total_cost = sum(float(u["cost"] or 0) for u in usage)
 
+    from ai_agents.spend import daily_budget, remaining_today, spent_today
+
     return render(request, "dashboard/ai_models.html", {
         "page_id": "ai_models",
+        "budget_daily": daily_budget(),
+        "budget_spent_today": round(spent_today(), 4),
+        "budget_remaining": (None if remaining_today() == float("inf")
+                              else round(remaining_today(), 4)),
         "tier_rows": tier_rows,
         "agent_groups": agent_groups,
         "catalog": [
