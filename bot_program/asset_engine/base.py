@@ -52,6 +52,12 @@ class AssetBot(ABC):
 
     def tick(self) -> dict:
         """Run one cycle. Returns a summary dict for logging."""
+        from bot_program.asset_engine.safety import write_heartbeat
+
+        # Heartbeat first: a bot that dies mid-tick should still show when
+        # it was last alive on the health page.
+        write_heartbeat(self.cfg, status="RUNNING")
+
         managed = self.manage_positions()
         ok, gate_reason = self.can_open_new()
         opened = []
@@ -67,6 +73,8 @@ class AssetBot(ABC):
                 except Exception as e:
                     logger.warning("[%s_bot] scan_symbol(%s) failed: %s",
                                    self.asset_class, symbol, e)
+
+        write_heartbeat(self.cfg, status="OK", note=gate_reason)
         return {
             "asset_class": self.asset_class, "config_id": self.cfg.id,
             "managed": managed, "opened": opened, "gate_reason": gate_reason,
@@ -363,6 +371,18 @@ class AssetBot(ABC):
 
     def can_open_new(self) -> tuple[bool, str]:
         from bot_program.models import AssetBotTrade
+        from bot_program.asset_engine.safety import (
+            CircuitBreakers, notify_circuit_breaker,
+        )
+
+        # Circuit breakers: stop opening when the recent record says
+        # something is wrong. Never force-closes — an automated system that
+        # starts closing on a heuristic is worse than one that just stops.
+        allowed, reasons = CircuitBreakers(self.cfg).check_all()
+        if not allowed:
+            notify_circuit_breaker(self.cfg, reasons)
+            return (False, "circuit breaker: " + "; ".join(reasons))
+
         # CLOSE_PENDING still holds capital/exposure at the broker.
         open_count = AssetBotTrade.objects.filter(
             config=self.cfg, status__in=("OPEN", "CLOSE_PENDING")).count()
@@ -536,6 +556,14 @@ class AssetBot(ABC):
         if not ok:
             logger.info("[%s_bot] skipping %s — %s",
                         self.asset_class, symbol, cost_reason)
+            return None
+
+        # Shadow mode: everything is computed, nothing is submitted and no
+        # row is written. The way to validate a change against live data
+        # for 24-48h without risking money.
+        from bot_program.asset_engine.safety import is_shadow, log_shadow_entry
+        if is_shadow(self.cfg):
+            log_shadow_entry(self.cfg, symbol, decision, price, qty)
             return None
 
         paper = (self.cfg.mode == "paper")

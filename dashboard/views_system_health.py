@@ -211,6 +211,23 @@ def check_bot_heartbeats(user) -> dict:
              if _age(last_by_config.get(cfg.id)) is None
              or _age(last_by_config.get(cfg.id)) > 86400]
 
+    # A bot that hasn't ticked at all is a different (worse) problem than
+    # one that ticked and found nothing to do.
+    from bot_program.asset_engine.safety import (
+        HEARTBEAT_STALE_SECONDS, heartbeat_age_seconds,
+    )
+    dead = []
+    for cfg in configs:
+        age = heartbeat_age_seconds(cfg)
+        if age is None or age > HEARTBEAT_STALE_SECONDS:
+            dead.append(f"{cfg.name} ({_fmt_age(age)})")
+    if dead:
+        return _check("bots", "Bot activity", "fail",
+                      f"{len(dead)}/{len(configs)} bots have not ticked: "
+                      + ", ".join(dead[:4]),
+                      "The bot tick task may not be running — check the "
+                      "worker and the pipeline_asset_bots component")
+
     active = len(configs) - len(quiet)
     if not quiet:
         return _check("bots", "Bot activity", "ok",
