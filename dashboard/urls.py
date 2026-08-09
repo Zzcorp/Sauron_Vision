@@ -62,6 +62,7 @@ from .views_calibration import calibration_dashboard
 from .views_ai_models import ai_models_dashboard
 from .views_system_health import system_health
 from .views_forensics import forensics_list, forensics_detail
+from .views_bot_charts import bot_charts
 from .views_allocator import allocator_dashboard
 from .views_eye import eye_dashboard, eye_partial
 from .views_eye_drilldown import eye_gate_events, eye_fills, eye_exposure
@@ -151,6 +152,7 @@ urlpatterns = [
     path("calibration/", calibration_dashboard, name="calibration_dashboard"),
     path("ai-models/", ai_models_dashboard, name="ai_models_dashboard"),
     path("health/", system_health, name="system_health"),
+    path("bot-charts/", bot_charts, name="bot_charts"),
     path("forensics/", forensics_list, name="forensics_list"),
     path("forensics/<int:trade_id>/", forensics_detail, name="forensics_detail"),
     path("allocator/", allocator_dashboard, name="allocator_dashboard"),

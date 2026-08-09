@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Bot Performance Charts — Sauron Vision{% endblock %}
+{% block page_title %}📈 BOT PERFORMANCE{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CLOSED TRADES</span>
+        <span class="oc-strip-value">{{ stats.n }}</span>
+        <span class="oc-strip-sub">{{ stats.graded }} graded · {{ days }}d</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">EXPECTANCY</span>
+        <span class="oc-strip-value">{{ stats.expectancy|default_if_none:"—" }}R</span>
+        <span class="oc-strip-sub">per trade</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">WIN RATE</span>
+        <span class="oc-strip-value">{{ stats.win_rate|default_if_none:"—" }}</span>
+        <span class="oc-strip-sub">best {{ stats.best_r|default_if_none:"—" }}R · worst {{ stats.worst_r|default_if_none:"—" }}R</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PROFIT FACTOR</span>
+        <span class="oc-strip-value">{{ stats.profit_factor|default_if_none:"—" }}</span>
+        <span class="oc-strip-sub">gross win / gross loss</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MAX DRAWDOWN</span>
+        <span class="oc-strip-value">{{ stats.max_drawdown_pct }}%</span>
+        <span class="oc-strip-sub">peak to trough</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">NET P&amp;L</span>
+        <span class="oc-strip-value">{{ stats.total_pnl }}</span>
+        <span class="oc-strip-sub">realised</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Scope</span></div>
+    <form method="get" style="display:flex; gap:12px; align-items:end; padding:0 16px 16px;">
+        <div>
+            <label class="form-label">BOT</label>
+            <select name="config" class="form-input" style="min-width:220px;">
+                <option value="">all bots</option>
+                {% for c in configs %}
+                <option value="{{ c.id }}" {% if selected and selected.id == c.id %}selected{% endif %}>
+                    {{ c.asset_class }} · {{ c.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="form-label">DAYS</label>
+            <select name="days" class="form-input">
+                {% for d in "30,90,180,365"|slice:":0" %}{% endfor %}
+                <option value="30" {% if days == 30 %}selected{% endif %}>30</option>
+                <option value="90" {% if days == 90 %}selected{% endif %}>90</option>
+                <option value="180" {% if days == 180 %}selected{% endif %}>180</option>
+                <option value="365" {% if days == 365 %}selected{% endif %}>365</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">▶ Apply</button>
+    </form>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:20px;">
+    <div class="card-header">
+        <span class="card-title">Equity curve</span>
+        <span style="color:var(--text-muted); font-size:12px;">
+            {{ curve.first }} → {{ curve.last }}
+        </span>
+    </div>
+    <div style="padding:16px; overflow-x:auto;">
+        {% if curve.path %}
+        <svg viewBox="0 0 720 200" width="100%" height="200"
+             preserveAspectRatio="none" role="img"
+             aria-label="Cumulative equity after each closed trade">
+            <line x1="8" y1="199" x2="712" y2="199" stroke="var(--border)" stroke-width="1"/>
+            <path d="{{ curve.path }}" fill="none" stroke-width="2"
+                  stroke="{% if curve.up %}var(--success){% else %}var(--danger){% endif %}"/>
+        </svg>
+        <div style="display:flex; justify-content:space-between; color:var(--text-muted); font-size:11px;">
+            <span>low {{ curve.min }}</span><span>high {{ curve.max }}</span>
+        </div>
+        {% else %}
+        <p style="color:var(--text-muted);">
+            Not enough closed trades yet to draw a curve.
+        </p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:20px;">
+    <div class="card-header">
+        <span class="card-title">R distribution</span>
+        <span style="color:var(--text-muted); font-size:12px;">
+            {% if stats.top_trade_share %}
+            best trade carries {{ stats.top_trade_share }} of total R —
+            {% if stats.top_trade_share > 0.5 %}the edge rests on one outlier{% else %}spread across trades{% endif %}
+            {% endif %}
+        </span>
+    </div>
+    {% if histogram %}
+    <div style="padding:16px;">
+        {% for b in histogram %}
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+            <span style="width:90px; font-size:11px; color:var(--text-muted);">{{ b.label }}</span>
+            <div style="flex:1; background:var(--bg-elev); height:16px; border-radius:3px; overflow:hidden;">
+                <div style="width:{{ b.pct }}%; height:100%;
+                            background:{% if b.win %}var(--success){% else %}var(--danger){% endif %};
+                            opacity:.75;"></div>
+            </div>
+            <span style="width:36px; text-align:right; font-size:12px;">{{ b.n }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="padding:16px; color:var(--text-muted);">No graded trades in this window.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up">
+    <div class="card-header"><span class="card-title">Most recent closes</span></div>
+    {% if recent %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Closed</th><th>Bot</th><th>Symbol</th><th>Side</th>
+            <th>P&amp;L</th><th>R</th><th>Outcome</th><th></th></tr></thead>
+        <tbody>
+        {% for t in recent %}
+        <tr>
+            <td>{{ t.closed_at|date:"m-d H:i" }}</td>
+            <td style="font-size:12px;">{{ t.config.name }}</td>
+            <td><strong>{{ t.symbol }}</strong></td>
+            <td>{{ t.side }}</td>
+            <td>{{ t.pnl|default_if_none:"—" }}</td>
+            <td>{{ t.realized_r|default_if_none:"—" }}</td>
+            <td>{{ t.outcome|default:"—" }}</td>
+            <td><a href="{% url 'forensics_detail' t.id %}" class="btn btn-sm">Why?</a></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="padding:16px; color:var(--text-muted);">No closed trades in this window.</p>
+    {% endif %}
+</div>
+{% endblock %}

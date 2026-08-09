@@ -24,17 +24,33 @@ class MobileCSSPresenceTests(TestCase):
         self.user = _user()
         self.client.force_login(self.user)
 
+    # The design system now lives in a cacheable static file rather than
+    # ~2,900 lines of CSS inlined into every page, so "the page carries the
+    # responsive rules" means it links the stylesheet AND that stylesheet
+    # contains them.
+    @classmethod
+    def _stylesheet(cls):
+        from pathlib import Path
+        from django.conf import settings
+        return (Path(settings.BASE_DIR) / "static" / "css" / "sauron.css"
+                ).read_text(encoding="utf-8")
+
     def _assert_responsive_markers(self, response):
-        """Check that the response carries the Phase-29 responsive rules."""
+        """Check the page reaches the Phase-29 responsive rules."""
         body = response.content.decode("utf-8", errors="ignore")
-        # Catch-all inline-grid override.
-        self.assertIn('[style*="grid-template-columns"]', body)
-        # Table horizontal-scroll rule.
-        self.assertIn(".table-wrapper", body)
-        # Mobile hamburger button.
+        self.assertIn("css/sauron.css", body)
+        # Markup-side hooks still render inline.
         self.assertIn("mobile-menu-btn", body)
+
+        css = self._stylesheet()
+        # Catch-all inline-grid override.
+        self.assertIn('[style*="grid-template-columns"]', css)
+        # Table horizontal-scroll rule.
+        self.assertIn(".table-wrapper", css)
         # Sidebar mobile-open class.
-        self.assertIn("mobile-open", body)
+        self.assertIn("mobile-open", css)
+        # And the rules are actually inside a mobile media query.
+        self.assertIn("max-width: 768px", css)
 
     def test_eye_dashboard_carries_responsive_css(self):
         r = self.client.get("/eye/")
@@ -92,6 +108,8 @@ class TabletBreakpointTests(TestCase):
     def test_tablet_media_query_present(self):
         r = self.client.get("/eye/")
         body = r.content.decode("utf-8", errors="ignore")
-        # Tablet range we added: min-width:769px AND max-width:1024px
-        self.assertIn("min-width: 769px", body)
-        self.assertIn("max-width: 1024px", body)
+        self.assertIn("css/sauron.css", body)
+        # The rules themselves now live in the extracted stylesheet.
+        css = MobileCSSPresenceTests._stylesheet()
+        self.assertIn("min-width: 769px", css)
+        self.assertIn("max-width: 1024px", css)
