@@ -265,11 +265,29 @@ class HeadcountFloorTests(TestCase):
         self.assertEqual(verdict["direction"], "HOLD")
 
     def test_decide_passes_the_configured_floor_through(self):
+        """The floor has to be what rejects this, not the weight threshold.
+        extras pins min_net_weight low enough that one signal clears it
+        comfortably, so a HOLD can only come from the headcount — and the
+        control below proves the same setup enters at a floor of 1."""
         from bot_program.asset_engine import StockBot
         inst = _instrument("AAA")
         _signal(inst, "bullish", 0.95, "solo")
-        cfg = _cfg(self.user, name="FLOOR", min_signals_for_entry=2)
-        self.assertEqual(StockBot(cfg).decide("AAA").direction, "HOLD")
+        cfg = _cfg(self.user, name="FLOOR", min_signals_for_entry=2,
+                   extras={"min_net_weight": 0.5})
+        d = StockBot(cfg).decide("AAA")
+        self.assertEqual(d.direction, "HOLD")
+        self.assertIn("need 2", d.reasons[0])
+
+    def test_the_same_setup_enters_when_the_floor_is_one(self):
+        """Control for the test above: identical signal and threshold, only
+        min_signals_for_entry differs. Without this pair, a HOLD for any
+        unrelated reason would look like the floor working."""
+        from bot_program.asset_engine import StockBot
+        inst = _instrument("AAA")
+        _signal(inst, "bullish", 0.95, "solo")
+        cfg = _cfg(self.user, name="FLOOR1", min_signals_for_entry=1,
+                   extras={"min_net_weight": 0.5})
+        self.assertEqual(StockBot(cfg).decide("AAA").direction, "BUY")
 
 
 class WeightQueryBudgetTests(TestCase):
@@ -449,20 +467,32 @@ class CostFilterBiteTests(TestCase):
     def setUp(self):
         self.user = _user("cf_u")
 
-    def test_the_gross_check_alone_cannot_reject_an_atr_setup(self):
-        """Documents why the net check exists. An ATR target is 2x the ATR
-        stop and the stop is floored at 0.2% of price, so the planned move
-        is always >= 0.4% — above `min_edge_ratio x cost` for every asset
-        class in the table. The filter passed everything while reading as
-        if it were protecting the book."""
+    def test_the_gross_check_alone_cannot_reject_the_tightest_atr_setup(self):
+        """Runs the real filter, not arithmetic on constants. At the very
+        tightest stop the ATR path can produce (MIN_STOP_FRACTION, target
+        2x that), the gross check passes for every non-options class — so
+        on its own it could never reject an ATR setup, however marginal.
+        Options are excluded deliberately: their 60bps makes the gross
+        check bite there, which is exactly why it looked like it worked."""
         from bot_program.asset_engine.risk_levels import (
-            DEFAULT_COST_BPS, DEFAULT_MIN_EDGE_RATIO, MIN_STOP_FRACTION,
+            MIN_STOP_FRACTION, passes_cost_filter,
         )
-        smallest_atr_target = MIN_STOP_FRACTION * 2
-        worst_cost = max(DEFAULT_COST_BPS[k] for k in
-                         ("stock", "forex", "crypto", "commodity")) / 10_000.0
-        self.assertGreater(smallest_atr_target,
-                           worst_cost * DEFAULT_MIN_EDGE_RATIO)
+        # Rejected once costs are netted; forex is absent on purpose — at
+        # 2bps a 0.2% stop really is 100x the round trip, and a filter that
+        # rejected it would be wrong rather than strict.
+        NET_REJECTS = {"stock", "crypto", "commodity"}
+        for asset_class in ("stock", "forex", "crypto", "commodity"):
+            cfg = _cfg(self.user, asset_class=asset_class,
+                       name=f"GROSS-{asset_class}")
+            price = 100.0
+            stop = price * (1 - MIN_STOP_FRACTION)
+            target = price * (1 + MIN_STOP_FRACTION * 2)
+            ok, _ = passes_cost_filter(cfg, "SYM", price, target)
+            self.assertTrue(ok, msg=f"{asset_class} rejected by gross check")
+            ok_net, reason = passes_cost_filter(cfg, "SYM", price, target,
+                                                stop=stop)
+            self.assertEqual(ok_net, asset_class not in NET_REJECTS,
+                             msg=f"{asset_class}: {reason}")
 
     def test_a_tight_stop_on_a_wide_spread_is_rejected(self):
         from bot_program.asset_engine.risk_levels import passes_cost_filter

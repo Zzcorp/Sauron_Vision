@@ -62,14 +62,27 @@ def quote_targets(asset_class: str, limit: int = 0) -> list:
     matters as much as membership: when the list is truncated the symbols
     with real money behind them must be the ones that survive.
     """
+    from django.utils import timezone
+
     traded = bot_symbols()
     rows = list(scan_universe(asset_class=asset_class))
     rows.sort(key=lambda i: (i.symbol not in traded, i.symbol))
+
+    # Rotate the traded block. A fixed alphabetical order means that once
+    # the provider cap binds, the SAME funded symbols are polled every run
+    # and the ones past the cut never get a quote at all — a permanent
+    # blind spot rather than the reduced refresh rate the cap implies.
+    funded = [i for i in rows if i.symbol in traded]
+    if limit and len(funded) > limit:
+        offset = int(timezone.now().timestamp() // 60) % len(funded)
+        funded = funded[offset:] + funded[:offset]
+        rows = funded + [i for i in rows if i.symbol not in traded]
+
     if limit and len(rows) > limit:
         dropped = [i.symbol for i in rows[limit:] if i.symbol in traded]
         if dropped:
             logger.warning("[universe] %s quote budget of %d truncates %d "
-                           "traded symbol(s): %s", asset_class, limit,
+                           "traded symbol(s) this run: %s", asset_class, limit,
                            len(dropped), ", ".join(sorted(dropped)))
         rows = rows[:limit]
     return rows

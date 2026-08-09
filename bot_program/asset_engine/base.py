@@ -266,6 +266,7 @@ class AssetBot(ABC):
         and the retry_pending_closes beat task drains it. Returns True when
         the trade ended CLOSED.
         """
+        stripped = False
         if not trade.paper:
             try:
                 # Phase-33 idempotency on close — id derived from trade.id so
@@ -290,7 +291,14 @@ class AssetBot(ABC):
                         "protective legs and retrying once",
                         self.asset_class, trade.symbol)
                     self._cancel_protective_orders(trade, client)
+                    # From here the position has no broker-side stop. If the
+                    # retry also fails the row goes CLOSE_PENDING with a live,
+                    # UNPROTECTED position behind it — a materially worse
+                    # state than an ordinary pending close, and the retry task
+                    # and the operator both need to know which one it is.
+                    stripped = True
                     self._submit_close_order(trade, client, client_order_id)
+                    stripped = False
                 else:
                     # The close went through, so the bracket's resting legs
                     # are now orphaned. Left alone, the stop eventually
@@ -306,7 +314,18 @@ class AssetBot(ABC):
                 if "close-failed" not in (trade.reason or ""):
                     trade.reason = ((trade.reason or "")
                                     + f" | close-failed:{reason}").strip()[:1000]
-                trade.save(update_fields=["status", "reason"])
+                fields = ["status", "reason"]
+                if stripped:
+                    logger.critical(
+                        "[%s_bot] %s is LIVE AND UNPROTECTED: its bracket was "
+                        "cancelled to allow a close that then failed",
+                        self.asset_class, trade.symbol)
+                    meta = dict(trade.metadata or {})
+                    meta["protection_stripped"] = True
+                    meta["protected"] = False
+                    trade.metadata = meta
+                    fields.append("metadata")
+                trade.save(update_fields=fields)
                 self._notify_close_pending(trade, reason)
                 try:
                     from dashboard.consumers import push_eye_event

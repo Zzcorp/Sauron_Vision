@@ -60,8 +60,13 @@ class DeploymentFilesExistTests(TestCase):
     def test_backup_script_exists(self):
         self.assertTrue((DEPLOY / "backup.sh").is_file())
 
-    def test_entrypoint_script_exists(self):
-        self.assertTrue((REPO / "scripts" / "entrypoint.sh").is_file())
+    def test_no_second_migration_path_exists(self):
+        """scripts/entrypoint.sh ran `migrate` on every container start and
+        was wired to nothing — not the Dockerfile, not compose. A dead
+        script that does the wrong thing is worse than no script: the next
+        person to need an entrypoint finds it and wires it up, restoring
+        the very race the one-shot `migrate` service exists to prevent."""
+        self.assertFalse((REPO / "scripts" / "entrypoint.sh").exists())
 
     def test_env_production_example_exists(self):
         self.assertTrue((REPO / ".env.production.example").is_file())
@@ -141,6 +146,15 @@ class ComposeProdStructureTests(TestCase):
             self.skipTest("PyYAML not installed")
         migrate = self.data["services"]["migrate"]
         self.assertIn("migrate", str(migrate.get("command", "")))
+        # And it must be the ONLY thing that migrates.
+        for name, svc in self.data["services"].items():
+            if name == "migrate":
+                continue
+            cmd = svc.get("command") or ""
+            if isinstance(cmd, list):
+                cmd = " ".join(cmd)
+            self.assertNotIn("manage.py migrate", cmd,
+                             msg=f"{name} migrates too — that is the race")
         for svc in ("web", "worker-fast", "beat"):
             depends = self.data["services"][svc].get("depends_on") or {}
             self.assertIn("migrate", depends,
@@ -158,13 +172,28 @@ class ComposeProdStructureTests(TestCase):
                 for svc in self.data["services"].values()
                 if isinstance(svc.get("environment"), dict)
                 and "REDIS_URL" in svc["environment"]}
-        self.assertLessEqual(len(urls), 1, msg=f"divergent REDIS_URLs: {urls}")
+        # Exactly one, not "at most one": an empty set would mean no service
+        # configures Redis at all, which this assertion must not call a pass.
+        self.assertEqual(len(urls), 1, msg=f"REDIS_URLs seen: {urls}")
+        for svc in ("web", "worker-fast", "worker-slow", "beat"):
+            self.assertIn("REDIS_URL",
+                          self.data["services"][svc].get("environment") or {},
+                          msg=f"{svc} does not pin REDIS_URL")
 
-    def test_no_source_bind_mount_on_web(self):
+    def test_no_source_bind_mount_on_any_app_service(self):
         """Production must not bind-mount the source — the image is the
-        artefact, or a deploy means 'whatever happens to be on the box'."""
-        self.assertNotIn("- .:/app", self.text)
-        self.assertNotIn("- ..:/app", self.text)
+        artefact, or a deploy means 'whatever happens to be on the box'.
+        Checks the parsed volumes of every service, not two literal strings
+        that any reformatting of the file would slip past."""
+        if self.data is None:
+            self.skipTest("PyYAML not installed")
+        for name, svc in self.data["services"].items():
+            for vol in (svc.get("volumes") or []):
+                target = (vol.split(":")[1] if isinstance(vol, str)
+                          and ":" in vol else "")
+                self.assertNotEqual(
+                    target, "/app",
+                    msg=f"{name} bind-mounts source over /app: {vol}")
 
     def test_postgres_port_not_exposed(self):
         if self.data is None:
@@ -216,25 +245,14 @@ class CaddyfileTests(TestCase):
         # unusable for anyone else.
         self.assertIn("{$DOMAIN", self.text)
 
-    def test_websockets_reach_the_app(self):
-        """The Eye dashboard is a WebSocket. A reverse proxy that doesn't
-        pass the upgrade turns a live page into a dead one."""
-        self.assertTrue("reverse_proxy" in self.text)
-
-
-class EntrypointScriptTests(TestCase):
-    def setUp(self):
-        self.text = (REPO / "scripts" / "entrypoint.sh").read_text(encoding="utf-8")
-
-    def test_waits_for_db(self):
-        self.assertIn("psycopg2", self.text)
-
-    def test_handsoff_to_cmd(self):
-        # `exec "$@"` so SIGTERM reaches the worker, not the wrapper.
-        self.assertIn('exec "$@"', self.text)
-
-    def test_set_strict_mode(self):
-        self.assertRegex(self.text, r"(?m)^set\s+-[eu]+")
+    def test_forwarded_proto_is_set_on_the_upstream(self):
+        """Django only honours SECURE_PROXY_SSL_HEADER when the proxy sets
+        it. Without this header the app believes every request is plain
+        HTTP behind an HTTPS terminator and answers with a redirect to
+        HTTPS — a loop that takes the whole site down, TLS certificate and
+        all."""
+        self.assertIn("X-Forwarded-Proto", self.text)
+        self.assertIn("header_up Host", self.text)
 
 
 class EnvExampleCoverageTests(TestCase):

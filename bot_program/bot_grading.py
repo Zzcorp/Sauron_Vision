@@ -64,14 +64,24 @@ def grade_bot_trade(trade) -> bool:
     # risk the same quantity — every trailing exit would score ~1.0R no
     # matter the true multiple, inflating the track record that sizes live
     # positions. entry_meta records the stop the trade was opened with.
+    # Two different stops, for two different questions.
+    #   effective_sl — where the stop actually sat when the trade closed.
+    #     This is what classifies the OUTCOME: a trade closed at its trailed
+    #     stop was stopped out, and labelling it manual_close would misreport
+    #     it in the audit log, the notifications and every dashboard.
+    #   sl — the stop the trade OPENED with, which is the risk it was taken
+    #     with and therefore the only correct denominator for realized_r.
+    # Before the split these were one variable, so grading against the
+    # trailed stop made pnl and risk the same quantity and every trailing
+    # exit scored ~1.0R.
+    effective_sl = float(trade.stop_loss) if trade.stop_loss is not None else 0.0
+    sl = effective_sl
     _initial_sl = (trade.metadata or {}).get("initial_stop_loss")
     if _initial_sl is not None:
         try:
             sl = float(_initial_sl)
         except (TypeError, ValueError):
-            sl = float(trade.stop_loss) if trade.stop_loss is not None else 0.0
-    else:
-        sl = float(trade.stop_loss) if trade.stop_loss is not None else 0.0
+            pass
     tp = float(trade.take_profit) if trade.take_profit is not None else 0.0
     qty = float(trade.qty or 0)
 
@@ -88,12 +98,12 @@ def grade_bot_trade(trade) -> bool:
     elif side == "BUY":
         if tp and exit_p >= tp:
             outcome = "hit_target"
-        elif sl and exit_p <= sl:
+        elif effective_sl and exit_p <= effective_sl:
             outcome = "stopped_out"
     elif side == "SELL":
         if tp and exit_p <= tp:
             outcome = "hit_target"
-        elif sl and exit_p >= sl:
+        elif effective_sl and exit_p >= effective_sl:
             outcome = "stopped_out"
     trade.outcome = outcome
 

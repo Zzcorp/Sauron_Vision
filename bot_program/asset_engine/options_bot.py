@@ -48,6 +48,17 @@ DEFAULT_MAX_DTE = 60
 DEFAULT_CLOSE_BEFORE_DTE = 5
 DEFAULT_MAX_PREMIUM_PER_CONTRACT = 5.0  # in $, multiplied by 100 = $500/contract
 
+# AssetBotConfig.stop_loss_pct / take_profit_pct default to 1.5 / 3.0, which
+# are equity moves. Applied to an option PREMIUM they are nonsense: premium
+# routinely swings 10-30% in a session, so a 1.5% stop is hit by the spread
+# itself on the first mark. Before the cost filter existed that produced a
+# stream of instant stop-outs; with it, every entry is rejected instead.
+# Either way the config as shipped cannot trade options, so below this
+# plausibility floor we substitute premium-scale levels and say so.
+MIN_PLAUSIBLE_PREMIUM_STOP_PCT = 10.0
+DEFAULT_PREMIUM_STOP_PCT = 35.0
+DEFAULT_PREMIUM_TARGET_PCT = 70.0
+
 
 # ── module-level helpers (shared with kill_switch / reconciliation) ─────────
 
@@ -159,6 +170,34 @@ class OptionsBot(AssetBot):
 
     def _close_before_dte(self) -> int:
         return int(self._extras().get("close_before_dte", DEFAULT_CLOSE_BEFORE_DTE))
+
+    def _premium_level_pcts(self) -> tuple:
+        """(stop_pct, target_pct) as percentages OF PREMIUM.
+
+        Honours the config when it is on a premium scale, and falls back to
+        premium-scale defaults when it is not — preserving the config's
+        reward:risk ratio so a deliberate 1:3 stays 1:3.
+        """
+        extras = self._extras()
+        stop_pct = float(extras.get("premium_stop_pct", 0) or 0)
+        target_pct = float(extras.get("premium_target_pct", 0) or 0)
+        if stop_pct > 0 and target_pct > 0:
+            return stop_pct, target_pct
+
+        cfg_stop = float(self.cfg.stop_loss_pct or 0)
+        cfg_target = float(self.cfg.take_profit_pct or 0)
+        if cfg_stop >= MIN_PLAUSIBLE_PREMIUM_STOP_PCT:
+            return cfg_stop, cfg_target
+
+        ratio = (cfg_target / cfg_stop) if cfg_stop > 0 else 2.0
+        stop_pct = DEFAULT_PREMIUM_STOP_PCT
+        target_pct = stop_pct * ratio
+        logger.warning(
+            "[options_bot] cfg %s: stop_loss_pct=%.2f%% is an equity-scale "
+            "move applied to an option premium — using %.0f%%/%.0f%% of "
+            "premium instead (set extras['premium_stop_pct'] to override)",
+            self.cfg.id, cfg_stop, stop_pct, target_pct)
+        return stop_pct, target_pct
 
     def _max_premium(self) -> float:
         return float(self._extras().get(
@@ -347,8 +386,9 @@ class OptionsBot(AssetBot):
             self._notify_paper_fallback(symbol)
             return None
 
-        sl = premium * (1 - self.cfg.stop_loss_pct / 100)
-        tp = premium * (1 + self.cfg.take_profit_pct / 100)
+        stop_pct, target_pct = self._premium_level_pcts()
+        sl = premium * (1 - stop_pct / 100)
+        tp = premium * (1 + target_pct / 100)
 
         # Cost filter. Options are the one asset class where the round trip
         # is routinely a double-digit percentage of the position: a 1.00/1.20
@@ -357,11 +397,20 @@ class OptionsBot(AssetBot):
         # options without it means buying premium that has to move ~20%
         # before the trade is even flat. The contract's own quoted spread is
         # the honest cost here — far better than an asset-class average.
+        # `is not None`, not truthiness: a quoted bid of 0.00 is a real and
+        # highly informative quote — nobody will buy this contract at any
+        # price — and treating it as "no data" fell back to the optimistic
+        # 60bps table exactly where the spread is worst.
         cost_fraction = None
-        if contract.bid and contract.ask and premium > 0:
+        if contract.bid is not None and contract.ask is not None and premium > 0:
             spread = float(Decimal(contract.ask) - Decimal(contract.bid))
             if spread > 0:
                 cost_fraction = spread / premium
+        if contract.bid is not None and float(contract.bid) <= 0:
+            logger.info("[options_bot] %s strike %s skipped: no bid — the "
+                        "position could not be exited at any price",
+                        symbol, contract.strike)
+            return None
         ok, cost_reason = passes_cost_filter(
             self.cfg, symbol, premium, tp, stop=sl,
             cost_fraction=cost_fraction)
