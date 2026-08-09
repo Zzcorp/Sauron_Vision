@@ -1,131 +1,194 @@
-# Single-VPS deployment for Sauron Vision.
-# Brings up web + celery worker + beat + redis + postgres + all
-# five streamers in one go. Optional streamers (finnhub, oanda)
-# only spin up when you enable their profile.
+# Sauron Vision — the single production stack.
 #
-# Usage:
-#   cp .env.example .env && edit .env
-#   docker compose -f deploy/docker-compose.yml up -d
+# One box runs everything: Postgres, Redis, the ASGI web service, the two
+# Celery workers, beat, Caddy for TLS, and (optionally) the market-data
+# streamers. This replaces the four rival deployment definitions that used
+# to disagree with each other about database names, queue flags and env
+# files — following any one of them led into a wall part-way through.
 #
-# Enable optional streamers:
-#   docker compose -f deploy/docker-compose.yml --profile finnhub --profile oanda up -d
+#   cp .env.production.example .env      # then fill it in
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#
+# Streamers are opt-in so a first deploy has fewer moving parts:
+#   docker compose -f deploy/docker-compose.yml --profile streamers up -d
+#
+# See deploy/RUNBOOK.md for the full first-deploy walkthrough.
+
+name: sauron
+
+x-django: &django
+  build:
+    context: ..
+    dockerfile: Dockerfile.prod
+  env_file: ../.env
+  environment:
+    # Every service MUST share one Redis: the streamers publish into a
+    # pub/sub channel that the web process subscribes to for browser
+    # WebSockets. Different Redis instances = updates silently never arrive.
+    REDIS_URL: redis://redis:6379/0
+    DB_ENGINE: postgresql
+    DB_HOST: postgres
+    DB_PORT: "5432"
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+  restart: unless-stopped
 
 services:
   postgres:
     image: postgres:16-alpine
-    restart: unless-stopped
     environment:
-      POSTGRES_DB:       ${POSTGRES_DB:-sauron}
-      POSTGRES_USER:     ${POSTGRES_USER:-sauron}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sauron}
+      POSTGRES_DB: ${DB_NAME:-sauron_vision}
+      POSTGRES_USER: ${DB_USER:-sauron}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-sauron}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-sauron} -d ${DB_NAME:-sauron_vision}"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
     volumes:
       - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
 
-  web:
+  # Migrations run ONCE here rather than racing in every service's entrypoint.
+  # django_celery_beat's tables must exist before beat starts, which is why
+  # everything below waits for this to complete successfully.
+  migrate:
     build:
       context: ..
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    command: sh -c "python manage.py migrate --noinput && python manage.py collectstatic --noinput && daphne -b 0.0.0.0 -p 8000 config.asgi:application"
-    environment: &common-env
-      DJANGO_SETTINGS_MODULE: config.settings
-      DATABASE_URL: postgres://${POSTGRES_USER:-sauron}:${POSTGRES_PASSWORD:-sauron}@postgres:5432/${POSTGRES_DB:-sauron}
+      dockerfile: Dockerfile.prod
+    env_file: ../.env
+    environment:
       REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      SECRET_KEY: ${SECRET_KEY}
-      DEBUG: ${DEBUG:-0}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
-      FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
-      OANDA_API_KEY: ${OANDA_API_KEY:-}
-      OANDA_ACCOUNT_ID: ${OANDA_ACCOUNT_ID:-}
-      OANDA_ENV: ${OANDA_ENV:-practice}
+      DB_ENGINE: postgresql
+      DB_HOST: postgres
+      DB_PORT: "5432"
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             python manage.py seed_components"
     depends_on:
-      postgres: {condition: service_healthy}
-      redis:    {condition: service_healthy}
-    ports:
-      - "${WEB_PORT:-8000}:8000"
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
 
-  celery-worker:
-    build: {context: .., dockerfile: Dockerfile}
-    restart: unless-stopped
-    command: celery -A config worker -l info --concurrency=${CELERY_CONCURRENCY:-4}
-    environment: *common-env
-    depends_on:
-      postgres: {condition: service_healthy}
-      redis:    {condition: service_healthy}
+  web:
+    <<: *django
+    command: >
+      daphne -b 0.0.0.0 -p 8000 config.asgi:application
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/healthz/')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
-  celery-beat:
-    build: {context: .., dockerfile: Dockerfile}
-    restart: unless-stopped
+  # Queue coverage matters: config/celery.py routes some tasks to fast/slow/ai
+  # and sends everything else to `default`. Between these two workers every
+  # queue in the beat schedule is consumed — a worker set that misses one
+  # silently drops half the schedule.
+  worker-fast:
+    <<: *django
+    command: celery -A config worker -l info -Q fast,default -c 2 --without-gossip --without-mingle
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 60s
+
+  worker-slow:
+    <<: *django
+    command: celery -A config worker -l info -Q slow,ai -c 2 --without-gossip --without-mingle
+
+  beat:
+    <<: *django
     command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
-    environment: *common-env
-    depends_on:
-      postgres: {condition: service_healthy}
-      redis:    {condition: service_healthy}
 
-  stream-binance:
-    build: {context: .., dockerfile: Dockerfile}
-    restart: unless-stopped
-    command: python manage.py stream_binance
-    environment: *common-env
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN must be set in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
     depends_on:
-      postgres: {condition: service_healthy}
-      redis:    {condition: service_healthy}
+      - web
+    restart: unless-stopped
+
+  # ── Market-data streamers (opt-in: --profile streamers) ────────────────
+  # Binance public streams need no API key. Finnhub/OANDA need credentials
+  # in .env; without them the command exits and the container stays down,
+  # which is the honest outcome.
+  stream-binance:
+    <<: *django
+    command: python manage.py stream_binance
+    profiles: ["streamers"]
 
   stream-binance-futures:
-    build: {context: .., dockerfile: Dockerfile}
-    restart: unless-stopped
+    <<: *django
     command: python manage.py stream_binance_futures
-    environment: *common-env
-    depends_on:
-      postgres: {condition: service_healthy}
-      redis:    {condition: service_healthy}
+    profiles: ["streamers"]
 
   stream-binance-depth:
-    build: {context: .., dockerfile: Dockerfile}
-    restart: unless-stopped
+    <<: *django
     command: python manage.py stream_binance_depth
-    environment: *common-env
-    depends_on:
-      postgres: {condition: service_healthy}
-      redis:    {condition: service_healthy}
-
-  stream-finnhub:
-    profiles: ["finnhub"]
-    build: {context: .., dockerfile: Dockerfile}
-    restart: unless-stopped
-    command: python manage.py stream_finnhub
-    environment: *common-env
-    depends_on:
-      postgres: {condition: service_healthy}
-      redis:    {condition: service_healthy}
+    profiles: ["streamers"]
 
   stream-oanda:
-    profiles: ["oanda"]
-    build: {context: .., dockerfile: Dockerfile}
-    restart: unless-stopped
+    <<: *django
     command: python manage.py stream_oanda
-    environment: *common-env
+    profiles: ["streamers"]
+
+  stream-finnhub:
+    <<: *django
+    command: python manage.py stream_finnhub
+    profiles: ["streamers"]
+
+  # ── Nightly offsite backup (opt-in: --profile backup) ──────────────────
+  # A dump that lives on the same disk as the database is not a backup.
+  backup:
+    image: postgres:16-alpine
+    env_file: ../.env
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
+    volumes:
+      - ./backup.sh:/backup.sh:ro
+      - backups:/backups
+    entrypoint: ["sh", "/backup.sh"]
     depends_on:
-      postgres: {condition: service_healthy}
-      redis:    {condition: service_healthy}
+      postgres:
+        condition: service_healthy
+    profiles: ["backup"]
+    restart: unless-stopped
 
 volumes:
   pgdata:
   redisdata:
+  caddydata:
+  caddyconfig:
+  backups:

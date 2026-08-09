@@ -13,6 +13,13 @@ SECRET_KEY = os.getenv("SECRET_KEY", "insecure-dev-key-change-me")
 DEBUG = os.getenv("DEBUG", "True").lower() in ("true", "1", "yes")
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
+# Key for broker-credential encryption at rest (bot_program.models).
+# Kept SEPARATE from SECRET_KEY so rotating the latter — or moving to a new
+# host, which regenerates it — cannot make every stored broker credential
+# permanently undecryptable. Generate with:
+#   python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"
+FERNET_KEY = os.getenv("FERNET_KEY", "")
+
 # Render.com auto-provides this
 RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME")
 if RENDER_EXTERNAL_HOSTNAME:
@@ -320,6 +327,31 @@ CORS_ALLOWED_ORIGINS = [
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
+# ============================================================
+# Email — digests, strategist briefings, newsletters
+# ============================================================
+# .env.production.example documented EMAIL_* for months while settings.py
+# defined none of it, so Django fell back to SMTP localhost:25 and every
+# production email silently failed.
+EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() in ("true", "1", "yes")
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False").lower() in ("true", "1", "yes")
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "20"))
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@sauronvision.com")
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
+
+# With no SMTP host configured, print to the console instead of pretending
+# to send: a visible no-op beats a silent failure.
+if not EMAIL_HOST:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+else:
+    EMAIL_BACKEND = os.getenv(
+        "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+
+
 # Django 5.1 removed STATICFILES_STORAGE — the STORAGES dict is the only
 # setting WhiteNoise reads now; the old name was silently ignored, so prod
 # was serving uncompressed, unhashed static files.

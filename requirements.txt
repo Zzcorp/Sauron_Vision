@@ -67,3 +67,4 @@ reportlab>=4.2
 # Phase 33 — Production observability (Sentry).
 # Auto-instruments Django + Celery + Redis when SENTRY_DSN is set.
 sentry-sdk[django,celery]>=2.0
+PyYAML>=6.0

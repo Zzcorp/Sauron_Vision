@@ -1,0 +1,25 @@
+# Caddy fetches and renews TLS certificates automatically — point DNS at
+# the box, set DOMAIN in .env, and HTTPS just works. This is the step most
+# first deployments die on.
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Django sets secure cookies and HSTS behind this header; without it
+	# SECURE_PROXY_SSL_HEADER never matches and you get a redirect loop.
+	reverse_proxy web:8000 {
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-For {remote_host}
+		header_up Host {host}
+	}
+
+	# WebSockets (the Eye / Operations Center live feed) upgrade through the
+	# same proxy — Caddy handles this transparently.
+
+	log {
+		output file /data/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+	}
+}

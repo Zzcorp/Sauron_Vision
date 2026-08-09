@@ -6,10 +6,53 @@ from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
 import base64, hashlib, json
 
+def _derive_key(material: str) -> bytes:
+    return base64.urlsafe_b64encode(hashlib.sha256(material.encode()).digest())
+
+
+def _fernet_keys() -> list:
+    """Keys to try when decrypting, newest first.
+
+    Broker credentials used to be encrypted with a key derived from
+    SECRET_KEY, which made two ordinary operations destructive: rotating
+    SECRET_KEY (normal security hygiene) and moving to a new host (which
+    regenerates it) both left every stored credential permanently
+    unreadable — and, worse, silently routed live bots to PaperTrader.
+
+    FERNET_KEY is now the key of record. The SECRET_KEY-derived key is kept
+    as a read-only fallback so existing rows keep working; anything saved
+    afterwards is written with FERNET_KEY. Set FERNET_KEY before migrating
+    hosts and credentials survive the move.
+    """
+    keys = []
+    configured = getattr(settings, "FERNET_KEY", "") or ""
+    if configured:
+        # Accept either a real Fernet key or arbitrary material we hash.
+        try:
+            Fernet(configured.encode())
+            keys.append(configured.encode())
+        except Exception:
+            keys.append(_derive_key(configured))
+    keys.append(_derive_key(getattr(settings, "SECRET_KEY", "sauron-default")))
+    return keys
+
+
 def _fernet() -> Fernet:
-    key = getattr(settings, "SECRET_KEY", "sauron-default").encode()
-    key = base64.urlsafe_b64encode(hashlib.sha256(key).digest())
-    return Fernet(key)
+    """Cipher used for WRITING — always the preferred (first) key."""
+    return Fernet(_fernet_keys()[0])
+
+
+def _decrypt(token: str) -> str:
+    """Decrypt with any known key, so rows written under the old
+    SECRET_KEY-derived key keep working after FERNET_KEY is introduced."""
+    if not token:
+        return ""
+    for key in _fernet_keys():
+        try:
+            return Fernet(key).decrypt(token.encode()).decode()
+        except (InvalidToken, Exception):
+            continue
+    return ""
 
 class BinanceAccount(models.Model):
     """Encrypted Binance API credentials linked to a Sauron user."""
@@ -30,12 +73,9 @@ class BinanceAccount(models.Model):
 
     def get_credentials(self) -> tuple[str, str] | tuple[None, None]:
         if not self.api_key_enc: return (None, None)
-        try:
-            f = _fernet()
-            return (f.decrypt(self.api_key_enc.encode()).decode(),
-                    f.decrypt(self.api_secret_enc.encode()).decode())
-        except InvalidToken:
-            return (None, None)
+        key = _decrypt(self.api_key_enc)
+        secret = _decrypt(self.api_secret_enc)
+        return (key, secret) if key and secret else (None, None)
 
     def __str__(self): return f"{self.user.username} · Binance ({'testnet' if self.testnet else 'live'})"
 
@@ -65,12 +105,9 @@ class OANDAAccount(models.Model):
     def get_credentials(self) -> "tuple[str, str] | tuple[None, None]":
         if not self.api_key_enc:
             return (None, None)
-        try:
-            f = _fernet()
-            return (f.decrypt(self.api_key_enc.encode()).decode(),
-                    f.decrypt(self.account_id_enc.encode()).decode())
-        except InvalidToken:
-            return (None, None)
+        key = _decrypt(self.api_key_enc)
+        account_id = _decrypt(self.account_id_enc)
+        return (key, account_id) if key and account_id else (None, None)
 
     def __str__(self):
         return f"{self.user.username} · OANDA ({'practice' if self.practice else 'live'})"
@@ -128,11 +165,7 @@ class IBKRAccount(models.Model):
     def get_account_id(self) -> "str | None":
         if not self.account_id_enc:
             return None
-        try:
-            f = _fernet()
-            return f.decrypt(self.account_id_enc.encode()).decode()
-        except InvalidToken:
-            return None
+        return _decrypt(self.account_id_enc) or None
 
     def is_primary_for(self, asset_class: str) -> bool:
         return bool({
@@ -169,12 +202,9 @@ class AlpacaAccount(models.Model):
     def get_credentials(self) -> "tuple[str, str] | tuple[None, None]":
         if not self.api_key_enc:
             return (None, None)
-        try:
-            f = _fernet()
-            return (f.decrypt(self.api_key_enc.encode()).decode(),
-                    f.decrypt(self.api_secret_enc.encode()).decode())
-        except InvalidToken:
-            return (None, None)
+        key = _decrypt(self.api_key_enc)
+        secret = _decrypt(self.api_secret_enc)
+        return (key, secret) if key and secret else (None, None)
 
     def __str__(self):
         return f"{self.user.username} · Alpaca ({'paper' if self.paper else 'live'})"
