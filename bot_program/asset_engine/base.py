@@ -869,11 +869,26 @@ class AssetBot(ABC):
         if inst is None:
             return BotDecision("HOLD", 0, [f"no Instrument record for {symbol}"])
 
-        active = list(
-            Signal.objects.filter(instrument=inst, is_active=True)
-            .order_by("-score")[:8]
-        )
+        # Age bound. `is_active` is cleared by the lifecycle pass, which
+        # needs a fresh quote to evaluate an outcome — so a signal on an
+        # instrument that stops being quoted stays active forever and votes
+        # forever. Five fabricated sv_sample_* rows from April are still
+        # active in the dev database at scores of 0.68-0.92, comfortably
+        # above the 0.60 default threshold: without this the first trade any
+        # new config takes is against months-old invented data, re-entered
+        # every cooldown for as long as the bot runs.
+        max_age_hours = self._extras_float("max_signal_age_hours", 24.0)
+        qs = Signal.objects.filter(instrument=inst, is_active=True)
+        if max_age_hours > 0:
+            cutoff = timezone.now() - timedelta(hours=max_age_hours)
+            qs = qs.filter(created_at__gte=cutoff)
+        active = list(qs.order_by("-score")[:8])
         if not active:
+            stale = Signal.objects.filter(instrument=inst, is_active=True).count()
+            if stale:
+                return BotDecision("HOLD", 0, [
+                    f"{stale} active signal(s) but none within "
+                    f"{max_age_hours:.0f}h — stale"])
             return BotDecision("HOLD", 0, ["no active signals"])
 
         bullish = [s for s in active if s.direction == "bullish"
@@ -958,14 +973,21 @@ def make_bot(config) -> AssetBot:
     from .forex_bot import ForexBot
     from .commodity_bot import CommodityBot
     from .options_bot import OptionsBot
+    from .crypto_bot import CryptoBot
 
     cls_map = {
         "stock": StockBot,
         "forex": ForexBot,
         "commodity": CommodityBot,
         "options": OptionsBot,
+        "crypto": CryptoBot,
     }
     cls = cls_map.get(config.asset_class)
     if cls is None:
-        raise ValueError(f"No AssetBot for asset_class={config.asset_class!r}")
+        # `cfd` is selectable in the admin form and has no implementation, so
+        # a CFD config raises here on every tick. Name the gap rather than
+        # letting the runner swallow a bare ValueError.
+        raise ValueError(
+            f"No AssetBot implementation for asset_class={config.asset_class!r}. "
+            f"Implemented: {', '.join(sorted(cls_map))}")
     return cls(config)

@@ -20,19 +20,28 @@ def _create_signals_and_notify(results):
     from signals.models import Signal
     from signals.rule_actuator import is_rule_active, rule_size_multiplier
 
+    from signals.rule_adapter import flatten, normalise
+
     new_count = 0
     blocked_paused = 0
+    unstorable = 0
 
-    for result in results:
-        if not result:
+    # flatten() first: SmcCompositeRule returns a LIST of setups while every
+    # other rule returns a dict, and scan_instrument appends whichever it got.
+    for raw in flatten(results):
+        # normalise() is the translation between the shape rules emit
+        # ({symbol, rule, direction: "LONG", headline, thesis, entry, ...})
+        # and the shape this table stores ({instrument, rule_name,
+        # direction: "bullish", title, description, suggested_entry, ...}).
+        # Without it every rule hit was dropped here with a warning.
+        fields = normalise(raw)
+        if fields is None:
+            unstorable += 1
             continue
 
-        instrument = result.get("instrument")
-        rule_name = result.get("rule_name")
-
-        if not instrument or not rule_name:
-            logger.warning("Signal result missing instrument or rule_name — skipping: %s", result)
-            continue
+        instrument = fields["instrument"]
+        rule_name = fields["rule_name"]
+        result = {**raw, **fields}
 
         # Phase-5: skip rules paused by the actuator.
         if not is_rule_active(rule_name):
@@ -63,23 +72,9 @@ def _create_signals_and_notify(results):
             sub_scores["actuator_multiplier"] = rule_mult
         result = {**result, "sub_scores": sub_scores}
 
-        signal = Signal.objects.create(
-            instrument=instrument,
-            signal_type=result.get("signal_type", ""),
-            direction=result.get("direction", ""),
-            urgency=result.get("urgency", ""),
-            title=result.get("title", ""),
-            description=result.get("description", ""),
-            rule_name=rule_name,
-            score=result.get("score"),
-            sub_scores=result.get("sub_scores"),
-            price_at_signal=result.get("price_at_signal"),
-            suggested_entry=result.get("suggested_entry"),
-            suggested_stop=result.get("suggested_stop"),
-            suggested_target=result.get("suggested_target"),
-            risk_reward_ratio=result.get("risk_reward_ratio"),
-            is_active=True,
-        )
+        signal = Signal.objects.create(is_active=True, **{
+            **fields, "sub_scores": result.get("sub_scores") or {},
+        })
 
         new_count += 1
         logger.info("Created signal pk=%s rule=%s instrument=%s", signal.pk, rule_name, instrument)
@@ -96,6 +91,12 @@ def _create_signals_and_notify(results):
             dispatch_signal_alert(signal)
         except Exception:
             logger.exception("dispatch_signal_alert failed for signal pk=%s", signal.pk)
+
+    if unstorable:
+        # Loud, because a silent version of exactly this counter is how a bug
+        # that discarded 100% of rule output survived the life of the project.
+        logger.warning("%d rule result(s) could not be stored as signals — "
+                       "see the [rule_adapter] warnings above for each", unstorable)
 
     if blocked_paused:
         logger.info("Actuator blocked %d signal(s) for paused rules.", blocked_paused)

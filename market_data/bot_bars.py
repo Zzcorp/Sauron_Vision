@@ -46,11 +46,36 @@ def _client_for(user, symbol, cfg):
         # market data still comes from the real venue when creds exist.
         if getattr(cfg, "mode", "paper") == "paper":
             client = client_for_symbol(user, symbol, None)
-            if isinstance(client, PaperTrader):
-                return None
-        else:
-            return None
+        if isinstance(client, PaperTrader):
+            return _public_market_data_client(cfg)
     return client
+
+
+def _public_market_data_client(cfg):
+    """A keyless client for venues whose market data is public.
+
+    Requiring broker credentials for BARS was a structural dead end on a
+    fresh install: no keys meant no bars, no bars meant no indicators and no
+    rule could ever fire, so the platform could not produce the evidence it
+    needed to justify connecting a broker in the first place. Binance spot
+    klines need no key and no account.
+
+    Deliberately the LIVE endpoint even for paper configs: testnet klines are
+    synthetic, and a strategy validated against invented candles has been
+    validated against nothing.
+    """
+    if getattr(cfg, "asset_class", None) != "crypto":
+        return None
+    try:
+        from bot_program.engine.binance_client import BinanceClient
+        client = BinanceClient("", "", testnet=False)
+        # Tagged so a data-only bar is never mistaken for one from the venue
+        # the order actually filled on.
+        client._sv_public_feed = True
+        return client
+    except Exception as e:
+        logger.warning("[bars] public market-data client unavailable: %s", e)
+        return None
 
 
 def _upsert_rows(inst, interval, rows, source) -> tuple[int, int]:
@@ -91,7 +116,7 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
     """Fetch and persist bars for every symbol on one bot config."""
     from instruments.models import Instrument
 
-    out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0}
+    out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0}
     for symbol in (cfg.symbols or []):
         inst = Instrument.objects.filter(symbol=symbol).first()
         if inst is None:
@@ -101,12 +126,21 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
 
         client = _client_for(cfg.user, symbol, cfg)
         if client is None:
-            logger.info("[bars] no market-data client for %s (%s) — skipping",
-                        symbol, cfg.asset_class)
+            # Distinct from `errors`, which means "no Instrument row".
+            # Operators scan errors for real breakage; a missing broker is a
+            # configuration state with a different remedy, and at WARNING
+            # because it means this symbol can never produce a decision.
+            logger.warning(
+                "[bars] no market-data client for %s (%s) — this symbol will "
+                "produce no bars, no indicators and no signals until broker "
+                "credentials exist for that asset class", symbol, cfg.asset_class)
+            out["no_client"] += 1
             continue
 
         source = type(client).__name__.replace("Trader", "").replace(
             "Client", "").lower() or "broker"
+        if getattr(client, "_sv_public_feed", False):
+            source += "_public"
         out["symbols"] += 1
         for interval in intervals:
             try:
@@ -126,7 +160,8 @@ def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dic
     """Refresh bars for every enabled AssetBotConfig across all users."""
     from bot_program.models import AssetBotConfig
 
-    totals = {"configs": 0, "symbols": 0, "bars": 0, "skipped": 0, "errors": 0}
+    totals = {"configs": 0, "symbols": 0, "bars": 0, "skipped": 0, "errors": 0,
+              "no_client": 0}
     for cfg in (AssetBotConfig.objects.filter(enabled=True)
                 .select_related("user")):
         totals["configs"] += 1
@@ -136,7 +171,7 @@ def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dic
             logger.exception("[bars] config %s failed: %s", cfg.id, e)
             totals["errors"] += 1
             continue
-        for k in ("symbols", "bars", "skipped", "errors"):
-            totals[k] += res[k]
+        for k in ("symbols", "bars", "skipped", "errors", "no_client"):
+            totals[k] += res.get(k, 0)
     logger.info("[bars] refresh complete: %s", totals)
     return totals

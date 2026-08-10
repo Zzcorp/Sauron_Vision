@@ -24,6 +24,10 @@ class AssetBotConfig(models.Model):
         ("forex", "Forex"),
         ("commodity", "Commodities"),
         ("options", "Options"),
+        # Crypto is the only class whose market data is free and keyless, so
+        # it is the one route from a fresh install to a graded paper trade
+        # without a broker relationship.
+        ("crypto", "Crypto"),
         ("cfd", "CFDs"),
     ]
     MODE_CHOICES = [

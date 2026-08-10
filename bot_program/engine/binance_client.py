@@ -27,9 +27,21 @@ class BinanceClient:
         r = requests.get(f"{self.base}/api/v3/ticker/24hr", params={"symbol": symbol}, timeout=8)
         r.raise_for_status(); return r.json()
 
-    def klines(self, symbol: str, interval: str = "15m", limit: int = 200) -> list[list]:
-        r = requests.get(f"{self.base}/api/v3/klines",
-                         params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=10)
+    def klines(self, symbol: str, interval: str = "15m", limit: int = 200,
+               start_time: int | None = None, end_time: int | None = None) -> list[list]:
+        """Public endpoint — no key required.
+
+        start_time/end_time are epoch MILLISECONDS. Without them the API
+        returns only the most recent `limit` bars, which caps history at
+        1000 and makes a 200-period moving average unreachable on any
+        timeframe longer than an hour. Backfill paginates with start_time.
+        """
+        params = {"symbol": symbol, "interval": interval, "limit": limit}
+        if start_time is not None:
+            params["startTime"] = int(start_time)
+        if end_time is not None:
+            params["endTime"] = int(end_time)
+        r = requests.get(f"{self.base}/api/v3/klines", params=params, timeout=15)
         r.raise_for_status(); return r.json()
 
     def order_book(self, symbol: str, limit: int = 100) -> dict:

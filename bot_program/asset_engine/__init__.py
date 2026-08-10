@@ -12,4 +12,5 @@ from .stock_bot import StockBot  # noqa: F401
 from .forex_bot import ForexBot  # noqa: F401
 from .commodity_bot import CommodityBot  # noqa: F401
 from .options_bot import OptionsBot  # noqa: F401
+from .crypto_bot import CryptoBot  # noqa: F401
 from .runner import run_asset_bot_tick, run_all_asset_bots  # noqa: F401
