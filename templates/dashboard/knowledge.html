@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Knowledge graph · Sauron's Mind{% endblock %}
 {% block content %}
-<div class="page-content">
+
     {# ── 1. Top stat strip — 6 cells ─────────────────────────────────── #}
     <div class="oc-strip" style="margin-bottom:18px;">
         <div class="oc-strip-cell">
@@ -116,5 +116,5 @@
     {% empty %}
         <div class="card"><p style="color:var(--text-muted);">Graph is empty — wait for the first nightly consolidation run.</p></div>
     {% endfor %}
-</div>
+
 {% endblock %}

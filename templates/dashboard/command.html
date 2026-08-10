@@ -46,13 +46,13 @@
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <!-- TAB BAR — each head shows a LIVE metric                              -->
 <!-- ═══════════════════════════════════════════════════════════════════ -->
-<div class="oc-tabs" role="tablist">
+<div class="oc-tabs" id="ocTabs" role="tablist">
     {% for tab_key, label, glyph in tab_keys|default_if_none:"" %}{% endfor %}
     <button type="button"
             class="oc-tab {% if active_tab == 'live' %}active{% endif %}"
             data-tab="live" data-ws-events="fill,gate_reject,position_change,regime_shift" role="tab"
             hx-get="{% url 'command_tab_live' %}"
-            hx-target="#ocTabBody" hx-swap="innerHTML show:top"
+            hx-target="#ocTabBody" hx-swap="innerHTML"
             hx-push-url="?tab=live">
         <span class="oc-tab-head">
             <span class="oc-tab-glyph">◉</span>
@@ -68,7 +68,7 @@
             class="oc-tab {% if active_tab == 'portfolio' %}active{% endif %}"
             data-tab="portfolio" data-ws-events="position_change,fill,daily_snapshot" role="tab"
             hx-get="{% url 'command_tab_portfolio' %}"
-            hx-target="#ocTabBody" hx-swap="innerHTML show:top"
+            hx-target="#ocTabBody" hx-swap="innerHTML"
             hx-push-url="?tab=portfolio">
         <span class="oc-tab-head">
             <span class="oc-tab-glyph">▦</span>
@@ -84,7 +84,7 @@
             class="oc-tab {% if active_tab == 'history' %}active{% endif %}"
             data-tab="history" data-ws-events="fill" role="tab"
             hx-get="{% url 'command_tab_history' %}"
-            hx-target="#ocTabBody" hx-swap="innerHTML show:top"
+            hx-target="#ocTabBody" hx-swap="innerHTML"
             hx-push-url="?tab=history">
         <span class="oc-tab-head">
             <span class="oc-tab-glyph">▣</span>
@@ -100,7 +100,7 @@
             class="oc-tab {% if active_tab == 'bots' %}active{% endif %}"
             data-tab="bots" data-ws-events="bot_heartbeat,fill" role="tab"
             hx-get="{% url 'command_tab_bots' %}"
-            hx-target="#ocTabBody" hx-swap="innerHTML show:top"
+            hx-target="#ocTabBody" hx-swap="innerHTML"
             hx-push-url="?tab=bots">
         <span class="oc-tab-head">
             <span class="oc-tab-glyph">⌬</span>
@@ -116,6 +116,32 @@
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <!-- TAB BODY                                                             -->
 <!-- ═══════════════════════════════════════════════════════════════════ -->
+<script>
+/* Tab switching used to carry `show:top` on the swap, which scrolls the
+   SWAP TARGET to the top of the viewport. #ocTabBody sits below the tab
+   strip and the hero metrics, so every tab change shoved all of that
+   off-screen and left the page scrolled far down — you had to scroll back
+   up to see which tab you were even on.
+
+   Scrolling is now conditional: if the tab strip is already visible, the
+   page does not move at all. It only scrolls when the strip has gone off
+   the top, and then only far enough to bring it back with a little room
+   above it. */
+(function () {
+    "use strict";
+    document.body.addEventListener("htmx:afterSwap", function (e) {
+        if (!e.target || e.target.id !== "ocTabBody") return;
+        var tabs = document.getElementById("ocTabs");
+        if (!tabs) return;
+        var top = tabs.getBoundingClientRect().top;
+        if (top >= 0) return;                     // already visible: don't move
+        var behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "auto" : "smooth";
+        window.scrollBy({ top: top - 12, left: 0, behavior: behavior });
+    });
+})();
+</script>
+
 <div id="ocTabBody"
      hx-get="{% url 'command_tab_live' %}{% if active_tab != 'live' %}{% endif %}"
      {% if active_tab == 'live' %}hx-trigger="load"{% else %}hx-trigger="revealed"{% endif %}

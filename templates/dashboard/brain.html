@@ -2,7 +2,7 @@
 {% block title %}Sauron's Mind · Brain{% endblock %}
 
 {% block content %}
-<div class="page-content">
+
     {% if request.session.brain_run_result %}
         <div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent);">
             <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;">Last manual run</div>
@@ -163,5 +163,5 @@
             </tbody>
         </table>
     </div>
-</div>
+
 {% endblock %}

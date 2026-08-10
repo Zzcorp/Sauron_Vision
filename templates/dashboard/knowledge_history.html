@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ kind }}:{{ key }} · history{% endblock %}
 {% block content %}
-<div class="page-content">
+
     <div class="page-header">
         <h1>{{ kind }}:{{ key }}</h1>
         <p class="page-subtitle">{{ history|length }} version(s) · oldest first</p>
@@ -22,5 +22,5 @@
         {% endfor %}
         </tbody>
     </table>
-</div>
+
 {% endblock %}

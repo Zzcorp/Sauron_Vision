@@ -27,7 +27,7 @@
                          color: var(--accent); text-transform: uppercase;
                          letter-spacing: 1px; margin-right: 4px; }
 </style>
-<div class="page-content">
+
     <div style="display:flex;justify-content:flex-end;margin-bottom:14px;">
         <form method="post" action="{% url 'research_new_conversation' %}" style="margin:0;">
             {% csrf_token %}
@@ -224,5 +224,5 @@
     </section>
 
     </div>{# /.ask-grid #}
-</div>
+
 {% endblock %}
