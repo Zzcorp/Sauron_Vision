@@ -57,22 +57,19 @@ def _public_market_data_client(cfg):
     Requiring broker credentials for BARS was a structural dead end on a
     fresh install: no keys meant no bars, no bars meant no indicators and no
     rule could ever fire, so the platform could not produce the evidence it
-    needed to justify connecting a broker in the first place. Binance spot
-    klines need no key and no account.
+    needed to justify connecting a broker in the first place.
 
-    Deliberately the LIVE endpoint even for paper configs: testnet klines are
-    synthetic, and a strategy validated against invented candles has been
-    validated against nothing.
+    Crypto uses Binance public klines; stocks, ETFs, indices, commodity
+    futures and FX majors use Yahoo. Options are absent deliberately —
+    there is no free chain source worth trusting.
+
+    Deliberately the LIVE endpoint even for paper configs: testnet klines
+    are synthetic, and a strategy validated against invented candles has
+    been validated against nothing.
     """
-    if getattr(cfg, "asset_class", None) != "crypto":
-        return None
     try:
-        from bot_program.engine.binance_client import BinanceClient
-        client = BinanceClient("", "", testnet=False)
-        # Tagged so a data-only bar is never mistaken for one from the venue
-        # the order actually filled on.
-        client._sv_public_feed = True
-        return client
+        from market_data.public_feed import public_feed_for
+        return public_feed_for(getattr(cfg, "asset_class", "") or "")
     except Exception as e:
         logger.warning("[bars] public market-data client unavailable: %s", e)
         return None

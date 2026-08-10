@@ -3162,3 +3162,193 @@
         }
         .se-resize-l, .se-resize-t, .se-resize-tl { display: none; }
     }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   REFINEMENT LAYER
+   ───────────────────────────────────────────────────────────────────────
+   Appended, not merged, and deliberately so: the vocabulary below is
+   already used by 80 templates (.card), 52 (.sv-perf-table) and 48
+   (.oc-strip). Rewriting those definitions in place would risk every page
+   at once for a cosmetic gain. Later rules win in the cascade, so this
+   sharpens the existing system without deleting a line of it — and it can
+   be removed wholesale if any of it is unwelcome.
+
+   No markup changes. Every page that already uses these classes inherits
+   the improvement.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. Numbers that line up ─────────────────────────────────────────────
+   The single biggest defect in a data UI: proportional digits make columns
+   jitter as values change, so a price ticking 9->10 shifts everything after
+   it. Tabular figures fix the advance width and make vertical comparison
+   possible at a glance. This is why a trading screen feels stable or does
+   not.                                                                    */
+.oc-strip-value,
+.oc-strip-sub,
+.metric-value,
+.metric-change,
+.sv-perf-table td,
+.stat-box,
+.t-price,
+.t-change {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "zero" 1;
+}
+
+/* ── 2. The metric strip ─────────────────────────────────────────────────
+   A 9px label tracked to 2px is past the point where letter-spacing helps
+   legibility and into where it hurts it. Slightly larger, slightly looser,
+   and with a clear step down to the sub-line, the three tiers read as a
+   hierarchy instead of three similar greys.                              */
+.oc-strip {
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: 10px;
+    align-items: stretch;
+}
+.oc-strip-cell {
+    padding: 13px 15px 14px;
+    gap: 5px;
+    border-radius: 7px;
+    transition: border-color .15s ease, background .15s ease;
+}
+.oc-strip-cell:hover {
+    border-color: var(--border-glow, var(--border));
+    background: var(--bg-card-hover, var(--bg-card));
+}
+.oc-strip-label {
+    font-size: 9.5px;
+    letter-spacing: 1.4px;
+    line-height: 1.2;
+}
+.oc-strip-value {
+    font-size: 20px;
+    line-height: 1.15;
+    letter-spacing: -0.2px;   /* mono at size needs tightening, not opening */
+}
+.oc-strip-sub {
+    font-size: 10.5px;
+    letter-spacing: 0.2px;
+    line-height: 1.3;
+    opacity: .82;
+}
+
+/* A metric with no sample size behind it is a number pretending to be
+   evidence. `.oc-strip-sub` carrying an "n=" is the honest form; this makes
+   the absence visible to whoever is writing the template. */
+.oc-strip-value[data-n="0"],
+.oc-strip-value.is-unproven { opacity: .55; }
+
+/* ── 3. Cards ────────────────────────────────────────────────────────────
+   The !important on padding is left alone — too many pages depend on it —
+   but everything around it can be sharpened.                             */
+.card {
+    border-radius: 8px;
+    transition: border-color .15s ease, transform .15s ease;
+}
+.card:hover { border-color: var(--border-glow, var(--border)); }
+.card-header {
+    margin-bottom: 13px;
+    padding-bottom: 10px;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.card-title {
+    letter-spacing: .3px;
+    text-wrap: balance;
+}
+
+/* ── 4. Tables ───────────────────────────────────────────────────────────
+   These carry the actual evidence — trades, rules, R-multiples — and were
+   the least designed surface in the system: no zebra, no row hover, no
+   sticky header, numerics left-aligned against text.                     */
+.sv-perf-table { width: 100%; border-collapse: collapse; }
+.sv-perf-table thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--bg-card);
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-align: left;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+.sv-perf-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+    vertical-align: middle;
+}
+.sv-perf-table tbody tr { transition: background .12s ease; }
+.sv-perf-table tbody tr:nth-child(even) {
+    background: color-mix(in srgb, var(--bg-card-hover, var(--bg-card)) 35%, transparent);
+}
+.sv-perf-table tbody tr:hover {
+    background: var(--bg-card-hover, var(--bg-card));
+}
+.sv-perf-table tbody tr:last-child td { border-bottom: none; }
+/* Numerics right-align so magnitude is comparable down the column. */
+.sv-perf-table td.num,
+.sv-perf-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Direction and outcome colour, consistent wherever it appears. */
+.sv-perf-table .up, .oc-strip-value.up, .metric-change.up { color: var(--success, var(--accent)); }
+.sv-perf-table .down, .oc-strip-value.down, .metric-change.down { color: var(--danger, var(--accent-red)); }
+
+/* ── 5. Empty states ─────────────────────────────────────────────────────
+   A platform with no track record shows these constantly, so they are a
+   primary surface rather than an edge case. They should say what is
+   missing, not merely that something is.                                 */
+.oc-empty, .empty-state {
+    padding: 26px 18px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.6;
+    border: 1px dashed color-mix(in srgb, var(--border) 70%, transparent);
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--bg-card-hover, var(--bg-card)) 25%, transparent);
+}
+.oc-empty strong, .empty-state strong {
+    display: block;
+    color: var(--text-primary);
+    font-size: 13.5px;
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+
+/* ── 6. Keyboard access ──────────────────────────────────────────────────
+   Nothing in the system had a visible focus state, which makes the whole
+   platform unusable without a mouse.                                     */
+a:focus-visible,
+button:focus-visible,
+.nav-link:focus-visible,
+.card:focus-visible,
+[tabindex]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* ── 7. Wide content must not scroll the page sideways ───────────────── */
+.table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* ── 8. Motion ───────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ── 9. Density on smaller screens ───────────────────────────────────── */
+@media (max-width: 640px) {
+    .oc-strip { grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); gap: 8px; }
+    .oc-strip-cell { padding: 10px 12px; }
+    .oc-strip-value { font-size: 17px; }
+    .sv-perf-table thead th, .sv-perf-table td { padding: 7px 9px; }
+}

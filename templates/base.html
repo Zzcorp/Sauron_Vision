@@ -351,7 +351,7 @@
                     <span>{{ item.title|truncatechars:40 }}</span>
                     {% endif %}
                     <div class="ticker-popup">
-                        <div class="tp-title">{{ item.symbol|default:item.title }}</div>
+                        <div class="tp-title">{% firstof item.symbol item.title %}</div>
                         {% if item.type == "quote" %}
                         <div class="tp-row"><span class="lbl">Price</span><span>{{ item.price }}</span></div>
                         <div class="tp-row"><span class="lbl">Change</span><span style="color:{% if item.change >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{{ item.change_display }}</span></div>
@@ -2751,6 +2751,81 @@ if ('serviceWorker' in navigator) {
 })();
 </script>
 {% endif %}
+
+<script>
+/* ── Resume scroll position across navigation ─────────────────────────────
+   The sidebar is taller than the viewport, so clicking an item near the
+   bottom used to land on the next page with the menu snapped back to the
+   top — the entry just clicked scrolled out of sight, and finding your
+   place again meant re-scrolling on every single navigation.
+
+   Position is saved per element and per browser tab (sessionStorage, not
+   localStorage: two tabs on different sections should not fight over one
+   position, and it should not persist for weeks after the session ends).
+
+   Restored before paint via the capture-phase, so the pane never visibly
+   jumps from top to the saved offset.                                     */
+(function () {
+    "use strict";
+    var PANES = ["#mainSidebar", ".sidebar-nav", "[data-keep-scroll]"];
+    var KEY = "sv:scroll:";
+
+    function panes() {
+        var found = [], seen = [];
+        PANES.forEach(function (sel) {
+            document.querySelectorAll(sel).forEach(function (el) {
+                if (seen.indexOf(el) === -1) { seen.push(el); found.push(el); }
+            });
+        });
+        return found;
+    }
+
+    function keyFor(el, i) {
+        // Keyed by element identity, not by URL: the point is to hold the
+        // menu still WHILE the page changes.
+        return KEY + (el.id || el.className || "pane") + ":" + i;
+    }
+
+    function restore() {
+        panes().forEach(function (el, i) {
+            if (el.scrollHeight <= el.clientHeight) return;
+            var saved = null;
+            try { saved = sessionStorage.getItem(keyFor(el, i)); } catch (e) { return; }
+            if (saved === null) return;
+            var top = parseInt(saved, 10);
+            if (!isNaN(top)) el.scrollTop = top;
+        });
+    }
+
+    function save() {
+        panes().forEach(function (el, i) {
+            try { sessionStorage.setItem(keyFor(el, i), String(el.scrollTop)); }
+            catch (e) { /* private mode or quota — never break navigation */ }
+        });
+    }
+
+    restore();
+    document.addEventListener("DOMContentLoaded", restore);
+
+    // Save on the way out. `pagehide` fires on back/forward navigation where
+    // `beforeunload` does not, and both are needed for full coverage.
+    window.addEventListener("pagehide", save);
+    window.addEventListener("beforeunload", save);
+    // And on click, because a link may navigate before either event lands.
+    document.addEventListener("click", function (e) {
+        if (e.target && e.target.closest && e.target.closest("a[href]")) save();
+    }, true);
+
+    // Throttled while scrolling, so a mid-scroll navigation still resumes.
+    var pending = null;
+    panes().forEach(function (el) {
+        el.addEventListener("scroll", function () {
+            if (pending) return;
+            pending = setTimeout(function () { pending = null; save(); }, 250);
+        }, { passive: true });
+    });
+})();
+</script>
 
 </body>
 </html>

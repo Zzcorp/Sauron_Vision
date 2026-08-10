@@ -199,10 +199,57 @@ def fetch_eod_all_instruments():
 @shared_task
 @guarded_task("scraper_crypto")
 def fetch_crypto_quotes():
-    """Fetch crypto prices from CoinGecko."""
-    from market_data.adapters.crypto_adapter import save_crypto_quotes_to_db
-    count = save_crypto_quotes_to_db()
-    return {"status": "success", "fetched": count}
+    """Mark crypto from the venue the orders fill on.
+
+    This used to read CoinGecko's cross-exchange aggregate, which had two
+    problems. The smaller one is that a blended price never printed on the
+    book you actually trade against, so a stop could be evaluated against a
+    level that did not exist at your venue. The larger one, measured: the
+    call returned ZERO symbols — CoinGecko's free tier now rate-limits it —
+    so `LiveQuote` was never written for any crypto pair at all, and a paper
+    crypto bot had no mark price, which means its positions could never
+    reach a stop or a target.
+
+    Binance's public ticker is free, keyless, and is the venue. CoinGecko
+    stays as a fallback for pairs Binance does not list.
+    """
+    from instruments.models import Instrument
+    from market_data.public_feed import public_feed_for
+    from market_data.quotes import write_quote
+
+    feed = public_feed_for("crypto")
+    fetched, failed = 0, []
+    if feed is not None:
+        from market_data.management.commands.backfill_bars import venue_symbol
+        for inst in Instrument.objects.filter(asset_class="crypto",
+                                              is_active=True):
+            try:
+                tk = feed.ticker(venue_symbol(inst.symbol)) or {}
+                last = float(tk.get("lastPrice", 0) or 0)
+            except Exception:
+                last = 0
+            if last <= 0:
+                failed.append(inst.symbol)
+                continue
+            change = 0.0
+            try:
+                change = float(tk.get("priceChangePercent", 0) or 0)
+            except (TypeError, ValueError):
+                pass
+            if write_quote(inst.symbol, last=last, source="binance_public",
+                            change_pct=change, instrument=inst):
+                fetched += 1
+
+    # Anything Binance does not list falls back to the aggregate.
+    if failed:
+        try:
+            from market_data.adapters.crypto_adapter import save_crypto_quotes_to_db
+            fetched += save_crypto_quotes_to_db(symbols=failed) or 0
+        except Exception as e:
+            logger.warning("[crypto quotes] CoinGecko fallback failed: %s", e)
+
+    return {"status": "success", "fetched": fetched,
+            "not_on_binance": len(failed)}
 
 
 @shared_task

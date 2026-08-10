@@ -166,7 +166,7 @@
 <div class="card" style="margin-bottom: 18px;">
     <div class="card-header"><span class="card-title">Latest AI briefing</span></div>
     {% if latest_briefing %}
-    <div style="font-size: 13px; line-height: 1.7; white-space: pre-wrap;">{{ latest_briefing.structured_output.review|default:latest_briefing.response_summary|truncatechars:2000 }}</div>
+    <div style="font-size: 13px; line-height: 1.7; white-space: pre-wrap;">{% firstof latest_briefing.structured_output.review latest_briefing.response_summary as briefing_text %}{{ briefing_text|truncatechars:2000 }}</div>
     <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:10px;">
         {{ latest_briefing.agent }} · {{ latest_briefing.provider }}/{{ latest_briefing.model|truncatechars:30 }} · {{ latest_briefing.created_at|date:"M d H:i" }}
     </div>
