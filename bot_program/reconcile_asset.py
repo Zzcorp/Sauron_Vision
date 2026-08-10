@@ -196,10 +196,33 @@ def _close_as_orphan(trade) -> None:
     trade.pnl = pnl
     trade.status = "CLOSED"
     trade.closed_at = timezone.now()
-    trade.outcome = "manual_close"
     trade.reason = (trade.reason + " | reconciled-orphan").strip()
+
+    # The exit price was INFERRED — a current ticker or a stored quote, not
+    # the fill the broker actually got. Flag it, because the difference
+    # matters to anyone reading the resulting R: this is the path every
+    # bracket-protected stock and forex exit takes, so without the flag a
+    # large share of the track record would silently be estimates.
+    meta = dict(trade.metadata or {})
+    meta["exit_price_inferred"] = True
+    trade.metadata = meta
     trade.save(update_fields=["exit_price", "pnl", "status", "closed_at",
-                                "outcome", "reason"])
+                                "reason", "metadata"])
+
+    # Grade it. The module docstring has always claimed this happened and it
+    # never did: outcome was hardcoded to "manual_close" and realized_r was
+    # left NULL. Since reconciliation is how EVERY broker-side exit is
+    # finalised — which is all stock and forex trades, because their stops
+    # rest at the broker — those two asset classes contributed exactly zero
+    # graded trades to the learning loop no matter how long they ran.
+    try:
+        from bot_program.bot_grading import grade_bot_trade
+        grade_bot_trade(trade)
+    except Exception as e:
+        logger.warning("reconcile: grading #%s failed: %s", trade.id, e)
+        if not trade.outcome:
+            trade.outcome = "manual_close"
+            trade.save(update_fields=["outcome"])
 
 
 def reconcile_all_users() -> dict:

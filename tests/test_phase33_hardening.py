@@ -216,7 +216,14 @@ class ReconciliationTests(TestCase):
         self.assertEqual(r["closed_as_orphan"], 1)
         trade.refresh_from_db()
         self.assertEqual(trade.status, "CLOSED")
-        self.assertEqual(trade.outcome, "manual_close")
+        # Classified by the grader, not hardcoded. Reconciliation is how
+        # every bracket-protected exit is finalised, so hardcoding
+        # "manual_close" and leaving realized_r NULL meant stock and forex
+        # contributed zero graded trades however long they ran.
+        self.assertEqual(trade.outcome, "hit_target")
+        self.assertIsNotNone(trade.realized_r)
+        self.assertTrue(trade.metadata.get("exit_price_inferred"),
+                        "an inferred exit price must be flagged as such")
         # Exit price reflects last broker tick (105) not entry (100).
         self.assertEqual(trade.exit_price, Decimal("105"))
 

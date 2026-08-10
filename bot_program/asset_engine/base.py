@@ -159,6 +159,17 @@ class AssetBot(ABC):
 
     # ── exit management ──────────────────────────────────────────────────
 
+    def _skip(self, symbol: str, code: str, detail: str = ""):
+        """Record why this symbol produced no trade, and return None.
+
+        Every `return None` in scan_symbol goes through here. Several were
+        silent, which made "the market was quiet" and "this bot has never
+        been capable of trading" indistinguishable from outside.
+        """
+        from bot_program.asset_engine import skips
+        skips.record(self.cfg, symbol, code, detail)
+        return None
+
     def _extras_float(self, key: str, default: float = 0.0) -> float:
         """Read a numeric knob out of cfg.extras without ever raising.
 
@@ -337,6 +348,24 @@ class AssetBot(ABC):
                     pass
                 return False
 
+        # The exit half of the round trip. Without this a paper trade books
+        # a free entry and a free exit, and its expectancy is overstated by
+        # the full round trip — the exact quantity the cost filter rejects
+        # trades for being unable to cover.
+        if trade.paper:
+            # Charged on every exit, including take-profits. A take-profit
+            # is a limit order and would not cross the spread, so this is
+            # deliberately CONSERVATIVE rather than precise — the cost model
+            # is a single blended round-trip number and does not separate
+            # spread from commission, and for evidence you intend to bet
+            # real money on, erring toward overstating cost is the right
+            # direction. It no longer affects classification: grading reads
+            # the recorded close reason, not the post-cost fill price.
+            from bot_program.asset_engine.risk_levels import paper_fill_price
+            exit_side = "SELL" if trade.side == "BUY" else "BUY"
+            price = Decimal(str(paper_fill_price(
+                self.cfg, trade.symbol, float(price), exit_side)))
+
         pnl = self._trade_pnl(trade, price)
         trade.exit_price = price
         trade.pnl = pnl
@@ -477,13 +506,15 @@ class AssetBot(ABC):
     def scan_symbol(self, symbol: str) -> Optional[dict]:
         from bot_program.models import AssetBotTrade
         from bot_program.engine.broker_router import client_for_symbol
+        from bot_program.asset_engine import skips
 
         # Skip if a trade for this symbol is already open (or awaiting a
         # retried close — the broker position is still live) under this config.
         if AssetBotTrade.objects.filter(
                 config=self.cfg, symbol=symbol,
                 status__in=("OPEN", "CLOSE_PENDING")).exists():
-            return None
+            return self._skip(symbol, skips.ALREADY_OPEN,
+                              "a position is already on")
 
         # Cooldown: skip if a CLOSED trade for this symbol was created within cool_down_minutes.
         cool = self.cfg.cool_down_minutes or 0
@@ -493,11 +524,16 @@ class AssetBot(ABC):
                 closed_at__gte=timezone.now() - timedelta(minutes=cool),
             ).exists()
             if recent:
-                return None
+                return self._skip(symbol, skips.COOLDOWN,
+                                  f"closed a trade within {cool}m")
 
         decision = self.decide(symbol)
         if decision.direction == "HOLD":
-            return None
+            reason = (decision.reasons or [""])[0]
+            code = (skips.STALE_SIGNALS if "stale" in reason
+                    else skips.NO_SIGNALS if "no active signals" in reason
+                    else skips.HOLD)
+            return self._skip(symbol, code, reason)
 
         # Phase-39 brain advisory — if the central synthesizer flagged this
         # rule pause_recommended (via KnowledgeNode rule_state or latest
@@ -544,7 +580,7 @@ class AssetBot(ABC):
             if not allowed:
                 logger.info("[%s_bot] orchestrator declined %s: %s",
                             self.asset_class, symbol, reason)
-                return None
+                return self._skip(symbol, skips.GATE_BLOCKED, reason)
         except Exception as e:
             logger.warning("[%s_bot] orchestrator check failed for %s: %s",
                            self.asset_class, symbol, e)
@@ -561,20 +597,33 @@ class AssetBot(ABC):
                 "(missing/invalid broker credentials?) — refusing to trade",
                 self.asset_class, self.cfg.id, symbol)
             self._notify_paper_fallback(symbol)
-            return None
+            return self._skip(symbol, skips.PAPER_FALLBACK,
+                              "live config fell back to PaperTrader")
 
         try:
             tk = client.ticker(symbol)
         except Exception as e:
             logger.warning("[%s_bot] ticker(%s) failed: %s",
                            self.asset_class, symbol, e)
-            return None
+            return self._skip(symbol, skips.NO_PRICE, f"ticker failed: {e}")
         try:
             price = float(tk.get("lastPrice", "0") or 0)
         except (TypeError, ValueError):
             price = 0
         if price <= 0:
-            return None
+            return self._skip(symbol, skips.NO_PRICE, "ticker returned 0")
+
+        # A paper entry used to be recorded at the raw ticker, because the
+        # order block below sits inside `if not paper:` and PaperTrader is
+        # therefore never reached. Charge the realistic fill here, before
+        # levels and sizing, so the stop and the quantity are both relative
+        # to the price actually obtained — which is how a real bracket is
+        # placed.
+        market_price = price
+        paper_now = (self.cfg.mode == "paper")
+        if paper_now:
+            from bot_program.asset_engine.risk_levels import paper_fill_price
+            price = paper_fill_price(self.cfg, symbol, price, decision.direction)
 
         # ── Levels FIRST, because the stop is an input to the size ───────
         # Volatility-normalised levels: a fixed 2% stop is a different bet on
@@ -594,7 +643,7 @@ class AssetBot(ABC):
         if not ok:
             logger.info("[%s_bot] skipping %s — %s",
                         self.asset_class, symbol, cost_reason)
-            return None
+            return self._skip(symbol, skips.COST_FILTER, cost_reason)
 
         # ── What the promotion stage permits ─────────────────────────────
         # A stage is a venue, not a size. Applying it as a multiplier meant
@@ -608,7 +657,7 @@ class AssetBot(ABC):
             if not stage["may_trade"]:
                 logger.info("[%s_bot] %s not traded: %s", self.asset_class,
                             symbol, stage["reason"])
-                return None
+                return self._skip(symbol, skips.STAGE_BLOCKED, stage["reason"])
 
         # ── Size by RISK, not by notional ────────────────────────────────
         sizing = self._size_for_entry(symbol, price, sl, decision)
@@ -625,7 +674,7 @@ class AssetBot(ABC):
                 logger.error("[%s_bot] sizing multiplier failed for %s: %s — "
                              "refusing to trade at unscaled size",
                              self.asset_class, symbol, e)
-                return None
+                return self._skip(symbol, skips.ERROR, f"sizing lane: {e}")
         if not stage["force_paper"]:
             qty *= float(stage["live_size_factor"])
 
@@ -635,7 +684,10 @@ class AssetBot(ABC):
                         "%s, stop %.3f%% away) — skipping", self.asset_class,
                         symbol, sizing["risk_fraction"] * 100, self.cfg.capital,
                         abs(price - sl) / price * 100 if price else 0)
-            return None
+            return self._skip(
+                symbol, skips.SIZED_TO_ZERO,
+                f"risk budget {sizing['risk_fraction'] * 100:.2f}% of "
+                f"{self.cfg.capital} is below one tradeable unit")
 
         # Shadow mode: everything is computed, nothing is submitted and no
         # row is written. The way to validate a change against live data
@@ -643,7 +695,8 @@ class AssetBot(ABC):
         from bot_program.asset_engine.safety import is_shadow, log_shadow_entry
         if is_shadow(self.cfg):
             log_shadow_entry(self.cfg, symbol, decision, price, qty)
-            return None
+            return self._skip(symbol, skips.SHADOW,
+                              "shadow mode — computed, not submitted")
 
         # A paper-STAGE rule trades on the paper venue even in a live config:
         # that is the whole point of the stage, and it is how the evidence to
@@ -656,6 +709,14 @@ class AssetBot(ABC):
         # denominator that realized_r (and therefore sizing) depends on. This
         # is the POST-floor stop — the one actually placed.
         entry_meta["initial_stop_loss"] = round(float(sl), 8)
+        if paper or paper_now:
+            from bot_program.asset_engine.risk_levels import (
+                round_trip_cost_fraction,
+            )
+            entry_meta["paper_fill"] = True
+            entry_meta["market_price"] = round(float(market_price), 8)
+            entry_meta["cost_applied_fraction"] = round(
+                round_trip_cost_fraction(self.cfg, symbol) / 2.0, 8)
         entry_meta["risk_fraction"] = sizing["risk_fraction"]
         entry_meta["risk_dollars"] = sizing["risk_dollars"]
         entry_meta["notional_fraction"] = sizing["notional_fraction"]
@@ -694,7 +755,8 @@ class AssetBot(ABC):
                                     "(status=%s, client_order_id=%s)",
                                     self.asset_class, symbol, status,
                                     client_order_id)
-                    return None
+                    return self._skip(symbol, skips.ORDER_REJECTED,
+                                      f"broker status {status}")
 
                 # Real fills: prefer the broker's average fill price and
                 # filled quantity over the pre-order ticker, so slippage
@@ -775,6 +837,7 @@ class AssetBot(ABC):
             logger.warning("[%s_bot] WS push (open) failed: %s",
                            self.asset_class, e)
 
+        skips.clear(self.cfg, symbol)
         return {"trade_id": trade.id, "symbol": symbol,
                 "side": decision.direction, "qty": float(qty),
                 "entry": price, "score": decision.score}

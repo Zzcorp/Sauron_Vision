@@ -134,6 +134,36 @@ def round_trip_cost_fraction(cfg, symbol: str) -> float:
     return float(bps) / 10_000.0
 
 
+def paper_fill_price(cfg, symbol: str, price: float, side: str,
+                     *, cost_fraction: float | None = None) -> float:
+    """The price a paper order would REALISTICALLY fill at.
+
+    The AssetBot paper path never touches PaperTrader: the order block sits
+    inside `if not paper:`, so a paper entry was recorded at the raw ticker
+    and a paper exit at the raw mark. Both sides free. That inflates paper
+    expectancy by exactly the quantity `passes_cost_filter` exists to defend
+    against — and paper expectancy is the evidence the promotion ladder uses
+    to decide whether a rule may touch real money. A system that measures
+    itself with costs removed will promote rules that lose money net.
+
+    Half the round trip is charged per side, adversely: a buyer pays up, a
+    seller sells down.
+
+    This is a model, not a measurement — DEFAULT_COST_BPS is an assumption.
+    That is why the fraction applied is recorded on the trade, so it can be
+    retuned against real fills later instead of being baked irreversibly
+    into the ledger.
+    """
+    if price <= 0:
+        return price
+    cost = (float(cost_fraction) if cost_fraction is not None
+            else round_trip_cost_fraction(cfg, symbol))
+    if cost <= 0:
+        return price
+    half = cost / 2.0
+    return price * (1 + half) if str(side).upper() == "BUY" else price * (1 - half)
+
+
 def passes_cost_filter(cfg, symbol: str, price: float, target: float,
                        *, stop: float | None = None,
                        cost_fraction: float | None = None) -> tuple:

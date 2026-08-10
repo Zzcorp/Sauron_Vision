@@ -264,8 +264,14 @@ class ManagePositionsTests(TestCase):
         trade.refresh_from_db()
         self.assertEqual(trade.status, "CLOSED")
         self.assertGreater(trade.pnl, 0)
-        # 115 (capped at target check is >=) — actual close uses 115
-        self.assertEqual(trade.pnl, (Decimal("115") - Decimal("100")) * Decimal("10"))
+        # Net of the paper round trip, not gross. A paper exit now fills
+        # adversely — half the round-trip cost, same as a real one — so
+        # 15 points on 10 shares books slightly under $150. Booking the
+        # full $150 is what inflated paper expectancy by exactly the cost
+        # the entry filter rejects trades for being unable to cover.
+        gross = (Decimal("115") - Decimal("100")) * Decimal("10")
+        self.assertLess(trade.pnl, gross)
+        self.assertGreater(trade.pnl, gross * Decimal("0.99"))
 
     @patch("bot_program.engine.broker_router.client_for_symbol")
     def test_stop_loss_closes_with_negative_pnl(self, mock_client_for):

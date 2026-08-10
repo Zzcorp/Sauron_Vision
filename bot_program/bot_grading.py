@@ -93,8 +93,21 @@ def grade_bot_trade(trade) -> bool:
     # ── outcome ──────────────────────────────────────────────────
     side = (trade.side or "").upper()
     outcome = "manual_close"
-    if "EXPIRY_CLOSE" in (trade.reason or ""):
+    reason = trade.reason or ""
+
+    # Prefer the reason the bot recorded over re-deriving it from the exit
+    # price. `_close_trade` already knows whether the mark crossed the stop
+    # or the target; inferring it again from the FILL is unreliable, because
+    # the fill includes costs and can land a hair the wrong side of a level
+    # the trade genuinely reached. The outcome describes why the position
+    # closed; pnl describes what was actually received. Conflating them
+    # turned take-profit exits into "manual_close".
+    if "EXPIRY_CLOSE" in reason:
         outcome = "expired"
+    elif "closed:TP" in reason:
+        outcome = "hit_target"
+    elif "closed:SL" in reason:
+        outcome = "stopped_out"
     elif side == "BUY":
         if tp and exit_p >= tp:
             outcome = "hit_target"
