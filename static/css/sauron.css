@@ -3261,7 +3261,16 @@
    These carry the actual evidence — trades, rules, R-multiples — and were
    the least designed surface in the system: no zebra, no row hover, no
    sticky header, numerics left-aligned against text.                     */
-.sv-perf-table { width: 100%; border-collapse: collapse; }
+.sv-perf-table {
+    width: 100%;
+    border-collapse: collapse;
+    /* Absorbed from the 17 templates that each carried their own copy of
+       this block in an inline <style>. Inline styles come after the linked
+       sheet, so those copies silently cancelled every refinement below on
+       exactly the pages that use tables most. */
+    font-family: var(--font-mono);
+    font-size: .85rem;
+}
 .sv-perf-table thead th {
     position: sticky; top: 0; z-index: 1;
     background: var(--bg-card);
@@ -3351,4 +3360,59 @@ button:focus-visible,
     .oc-strip-cell { padding: 10px 12px; }
     .oc-strip-value { font-size: 17px; }
     .sv-perf-table thead th, .sv-perf-table td { padding: 7px 9px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TOKEN ALIASES
+   ───────────────────────────────────────────────────────────────────────
+   294 references across the stylesheet and templates pointed at 19 custom
+   properties that were never defined anywhere. A var() with no definition
+   and no fallback makes the whole declaration invalid, so the browser drops
+   it: `color: var(--text)` produced no colour at all, `background:
+   var(--bg-darker)` produced no background, and `font-family: var(--font-m)`
+   fell back to the default serif. That is why numbers that should be green
+   rendered as plain body text and several panels looked unstyled — the CSS
+   was there and was being thrown away.
+
+   These are aliases, not new colours: each points at the canonical token
+   that already exists. Because a var() reference resolves at the point of
+   USE, aliasing this way stays correct under body.light-mode, which
+   redefines the canonical tokens.
+
+   The right long-term fix is to rename the 294 call sites onto the
+   canonical vocabulary. This makes them work today without touching 60+
+   files, and it is a safe intermediate step: nothing here overrides an
+   existing definition, because none of these had one.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+    /* Text */
+    --text:        var(--text-primary);
+    --text2:       var(--text-secondary, var(--text-muted));
+    --text3:       var(--text-muted);
+
+    /* Surfaces */
+    --bg:          var(--bg-primary);
+    --bg2:         var(--bg-secondary);
+    --bg3:         var(--bg-card);
+    --bg-alt:      var(--bg-secondary);
+    --bg-elev:     var(--bg-card-hover);
+    --bg-darker:   var(--bg-void);
+
+    /* Semantic colour. `--accent-green` is referenced 26 times for winning
+       numbers; without it a profit rendered in body text while a loss
+       rendered red, so the eye read every table as uniformly bad. */
+    --accent-green: var(--success, var(--accent));
+    --down:         var(--danger, var(--accent-red));
+    --purple:       var(--accent-purple);
+    --gold:         var(--accent-gold);
+    --blue:         var(--accent-blue);
+
+    /* Type */
+    --font-m:      var(--font-mono);
+    --font-d:      var(--font-display);
+    --font-h:      var(--font-heading);
+
+    /* Geometry */
+    --radius-md:   8px;
+    --se-panel-height: 420px;
 }
