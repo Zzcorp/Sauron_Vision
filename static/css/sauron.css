@@ -3416,3 +3416,61 @@ button:focus-visible,
     --radius-md:   8px;
     --se-panel-height: 420px;
 }
+
+/* ── The lead metric ─────────────────────────────────────────────────────
+   Metric strips render six to eight cells of identical weight, so no page
+   states its headline number — the operator's eye has to read all of them
+   to find the one that matters. A strip should answer its page's question
+   at a glance and let the rest support it.
+
+   Opt in by adding `oc-strip-cell--lead` to the one cell that answers the
+   page: net P&L on performance, overall state on health, expectancy on the
+   bot charts. Deliberately a modifier rather than "first cell wins", since
+   the most important number is rarely the first one authored. */
+.oc-strip-cell--lead {
+    grid-column: span 2;
+    border-left: 2px solid var(--accent);
+    background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--accent) 7%, transparent) 0%,
+        transparent 45%);
+}
+.oc-strip-cell--lead .oc-strip-label { color: var(--accent); opacity: .95; }
+.oc-strip-cell--lead .oc-strip-value { font-size: 30px; line-height: 1.05; }
+.oc-strip-cell--lead .oc-strip-sub { font-size: 11px; opacity: .9; }
+
+@media (max-width: 640px) {
+    .oc-strip-cell--lead { grid-column: span 2; }
+    .oc-strip-cell--lead .oc-strip-value { font-size: 24px; }
+}
+
+/* ── Sample size, stated rather than implied ─────────────────────────────
+   A rate with no n behind it is a number pretending to be evidence, and at
+   this stage almost every rate on the platform rests on single digits.
+   `<span class="n-badge">n=7</span>` sits inline with the value without
+   competing with it. */
+.n-badge {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .5px;
+    padding: 1px 5px;
+    margin-left: 6px;
+    border-radius: 3px;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+    vertical-align: middle;
+}
+.n-badge--thin { color: var(--accent-gold); }   /* below a trustworthy n */
+
+/* ── Sparse cards ────────────────────────────────────────────────────────
+   The most common state on this platform is "nothing here yet", and it was
+   the least designed one: a bare grey <p>. `.oc-empty` and `.empty-state`
+   are styled in the refinement layer; this makes the two-line form — what
+   is missing, and what would fill it — read as intentional. */
+.empty-state .hint, .oc-empty .hint {
+    display: block;
+    margin-top: 6px;
+    font-size: 12px;
+    opacity: .8;
+}

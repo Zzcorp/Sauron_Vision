@@ -9,10 +9,10 @@
         <span class="oc-strip-value">{{ stats.n }}</span>
         <span class="oc-strip-sub">{{ stats.graded }} graded · {{ days }}d</span>
     </div>
-    <div class="oc-strip-cell">
+    <div class="oc-strip-cell oc-strip-cell--lead">
         <span class="oc-strip-label">EXPECTANCY</span>
-        <span class="oc-strip-value">{{ stats.expectancy|default_if_none:"—" }}R</span>
-        <span class="oc-strip-sub">per trade</span>
+        <span class="oc-strip-value">{{ stats.expectancy|default_if_none:"—" }}R{% if stats.graded %}<span class="n-badge{% if stats.graded < 30 %} n-badge--thin{% endif %}">n={{ stats.graded }}</span>{% endif %}</span>
+        <span class="oc-strip-sub">{% if not stats.graded %}no graded trades yet{% elif stats.graded < 30 %}too few trades to trust — needs hundreds{% else %}per trade, net of modelled costs{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">WIN RATE</span>

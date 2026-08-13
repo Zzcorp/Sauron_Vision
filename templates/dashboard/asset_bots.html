@@ -24,7 +24,7 @@
         <span class="oc-strip-value">{{ n_trades_24h }}</span>
         <span class="oc-strip-sub">finished trades</span>
     </div>
-    <div class="oc-strip-cell">
+    <div class="oc-strip-cell oc-strip-cell--lead">
         <span class="oc-strip-label">P&amp;L · 24H</span>
         <span class="oc-strip-value {% if pnl_24h_total > 0 %}up{% elif pnl_24h_total < 0 %}down{% endif %}">{{ pnl_24h_total }}</span>
         <span class="oc-strip-sub">non-crypto bots</span>
