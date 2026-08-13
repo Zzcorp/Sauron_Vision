@@ -6,10 +6,12 @@
 <div class="oc-strip" style="margin-bottom:18px;">
     <div class="oc-strip-cell">
         <span class="oc-strip-label">OVERALL</span>
-        <span class="oc-strip-value" style="color:{% if overall == 'ok' %}var(--success){% elif overall == 'warn' %}var(--accent-gold){% else %}var(--danger){% endif %};">
-            {% if overall == 'ok' %}HEALTHY{% elif overall == 'warn' %}DEGRADED{% else %}ACTION NEEDED{% endif %}
+        <span class="oc-strip-value" style="color:{% if overall == 'ok' %}var(--success){% elif overall == 'warn' or overall == 'unconfigured' %}var(--accent-gold){% else %}var(--danger){% endif %};">
+            {% if overall == 'ok' %}HEALTHY{% elif overall == 'unconfigured' %}NOT SET UP{% elif overall == 'warn' %}DEGRADED{% else %}ACTION NEEDED{% endif %}
         </span>
-        <span class="oc-strip-sub">{{ checks|length }} checks</span>
+        <span class="oc-strip-sub">
+            {% if overall == 'unconfigured' %}{{ unconfigured|length }} check(s) pass only because there is nothing to check{% else %}{{ checks|length }} checks{% endif %}
+        </span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">PASSING</span>

@@ -49,7 +49,7 @@
             <td><span class="badge badge-{% if c.status == 'active' %}bullish{% elif c.status == 'paused' %}bearish{% else %}medium{% endif %}">{{ c.get_status_display }}</span></td>
             <td>{{ c.weight_multiplier|floatformat:2 }}</td>
             <td>{% if c.status == 'active' %}{{ c.allocator_weight|floatformat:2 }}{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}</td>
-            <td><strong>{{ c.weight_multiplier|floatformat:2 }} × {{ c.allocator_weight|floatformat:2 }}</strong></td>
+            <td class="num"><strong>×{{ c.effective_multiplier|floatformat:2 }}</strong><span style="display:block;font-size:10px;color:var(--text-muted);">{{ c.weight_multiplier|floatformat:2 }} × {{ c.allocator_weight|floatformat:2 }}</span></td>
           </tr>
         {% endfor %}
       </tbody>

@@ -16,7 +16,7 @@
         {% for p in positions %}
           <tr>
             <td>{{ p.instrument.symbol }}</td>
-            <td>{{ p.side|default:"—" }}</td>
+            <td>{{ p.direction|default:"—" }}</td>
             <td>{{ p.entry_price|default:"—" }}</td>
             <td>{{ p.current_price|default:"—" }}</td>
             <td class="{% if p.unrealized_pnl > 0 %}up{% else %}down{% endif %}">

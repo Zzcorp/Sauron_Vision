@@ -128,7 +128,7 @@
                         <tr>
                             <td><strong>{{ r.name|truncatechars:32 }}</strong></td>
                             <td><span class="badge badge-medium">{{ r.strategy_type }}</span></td>
-                            <td class="up">+{{ r.total_return_pct|floatformat:2 }}%</td>
+                            <td class="num {% if r.total_return_pct > 0 %}up{% elif r.total_return_pct < 0 %}down{% endif %}">{% if r.total_return_pct > 0 %}+{% endif %}{{ r.total_return_pct|floatformat:2 }}%</td>
                             <td>{{ r.sharpe_ratio|default:"—"|floatformat:2 }}</td>
                         </tr>
                     {% endfor %}

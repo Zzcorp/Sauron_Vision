@@ -11,10 +11,16 @@
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">VAR · 95%</span>
-        <span class="oc-strip-value down">
-            {% if var_snapshot.var_pct is not None %}{{ var_snapshot.var_pct|floatformat:2 }}%{% else %}—{% endif %}
+        {# `var_pct` is 0 both when the risk engine measured no risk and when
+           it gave up for want of history — and `is not None` passes for both,
+           so an unmeasurable book rendered a confident red 0.00%, which reads
+           as "no downside". The engine sets `note` when it could not compute;
+           trust that rather than the number. #}
+        <span class="oc-strip-value {% if var_snapshot.note %}{% else %}down{% endif %}"
+              {% if var_snapshot.note %}style="color:var(--text-muted);"{% endif %}>
+            {% if var_snapshot.note %}—{% elif var_snapshot.var_pct is not None %}{{ var_snapshot.var_pct|floatformat:2 }}%{% else %}—{% endif %}
         </span>
-        <span class="oc-strip-sub">value-at-risk daily</span>
+        <span class="oc-strip-sub">{% if var_snapshot.note %}{{ var_snapshot.note }}{% else %}value-at-risk daily{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">SHARPE</span>
@@ -121,14 +127,19 @@
       <tbody>
         {% for r in kelly_rows %}
           <tr>
-            <td>{{ r.rule_name|truncatechars:36 }}</td>
-            <td>{{ r.win_rate|floatformat:2 }}</td>
-            <td class="up">{{ r.avg_win_pct|floatformat:2 }}</td>
-            <td class="down">{{ r.avg_loss_pct|floatformat:2 }}</td>
-            <td>{{ r.n }}</td>
-            <td>{{ r.full_kelly|floatformat:3 }}</td>
-            <td><strong>{{ r.half_kelly|floatformat:3 }}</strong></td>
-            <td>{% if r.is_empirical %}empirical{% else %}fallback{% endif %}</td>
+          {# A row with too little history returns the FALLBACK constants
+             (0.50 / 1.00 / 1.00). Rendered in the same weight as a measured
+             row, and with the qualifier eight columns away, they read as
+             findings. Fallback rows are muted so the difference is visible
+             before the eye reaches the last cell. #}
+            <td{% if not r.is_empirical %} style="color:var(--text-muted);"{% endif %}>{{ r.rule_name|truncatechars:36 }}</td>
+            <td class="num"{% if not r.is_empirical %} style="color:var(--text-muted);"{% endif %}>{{ r.win_rate|floatformat:2 }}</td>
+            <td class="num {% if r.is_empirical %}up{% endif %}"{% if not r.is_empirical %} style="color:var(--text-muted);"{% endif %}>{{ r.avg_win_pct|floatformat:2 }}</td>
+            <td class="num {% if r.is_empirical %}down{% endif %}"{% if not r.is_empirical %} style="color:var(--text-muted);"{% endif %}>{{ r.avg_loss_pct|floatformat:2 }}</td>
+            <td class="num">{{ r.n }}</td>
+            <td class="num"{% if not r.is_empirical %} style="color:var(--text-muted);"{% endif %}>{{ r.full_kelly|floatformat:3 }}</td>
+            <td class="num">{% if r.is_empirical %}<strong>{{ r.half_kelly|floatformat:3 }}</strong>{% else %}<span style="color:var(--text-muted);">{{ r.half_kelly|floatformat:3 }}</span>{% endif %}</td>
+            <td>{% if r.is_empirical %}<span class="badge badge-active">empirical</span>{% else %}<span class="badge" style="color:var(--text-muted);">not measured</span>{% endif %}</td>
           </tr>
         {% endfor %}
       </tbody>

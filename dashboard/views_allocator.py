@@ -16,6 +16,16 @@ def allocator_dashboard(request):
                    .order_by("-proposed_at")[:30])
     rule_states = list(RuleControl.objects.all().order_by("rule_name"))
 
+    # The "Effective x" column used to render the multiplication as text —
+    # "0.50 x 1.00" — rather than its result, so the one number an operator
+    # needs (what this rule's size is actually scaled by) was the one number
+    # the table did not show. widthratio cannot do it either: it rounds to an
+    # integer, which would turn x0.375 into x0.
+    for c in rule_states:
+        admin_w = float(c.weight_multiplier or 1.0) if c.status == "reduced" else 1.0
+        alloc_w = float(c.allocator_weight or 1.0) if c.status == "active" else 0.0
+        c.effective_multiplier = round(admin_w * alloc_w, 4)
+
     context = {
         "page_id": "allocator",
         "shadows": shadows,

@@ -25,9 +25,17 @@ QUOTE_STALE_SECONDS = 900
 HEARTBEAT_STALE_SECONDS = 1800
 
 
-def _check(key, label, state, detail, hint=""):
+def _check(key, label, state, detail, hint="", configured=True):
+    """One health row.
+
+    `configured=False` marks a check that passes only because there is
+    nothing for it to look at — no bots, no feeds, no positions. Both render
+    green, and conflating them is how a platform where nothing is set up
+    reports HEALTHY in the same colour as one that is working. The page
+    needs to be able to tell them apart.
+    """
     return {"key": key, "label": label, "state": state,
-            "detail": detail, "hint": hint}
+            "detail": detail, "hint": hint, "configured": configured}
 
 
 def _age(dt) -> float | None:
@@ -104,7 +112,8 @@ def check_bot_bars(user) -> dict:
         symbols.update(cfg.symbols or [])
     if not symbols:
         return _check("bars", "Bot bars (4h)", "ok",
-                      "no enabled bot configs — nothing to feed")
+                      "no enabled bot configs — nothing to feed",
+                      configured=False)
 
     inst_by_symbol = {
         i.symbol: i.id for i in Instrument.objects.filter(symbol__in=symbols)
@@ -197,7 +206,8 @@ def check_bot_heartbeats(user) -> dict:
 
     configs = list(AssetBotConfig.objects.filter(user=user, enabled=True))
     if not configs:
-        return _check("bots", "Bot activity", "ok", "no enabled bots")
+        return _check("bots", "Bot activity", "ok", "no enabled bots",
+                      configured=False)
 
     # One query for the whole fleet instead of one per config.
     last_by_config = {
@@ -339,9 +349,25 @@ def system_health(request):
         counts[c["state"]] = counts.get(c["state"], 0) + 1
     overall = "fail" if counts["fail"] else ("warn" if counts["warn"] else "ok")
 
+    # A green page can mean two very different things, and the difference is
+    # the whole point of the page. "Everything works" and "nothing is set up
+    # so there is nothing to break" both produce all-ok — and on a platform
+    # with no bots, no feeds and no positions, the second is what you get.
+    # Reporting that as HEALTHY in the same green trains the operator to
+    # trust a screen that is telling them nothing.
+    unconfigured = [c for c in checks if not c.get("configured", True)]
+    if overall == "ok" and unconfigured:
+        overall = "unconfigured"
+
+    # Failures first: on a long list the thing needing attention should not
+    # be below fifteen passing rows.
+    order = {"fail": 0, "warn": 1, "ok": 2}
+    checks.sort(key=lambda c: order.get(c["state"], 3))
+
     return render(request, "dashboard/system_health.html", {
         "page_id": "system_health",
         "checks": checks,
         "counts": counts,
         "overall": overall,
+        "unconfigured": unconfigured,
     })
