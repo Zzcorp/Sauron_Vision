@@ -52,6 +52,59 @@ def _pin_ok(request) -> bool:
     return bool(prof and prof.access_pin_hash and check_password(pin, prof.access_pin_hash))
 
 
+@_admin_only
+def flatten_all_positions(request):
+    """The real kill switch: disable every bot AND close every open position.
+
+    This had no user interface at all. `execute_kill_switch` and its endpoint
+    both existed and were reachable from nothing, while the only red button
+    on the platform — STOP ALL — toggles `platform_master`, which stops the
+    SCHEDULER and closes nothing. Pressing it while holding open trades is
+    the worst of both worlds: the positions stay live at the broker and the
+    bot that would have honoured their stops is now switched off.
+
+    Gated on the trading PIN. It is irreversible, it moves real money, and it
+    is exactly the action that should not be one click from a stray cursor —
+    the same bar the platform already sets for arming a bot live.
+    """
+    from django.contrib import messages
+    from django.shortcuts import redirect
+    from bot_program.engine.kill_switch import execute_kill_switch
+
+    if not _pin_ok(request):
+        messages.error(request, "Trading PIN required to flatten positions. "
+                                "Nothing was closed.")
+        return redirect("admin_dashboard")
+
+    reason = (request.POST.get("reason") or "manual kill switch").strip()[:200]
+    try:
+        results = execute_kill_switch(user=request.user, reason=reason)
+    except Exception as e:
+        logger.exception("[kill switch] failed for %s: %s", request.user, e)
+        messages.error(request, f"Kill switch FAILED: {e}. Check your broker "
+                                f"positions manually before assuming they are flat.")
+        return redirect("admin_dashboard")
+
+    closed = (results.get("positions_closed", 0)
+              + results.get("asset_positions_closed", 0)
+              + results.get("portfolio_positions_closed", 0))
+    disabled = (results.get("bots_disabled", 0)
+                + results.get("asset_bots_disabled", 0))
+    errs = results.get("errors") or []
+
+    msg = f"Kill switch: {disabled} bot(s) disabled, {closed} position(s) closed."
+    if errs:
+        # Never report a clean sweep when some closes failed — the operator
+        # would stop looking, and a position they believe is flat is the most
+        # expensive kind of wrong.
+        messages.error(request, msg + f" {len(errs)} FAILED — these may still "
+                                      f"be open at the broker: {'; '.join(str(e)[:120] for e in errs[:3])}")
+    else:
+        messages.success(request, msg)
+    return redirect("admin_dashboard")
+
+
+
 def _run_task(task_callable, label: str, request):
     """Run a Celery task synchronously and flash the result."""
     try:

@@ -35,6 +35,7 @@ from .views_performance import performance_dashboard
 from .views_risk import risk_dashboard
 from .views_ai_insights import ai_insights_dashboard
 from .views_admin_hq import (
+    flatten_all_positions,
     run_signal_scan, run_smc_lifecycle, run_grade_signals,
     run_decay_investigation, run_daily_snapshot, run_recalc_exposure,
     run_nightly_cleanup, run_full_universe_scan, run_seed_components,
@@ -290,6 +291,10 @@ urlpatterns = [
 
     # ── Kill Switch ────────────────────────────────────────
     path("api/kill-switch/", views.kill_switch_api, name="kill_switch_api"),
+    # The real kill switch, with a user interface and a PIN gate. The API
+    # above had neither and was reachable from no template.
+    path("admin-hq/flatten-all/", flatten_all_positions,
+         name="flatten_all_positions"),
 
     # ── Price Alerts ───────────────────────────────────────
     path("api/price-alerts/", views.price_alerts_api, name="price_alerts_api"),

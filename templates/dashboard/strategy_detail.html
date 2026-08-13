@@ -44,7 +44,7 @@
     <div class="card-header"><span class="card-title">Strategy Legs</span></div>
     {% if strategy.legs.all %}
     <div class="table-wrapper">
-    <table>
+    <table class="sv-perf-table">
         <thead><tr><th>Instrument</th><th>Action</th><th>Weight</th><th>Entry</th><th>Stop Loss</th><th>Take Profit</th><th>Status</th></tr></thead>
         <tbody>
         {% for leg in strategy.legs.all %}

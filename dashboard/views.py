@@ -1407,6 +1407,23 @@ def admin_dashboard(request):
     context["master_enabled"] = master_enabled
     context["components_by_category"] = components_by_category
 
+    # What STOP ALL does NOT do. Toggling platform_master stops the scheduler
+    # from running tasks; it does not close a single position. So an operator
+    # who presses the big red button while holding open trades is left in the
+    # worst state available: positions still live at the broker, and the bot
+    # that would have honoured their stops now switched off. The page has to
+    # say so, and it needs the real flatten within reach.
+    from bot_program.models import AssetBotTrade, BotTrade
+    context["open_trade_count"] = (
+        AssetBotTrade.objects.filter(config__user=request.user,
+                                     status__in=("OPEN", "CLOSE_PENDING")).count()
+        + BotTrade.objects.filter(config__user=request.user,
+                                  status="OPEN").count()
+    )
+    context["has_pin"] = bool(
+        getattr(getattr(request.user, "trader_profile", None),
+                "access_pin_hash", ""))
+
     # Phase-3/4 HQ additions: surface broker accounts + AI-related components
     # so the template can render dedicated sections without re-querying.
     from bot_program.models import BinanceAccount, OANDAAccount, AlpacaAccount

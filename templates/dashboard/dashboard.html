@@ -762,7 +762,7 @@ body.sv-editing [id^="section-"].sv-hidden-in-edit .sv-edit-x span { display: no
                 <a href="{% url 'strategies_list' %}" class="btn btn-sm">View All →</a>
             </div>
             {% if active_strategies %}
-            <div class="table-wrapper"><table>
+            <div class="table-wrapper"><table class="sv-perf-table">
                 <thead><tr><th>Strategy</th><th>Horizon</th><th>Status</th><th>P&L</th></tr></thead>
                 <tbody>
                 {% for s in active_strategies %}

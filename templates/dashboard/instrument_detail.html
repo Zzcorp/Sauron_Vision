@@ -64,7 +64,7 @@
     <div class="card-header"><span class="card-title">Recent Signals for {{ instrument.symbol }}</span></div>
     {% if signals %}
     <div class="table-wrapper">
-    <table>
+    <table class="sv-perf-table">
         <thead><tr><th>Time</th><th>Direction</th><th>Type</th><th>Title</th><th>Score</th></tr></thead>
         <tbody>
         {% for s in signals %}
