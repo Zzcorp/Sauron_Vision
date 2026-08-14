@@ -111,6 +111,10 @@
 
     function backdropFor(el) {
         var sel = el.getAttribute("data-sv-backdrop");
+        /* Some dialogs ARE their own scrim: a full-viewport `inset: 0` box
+         * that centres its panel with flex. Those must not also get the
+         * shared backdrop, or the page is dimmed twice. */
+        if (sel === "none") return null;
         if (sel) return d.querySelector(sel);
         if (!sharedBackdrop) {
             sharedBackdrop = d.createElement("div");
@@ -344,6 +348,13 @@
 
         /* A click on the backdrop, or anywhere outside a menu, dismisses. */
         if (top.backdrop && t === top.backdrop) {
+            if (!top.el.hasAttribute("data-sv-persist")) close(top.el);
+            return;
+        }
+        /* Self-scrim dialogs: the overlay element covers the viewport and
+         * centres its own panel, so "outside the dialog" means a click that
+         * landed on the overlay itself rather than on anything within it. */
+        if (t === top.el && isModal(top.el)) {
             if (!top.el.hasAttribute("data-sv-persist")) close(top.el);
             return;
         }

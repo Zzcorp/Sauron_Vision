@@ -23,9 +23,9 @@
             <td>{% if row.heartbeat_age %}{{ row.heartbeat_age|floatformat:0 }}s{% else %}—{% endif %}</td>
             <td>{{ row.open_trades }}</td>
             <td>{% if row.circuit %}<span style="color:var(--accent-red);">{{ row.circuit }}</span>{% else %}ok{% endif %}</td>
-            {# Each button carries its row's state so the confirmation can
+            {% comment %} Each button carries its row's state so the confirmation can
                show what is being changed. Toggle and Reset circuit had no
-               confirmation whatsoever, and both re-arm live trading. #}
+               confirmation whatsoever, and both re-arm live trading. {% endcomment %}
             <td class="actions"
                 data-bot-name="{{ row.config.name|default:row.config.id }}"
                 data-bot-market="{{ row.market }}"

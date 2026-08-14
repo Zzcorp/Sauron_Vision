@@ -62,9 +62,9 @@ the broker, and the bot that would have honoured their stops switched off.
             </div>
             {% endif %}
         </div>
-        {# window.confirm could not show what was about to be closed. On the
+        {% comment %} window.confirm could not show what was about to be closed. On the
            most destructive control in the platform, "Are you sure?" is not a
-           question anybody can answer — the positions ARE the decision. #}
+           question anybody can answer — the positions ARE the decision. {% endcomment %}
         <form method="post" action="{% url 'flatten_all_positions' %}"
               id="flattenForm"
               data-open-count="{{ open_trade_count|default:0 }}"
@@ -651,7 +651,7 @@ the broker, and the bot that would have honoured their stops switched off.
 <div class="card fade-in-up delay-5" style="margin-bottom:24px;">
     <div class="card-header">
         <span class="card-title">Registered Users</span>
-        <button class="btn btn-primary btn-sm" onclick="document.getElementById('addUserModal').classList.add('active')">+ Add User</button>
+        <button class="btn btn-primary btn-sm" data-sv-open="addUserModal">+ Add User</button>
     </div>
     <div class="table-wrapper"><table class="sv-perf-table">
         <thead><tr><th>Username</th><th>Email</th><th>Name</th><th>Staff</th><th>Active</th><th>Joined</th><th>Last Login</th></tr></thead>
@@ -691,9 +691,12 @@ the broker, and the bot that would have honoured their stops switched off.
 </div>
 
 <!-- ── ADD USER MODAL ─────────────────────────── -->
-<div class="modal-overlay" id="addUserModal">
+<div class="modal-overlay" id="addUserModal" role="dialog" aria-modal="true"
+     aria-label="Create new user"
+     data-sv-overlay="dialog" data-sv-backdrop="none"
+     data-sv-focus="input[name='username']">
     <div class="modal">
-        <button class="modal-close" onclick="document.getElementById('addUserModal').classList.remove('active')">&times;</button>
+        <button class="modal-close" data-sv-close>&times;</button>
         <div class="modal-title">CREATE NEW USER</div>
         <form method="post" action="{% url 'admin_create_user' %}">
             {% csrf_token %}
@@ -723,7 +726,7 @@ the broker, and the bot that would have honoured their stops switched off.
             </div>
             <div style="display:flex;gap:12px;">
                 <button type="submit" class="btn btn-primary" style="flex:1;">Create User</button>
-                <button type="button" class="btn" onclick="document.getElementById('addUserModal').classList.remove('active')">Cancel</button>
+                <button type="button" class="btn" data-sv-close>Cancel</button>
             </div>
         </form>
     </div>

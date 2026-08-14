@@ -37,8 +37,8 @@
 
     <script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="{% static 'css/sauron.css' %}">
-    {# The overlay system loads after sauron.css: it re-points the older
-       hand-picked z-indexes onto one ladder, and that has to win. #}
+    {% comment %} The overlay system loads after sauron.css: it re-points the older
+       hand-picked z-indexes onto one ladder, and that has to win. {% endcomment %}
     <link rel="stylesheet" href="{% static 'css/sv-overlay.css' %}">
     <script src="{% static 'js/sv-overlay.js' %}" defer></script>
     <script src="{% static 'js/sv-flash.js' %}" defer></script>
@@ -65,23 +65,93 @@
             <stop offset="60%" stop-color="#00e868" stop-opacity="0.15"/>
             <stop offset="100%" stop-color="#00e868" stop-opacity="0"/>
         </radialGradient>
+        {% comment %} The wet highlight that makes a drawn eye read as an eye rather than
+           as a diagram: light comes from up-left, so the cornea catches it
+           off-centre and the pupil sits in shadow beneath. {% endcomment %}
+        <radialGradient id="corneaHi" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#d8ffe9" stop-opacity="0.55"/>
+            <stop offset="55%" stop-color="#7dffc0" stop-opacity="0.13"/>
+            <stop offset="100%" stop-color="#00e868" stop-opacity="0"/>
+        </radialGradient>
+        {% comment %} Depth across the sclera. Without it the white of the eye is a flat
+           field and the whole shape reads as a logo. {% endcomment %}
+        <radialGradient id="scleraDepth" cx="50%" cy="46%" r="58%">
+            <stop offset="0%" stop-color="#00e868" stop-opacity="0.10"/>
+            <stop offset="62%" stop-color="#00e868" stop-opacity="0.03"/>
+            <stop offset="100%" stop-color="#00281a" stop-opacity="0.16"/>
+        </radialGradient>
     </defs>
-    <!-- STATIC: eye structure — thicker strokes -->
+
+    <!-- STATIC: eye structure -->
     <g class="eye-static">
-        <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="3.5"/>
-        <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
-        <path d="M 10,400 Q 200,100 400,160 Q 600,100 790,400" fill="none" stroke="#00e868" stroke-width="2" opacity="0.6"/>
-        <path d="M 10,400 Q 200,700 400,640 Q 600,700 790,400" fill="none" stroke="#00e868" stroke-width="2" opacity="0.6"/>
+        {% comment %} The lid: one symmetric quadratic per side, meeting at the
+           tips. A vesica, which is the actual geometry of an eye opening —
+           the old outline was a full ellipse with arcs drawn over the top of
+           it, so the shape bulged above its own lid line.
+
+           One arc per lid, not two. Two arcs meeting at the centre each peak
+           BEFORE their shared endpoint: measured, the join sat 3.66 units
+           below the true apex at x=355, so the lid had two peaks with a dip
+           between them — a seagull, not an eye. With the control points
+           equally spaced in x, a single quadratic puts the apex exactly at
+           (400,152), which is also where the board traces leave the eye. {% endcomment %}
+        <path class="eye-lid" d="M 10,400 Q 400,-96 790,400"
+              fill="none" stroke="#00e868" stroke-width="3.5"/>
+        <path class="eye-lid" d="M 10,400 Q 400,896 790,400"
+              fill="none" stroke="#00e868" stroke-width="3.5"/>
+        {% comment %} Sclera fill, clipped to the lid opening by drawing the two arcs as
+           one closed path. {% endcomment %}
+        <path d="M 10,400 Q 400,-96 790,400 Q 400,896 10,400 Z"
+              fill="url(#scleraDepth)" stroke="none"/>
+        {% comment %} Lid crease — the fold above the eye. One faint line, and the eye
+           stops looking like it was drawn with a compass. {% endcomment %}
+        <path d="M 70,326 Q 400,-116 730,326"
+              fill="none" stroke="#00e868" stroke-width="1" opacity="0.28"/>
+        <path d="M 40,400 Q 400,840 760,400"
+              fill="none" stroke="#00e868" stroke-width="0.9" opacity="0.3"/>
+
+        {% comment %} ── IRIS ──────────────────────────────────────────────────────
+           Radial fibre structure, which is what the old iris was missing
+           entirely: it was a bare circle. Drawn as one thick dashed ring
+           rather than sixty <line> elements — the dashes run along the
+           circumference and the stroke width gives each one its radial
+           length, so a single element paints the whole striation. {% endcomment %}
+        <circle cx="400" cy="400" r="112" fill="none" stroke="#00e868"
+                stroke-width="84" opacity="0.07"
+                stroke-dasharray="2.6 9.13" class="iris-fibres"/>
+        <circle cx="400" cy="400" r="126" fill="none" stroke="#00e868"
+                stroke-width="52" opacity="0.05"
+                stroke-dasharray="1.8 14.6934" class="iris-fibres-2"/>
+        {% comment %} Limbal ring: the dark band at the outer edge of a real iris. It is
+           the single detail that reads as "eye" the fastest. {% endcomment %}
         <circle cx="400" cy="400" r="160" fill="none" stroke="#00e868" stroke-width="2.5"/>
+        <circle cx="400" cy="400" r="152" fill="none" stroke="#00e868" stroke-width="5" opacity="0.14"/>
+        <circle cx="400" cy="400" r="146" fill="none" stroke="#00e868" stroke-width="0.8" opacity="0.35"/>
+        {% comment %} Collarette — the ridge partway out, where iris fibres change
+           direction. {% endcomment %}
+        <circle cx="400" cy="400" r="88" fill="none" stroke="#00e868"
+                stroke-width="1" opacity="0.3" stroke-dasharray="5 4"/>
+
         <!-- Pupil group — translates with cursor (tracking JS in eye-tracker block) -->
         <g id="globePupilGroup" style="transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);">
-            <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="3"/>
-            <circle cx="400" cy="400" r="40" fill="url(#pupilFill)" filter="url(#pupilGlow)"/>
-            <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.18" filter="url(#pupilGlow)"/>
-            <circle cx="400" cy="400" r="8" fill="#00e868" opacity="0.4"/>
+            {% comment %} Inner group carries the dilation. The outer one is driven by the
+               cursor tracker, and two scripts writing one transform would
+               fight. {% endcomment %}
+            <g class="pupil-breathe">
+                <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="3"/>
+                <circle cx="400" cy="400" r="40" fill="url(#pupilFill)" filter="url(#pupilGlow)"/>
+                <circle cx="400" cy="400" r="20" fill="#00e868" opacity="0.18" filter="url(#pupilGlow)"/>
+                <circle cx="400" cy="400" r="8" fill="#00e868" opacity="0.4"/>
+            </g>
         </g>
-        <line x1="10" y1="400" x2="80" y2="400" stroke="#00e868" stroke-width="1" opacity="0.3"/>
-        <line x1="720" y1="400" x2="790" y2="400" stroke="#00e868" stroke-width="1" opacity="0.3"/>
+
+        {% comment %} Corneal highlight sits above the pupil and does NOT track with it —
+           a specular reflection is fixed to the light source, not the gaze.
+           Moving it with the pupil is the classic tell of a fake eye. {% endcomment %}
+        <ellipse cx="330" cy="330" rx="58" ry="34" fill="url(#corneaHi)"
+                 transform="rotate(-28 330 330)" class="cornea-hi"/>
+        <ellipse cx="470" cy="470" rx="26" ry="14" fill="url(#corneaHi)"
+                 transform="rotate(-28 470 470)" opacity="0.4"/>
     </g>
 
     <!-- ROTATING: globe meridians & latitude lines — thicker -->
@@ -103,30 +173,156 @@
      the coordinates line up with the eye precisely.                   -->
 <svg class="globe-circuits-bg" viewBox="0 0 800 800"
      xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    {% comment %} ── The board ──────────────────────────────────────────────────────
+       Rebuilt around one idea: the eye is a silicon die at the centre of a
+       circuit board. The iris is the die, the bond wires cross the sclera,
+       the eye tips are the package leads, and everything beyond is board.
+       That gives the traces a reason to be where they are, which the
+       previous eight symmetric runs to the corners did not have.
+
+       Every corner is mitered at 45°. This is the single most recognisable
+       signature of real PCB layout, and it is not decorative: a 90° corner
+       traps etchant and causes an impedance discontinuity, so layout tools
+       refuse to make them. The old traces were all right angles, which is
+       why they read as a flowchart rather than as copper.                {% endcomment %}
+    <defs>
+        <pattern id="copperHatch" width="14" height="14" patternUnits="userSpaceOnUse"
+                 patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="14" stroke="#00e868" stroke-width="1"/>
+        </pattern>
+    </defs>
+
+    {% comment %} Ground pour. Real boards flood unused area with copper and hatch it;
+       here it gives the empty corners some material presence. {% endcomment %}
+    <g class="bg-pour">
+        <path d="M 0 0 L 236 0 L 0 236 Z" fill="url(#copperHatch)"/>
+        <path d="M 800 800 L 564 800 L 800 564 Z" fill="url(#copperHatch)"/>
+    </g>
+
     <g class="bg-circuits">
-        <!-- TOP arc apex of vesica ≈ (400, 160) -->
-        <path class="bg-circuit" d="M 400 160 L 400 100 L 160 100 L 160 40 L 60 40"/>
-        <path class="bg-circuit" d="M 400 160 L 400 100 L 640 100 L 640 40 L 740 40"/>
-        <!-- BOTTOM arc apex ≈ (400, 640) -->
-        <path class="bg-circuit" d="M 400 640 L 400 700 L 160 700 L 160 760 L 60 760"/>
-        <path class="bg-circuit" d="M 400 640 L 400 700 L 640 700 L 640 760 L 740 760"/>
-        <!-- LEFT tip ≈ (10, 400) -->
-        <path class="bg-circuit" d="M 10 400 L 10 320 L 60 320"/>
-        <path class="bg-circuit" d="M 10 400 L 10 480 L 60 480"/>
-        <!-- RIGHT tip ≈ (790, 400) -->
-        <path class="bg-circuit" d="M 790 400 L 790 320 L 740 320"/>
-        <path class="bg-circuit" d="M 790 400 L 790 480 L 740 480"/>
-        <!-- Junction nodes -->
-        <circle class="bg-circuit-node" cx="160" cy="40"  r="4"/>
-        <circle class="bg-circuit-node" cx="640" cy="40"  r="4"/>
-        <circle class="bg-circuit-node" cx="160" cy="760" r="4"/>
-        <circle class="bg-circuit-node" cx="640" cy="760" r="4"/>
-        <circle class="bg-circuit-node" cx="60"  cy="320" r="3.5"/>
-        <circle class="bg-circuit-node" cx="60"  cy="480" r="3.5"/>
-        <circle class="bg-circuit-node" cx="740" cy="320" r="3.5"/>
-        <circle class="bg-circuit-node" cx="740" cy="480" r="3.5"/>
-        <circle class="bg-circuit-node" cx="400" cy="100" r="3"/>
-        <circle class="bg-circuit-node" cx="400" cy="700" r="3"/>
+        {% comment %} ── Bond wires: die pads → lead frame ────────────────────────
+           Straight and radial, because a bond wire is a physical wire from
+           the die edge to the package, not a routed trace. They carry no
+           flow animation for the same reason. {% endcomment %}
+        <g class="bg-bond">
+            <path d="M 568 400 L 605 400"/>
+            <path d="M 561.5 446.3 L 597.1 456.5"/>
+            <path d="M 561.5 353.7 L 597.1 343.5"/>
+            <path d="M 542.5 489.0 L 573.8 508.7"/>
+            <path d="M 542.5 311.0 L 573.8 291.3"/>
+            <path d="M 232 400 L 195 400"/>
+            <path d="M 238.5 446.3 L 202.9 456.5"/>
+            <path d="M 238.5 353.7 L 202.9 343.5"/>
+            <path d="M 257.5 489.0 L 226.2 508.7"/>
+            <path d="M 257.5 311.0 L 226.2 291.3"/>
+        </g>
+
+        {# Die-edge bond pads, sitting on the limbal ring. #}
+        <g class="bg-pad">
+            <rect x="563.5" y="395" width="9" height="10" rx="1"/>
+            <rect x="557" y="441.3" width="9" height="10" rx="1" transform="rotate(16 561.5 446.3)"/>
+            <rect x="557" y="348.7" width="9" height="10" rx="1" transform="rotate(-16 561.5 353.7)"/>
+            <rect x="538" y="484" width="9" height="10" rx="1" transform="rotate(32 542.5 489)"/>
+            <rect x="538" y="306" width="9" height="10" rx="1" transform="rotate(-32 542.5 311)"/>
+            <rect x="227.5" y="395" width="9" height="10" rx="1"/>
+            <rect x="234" y="441.3" width="9" height="10" rx="1" transform="rotate(-16 238.5 446.3)"/>
+            <rect x="234" y="348.7" width="9" height="10" rx="1" transform="rotate(16 238.5 353.7)"/>
+            <rect x="253" y="484" width="9" height="10" rx="1" transform="rotate(-32 257.5 489)"/>
+            <rect x="253" y="306" width="9" height="10" rx="1" transform="rotate(32 257.5 311)"/>
+        </g>
+
+        {% comment %} ── Power buses: die → package lead. Thicker, because a power net
+             carries current and is always the fattest trace on a board. {% endcomment %}
+        <path class="bg-circuit bg-circuit--power" d="M 605 400 L 762 400 L 774 388 L 790 388"
+              style="animation-delay:-0.4s"/>
+        <path class="bg-circuit bg-circuit--power" d="M 195 400 L 38 400 L 26 412 L 10 412"
+              style="animation-delay:-2.1s"/>
+
+        {# ── Board traces. Out of the lid apexes, mitered, to the edges. #}
+        <path class="bg-circuit" d="M 400 152 L 400 112 L 388 100 L 172 100 L 160 88 L 160 52 L 148 40 L 60 40"
+              style="animation-delay:-0.9s"/>
+        <path class="bg-circuit" d="M 400 152 L 400 112 L 412 100 L 628 100 L 640 88 L 640 52 L 652 40 L 740 40"
+              style="animation-delay:-3.4s;animation-duration:7.8s"/>
+        <path class="bg-circuit" d="M 400 648 L 400 688 L 388 700 L 172 700 L 160 712 L 160 748 L 148 760 L 60 760"
+              style="animation-delay:-5.2s;animation-duration:5.6s"/>
+        {% comment %} Serpentine on this one: a length-matching meander, used to delay a
+           fast signal so it arrives with its partner. Nothing says "high
+           speed board" faster. {% endcomment %}
+        <path class="bg-circuit" d="M 400 648 L 400 688 L 412 700 L 628 700 L 640 712 L 640 742 L 652 754
+                                    L 657 754 L 661 750 L 661 740 L 665 736 L 670 736 L 674 740
+                                    L 674 750 L 678 754 L 683 754 L 687 750 L 687 740 L 691 736
+                                    L 696 736 L 700 740 L 700 750 L 704 754 L 709 754 L 713 750
+                                    L 713 740 L 717 736 L 722 736 L 726 740 L 726 750 L 730 754
+                                    L 734 754 L 740 760"
+              style="animation-delay:-1.7s"/>
+
+        {# Lead-frame breakouts at the tips. #}
+        <path class="bg-circuit" d="M 10 400 L 10 332 L 22 320 L 60 320" style="animation-delay:-2.6s"/>
+        <path class="bg-circuit" d="M 10 400 L 10 468 L 22 480 L 60 480" style="animation-delay:-4.8s"/>
+        <path class="bg-circuit" d="M 790 400 L 790 332 L 778 320 L 740 320" style="animation-delay:-1.3s"/>
+        <path class="bg-circuit" d="M 790 400 L 790 468 L 778 480 L 740 480" style="animation-delay:-3.9s;animation-duration:8.4s"/>
+
+        {% comment %} ── Differential pair: two traces routed together at a fixed gap,
+             the way a clock or a USB pair is laid out. {% endcomment %}
+        <g class="bg-diff">
+            <path d="M 60 40 L 44 40 L 32 52 L 32 232"/>
+            <path d="M 60 49 L 48 49 L 41 56 L 41 232"/>
+        </g>
+        <g class="bg-diff">
+            <path d="M 740 760 L 756 760 L 768 748 L 768 568"/>
+            <path d="M 740 751 L 752 751 L 759 744 L 759 568"/>
+        </g>
+
+        {# ── Component footprints ───────────────────────────────────── #}
+        <g class="bg-ic">
+            <rect x="90" y="576" width="66" height="48" rx="3"/>
+            <circle cx="99" cy="585" r="3.2" class="bg-ic-dot"/>
+            <path d="M 90 588 L 78 588 M 90 600 L 78 600 M 90 612 L 78 612"/>
+            <path d="M 156 588 L 168 588 M 156 600 L 168 600 M 156 612 L 168 612"/>
+        </g>
+        <g class="bg-ic">
+            <rect x="648" y="172" width="54" height="40" rx="3"/>
+            <circle cx="656" cy="180" r="2.8" class="bg-ic-dot"/>
+            <path d="M 648 184 L 638 184 M 648 196 L 638 196 M 648 206 L 638 206"/>
+            <path d="M 702 184 L 712 184 M 702 196 L 712 196 M 702 206 L 712 206"/>
+        </g>
+
+        {% comment %} Discrete two-pad parts — the resistors and decoupling caps that
+           cover a real board and are the reason it looks populated. {% endcomment %}
+        <g class="bg-smd">
+            <rect x="176" y="94"  width="7" height="13" rx="1"/><rect x="189" y="94"  width="7" height="13" rx="1"/>
+            <rect x="604" y="94"  width="7" height="13" rx="1"/><rect x="617" y="94"  width="7" height="13" rx="1"/>
+            <rect x="176" y="694" width="7" height="13" rx="1"/><rect x="189" y="694" width="7" height="13" rx="1"/>
+            <rect x="26"  y="256" width="13" height="7" rx="1"/><rect x="26"  y="269" width="13" height="7" rx="1"/>
+            <rect x="762" y="536" width="13" height="7" rx="1"/><rect x="762" y="549" width="13" height="7" rx="1"/>
+        </g>
+
+        {% comment %} ── Vias. An annulus, not a dot: a via is a plated hole through the
+             board, and the hole is the whole point of it. The old nodes were
+             filled circles, which is a test point, not a via. {% endcomment %}
+        <g class="bg-via">
+            <circle cx="160" cy="40"  r="5"/><circle cx="640" cy="40"  r="5"/>
+            <circle cx="160" cy="760" r="5"/><circle cx="640" cy="760" r="5"/>
+            <circle cx="60"  cy="320" r="4.5"/><circle cx="60"  cy="480" r="4.5"/>
+            <circle cx="740" cy="320" r="4.5"/><circle cx="740" cy="480" r="4.5"/>
+            <circle cx="400" cy="100" r="4"/><circle cx="400" cy="700" r="4"/>
+            <circle cx="605" cy="400" r="4.5"/><circle cx="195" cy="400" r="4.5"/>
+            <circle cx="32"  cy="232" r="4"/><circle cx="768" cy="568" r="4"/>
+        </g>
+
+        {% comment %} Silkscreen. Reference designators are printed on every real board
+           and are the texture that sells it at a glance. {% endcomment %}
+        <g class="bg-silk">
+            <text x="90" y="570">U1</text>
+            <text x="648" y="166">U2</text>
+            <text x="176" y="88">R4</text>
+            <text x="604" y="88">R5</text>
+            <text x="24" y="250">C1</text>
+            <text x="760" y="530">C2</text>
+            <text x="408" y="94" class="bg-silk--net">VCC</text>
+            <text x="408" y="716" class="bg-silk--net">GND</text>
+            <text x="614" y="392" class="bg-silk--net">IRIS_OUT</text>
+        </g>
     </g>
 </svg>
 
@@ -218,13 +414,13 @@
                 <span class="topbar-title">{% block page_title %}Dashboard{% endblock %}</span>
             </div>
             <div class="topbar-right">
-                {# A hardcoded green "LIVE" dot used to sit here, driven by
+                {% comment %} A hardcoded green "LIVE" dot used to sit here, driven by
                    nothing at all — no context variable, no poller, no socket.
                    It sat first in this flex row, so it was read BEFORE the
                    real #liveStatusPill twenty lines below, which does poll
                    /api/live/health/ and correctly says OFFLINE when the feeds
                    are dead. Two contradictory liveness claims forty pixels
-                   apart, and the false one had the better seat. #}
+                   apart, and the false one had the better seat. {% endcomment %}
                 <a href="{% url 'toggle_theme' %}" class="theme-toggle-btn" title="Switch to light/dark mode">
                     <span class="theme-icon-dark">☀</span>
                     <span class="theme-icon-light">☾</span>
@@ -366,10 +562,10 @@
                         <div class="tp-head">
                             <span class="tp-sym">{{ item.symbol }}</span>
                             <span class="tp-chip">{{ item.asset_class }}</span>
-                            {# Rendered by CSS off .is-stale, which the age
+                            {% comment %} Rendered by CSS off .is-stale, which the age
                                ticker sets as the quote crosses 15 minutes —
                                rather than only if it was already stale at the
-                               moment the page happened to be built. #}
+                               moment the page happened to be built. {% endcomment %}
                             <span class="tp-chip tp-chip--warn tp-stale-chip">STALE</span>
                         </div>
                         {% if item.name %}<div class="tp-sub">{{ item.name }}</div>{% endif %}
@@ -396,8 +592,8 @@
                         </div>
                         <div class="tp-sub">{{ item.title|truncatechars:90 }}</div>
 
-                        {# Conviction as a bar, because a bare 0.72 means nothing
-                           without the scale it sits on. #}
+                        {% comment %} Conviction as a bar, because a bare 0.72 means nothing
+                           without the scale it sits on. {% endcomment %}
                         <div class="tp-score">
                             <div class="tp-score-track"><div class="tp-score-fill" style="width:{{ item.score_pct }}%;"></div></div>
                             <span class="tp-score-num">{{ item.score }}</span>
@@ -414,8 +610,8 @@
                         <div class="tp-row"><span class="lbl">Reward : risk</span><span>{{ item.rr }} : 1</span></div>
                         {% endif %}
                         {% if item.drift_pct != None %}
-                        {# A setup is only actionable while price is still near
-                           its entry; without this the card silently ages. #}
+                        {% comment %} A setup is only actionable while price is still near
+                           its entry; without this the card silently ages. {% endcomment %}
                         <div class="tp-row"><span class="lbl">Moved since</span><span class="{% if item.drift_pct >= 0 %}up{% else %}down{% endif %}">{{ item.drift_pct }}%</span></div>
                         {% endif %}
                         <div class="tp-row"><span class="lbl">Rule</span><span>{{ item.rule_name|default:"—"|truncatechars:26 }}</span></div>
@@ -511,9 +707,9 @@
                         <div class="ip-dd-grid">
                             <div class="ip-dd-cell"><span class="dk">VALUE</span><span class="dv">&euro;{{ panel_portfolio_value|default:"0" }}</span></div>
                             <div class="ip-dd-cell"><span class="dk">CASH</span><span class="dv">&euro;{{ panel_cash|default:"0" }}</span></div>
-                            {# |default:"+0.00%" was dead code — a non-empty
+                            {% comment %} |default:"+0.00%" was dead code — a non-empty
                                string is truthy, so the filter never fired and
-                               the fabricated number was simply hardcoded. #}
+                               the fabricated number was simply hardcoded. {% endcomment %}
                             <div class="ip-dd-cell"><span class="dk">DAILY P&amp;L</span><span class="dv {% if panel_daily_pnl > 0 %}up{% elif panel_daily_pnl < 0 %}down{% endif %}">
                                 {% if panel_daily_pnl_display %}{{ panel_daily_pnl_display }}{% else %}<span class="sv-unknown" title="No snapshot for today yet">&mdash;</span>{% endif %}
                             </span></div>
@@ -542,11 +738,11 @@
                     </div>
                 </a>
                 <a href="{% url 'bot_home' %}" class="ip-cat ip-cat-link">
-                    {# panel_bot_armed was assigned nowhere in the codebase, so
+                    {% comment %} panel_bot_armed was assigned nowhere in the codebase, so
                        this cell reported OFF / OFFLINE / 0 open on every page
                        of the platform regardless of what the bot was actually
                        doing. Unknown is now distinct from off: a bot whose
-                       state we failed to read must not be drawn as disarmed. #}
+                       state we failed to read must not be drawn as disarmed. {% endcomment %}
                     <span class="ip-label">BOT</span>
                     <span class="ip-count {% if panel_bot_armed is None %}sv-unknown{% elif not panel_bot_armed %}red{% endif %}">{% if panel_bot_armed is None %}&mdash;{% elif panel_bot_armed %}ARMED{% else %}OFF{% endif %}</span>
                     <span class="ip-sub">{{ panel_bot_mode|default:"—" }} · {% if panel_bot_open is None %}&mdash;{% else %}{{ panel_bot_open }}{% endif %} open</span>
@@ -620,9 +816,9 @@
                             <div class="ip-dd-cell"><span class="dk">SAMPLES</span><span class="dv">{{ panel_funding_samples }}</span></div>
                         </div>
                         {% else %}
-                        {# Four hardcoded zeros used to sit here, which reads as
+                        {% comment %} Four hardcoded zeros used to sit here, which reads as
                            "funding is flat everywhere" — the opposite of "the
-                           funding stream is not running". #}
+                           funding stream is not running". {% endcomment %}
                         <div class="sv-empty"><b>No funding data</b>No perpetual funding rates recorded in the last 24 hours.</div>
                         {% endif %}
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Liquidations page</div>
@@ -642,9 +838,9 @@
                             <div class="ip-dd-cell"><span class="dk">SHORTS REKT</span><span class="dv">${{ panel_liq_short_display }}</span></div>
                         </div>
                         {% else %}
-                        {# $0 across the board is what a calm market looks like.
+                        {% comment %} $0 across the board is what a calm market looks like.
                            It is also what a dead websocket looks like, and the
-                           operator cannot tell those apart from a zero. #}
+                           operator cannot tell those apart from a zero. {% endcomment %}
                         <div class="sv-empty"><b>No liquidation data</b>Nothing recorded in the last 24 hours — the liquidation stream may not be running.</div>
                         {% endif %}
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View heatmap</div>
@@ -1306,6 +1502,14 @@
     /* ── Mouse parallax on globe-eye + eye-glow-shadow ─────── */
     var globe = document.querySelector('.globe-eye-bg');
     var eyeShadow = document.querySelector('.eye-glow-shadow');
+    /* The circuit layer shares the eye's coordinate system: its bond pads sit
+       on the die edge, its traces leave the lid apexes, its power buses meet
+       the eye tips. All of that is registration, and the parallax used to move
+       the eye by up to 60px while leaving the board where it was — so on the
+       first mouse move the pads slid off the iris and ploughed across the
+       striations, and the traces detached from the lid. The two layers have to
+       travel together or they must not share coordinates at all. */
+    var circuits = document.querySelector('.globe-circuits-bg');
     /* Smoothed (lerped) target so the eye eases toward the cursor instead
        of jittering frame-to-frame */
     var pTargetX = 0, pTargetY = 0, pCurX = 0, pCurY = 0;
@@ -1318,9 +1522,11 @@
     (function loop() {
         pCurX += (pTargetX - pCurX) * 0.08;
         pCurY += (pTargetY - pCurY) * 0.08;
-        if (globe) {
-            globe.style.transform =
+        if (globe || circuits) {
+            var eyeShift =
                 'translate(calc(-50% + ' + (pCurX * 60) + 'px), calc(-50% + ' + (pCurY * 60) + 'px))';
+            if (globe) globe.style.transform = eyeShift;
+            if (circuits) circuits.style.transform = eyeShift;
         }
         if (eyeShadow) {
             eyeShadow.style.transform =
@@ -2406,14 +2612,14 @@ if ('serviceWorker' in navigator) {
             <path class="pal-cloud pal-cloud-2"
                   d="M 6 36 Q 20 42 32 36 Q 44 30 54 36"/>
         </g>
-        {# Ghostly Sauron-eye silhouette made of glowing light, pulsing
+        {% comment %} Ghostly Sauron-eye silhouette made of glowing light, pulsing
            inside the orb. Sits behind the visions so the data flashes
-           appear "in front of" the watching eye.                       #}
+           appear "in front of" the watching eye.                       {% endcomment %}
         <g class="pal-glow-eye" clip-path="url(#palClip)">
-            {# Pure-light eye silhouette — one filled ellipse fading from
+            {% comment %} Pure-light eye silhouette — one filled ellipse fading from
                bright accent core to transparent (gradient does the work,
                no stroke). Pulses opacity/intensity to feel like the eye
-               is breathing. Sharp oval shape, no border. #}
+               is breathing. Sharp oval shape, no border. {% endcomment %}
             <ellipse class="pal-glow-eye-light" cx="30" cy="30"
                      rx="20" ry="10" fill="url(#palGlowEyeGrad)"/>
         </g>
@@ -2438,10 +2644,10 @@ if ('serviceWorker' in navigator) {
         </g>
         <ellipse class="pal-highlight" cx="22" cy="20" rx="6.5" ry="3.5"
                  fill="url(#palHighlightGrad)"/>
-        {# Ripples REPLACE the rim. Each ripple grows from a small inner
+        {% comment %} Ripples REPLACE the rim. Each ripple grows from a small inner
            radius outward to where the rim used to live (scale 1.0 →
            r=22.5), fades out, and the next staggered ripple takes its
-           place. Solid stroke — not dashed. #}
+           place. Solid stroke — not dashed. {% endcomment %}
         <g class="pal-ripples">
             <circle class="pal-ripple pal-ripple-1" cx="30" cy="30" r="22.5" fill="none"/>
             <circle class="pal-ripple pal-ripple-2" cx="30" cy="30" r="22.5" fill="none"/>

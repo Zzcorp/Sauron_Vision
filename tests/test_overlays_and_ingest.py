@@ -103,6 +103,226 @@ class ZIndexLadderTests(TestCase):
             self.assertIn(sel, self.css)
 
 
+class TemplateCommentTests(TestCase):
+    """Django's {# #} is a SINGLE-LINE comment. Spanning it over two lines
+    does not make a comment at all — the text renders verbatim into the page.
+    This has now bitten this codebase twice, once inside an SVG where it also
+    broke the markup, so it gets a guard."""
+
+    def test_no_template_uses_a_multiline_hash_comment(self):
+        import re
+        from django.conf import settings
+        offenders = []
+        for path in Path(settings.BASE_DIR).joinpath("templates").rglob("*.html"):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for m in re.finditer(r"\{#(.*?)#\}", text, re.S):
+                if "\n" in m.group(1):
+                    offenders.append(f"{path.name}: {m.group(1).strip()[:50]}")
+        self.assertEqual(offenders, [],
+                         "use {% comment %}…{% endcomment %} for multi-line")
+
+    def test_no_comment_markup_reaches_the_browser(self):
+        user = User.objects.create_user(username="cm_u", password="x")
+        self.client.force_login(user)
+        body = self.client.get("/signals/", HTTP_HOST="127.0.0.1").content.decode(
+            "utf-8", "replace")
+        self.assertNotIn("{#", body)
+        self.assertNotIn("{% comment", body)
+
+
+class BackgroundArtTests(TestCase):
+    """The eye and the board it sits on."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="bg_u", password="x")
+        self.client.force_login(self.user)
+        self.body = self.client.get(
+            "/signals/", HTTP_HOST="127.0.0.1").content.decode("utf-8", "replace")
+
+    def _svg(self, cls):
+        import re
+        m = re.search(rf'<svg class="{cls}".*?</svg>', self.body, re.S)
+        self.assertIsNotNone(m, f"{cls} is not in the page")
+        return m.group(0)
+
+    def test_both_background_layers_are_well_formed(self):
+        """A malformed background SVG does not fail loudly — the browser drops
+        the rest of the drawing and the page still renders."""
+        import xml.etree.ElementTree as ET
+        for cls in ("globe-eye-bg", "globe-circuits-bg"):
+            try:
+                ET.fromstring(self._svg(cls))
+            except ET.ParseError as exc:
+                self.fail(f"{cls} is not well-formed: {exc}")
+
+    def test_the_iris_has_structure(self):
+        """It was a bare circle. An iris without fibres or a limbal ring reads
+        as a logo, not an eye."""
+        svg = self._svg("globe-eye-bg")
+        self.assertIn("iris-fibres", svg)
+        self.assertIn("pupil-breathe", svg)
+        self.assertIn("corneaHi", svg)
+
+    def test_the_highlight_does_not_track_the_gaze(self):
+        """A specular reflection is fixed to the light source. Moving it with
+        the pupil is the classic tell of a fake eye, so it must live outside
+        the group the cursor tracker transforms."""
+        import re
+        svg = self._svg("globe-eye-bg")
+        pupil = re.search(r'<g id="globePupilGroup".*?</g>\s*</g>', svg, re.S)
+        self.assertIsNotNone(pupil)
+        self.assertNotIn("cornea-hi", pupil.group(0))
+
+    def _traces(self):
+        import re
+        return re.findall(r'<path class="bg-circuit[^"]*" d="([^"]+)"',
+                          self._svg("globe-circuits-bg"))
+
+    @staticmethod
+    def _points(d):
+        import re
+        nums = [float(n) for n in re.findall(r"-?\d+\.?\d*", d)]
+        return list(zip(nums[::2], nums[1::2]))
+
+    def test_no_trace_has_a_right_angle(self):
+        """A 90° corner traps etchant when the board is made and causes an
+        impedance discontinuity when it is used, so layout tools will not
+        emit one. Every turn goes through a diagonal."""
+        traces = self._traces()
+        self.assertGreaterEqual(len(traces), 8, "traces are missing")
+        for d in traces:
+            pts = self._points(d)
+            for a, b, c in zip(pts, pts[1:], pts[2:]):
+                square = ((a[0] == b[0] and b[1] == c[1]) or
+                          (a[1] == b[1] and b[0] == c[0]))
+                self.assertFalse(square, f"right angle at {b} in {d[:50]}")
+
+    def test_every_miter_is_exactly_45_degrees(self):
+        """An almost-45 corner reads as a mistake rather than as a style."""
+        for d in self._traces():
+            pts = self._points(d)
+            for a, b in zip(pts, pts[1:]):
+                dx, dy = b[0] - a[0], b[1] - a[1]
+                if dx and dy:
+                    self.assertAlmostEqual(abs(dx), abs(dy), places=6,
+                                           msg=f"non-45 segment {a}->{b}")
+
+    def test_nothing_is_routed_off_the_canvas(self):
+        for d in self._traces():
+            for x, y in self._points(d):
+                self.assertTrue(0 <= x <= 800 and 0 <= y <= 800,
+                                f"point ({x},{y}) is outside the viewBox")
+
+    def test_the_bond_pads_sit_on_their_wires(self):
+        """The pads are the join between die and package; a pad floating off
+        its wire is the detail that gives the whole drawing away."""
+        import math, re
+        svg = self._svg("globe-circuits-bg")
+        wires = [tuple(float(v) for v in re.findall(r"-?\d+\.?\d*", d))[:2]
+                 for d in re.findall(r'<path d="(M [^"]+)"/>', svg)]
+        self.assertTrue(wires, "the bond wires are gone")
+        pads = re.findall(r'<rect x="([\d.]+)" y="([\d.]+)" width="9" height="10"', svg)
+        self.assertEqual(len(pads), 10, "there should be ten die pads")
+        for rx, ry in pads:
+            cx, cy = float(rx) + 4.5, float(ry) + 5
+            self.assertLess(min(math.hypot(cx - wx, cy - wy) for wx, wy in wires),
+                            0.05, f"pad at ({cx},{cy}) is off its wire")
+
+    def test_the_board_travels_with_the_eye(self):
+        """The circuit layer is registered to eye coordinates — pads on the die
+        edge, traces leaving the lid apexes. The mouse parallax moved the eye
+        by up to 60px and left the board behind, so the registration came
+        apart on the first pointer move."""
+        self.assertIn("circuits.style.transform = eyeShift", self.body)
+
+    def test_the_board_is_populated(self):
+        """Bond wires, vias, footprints and silkscreen are what separate a
+        circuit board from a flowchart."""
+        svg = self._svg("globe-circuits-bg")
+        for part in ("bg-bond", "bg-via", "bg-pad", "bg-ic", "bg-smd",
+                     "bg-silk", "bg-diff", "copperHatch"):
+            self.assertIn(part, svg, f"{part} is missing from the board")
+
+    def test_a_via_is_a_hole_not_a_dot(self):
+        css = _read("static", "css", "sauron.css")
+        import re
+        m = re.search(r"\.globe-circuits-bg \.bg-via circle \{([^}]+)\}", css)
+        self.assertIsNotNone(m, "the via rule is gone")
+        self.assertIn("fill: none", m.group(1))
+
+    def test_power_traces_are_wider_than_signal_traces(self):
+        import re
+        css = _read("static", "css", "sauron.css")
+        sig = re.search(r"\.globe-circuits-bg \.bg-circuit \{[^}]*stroke-width:\s*([\d.]+)", css)
+        pwr = re.search(r"\.bg-circuit--power \{[^}]*stroke-width:\s*([\d.]+)", css)
+        self.assertIsNotNone(sig)
+        self.assertIsNotNone(pwr)
+        self.assertGreater(float(pwr.group(1)), float(sig.group(1)))
+
+    def test_the_ambient_motion_respects_reduced_motion(self):
+        """A permanent crawl behind text is what triggers vestibular
+        discomfort, and none of it carries information."""
+        css = _read("static", "css", "sauron.css")
+        block = css[css.find("prefers-reduced-motion"):]
+        self.assertIn("pupil-breathe", css)
+        self.assertIn("prefers-reduced-motion", css)
+        self.assertIn("bg-circuit", block)
+
+    def test_light_mode_recolour_does_not_outline_the_gradients(self):
+        """As `*` this also hit the sclera fill and the corneal highlight,
+        drawing a hard green outline around two soft gradients."""
+        css = _read("static", "css", "sauron.css")
+        self.assertNotIn("body.light-mode .globe-eye-bg * {", css)
+        self.assertIn('body.light-mode .globe-eye-bg [stroke]:not([stroke="none"])', css)
+
+
+class LegacyModalMigrationTests(TestCase):
+    """The backtest and add-user dialogs were shown by writing
+    element.style.display from six call sites, with no Escape, no focus
+    management and no scroll lock."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            username="lm_u", password="x", email="a@b.c")
+        self.client.force_login(self.user)
+
+    def test_the_backtest_modals_are_declared_to_the_controller(self):
+        html = _read("templates", "dashboard", "backtest_list.html")
+        self.assertEqual(html.count('data-sv-overlay="dialog"'), 2)
+        self.assertIn("SV.overlay.open('btModal')", html)
+        self.assertNotIn("style.display='flex'", html)
+        self.assertNotIn("style.display = 'flex';", html)
+
+    def test_the_add_user_modal_is_declared_to_the_controller(self):
+        html = _read("templates", "dashboard", "admin_dashboard.html")
+        self.assertIn('data-sv-open="addUserModal"', html)
+        self.assertIn("data-sv-close", html)
+        self.assertNotIn("classList.add('active')", html)
+
+    def test_a_self_scrim_dialog_does_not_get_a_second_backdrop(self):
+        """These overlays are already a full-viewport dimmed box; the shared
+        backdrop on top would dim the page twice."""
+        js = _read("static", "js", "sv-overlay.js")
+        self.assertIn('if (sel === "none") return null;', js)
+
+    def test_clicking_the_scrim_of_a_self_scrim_dialog_closes_it(self):
+        js = _read("static", "js", "sv-overlay.js")
+        self.assertIn("t === top.el && isModal(top.el)", js)
+
+    def test_a_tall_modal_can_be_scrolled_to_its_submit_button(self):
+        css = _read("static", "css", "sauron.css")
+        import re
+        m = re.search(r"\n        \.modal \{([^}]+)\}", css)
+        self.assertIsNotNone(m)
+        self.assertIn("overflow-y: auto", m.group(1))
+
+    def test_the_pages_still_render(self):
+        for path in ("/admin-dashboard/", "/backtest/"):
+            self.assertEqual(
+                self.client.get(path, HTTP_HOST="127.0.0.1").status_code, 200,
+                f"{path} broke")
+
+
 class DestructiveActionTests(TestCase):
     """window.confirm cannot show the thing being destroyed. On this platform
     the guarded actions are disarming a bot and flattening the book, where the

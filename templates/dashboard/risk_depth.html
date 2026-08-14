@@ -11,11 +11,11 @@
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">VAR · 95%</span>
-        {# `var_pct` is 0 both when the risk engine measured no risk and when
+        {% comment %} `var_pct` is 0 both when the risk engine measured no risk and when
            it gave up for want of history — and `is not None` passes for both,
            so an unmeasurable book rendered a confident red 0.00%, which reads
            as "no downside". The engine sets `note` when it could not compute;
-           trust that rather than the number. #}
+           trust that rather than the number. {% endcomment %}
         <span class="oc-strip-value {% if var_snapshot.note %}{% else %}down{% endif %}"
               {% if var_snapshot.note %}style="color:var(--text-muted);"{% endif %}>
             {% if var_snapshot.note %}—{% elif var_snapshot.var_pct is not None %}{{ var_snapshot.var_pct|floatformat:2 }}%{% else %}—{% endif %}
@@ -127,11 +127,11 @@
       <tbody>
         {% for r in kelly_rows %}
           <tr>
-          {# A row with too little history returns the FALLBACK constants
+          {% comment %} A row with too little history returns the FALLBACK constants
              (0.50 / 1.00 / 1.00). Rendered in the same weight as a measured
              row, and with the qualifier eight columns away, they read as
              findings. Fallback rows are muted so the difference is visible
-             before the eye reaches the last cell. #}
+             before the eye reaches the last cell. {% endcomment %}
             <td{% if not r.is_empirical %} style="color:var(--text-muted);"{% endif %}>{{ r.rule_name|truncatechars:36 }}</td>
             <td class="num"{% if not r.is_empirical %} style="color:var(--text-muted);"{% endif %}>{{ r.win_rate|floatformat:2 }}</td>
             <td class="num {% if r.is_empirical %}up{% endif %}"{% if not r.is_empirical %} style="color:var(--text-muted);"{% endif %}>{{ r.avg_win_pct|floatformat:2 }}</td>
