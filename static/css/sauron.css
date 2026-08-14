@@ -3474,3 +3474,256 @@ button:focus-visible,
     font-size: 12px;
     opacity: .8;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TICKER POPUPS
+   ───────────────────────────────────────────────────────────────────────
+   The signal popup showed score, urgency and direction — so hovering told
+   you a setup existed and nothing about the trade it proposes. The levels
+   ARE the signal: where to get in, where you are wrong, what you are
+   playing for. The quote popup showed a price with no age, and the quote
+   pollers are rate-limited enough that a "live" number can be hours old.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.tp-head {
+    display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+    margin-bottom: 5px;
+}
+.tp-sym {
+    font-family: var(--font-display); font-size: 14px; font-weight: 700;
+    color: var(--accent); letter-spacing: .5px;
+}
+.tp-chip {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px;
+    text-transform: uppercase; padding: 2px 6px; border-radius: 3px;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+}
+.tp-chip--bullish { color: var(--success); background: color-mix(in srgb, var(--success) 16%, transparent); }
+.tp-chip--bearish { color: var(--danger);  background: color-mix(in srgb, var(--danger) 16%, transparent); }
+.tp-chip--warn    { color: var(--accent-gold); background: color-mix(in srgb, var(--accent-gold) 18%, transparent); }
+
+.tp-sub {
+    font-size: 11.5px; color: var(--text-muted); line-height: 1.45;
+    margin-bottom: 8px;
+}
+
+.tp-big {
+    font-family: var(--font-mono); font-size: 21px; font-weight: 700;
+    letter-spacing: -.3px; margin: 2px 0 9px;
+    font-variant-numeric: tabular-nums;
+}
+.tp-big.up { color: var(--success); }
+.tp-big.down { color: var(--danger); }
+.tp-big-delta { font-size: 13px; font-weight: 600; opacity: .85; margin-left: 4px; }
+
+/* Conviction as a bar. A bare 0.72 means nothing without its scale. */
+.tp-score { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+.tp-score-track {
+    flex: 1; height: 5px; border-radius: 3px; overflow: hidden;
+    background: color-mix(in srgb, var(--text-muted) 22%, transparent);
+}
+.tp-score-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+.tp-score-num {
+    font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+    font-variant-numeric: tabular-nums; color: var(--text-primary);
+}
+
+/* The three levels, read left to right as the trade is lived. */
+.tp-levels {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--border); border: 1px solid var(--border);
+    border-radius: 5px; overflow: hidden; margin: 0 0 9px;
+}
+.tp-level {
+    background: var(--bg-card); padding: 6px 8px;
+    display: flex; flex-direction: column; gap: 2px; min-width: 0;
+}
+.tp-level .lbl {
+    font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 1px;
+    color: var(--text-muted);
+}
+.tp-level span:last-child {
+    font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis;
+}
+.tp-level--stop span:last-child   { color: var(--danger); }
+.tp-level--target span:last-child { color: var(--success); }
+
+.tp-thesis {
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    font-size: 11.5px; line-height: 1.55; color: var(--text-muted);
+}
+.tp-cta {
+    margin-top: 9px; font-family: var(--font-mono); font-size: 10px;
+    letter-spacing: 1px; color: var(--accent); opacity: .85;
+}
+.ticker-popup .tp-row { font-family: var(--font-mono); font-size: 11px; }
+.ticker-popup .tp-row .up { color: var(--success); }
+.ticker-popup .tp-row .down { color: var(--danger); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   EVENT BANNERS
+   ───────────────────────────────────────────────────────────────────────
+   The platform already pushed fill_open, fill_close and close_pending on a
+   per-user socket, and nothing anywhere listened — so a position opening or
+   closing produced no visible acknowledgement at all. A trade is the single
+   most consequential thing this software does; it should not be something
+   you discover later on a table.
+
+   Stacked bottom-right, above the ticker headband. Collapsed by default to
+   the one line that matters, expandable to the levels. They do not steal
+   focus and never block a click.
+   ═══════════════════════════════════════════════════════════════════════ */
+#svBannerStack {
+    position: fixed;
+    right: 18px;
+    bottom: 72px;          /* clear of the ticker headband */
+    z-index: 900;
+    display: flex;
+    flex-direction: column-reverse;   /* newest nearest the eye */
+    gap: 9px;
+    max-width: min(370px, calc(100vw - 36px));
+    pointer-events: none;             /* the gaps stay click-through */
+}
+#svBannerStack > * { pointer-events: auto; }
+
+.sv-banner {
+    background: var(--bg-card);
+    border: 1px solid var(--border-glow);
+    border-left: 3px solid var(--text-muted);
+    border-radius: 7px;
+    box-shadow: 0 6px 22px -8px rgba(0, 0, 0, .45);
+    padding: 10px 12px;
+    font-size: 12.5px;
+    animation: svBannerIn .22s ease-out;
+}
+@keyframes svBannerIn {
+    from { opacity: 0; transform: translateX(14px); }
+    to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .sv-banner { animation: none; }
+}
+
+.sv-banner--open   { border-left-color: var(--accent); }
+.sv-banner--close  { border-left-color: var(--text-muted); }
+.sv-banner--win    { border-left-color: var(--success); }
+.sv-banner--loss   { border-left-color: var(--danger); }
+.sv-banner--signal { border-left-color: var(--accent-blue, var(--accent)); }
+.sv-banner--warn   { border-left-color: var(--accent-gold); }
+
+.sv-banner-head {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.sv-banner-kind {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.2px;
+    text-transform: uppercase; color: var(--text-muted);
+}
+.sv-banner-sym {
+    font-family: var(--font-display); font-weight: 700; font-size: 13px;
+    color: var(--text-primary); letter-spacing: .4px;
+}
+.sv-banner-val {
+    margin-left: auto; font-family: var(--font-mono); font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.sv-banner-val.up { color: var(--success); }
+.sv-banner-val.down { color: var(--danger); }
+.sv-banner-line {
+    margin-top: 3px; color: var(--text-muted); font-size: 11.5px;
+    line-height: 1.45;
+}
+.sv-banner-more {
+    display: none; margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.sv-banner.is-open .sv-banner-more { display: block; }
+.sv-banner-more .tp-row { font-family: var(--font-mono); font-size: 11px; }
+
+.sv-banner-actions {
+    display: flex; gap: 10px; align-items: center; margin-top: 8px;
+}
+.sv-banner-btn {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: .8px;
+    text-transform: uppercase; background: none; border: none; padding: 0;
+    color: var(--accent); cursor: pointer;
+}
+.sv-banner-btn:hover { text-decoration: underline; }
+.sv-banner-close {
+    margin-left: auto; color: var(--text-muted); cursor: pointer;
+    background: none; border: none; font-size: 15px; line-height: 1; padding: 0 2px;
+}
+
+@media (max-width: 640px) {
+    #svBannerStack { right: 10px; left: 10px; bottom: 64px; max-width: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   LIGHT MODE — remove the dark inset shadows
+   ───────────────────────────────────────────────────────────────────────
+   The shadow stack was authored for the dark theme, where an
+   `inset ... rgba(0,0,0,.5)` reads as depth against a near-black ground.
+   body.light-mode swaps the colour tokens but never touched box-shadow, so
+   on a light ground those same insets render as grey smudges pressed into
+   the headband, the cards and the chat buttons — the panels look dirty
+   rather than raised.
+
+   Replaced with light-appropriate shadows: soft, neutral, outer only. The
+   modal and sidebar scrims are deliberately untouched — those are
+   `position: inset: 0` overlays that are SUPPOSED to be dark, and dimming
+   them would break the focus they exist to create.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+body.light-mode .data-headband {
+    box-shadow: 0 1px 3px rgba(20, 30, 24, .07);
+}
+
+body.light-mode .card,
+body.light-mode .stat-box,
+body.light-mode .metric,
+body.light-mode .signal-item {
+    box-shadow: 0 1px 2px rgba(20, 30, 24, .05),
+                0 4px 14px -8px rgba(20, 30, 24, .10);
+}
+body.light-mode .card:hover,
+body.light-mode .stat-box:hover,
+body.light-mode .metric:hover,
+body.light-mode .signal-item:hover {
+    box-shadow: 0 2px 4px rgba(20, 30, 24, .07),
+                0 10px 24px -12px rgba(20, 30, 24, .16);
+}
+
+body.light-mode .sr-popup,
+body.light-mode .ticker-popup,
+body.light-mode .sv-banner {
+    box-shadow: 0 8px 26px -10px rgba(20, 30, 24, .22);
+}
+
+/* Ask Sauron: the FAB and its panel carried the heaviest inset stack in the
+   stylesheet — three sides of inset black plus an outer halo. */
+body.light-mode .se-eye-fab {
+    box-shadow: 0 2px 10px rgba(20, 30, 24, .18),
+                0 0 0 1px rgba(0, 153, 77, .25);
+}
+body.light-mode .se-chat-panel {
+    box-shadow: 0 18px 44px -18px rgba(20, 30, 24, .28),
+                0 0 0 1px rgba(0, 153, 77, .12);
+}
+body.light-mode .se-chat-header,
+body.light-mode .se-chat-header-btn,
+body.light-mode .se-chat-input-wrap {
+    box-shadow: none;
+}
+
+/* Anything else that slipped through: kill inset shadows on interactive
+   chrome in light mode, without touching the deliberate scrims. */
+body.light-mode .btn,
+body.light-mode button:not(.sv-banner-close),
+body.light-mode .oc-tab,
+body.light-mode .nav-link,
+body.light-mode .topbar {
+    box-shadow: none;
+}

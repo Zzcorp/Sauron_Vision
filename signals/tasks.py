@@ -79,6 +79,32 @@ def _create_signals_and_notify(results):
         new_count += 1
         logger.info("Created signal pk=%s rule=%s instrument=%s", signal.pk, rule_name, instrument)
 
+        # Live banner. Signals were the one thing the operator most wants to
+        # know about the moment it happens, and the only events on the socket
+        # were fills — so a new setup appeared silently and was discovered
+        # later, if at all. Best-effort: a broken socket must never abort a
+        # scan that has already persisted its row.
+        try:
+            from dashboard.consumers import push_eye_event
+            from django.contrib.auth.models import User
+            payload = {
+                "signal_id": signal.pk,
+                "symbol": instrument.symbol,
+                "title": signal.title,
+                "direction": signal.direction,
+                "score": round(float(signal.score or 0), 2),
+                "rule_name": rule_name,
+                "entry": str(signal.suggested_entry or signal.price_at_signal or ""),
+                "stop": str(signal.suggested_stop or ""),
+                "target": str(signal.suggested_target or ""),
+                "rr": signal.risk_reward_ratio,
+                "url": "/signals/",
+            }
+            for u in User.objects.filter(is_active=True, is_staff=True):
+                push_eye_event(u, "new_signal", payload)
+        except Exception as e:
+            logger.debug("new_signal push failed for pk=%s: %s", signal.pk, e)
+
         # Notify — wrapped individually so a broken notifier never aborts the scan.
         try:
             from alerts.notify import notify_new_signal

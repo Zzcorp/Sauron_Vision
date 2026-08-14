@@ -91,22 +91,77 @@ def sauron_context(request):
         # Quotes
         for q in LiveQuote.objects.select_related("instrument").order_by("-updated_at")[:15]:
             change = float(q.change_pct or 0)
+            spread_pct = None
+            try:
+                if q.bid and q.ask and float(q.ask) > 0:
+                    spread_pct = (float(q.ask) - float(q.bid)) / float(q.ask) * 100
+            except Exception:
+                spread_pct = None
+            age_s = int((now - q.updated_at).total_seconds()) if q.updated_at else None
+            if age_s is None:
+                age_display = "unknown"
+            elif age_s < 90:
+                age_display = "just now"
+            elif age_s < 3600:
+                age_display = f"{age_s // 60}m ago"
+            elif age_s < 86400:
+                age_display = f"{age_s // 3600}h ago"
+            else:
+                age_display = f"{age_s // 86400}d ago"
             ticker.append({
                 "type": "quote", "symbol": q.instrument.symbol,
+                "name": q.instrument.name or "",
                 "price": str(q.last), "change": change,
                 "change_display": f"+{change:.2f}%" if change >= 0 else f"{change:.2f}%",
                 "asset_class": q.instrument.asset_class,
+                "bid": q.bid, "ask": q.ask,
+                "spread_pct": round(spread_pct, 3) if spread_pct is not None else None,
+                "volume": q.volume,
+                # A price with no age is a price you cannot act on: the quote
+                # pollers are rate-limited and a "live" number can be hours old.
+                "age_s": age_s, "age_display": age_display,
+                "stale": bool(age_s is not None and age_s > 900),
+                "source": q.source or "",
                 "url": f"/instruments/{q.instrument.symbol}/",
             })
 
-        # Signals
+        # Signals. The popup used to carry only score, urgency and direction —
+        # so hovering a signal told you a setup existed but nothing about the
+        # trade it proposes. The levels are the whole point of a signal: where
+        # to get in, where you are wrong, and what you are playing for.
         active_signals = Signal.objects.filter(is_active=True)
         for s in active_signals.select_related("instrument").order_by("-score")[:5]:
+            entry = s.suggested_entry or s.price_at_signal
+            rr = s.risk_reward_ratio
+            if rr is None and entry and s.suggested_stop and s.suggested_target:
+                risk = abs(float(entry) - float(s.suggested_stop))
+                if risk > 0:
+                    rr = round(abs(float(s.suggested_target) - float(entry)) / risk, 2)
+            # How far price has travelled since the signal fired: a setup is
+            # only actionable while price is still near its entry.
+            drift_pct = None
+            try:
+                lq = LiveQuote.objects.filter(instrument=s.instrument).first()
+                if lq and lq.last and s.price_at_signal:
+                    drift_pct = (float(lq.last) - float(s.price_at_signal)) / float(s.price_at_signal) * 100
+            except Exception:
+                drift_pct = None
+            age_min = int((now - s.created_at).total_seconds() // 60) if s.created_at else None
             ticker.append({
                 "type": "signal", "symbol": s.instrument.symbol,
                 "title": s.title or "",
+                "description": (s.description or "")[:400],
                 "direction": s.direction, "score": f"{s.score:.2f}",
-                "urgency": s.urgency, "url": "/signals/",
+                "score_pct": int(round(float(s.score or 0) * 100)),
+                "urgency": s.urgency,
+                "rule_name": s.rule_name or "",
+                "signal_type": s.signal_type or "",
+                "entry": entry, "stop": s.suggested_stop,
+                "target": s.suggested_target, "rr": rr,
+                "drift_pct": round(drift_pct, 2) if drift_pct is not None else None,
+                "age_min": age_min,
+                "asset_class": s.instrument.asset_class,
+                "url": "/signals/",
             })
 
         # News

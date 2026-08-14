@@ -351,15 +351,65 @@
                     <span>{{ item.title|truncatechars:40 }}</span>
                     {% endif %}
                     <div class="ticker-popup">
-                        <div class="tp-title">{% firstof item.symbol item.title %}</div>
                         {% if item.type == "quote" %}
-                        <div class="tp-row"><span class="lbl">Price</span><span>{{ item.price }}</span></div>
-                        <div class="tp-row"><span class="lbl">Change</span><span style="color:{% if item.change >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{{ item.change_display }}</span></div>
-                        <div class="tp-row"><span class="lbl">Class</span><span>{{ item.asset_class }}</span></div>
+                        <div class="tp-head">
+                            <span class="tp-sym">{{ item.symbol }}</span>
+                            <span class="tp-chip">{{ item.asset_class }}</span>
+                            {% if item.stale %}<span class="tp-chip tp-chip--warn">STALE</span>{% endif %}
+                        </div>
+                        {% if item.name %}<div class="tp-sub">{{ item.name }}</div>{% endif %}
+                        <div class="tp-big {% if item.change >= 0 %}up{% else %}down{% endif %}">
+                            {{ item.price }} <span class="tp-big-delta">{{ item.change_display }}</span>
+                        </div>
+                        {% if item.bid and item.ask %}
+                        <div class="tp-row"><span class="lbl">Bid / Ask</span><span>{{ item.bid }} / {{ item.ask }}</span></div>
+                        {% endif %}
+                        {% if item.spread_pct != None %}
+                        <div class="tp-row"><span class="lbl">Spread</span><span>{{ item.spread_pct }}%</span></div>
+                        {% endif %}
+                        {% if item.volume %}<div class="tp-row"><span class="lbl">Volume</span><span>{{ item.volume }}</span></div>{% endif %}
+                        <div class="tp-row"><span class="lbl">Quoted</span><span{% if item.stale %} style="color:var(--accent-gold);"{% endif %}>
+                            {{ item.age_display }}{% if item.source %} · {{ item.source }}{% endif %}
+                        </span></div>
+                        <div class="tp-cta">▸ Open instrument</div>
+
                         {% elif item.type == "signal" %}
-                        <div class="tp-row"><span class="lbl">Score</span><span>{{ item.score }}</span></div>
-                        <div class="tp-row"><span class="lbl">Urgency</span><span>{{ item.urgency }}</span></div>
-                        <div class="tp-row"><span class="lbl">Direction</span><span>{{ item.direction }}</span></div>
+                        <div class="tp-head">
+                            <span class="tp-sym">{{ item.symbol }}</span>
+                            <span class="tp-chip tp-chip--{{ item.direction }}">{{ item.direction|upper }}</span>
+                            {% if item.urgency %}<span class="tp-chip">{{ item.urgency|upper }}</span>{% endif %}
+                        </div>
+                        <div class="tp-sub">{{ item.title|truncatechars:90 }}</div>
+
+                        {# Conviction as a bar, because a bare 0.72 means nothing
+                           without the scale it sits on. #}
+                        <div class="tp-score">
+                            <div class="tp-score-track"><div class="tp-score-fill" style="width:{{ item.score_pct }}%;"></div></div>
+                            <span class="tp-score-num">{{ item.score }}</span>
+                        </div>
+
+                        {% if item.entry %}
+                        <div class="tp-levels">
+                            <div class="tp-level"><span class="lbl">ENTRY</span><span>{{ item.entry|floatformat:4 }}</span></div>
+                            {% if item.stop %}<div class="tp-level tp-level--stop"><span class="lbl">STOP</span><span>{{ item.stop|floatformat:4 }}</span></div>{% endif %}
+                            {% if item.target %}<div class="tp-level tp-level--target"><span class="lbl">TARGET</span><span>{{ item.target|floatformat:4 }}</span></div>{% endif %}
+                        </div>
+                        {% endif %}
+                        {% if item.rr %}
+                        <div class="tp-row"><span class="lbl">Reward : risk</span><span>{{ item.rr }} : 1</span></div>
+                        {% endif %}
+                        {% if item.drift_pct != None %}
+                        {# A setup is only actionable while price is still near
+                           its entry; without this the card silently ages. #}
+                        <div class="tp-row"><span class="lbl">Moved since</span><span class="{% if item.drift_pct >= 0 %}up{% else %}down{% endif %}">{{ item.drift_pct }}%</span></div>
+                        {% endif %}
+                        <div class="tp-row"><span class="lbl">Rule</span><span>{{ item.rule_name|default:"—"|truncatechars:26 }}</span></div>
+                        {% if item.age_min != None %}
+                        <div class="tp-row"><span class="lbl">Age</span><span>{% if item.age_min < 60 %}{{ item.age_min }}m{% else %}{{ item.age_min }}m — stale{% endif %}</span></div>
+                        {% endif %}
+                        {% if item.description %}<div class="tp-thesis">{{ item.description|truncatechars:220 }}</div>{% endif %}
+                        <div class="tp-cta">▸ Open signals</div>
+
                         {% elif item.type == "news" %}
                         <div class="tnp-head">
                           <span class="tnp-source">{{ item.source }}</span>
@@ -2826,6 +2876,167 @@ if ('serviceWorker' in navigator) {
     });
 })();
 </script>
+
+{% if request.user.is_authenticated %}
+<div id="svBannerStack" aria-live="polite" aria-label="Live trading events"></div>
+<script>
+/* Live event banners.
+
+   The platform already pushed fill_open, fill_close and close_pending on a
+   per-user socket (/ws/eye/) and NOTHING listened — so a position opening or
+   closing produced no acknowledgement anywhere in the interface. A trade is
+   the most consequential thing this software does; discovering it later on a
+   table is not good enough. new_signal was added to the same stream.
+
+   Collapsed to the one line that matters, expandable to the levels. Never
+   steals focus, never blocks a click, and a close is kept on screen longer
+   than an open because a close carries a P&L worth reading. */
+(function () {
+    "use strict";
+    var stack = document.getElementById("svBannerStack");
+    if (!stack || !("WebSocket" in window)) return;
+
+    var MAX_VISIBLE = 4;
+    var TTL = { fill_open: 15000, new_signal: 18000, fill_close: 30000,
+                close_pending: 0 };   /* 0 = sticky: this one needs a human */
+
+    function esc(v) {
+        return String(v === undefined || v === null ? "" : v)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+    }
+    function num(v) {
+        var n = parseFloat(v);
+        return isNaN(n) ? null : n;
+    }
+    function row(label, value) {
+        if (value === "" || value === null || value === undefined) return "";
+        return '<div class="tp-row"><span class="lbl">' + esc(label) +
+               '</span><span>' + esc(value) + '</span></div>';
+    }
+
+    function describe(kind, d) {
+        var pnl = num(d.pnl);
+        if (kind === "new_signal") {
+            return {
+                cls: "signal", kind: "New signal", sym: d.symbol,
+                val: (d.score !== undefined && d.score !== null) ? String(d.score) : "",
+                valCls: "",
+                line: (d.direction ? String(d.direction).toUpperCase() + " · " : "") +
+                      (d.title || d.rule_name || ""),
+                more: row("Rule", d.rule_name) + row("Entry", d.entry) +
+                      row("Stop", d.stop) + row("Target", d.target) +
+                      row("Reward : risk", d.rr ? d.rr + " : 1" : ""),
+                href: d.url || "/signals/"
+            };
+        }
+        if (kind === "fill_open") {
+            return {
+                cls: "open", kind: "Position opened", sym: d.symbol,
+                val: d.qty ? (d.side || "") + " " + d.qty : (d.side || ""),
+                valCls: "",
+                line: (d.asset_class ? d.asset_class + " · " : "") +
+                      (d.entry ? "entry " + d.entry : ""),
+                more: row("Side", d.side) + row("Quantity", d.qty) +
+                      row("Entry", d.entry) + row("Rule", d.rule_name) +
+                      row("Venue", d.paper === undefined ? "" : (d.paper ? "paper" : "LIVE")),
+                href: "/asset-bots/"
+            };
+        }
+        if (kind === "fill_close") {
+            return {
+                cls: pnl === null ? "close" : (pnl >= 0 ? "win" : "loss"),
+                kind: "Position closed", sym: d.symbol,
+                val: pnl === null ? "" : (pnl >= 0 ? "+" : "") + pnl.toFixed(2),
+                valCls: pnl === null ? "" : (pnl >= 0 ? "up" : "down"),
+                line: d.outcome ? String(d.outcome).replace(/_/g, " ") : "closed",
+                more: row("Outcome", d.outcome) + row("P&L", d.pnl) + row("Side", d.side),
+                href: "/bot-charts/"
+            };
+        }
+        if (kind === "close_pending") {
+            return {
+                cls: "warn", kind: "Close FAILED", sym: d.symbol, val: "!",
+                valCls: "down",
+                line: "Still open at the broker — the close was rejected.",
+                more: row("Asset class", d.asset_class) + row("Trade", d.trade_id),
+                href: "/asset-bots/"
+            };
+        }
+        return null;
+    }
+
+    function add(kind, data) {
+        var m = describe(kind, data || {});
+        if (!m) return;
+
+        var el = document.createElement("div");
+        el.className = "sv-banner sv-banner--" + m.cls;
+        el.innerHTML =
+            '<div class="sv-banner-head">' +
+              '<span class="sv-banner-kind">' + esc(m.kind) + '</span>' +
+              '<span class="sv-banner-sym">' + esc(m.sym || "") + '</span>' +
+              (m.val ? '<span class="sv-banner-val ' + m.valCls + '">' + esc(m.val) + '</span>' : '') +
+            '</div>' +
+            (m.line ? '<div class="sv-banner-line">' + esc(m.line) + '</div>' : '') +
+            (m.more ? '<div class="sv-banner-more">' + m.more + '</div>' : '') +
+            '<div class="sv-banner-actions">' +
+              (m.more ? '<button type="button" class="sv-banner-btn" data-act="more">Details</button>' : '') +
+              '<a class="sv-banner-btn" href="' + esc(m.href) + '">Open &#9656;</a>' +
+              '<button type="button" class="sv-banner-close" data-act="dismiss" aria-label="Dismiss">&times;</button>' +
+            '</div>';
+
+        el.addEventListener("click", function (e) {
+            var act = e.target && e.target.getAttribute && e.target.getAttribute("data-act");
+            if (act === "dismiss") {
+                el.remove();
+            } else if (act === "more") {
+                el.classList.toggle("is-open");
+                e.target.textContent = el.classList.contains("is-open") ? "Less" : "Details";
+            }
+        });
+
+        stack.appendChild(el);
+        while (stack.children.length > MAX_VISIBLE) stack.removeChild(stack.firstChild);
+
+        var ttl = TTL[kind];
+        if (ttl) {
+            setTimeout(function () {
+                /* An expanded banner is one the operator is still reading. */
+                if (!el.classList.contains("is-open")) el.remove();
+            }, ttl);
+        }
+    }
+
+    var ws = null, retry = 0;
+    function schedule() {
+        /* Backed off and capped: a dead socket must not spin the browser. */
+        retry = Math.min(retry + 1, 6);
+        setTimeout(connect, 1000 * Math.pow(2, retry));
+    }
+    function connect() {
+        var proto = location.protocol === "https:" ? "wss:" : "ws:";
+        try {
+            ws = new WebSocket(proto + "//" + location.host + "/ws/eye/");
+        } catch (e) {
+            return schedule();
+        }
+        ws.onopen = function () { retry = 0; };
+        ws.onmessage = function (ev) {
+            var msg;
+            try { msg = JSON.parse(ev.data); } catch (e) { return; }
+            if (msg && msg.type === "eye_event") add(msg.kind, msg.data);
+        };
+        ws.onclose = schedule;
+        ws.onerror = function () { try { ws.close(); } catch (e) {} };
+    }
+    connect();
+
+    /* Exposed so a page can raise a banner without waiting on the socket. */
+    window.svBanner = add;
+})();
+</script>
+{% endif %}
 
 </body>
 </html>
