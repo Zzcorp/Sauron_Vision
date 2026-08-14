@@ -219,14 +219,22 @@ def fetch_insider_trades(symbol: Optional[str] = None, limit: int = 20) -> list[
         logger.error("fetch_insider_trades: XML parsing error: %s", exc)
         return []
 
-    logger.info("fetch_insider_trades: retrieved %d filings (symbol=%s)", len(results), symbol)
+    # This call was simply missing. The function built rows with a resolvable
+    # "instrument" key — the only path in this module that can satisfy the
+    # persist guard below — and then returned them straight to a caller that
+    # took len() and dropped the list.
+    stored = _persist_institutional_filings(results)
+    logger.info("fetch_insider_trades: retrieved %d filings, stored %d (symbol=%s)",
+                len(results), stored, symbol)
     return results
 
 
-def _persist_institutional_filings(filings: list[dict]) -> None:
-    """Attempt to save parsed filings to the InstitutionalFiling model."""
+def _persist_institutional_filings(filings: list[dict]) -> int:
+    """Save parsed filings to InstitutionalFiling. Returns rows written."""
     if not filings:
-        return
+        return 0
+    written = 0
+    skipped_unknown = 0
     try:
         from scraping.models import InstitutionalFiling
         from instruments.models import Instrument
@@ -234,12 +242,12 @@ def _persist_institutional_filings(filings: list[dict]) -> None:
 
         for f in filings:
             sym = f.get("instrument")
-            if not sym:
-                continue
-            try:
-                instrument = Instrument.objects.get(symbol=sym)
-            except Instrument.DoesNotExist:
-                continue
+            instrument = None
+            if sym:
+                instrument = Instrument.objects.filter(symbol__iexact=sym).first()
+                if instrument is None:
+                    skipped_unknown += 1
+                    continue
 
             filing_date = f.get("filing_date")
             if isinstance(filing_date, str):
@@ -248,17 +256,53 @@ def _persist_institutional_filings(filings: list[dict]) -> None:
                 except ValueError:
                     filing_date = date.today()
 
-            InstitutionalFiling.objects.get_or_create(
-                filing_type=f.get("filing_type", "")[:10],
-                filer_name=f.get("filer_name", "")[:300],
-                instrument=instrument,
-                filing_date=filing_date,
-                defaults={
-                    "shares": f.get("shares"),
-                    "value": f.get("value"),
-                    "change_type": f.get("change_type", "")[:20],
-                    "source_url": f.get("source_url", "")[:200],
-                },
-            )
+            source_url = (f.get("source_url") or "")[:200]
+
+            # A 13F from the current-filings feed names the filer but not the
+            # holdings — those live in the INFORMATION TABLE attachment, which
+            # this scraper does not follow. So instrument stays null rather
+            # than the row being thrown away: knowing that a given manager
+            # filed on a given date is genuinely useful, and discarding it was
+            # why the 13F path could never write anything at all.
+            #
+            # Dedupe by accession URL when we have one. unique_together cannot
+            # do this job here because SQL treats two NULL instruments as
+            # distinct, so every run would re-insert the same 13F rows.
+            existing = None
+            if source_url:
+                existing = InstitutionalFiling.objects.filter(
+                    source_url=source_url).first()
+            if existing is None:
+                existing = InstitutionalFiling.objects.filter(
+                    filing_type=f.get("filing_type", "")[:10],
+                    filer_name=f.get("filer_name", "")[:300],
+                    instrument=instrument,
+                    filing_date=filing_date,
+                ).first()
+
+            if existing is None:
+                InstitutionalFiling.objects.create(
+                    filing_type=f.get("filing_type", "")[:10],
+                    filer_name=f.get("filer_name", "")[:300],
+                    instrument=instrument,
+                    filing_date=filing_date,
+                    shares=f.get("shares"),
+                    value=f.get("value"),
+                    change_type=f.get("change_type", "")[:20],
+                    source_url=source_url,
+                )
+                written += 1
+
+        if skipped_unknown:
+            # Previously a bare `continue` with no counter, so a run that
+            # resolved none of its filings looked identical to a quiet day.
+            logger.info(
+                "InstitutionalFiling: %d of %d filings named a symbol we do "
+                "not carry and were dropped", skipped_unknown, len(filings))
+
     except Exception as exc:
-        logger.debug("InstitutionalFiling persistence skipped: %s", exc)
+        # WARNING, not DEBUG: a database error here used to abort the rest of
+        # the batch without appearing in the logs at all.
+        logger.warning("InstitutionalFiling persistence failed: %s", exc)
+
+    return written

@@ -23,11 +23,19 @@
             <td>{% if row.heartbeat_age %}{{ row.heartbeat_age|floatformat:0 }}s{% else %}—{% endif %}</td>
             <td>{{ row.open_trades }}</td>
             <td>{% if row.circuit %}<span style="color:var(--accent-red);">{{ row.circuit }}</span>{% else %}ok{% endif %}</td>
-            <td class="actions">
-              <button class="btn-small" onclick="adminBotToggle({{ row.config.id }})">Toggle</button>
-              <button class="btn-small" onclick="adminBotShadow({{ row.config.id }})">Shadow 24h</button>
-              <button class="btn-small" onclick="adminBotResetCircuit({{ row.config.id }})">Reset circuit</button>
-              <button class="btn-small" onclick="adminBotReconcile({{ row.config.id }})">Reconcile</button>
+            {# Each button carries its row's state so the confirmation can
+               show what is being changed. Toggle and Reset circuit had no
+               confirmation whatsoever, and both re-arm live trading. #}
+            <td class="actions"
+                data-bot-name="{{ row.config.name|default:row.config.id }}"
+                data-bot-market="{{ row.market }}"
+                data-bot-enabled="{% if row.enabled %}1{% else %}0{% endif %}"
+                data-bot-open="{{ row.open_trades|default:0 }}"
+                data-bot-circuit="{{ row.circuit|default:'' }}">
+              <button class="btn-small" onclick="adminBotToggle({{ row.config.id }}, this)">Toggle</button>
+              <button class="btn-small" onclick="adminBotShadow({{ row.config.id }}, this)">Shadow 24h</button>
+              <button class="btn-small" onclick="adminBotResetCircuit({{ row.config.id }}, this)">Reset circuit</button>
+              <button class="btn-small" onclick="adminBotReconcile({{ row.config.id }}, this)">Reconcile</button>
             </td>
           </tr>
         {% endfor %}
@@ -64,25 +72,121 @@ async function adminBotPost(url) {
   });
   return r.json();
 }
-async function adminBotToggle(id) {
+/* Row context, so a confirmation can name the bot it is about to change
+   rather than asking about "the bot". */
+function botCtx(el) {
+  const d = (el && el.closest("[data-bot-name]")) || null;
+  if (!d) return { name: "this bot", market: "—", enabled: null, open: 0, circuit: "" };
+  return {
+    name: d.dataset.botName || "this bot",
+    market: d.dataset.botMarket || "—",
+    enabled: d.dataset.botEnabled === "1",
+    open: parseInt(d.dataset.botOpen || "0", 10) || 0,
+    circuit: d.dataset.botCircuit || "",
+  };
+}
+
+function botFail(action, err) {
+  return SV.overlay.alert({
+    title: action + " failed",
+    message: String(err || "The server did not say why."),
+    detail: "Nothing was changed. The bot is in the state it was in before.",
+  });
+}
+
+/* Arming or disarming live trading. Previously had no confirmation at all. */
+async function adminBotToggle(id, el) {
+  const c = botCtx(el);
+  const arming = c.enabled === false;
+  const ok = await SV.overlay.confirm({
+    title: arming ? "Arm this bot" : "Disarm this bot",
+    message: arming
+      ? "This bot will start opening positions again."
+      : "This bot will stop opening new positions.",
+    facts: [
+      ["Bot", c.name],
+      ["Market", c.market],
+      ["Open trades", String(c.open)],
+      ["After this", arming ? "ARMED" : "DISARMED"],
+    ],
+    /* The single most important thing to say here, and the thing a native
+       confirm() had no room for. */
+    detail: !arming && c.open
+      ? "Disarming does NOT close the " + c.open + " open position" +
+        (c.open === 1 ? "" : "s") + ". They stay live at the broker without a " +
+        "bot to honour their stops. Use Emergency Flatten to close them."
+      : "",
+    danger: !arming,
+    confirmLabel: arming ? "Arm bot" : "Disarm bot",
+  });
+  if (!ok) return;
   const r = await adminBotPost(`/htmx/admin/bots/${id}/toggle/`);
   if (r.ok) location.reload();
-  else alert("Failed: " + r.error);
+  else botFail("Toggle", r.error);
 }
-async function adminBotShadow(id) {
+
+async function adminBotShadow(id, el) {
+  const c = botCtx(el);
+  const ok = await SV.overlay.confirm({
+    title: "Shadow mode for 24 hours",
+    message: "The bot keeps deciding and logging, but stops placing orders.",
+    facts: [["Bot", c.name], ["Market", c.market], ["Duration", "24 hours"]],
+    confirmLabel: "Enable shadow",
+  });
+  if (!ok) return;
   const r = await adminBotPost(`/htmx/admin/bots/${id}/shadow/`);
-  if (r.ok) alert("Shadow mode enabled until " + r.shadow_until);
-  else alert("Failed: " + r.error);
+  if (r.ok) {
+    await SV.overlay.alert({
+      title: "Shadow mode on",
+      message: c.name + " will decide but not trade.",
+      facts: [["Until", String(r.shadow_until || "—")]],
+    });
+    location.reload();
+  } else botFail("Shadow mode", r.error);
 }
-async function adminBotResetCircuit(id) {
+
+/* A circuit breaker trips because something went wrong. Re-arming it without
+   saying so was the most dangerous unguarded control on this page. */
+async function adminBotResetCircuit(id, el) {
+  const c = botCtx(el);
+  const ok = await SV.overlay.confirm({
+    title: "Reset circuit breaker",
+    message: "The breaker tripped to stop this bot trading. Resetting it lets "
+           + "the bot trade again immediately.",
+    facts: [
+      ["Bot", c.name],
+      ["Breaker state", c.circuit || "ok"],
+      ["Open trades", String(c.open)],
+    ],
+    detail: "If the condition that tripped it has not been fixed, it will trip "
+          + "again — after the bot has taken more positions.",
+    danger: true,
+    confirmLabel: "Reset breaker",
+  });
+  if (!ok) return;
   const r = await adminBotPost(`/htmx/admin/bots/${id}/reset-circuit/`);
   if (r.ok) location.reload();
-  else alert("Failed: " + r.error);
+  else botFail("Circuit reset", r.error);
 }
-async function adminBotReconcile(id) {
+
+/* Read-only, so no confirmation — but the result deserves better than
+   JSON.stringify into an alert box. */
+async function adminBotReconcile(id, el) {
+  const c = botCtx(el);
   const r = await adminBotPost(`/htmx/admin/bots/${id}/reconcile/`);
-  if (r.ok) alert("Reconciled: " + JSON.stringify(r.result));
-  else alert("Failed: " + r.error);
+  if (!r.ok) return botFail("Reconcile", r.error);
+  const result = r.result || {};
+  const facts = Object.keys(result).map(function (k) {
+    const v = result[k];
+    return [k.replace(/_/g, " "), typeof v === "object" ? JSON.stringify(v) : String(v)];
+  });
+  await SV.overlay.alert({
+    title: "Reconciled " + c.name,
+    message: facts.length
+      ? "Local records compared against the broker."
+      : "Local records match the broker. Nothing to correct.",
+    facts: facts,
+  });
 }
 window.adminBotToggle = adminBotToggle;
 window.adminBotShadow = adminBotShadow;

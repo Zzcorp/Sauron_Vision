@@ -113,8 +113,13 @@ def fetch_screener_results(filters: Optional[dict] = None) -> list[dict]:
     results: list[dict] = []
 
     try:
-        # FinViz screener table has id="screener-content" or class="screener-table"
-        table = soup.find("table", {"id": "screener-content"})
+        # screener-content is a <div> wrapping the results table, not the
+        # table itself. Asking find() for a <table> with that id therefore
+        # matched nothing, and the fallback class regex matched nothing
+        # either because FinViz no longer emits `table-light`. The scraper
+        # returned zero rows on a perfectly good HTTP 200 every single run.
+        container = soup.find(id="screener-content") or soup
+        table = container.find("table") if container else None
         if table is None:
             table = soup.find("table", class_=re.compile(r"table-light|screener"))
 

@@ -37,6 +37,11 @@
 
     <script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="{% static 'css/sauron.css' %}">
+    {# The overlay system loads after sauron.css: it re-points the older
+       hand-picked z-indexes onto one ladder, and that has to win. #}
+    <link rel="stylesheet" href="{% static 'css/sv-overlay.css' %}">
+    <script src="{% static 'js/sv-overlay.js' %}" defer></script>
+    <script src="{% static 'js/sv-flash.js' %}" defer></script>
 {% block extra_css %}{% endblock %}
 </head>
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}">
@@ -213,7 +218,13 @@
                 <span class="topbar-title">{% block page_title %}Dashboard{% endblock %}</span>
             </div>
             <div class="topbar-right">
-                <span><span class="status-dot online"></span> LIVE</span>
+                {# A hardcoded green "LIVE" dot used to sit here, driven by
+                   nothing at all — no context variable, no poller, no socket.
+                   It sat first in this flex row, so it was read BEFORE the
+                   real #liveStatusPill twenty lines below, which does poll
+                   /api/live/health/ and correctly says OFFLINE when the feeds
+                   are dead. Two contradictory liveness claims forty pixels
+                   apart, and the false one had the better seat. #}
                 <a href="{% url 'toggle_theme' %}" class="theme-toggle-btn" title="Switch to light/dark mode">
                     <span class="theme-icon-dark">☀</span>
                     <span class="theme-icon-light">☾</span>
@@ -350,12 +361,16 @@
                     <span class="t-badge strat">STRAT</span>
                     <span>{{ item.title|truncatechars:40 }}</span>
                     {% endif %}
-                    <div class="ticker-popup">
+                    <div class="ticker-popup"{% if item.type == "quote" %} data-sv-staleable{% endif %}>
                         {% if item.type == "quote" %}
                         <div class="tp-head">
                             <span class="tp-sym">{{ item.symbol }}</span>
                             <span class="tp-chip">{{ item.asset_class }}</span>
-                            {% if item.stale %}<span class="tp-chip tp-chip--warn">STALE</span>{% endif %}
+                            {# Rendered by CSS off .is-stale, which the age
+                               ticker sets as the quote crosses 15 minutes —
+                               rather than only if it was already stale at the
+                               moment the page happened to be built. #}
+                            <span class="tp-chip tp-chip--warn tp-stale-chip">STALE</span>
                         </div>
                         {% if item.name %}<div class="tp-sub">{{ item.name }}</div>{% endif %}
                         <div class="tp-big {% if item.change >= 0 %}up{% else %}down{% endif %}">
@@ -368,8 +383,8 @@
                         <div class="tp-row"><span class="lbl">Spread</span><span>{{ item.spread_pct }}%</span></div>
                         {% endif %}
                         {% if item.volume %}<div class="tp-row"><span class="lbl">Volume</span><span>{{ item.volume }}</span></div>{% endif %}
-                        <div class="tp-row"><span class="lbl">Quoted</span><span{% if item.stale %} style="color:var(--accent-gold);"{% endif %}>
-                            {{ item.age_display }}{% if item.source %} · {{ item.source }}{% endif %}
+                        <div class="tp-row"><span class="lbl">Quoted</span><span>
+                            <span class="sv-age"{% if item.quoted_at %} data-sv-at="{{ item.quoted_at }}"{% endif %}>{{ item.age_display }}</span>{% if item.source %} · {{ item.source }}{% endif %}
                         </span></div>
                         <div class="tp-cta">▸ Open instrument</div>
 
@@ -496,10 +511,17 @@
                         <div class="ip-dd-grid">
                             <div class="ip-dd-cell"><span class="dk">VALUE</span><span class="dv">&euro;{{ panel_portfolio_value|default:"0" }}</span></div>
                             <div class="ip-dd-cell"><span class="dk">CASH</span><span class="dv">&euro;{{ panel_cash|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">DAILY P&amp;L</span><span class="dv">{{ panel_daily_pnl_display|default:"+0.00%" }}</span></div>
+                            {# |default:"+0.00%" was dead code — a non-empty
+                               string is truthy, so the filter never fired and
+                               the fabricated number was simply hardcoded. #}
+                            <div class="ip-dd-cell"><span class="dk">DAILY P&amp;L</span><span class="dv {% if panel_daily_pnl > 0 %}up{% elif panel_daily_pnl < 0 %}down{% endif %}">
+                                {% if panel_daily_pnl_display %}{{ panel_daily_pnl_display }}{% else %}<span class="sv-unknown" title="No snapshot for today yet">&mdash;</span>{% endif %}
+                            </span></div>
                             <div class="ip-dd-cell"><span class="dk">EXPOSURE</span><span class="dv">{{ panel_exposure|default:"0" }}%</span></div>
                             <div class="ip-dd-cell"><span class="dk">POSITIONS</span><span class="dv">{{ panel_positions|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">DRAWDOWN</span><span class="dv red">{{ panel_drawdown|default:"0" }}%</span></div>
+                            <div class="ip-dd-cell"><span class="dk">DRAWDOWN</span><span class="dv red">
+                                {% if panel_drawdown %}{{ panel_drawdown }}%{% else %}<span class="sv-unknown" title="No portfolio snapshot has been taken yet">&mdash;</span>{% endif %}
+                            </span></div>
                         </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Portfolio</div>
                     </div>
@@ -520,16 +542,21 @@
                     </div>
                 </a>
                 <a href="{% url 'bot_home' %}" class="ip-cat ip-cat-link">
+                    {# panel_bot_armed was assigned nowhere in the codebase, so
+                       this cell reported OFF / OFFLINE / 0 open on every page
+                       of the platform regardless of what the bot was actually
+                       doing. Unknown is now distinct from off: a bot whose
+                       state we failed to read must not be drawn as disarmed. #}
                     <span class="ip-label">BOT</span>
-                    <span class="ip-count {% if not panel_bot_armed %}red{% endif %}">{% if panel_bot_armed %}ARMED{% else %}OFF{% endif %}</span>
-                    <span class="ip-sub">{{ panel_bot_mode|default:"paper" }} · {{ panel_bot_open|default:"0" }} open</span>
+                    <span class="ip-count {% if panel_bot_armed is None %}sv-unknown{% elif not panel_bot_armed %}red{% endif %}">{% if panel_bot_armed is None %}&mdash;{% elif panel_bot_armed %}ARMED{% else %}OFF{% endif %}</span>
+                    <span class="ip-sub">{{ panel_bot_mode|default:"—" }} · {% if panel_bot_open is None %}&mdash;{% else %}{{ panel_bot_open }}{% endif %} open</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">BOT PROGRAM</div>
                         <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">STATUS</span><span class="dv">{% if panel_bot_armed %}ARMED{% else %}OFFLINE{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">STATUS</span><span class="dv">{% if panel_bot_armed is None %}<span class="sv-unknown">UNKNOWN</span>{% elif panel_bot_armed %}ARMED{% else %}OFFLINE{% endif %}</span></div>
                             <div class="ip-dd-cell"><span class="dk">MODE</span><span class="dv">{{ panel_bot_mode|default:"—"|upper }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">OPEN</span><span class="dv">{{ panel_bot_open|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">24H P&amp;L</span><span class="dv">{{ panel_bot_pnl_24h_display|default:"+0.00" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">OPEN</span><span class="dv">{% if panel_bot_open is None %}<span class="sv-unknown">&mdash;</span>{% else %}{{ panel_bot_open }}{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">24H P&amp;L</span><span class="dv">{% if panel_bot_pnl_24h_display %}{{ panel_bot_pnl_24h_display }}{% else %}<span class="sv-unknown" title="No bot trades closed in the last 24 hours">&mdash;</span>{% endif %}</span></div>
                         </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Go to Bot Program</div>
                     </div>
@@ -582,30 +609,44 @@
                 <a href="{% url 'liquidations_page' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">FUNDING</span>
                     <span class="ip-count">{{ panel_funding_display|default:"—" }}</span>
-                    <span class="ip-sub">24h avg · {{ panel_funding_extreme_count|default:"0" }} extreme</span>
+                    <span class="ip-sub">24h avg · {% if panel_funding_extreme_count is None %}&mdash;{% else %}{{ panel_funding_extreme_count }}{% endif %} extreme</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">FUNDING RATES</div>
+                        {% if panel_funding_samples %}
                         <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">AVG 24H</span><span class="dv">{{ panel_funding_display|default:"—" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">EXTREME</span><span class="dv gold">{{ panel_funding_extreme_count|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">FLIPS</span><span class="dv">{{ panel_funding_flips|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">SAMPLES</span><span class="dv">{{ panel_funding_samples|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">AVG 24H</span><span class="dv">{{ panel_funding_display }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">EXTREME</span><span class="dv gold">{{ panel_funding_extreme_count }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">FLIPS</span><span class="dv">{{ panel_funding_flips }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">SAMPLES</span><span class="dv">{{ panel_funding_samples }}</span></div>
                         </div>
+                        {% else %}
+                        {# Four hardcoded zeros used to sit here, which reads as
+                           "funding is flat everywhere" — the opposite of "the
+                           funding stream is not running". #}
+                        <div class="sv-empty"><b>No funding data</b>No perpetual funding rates recorded in the last 24 hours.</div>
+                        {% endif %}
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Liquidations page</div>
                     </div>
                 </a>
                 <a href="{% url 'liquidations_page' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">LIQ 24H</span>
-                    <span class="ip-count">${{ panel_liq_24h_display|default:"0" }}</span>
-                    <span class="ip-sub">{{ panel_liq_count|default:"0" }} events</span>
+                    <span class="ip-count">{% if panel_liq_24h_display %}${{ panel_liq_24h_display }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub">{% if panel_liq_count is None %}no feed{% else %}{{ panel_liq_count }} events{% endif %}</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">LIQUIDATIONS (24H)</div>
+                        {% if panel_liq_count %}
                         <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">TOTAL</span><span class="dv">${{ panel_liq_24h_display|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">COUNT</span><span class="dv">{{ panel_liq_count|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">LONGS REKT</span><span class="dv red">${{ panel_liq_long_display|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">SHORTS REKT</span><span class="dv">${{ panel_liq_short_display|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">TOTAL</span><span class="dv">${{ panel_liq_24h_display }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">COUNT</span><span class="dv">{{ panel_liq_count }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">LONGS REKT</span><span class="dv red">${{ panel_liq_long_display }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">SHORTS REKT</span><span class="dv">${{ panel_liq_short_display }}</span></div>
                         </div>
+                        {% else %}
+                        {# $0 across the board is what a calm market looks like.
+                           It is also what a dead websocket looks like, and the
+                           operator cannot tell those apart from a zero. #}
+                        <div class="sv-empty"><b>No liquidation data</b>Nothing recorded in the last 24 hours — the liquidation stream may not be running.</div>
+                        {% endif %}
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View heatmap</div>
                     </div>
                 </a>
@@ -1723,29 +1764,75 @@ document.addEventListener('click', function(e) {
 </script>
 
 <script>
-/* UPGRADE-8: Live status poller */
+/* Live status poller.
+   The one widget whose entire job is telling the operator whether market data
+   is fresh used to swallow every one of its own failures: a non-2xx became
+   null and returned, and a network error hit an empty .catch(). So when
+   /api/live/health/ stopped answering, the dropdown kept displaying the last
+   successful payload — green dot, "LIVE", "4s ago" — indefinitely. An
+   operator would check the freshness widget, see green, and trade on quotes
+   that had stopped updating an hour earlier.
+   There is a concrete trigger, not just a hypothetical: the endpoint is
+   @login_required and LOGIN_URL is the public wall, so on session expiry the
+   fetch follows the redirect and gets HTML with a 200. r.ok is true, r.json()
+   rejects, and the empty catch discarded it. */
 (function(){
+  var lastOk = null;   /* epoch ms of the last poll that actually parsed */
+
   function fmt(s){if(s==null)return '—';if(s<60)return Math.round(s)+'s';if(s<3600)return Math.round(s/60)+'m';return Math.round(s/3600)+'h';}
-  function tick(){
-    fetch('/api/live/health/',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(d=>{
-      if(!d)return;
-      var dot=document.querySelector('#liveStatusPill .lsp-dot');
-      var label=document.querySelector('#liveStatusPill .lsp-label');
-      var body=document.getElementById('lspBody');
-      if(!body||!dot)return;
-      var srcs=d.sources||[];
-      // Worst-case state for the pill
-      var hasGreen=srcs.some(s=>s.state==='green');
-      var hasYellow=srcs.some(s=>s.state==='yellow');
-      var hasRed=srcs.some(s=>s.state==='red');
-      dot.className='lsp-dot '+(hasRed?'lsp-red':hasYellow?'lsp-yellow':hasGreen?'lsp-green':'lsp-flat');
-      label.textContent=hasGreen?'LIVE':hasYellow?'DELAYED':'OFFLINE';
-      if(!srcs.length){body.innerHTML='<div class="lsp-empty">No live data sources.<br>See <a href="/getting-started/" style="color:var(--accent);text-decoration:none;">Getting Started</a> to configure.</div>';return;}
-      body.innerHTML=srcs.map(function(s){
-        return '<div class="lsp-row"><span class="lsp-dot lsp-'+s.state+'"></span><span class="lsp-src">'+s.source+'</span><span class="lsp-age">'+fmt(s.age_seconds)+' ago</span></div>';
-      }).join('');
-    }).catch(function(){});
+
+  function el(sel){return document.querySelector(sel);}
+
+  function degrade(reason){
+    var dot=el('#liveStatusPill .lsp-dot'), label=el('#liveStatusPill .lsp-label'),
+        body=document.getElementById('lspBody');
+    if(!dot||!label||!body)return;
+    dot.className='lsp-dot lsp-red';
+    label.textContent='STALE';
+    var since = lastOk ? fmt((Date.now()-lastOk)/1000)+' ago' : 'never';
+    body.innerHTML='<div class="lsp-empty" style="color:var(--accent-red);">'+
+      'Health check unreachable.<br>'+reason+'<br>Last good reading: '+since+'</div>';
   }
+
+  function render(d){
+    var dot=el('#liveStatusPill .lsp-dot'), label=el('#liveStatusPill .lsp-label'),
+        body=document.getElementById('lspBody');
+    if(!body||!dot||!label)return;
+
+    /* The endpoint answers 200 with {"error": ..., "sources": []} when its own
+       backend throws. Without this branch a server crash was rendered to the
+       operator as "no data sources configured" — a setup problem rather than
+       an outage. */
+    if(d.error){ degrade('Server error: '+String(d.error).slice(0,120)); return; }
+
+    lastOk = Date.now();
+    var srcs=d.sources||[];
+    var hasGreen=srcs.some(s=>s.state==='green');
+    var hasYellow=srcs.some(s=>s.state==='yellow');
+    var hasRed=srcs.some(s=>s.state==='red');
+    dot.className='lsp-dot '+(hasRed?'lsp-red':hasYellow?'lsp-yellow':hasGreen?'lsp-green':'lsp-flat');
+    label.textContent=hasGreen?'LIVE':hasYellow?'DELAYED':'OFFLINE';
+    if(!srcs.length){body.innerHTML='<div class="lsp-empty">No live data sources.<br>See <a href="/getting-started/" style="color:var(--accent);text-decoration:none;">Getting Started</a> to configure.</div>';return;}
+    body.innerHTML=srcs.map(function(s){
+      return '<div class="lsp-row"><span class="lsp-dot lsp-'+s.state+'"></span><span class="lsp-src">'+s.source+'</span><span class="lsp-age">'+fmt(s.age_seconds)+' ago</span></div>';
+    }).join('');
+  }
+
+  function tick(){
+    fetch('/api/live/health/',{credentials:'same-origin'})
+      .then(function(r){
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        return r.json();      /* rejects on the login-page-as-200 case */
+      })
+      .then(render)
+      .catch(function(e){ degrade(String(e && e.message || e).slice(0,120)); });
+  }
+
+  /* The label ships as "LIVE" in the markup, so until the first poll lands
+     the pill is asserting something nobody has checked. */
+  var label0=el('#liveStatusPill .lsp-label');
+  if(label0) label0.textContent='…';
+
   setInterval(tick,10000);
   setTimeout(tick,1500);
 })();

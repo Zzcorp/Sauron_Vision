@@ -195,7 +195,60 @@ def fetch_technical_analysis(symbol: str) -> dict:
     }
 
     logger.debug("TradingView: %s → %s", tv_symbol, result["recommendation"])
+    _persist_recommendation(result)
     return result
+
+
+def _persist_recommendation(result: dict) -> int:
+    """Store the aggregate recommendation as a SentimentSnapshot.
+
+    This module had no write layer of any kind: the task fetched a full
+    indicator payload per watchlist symbol and dropped it on the floor,
+    keeping only a count of the HTTP round-trips it had made.
+
+    The indicator values themselves are deliberately NOT stored. indicators/
+    tasks.py already computes RSI, MACD, the moving averages and the rest from
+    local PriceData into TechnicalIndicator, keyed on
+    (instrument, timeframe, timestamp). A second writer filling the same rows
+    from a different price source would contend on that key and leave nobody
+    able to say which number came from where.
+
+    The recommendation is the part worth keeping, because it is not derivable
+    from our own bars — it is TradingView's own aggregation across its
+    indicator set, and it maps cleanly onto the -1..+1 composite_score that
+    SentimentSnapshot already carries.
+    """
+    value = result.get("recommendation_value")
+    if value is None:
+        return 0
+    try:
+        from django.utils import timezone as dj_tz
+        from scraping.models import SentimentSnapshot
+        from instruments.models import Instrument
+
+        instrument = Instrument.objects.filter(
+            symbol__iexact=result.get("symbol", "")).first()
+        if instrument is None:
+            logger.debug("TradingView: %s is not in the instrument catalogue",
+                         result.get("symbol"))
+            return 0
+
+        score = max(-1.0, min(1.0, float(value)))
+        SentimentSnapshot.objects.create(
+            instrument=instrument,
+            source="tradingview",
+            timestamp=dj_tz.now(),
+            # A rating is a direction, not a poll: there are no votes to
+            # count, so the tallies stay at zero and the score carries it.
+            bullish_count=0, bearish_count=0, neutral_count=0,
+            composite_score=round(score, 4),
+            volume=0,
+            trending=False,
+        )
+        return 1
+    except Exception as exc:
+        logger.warning("TradingView recommendation persistence failed: %s", exc)
+        return 0
 
 
 def fetch_trending_ideas(limit: int = 20) -> list[dict]:

@@ -329,8 +329,13 @@ body.sv-editing [id^="section-"].sv-hidden-in-edit .sv-edit-x span { display: no
             if (delEl) {
                 delEl.addEventListener('click', function(e) {
                     e.stopPropagation();
-                    if (!confirm('Delete preset "' + p.name + '"?')) return;
-                    deletePreset(p.id);
+                    SV.overlay.confirm({
+                        title: 'Delete preset',
+                        message: 'The layout "' + p.name + '" will be removed.',
+                        detail: 'Your dashboard sections are not affected — only this saved arrangement of them.',
+                        danger: true,
+                        confirmLabel: 'Delete preset'
+                    }).then(function (ok) { if (ok) deletePreset(p.id); });
                 });
             }
             pills.appendChild(btn);
@@ -495,7 +500,11 @@ body.sv-editing [id^="section-"].sv-hidden-in-edit .sv-edit-x span { display: no
             if (!el.classList.contains('sv-hidden-in-edit')) chosen.push(el.id);
         });
         if (chosen.length === 0) {
-            alert('Keep at least one section before saving.');
+            SV.overlay.alert({
+                title: 'Nothing to save',
+                message: 'A preset needs at least one visible section.',
+                detail: 'Turn a section back on, then save.'
+            });
             return;
         }
         fetch('/api/dashboard/presets/', {
@@ -506,7 +515,11 @@ body.sv-editing [id^="section-"].sv-hidden-in-edit .sv-edit-x span { display: no
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            if (!data.ok) { alert(data.error || 'Could not save preset'); return; }
+            if (!data.ok) {
+                SV.overlay.alert({ title: 'Could not save preset',
+                                   message: String(data.error || 'The server did not say why.') });
+                return;
+            }
             /* Apply the saved layout and exit without restoring snapshot */
             preEditSnapshot = null;
             exitEditMode(false);
@@ -515,7 +528,11 @@ body.sv-editing [id^="section-"].sv-hidden-in-edit .sv-edit-x span { display: no
             loadPresets();
             if (data.id) setTimeout(function() { activatePreset(data.id); }, 150);
         })
-        .catch(function() { alert('Failed to save preset'); });
+        .catch(function (e) {
+            SV.overlay.alert({ title: 'Could not save preset',
+                               message: 'The request never reached the server.',
+                               detail: String(e) });
+        });
     }
 
     if (editBtn) editBtn.addEventListener('click', enterEditMode);

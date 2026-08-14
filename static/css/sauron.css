@@ -91,7 +91,14 @@
         body.light-mode .grid-bg { background-image:
             linear-gradient(rgba(0,153,77,0.04) 1px, transparent 1px),
             linear-gradient(90deg, rgba(0,153,77,0.04) 1px, transparent 1px); }
-        .app-layout { display: flex; min-height: 100vh; position: relative; z-index: 1; }
+        /* No z-index here. It used to be `z-index: 1`, which established a
+           stacking context over the entire application shell — so every modal
+           rendered into {% block content %} was trapped inside it and painted
+           at 1 against the root, no matter what z-index it declared. That is
+           why the add-user dialog appeared UNDERNEATH the floating Ask Sauron
+           eye, which is a body-level sibling. `position: relative` alone is
+           enough to lift the layout above the z-index: 0 canvas layers. */
+        .app-layout { display: flex; min-height: 100vh; position: relative; }
 
         /* ── Sidebar ─────────────────────────────── */
         .sidebar {

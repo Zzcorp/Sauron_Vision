@@ -1,0 +1,653 @@
+/* ════════════════════════════════════════════════════════════════════════
+   SV OVERLAY SYSTEM
+   The one visual language for everything that floats above the page.
+
+   This platform grew six independent overlay implementations. Two separate
+   modal systems (.modal-overlay at z-index 1000, .sv-modal at 9999) with
+   different markup, different close buttons and different padding. Hover
+   cards at 1000 and one at 2147483000 — the maximum-integer hack, which put
+   a tooltip above every modal on the site. Dropdown menus that each brought
+   their own outside-click handler. Event banners at 900, underneath all of
+   it, so a notification that a position had opened could be covered by a
+   tooltip.
+
+   Nothing here is decorative. Every rule below exists because one of those
+   surfaces was doing something an operator would notice and resent.
+
+   Loaded after sauron.css, and deliberately a separate file: the ladder and
+   the shared anatomy need to be readable in one screen, which they are not
+   when appended to a 3,700-line stylesheet.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. THE LADDER ──────────────────────────────────────────────────────
+   One ordering, written once, in the order things are allowed to cover one
+   another. The controller (sv-overlay.js) publishes --sv-stack so that two
+   overlays of the same kind stack in the order they were opened.
+
+   The reasoning behind the order, because it is the part that gets broken:
+   a hover card may cover the page but never a menu the operator opened on
+   purpose; a menu never covers a panel; a banner outranks all three because
+   it reports something that just happened to real money; a modal scrim
+   covers even the banner, because a modal is a mode and dimming everything
+   is the entire point of it; and a toast sits on top of everything because
+   it is the acknowledgement of the action you just took inside the modal. */
+:root {
+    --z-canvas:       0;   /* globe-eye, particles, grid background */
+    --z-sticky:     100;   /* sticky table headers, section heads   */
+    --z-chrome:     500;   /* headbands, ticker bar, info panel     */
+    --z-rail:       600;   /* signal rail                          */
+    --z-nav-scrim:  700;   /* mobile sidebar scrim                  */
+    --z-sidebar:    800;   /* sidebar, including mobile-open        */
+    --z-hovercard: 1200;   /* ticker popup, info-panel dd, sr-popup */
+    --z-menu:      1600;   /* notification bell, user menu, etc.    */
+    --z-panel:     2000;   /* Ask Sauron side panel                 */
+    --z-fab:       2100;   /* the eye, above its own panel edge     */
+    --z-banner:    2600;   /* live fill / signal banners            */
+    --z-backdrop:  3000;   /* modal scrim                           */
+    --z-dialog:    3100;   /* modal dialogs                         */
+    --z-toast:     4000;   /* transient acknowledgements            */
+
+    /* Overlay surface vocabulary, so a popup cannot drift from the platform */
+    --pop-bg:      var(--bg-card, #0e1117);
+    --pop-bg-2:    var(--bg-card-hover, #161b22);
+    --pop-border:  var(--border, rgba(255,255,255,.10));
+    --pop-radius:  10px;
+    --pop-pad:     14px;
+    --pop-shadow:  0 18px 48px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .4);
+    --pop-in:      140ms cubic-bezier(.2, .7, .3, 1);
+}
+
+/* ── 2. RETROFIT: the existing overlays join the ladder ─────────────────
+   These selectors already exist in sauron.css with hand-picked z-indexes.
+   Rather than hunt each one down in a 3,700-line file, they are re-pointed
+   here, which also documents in one place what used to be wrong.
+
+   IMPORTANT, and the thing that makes half of this block a no-op if it is
+   forgotten: a z-index only competes with its siblings inside the nearest
+   STACKING CONTEXT. Three ancestors in this app create one, and a descendant
+   can never escape by declaring a bigger number:
+
+     .app-layout    had `z-index: 1`   — fixed in sauron.css, the property is
+                                         now removed entirely
+     .topbar        has `backdrop-filter: blur(14px)` — which creates a
+                                         stacking context on its own, with or
+                                         without a z-index, so the notification
+                                         bell, the user menu, the exchange list
+                                         and the live-status panel are all
+                                         permanently clamped to the topbar's
+                                         own level. The topbar is therefore
+                                         raised to the menu tier below, because
+                                         the menus it contains cannot be raised
+                                         independently of it.
+     .signals-rail  has `z-index: 40`  — which clamped .sr-popup's
+                                         `z-index: 2147483000` to 40. The
+                                         maximum-integer hack never worked; it
+                                         was competing inside a box that itself
+                                         painted below the topbar.  */
+.topbar          { z-index: var(--z-menu) !important; }
+.signals-rail    { z-index: var(--z-rail) !important; }
+.ticker-bar,
+.data-headband,
+.info-panel-wrap { z-index: var(--z-chrome) !important; }
+.sidebar-overlay { z-index: var(--z-nav-scrim) !important; }
+.sidebar,
+.sidebar.mobile-open { z-index: var(--z-sidebar) !important; }
+.mobile-menu-btn,
+.mobile-toggle   { z-index: calc(var(--z-sidebar) + 1) !important; }
+.ticker-popup,
+.ip-dropdown,
+.dh-pop,
+#navMiniTip           { z-index: var(--z-hovercard) !important; }
+
+/* Was 2147483000. A hover card that painted above every modal on the site. */
+.sr-popup             { z-index: var(--z-hovercard) !important; }
+
+.exchange-dropdown,
+.lsp-dropdown,
+.notif-dropdown,
+.user-menu-dropdown   { z-index: calc(var(--z-menu) + var(--sv-stack, 0)) !important; }
+
+.se-chat-panel        { z-index: var(--z-panel) !important; }
+.se-eye-fab           { z-index: var(--z-fab) !important; }
+
+/* Was 900 — beneath the hover cards, so a fill notification could be
+   covered by a tooltip about an unrelated symbol. */
+#svBannerStack        { z-index: var(--z-banner) !important; }
+
+/* Two modal systems, both now on the ladder rather than at 1000 and 9999. */
+.modal-overlay,
+.sv-modal-backdrop,
+.kbd-modal-overlay    { z-index: calc(var(--z-backdrop) + var(--sv-stack, 0)) !important; }
+.modal,
+.sv-modal,
+.kbd-modal,
+.bt-modal-overlay,
+.bt-modal             { z-index: calc(var(--z-dialog) + var(--sv-stack, 0)) !important; }
+
+.shortcut-toast       { z-index: var(--z-toast) !important; }
+
+/* ── 3. BACKDROP AND SCROLL LOCK ────────────────────────────────────────
+   The scroll lock is compensated in JS so the page does not jump sideways
+   by the width of the scrollbar the instant a dialog opens. */
+.sv-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--z-backdrop) + var(--sv-stack, 0));
+    background: rgba(0, 0, 0, .62);
+    backdrop-filter: blur(3px);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity var(--pop-in), visibility var(--pop-in);
+}
+.sv-backdrop.is-open { opacity: 1; visibility: visible; }
+
+body.sv-scroll-locked { overflow: hidden; }
+
+/* ── 4. SHARED ANATOMY ──────────────────────────────────────────────────
+   Every overlay — hover card, menu, dialog — is built from these, so a
+   symbol, a level or a score looks identical wherever the operator meets
+   it. Deliberately an extension of the tp-* vocabulary that the ticker
+   popup already uses rather than a competing one. */
+.sv-pop-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px var(--pop-pad);
+    border-bottom: 1px solid var(--pop-border);
+}
+.sv-pop-title {
+    font-family: var(--font-heading, var(--font-mono));
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--text-secondary, #9aa4b2);
+}
+.sv-pop-sym {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary, #e6edf3);
+    letter-spacing: .02em;
+}
+.sv-pop-body { padding: var(--pop-pad); }
+.sv-pop-foot {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px var(--pop-pad);
+    border-top: 1px solid var(--pop-border);
+    background: color-mix(in srgb, var(--pop-bg-2) 60%, transparent);
+}
+
+/* A labelled figure. The label is always present: an unlabelled number on a
+   trading screen is a number the operator has to guess the meaning of. */
+.sv-pop-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    padding: 3px 0;
+}
+.sv-pop-row .lbl {
+    color: var(--text-muted, #7d8590);
+    text-transform: uppercase;
+    font-size: 9.5px;
+    letter-spacing: .07em;
+}
+.sv-pop-row .up   { color: var(--accent-green, #00e868); }
+.sv-pop-row .down { color: var(--accent-red, #ff4d4d); }
+
+.sv-pop-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 14px;
+}
+
+/* Entry / stop / target, read left to right in the order a trade happens. */
+.sv-pop-levels {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--pop-border);
+    border: 1px solid var(--pop-border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 10px 0;
+}
+.sv-pop-level {
+    background: var(--pop-bg);
+    padding: 7px 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.sv-pop-level .lbl {
+    font-size: 9px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-muted, #7d8590);
+}
+.sv-pop-level .val {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary, #e6edf3);
+}
+.sv-pop-level--stop   .val { color: var(--accent-red, #ff4d4d); }
+.sv-pop-level--target .val { color: var(--accent-green, #00e868); }
+
+.sv-chip {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--pop-bg-2);
+    color: var(--text-secondary, #9aa4b2);
+    white-space: nowrap;
+}
+.sv-chip--bullish { color: var(--accent-green, #00e868); background: color-mix(in srgb, var(--accent-green, #00e868) 15%, transparent); }
+.sv-chip--bearish { color: var(--accent-red, #ff4d4d);  background: color-mix(in srgb, var(--accent-red, #ff4d4d) 15%, transparent); }
+.sv-chip--warn    { color: var(--accent-gold, #ffb000); background: color-mix(in srgb, var(--accent-gold, #ffb000) 16%, transparent); }
+.sv-chip--muted   { color: var(--text-muted, #7d8590); }
+
+/* A bare 0.72 means nothing without the scale it sits on. */
+.sv-meter { display: flex; align-items: center; gap: 8px; }
+.sv-meter-track {
+    flex: 1;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--pop-bg-2);
+    overflow: hidden;
+}
+.sv-meter-fill { height: 100%; background: var(--accent, #00e868); border-radius: 3px; }
+.sv-meter-num {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary, #e6edf3);
+}
+
+/* ── 5. THE THREE HONEST STATES ─────────────────────────────────────────
+   An overlay with nothing in it must say why, an overlay still fetching must
+   say so, and an overlay that failed must not look like an empty one. The
+   platform previously rendered all three as blank space or as "0". */
+.sv-empty, .sv-loading, .sv-error {
+    padding: 18px var(--pop-pad);
+    text-align: center;
+    font-size: 11px;
+    line-height: 1.5;
+}
+.sv-empty   { color: var(--text-muted, #7d8590); }
+.sv-empty b { display: block; color: var(--text-secondary, #9aa4b2); margin-bottom: 3px; font-weight: 600; }
+.sv-loading { color: var(--text-muted, #7d8590); font-family: var(--font-mono); }
+.sv-loading::after {
+    content: "";
+    display: inline-block;
+    width: 5px; height: 5px;
+    margin-left: 6px;
+    border-radius: 50%;
+    background: var(--accent, #00e868);
+    animation: sv-pulse 1s ease-in-out infinite;
+}
+.sv-error   { color: var(--accent-red, #ff4d4d); }
+
+/* A value we could not compute renders as an em-dash and is visibly not a
+   measurement. It must never be styled like a real figure, and never as 0. */
+.sv-unknown {
+    color: var(--text-muted, #7d8590) !important;
+    opacity: .65;
+    font-weight: 400 !important;
+}
+
+@keyframes sv-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+
+/* ── 5b. LIVE AGE ───────────────────────────────────────────────────────
+   Every figure an operator would act on states when it was last true. The
+   text is rewritten client-side from data-sv-at (see sv-overlay.js), so an
+   age advances on a page that has been open for an hour instead of being
+   frozen at whatever it was when the HTML was built. */
+.sv-age {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .04em;
+    color: var(--text-muted, #7d8590);
+    white-space: nowrap;
+}
+.sv-age--stale { color: var(--accent-gold, #ffb000); }
+.sv-age--dead  { color: var(--accent-red, #ff4d4d); }
+
+/* The chip ships in the markup and is revealed only once the age crosses the
+   threshold. Previously the server decided this once at render time, so the
+   one state worth seeing was the one that could never appear. */
+.tp-stale-chip { display: none; }
+[data-sv-staleable].is-stale .tp-stale-chip { display: inline-block; }
+
+/* ── 6. HOVER CARD ──────────────────────────────────────────────────────
+   Read-only detail on hover. Never contains a control the operator must
+   reach, because a card that disappears when you move toward it cannot hold
+   one. Anything actionable belongs in a menu or a dialog. */
+.sv-card {
+    position: absolute;
+    z-index: var(--z-hovercard);
+    min-width: 240px;
+    max-width: 340px;
+    background: var(--pop-bg);
+    border: 1px solid var(--pop-border);
+    border-radius: var(--pop-radius);
+    box-shadow: var(--pop-shadow);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(4px);
+    transition: opacity var(--pop-in), transform var(--pop-in), visibility var(--pop-in);
+    pointer-events: none;
+}
+.sv-card.is-open,
+:hover > .sv-card { opacity: 1; visibility: visible; transform: translateY(0); }
+
+/* ── 7. MENU ────────────────────────────────────────────────────────────
+   A list of actions hanging off a trigger. Escape closes it, an outside
+   click closes it, and only one is ever open — all handled centrally. */
+.sv-menu {
+    position: absolute;
+    z-index: calc(var(--z-menu) + var(--sv-stack, 0));
+    min-width: 200px;
+    max-height: min(70vh, 460px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: var(--pop-bg);
+    border: 1px solid var(--pop-border);
+    border-radius: var(--pop-radius);
+    box-shadow: var(--pop-shadow);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-4px);
+    transition: opacity var(--pop-in), transform var(--pop-in), visibility var(--pop-in);
+}
+.sv-menu.is-open { opacity: 1; visibility: visible; transform: translateY(0); }
+
+.sv-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--text-secondary, #9aa4b2);
+    background: none;
+    border: 0;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+.sv-menu-item:hover,
+.sv-menu-item:focus-visible {
+    background: var(--pop-bg-2);
+    color: var(--text-primary, #e6edf3);
+    outline: none;
+}
+.sv-menu-item--danger { color: var(--accent-red, #ff4d4d); }
+.sv-menu-sep { height: 1px; background: var(--pop-border); margin: 4px 0; }
+
+/* ── 8. DIALOG ──────────────────────────────────────────────────────────
+   A mode. Focus goes in, is trapped, and comes back out to the trigger. */
+.sv-dialog {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    z-index: calc(var(--z-dialog) + var(--sv-stack, 0));
+    width: min(92vw, 520px);
+    max-height: min(86vh, 720px);
+    display: flex;
+    flex-direction: column;
+    background: var(--pop-bg);
+    border: 1px solid var(--pop-border);
+    border-radius: var(--pop-radius);
+    box-shadow: var(--pop-shadow);
+    opacity: 0;
+    visibility: hidden;
+    transform: translate(-50%, -46%) scale(.97);
+    transition: opacity var(--pop-in), transform var(--pop-in), visibility var(--pop-in);
+}
+.sv-dialog.is-open {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, -50%) scale(1);
+}
+.sv-dialog--danger { border-color: color-mix(in srgb, var(--accent-red, #ff4d4d) 45%, var(--pop-border)); }
+
+.sv-dialog-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--pop-border);
+}
+.sv-dialog-title {
+    flex: 1;
+    font-family: var(--font-heading, var(--font-mono));
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--text-primary, #e6edf3);
+}
+.sv-dialog--danger .sv-dialog-title { color: var(--accent-red, #ff4d4d); }
+.sv-dialog-x {
+    background: none;
+    border: 0;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--text-muted, #7d8590);
+    cursor: pointer;
+    padding: 0 2px;
+}
+.sv-dialog-x:hover { color: var(--text-primary, #e6edf3); }
+
+.sv-dialog-body { padding: 16px; overflow-y: auto; }
+.sv-dialog-msg  { margin: 0 0 10px; font-size: 13px; line-height: 1.55; color: var(--text-primary, #e6edf3); }
+.sv-dialog-detail {
+    margin: 10px 0 0;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--text-muted, #7d8590);
+}
+
+/* The facts that make the decision. window.confirm() could not show these,
+   which is the substantive reason it had to go: "Are you sure?" about a
+   position is not a question anybody can answer. */
+.sv-dialog-facts {
+    margin: 12px 0 0;
+    border: 1px solid var(--pop-border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.sv-dialog-fact {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 7px 11px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary, #e6edf3);
+}
+.sv-dialog-fact + .sv-dialog-fact { border-top: 1px solid var(--pop-border); }
+.sv-dialog-fact .lbl {
+    color: var(--text-muted, #7d8590);
+    text-transform: uppercase;
+    font-size: 9.5px;
+    letter-spacing: .07em;
+}
+
+.sv-dialog-confirm-text {
+    display: block;
+    margin: 14px 0 0;
+    font-size: 11.5px;
+    color: var(--text-secondary, #9aa4b2);
+}
+.sv-dialog-confirm-text b { color: var(--accent-red, #ff4d4d); font-family: var(--font-mono); }
+.sv-dialog-confirm-text input {
+    display: block;
+    width: 100%;
+    margin-top: 6px;
+    padding: 8px 10px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-primary, #e6edf3);
+    background: var(--bg-primary, #0d1117);
+    border: 1px solid var(--pop-border);
+    border-radius: 6px;
+}
+.sv-dialog-confirm-text input:focus {
+    outline: none;
+    border-color: var(--accent, #00e868);
+}
+
+.sv-dialog-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 9px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--pop-border);
+}
+.sv-dialog-btn {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    padding: 8px 15px;
+    border-radius: 6px;
+    border: 1px solid var(--pop-border);
+    background: var(--pop-bg-2);
+    color: var(--text-secondary, #9aa4b2);
+    cursor: pointer;
+}
+.sv-dialog-btn:hover { color: var(--text-primary, #e6edf3); border-color: var(--text-muted, #7d8590); }
+.sv-dialog-btn--go {
+    background: color-mix(in srgb, var(--accent, #00e868) 16%, transparent);
+    border-color: color-mix(in srgb, var(--accent, #00e868) 55%, transparent);
+    color: var(--accent, #00e868);
+}
+.sv-dialog-btn--go.is-danger {
+    background: color-mix(in srgb, var(--accent-red, #ff4d4d) 16%, transparent);
+    border-color: color-mix(in srgb, var(--accent-red, #ff4d4d) 55%, transparent);
+    color: var(--accent-red, #ff4d4d);
+}
+.sv-dialog-btn[disabled] { opacity: .4; cursor: not-allowed; }
+
+/* ── 9. TICK FLASH ──────────────────────────────────────────────────────
+   Marks the figures that changed on a refresh, so a move is something the
+   operator SEES rather than something they have to have memorised.
+
+   Faint on purpose. This is peripheral-vision work: loud enough to catch the
+   eye mid-scan, quiet enough that a page refreshing every thirty seconds
+   never strobes. A flash you can read is a flash you will learn to ignore. */
+.sv-flash {
+    animation: sv-flash-same 1s ease-out;
+    border-radius: 3px;
+}
+.sv-flash--up   { animation-name: sv-flash-up; }
+.sv-flash--down { animation-name: sv-flash-down; }
+
+@keyframes sv-flash-up {
+    0%   { background-color: color-mix(in srgb, var(--accent-green, #00e868) 26%, transparent); }
+    100% { background-color: transparent; }
+}
+@keyframes sv-flash-down {
+    0%   { background-color: color-mix(in srgb, var(--accent-red, #ff4d4d) 26%, transparent); }
+    100% { background-color: transparent; }
+}
+@keyframes sv-flash-same {
+    0%   { background-color: color-mix(in srgb, var(--accent-blue, #5b9eff) 20%, transparent); }
+    100% { background-color: transparent; }
+}
+
+/* ── 10. LIGHT MODE ─────────────────────────────────────────────────────
+   The shadow stack above is authored for a near-black ground. On a light one
+   the same values read as grime rather than elevation. */
+body.light-mode {
+    --pop-shadow: 0 14px 36px rgba(19, 25, 38, .16), 0 2px 6px rgba(19, 25, 38, .10);
+}
+body.light-mode .sv-backdrop { background: rgba(23, 30, 44, .45); }
+body.light-mode .sv-flash    { mix-blend-mode: multiply; }
+
+/* Two overlays paint their own near-black gradient instead of using
+   --bg-card, while the text inside them IS tokenised. So light mode swapped
+   the text to dark green and left the panel black: the user menu and the
+   signal-rail hover card both became dark-on-dark and unreadable. Every other
+   overlay on the platform already resolves through the tokens and needs
+   nothing here. */
+body.light-mode .user-menu-dropdown,
+body.light-mode .sr-popup {
+    background: var(--bg-card, #fff) !important;
+    border-color: var(--border, rgba(19, 25, 38, .14)) !important;
+}
+body.light-mode .sr-popup::after {
+    border-left-color: var(--bg-card, #fff) !important;
+}
+
+/* ── 11. SMALL SCREENS ──────────────────────────────────────────────────
+   A dialog centred on a phone leaves the controls under the thumb's reach
+   and the keyboard covers half of it. Bottom sheet instead. */
+@media (max-width: 640px) {
+    .sv-dialog {
+        top: auto;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        max-width: 100%;
+        max-height: 88vh;
+        border-radius: var(--pop-radius) var(--pop-radius) 0 0;
+        border-bottom: 0;
+        transform: translateY(14px);
+    }
+    .sv-dialog.is-open { transform: translateY(0); }
+    .sv-dialog-foot { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+    .sv-dialog-btn  { flex: 1; padding: 11px 15px; }
+    .sv-pop-grid    { grid-template-columns: minmax(0, 1fr); }
+
+    /* A hover card cannot be opened by a finger, and leaving it in the
+       markup means the first tap opens it and swallows the tap that was
+       meant to follow the link. */
+    .sv-card,
+    .ticker-popup,
+    .sr-popup,
+    .dh-pop { display: none !important; }
+}
+
+@media (hover: none) {
+    .sv-card, .ticker-popup, .sr-popup, .dh-pop { display: none !important; }
+}
+
+/* ── 12. MOTION ─────────────────────────────────────────────────────────
+   Every animation here is an affordance, not decoration, so under reduced
+   motion they collapse to instant rather than disappearing. */
+@media (prefers-reduced-motion: reduce) {
+    .sv-backdrop, .sv-card, .sv-menu, .sv-dialog {
+        transition-duration: 1ms;
+    }
+    .sv-dialog, .sv-dialog.is-open { transform: translate(-50%, -50%); }
+    .sv-flash { animation-duration: 1ms; }
+    .sv-loading::after { animation: none; opacity: .7; }
+}
+
+/* ── 13. FOCUS ──────────────────────────────────────────────────────────
+   Overlays are where keyboard operation matters most, and where it was
+   least visible: several of these surfaces had no focus style at all. */
+.sv-dialog :focus-visible,
+.sv-menu :focus-visible,
+.sv-card :focus-visible {
+    outline: 2px solid var(--accent, #00e868);
+    outline-offset: 2px;
+    border-radius: 3px;
+}

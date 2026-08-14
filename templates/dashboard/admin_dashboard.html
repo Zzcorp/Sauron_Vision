@@ -62,10 +62,12 @@ the broker, and the bot that would have honoured their stops switched off.
             </div>
             {% endif %}
         </div>
+        {# window.confirm could not show what was about to be closed. On the
+           most destructive control in the platform, "Are you sure?" is not a
+           question anybody can answer — the positions ARE the decision. #}
         <form method="post" action="{% url 'flatten_all_positions' %}"
-              onsubmit="return confirm('Close ALL open positions at the broker and disable every bot?
-
-This cannot be undone.');"
+              id="flattenForm"
+              data-open-count="{{ open_trade_count|default:0 }}"
               style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             {% csrf_token %}
             {% if has_pin %}
@@ -85,6 +87,44 @@ This cannot be undone.');"
         </form>
     </div>
 </div>
+
+<script>
+/* The flatten guard. Two things window.confirm could never do: show the
+   operator how many positions are about to be closed at the broker, and make
+   the confirmation cost more than a reflex Enter. Typing FLATTEN is deliberate
+   friction on the one control that cannot be undone. */
+(function () {
+    var form = document.getElementById("flattenForm");
+    if (!form) return;
+    var armed = false;
+    form.addEventListener("submit", function (e) {
+        if (armed) return;                 /* second pass, let it through */
+        e.preventDefault();
+        var open = parseInt(form.dataset.openCount || "0", 10) || 0;
+        SV.overlay.confirm({
+            title: "Emergency flatten",
+            message: open
+                ? "This closes " + open + " open position" + (open === 1 ? "" : "s") +
+                  " at the broker and disables every bot."
+                : "No positions are open. This will still disable every bot.",
+            facts: [
+                ["Open positions", open ? String(open) : "none"],
+                ["Bots after this", "all disabled"],
+                ["Reversible", "no"]
+            ],
+            detail: "Positions are closed at the market price available now, which "
+                  + "may be worse than your stops.",
+            danger: true,
+            requireText: "FLATTEN",
+            confirmLabel: "Flatten everything"
+        }).then(function (ok) {
+            if (!ok) return;
+            armed = true;
+            form.submit();
+        });
+    });
+})();
+</script>
 
 <!-- Quick Actions -->
 <div class="grid grid-4" style="margin-bottom:24px;">

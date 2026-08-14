@@ -6,6 +6,38 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _scan_universe(limit=20):
+    """The instruments a per-symbol scraper should walk.
+
+    Every per-symbol loop in this package filtered on is_watchlist=True. Not
+    one of the 179 active instruments has that flag set, so each of those
+    loops iterated zero times and returned success — which is also why
+    TechnicalIndicator held zero rows despite 5,600 price bars being present.
+
+    An empty watchlist is a configuration the operator has not got round to,
+    not an instruction to do nothing. So fall back to the instruments we
+    actually have prices for, which is the set any of this can say something
+    useful about, and say out loud that we are doing it.
+    """
+    from instruments.models import Instrument
+
+    watchlist = Instrument.objects.filter(is_watchlist=True, is_active=True)
+    if watchlist.exists():
+        return list(watchlist[:limit])
+
+    fallback = list(Instrument.objects.filter(
+        is_active=True, prices__isnull=False).distinct()[:limit])
+    if fallback:
+        logger.info("No instruments are flagged is_watchlist; falling back to "
+                    "%d active instruments that have price history. Run "
+                    "`manage.py seed_watchlist` to set a real watchlist.",
+                    len(fallback))
+    else:
+        logger.warning("No watchlist and no instruments with price history — "
+                       "per-symbol scrapers have nothing to walk.")
+    return fallback
+
+
 @shared_task
 @guarded_task("scraper_news")
 def fetch_breaking_news():
@@ -16,15 +48,17 @@ def fetch_breaking_news():
     """Tier 1: Fetch news from RSS feeds and APIs."""
     from scraping.scrapers.news_aggregator import fetch_rss_news, fetch_marketaux_news
 
-    rss_count = fetch_rss_news(max_per_feed=5)
-    api_count = fetch_marketaux_news(limit=20)
+    rss = fetch_rss_news(max_per_feed=5)
+    api = fetch_marketaux_news(limit=20)
+    stored = rss["stored"] + api["stored"]
 
     # Push WebSocket notification for new news
-    if rss_count + api_count > 0:
+    if stored > 0:
         from dashboard.consumers import push_news_notification
-        push_news_notification({"count": rss_count + api_count, "message": f"{rss_count + api_count} new articles"})
+        push_news_notification({"count": stored, "message": f"{stored} new articles"})
 
-    return {"status": "success", "rss": rss_count, "api": api_count}
+    return {"status": "success", "rss": rss, "api": api,
+            "parsed": rss["parsed"] + api["parsed"], "stored": stored}
 
 
 @shared_task
@@ -34,20 +68,28 @@ def fetch_social_sentiment():
     from scraping.scrapers.reddit_sentiment import fetch_reddit_sentiment
     from scraping.scrapers.stocktwits import fetch_trending
 
+    from scraping.models import SentimentSnapshot
+
+    # Counting rows written is the only honest measure here. Both sources
+    # previously reported len() of what they fetched, which is a count of
+    # HTTP results rather than of anything that reached the database — and
+    # SentimentSnapshot had zero rows the whole time.
+    before = SentimentSnapshot.objects.count()
     results = {"reddit": 0, "stocktwits": 0}
+
     try:
-        reddit_data = fetch_reddit_sentiment(limit=50)
-        results["reddit"] = len(reddit_data)
+        results["reddit"] = len(fetch_reddit_sentiment(limit=50))
     except Exception as e:
         logger.error(f"Reddit sentiment failed: {e}")
 
     try:
-        trending = fetch_trending()
-        results["stocktwits"] = len(trending)
+        results["stocktwits"] = len(fetch_trending())
     except Exception as e:
         logger.error(f"StockTwits trending failed: {e}")
 
-    return {"status": "success", **results}
+    stored = SentimentSnapshot.objects.count() - before
+    return {"status": "success", **results,
+            "parsed": results["reddit"] + results["stocktwits"], "stored": stored}
 
 
 @shared_task
@@ -55,8 +97,8 @@ def fetch_social_sentiment():
 def check_economic_calendar():
     """Tier 2: Fetch earnings calendar from FMP."""
     from scraping.scrapers.earnings_calendar import fetch_earnings_calendar_fmp
-    data = fetch_earnings_calendar_fmp(days_ahead=14)
-    return {"status": "success", "events": len(data)}
+    result = fetch_earnings_calendar_fmp(days_ahead=14)
+    return {"status": "success", **result}
 
 
 @shared_task
@@ -118,29 +160,29 @@ def aggregate_sentiment():
 @shared_task
 @guarded_task("scraper_tradingview")
 def fetch_tradingview_ideas():
-    """Tier 4: Fetch TradingView ideas + technicals for watchlist."""
-    from scraping.scrapers.tradingview import fetch_trending_ideas, fetch_technical_analysis
-    from instruments.models import Instrument
+    """Tier 4: TradingView aggregate ratings for the watchlist.
 
-    results = {"ideas": 0, "technicals": 0}
-    try:
-        ideas = fetch_trending_ideas(limit=20)
-        results["ideas"] = len(ideas)
-    except Exception as e:
-        logger.error(f"TradingView ideas failed: {e}")
+    The ideas half of this task was removed. It scraped tradingview.com/ideas
+    with a `per_page` parameter that the site answers with a 404, there is no
+    model anywhere that could hold an idea, and no page would have shown one —
+    so it was three failure modes deep and still reported success every six
+    hours.
+    """
+    from scraping.scrapers.tradingview import fetch_technical_analysis
+    from scraping.models import SentimentSnapshot
 
-    try:
-        watchlist = Instrument.objects.filter(is_watchlist=True, is_active=True)[:20]
-        for inst in watchlist:
-            try:
-                fetch_technical_analysis(inst.symbol)
-                results["technicals"] += 1
-            except Exception:
-                pass
-    except Exception as e:
-        logger.error(f"TradingView technicals failed: {e}")
+    before = SentimentSnapshot.objects.count()
+    parsed = 0
 
-    return {"status": "success", **results}
+    for inst in _scan_universe(limit=20):
+        try:
+            fetch_technical_analysis(inst.symbol)
+            parsed += 1
+        except Exception as e:
+            logger.warning("TradingView technicals failed for %s: %s", inst.symbol, e)
+
+    return {"status": "success", "symbols": parsed, "parsed": parsed,
+            "stored": SentimentSnapshot.objects.count() - before}
 
 
 @shared_task
@@ -149,20 +191,25 @@ def fetch_sec_filings():
     """Tier 5: Fetch SEC filings (13F + insider trades)."""
     from scraping.scrapers.sec_edgar import fetch_recent_13f_filings, fetch_insider_trades
 
+    from scraping.models import InstitutionalFiling
+
+    before = InstitutionalFiling.objects.count()
     results = {"filings_13f": 0, "insider_trades": 0}
+
     try:
-        filings = fetch_recent_13f_filings(limit=20)
-        results["filings_13f"] = len(filings)
+        results["filings_13f"] = len(fetch_recent_13f_filings(limit=20))
     except Exception as e:
         logger.error(f"SEC 13F fetch failed: {e}")
 
     try:
-        trades = fetch_insider_trades(limit=20)
-        results["insider_trades"] = len(trades)
+        results["insider_trades"] = len(fetch_insider_trades(limit=20))
     except Exception as e:
         logger.error(f"SEC insider trades failed: {e}")
 
-    return {"status": "success", **results}
+    stored = InstitutionalFiling.objects.count() - before
+    return {"status": "success", **results,
+            "parsed": results["filings_13f"] + results["insider_trades"],
+            "stored": stored}
 
 
 @shared_task
@@ -170,10 +217,14 @@ def fetch_sec_filings():
 def fetch_cot_reports():
     """Tier 6: Fetch CFTC Commitments of Traders reports."""
     from scraping.scrapers.cot_reports import fetch_latest_cot_report
+    from scraping.models import COTReport
 
+    before = COTReport.objects.count()
     try:
         reports = fetch_latest_cot_report()
-        return {"status": "success", "reports_processed": len(reports)}
     except Exception as e:
         logger.error(f"COT reports failed: {e}")
         return {"status": "error", "error": str(e)}
+
+    return {"status": "success", "reports_processed": len(reports),
+            "parsed": len(reports), "stored": COTReport.objects.count() - before}

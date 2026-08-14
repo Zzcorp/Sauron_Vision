@@ -80,11 +80,16 @@ def _extract_message_sentiment(messages: list[dict]) -> tuple[int, int, int]:
     return bullish, bearish, neutral
 
 
-def fetch_symbol_sentiment(symbol: str) -> dict:
+def fetch_symbol_sentiment(symbol: str, trending: bool = False) -> dict:
     """Fetch the latest message stream and compute sentiment for a symbol.
 
     Args:
         symbol: Uppercase ticker symbol, e.g. "AAPL".
+        trending: whether this symbol is currently trending. It has to be an
+            argument rather than something the caller sets afterwards, because
+            this function persists before it returns — setting the flag on the
+            dict you get back would change nothing about the row already
+            written, which is exactly the trap the previous shape laid.
 
     Returns:
         Dict with keys: symbol, bullish_count, bearish_count, neutral_count,
@@ -132,7 +137,7 @@ def fetch_symbol_sentiment(symbol: str) -> dict:
         "neutral_count": neutral,
         "composite_score": round(composite, 4),
         "volume": len(messages),
-        "trending": False,
+        "trending": trending,
         "messages": [
             {
                 "id": m.get("id"),
@@ -153,11 +158,28 @@ def fetch_symbol_sentiment(symbol: str) -> dict:
     return result
 
 
-def fetch_trending() -> list[dict]:
+"""How many trending symbols we actually pull a message stream for.
+
+_get is rate-limited to 20 calls/minute and StockTwits typically returns
+around thirty trending symbols, so fetching every one of them would make this
+task block for minutes on a queue shared with other scrapers. The trending
+list is ordered by how much attention a symbol is getting, so the head of it
+carries nearly all of the signal."""
+TRENDING_SENTIMENT_LIMIT = 12
+
+
+def fetch_trending(with_sentiment: bool = True) -> list[dict]:
     """Fetch the list of currently trending symbols on StockTwits.
 
+    This used to fetch the trending list, loop over it setting
+    item["trending"] = True on dictionaries nobody kept, and return. The
+    persist helper below it was real and correct, and its only caller,
+    fetch_symbol_sentiment, had zero call sites anywhere in the codebase — so
+    the entire StockTwits integration ran on schedule and stored nothing.
+
     Returns:
-        List of dicts with keys: symbol, watchlist_count, title.
+        List of dicts with keys: symbol, watchlist_count, title, and (when a
+        stream was fetched) the sentiment counts and composite score.
         Returns empty list on any error.
     """
     data = _get(TRENDING_URL)
@@ -181,15 +203,44 @@ def fetch_trending() -> list[dict]:
 
     logger.info("StockTwits trending: %d symbols", len(results))
 
-    # Optionally fetch sentiment for each trending symbol and persist
-    for item in results:
+    if not with_sentiment:
+        for item in results:
+            item["trending"] = True
+        return results
+
+    # Pull the message stream for the head of the list. Each call persists a
+    # SentimentSnapshot, which is the only way this integration produces data.
+    stored = 0
+    for item in results[:TRENDING_SENTIMENT_LIMIT]:
+        symbol = item.get("symbol") or ""
+        if not symbol:
+            continue
+        detail = fetch_symbol_sentiment(symbol, trending=True)
+        item.update({
+            "trending": True,
+            "bullish_count": detail.get("bullish_count", 0),
+            "bearish_count": detail.get("bearish_count", 0),
+            "neutral_count": detail.get("neutral_count", 0),
+            "composite_score": detail.get("composite_score", 0.0),
+            "volume": detail.get("volume", 0),
+        })
+        if detail.get("volume"):
+            stored += 1
+
+    for item in results[TRENDING_SENTIMENT_LIMIT:]:
         item["trending"] = True
 
+    logger.info("StockTwits: fetched sentiment for %d of %d trending symbols",
+                stored, len(results))
     return results
 
 
-def _persist_sentiment_snapshot(data: dict) -> None:
-    """Save a SentimentSnapshot row if the instrument is in our DB."""
+def _persist_sentiment_snapshot(data: dict) -> int:
+    """Save a SentimentSnapshot row if the instrument is in our DB.
+
+    Returns 1 if a row was written, 0 otherwise — the caller needs to be able
+    to distinguish "nothing to store" from "stored nothing".
+    """
     try:
         from django.utils import timezone as dj_tz
         from scraping.models import SentimentSnapshot
@@ -197,23 +248,34 @@ def _persist_sentiment_snapshot(data: dict) -> None:
 
         symbol = data.get("symbol", "")
         if not symbol:
-            return
+            return 0
 
-        instrument = Instrument.objects.filter(symbol=symbol).first()
+        instrument = Instrument.objects.filter(symbol__iexact=symbol).first()
         if instrument is None:
-            return
+            # Most trending StockTwits symbols are small caps outside our
+            # catalogue, so this is the common case rather than an error — but
+            # it was previously a bare `return` and the drops were invisible.
+            logger.debug("StockTwits: %s is not in the instrument catalogue", symbol)
+            return 0
 
         SentimentSnapshot.objects.create(
             instrument=instrument,
             source="stocktwits",
             timestamp=dj_tz.now(),
-            bullish_count=data["bullish_count"],
-            bearish_count=data["bearish_count"],
-            neutral_count=data["neutral_count"],
-            composite_score=data["composite_score"],
-            volume=data["volume"],
+            # .get with defaults, not subscripts: the trending payload has a
+            # different shape to the stream payload, and hard subscripts here
+            # raised KeyError straight into the DEBUG-level swallow below.
+            bullish_count=data.get("bullish_count", 0),
+            bearish_count=data.get("bearish_count", 0),
+            neutral_count=data.get("neutral_count", 0),
+            composite_score=data.get("composite_score", 0.0),
+            volume=data.get("volume", 0),
             trending=data.get("trending", False),
         )
+        return 1
 
     except Exception as exc:
-        logger.debug("StockTwits SentimentSnapshot persistence skipped: %s", exc)
+        # WARNING, not DEBUG. At DEBUG an IntegrityError mid-batch was
+        # completely invisible at the default log level.
+        logger.warning("StockTwits SentimentSnapshot persistence failed: %s", exc)
+        return 0

@@ -8,6 +8,7 @@
     </h2>
     {% if config %}
       <button id="pause-btn" class="btn {% if config.enabled %}btn-danger{% else %}btn-primary{% endif %}"
+              data-bot-paused="{% if config.enabled %}0{% else %}1{% endif %}"
               onclick="togglePause()" style="font-size:1.1rem;padding:14px 28px;">
         {% if config.enabled %}⏸  PAUSE BOT{% else %}▶  RESUME BOT{% endif %}
       </button>
@@ -122,17 +123,32 @@ function getCsrf() {
   const m = document.cookie.match(/csrftoken=([^;]+)/);
   return m ? m[1] : "";
 }
+/* "Are you sure you want to toggle the bot?" told the operator neither which
+   direction they were toggling nor what it would do to open positions. */
 async function togglePause() {
-  if (!confirm("Are you sure you want to toggle the bot?")) return;
+  const btn = document.getElementById("pause-btn");
+  const paused = !!btn && btn.dataset.botPaused === "1";
+  const ok = await SV.overlay.confirm({
+    title: paused ? "Resume the bot" : "Pause the bot",
+    message: paused
+      ? "The bot will start taking new positions again."
+      : "The bot will stop taking new positions.",
+    detail: paused ? "" :
+      "Pausing does not close anything already open — those positions stay "
+      + "live at the broker without the bot managing their stops.",
+    danger: !paused,
+    confirmLabel: paused ? "Resume" : "Pause",
+  });
+  if (!ok) return;
   try {
     const r = await fetch("/bot/console/pause/", {
       method: "POST", headers: { "X-CSRFToken": getCsrf() },
     });
     const j = await r.json();
     if (j.ok) location.reload();
-    else alert("Failed: " + j.error);
+    else SV.overlay.alert({ title: "Could not change the bot", message: String(j.error || "The server did not say why."), detail: "The bot is in the state it was in before." });
   } catch (e) {
-    alert("Network error: " + e);
+    SV.overlay.alert({ title: "Network error", message: String(e), detail: "The request never reached the server, so nothing changed." });
   }
 }
 window.togglePause = togglePause;

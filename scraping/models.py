@@ -7,7 +7,11 @@ class NewsArticle(models.Model):
     """News articles from scraped sources and APIs."""
     title = models.CharField(max_length=500)
     source = models.CharField(max_length=100)
-    url = models.URLField(unique=True)
+    # 500, not the 200 default. Article links routinely carry tracking
+    # parameters past 200 characters, and truncating them against a unique
+    # column silently collapsed distinct articles into one row while storing
+    # a link that no longer resolved.
+    url = models.URLField(max_length=500, unique=True)
     published_at = models.DateTimeField()
     content_summary = models.TextField(blank=True)
     raw_content = models.TextField(blank=True)
@@ -67,7 +71,13 @@ class InstitutionalFiling(models.Model):
     """SEC 13F and Form 4 data."""
     filing_type = models.CharField(max_length=10)
     filer_name = models.CharField(max_length=300)
-    instrument = models.ForeignKey(Instrument, on_delete=models.CASCADE, related_name="institutional_filings")
+    # Nullable: a 13F in the current-filings feed identifies the manager and
+    # the date, but the holdings live in a separate INFORMATION TABLE
+    # attachment. Requiring an instrument here meant every 13F row was
+    # discarded at write time, which is why this table stayed empty.
+    instrument = models.ForeignKey(
+        Instrument, on_delete=models.CASCADE, related_name="institutional_filings",
+        null=True, blank=True)
     filing_date = models.DateField()
     shares = models.BigIntegerField(null=True)
     value = models.DecimalField(max_digits=20, decimal_places=2, null=True)

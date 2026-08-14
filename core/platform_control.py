@@ -35,12 +35,23 @@ class PlatformComponent(models.Model):
         status = "ON" if self.is_enabled else "OFF"
         return f"[{status}] {self.name}"
 
-    def mark_run(self, success=True, message=""):
+    def mark_run(self, success=True, message="", status=None):
+        """Record a run.
+
+        `status` allows a third outcome beyond success and error: "warning",
+        meaning the task completed without raising but did not do its job —
+        it parsed rows and stored none, or it was starved of a credential.
+        Without that distinction, six scrapers holding zero rows between them
+        all reported a clean green run, which is the single reason nobody
+        noticed the earnings blackout had never once fired.
+        """
         self.last_run_at = timezone.now()
-        self.last_status = "success" if success else "error"
+        self.last_status = status or ("success" if success else "error")
         self.last_message = message[:500]
         self.run_count += 1
-        if not success:
+        # A warning is not a crash: it should not inflate the error rate the
+        # health page uses to decide whether a component is broken.
+        if self.last_status == "error":
             self.error_count += 1
         self.save(update_fields=["last_run_at", "last_status", "last_message", "run_count", "error_count", "updated_at"])
 

@@ -1,8 +1,30 @@
 """Global context processors for Sauron Vision."""
 import logging
+from datetime import timedelta
+
+from django.db.models import Count, Sum
+from django.utils import timezone
+
 from .exchange_status import get_exchange_status
 
 logger = logging.getLogger(__name__)
+
+
+def _compact(value):
+    """Money at a glance: 1.2B, 340M, 18K.
+
+    The liquidation cells are 60px wide in the info panel. A raw
+    1,238,904,551 does not fit and wraps into the cell below it, so the figure
+    that gets read is whichever half survived.
+    """
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    for cut, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if abs(n) >= cut:
+            return f"{n / cut:,.1f}{suffix}"
+    return f"{n:,.0f}"
 
 
 def sauron_context(request):
@@ -53,10 +75,35 @@ def sauron_context(request):
         "panel_sentiment": "—",
         "panel_ai_cost": "0.00",
         "panel_ai_tasks": 0,
-        "panel_drawdown": "0.0",
+        # None, not "0.0" and not "+0.00%". These are measurements, and until
+        # one has been taken the honest answer is an em-dash. A confident red
+        # 0.0% drawdown reads as "no downside", not as "we could not compute
+        # it" — which is the failure mode this platform already has a whole
+        # test module about.
+        "panel_drawdown": None,
         "panel_max_dd": "3.0",
-        "panel_daily_pnl": 0,
-        "panel_daily_pnl_display": "+0.00%",
+        "panel_daily_pnl": None,
+        "panel_daily_pnl_display": None,
+        # Fourteen of the thirty panel_* names below were rendered by
+        # base.html and assigned by nothing at all, so the info panel showed a
+        # fabricated constant on every page of the platform. The BOT cell was
+        # the worst of them: panel_bot_armed was never set, so the header
+        # permanently reported OFF / OFFLINE / 0 open even with the bot armed
+        # and holding positions.
+        "panel_signals_24h": 0,
+        "panel_bot_armed": None,
+        "panel_bot_mode": None,
+        "panel_bot_open": None,
+        "panel_bot_pnl_24h_display": None,
+        "panel_funding_display": None,
+        "panel_funding_extreme_count": None,
+        "panel_funding_flips": None,
+        "panel_funding_samples": None,
+        "panel_liq_24h_display": None,
+        "panel_liq_count": None,
+        "panel_liq_long_display": None,
+        "panel_liq_short_display": None,
+        "panel_vix": None,
         "panel_watchlist": 0,
         "panel_recent_signals": [],
         "panel_recent_positions": [],
@@ -121,6 +168,11 @@ def sauron_context(request):
                 # pollers are rate-limited and a "live" number can be hours old.
                 "age_s": age_s, "age_display": age_display,
                 "stale": bool(age_s is not None and age_s > 900),
+                # The ISO stamp is what makes the age LIVE. Everything above is
+                # decided once, at render time, so a dashboard left open for an
+                # hour on a dead feed still read "just now" and could never
+                # show the STALE chip — the single state worth showing.
+                "quoted_at": q.updated_at.isoformat() if q.updated_at else "",
                 "source": q.source or "",
                 "url": f"/instruments/{q.instrument.symbol}/",
             })
@@ -196,6 +248,9 @@ def sauron_context(request):
 
         ctx["ticker_items"] = ticker
         ctx["panel_signals"] = active_signals.count()
+        # Rendered by base.html as "24H NEW" and assigned by nothing, so the
+        # signals dropdown reported zero new signals in perpetuity.
+        ctx["panel_signals_24h"] = Signal.objects.filter(created_at__gte=day_ago).count()
         ctx["panel_bullish"] = active_signals.filter(direction="bullish").count()
         ctx["panel_bearish"] = active_signals.filter(direction="bearish").count()
         ctx["panel_strategies"] = Strategy.objects.filter(status__in=["active", "approved"]).count()
@@ -220,8 +275,91 @@ def sauron_context(request):
         ctx["panel_watchlist"] = portfolio.positions.filter(instrument__is_watchlist=True).count()
         # Expanded panel data
         ctx["panel_recent_positions"] = list(open_pos.select_related("instrument")[:5])
+
+        # Drawdown and daily P&L come from the most recent snapshot. Both used
+        # to be hardcoded constants — "0.0" and "+0.00%" — sitting in the same
+        # weight and colour as a real reading.
+        from portfolio.models import PortfolioSnapshot
+        snap = PortfolioSnapshot.objects.filter(
+            portfolio=portfolio).order_by("-date").first()
+        if snap:
+            if snap.max_drawdown is not None:
+                # Already stored as a negative percentage by portfolio.tasks —
+                # do not multiply by 100, and show it as a magnitude.
+                ctx["panel_drawdown"] = f"{abs(float(snap.max_drawdown)):.1f}"
+            # A snapshot from last week does not describe today's P&L.
+            if snap.date == timezone.localdate() and snap.daily_pnl_pct is not None:
+                pct = float(snap.daily_pnl_pct)
+                ctx["panel_daily_pnl"] = pct
+                ctx["panel_daily_pnl_display"] = f"{pct:+.2f}%"
     except Exception as e:
         logger.debug(f"Portfolio data unavailable: {e}")
+
+    # Computed independently of the ticker block above: that one is wrapped in
+    # its own try, and if it fails before assigning day_ago every panel below
+    # would die on a NameError swallowed as "no data".
+    day_ago = timezone.now() - timedelta(hours=24)
+
+    # ── Bot program ──
+    try:
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+
+        configs = AssetBotConfig.objects.filter(user=request.user)
+        enabled = configs.filter(enabled=True)
+        ctx["panel_bot_armed"] = enabled.exists()
+        modes = sorted({c.mode for c in enabled})
+        ctx["panel_bot_mode"] = (modes[0] if len(modes) == 1
+                                 else ("mixed" if modes else "—"))
+        ctx["panel_bot_open"] = AssetBotTrade.objects.filter(
+            config__user=request.user, status__in=("OPEN", "CLOSE_PENDING")).count()
+
+        closed_24h = AssetBotTrade.objects.filter(
+            config__user=request.user, status="CLOSED", closed_at__gte=day_ago)
+        pnl = closed_24h.aggregate(total=Sum("pnl"))["total"]
+        # Distinguish "no trades closed today" from "closed flat".
+        ctx["panel_bot_pnl_24h_display"] = (
+            f"{float(pnl):+,.2f}" if pnl is not None else None)
+    except Exception as e:
+        logger.debug(f"Bot panel data unavailable: {e}")
+
+    # ── Funding and liquidations ──
+    try:
+        from market_data.models import FundingRate, LiquidationEvent
+
+        rates = list(FundingRate.objects.filter(
+            timestamp__gte=day_ago).values_list("symbol", "funding_rate"))
+        if rates:
+            values = [float(r) for _, r in rates if r is not None]
+            if values:
+                ctx["panel_funding_samples"] = len(values)
+                ctx["panel_funding_display"] = f"{sum(values) / len(values) * 100:+.4f}%"
+                ctx["panel_funding_extreme_count"] = sum(
+                    1 for v in values if abs(v) >= 0.001)
+                # A flip is the rate changing sign for a symbol: the moment
+                # the crowd stops paying to be long and starts paying to be
+                # short, which is the whole reason to watch this number.
+                flips = 0
+                by_symbol = {}
+                for symbol, rate in rates:
+                    if rate is None:
+                        continue
+                    by_symbol.setdefault(symbol, []).append(float(rate))
+                for series in by_symbol.values():
+                    flips += sum(1 for a, b in zip(series, series[1:])
+                                 if (a >= 0) != (b >= 0))
+                ctx["panel_funding_flips"] = flips
+
+        liqs = LiquidationEvent.objects.filter(timestamp__gte=day_ago)
+        agg = liqs.aggregate(total=Sum("notional_usd"), n=Count("id"))
+        if agg["n"]:
+            ctx["panel_liq_count"] = agg["n"]
+            ctx["panel_liq_24h_display"] = _compact(agg["total"] or 0)
+            longs = liqs.filter(side__iexact="long").aggregate(t=Sum("notional_usd"))["t"]
+            shorts = liqs.filter(side__iexact="short").aggregate(t=Sum("notional_usd"))["t"]
+            ctx["panel_liq_long_display"] = _compact(longs or 0)
+            ctx["panel_liq_short_display"] = _compact(shorts or 0)
+    except Exception as e:
+        logger.debug(f"Funding/liquidation panel data unavailable: {e}")
 
     # Expanded panel signals + news
     try:
