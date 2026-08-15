@@ -259,18 +259,14 @@ class SeedBotsFleetDefinitionTests(SimpleTestCase):
                 set(symbols) & YF_UNAVAILABLE,
                 f"{name} trades a symbol with no free data source")
 
-    def test_no_jpy_quoted_pair_ships_until_the_sizing_gap_closes(self):
-        """ForexBot's risk sizing divides dollar risk by the stop distance
-        in quote-currency terms without converting; on a JPY-quoted pair the
-        default-risk quantity computes ~10 units, rounds to the nearest 100,
-        and sizes to zero — a bot that ticks forever and never trades."""
+    def test_jpy_pairs_ship_now_that_sizing_converts(self):
+        """The quote-currency sizing gap is closed (ForexBot._value_per_unit
+        converts the stop distance to account currency), so the majors set
+        must carry USDJPY again — its absence was a workaround, not a
+        preference."""
         from bot_program.management.commands.seed_bots import FLEET
-        for _, name, symbols in FLEET:
-            for sym in symbols:
-                self.assertFalse(
-                    sym.endswith("JPY"),
-                    f"{name}: {sym} is JPY-quoted and sizes to zero under "
-                    f"default risk sizing")
+        majors = next(s for _, name, s in FLEET if name == "starter_fx_majors")
+        self.assertIn("USDJPY", majors)
 
 
 class SeedBotsCommandTests(TestCase):

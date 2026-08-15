@@ -85,7 +85,6 @@ DEFAULT_COMPONENTS = [
     {"key": "scraper_news", "name": "Breaking News", "description": "Fetch news from APIs and RSS (every 3 min)", "category": "scraper"},
     {"key": "scraper_sentiment", "name": "Social Sentiment", "description": "Reddit, StockTwits sentiment (every 30 min)", "category": "scraper"},
     {"key": "scraper_calendar", "name": "Economic Calendar", "description": "Check upcoming economic events (every 30 min)", "category": "scraper"},
-    {"key": "scraper_finviz", "name": "FinViz Screener", "description": "Stock screener data (every 1 hour)", "category": "scraper"},
     {"key": "scraper_tradingview", "name": "TradingView Ideas", "description": "Community ideas and technicals (every 6 hours)", "category": "scraper"},
     {"key": "scraper_fred", "name": "FRED Macro Data", "description": "Federal Reserve economic data (every 4 hours)", "category": "scraper"},
     {"key": "scraper_eod", "name": "EOD Price History", "description": "End-of-day OHLCV for full universe (daily 22:30 UTC)", "category": "scraper"},
@@ -175,8 +174,23 @@ DEFAULT_COMPONENTS = [
 ]
 
 
+# Components that once existed and were deliberately removed. Named
+# explicitly rather than pruning everything outside DEFAULT_COMPONENTS,
+# because some live keys (pipeline_alerts, pipeline_digest,
+# agent_commentator) are admin-created by hand and a blanket prune would
+# silently disable them.
+RETIRED_COMPONENT_KEYS = ["scraper_finviz"]
+
+
 def seed_components():
-    """Register all default components."""
+    """Register all default components, and bury the retired ones.
+
+    Without the delete, a removed component's row survives on deployed
+    databases forever: the registry keeps listing it, its toggle keeps
+    reporting "started" for a task that no longer exists, and the bulk
+    scraper toggle keeps counting it.
+    """
+    PlatformComponent.objects.filter(key__in=RETIRED_COMPONENT_KEYS).delete()
     created = 0
     for comp in DEFAULT_COMPONENTS:
         _, was_created = PlatformComponent.objects.get_or_create(

@@ -103,6 +103,10 @@ class RunNowAuthorizationTests(TestCase):
 # ── Broker credential forms ────────────────────────────────────────────────
 
 class BrokerCredentialFormTests(TestCase):
+    """Saving credentials now VERIFIES them: `connected` means the broker
+    answered an authenticated call, not "written down". Tests patch the
+    client ping so no test ever leaves the process."""
+
     def setUp(self):
         self.client = Client()
         self.admin = _superuser()
@@ -110,13 +114,16 @@ class BrokerCredentialFormTests(TestCase):
         self.client.force_login(self.admin)
 
     def test_save_oanda_creates_encrypted_account(self):
+        from unittest.mock import patch
         from bot_program.models import OANDAAccount
-        r = self.client.post("/admin-dashboard/brokers/oanda/save/", {
-            "target_username": "alice",
-            "oanda_api_key": "sk-test-oanda",
-            "oanda_account_id": "101-001-1234567-001",
-            "practice": "on",
-        })
+        with patch("bot_program.engine.oanda_client.OANDATrader.ping",
+                   return_value=True):
+            r = self.client.post("/admin-dashboard/brokers/oanda/save/", {
+                "target_username": "alice",
+                "oanda_api_key": "sk-test-oanda",
+                "oanda_account_id": "101-001-1234567-001",
+                "practice": "on",
+            })
         self.assertEqual(r.status_code, 302)
         acct = OANDAAccount.objects.get(user=self.target)
         # Encrypted fields are non-empty and round-trip back to plaintext.
@@ -127,31 +134,75 @@ class BrokerCredentialFormTests(TestCase):
         self.assertEqual(aid, "101-001-1234567-001")
         self.assertTrue(acct.practice)
         self.assertTrue(acct.connected)
+        self.assertIsNotNone(acct.last_sync)
+
+    def test_save_oanda_with_bad_keys_stores_but_not_connected(self):
+        """The row survives (the operator can fix a typo without retyping
+        everything) but `connected` tells the truth."""
+        from unittest.mock import patch
+        from bot_program.models import OANDAAccount
+        with patch("bot_program.engine.oanda_client.OANDATrader.ping",
+                   return_value=False):
+            r = self.client.post("/admin-dashboard/brokers/oanda/save/", {
+                "target_username": "alice",
+                "oanda_api_key": "wrong-key",
+                "oanda_account_id": "101-001-0000000-001",
+                "practice": "on",
+            })
+        self.assertEqual(r.status_code, 302)
+        acct = OANDAAccount.objects.get(user=self.target)
+        self.assertFalse(acct.connected)
+        self.assertIsNone(acct.last_sync)
+        k, _ = acct.get_credentials()
+        self.assertEqual(k, "wrong-key")
 
     def test_save_alpaca_creates_encrypted_account(self):
+        from unittest.mock import patch
         from bot_program.models import AlpacaAccount
-        r = self.client.post("/admin-dashboard/brokers/alpaca/save/", {
-            "target_username": "alice",
-            "alpaca_api_key": "AKTEST",
-            "alpaca_api_secret": "secret-test",
-            # paper checkbox omitted → live
-        })
+        with patch("bot_program.engine.alpaca_client.AlpacaTrader.ping",
+                   return_value=True):
+            r = self.client.post("/admin-dashboard/brokers/alpaca/save/", {
+                "target_username": "alice",
+                "alpaca_api_key": "AKTEST",
+                "alpaca_api_secret": "secret-test",
+                # paper checkbox omitted → live
+            })
         self.assertEqual(r.status_code, 302)
         acct = AlpacaAccount.objects.get(user=self.target)
         k, s = acct.get_credentials()
         self.assertEqual(k, "AKTEST")
         self.assertEqual(s, "secret-test")
         self.assertFalse(acct.paper)  # checkbox unchecked → live
+        self.assertTrue(acct.connected)
+
+    def test_a_verification_exception_reads_as_not_connected(self):
+        """ping() never raises by contract, but the wrapper must survive a
+        constructor blowing up — a save that 500s loses the operator's
+        form input."""
+        from unittest.mock import patch
+        from bot_program.models import AlpacaAccount
+        with patch("bot_program.engine.alpaca_client.AlpacaTrader.__init__",
+                   side_effect=RuntimeError("no network")):
+            r = self.client.post("/admin-dashboard/brokers/alpaca/save/", {
+                "target_username": "alice",
+                "alpaca_api_key": "AKTEST",
+                "alpaca_api_secret": "secret-test",
+            })
+        self.assertEqual(r.status_code, 302)
+        self.assertFalse(AlpacaAccount.objects.get(user=self.target).connected)
 
     def test_disconnect_clears_credentials_without_deleting_row(self):
+        from unittest.mock import patch
         from bot_program.models import AlpacaAccount
         # First save
-        self.client.post("/admin-dashboard/brokers/alpaca/save/", {
-            "target_username": "alice",
-            "alpaca_api_key": "AKTEST",
-            "alpaca_api_secret": "secret",
-            "paper": "on",
-        })
+        with patch("bot_program.engine.alpaca_client.AlpacaTrader.ping",
+                   return_value=True):
+            self.client.post("/admin-dashboard/brokers/alpaca/save/", {
+                "target_username": "alice",
+                "alpaca_api_key": "AKTEST",
+                "alpaca_api_secret": "secret",
+                "paper": "on",
+            })
         # Then disconnect
         r = self.client.post("/admin-dashboard/brokers/disconnect/", {
             "target_username": "alice",

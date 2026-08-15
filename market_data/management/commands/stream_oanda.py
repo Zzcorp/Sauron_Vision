@@ -49,24 +49,32 @@ def discover_instruments(override):
 
 @sync_to_async
 def update_live_quote(symbol_display, bid, ask):
-    from instruments.models import Instrument
+    """Through the one writer, as source 'oanda_stream'.
+
+    This was the last streamer writing LiveQuote directly — skipping the
+    source-precedence guard, the zero/NaN price refusal and the shared
+    symbol resolution. It also stamped source='oanda', the REST tier
+    (priority 70): a real-time broker tick that ranked below finnhub_ws
+    and could itself be clobbered. 'oanda_stream' is the tier the priority
+    table always reserved for it.
+    """
     from market_data.models import LiveQuote
+    from market_data.quotes import resolve_instrument, write_quote
     try:
-        inst = (Instrument.objects.filter(symbol__iexact=symbol_display).first()
-                or Instrument.objects.filter(symbol__iexact=symbol_display.replace("_","")).first()
-                or Instrument.objects.filter(symbol__iexact=symbol_display.replace("_","/")).first())
-        if not inst: return
+        inst = resolve_instrument(symbol_display)
+        if not inst:
+            # Loud, because a silent drop here once cost every tick: the
+            # dashboard broadcast kept animating while LiveQuote starved.
+            log.warning("update_live_quote: no Instrument for %r — tick "
+                        "dropped", symbol_display)
+            return
         mid = (bid + ask) / 2
         prev = LiveQuote.objects.filter(instrument=inst).first()
         prev_last = float(prev.last) if prev and prev.last else mid
         change_pct = ((mid - prev_last) / prev_last * 100) if prev_last else 0
-        LiveQuote.objects.update_or_create(
-            instrument=inst,
-            defaults=dict(last=Decimal(str(mid)),
-                          bid=Decimal(str(bid)), ask=Decimal(str(ask)),
-                          change_pct=Decimal(str(round(change_pct,4))),
-                          source="oanda"),
-        )
+        write_quote(inst.symbol, last=mid, source="oanda_stream",
+                    bid=bid, ask=ask, change_pct=round(change_pct, 4),
+                    instrument=inst)
     except Exception as e:
         log.debug("update_live_quote: %s", e)
 

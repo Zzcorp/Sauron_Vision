@@ -76,17 +76,27 @@ def link_binance(request):
         if form.is_valid():
             acct = form.save(commit=False)
             acct.set_credentials(form.cleaned_data["api_key"], form.cleaned_data["api_secret"])
-            # Test
+            # Verify with the SIGNED account endpoint. ping() hits the
+            # public /api/v3/ping, which succeeds with garbage keys — for
+            # as long as it was the check here, "linked ✓" meant "Binance
+            # is on the internet", not "these keys work".
             cli = BinanceClient(form.cleaned_data["api_key"], form.cleaned_data["api_secret"], acct.testnet)
-            if cli.ping():
+            try:
+                cli.account()
+                verified = True
+            except Exception:
+                verified = False
+            if verified:
                 acct.connected = True
                 try:
                     acct.last_balance_usdt = cli.balance_usdt()
                 except Exception: pass
                 acct.save()
-                messages.success(request, "Binance account linked ✓")
+                messages.success(request, "Binance account linked ✓ (keys verified)")
             else:
-                messages.error(request, "Could not reach Binance with those keys")
+                acct.connected = False
+                acct.save()
+                messages.error(request, "Binance rejected those keys — saved, but not connected")
             return redirect("bot_home")
     else:
         form = BinanceLinkForm(instance=acct)

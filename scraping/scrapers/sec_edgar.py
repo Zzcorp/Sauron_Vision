@@ -6,6 +6,7 @@ SEC_EDGAR_USER_AGENT environment variable.
 """
 import os
 import logging
+import re
 import time
 from datetime import date, datetime
 from typing import Optional
@@ -28,6 +29,55 @@ HEADERS = {
 }
 
 REQUEST_DELAY = 0.15  # SEC fair-use: no more than 10 req/sec
+
+# SEC's own CIK->ticker mapping (~800KB), cached for a day.
+CIK_TICKER_URL = "https://www.sec.gov/files/company_tickers.json"
+CIK_CACHE_KEY = "sec:cik_to_ticker"
+CIK_CACHE_SECONDS = 24 * 3600
+
+
+def _cik_to_ticker_map() -> dict:
+    """CIK (int) -> ticker from SEC's official mapping, or {} on failure.
+
+    Without this, a Form-4 issuer is just a company name: every insider row
+    landed with instrument NULL, and the only consumer filters on a concrete
+    instrument — stored and never read.
+    """
+    from django.core.cache import cache
+    cached = cache.get(CIK_CACHE_KEY)
+    if cached is not None:
+        # {} is a cached FAILURE: without negative caching a dead endpoint
+        # was re-fetched for every Issuer entry, ~10 x 60s of retries per
+        # nightly run.
+        return cached
+    resp = _get(CIK_TICKER_URL)
+    mapping = {}
+    if resp is not None:
+        try:
+            mapping = {int(row["cik_str"]): row["ticker"]
+                       for row in resp.json().values() if row.get("ticker")}
+        except Exception as exc:
+            logger.warning("CIK->ticker map parse failed: %s", exc)
+            mapping = {}
+    ttl = CIK_CACHE_SECONDS if mapping else 600
+    cache.set(CIK_CACHE_KEY, mapping, ttl)
+    return mapping
+
+
+def _issuer_symbol_from_title(title: str) -> Optional[str]:
+    """Ticker for a Form-4 '(Issuer)' entry title, or None.
+
+    Current-filings titles look like '4 - Ondas Inc. (0001646188) (Issuer)'
+    (verified against the live feed 2026-08-16) — the CIK in parentheses
+    resolves through SEC's map. Reporting-owner entries are people and
+    funds; they stay unresolved on purpose.
+    """
+    if "(Issuer)" not in (title or ""):
+        return None
+    m = re.search(r"\((\d{6,10})\)", title)
+    if not m:
+        return None
+    return _cik_to_ticker_map().get(int(m.group(1))) or None
 
 
 def _get(url: str, params: dict | None = None, timeout: int = 20) -> Optional[requests.Response]:
@@ -192,7 +242,19 @@ def fetch_insider_trades(symbol: Optional[str] = None, limit: int = 20) -> list[
             source_url = link_el.get("href", "") if link_el is not None else ""
             summary = summary_el.text if summary_el is not None else ""
 
-            # Title format: "4 - INSIDER NAME (CIK) (Form-4)"
+            # The current-filings feed emits each filing TWICE — one
+            # "(Issuer)" entry (the company) and one "(Reporting)" entry
+            # (the insider) — sharing one source_url. Persist dedupes on
+            # that url, so whichever landed first won, and a Reporting row
+            # carries no resolvable instrument. Keep only the Issuer entry,
+            # whose CIK resolves to a ticker.
+            issuer_symbol = None
+            if symbol is None:
+                if "(Issuer)" not in title:
+                    continue
+                issuer_symbol = _issuer_symbol_from_title(title)
+
+            # Title format: "4 - COMPANY OR INSIDER NAME (CIK) (Issuer)"
             parts = title.split(" - ", 1)
             filer_name = parts[1].strip().split("(")[0].strip() if len(parts) > 1 else title
 
@@ -207,7 +269,7 @@ def fetch_insider_trades(symbol: Optional[str] = None, limit: int = 20) -> list[
                 "filer_name": filer_name,
                 "filing_type": "4",
                 "filing_date": filing_date.isoformat() if filing_date else filing_date_str,
-                "instrument": symbol,
+                "instrument": symbol or issuer_symbol,
                 "shares": None,
                 "value": None,
                 "change_type": "",

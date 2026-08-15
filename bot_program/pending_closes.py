@@ -59,6 +59,14 @@ def _pnl(trade, price: Decimal) -> Decimal:
             pnl *= option_pnl_multiplier(trade)
         except Exception:
             pass
+    elif trade.asset_class == "forex":
+        # Same entry-time conversion as every other close path — yen must
+        # not land unconverted in the column the USD daily-loss gate sums.
+        try:
+            from bot_program.asset_engine.forex_bot import forex_usd_multiplier
+            pnl *= forex_usd_multiplier(trade)
+        except Exception:
+            pass
     return pnl
 
 

@@ -467,7 +467,7 @@ the broker, and the bot that would have honoured their stops switched off.
         <div>
             <div style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:1px;">SUB-SECOND DISPATCH · STREAMER → FAST RULE → SIGNAL</div>
             <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;line-height:1.4;">
-                Streamers call <code>dispatch_event(event_type, payload)</code> directly or via the Celery wrapper. Fires registered FastRules; matches create Signals that flow through Phase 1–11.
+                Callers use <code>dispatch_event(event_type, payload)</code> synchronously, or <code>dispatch_event_task</code> for async dispatch (gated by the Event-Driven Engine switch). No streamer is wired to it yet — today's only producer is the test-fire form below. Fires registered FastRules; matches create Signals that flow through Phase 1–11.
                 <a href="{% url 'events_dashboard' %}" style="color:var(--accent);">Full view →</a>
             </div>
         </div>

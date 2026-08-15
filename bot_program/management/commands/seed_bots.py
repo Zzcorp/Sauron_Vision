@@ -29,17 +29,14 @@ SEED_PREFIX = "starter_"
 # an unknown spelling gets zero bars forever AND routes to Binance as
 # crypto, so every entry here must match seed_instruments exactly.
 #
-# No JPY-quoted pairs, deliberately: ForexBot's risk sizing divides the
-# dollar risk by the stop distance in QUOTE-currency terms without
-# converting, so on USDJPY a default-risk trade computes ~10 units, rounds
-# to the nearest 100, and sizes to zero — the bot would tick forever and
-# log SIZED_TO_ZERO on every entry. Add them back when the sizing gap is
-# closed, not before.
+# JPY-quoted pairs are back: ForexBot._value_per_unit now converts the
+# quote-currency stop distance into account currency, so USDJPY sizes to
+# ~1,700 units instead of computing ~10 and rounding to zero.
 FLEET = [
     ("forex", "starter_fx_majors",
-     ["EURUSD", "GBPUSD", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"]),
+     ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"]),
     ("forex", "starter_fx_crosses",
-     ["EURGBP", "EURCHF", "GBPCHF", "EURAUD", "GBPAUD"]),
+     ["EURGBP", "EURJPY", "GBPJPY", "AUDJPY", "EURCHF", "GBPCHF"]),
     ("commodity", "starter_metals",
      ["XAUUSD", "XAGUSD", "XPTUSD", "XPDUSD", "HGUSD"]),
     ("commodity", "starter_energy",

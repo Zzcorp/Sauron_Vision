@@ -50,8 +50,15 @@ _STABLE_SUFFIXES = ("USDT", "BUSD", "USDC")
 
 
 def instrument_symbol_candidates(symbol: str) -> list[str]:
-    """Symbols to try when resolving an exchange symbol to an Instrument."""
-    s = (symbol or "").upper().replace("-", "").replace("/", "").replace(":", "")
+    """Symbols to try when resolving an exchange symbol to an Instrument.
+
+    The underscore matters: OANDA streams EUR_USD, and without stripping it
+    the candidate list was ["EUR_USD"] plus stablecoin variants of the
+    unstripped string — every single streamer tick resolved to nothing and
+    was silently dropped while the dashboard's own broadcast kept animating.
+    """
+    s = (symbol or "").upper().replace("-", "").replace(
+        "/", "").replace(":", "").replace("_", "")
     out = [s]
     for suffix in _STABLE_SUFFIXES:
         if s.endswith(suffix):

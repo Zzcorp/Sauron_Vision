@@ -5,11 +5,72 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# A position mark accepts data up to a day old: this runs hourly for
+# valuation, not for stop management, so "the freshest print we have" beats
+# "nothing" — but a weeks-dead feed must not keep repainting the same price.
+MARK_MAX_AGE_HOURS = 24
+
+
+def _mark_for(instrument):
+    """Freshest usable price for an instrument, or None to leave the mark."""
+    from datetime import timedelta
+    from django.utils import timezone
+    from market_data.models import LiveQuote, PriceData
+
+    cutoff = timezone.now() - timedelta(hours=MARK_MAX_AGE_HOURS)
+    try:
+        lq = LiveQuote.objects.filter(instrument=instrument).first()
+        if lq and lq.last and lq.updated_at >= cutoff:
+            return lq.last
+    except Exception:
+        pass
+    try:
+        pd = (PriceData.objects
+              .filter(instrument=instrument, timestamp__gte=cutoff)
+              .order_by("-timestamp").first())
+        if pd:
+            return pd.close
+    except Exception:
+        pass
+    return None
+
+
+def mark_positions_to_market(positions) -> int:
+    """Refresh current_price + unrealized P&L on open positions. Returns the
+    number of rows marked.
+
+    Position.unrealized_pnl had a writer NOBODY scheduled (the manual eToro
+    sync) and a model default of 0 — so every dashboard that summed it
+    rendered +0.00 forever, and core/context_processors.py grew a parallel
+    AssetBotTrade path just to avoid it. The sign convention is the one the
+    closed-trade recompute paths already use: (mark - entry) * qty, negated
+    for direction="short".
+    """
+    marked = 0
+    for pos in positions:
+        mark = _mark_for(pos.instrument) if pos.instrument else None
+        if mark is None:
+            continue
+        entry = pos.entry_price or 0
+        pnl = (mark - entry) * pos.quantity
+        if (pos.direction or "").lower() == "short":
+            pnl = -pnl
+        pos.current_price = mark
+        pos.unrealized_pnl = pnl
+        pos.unrealized_pnl_pct = (
+            float((mark - entry) / entry * 100) if entry else 0.0)
+        if (pos.direction or "").lower() == "short":
+            pos.unrealized_pnl_pct = -pos.unrealized_pnl_pct
+        pos.save(update_fields=["current_price", "unrealized_pnl",
+                                "unrealized_pnl_pct"])
+        marked += 1
+    return marked
+
 
 @shared_task
 @guarded_task("pipeline_exposure")
 def recalculate_exposure():
-    """Tier 3: Recalculate portfolio exposure."""
+    """Tier 3: mark open positions to market, then recalculate exposure."""
     logger.info("Recalculating portfolio exposure")
 
     from portfolio.services import get_or_create_default_portfolio
@@ -20,6 +81,10 @@ def recalculate_exposure():
     positions = Position.objects.filter(
         portfolio=portfolio, closed_at__isnull=True
     ).select_related("instrument")
+
+    # Mark first, so the exposure sums below read today's prices rather
+    # than whatever the row was created with.
+    marked = mark_positions_to_market(positions)
 
     exposure_by_asset_class = {}
     exposure_by_sector = {}
@@ -59,12 +124,15 @@ def recalculate_exposure():
         float(portfolio.cash_available),
     )
 
+    # "marked" is deliberately NOT a task-gate count key: a day with zero
+    # open positions is a healthy no-op, not "ran and produced nothing".
     return {
         "status": "ok",
         "portfolio_id": portfolio.id,
         "current_value": float(portfolio.current_value),
         "cash": float(portfolio.cash_available),
         "position_count": positions.count(),
+        "marked": marked,
         "exposure_by_asset_class": exposure_by_asset_class,
         "exposure_by_sector": exposure_by_sector,
         "exposure_by_currency": exposure_by_currency,

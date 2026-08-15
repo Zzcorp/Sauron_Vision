@@ -27,24 +27,35 @@ TRIGGERED_TTL_HOURS_BY_TIMEFRAME = {
 }
 
 
+# A quote older than this is a fossil, not a price — same convention as
+# PaperTrader.MAX_QUOTE_AGE_SECONDS. Signal outcomes graded against a dead
+# poller's last print would corrupt the evidence the promotion ladder reads.
+MAX_QUOTE_AGE_SECONDS = 900
+
+
 def _latest_price(symbol):
-    """Best-effort recent price from LiveQuote / PriceData. Returns float or None."""
+    """Best-effort recent price from LiveQuote / PriceData. Returns float or None.
+
+    The LiveQuote branch was dead for the model's whole life: it queried
+    `symbol`, `timestamp` and `price` — three fields LiveQuote has never had
+    (it is one row per instrument: `instrument`, `last`, `updated_at`) — so
+    every call raised FieldError into the bare except and outcome grading
+    silently ran on bar closes alone, hours stale on the 4h timeframe.
+    """
     try:
+        from django.utils import timezone as tz
         from market_data.models import LiveQuote
-        lq = LiveQuote.objects.filter(symbol__iexact=symbol).order_by("-timestamp").first()
-        if lq and getattr(lq, "price", None):
-            return float(lq.price)
+        lq = LiveQuote.objects.filter(instrument__symbol__iexact=symbol).first()
+        if lq and lq.last:
+            age = (tz.now() - lq.updated_at).total_seconds()
+            if age <= MAX_QUOTE_AGE_SECONDS:
+                return float(lq.last)
     except Exception:
         pass
     try:
         from market_data.models import PriceData
         from instruments.models import Instrument
-        for field in ("symbol", "ticker", "code"):
-            try:
-                inst = Instrument.objects.get(**{field: symbol})
-                break
-            except Exception:
-                inst = None
+        inst = Instrument.objects.filter(symbol__iexact=symbol).first()
         if inst:
             pd = PriceData.objects.filter(instrument=inst).order_by("-timestamp").first()
             if pd:

@@ -102,20 +102,6 @@ def check_economic_calendar():
 
 
 @shared_task
-@guarded_task("scraper_finviz")
-def fetch_finviz_screener():
-    """Tier 3: Fetch FinViz screener data."""
-    from scraping.scrapers.finviz import fetch_screener_results
-
-    try:
-        results = fetch_screener_results()
-        return {"status": "success", "stocks_found": len(results)}
-    except Exception as e:
-        logger.error(f"FinViz screener failed: {e}")
-        return {"status": "error", "error": str(e)}
-
-
-@shared_task
 @guarded_task("pipeline_sentiment_agg")
 def aggregate_sentiment():
     """Tier 3: Aggregate sentiment scores across all sources."""
@@ -217,14 +203,16 @@ def fetch_sec_filings():
 def fetch_cot_reports():
     """Tier 6: Fetch CFTC Commitments of Traders reports."""
     from scraping.scrapers.cot_reports import fetch_latest_cot_report
-    from scraping.models import COTReport
 
-    before = COTReport.objects.count()
     try:
         reports = fetch_latest_cot_report()
     except Exception as e:
         logger.error(f"COT reports failed: {e}")
         return {"status": "error", "error": str(e)}
 
+    # 'stored' counts UPSERTS, not a row-count delta: the Saturday beat can
+    # fire before the CFTC posts the new week, and re-asserting last week's
+    # rows is a healthy run, not "handled N rows and stored none".
     return {"status": "success", "reports_processed": len(reports),
-            "parsed": len(reports), "stored": COTReport.objects.count() - before}
+            "parsed": len(reports),
+            "stored": getattr(fetch_latest_cot_report, "last_upserted", 0)}

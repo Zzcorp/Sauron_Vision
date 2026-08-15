@@ -39,6 +39,45 @@ def _admin_only(view):
     return wrapper
 
 
+def _broker_ping(build_client, label: str) -> bool:
+    """True iff the freshly-built client's authenticated ping succeeds.
+
+    `connected` used to be set unconditionally on save — it meant "written
+    down", not "these work", and stayed True for keys that had never once
+    reached the broker. Every client's ping() returns a plain bool and
+    never raises; this wrapper keeps that guarantee against constructor
+    surprises too.
+
+    Two IBKR-specific realities are handled here rather than in the view:
+    ib_insync needs an asyncio event loop and web requests run in worker
+    threads that have none (without this, the ping raised before any
+    socket I/O and verification could never succeed under threaded
+    serving); and a successful ping leaves a live TWS connection holding
+    the client-id slot, which would make every LATER router connection
+    fail with error 326 — so the client is always disconnected.
+    """
+    import asyncio
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+    client = None
+    try:
+        client = build_client()
+        return bool(client.ping())
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[hq] %s credential verification errored: %s", label, e)
+        return False
+    finally:
+        disconnect = getattr(client, "disconnect", None)
+        if callable(disconnect):
+            try:
+                disconnect()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def _pin_ok(request) -> bool:
     """True iff the acting user supplied their correct trading PIN.
 
@@ -223,10 +262,24 @@ def save_oanda_credentials(request):
     acct, _ = OANDAAccount.objects.get_or_create(user=user)
     acct.set_credentials(api_key, account_id)
     acct.practice = practice
-    acct.connected = True
-    acct.save()
     env = "practice" if practice else "live"
-    messages.success(request, f"OANDA credentials saved for {target_username} ({env}).")
+    # OANDA's ping() is an authenticated account-summary call, so this
+    # verifies the key AND the account id in one round trip.
+    from bot_program.engine.oanda_client import OANDATrader
+    acct.connected = _broker_ping(
+        lambda: OANDATrader(api_key, account_id, env=env), "OANDA")
+    if acct.connected:
+        from django.utils import timezone
+        acct.last_sync = timezone.now()
+    acct.save()
+    if acct.connected:
+        messages.success(request, f"OANDA credentials saved and verified "
+                                  f"for {target_username} ({env}).")
+    else:
+        messages.warning(request, f"OANDA credentials saved for "
+                                  f"{target_username} ({env}) but NOT "
+                                  f"verified — the account-summary call "
+                                  f"failed. Check the key and account id.")
     return redirect("admin_dashboard")
 
 
@@ -254,10 +307,24 @@ def save_alpaca_credentials(request):
     acct, _ = AlpacaAccount.objects.get_or_create(user=user)
     acct.set_credentials(api_key, api_secret)
     acct.paper = paper
-    acct.connected = True
-    acct.save()
     env = "paper" if paper else "live"
-    messages.success(request, f"Alpaca credentials saved for {target_username} ({env}).")
+    # Alpaca's ping() hits /v2/account with the submitted keys — a real
+    # credential check, not a reachability check.
+    from bot_program.engine.alpaca_client import AlpacaTrader
+    acct.connected = _broker_ping(
+        lambda: AlpacaTrader(api_key, api_secret, env=env), "Alpaca")
+    if acct.connected:
+        from django.utils import timezone
+        acct.last_sync = timezone.now()
+    acct.save()
+    if acct.connected:
+        messages.success(request, f"Alpaca credentials saved and verified "
+                                  f"for {target_username} ({env}).")
+    else:
+        messages.warning(request, f"Alpaca credentials saved for "
+                                  f"{target_username} ({env}) but NOT "
+                                  f"verified — the account call failed. "
+                                  f"Check the key pair.")
     return redirect("admin_dashboard")
 
 
@@ -316,15 +383,32 @@ def save_ibkr_credentials(request):
     acct.is_primary_for_options = primary_options
     acct.is_primary_for_commodity = primary_commodity
     acct.is_primary_for_cfd = primary_cfd
-    acct.connected = True
+    # IBKR's ping() proves the TWS/Gateway socket answers — NOT that the
+    # account id is valid (that is all ib_insync exposes cheaply). The
+    # message says which of the two was checked.
+    from bot_program.engine.ibkr_client import IBKRTrader
+    acct.connected = _broker_ping(
+        lambda: IBKRTrader(host=host, port=port, client_id=client_id,
+                           account_id=account_id, paper=paper), "IBKR")
+    if acct.connected:
+        from django.utils import timezone
+        acct.last_sync = timezone.now()
     acct.save()
 
     env = "paper" if paper else "live"
-    messages.success(
-        request,
-        f"IBKR credentials saved for {target_username} "
-        f"({host}:{port}, {env}, client_id={client_id}).",
-    )
+    if acct.connected:
+        messages.success(
+            request,
+            f"IBKR credentials saved for {target_username} — TWS reachable "
+            f"at {host}:{port} ({env}, client_id={client_id}).",
+        )
+    else:
+        messages.warning(
+            request,
+            f"IBKR credentials saved for {target_username} but TWS was NOT "
+            f"reachable at {host}:{port} — start TWS/Gateway and re-save to "
+            f"verify. (This checks the socket, not the account id.)",
+        )
     return redirect("admin_dashboard")
 
 

@@ -191,6 +191,12 @@ def _close_as_orphan(trade) -> None:
             pnl *= option_pnl_multiplier(trade)
         except Exception:
             pass
+    elif trade.asset_class == "forex":
+        try:
+            from bot_program.asset_engine.forex_bot import forex_usd_multiplier
+            pnl *= forex_usd_multiplier(trade)
+        except Exception:
+            pass
 
     trade.exit_price = exit_price
     trade.pnl = pnl

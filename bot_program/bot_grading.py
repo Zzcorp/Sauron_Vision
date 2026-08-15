@@ -136,6 +136,17 @@ def grade_bot_trade(trade) -> bool:
                     risk_dollars *= float(option_pnl_multiplier(trade))
                 except Exception:
                     pass
+            elif trade.asset_class == "forex":
+                # Forex pnl is converted to USD at the trade's entry-time
+                # rate; the risk here is |entry - stop| × qty, a QUOTE-
+                # currency amount. Scale it by the SAME rate or realized_r
+                # is true_R × rate — a JPY stop-out would grade at −0.0067
+                # instead of −1.0 and the promotion evidence goes blind.
+                try:
+                    from bot_program.asset_engine.forex_bot import forex_usd_multiplier
+                    risk_dollars *= float(forex_usd_multiplier(trade))
+                except Exception:
+                    pass
             if risk_dollars > 0:
                 pnl = float(trade.pnl or 0)
                 trade.realized_r = round(pnl / risk_dollars, 4)

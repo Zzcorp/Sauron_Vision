@@ -157,11 +157,18 @@ def fetch_live_quotes(self, watchlist_only=True):
         # "watchlist_only" now means "the scan universe" — the watchlist plus
         # every enabled bot's symbols. A quote is what the mark and the paper
         # fill path read, so a traded symbol without one is a bot that can
-        # decide but never act.
-        targets = quote_targets("stock", limit=20)
+        # decide but never act. ETFs ride along: SPY is asset_class="etf" in
+        # the catalogue, and a StockBot trading it would otherwise have bars
+        # and no mark.
+        targets = quote_targets(("stock", "etf"), limit=20)
     else:
-        targets = list(Instrument.objects.filter(
-            is_active=True, asset_class="stock")[:20])
+        # Split the budget per class: a single __in filter inherits the
+        # model ordering (asset_class first), and the catalogue's 20 ETFs
+        # would exactly fill the window with zero stocks polled.
+        targets = (list(Instrument.objects.filter(
+                       is_active=True, asset_class="stock")[:14])
+                   + list(Instrument.objects.filter(
+                       is_active=True, asset_class="etf")[:6]))
 
     fetched = 0
     for inst in targets:

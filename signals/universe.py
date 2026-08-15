@@ -29,11 +29,16 @@ def bot_symbols() -> set[str]:
     return out
 
 
-def scan_universe(include_watchlist: bool = True, asset_class: str = ""):
+def scan_universe(include_watchlist: bool = True, asset_class="") :
     """Instruments the scheduled pipeline should process.
 
     Union of the watchlist and every enabled bot's symbols — a bot symbol
     must be scanned whether or not a human starred it.
+
+    `asset_class` may be one class or a tuple of them: SPY and GLD are
+    asset_class="etf" in the catalogue, and a poller filtering on "stock"
+    alone would leave a StockBot trading ETFs with bars and no mark — the
+    same class of gap forex only just escaped.
     """
     from django.db.models import Q
     from instruments.models import Instrument
@@ -44,13 +49,15 @@ def scan_universe(include_watchlist: bool = True, asset_class: str = ""):
         q = Q(is_watchlist=True) | q
     qs = Instrument.objects.filter(q, is_active=True).distinct()
     if asset_class:
-        qs = qs.filter(asset_class=asset_class)
+        classes = ([asset_class] if isinstance(asset_class, str)
+                   else list(asset_class))
+        qs = qs.filter(asset_class__in=classes)
     logger.debug("[universe] %d instruments (%d bot symbols)",
                  qs.count(), len(symbols))
     return qs
 
 
-def quote_targets(asset_class: str, limit: int = 0) -> list:
+def quote_targets(asset_class, limit: int = 0) -> list:
     """Instruments to poll for live quotes, bot symbols first.
 
     The quote pollers used to read the watchlist alone. A bot trading a

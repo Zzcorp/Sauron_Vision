@@ -215,4 +215,8 @@ def size_position(cfg, *, asset_class: str, entry: float, stop: float,
         "risk_fraction": f,
         "risk_dollars": round(equity * f, 6),
         "notional_fraction": round(notional / equity, 6) if equity > 0 else 0.0,
+        # Recorded into entry_meta so every close path and the grader can
+        # convert quote-currency P&L with the SAME entry-time number —
+        # symmetry is what keeps realized_r price-based.
+        "value_per_unit": float(value_per_unit),
     }

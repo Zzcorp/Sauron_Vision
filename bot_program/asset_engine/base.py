@@ -720,6 +720,11 @@ class AssetBot(ABC):
         entry_meta["risk_fraction"] = sizing["risk_fraction"]
         entry_meta["risk_dollars"] = sizing["risk_dollars"]
         entry_meta["notional_fraction"] = sizing["notional_fraction"]
+        # The entry-time account-currency value of one price point per unit
+        # (the quote->USD rate for forex, 1.0 for USD-quoted classes).
+        # forex_usd_multiplier reads this on every close path and in
+        # grading, so P&L and the R denominator convert by the same number.
+        entry_meta["value_per_unit"] = sizing.get("value_per_unit", 1.0)
         if sizing["stop_widened"]:
             entry_meta["stop_widened"] = True
         if stage.get("stage"):

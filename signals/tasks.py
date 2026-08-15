@@ -260,3 +260,22 @@ def mine_patterns():
     result = mine_all_active()
     logger.info("Pattern mining: %s", result)
     return result
+
+
+@shared_task
+@guarded_task("pipeline_event_engine")
+def dispatch_event_task(event_type, payload=None, source="api"):
+    """Async twin of signals.fast_rules.dispatch_event - Phase 12.
+
+    The component registry described this wrapper for as long as the
+    component has existed, but it was never written: the switch gated
+    nothing, and toggling it changed nothing. It exists now, so anything
+    that wants sub-second dispatch without blocking the caller has a real
+    path - and switching the component OFF short-circuits here while
+    direct synchronous calls to dispatch_event() keep working, exactly as
+    the component description promises.
+    """
+    from signals.fast_rules import dispatch_event
+
+    result = dispatch_event(event_type, payload or {}, source=source)
+    return {"status": "success", **result}

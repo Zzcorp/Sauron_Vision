@@ -124,13 +124,36 @@ def execute_kill_switch(user=None, reason="manual"):
     return results
 
 
-def _market_exit_price(symbol, fallback):
-    """Best-effort current price for `symbol`; fall back to the trade entry."""
-    from market_data.models import LiveQuote
+def _market_exit_price(symbol, fallback, client=None):
+    """Best-effort current price for `symbol`; fall back to the trade entry.
+
+    The broker's own tick is asked first — its print is the book the forced
+    close will actually fill on (and for paper trades the router hands back
+    PaperTrader, whose ticker already enforces quote freshness with a bar
+    fallback). The direct LiveQuote read rejects stale rows: the kill switch
+    runs precisely when things are broken, which is when a dead poller's
+    fossil is most likely to be sitting in the table — booking a forced
+    close at a price from an hour ago fabricates P&L.
+    """
+    from bot_program.engine.paper_trader import PaperTrader
+
+    if client is not None and hasattr(client, "ticker"):
+        try:
+            last = float((client.ticker(symbol) or {}).get("lastPrice", 0) or 0)
+            if last > 0:
+                return last
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[KILL SWITCH] ticker(%s) failed, falling back "
+                           "to LiveQuote: %s", symbol, e)
+
     try:
+        from django.utils import timezone as tz
+        from market_data.models import LiveQuote
         quote = LiveQuote.objects.filter(instrument__symbol=symbol).first()
         if quote and quote.last:
-            return float(quote.last)
+            age = (tz.now() - quote.updated_at).total_seconds()
+            if age <= PaperTrader.MAX_QUOTE_AGE_SECONDS:
+                return float(quote.last)
     except Exception:  # noqa: BLE001
         pass
     return float(fallback)
@@ -149,12 +172,14 @@ def _close_legacy_trade(trade, now):
     """Close one legacy crypto BotTrade and persist the close on the real schema."""
     from bot_program.engine.runner import _client_for
 
-    exit_price = _market_exit_price(trade.symbol, trade.entry_price)
-
-    # Route to the correct broker (or PaperTrader). The legacy selector takes
-    # (user, cfg) — passing the config as the user arg was the original bug.
+    # Route to the correct broker (or PaperTrader) BEFORE marking the exit,
+    # so the booked price can come from the venue's own tick. The legacy
+    # selector takes (user, cfg) — passing the config as the user arg was
+    # the original bug.
     try:
         client = _client_for(trade.config.user, trade.config)
+        exit_price = _market_exit_price(trade.symbol, trade.entry_price,
+                                        client=client)
         _try_broker_close(client, trade.symbol, trade.side, trade.qty)
     except Exception as e:  # noqa: BLE001
         logger.warning("[KILL SWITCH] broker close failed for %s: %s", trade.symbol, e)
@@ -176,6 +201,18 @@ def _close_asset_trade(trade, now):
     from bot_program.engine.broker_router import client_for_symbol
 
     is_options = trade.asset_class == "options"
+
+    # The client is built before the mark so the exit price can come from
+    # the broker's own tick (PaperTrader for paper trades, which enforces
+    # quote freshness itself). Construction failing aborts this trade's
+    # close exactly as a failed submit does — the caller records the error.
+    try:
+        client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[KILL SWITCH] broker route failed for %s: %s",
+                       trade.symbol, e)
+        raise
+
     if is_options:
         # Premium-denominated trade: LiveQuote holds the UNDERLYING's price,
         # which is the wrong scale — mark at the option's own premium, falling
@@ -186,14 +223,14 @@ def _close_asset_trade(trade, now):
         )
         exit_price = float(current_premium_for_trade(trade) or trade.entry_price)
     else:
-        exit_price = _market_exit_price(trade.symbol, trade.entry_price)
+        exit_price = _market_exit_price(trade.symbol, trade.entry_price,
+                                        client=client)
 
     try:
         # Paper trades have no broker-side position to flatten — same rule
         # as AssetBot._close_trade. Submitting anyway can raise (PaperTrader
         # has no option order path) and strand the row OPEN forever.
         if not trade.paper:
-            client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
             # Cancel resting broker-side SL/TP first: a stop left behind after
             # we flatten would fire against a flat book and open a reverse
             # position — the opposite of what a kill switch is for.
@@ -219,6 +256,14 @@ def _close_asset_trade(trade, now):
         pnl = -pnl
     if is_options:
         pnl *= float(option_pnl_multiplier(trade))
+    elif trade.asset_class == "forex":
+        # Same entry-time conversion as the bot's own close path — a forced
+        # JPY close must not book yen into the USD P&L column.
+        try:
+            from bot_program.asset_engine.forex_bot import forex_usd_multiplier
+            pnl *= float(forex_usd_multiplier(trade))
+        except Exception:  # noqa: BLE001
+            pass
 
     trade.exit_price = exit_price
     trade.closed_at = now

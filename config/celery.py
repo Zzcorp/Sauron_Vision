@@ -171,10 +171,6 @@ app.conf.beat_schedule = {
         "task": "portfolio.tasks.recalculate_exposure",
         "schedule": 3600.0,
     },
-    "fetch-finviz-screener": {
-        "task": "scraping.tasks.fetch_finviz_screener",
-        "schedule": 3600.0,
-    },
     "ai-anomaly-scan": {
         "task": "ai_agents.tasks.run_anomaly_detection",
         "schedule": 3600.0,
