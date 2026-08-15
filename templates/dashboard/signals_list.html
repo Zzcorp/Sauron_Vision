@@ -205,7 +205,13 @@
         {% for s in signals %}
         <tr>
             <td style="font-size: 11px; color: var(--text-muted);">{{ s.created_at|date:"M d H:i" }}</td>
-            <td style="font-family: var(--font-display); font-size: 12px;">{{ s.instrument.symbol }}</td>
+            <td style="font-family: var(--font-display); font-size: 12px;">
+                {{ s.instrument.symbol }}
+                {% comment %} Every signal can be handed to Sauron as a subject. {% endcomment %}
+                <button type="button" class="ask-sauron"
+                        data-ask-sauron="{{ s.direction|upper }} {{ s.instrument.symbol }}{% if s.rule_name %} ({{ s.rule_name }}){% endif %}"
+                        data-ask-kind="signal" title="Ask Sauron about this signal">◬ ask</button>
+            </td>
             <td><span class="badge badge-medium">{{ s.signal_type }}</span></td>
             <td><span class="badge badge-{{ s.direction }}">{{ s.direction }}</span></td>
             <td><span class="badge badge-{{ s.urgency }}">{{ s.urgency }}</span></td>

@@ -727,3 +727,91 @@ body.light-mode .sr-popup::after {
     outline-offset: 2px;
     border-radius: 3px;
 }
+
+/* ── 14. ASK SAURON: the orb, and asking about a subject ────────────────
+   The floating eye is decorative enough that people were not certain it could
+   be clicked, and it was labelled SEND while also being the open/close
+   control — two things on screen that looked like the way to submit, only one
+   of which was. It is now unambiguously the way in and out. */
+.se-eye-fab {
+    transition: transform .18s cubic-bezier(.2,.7,.3,1), box-shadow .18s ease;
+}
+.se-eye-fab:hover { transform: scale(1.09); }
+.se-eye-fab:active { transform: scale(1.02); }
+
+/* Corner marks: four brackets that draw themselves in on hover, saying
+   "this is a control" without putting a border round the eye. */
+.se-fab-corners { position: absolute; inset: -9px; pointer-events: none; }
+.se-fab-corner {
+    position: absolute; width: 9px; height: 9px;
+    border: 1.5px solid var(--accent, #00e868);
+    opacity: 0; transition: opacity .18s ease, transform .18s cubic-bezier(.2,.7,.3,1);
+}
+.se-fab-corner--tl { top: 0; left: 0;  border-right: 0; border-bottom: 0; transform: translate(4px, 4px); }
+.se-fab-corner--tr { top: 0; right: 0; border-left: 0;  border-bottom: 0; transform: translate(-4px, 4px); }
+.se-fab-corner--bl { bottom: 0; left: 0;  border-right: 0; border-top: 0; transform: translate(4px, -4px); }
+.se-fab-corner--br { bottom: 0; right: 0; border-left: 0;  border-top: 0; transform: translate(-4px, -4px); }
+.se-eye-fab:hover .se-fab-corner,
+.se-eye-fab:focus-visible .se-fab-corner { opacity: .9; transform: translate(0, 0); }
+/* Once open, the orb's only job is to close — so the corners give way. */
+.se-eye-fab.open:hover .se-fab-corner { opacity: 0; }
+
+.se-fab-close {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; line-height: 1; color: var(--accent, #00e868);
+    background: rgba(2, 8, 5, .82);
+    border-radius: 50%;
+    opacity: 0; pointer-events: none;
+    transition: opacity .16s ease;
+}
+.se-eye-fab.open:hover .se-fab-close,
+.se-eye-fab.open:focus-visible .se-fab-close { opacity: 1; }
+
+/* An answer landed while the panel was shut. */
+.se-eye-fab.answered::after {
+    content: ""; position: absolute; top: 2px; right: 2px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent, #00e868);
+    box-shadow: 0 0 0 2px rgba(2, 8, 5, .9), 0 0 10px var(--accent, #00e868);
+    animation: seUnread 1.6s ease-in-out infinite;
+}
+@keyframes seUnread { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* ── The subject a question is about ─────────────────────────────────
+   Carried as a chip rather than baked into the text, so it survives the
+   operator rewriting the question underneath it. */
+.se-ctx {
+    display: flex; align-items: center; gap: 7px;
+    margin-top: 8px; padding: 5px 8px;
+    background: color-mix(in srgb, var(--accent, #00e868) 9%, transparent);
+    border-left: 2px solid var(--accent, #00e868);
+    border-radius: 0 5px 5px 0;
+    font-family: var(--font-mono); font-size: 11px;
+}
+.se-ctx-k { font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-muted, #7d8590); }
+.se-ctx-v { flex: 1; color: var(--text-primary, #e6edf3); font-weight: 700; min-width: 0;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.se-ctx-x { background: none; border: 0; color: var(--text-muted, #7d8590);
+            font-size: 15px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.se-ctx-x:hover { color: var(--accent-red, #ff4d4d); }
+.se-ctx-suggest { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+
+/* The launcher that any signal, instrument or rule can carry. */
+.ask-sauron {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase;
+    padding: 3px 7px; border-radius: 4px; cursor: pointer;
+    background: color-mix(in srgb, var(--accent, #00e868) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent, #00e868) 34%, transparent);
+    color: var(--accent, #00e868); text-decoration: none; white-space: nowrap;
+}
+.ask-sauron:hover { background: color-mix(in srgb, var(--accent, #00e868) 22%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+    .se-eye-fab, .se-fab-corner { transition: none; }
+    .se-eye-fab:hover { transform: none; }
+    .se-eye-fab.answered::after { animation: none; }
+}
+.tp-cta-alt { color: var(--text-muted, #7d8590); font-weight: 400; }

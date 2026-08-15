@@ -611,7 +611,7 @@
                         <div class="tp-row"><span class="lbl">Quoted</span><span>
                             <span class="sv-age"{% if item.quoted_at %} data-sv-at="{{ item.quoted_at }}"{% endif %}>{{ item.age_display }}</span>{% if item.source %} · {{ item.source }}{% endif %}
                         </span></div>
-                        <div class="tp-cta">▸ Open instrument</div>
+                        <div class="tp-cta">▸ Open instrument · <span class="tp-cta-alt">shift-click to ask Sauron</span></div>
 
                         {% elif item.type == "signal" %}
                         <div class="tp-head">
@@ -648,7 +648,7 @@
                         <div class="tp-row"><span class="lbl">Age</span><span>{% if item.age_min < 60 %}{{ item.age_min }}m{% else %}{{ item.age_min }}m — stale{% endif %}</span></div>
                         {% endif %}
                         {% if item.description %}<div class="tp-thesis">{{ item.description|truncatechars:220 }}</div>{% endif %}
-                        <div class="tp-cta">▸ Open signals</div>
+                        <div class="tp-cta">▸ Open signals · <span class="tp-cta-alt">shift-click to ask Sauron</span></div>
 
                         {% elif item.type == "news" %}
                         <div class="tnp-head">
@@ -1130,8 +1130,8 @@
                     <div class="sr-pop-actions">
                         <a href="{% url 'instrument_detail' s.instrument.symbol %}" class="sr-pop-btn">▸ INSTRUMENT</a>
                         <button type="button" class="sr-pop-btn"
-                                onclick="event.preventDefault(); event.stopPropagation();
-                                         window.openEyeWithQuery && window.openEyeWithQuery('Why is the {{ s.rule_name|default:s.signal_type|escapejs }} signal on {{ s.instrument.symbol|escapejs }} firing?');">
+                                data-ask-sauron="{{ s.direction|upper }} {{ s.instrument.symbol }}{% if s.rule_name %} ({{ s.rule_name }}){% endif %}"
+                                data-ask-kind="signal">
                             ▸ ASK SAURON
                         </button>
                     </div>
@@ -2804,7 +2804,20 @@ if ('serviceWorker' in navigator) {
             <circle class="pal-ripple pal-ripple-3" cx="30" cy="30" r="22.5" fill="none"/>
         </g>
     </svg>
-    <span class="se-fab-label">SEND</span>
+    <span class="se-fab-label">ASK</span>
+    {% comment %}
+    Corner marks. They appear on hover to say the orb is a control rather than
+    an ornament — the eye is decorative enough that people were not sure it
+    could be clicked. When the panel is open the same corners give way to a
+    close cross, so the orb keeps one job: open, then close.
+    {% endcomment %}
+    <span class="se-fab-corners" aria-hidden="true">
+        <i class="se-fab-corner se-fab-corner--tl"></i>
+        <i class="se-fab-corner se-fab-corner--tr"></i>
+        <i class="se-fab-corner se-fab-corner--bl"></i>
+        <i class="se-fab-corner se-fab-corner--br"></i>
+    </span>
+    <span class="se-fab-close" aria-hidden="true">&times;</span>
 </button>
 
 <div class="se-chat-panel" id="seChatPanel" role="dialog" aria-label="Ask Sauron">
@@ -2835,12 +2848,25 @@ if ('serviceWorker' in navigator) {
             </div>
         </div>
     </div>
+    {% comment %}
+    The subject the question is about, carried as a chip so it survives the
+    operator rewriting the question underneath it. Launching from a signal
+    pre-fills a suggested wording and selects it, so typing replaces it —
+    the suggestion is a starting point, not something to delete first.
+    {% endcomment %}
+    <div class="se-ctx" id="seCtx" hidden>
+        <span class="se-ctx-k">about</span>
+        <span class="se-ctx-v" id="seCtxV"></span>
+        <button type="button" class="se-ctx-x" id="seCtxX" aria-label="Ask without this context">&times;</button>
+    </div>
+    <div class="se-ctx-suggest" id="seCtxSuggest" hidden></div>
     <div class="se-chat-input-wrap">
         {% csrf_token %}
         <textarea class="se-chat-input" id="seChatInput"
                   placeholder="Ask Sauron…  (Shift+Enter = new line)"
                   rows="1" autocomplete="off"></textarea>
-        <button type="button" class="se-chat-send" id="seChatSend" aria-label="Send">
+        <button type="button" class="se-chat-send" id="seChatSend"
+                aria-label="Send (Enter)" title="Send — Enter">
             <svg class="se-send-svg" viewBox="0 0 40 40" aria-hidden="true">
                 <defs>
                     <radialGradient id="sendOrbGrad" cx="50%" cy="50%" r="50%">
@@ -2905,6 +2931,107 @@ if ('serviceWorker' in navigator) {
     });
     sendBtn && sendBtn.addEventListener('click', function() { send(); });
 
+    /* ── Ask about a subject ───────────────────────────────────────────
+       Anything on the platform can hand Sauron a subject: a signal, an
+       instrument, a rule, a bot. The panel opens with the subject pinned as a
+       chip, a suggested question already written and selected so typing
+       replaces it, and a few follow-ups specific to what kind of thing it is.
+
+       The chip matters more than the pre-filled text: the operator will
+       rewrite the question, and the subject should survive that. */
+    var ctx = document.getElementById('seCtx');
+    var ctxV = document.getElementById('seCtxV');
+    var ctxX = document.getElementById('seCtxX');
+    var ctxSuggest = document.getElementById('seCtxSuggest');
+    var askContext = null;
+
+    var ASK_KINDS = {
+        signal: {
+            lead: function (s) { return 'What do you make of the ' + s + ' signal?'; },
+            more: ['Why is this firing now?', 'What would invalidate it?',
+                   'How has this rule graded lately?', 'What size would you take?']
+        },
+        instrument: {
+            lead: function (s) { return 'What is your read on ' + s + '?'; },
+            more: ['What is the setup right now?', 'What is the main risk here?',
+                   'How does this fit the current regime?', 'Anything in the news on it?']
+        },
+        rule: {
+            lead: function (s) { return 'How is the rule ' + s + ' performing?'; },
+            more: ['Why is it at this stage?', 'Should I trust it right now?',
+                   'What is its expectancy?']
+        },
+        bot: {
+            lead: function (s) { return 'What has the ' + s + ' bot been doing?'; },
+            more: ['Why has it not opened anything?', 'What is blocking its entries?']
+        },
+        generic: {
+            lead: function (s) { return 'What do you think about ' + s + '?'; },
+            more: ['Why does that matter?', 'What would change your mind?']
+        }
+    };
+
+    function setContext(subject, kind) {
+        askContext = subject ? { subject: subject, kind: kind || 'generic' } : null;
+        if (!ctx) return;
+        if (!askContext) {
+            ctx.hidden = true;
+            if (ctxSuggest) { ctxSuggest.hidden = true; ctxSuggest.innerHTML = ''; }
+            return;
+        }
+        ctxV.textContent = subject;
+        ctx.hidden = false;
+        var spec = ASK_KINDS[askContext.kind] || ASK_KINDS.generic;
+        if (ctxSuggest) {
+            ctxSuggest.innerHTML = spec.more.map(function (q) {
+                return '<button type="button" class="se-suggest" data-q="' +
+                    q.replace(/"/g, '&quot;') + '">' + q + '</button>';
+            }).join('');
+            ctxSuggest.hidden = false;
+        }
+    }
+
+    ctxX && ctxX.addEventListener('click', function () { setContext(null); });
+
+    window.askSauronAbout = function (subject, kind) {
+        openPanel();
+        setContext(subject, kind);
+        var spec = ASK_KINDS[kind] || ASK_KINDS.generic;
+        if (input) {
+            input.value = spec.lead(subject);
+            autoResizeInput();
+            input.focus();
+            /* Selected, not just placed: the operator types over it rather
+               than clearing it first. */
+            input.setSelectionRange(0, input.value.length);
+        }
+    };
+
+    /* Shift-click a ticker item to ask about it rather than navigate to it.
+       The hover card itself cannot hold the button: it vanishes the moment the
+       pointer leaves the item, so a control inside it is unreachable. */
+    document.addEventListener('click', function (e) {
+        if (!e.shiftKey) return;
+        var item = e.target.closest && e.target.closest('.ticker-item');
+        if (!item) return;
+        e.preventDefault();
+        var sym = item.querySelector('.t-sym');
+        if (!sym) return;
+        var isSignal = item.getAttribute('data-type') === 'signal';
+        window.askSauronAbout(sym.textContent.trim(),
+                              isSignal ? 'signal' : 'instrument');
+    }, true);
+
+    /* Any element on any page can launch it. */
+    document.addEventListener('click', function (e) {
+        var t = e.target.closest && e.target.closest('[data-ask-sauron]');
+        if (!t) return;
+        e.preventDefault();
+        e.stopPropagation();
+        window.askSauronAbout(t.getAttribute('data-ask-sauron'),
+                              t.getAttribute('data-ask-kind') || 'generic');
+    });
+
     /* Public hook — used by the signals-rail popup to pre-fill a question. */
     window.openEyeWithQuery = function(q) {
         openPanel();
@@ -2943,6 +3070,9 @@ if ('serviceWorker' in navigator) {
             tools.className = 'se-bubble-tools';
             tools.innerHTML =
                 '<button type="button" class="se-bubble-tool" data-se-copy>copy</button>' +
+                (role === 'assistant'
+                    ? '<button type="button" class="se-bubble-tool" data-se-regen>retry</button>'
+                    : '<button type="button" class="se-bubble-tool" data-se-edit>edit</button>') +
                 (opts.msgId ? '<button type="button" class="se-bubble-tool se-bubble-tool--danger" ' +
                               'data-se-del="' + opts.msgId + '" data-se-role="' + role + '">delete</button>' : '');
             b.appendChild(tools);
@@ -2969,6 +3099,26 @@ if ('serviceWorker' in navigator) {
             navigator.clipboard && navigator.clipboard.writeText(bod ? bod.innerText : '');
             copy.textContent = 'copied';
             setTimeout(function () { copy.textContent = 'copy'; }, 1400);
+            return;
+        }
+        var regen = e.target.closest && e.target.closest('[data-se-regen]');
+        if (regen) {
+            /* Ask the same question again. The previous answer is left in
+               place rather than replaced: two attempts side by side is the
+               comparison the operator wanted when they pressed it. */
+            if (lastQuestion) sendQuestion(lastQuestion);
+            return;
+        }
+        var edit = e.target.closest && e.target.closest('[data-se-edit]');
+        if (edit) {
+            var bubble = edit.closest('.se-bubble');
+            var body = bubble && bubble.querySelector('.se-bubble-body');
+            if (body && input) {
+                input.value = body.innerText;
+                autoResizeInput();
+                input.focus();
+                input.setSelectionRange(input.value.length, input.value.length);
+            }
             return;
         }
         var del = e.target.closest && e.target.closest('[data-se-del]');
@@ -3012,18 +3162,28 @@ if ('serviceWorker' in navigator) {
     }
     input && input.addEventListener('input', autoResizeInput);
 
+    var lastQuestion = null;
+
     function send() {
         var q = (input.value || '').trim();
         if (!q) return;
         input.value = '';
         autoResizeInput();
+        sendQuestion(q);
+    }
+
+    function sendQuestion(q) {
+        lastQuestion = q;
+        /* The subject travels with the question. Without it a follow-up like
+           "why is it firing?" arrives with no idea what "it" is. */
+        var asked = askContext ? q + '\n\n(About: ' + askContext.subject + ')' : q;
         if (sendBtn) { sendBtn.disabled = true; sendBtn.classList.add('working'); }
         var userBubble = appendBubble('user', q);
         var thinking = appendBubble('thinking', 'Sauron is thinking');
         fab.classList.add('working');
 
         var fd = new FormData();
-        fd.append('question', q);
+        fd.append('question', asked);
 
         fetch('{% url "research_ask_ajax" %}', {
             method: 'POST', body: fd, credentials: 'same-origin',
@@ -3045,6 +3205,10 @@ if ('serviceWorker' in navigator) {
             }
             if (j.ok && j.assistant_html) {
                 appendBubble('assistant', j.assistant_html, {html: true, msgId: j.assistant_message_id});
+                /* Answered while the operator was elsewhere. The FAB keeps
+                   thinking on its own, but a pulsing orb does not say WHAT
+                   came back — so show the opening of it and a way in. */
+                if (!panel.classList.contains('open')) notifyAnswer(j.assistant_html);
             } else if (j.assistant_html) {
                 appendBubble('assistant', j.assistant_html, {html: true, error: true, msgId: j.assistant_message_id});
             } else {
@@ -3058,7 +3222,10 @@ if ('serviceWorker' in navigator) {
         .finally(function() {
             if (sendBtn) { sendBtn.disabled = false; sendBtn.classList.remove('working'); }
             fab.classList.remove('working');
-            input.focus();
+            /* Only steal focus if the operator is still here. Focusing a
+               textarea inside a closed panel silently swallows every global
+               keyboard shortcut. */
+            if (panel.classList.contains('open')) input.focus();
         });
     }
     /* sendBtn === fab here, so we don't double-bind a click — the FAB
@@ -3066,6 +3233,21 @@ if ('serviceWorker' in navigator) {
     input.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     });
+
+    function notifyAnswer(html) {
+        var tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        var text = (tmp.textContent || '').trim().replace(/\s+/g, ' ');
+        fab.classList.add('answered');
+        if (window.svBanner) {
+            window.svBanner('sauron_answer', {
+                preview: text.slice(0, 180) + (text.length > 180 ? '…' : ''),
+                question: lastQuestion || ''
+            });
+        }
+    }
+    /* The unread mark clears the moment the panel is opened. */
+    fab.addEventListener('click', function () { fab.classList.remove('answered'); });
 
     function greetingBubble() {
         return '<div class="se-bubble assistant se-bubble-greeting">' +
@@ -3411,7 +3593,8 @@ if ('serviceWorker' in navigator) {
 
     var MAX_VISIBLE = 4;
     var TTL = { fill_open: 15000, new_signal: 18000, fill_close: 30000,
-                close_pending: 0 };   /* 0 = sticky: this one needs a human */
+                sauron_answer: 25000,
+                close_pending: 0 };   /* 0 = sticky: this one needs a human */   /* 0 = sticky: this one needs a human */
 
     function esc(v) {
         return String(v === undefined || v === null ? "" : v)
@@ -3467,6 +3650,18 @@ if ('serviceWorker' in navigator) {
                 href: "/bot-charts/"
             };
         }
+        if (kind === "sauron_answer") {
+            /* Answered while the panel was shut. A pulsing orb says something
+               happened; it does not say what, so lead with the opening of the
+               answer itself. */
+            return {
+                cls: "signal", kind: "Sauron answered", sym: "",
+                val: "", valCls: "",
+                line: d.preview || "",
+                more: row("You asked", d.question),
+                href: "#open-sauron"
+            };
+        }
         if (kind === "close_pending") {
             return {
                 cls: "warn", kind: "Close FAILED", sym: d.symbol, val: "!",
@@ -3501,6 +3696,15 @@ if ('serviceWorker' in navigator) {
 
         el.addEventListener("click", function (e) {
             var act = e.target && e.target.getAttribute && e.target.getAttribute("data-act");
+            if (e.target && e.target.getAttribute && e.target.getAttribute("href") === "#open-sauron") {
+                /* Not a link anywhere — it reopens the panel the answer
+                   belongs to. */
+                e.preventDefault();
+                var f = document.getElementById("seEyeFab");
+                if (f && !document.getElementById("seChatPanel").classList.contains("open")) f.click();
+                el.remove();
+                return;
+            }
             if (act === "dismiss") {
                 el.remove();
             } else if (act === "more") {

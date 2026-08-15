@@ -1348,3 +1348,126 @@ class QuotePrecedenceTests(TestCase):
         src = inspect.getsource(tasks.fetch_commodity_quotes)
         self.assertIn("write_quote", src)
         self.assertNotIn("LiveQuote.objects.update_or_create", src)
+
+
+class AskSauronLaunchTests(TestCase):
+    """Anything on the platform can hand Sauron a subject.
+
+    Before this, asking about a signal meant opening the panel and retyping
+    which instrument and which rule you meant — so nobody did it from the
+    place where the question occurred to them."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="ask_u", password="x")
+        self.client.force_login(self.user)
+        from instruments.models import Instrument
+        from signals.models import Signal
+        inst, _ = Instrument.objects.get_or_create(
+            symbol="USDJPY", defaults={"name": "Yen", "asset_class": "forex"})
+        Signal.objects.create(
+            instrument=inst, signal_type="technical", direction="bullish",
+            urgency="high", title="USDJPY long", rule_name="golden_cross",
+            score=0.7, is_active=True, price_at_signal=150)
+        self.body = self.client.get(
+            "/signals/", HTTP_HOST="127.0.0.1").content.decode("utf-8", "replace")
+
+    def test_a_signal_row_can_hand_itself_to_sauron(self):
+        self.assertIn("data-ask-sauron", self.body)
+        self.assertIn("USDJPY", self.body)
+
+    def test_the_subject_names_the_direction_and_the_rule(self):
+        """'What do you think about USDJPY' is a worse question than 'what do
+        you make of the BULLISH USDJPY (golden_cross) signal'."""
+        import re
+        subjects = re.findall(r'data-ask-sauron="([^"]+)"', self.body)
+        self.assertTrue(any("USDJPY" in s and "golden_cross" in s for s in subjects),
+                        f"no subject carried the rule: {subjects[:4]}")
+
+    def test_the_launcher_is_wired_to_a_handler(self):
+        self.assertIn("askSauronAbout", self.body)
+        self.assertIn("data-ask-kind", self.body)
+
+    def test_the_subject_is_carried_as_a_chip_not_baked_into_the_text(self):
+        """The operator rewrites the question; the subject has to survive
+        that."""
+        self.assertIn('id="seCtx"', self.body)
+        self.assertIn("askContext", self.body)
+
+    def test_the_subject_is_appended_to_what_is_actually_sent(self):
+        """A follow-up like 'why is it firing?' reaches the agent with no idea
+        what 'it' is unless the subject travels with it."""
+        self.assertIn("(About: ", self.body)
+
+    def test_each_kind_offers_its_own_follow_ups(self):
+        for kind in ("signal", "instrument", "rule", "bot"):
+            self.assertIn(kind + ":", self.body, f"{kind} has no suggestion set")
+
+
+class ChatMessageToolTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="cmt_u", password="x")
+        self.client.force_login(self.user)
+        self.body = self.client.get(
+            "/signals/", HTTP_HOST="127.0.0.1").content.decode("utf-8", "replace")
+
+    def test_an_answer_can_be_retried(self):
+        self.assertIn("data-se-regen", self.body)
+        self.assertIn("lastQuestion", self.body)
+
+    def test_a_question_can_be_edited(self):
+        self.assertIn("data-se-edit", self.body)
+
+    def test_an_answer_that_lands_on_a_closed_panel_is_announced(self):
+        """A pulsing orb says something happened. It does not say what."""
+        self.assertIn("notifyAnswer", self.body)
+        self.assertIn("sauron_answer", self.body)
+
+    def test_the_preview_carries_the_start_of_the_answer(self):
+        self.assertIn("preview", self.body)
+        self.assertIn("text.slice(0, 180)", self.body)
+
+    def test_focus_is_not_stolen_into_a_closed_panel(self):
+        """Focusing a textarea inside a shut panel silently swallows every
+        global keyboard shortcut."""
+        self.assertIn("if (panel.classList.contains('open')) input.focus();", self.body)
+
+
+class EyeFabAffordanceTests(TestCase):
+    """The orb was labelled SEND while also being the open/close control, so
+    two things on screen looked like the way to submit and only one was."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="fab_u", password="x")
+        self.client.force_login(self.user)
+        self.body = self.client.get(
+            "/signals/", HTTP_HOST="127.0.0.1").content.decode("utf-8", "replace")
+        self.css = _read("static", "css", "sv-overlay.css")
+
+    def test_the_orb_no_longer_claims_to_send(self):
+        self.assertIn('class="se-fab-label">ASK', self.body)
+        self.assertNotIn('class="se-fab-label">SEND', self.body)
+
+    def test_it_grows_and_shows_corner_marks_on_hover(self):
+        self.assertIn("se-fab-corners", self.body)
+        self.assertIn(".se-eye-fab:hover { transform: scale(", self.css)
+        self.assertIn(".se-eye-fab:hover .se-fab-corner", self.css)
+
+    def test_once_open_the_orb_offers_close_instead_of_corners(self):
+        self.assertIn("se-fab-close", self.body)
+        self.assertIn(".se-eye-fab.open:hover .se-fab-close", self.css)
+        self.assertIn(".se-eye-fab.open:hover .se-fab-corner { opacity: 0; }", self.css)
+
+    def test_an_unread_answer_is_marked_on_the_orb(self):
+        self.assertIn(".se-eye-fab.answered::after", self.css)
+
+    def test_the_send_control_sits_beside_the_input(self):
+        """Structural: the textarea and the send button share one flex row,
+        and the button follows the textarea."""
+        i = self.body.index('id="seChatInput"')
+        j = self.body.index('id="seChatSend"')
+        self.assertLess(i, j, "the send button is not after the input")
+        self.assertIn('title="Send — Enter"', self.body)
+
+    def test_the_hover_growth_respects_reduced_motion(self):
+        self.assertIn("prefers-reduced-motion", self.css)
+        self.assertIn(".se-eye-fab:hover { transform: none; }", self.css)
