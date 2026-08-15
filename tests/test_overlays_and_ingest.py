@@ -1227,3 +1227,124 @@ class TopologyMapTests(TestCase):
         keys = {n["key"] for n in self._topo()["nodes"]}
         for flag in MODE_FLAGS:
             self.assertNotIn(flag, keys)
+
+
+class TaskGateThroughputTests(TestCase):
+    """The gate judges a task by what it produced, not by whether it raised.
+
+    It already caught the scrapers, which report parsed/stored. It did not
+    catch the market-data pollers, which predate that convention and report a
+    single `fetched` count — so judge_result looked at them, found neither key,
+    and waved them through. A quote poller writing zero rows stayed permanently
+    green, which is the exact failure this function exists to catch, one module
+    over."""
+
+    def test_a_poller_that_wrote_nothing_is_a_warning(self):
+        from core.task_gate import judge_result
+        state, msg = judge_result({"status": "success", "fetched": 0})
+        self.assertEqual(state, "warning")
+        self.assertIn("nothing", msg)
+
+    def test_a_poller_that_wrote_rows_is_healthy(self):
+        from core.task_gate import judge_result
+        self.assertEqual(judge_result({"status": "success", "fetched": 6})[0], "success")
+
+    def test_requests_that_stored_nothing_are_a_warning(self):
+        from core.task_gate import judge_result
+        state, msg = judge_result({"status": "success", "attempted": 10, "fetched": 0})
+        self.assertEqual(state, "warning")
+        self.assertIn("10", msg)
+
+    def test_every_count_key_the_platform_uses_is_recognised(self):
+        """bars_saved and observations_saved are real return keys in
+        market_data.tasks; missing one silently re-opens the hole."""
+        from core.task_gate import judge_result
+        self.assertEqual(judge_result({"status": "success", "bars_saved": 12})[0], "success")
+        self.assertEqual(judge_result({"status": "success", "bars_saved": 0})[0], "warning")
+        self.assertEqual(judge_result({"status": "success", "observations_saved": 31})[0], "success")
+
+    def test_a_legitimate_skip_is_not_a_warning(self):
+        """Markets being shut is not a fault."""
+        from core.task_gate import judge_result
+        self.assertEqual(
+            judge_result({"status": "skipped", "reason": "markets_closed"})[0], "success")
+
+    def test_a_task_with_no_counts_keeps_the_benefit_of_the_doubt(self):
+        """This must not turn unrelated healthy tasks red."""
+        from core.task_gate import judge_result
+        self.assertEqual(judge_result({"status": "success"})[0], "success")
+        self.assertEqual(judge_result("not a dict")[0], "success")
+
+
+class ForexBudgetTests(TestCase):
+    """Alpha Vantage's free tier is 25 requests a day. The task charged the
+    budget for every loop iteration — including the ones where the adapter
+    returned None before making a request, which is what it does when no key
+    is configured. So ~20 no-op calls a day exhausted a quota belonging to a
+    key that does not exist, and the task then reported 'budget spent', which
+    reads as 'we used our allowance' rather than 'we are not configured'."""
+
+    def test_no_key_means_no_budget_is_charged(self):
+        from unittest.mock import patch
+        with patch("market_data.tasks._record_api_call") as charged, \
+             patch("market_data.adapters.alpha_vantage.API_KEY", ""), \
+             patch("core.market_calendar.is_forex_open", return_value=True):
+            from market_data.tasks import fetch_forex_quotes
+            result = fetch_forex_quotes.__wrapped__.__wrapped__()
+        charged.assert_not_called()
+        self.assertEqual(result["skipped"], "no_api_key")
+
+    def test_the_unconfigured_case_is_not_dressed_as_an_exhausted_quota(self):
+        from unittest.mock import patch
+        with patch("market_data.adapters.alpha_vantage.API_KEY", ""), \
+             patch("core.market_calendar.is_forex_open", return_value=True):
+            from market_data.tasks import fetch_forex_quotes
+            result = fetch_forex_quotes.__wrapped__.__wrapped__()
+        self.assertNotIn("budget", str(result.get("reason", "")).lower())
+        self.assertIn("ALPHA_VANTAGE_API_KEY", result["hint"])
+
+
+class QuotePrecedenceTests(TestCase):
+    """LiveQuote is one row per instrument with a single source column, so the
+    last writer wins unless something stops it. market_data/quotes.py exists to
+    stop it — and the commodity poller was the one feed writing the row
+    directly, bypassing the rule entirely."""
+
+    def setUp(self):
+        from instruments.models import Instrument
+        self.inst, _ = Instrument.objects.get_or_create(
+            symbol="XAUUSD", defaults={"name": "Gold", "asset_class": "commodity"})
+
+    def test_a_delayed_feed_cannot_overwrite_a_live_broker_tick(self):
+        """yfinance is fifteen minutes delayed for most listings and is the
+        lowest-priority source on the platform."""
+        from decimal import Decimal
+        from market_data.models import LiveQuote
+        from market_data.quotes import write_quote
+
+        LiveQuote.objects.update_or_create(
+            instrument=self.inst,
+            defaults={"last": Decimal("2400"), "source": "ibkr"})
+        wrote = write_quote("XAUUSD", last=2350, source="yfinance")
+        self.assertFalse(wrote, "a delayed print overwrote a broker tick")
+        self.assertEqual(LiveQuote.objects.get(instrument=self.inst).source, "ibkr")
+
+    def test_a_source_may_always_refresh_itself(self):
+        from decimal import Decimal
+        from market_data.models import LiveQuote
+        from market_data.quotes import write_quote
+        LiveQuote.objects.update_or_create(
+            instrument=self.inst,
+            defaults={"last": Decimal("2400"), "source": "yfinance"})
+        self.assertTrue(write_quote("XAUUSD", last=2410, source="yfinance"))
+        self.assertEqual(
+            LiveQuote.objects.get(instrument=self.inst).last, Decimal("2410"))
+
+    def test_the_commodity_poller_goes_through_the_one_writer(self):
+        """Asserted on the source, because the alternative is mocking yfinance
+        to prove a negative about a write that should no longer exist."""
+        import inspect
+        from market_data import tasks
+        src = inspect.getsource(tasks.fetch_commodity_quotes)
+        self.assertIn("write_quote", src)
+        self.assertNotIn("LiveQuote.objects.update_or_create", src)

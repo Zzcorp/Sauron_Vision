@@ -42,20 +42,38 @@ def judge_result(result):
 
     # Sum across sub-results too, so a task reporting several sources
     # ({"rss": {...}, "api": {...}}) is judged on the whole run.
-    parsed = stored = 0
+    #
+    # WORK_KEYS is not just "parsed"/"stored": the market-data tasks predate
+    # that convention and report a single "fetched" count, so for a while this
+    # function looked at them, found neither key, and waved them through — a
+    # quote poller that wrote zero rows stayed permanently green, which is the
+    # exact failure the function was written to catch, one module over.
+    WORK_KEYS = ("parsed", "attempted")
+    DONE_KEYS = ("stored", "written", "saved", "fetched", "observations_saved",
+                 "bars_saved", "articles")
+
+    attempted = done = 0
     seen_counts = False
     for value in [result] + [v for v in result.values() if isinstance(v, dict)]:
-        if "parsed" in value or "stored" in value:
-            seen_counts = True
-            parsed += int(value.get("parsed") or 0)
-            stored += int(value.get("stored") or 0)
+        keys = set(value)
+        if not (keys & set(WORK_KEYS) or keys & set(DONE_KEYS)):
+            continue
+        seen_counts = True
+        attempted += sum(int(value.get(k) or 0) for k in WORK_KEYS)
+        done += sum(int(value.get(k) or 0) for k in DONE_KEYS)
 
-    if seen_counts and parsed > 0 and stored == 0:
-        return "warning", f"parsed {parsed} rows and stored none"
-    if seen_counts:
-        return "success", f"parsed {parsed}, stored {stored}"
+    if not seen_counts:
+        return "success", declared
 
-    return "success", declared
+    if attempted > 0 and done == 0:
+        return "warning", f"handled {attempted} rows and stored none"
+    if done == 0:
+        # Nothing attempted and nothing produced. For a poller whose whole job
+        # is to produce rows every run, that is not a healthy result — it is
+        # how six scrapers held a clean record while their tables stayed empty.
+        return "warning", "ran and produced nothing"
+    return "success", (f"handled {attempted}, stored {done}" if attempted
+                       else f"stored {done}")
 
 
 def guarded_task(component_key):

@@ -209,7 +209,25 @@ which is how it catches a task that reports success and writes nothing.
 .tm-wrap { position:relative; overflow-x:auto; padding-bottom:8px; }
 .tm-edges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:0; overflow:visible; }
 .tm-board { position:relative; z-index:1; display:grid; gap:14px;
-    grid-template-columns:repeat(6, minmax(178px, 1fr)); align-items:start; min-width:1100px; }
+    grid-template-columns:repeat(6, minmax(168px, 1fr)); align-items:start; min-width:1080px; }
+/* Below the point where six readable columns fit, reflowing beats forcing a
+   horizontal scrollbar: the edges are computed from real positions, so the
+   wiring re-routes itself into whatever shape the columns land in. */
+@media (max-width:1240px) {
+    .tm-board { grid-template-columns:repeat(3, minmax(0,1fr)); min-width:0; }
+}
+@media (max-width:760px) {
+    .tm-board { grid-template-columns:repeat(2, minmax(0,1fr)); }
+    .tm-col-head p { display:none; }
+}
+@media (max-width:480px) {
+    .tm-board { grid-template-columns:minmax(0,1fr); }
+    .tm-bar { flex-direction:column; align-items:stretch; }
+    .tm-bar-right { justify-content:space-between; }
+    /* At this width the curves cross more than they connect, and a wrong
+       line is worse than no line. */
+    .tm-edges { display:none; }
+}
 .tm-col { display:flex; flex-direction:column; gap:8px; }
 .tm-col-head h2 { font-family:var(--font-display); font-size:12px; letter-spacing:1.6px;
     text-transform:uppercase; color:var(--accent); margin:0 0 2px; }
@@ -602,9 +620,60 @@ which is how it catches a task that reports success and writes nothing.
             .catch(function () { /* a failed poll must not blank the map */ });
     }
 
+    /* ── Keeping the wiring attached ──────────────────────────────────
+       Edges are computed from where the nodes actually are, so anything that
+       moves a node has to trigger a redraw. A window resize is only one of
+       those, and not the common one: collapsing the ticker bar or minimising
+       the info panel just toggles a class, fires no resize event, and used to
+       leave every edge hanging in its old position.
+
+       So watch the geometry itself with a ResizeObserver, and redraw on the
+       END of the collapse transition as well as the start — the animation
+       takes ~300ms and the final positions are not known until it lands. */
+    var pending = null;
+    function scheduleDraw() {
+        if (pending) return;
+        pending = requestAnimationFrame(function () {
+            pending = null;
+            drawEdges();
+            if (selected) highlight(selected);
+        });
+    }
+
+    if ("ResizeObserver" in window) {
+        var ro = new ResizeObserver(scheduleDraw);
+        ro.observe(board);
+        ro.observe(wrap);
+        /* The headbands are fixed to the viewport edges; when they collapse
+           the main content resizes, which shows up here. */
+        var main = document.querySelector(".main-content");
+        if (main) ro.observe(main);
+    }
+
+    /* Belt and braces for the transition itself. transitionend fires per
+       property, hence the debounce above. */
+    document.addEventListener("transitionend", function (e) {
+        if (!e.target.closest) return;
+        if (e.target.closest(".ticker-bar,.data-headband,.info-panel-wrap,.sidebar,.signals-rail")) {
+            scheduleDraw();
+        }
+    });
+    /* And on the click, so the redraw starts immediately rather than only
+       after the animation has finished. */
+    document.addEventListener("click", function (e) {
+        if (!e.target.closest) return;
+        if (e.target.closest(".hb-collapse-btn,#ipMinTab,#ipRestorePill," +
+                             ".sidebar-toggle,.mobile-menu-btn,.signals-rail-toggle")) {
+            scheduleDraw();
+            setTimeout(scheduleDraw, 340);
+        }
+    });
+
     drawEdges();
-    window.addEventListener("resize", drawEdges);
-    wrap.addEventListener("scroll", drawEdges);
+    window.addEventListener("resize", scheduleDraw);
+    wrap.addEventListener("scroll", scheduleDraw);
+    /* A late webfont swap reflows every label and moves every node under it. */
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleDraw);
     setInterval(refresh, 15000);
 })();
 </script>

@@ -88,24 +88,42 @@ def fetch_forex_quotes():
     # the first few returned a throttle notice and forex quotes silently
     # stopped updating. Budget the day's calls and spend them evenly.
     from market_data.quotes import write_quote
+    from market_data.adapters.alpha_vantage import API_KEY as AV_KEY
+
+    # Without a key, fetch_forex_rate returns None before making a request.
+    # The loop below still charged the day's budget for every one of those
+    # non-requests, so ~20 no-op calls a day exhausted a quota belonging to a
+    # key that does not exist — and the task then reported "budget spent",
+    # which reads as "we used our allowance" rather than "we are not
+    # configured". Two very different problems wearing the same message.
+    if not AV_KEY:
+        return {"status": "success", "fetched": 0, "attempted": 0,
+                "skipped": "no_api_key",
+                "hint": "ALPHA_VANTAGE_API_KEY is not set. OANDA practice "
+                        "streaming is free and broker-grade."}
 
     budget = _daily_budget_remaining("alpha_vantage", limit=AV_DAILY_LIMIT)
     if budget <= 0:
         return {"status": "skipped", "reason": "alpha_vantage daily budget spent",
                 "hint": "OANDA practice streaming is free and broker-grade"}
 
+    attempted = 0
     for inst in quote_targets("forex", limit=budget):
         from_cur = inst.symbol[:3]
         to_cur = inst.symbol[3:]
         rate = fetch_forex_rate(from_cur, to_cur)
+        # Charge the budget for a request that actually went out. A None here
+        # can still mean a spent call (throttled, bad symbol), but it can no
+        # longer mean a call that was never attempted.
         _record_api_call("alpha_vantage")
+        attempted += 1
         if rate and write_quote(inst.symbol, last=rate["rate"],
                                  source="alpha_vantage",
                                  bid=rate.get("bid"), ask=rate.get("ask"),
                                  instrument=inst):
             fetched += 1
 
-    return {"status": "success", "fetched": fetched}
+    return {"status": "success", "fetched": fetched, "attempted": attempted}
 
 
 @shared_task
@@ -124,38 +142,35 @@ def fetch_commodity_quotes():
         "HGUSD": "HG=F",     # Copper
     }
 
-    fetched = 0
+    # Through write_quote, not straight into LiveQuote. This was the only
+    # market poller writing the row directly, which meant it skipped the
+    # source-precedence rule that every other feed obeys — and yfinance is the
+    # lowest-priority source on the platform because it is fifteen minutes
+    # delayed for most listings. A five-minute poll could therefore overwrite
+    # a live broker tick on XAUUSD with a stale print, which is precisely the
+    # defect market_data/quotes.py was written to stop.
+    from market_data.quotes import write_quote
+
+    fetched = attempted = 0
     for sauron_sym, yf_sym in commodities.items():
         try:
-            # Fetch via yfinance using the futures symbol
             import yfinance as yf
-            from instruments.models import Instrument
-            from market_data.models import LiveQuote
-            from decimal import Decimal
 
             ticker = yf.Ticker(yf_sym)
             info = ticker.info
             price = info.get("regularMarketPrice", info.get("previousClose", 0))
+            if not price:
+                continue
 
-            if price:
-                try:
-                    inst = Instrument.objects.get(symbol=sauron_sym)
-                    LiveQuote.objects.update_or_create(
-                        instrument=inst,
-                        defaults={
-                            "last": Decimal(str(price)),
-                            "change_pct": Decimal(str(round(info.get("regularMarketChangePercent", 0), 4))),
-                            "volume": int(info.get("volume", 0)),
-                            "source": "yfinance",
-                        }
-                    )
-                    fetched += 1
-                except Instrument.DoesNotExist:
-                    pass
+            attempted += 1
+            if write_quote(sauron_sym, last=price, source="yfinance",
+                           change_pct=info.get("regularMarketChangePercent"),
+                           volume=info.get("volume")):
+                fetched += 1
         except Exception as e:
             logger.warning(f"Commodity fetch failed for {sauron_sym}: {e}")
 
-    return {"status": "success", "fetched": fetched}
+    return {"status": "success", "fetched": fetched, "attempted": attempted}
 
 
 @shared_task
