@@ -1063,3 +1063,167 @@ class SystemMapTests(TestCase):
             "/admin-dashboard/system-map/", HTTP_HOST="127.0.0.1").content.decode("utf-8", "replace")
         self.assertNotIn("{#", body)
         self.assertNotIn("{% comment", body)
+
+
+class TopologyMapTests(TestCase):
+    """The map draws Sauron as a machine you can reach into. Two things have to
+    hold or it is worse than no map: an edge must correspond to a real
+    read/write relationship, and a switch must reflect what the server
+    actually did."""
+
+    def setUp(self):
+        self.admin = User.objects.create_superuser(
+            username="tm_admin", password="x", email="a@b.co")
+        self.client.force_login(self.admin)
+
+    def _topo(self):
+        from dashboard.views_topology import build_topology
+        return build_topology(self.admin)
+
+    def _payload(self, script_id):
+        import json
+        import re
+        body = self.client.get(
+            "/admin-dashboard/system-map/", HTTP_HOST="127.0.0.1").content.decode(
+            "utf-8", "replace")
+        m = re.search(r'id="' + script_id + r'"[^>]*>(.*?)</script>', body, re.S)
+        self.assertIsNotNone(m, script_id + " is not on the page")
+        return json.loads(m.group(1))
+
+    def test_the_map_renders_for_staff(self):
+        r = self.client.get("/admin-dashboard/system-map/", HTTP_HOST="127.0.0.1")
+        self.assertEqual(r.status_code, 200)
+
+    def test_the_payloads_are_real_json(self):
+        """They are handed over with json_script. Interpolating a Python dict
+        into a <script> emits repr() — single quotes, True, None — which is a
+        syntax error the moment a label carries an apostrophe."""
+        nodes = self._payload("tmNodeData")
+        self.assertTrue(nodes)
+        self.assertIn("key", nodes[0])
+
+    def test_every_node_has_a_state_and_a_reason(self):
+        from dashboard.views_topology import STATE_META
+        for n in self._topo()["nodes"]:
+            self.assertIn(n["state"], STATE_META, n["key"])
+            self.assertTrue(n["why"].strip(), n["key"] + " has no reason")
+
+    def test_an_edge_never_points_at_a_node_that_is_not_drawn(self):
+        """A dangling edge draws a line to nowhere."""
+        topo = self._topo()
+        keys = {n["key"] for n in topo["nodes"]}
+        for e in topo["edges"]:
+            self.assertIn(e["from"], keys)
+            self.assertIn(e["to"], keys)
+
+    def test_no_node_feeds_itself(self):
+        for e in self._topo()["edges"]:
+            self.assertNotEqual(e["from"], e["to"])
+
+    def test_an_edge_only_animates_when_its_source_is_producing(self):
+        """A moving dash on a dead feed is the map telling a lie."""
+        topo = self._topo()
+        by_key = {n["key"]: n for n in topo["nodes"]}
+        for e in topo["edges"]:
+            if e["live"]:
+                self.assertEqual(by_key[e["from"]]["state"], "live", e["from"])
+
+    def test_a_component_that_stored_nothing_reads_silent_not_live(self):
+        """The exact failure this platform had: the task runs, does not raise,
+        and writes no rows."""
+        from core.platform_control import PlatformComponent
+        PlatformComponent.objects.update_or_create(
+            key="scraper_news",
+            defaults={"name": "Breaking News", "category": "scraper",
+                      "is_enabled": True, "last_status": "warning",
+                      "last_message": "parsed 40 rows and stored none",
+                      "last_run_at": timezone.now()})
+        node = next(n for n in self._topo()["nodes"] if n["key"] == "scraper_news")
+        self.assertEqual(node["state"], "silent")
+        self.assertIn("stored nothing", node["why"])
+
+    def test_the_eye_goes_dark_with_the_master_switch(self):
+        from core.platform_control import PlatformComponent
+        PlatformComponent.objects.update_or_create(
+            key="platform_master",
+            defaults={"name": "Master", "category": "system", "is_enabled": False})
+        eye = next(n for n in self._topo()["nodes"] if n["key"] == "eye_core")
+        self.assertEqual(eye["state"], "off")
+        self.assertIn("master switch", eye["why"].lower())
+
+    def test_toggling_a_component_flips_it_and_says_so(self):
+        from core.platform_control import PlatformComponent
+        PlatformComponent.objects.update_or_create(
+            key="scraper_cot",
+            defaults={"name": "COT", "category": "scraper", "is_enabled": True})
+        r = self.client.post("/admin-dashboard/system-map/toggle/",
+                             {"kind": "component", "key": "scraper_cot"},
+                             HTTP_HOST="127.0.0.1")
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()["enabled"])
+        self.assertFalse(PlatformComponent.objects.get(key="scraper_cot").is_enabled)
+
+    def test_toggling_something_that_does_not_exist_is_refused(self):
+        r = self.client.post("/admin-dashboard/system-map/toggle/",
+                             {"kind": "component", "key": "no_such_component"},
+                             HTTP_HOST="127.0.0.1")
+        self.assertEqual(r.status_code, 404)
+        self.assertFalse(r.json()["ok"])
+
+    def test_a_bot_toggle_is_scoped_to_its_owner(self):
+        """Arming another operator's bot from a map should not be one request
+        away."""
+        from bot_program.models import AssetBotConfig
+        other = User.objects.create_user(username="tm_other", password="x")
+        theirs = AssetBotConfig.objects.create(
+            user=other, asset_class="crypto", name="theirs",
+            enabled=True, mode="paper")
+        r = self.client.post("/admin-dashboard/system-map/toggle/",
+                             {"kind": "bot", "key": theirs.id},
+                             HTTP_HOST="127.0.0.1")
+        self.assertEqual(r.status_code, 404)
+        theirs.refresh_from_db()
+        self.assertTrue(theirs.enabled)
+
+    def test_a_staff_reader_cannot_arm_the_platform(self):
+        """Reading the map is a staff activity; arming and disarming is not."""
+        staff = User.objects.create_user(username="tm_staff", password="x",
+                                         is_staff=True)
+        self.client.force_login(staff)
+        self.assertEqual(
+            self.client.get("/admin-dashboard/system-map/",
+                            HTTP_HOST="127.0.0.1").status_code, 200)
+        r = self.client.post("/admin-dashboard/system-map/toggle/",
+                             {"kind": "component", "key": "scraper_cot"},
+                             HTTP_HOST="127.0.0.1")
+        self.assertIn(r.status_code, (302, 403))
+
+    def test_the_state_endpoint_carries_every_node(self):
+        """The map refreshes from this rather than re-rendering, which would
+        throw away the inspector and the scroll position every 15 seconds."""
+        topo = self._topo()
+        r = self.client.get("/admin-dashboard/system-map/state/",
+                            HTTP_HOST="127.0.0.1")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.json()["nodes"]), len(topo["nodes"]))
+
+    def test_a_bot_with_a_stranded_close_is_drawn_broken(self):
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        cfg = AssetBotConfig.objects.create(
+            user=self.admin, asset_class="crypto", name="c",
+            enabled=True, mode="paper")
+        AssetBotTrade.objects.create(
+            config=cfg, asset_class="crypto", symbol="BTCUSD", side="BUY",
+            qty=1, entry_price=100, status="CLOSE_PENDING")
+        node = next(n for n in self._topo()["nodes"]
+                    if n["key"] == "bot_" + str(cfg.id))
+        self.assertEqual(node["state"], "broken")
+        self.assertIn("broker", node["why"])
+
+    def test_mode_flags_are_folded_into_their_parent(self):
+        """actuator_mode_live has no task, no schedule and no output. As its
+        own node it would be a box with no edges, which reads as broken."""
+        from dashboard.views_topology import MODE_FLAGS
+        keys = {n["key"] for n in self._topo()["nodes"]}
+        for flag in MODE_FLAGS:
+            self.assertNotIn(flag, keys)

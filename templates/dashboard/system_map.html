@@ -4,315 +4,608 @@
 
 {% block content %}
 {% comment %}
-The admin panel already answered "is it switched on?" (the component registry)
-and "do these assertions pass?" (system health). Neither answered the question
-that matters when something is wrong: is data actually moving?
+Sauron drawn as a machine you can reach into.
 
-That was not a theoretical gap. Six scrapers sat green with zero rows between
-them, and the earnings calendar was one of them — so the bot's earnings
-blackout had never once fired while every surface reported healthy.
+The Eye sits in the middle because that is what it is: everything to its left
+is the platform gathering evidence, everything to its right is it acting, and
+the loop underneath is what it learns from having acted.
 
-So this page is built on throughput. Every node states how much it produced in
-24h, how old its newest row is, and when those disagree with "the task ran
-fine", it says so in a sentence that names the thing to fix.
+Nodes are real HTML, not SVG shapes, so every switch is a real button a
+keyboard can reach. The edges are drawn on an SVG layer behind them from the
+nodes' live positions, which means the wiring survives reflow, zoom and a
+phone-width column stack without a hand-maintained coordinate table.
 {% endcomment %}
 
-<div class="sm-verdict sm-verdict--{{ verdict }}">
-    <div class="sm-verdict-main">
-        <div class="sm-verdict-head">{{ headline }}</div>
-        <div class="sm-verdict-sub">
-            {{ total_nodes }} moving parts measured ·
-            <span class="sv-age" data-sv-at="{{ generated_at|date:'c' }}">just now</span>
-        </div>
-    </div>
-    <div class="sm-tallies">
-        {% for s in state_legend %}
-        <button type="button" class="sm-tally sm-tally--{{ s.tone }}" data-filter="{{ s.key }}"
-                title="{{ s.hint }}">
-            <span class="sm-tally-n">{{ s.count }}</span>
-            <span class="sm-tally-l">{{ s.glyph }} {{ s.label }}</span>
+<nav class="hq-divisions">
+    <a class="hq-div" href="{% url 'admin_dashboard' %}">
+        <span class="hq-div-k">Control</span>
+        <span class="hq-div-d">Switches, users, brokers, manual runs</span>
+    </a>
+    <a class="hq-div is-current" href="{% url 'system_map' %}">
+        <span class="hq-div-k">System Map</span>
+        <span class="hq-div-d">The machine, wired — switch any part in place</span>
+    </a>
+    <a class="hq-div" href="{% url 'system_health' %}">
+        <span class="hq-div-k">Health</span>
+        <span class="hq-div-d">Pass/fail checks on the things that must be true</span>
+    </a>
+</nav>
+
+<div class="tm-bar">
+    <div class="tm-legend">
+        {% for s in legend %}
+        <button type="button" class="tm-leg tm-leg--{{ s.tone }}" data-filter="{{ s.key }}">
+            <span class="tm-leg-n">{{ s.count }}</span>
+            <span class="tm-leg-l">{{ s.glyph }} {{ s.label }}</span>
         </button>
+        {% endfor %}
+    </div>
+    <div class="tm-bar-right">
+        <label class="tm-switch tm-switch--master {% if master_on %}is-on{% endif %}">
+            <input type="checkbox" data-toggle-kind="component" data-toggle-key="platform_master"
+                   {% if master_on %}checked{% endif %}>
+            <span class="tm-switch-ui"></span>
+            <span class="tm-switch-label">{% if master_on %}ARMED{% else %}STOPPED{% endif %}</span>
+        </label>
+        <span class="tm-refresh" id="tmRefresh">live · <span class="sv-age" data-sv-at="{{ generated_at|date:'c' }}"></span></span>
+    </div>
+</div>
+
+<div class="tm-wrap" id="tmWrap">
+    {% comment %} Edge layer sits behind the nodes and is drawn from their measured
+       positions, so it cannot drift out of step with the layout. {% endcomment %}
+    <svg class="tm-edges" id="tmEdges" aria-hidden="true"></svg>
+
+    <div class="tm-board" id="tmBoard">
+        {% for col in columns %}
+        <section class="tm-col tm-col--{{ col.key }}" data-layer="{{ col.key }}">
+            <header class="tm-col-head">
+                <h2>{{ col.title }}</h2>
+                <p>{{ col.blurb }}</p>
+            </header>
+
+            {% for n in col.nodes %}
+            <article class="tm-node tm-node--{{ n.meta.tone }} tm-node--{{ n.kind }}"
+                     id="node-{{ n.key }}" data-node="{{ n.key }}" data-state="{{ n.state }}"
+                     tabindex="0" role="button" aria-expanded="false"
+                     aria-label="{{ n.label }} — {{ n.meta.label }}">
+                <div class="tm-node-top">
+                    <span class="tm-state tm-state--{{ n.meta.tone }}" title="{{ n.meta.label }}">{{ n.meta.glyph }}</span>
+                    <span class="tm-node-name">{{ n.label }}</span>
+                    {% if n.can_toggle %}
+                    <label class="tm-switch" onclick="event.stopPropagation();">
+                        <input type="checkbox"
+                               data-toggle-kind="{% if n.kind == 'bot' %}bot{% else %}component{% endif %}"
+                               data-toggle-key="{% if n.kind == 'bot' %}{{ n.config_id }}{% elif n.toggle_key %}{{ n.toggle_key }}{% else %}{{ n.key }}{% endif %}"
+                               data-node-ref="{{ n.key }}"
+                               {% if n.enabled %}checked{% endif %}
+                               aria-label="Switch {{ n.label }} on or off">
+                        <span class="tm-switch-ui"></span>
+                    </label>
+                    {% endif %}
+                </div>
+                <div class="tm-node-foot">
+                    {% if n.metric is not None %}
+                    <span class="tm-node-metric">{{ n.metric }} <em>{{ n.metric_label }}</em></span>
+                    {% endif %}
+                    <span class="tm-node-age">{{ n.last_run }}</span>
+                </div>
+                {% if n.kind == 'eye' %}
+                <div class="tm-eye-mark" aria-hidden="true">
+                    <svg viewBox="0 0 120 60">
+                        <ellipse cx="60" cy="30" rx="56" ry="26" fill="none" stroke="currentColor" stroke-width="1.6"/>
+                        <circle cx="60" cy="30" r="17" fill="none" stroke="currentColor" stroke-width="1.6"/>
+                        <circle cx="60" cy="30" r="7" fill="currentColor"/>
+                    </svg>
+                </div>
+                {% endif %}
+            </article>
+            {% endfor %}
+
+            {% if not col.nodes %}
+            <div class="tm-col-empty">nothing in this layer</div>
+            {% endif %}
+        </section>
         {% endfor %}
     </div>
 </div>
 
+{# ── Inspector ─────────────────────────────────────────────────────── #}
+<aside class="tm-inspect" id="tmInspect" data-sv-overlay="panel" aria-label="Node inspector">
+    <header class="tm-inspect-head">
+        <span class="tm-state" id="tmInsGlyph">·</span>
+        <span class="tm-inspect-title" id="tmInsTitle">Select a node</span>
+        <button type="button" class="tm-inspect-x" data-sv-close aria-label="Close">&times;</button>
+    </header>
+    <div class="tm-inspect-body" id="tmInsBody">
+        <p class="tm-inspect-hint">Click any node on the map to see what it does, what it
+           produced, what reads it, and to switch it.</p>
+    </div>
+</aside>
+
 {% if problems %}
-{% comment %} Ranked worst-first by the same order the states are defined in, so this list
-   and the colour of every pill below can never disagree. {% endcomment %}
-<div class="card sm-problems">
+{% comment %}
+The map says how the machine is wired. This says which part to look at first,
+and it is measured from the data stores rather than the component switches —
+which is how it catches a task that reports success and writes nothing.
+{% endcomment %}
+<div class="card tm-problems">
     <div class="card-header">
         <span class="card-title">What to look at first</span>
-        <span class="sm-problem-count">{{ problems|length }}</span>
+        <span class="tm-problem-count">{{ problems|length }}</span>
     </div>
     {% for p in problems %}
-    <div class="sm-problem sm-problem--{{ p.meta.tone }}">
-        <span class="sm-pill sm-pill--{{ p.meta.tone }}">{{ p.meta.glyph }} {{ p.meta.label }}</span>
-        <div class="sm-problem-body">
-            <div class="sm-problem-title">{{ p.stage }} · {{ p.label }}</div>
-            <div class="sm-problem-why">{{ p.why }}</div>
-            {% if p.fix %}<div class="sm-problem-fix"><span class="sm-fix-k">FIX</span> <code>{{ p.fix }}</code></div>{% endif %}
+    <div class="tm-problem">
+        <span class="tm-state tm-state--{{ p.meta.tone }}">{{ p.meta.glyph }}</span>
+        <div class="tm-problem-body">
+            <div class="tm-problem-title">{{ p.stage }} · {{ p.label }}</div>
+            <div class="tm-problem-why">{{ p.why }}</div>
+            {% if p.fix %}<div class="tm-problem-fix">FIX <code>{{ p.fix }}</code></div>{% endif %}
         </div>
-        {% if p.link %}<a class="sm-problem-go" href="{{ p.link }}">{{ p.link_label }} &#9656;</a>{% endif %}
+        {% if p.link %}<a class="tm-problem-go" href="{{ p.link }}">{{ p.link_label }} &#9656;</a>{% endif %}
     </div>
     {% endfor %}
 </div>
 {% endif %}
 
-{% comment %} ── Throughput. One axis, one hue, bars proportional to the busiest stage.
-     Volume alone is not health — a stage can be busy and broken — so the
-     count of unhealthy nodes rides alongside rather than being coloured into
-     the same bar. {% endcomment %}
-<div class="card">
-    <div class="card-header">
-        <span class="card-title">Rows written in the last 24 hours</span>
-        <span class="sm-axis-note">relative to the busiest stage</span>
-    </div>
-    <div class="sm-flow">
-        {% for r in stage_rows %}
-        <a class="sm-flow-row" href="#stage-{{ r.key }}">
-            <span class="sm-flow-label">{{ r.title }}</span>
-            <span class="sm-flow-track">
-                <span class="sm-flow-bar" style="width:{{ r.pct }}%;"></span>
-            </span>
-            <span class="sm-flow-val">{{ r.volume }}</span>
-            <span class="sm-flow-health">
-                {% if r.bad %}<span class="sm-dot sm-dot--serious"></span>{{ r.bad }}/{{ r.nodes }} need attention
-                {% else %}<span class="sm-dot sm-dot--good"></span>{{ r.nodes }} healthy{% endif %}
-            </span>
-        </a>
-        {% endfor %}
+{% if orphans %}
+<div class="card tm-orphans">
+    <div class="card-header"><span class="card-title">Producing nothing anything reads</span></div>
+    <p class="tm-orphan-note">
+        These components run and write, and no node on this map consumes what they write.
+        That is either a missing edge in the wiring table or a part of the platform that is
+        doing work nobody uses — both worth knowing.
+    </p>
+    <div class="tm-orphan-list">
+        {% for o in orphans %}<code>{{ o }}</code>{% endfor %}
     </div>
 </div>
-
-{# ── The map itself ─────────────────────────────────────────────────── #}
-{% for stage in stages %}
-<section class="sm-stage" id="stage-{{ stage.key }}">
-    <div class="sm-stage-head">
-        <h2>{{ forloop.counter }}. {{ stage.title }}</h2>
-        <p>{{ stage.blurb }}</p>
-    </div>
-    <div class="sm-grid">
-        {% for n in stage.nodes %}
-        <article class="sm-node sm-node--{{ n.meta.tone }}" data-state="{{ n.state }}"
-                 tabindex="0" aria-expanded="false">
-            <header class="sm-node-head">
-                <span class="sm-node-name">{{ n.label }}</span>
-                <span class="sm-pill sm-pill--{{ n.meta.tone }}">{{ n.meta.glyph }} {{ n.meta.label }}</span>
-            </header>
-
-            <div class="sm-node-metric">
-                {% if n.metric is not None %}
-                    <span class="sm-metric-n">{{ n.metric }}</span>
-                    <span class="sm-metric-l">{{ n.metric_label }}</span>
-                {% else %}
-                    <span class="sm-metric-n sv-unknown">&mdash;</span>
-                {% endif %}
-                {% if n.newest_age is not None %}
-                <span class="sm-metric-age">newest {{ n.newest_display }}</span>
-                {% endif %}
-            </div>
-
-            <p class="sm-node-why">{{ n.why }}</p>
-
-            {% comment %} Everything below is the evidence, folded away until asked for —
-                 the panel is scannable at rest and complete on demand. {% endcomment %}
-            <div class="sm-node-detail">
-                <div class="sm-detail-row"><span class="k">Does</span><span>{{ n.purpose }}</span></div>
-                {% if n.rows_24h is not None %}
-                <div class="sm-detail-row"><span class="k">24h</span><span>{{ n.rows_24h }} rows</span></div>
-                {% endif %}
-                {% if n.reads %}
-                <div class="sm-detail-row"><span class="k">Feeds</span><span>{{ n.reads|join:" · " }}</span></div>
-                {% endif %}
-                {% if n.component %}
-                <div class="sm-detail-row"><span class="k">Task</span>
-                    <span>{{ n.component.name }} —
-                        {% if n.component.enabled %}enabled{% else %}disabled{% endif %},
-                        last run {{ n.component.last_run }} ago, {{ n.component.last_status }},
-                        {{ n.component.runs }} runs / {{ n.component.errors }} errors</span></div>
-                {% if n.component.last_message %}
-                <div class="sm-detail-row"><span class="k">Said</span><span class="sm-said">{{ n.component.last_message }}</span></div>
-                {% endif %}
-                {% endif %}
-                {% if n.fix %}
-                <div class="sm-detail-row"><span class="k">Fix</span><span><code>{{ n.fix }}</code></span></div>
-                {% endif %}
-            </div>
-
-            <footer class="sm-node-foot">
-                <button type="button" class="sm-more">Evidence</button>
-                {% if n.link %}<a class="sm-go" href="{{ n.link }}">{{ n.link_label }} &#9656;</a>{% endif %}
-            </footer>
-        </article>
-        {% endfor %}
-    </div>
-</section>
-{% endfor %}
-
-<div class="card sm-legend">
-    <div class="card-header"><span class="card-title">What the states mean</span></div>
-    {% for s in state_legend %}
-    <div class="sm-legend-row">
-        <span class="sm-pill sm-pill--{{ s.tone }}">{{ s.glyph }} {{ s.label }}</span>
-        <span>{{ s.hint }}</span>
-    </div>
-    {% endfor %}
-    <div class="sm-legend-note">
-        Every figure on this page is a live query. The distinction this page
-        exists to draw is between <strong>a task that ran</strong> and
-        <strong>data that arrived</strong> — a component can report success and
-        write nothing, and that is the failure this platform actually had.
-    </div>
-</div>
+{% endif %}
 
 <style>
-/* ── Verdict ─────────────────────────────────────────────────────── */
-.sm-verdict { display:flex; justify-content:space-between; align-items:center; gap:20px;
-    flex-wrap:wrap; padding:18px 20px; margin-bottom:18px; border-radius:10px;
-    background:var(--bg-card); border:1px solid var(--border); border-left-width:4px; }
-.sm-verdict--good     { border-left-color:var(--accent); }
-.sm-verdict--warning  { border-left-color:var(--accent-gold); }
-.sm-verdict--serious  { border-left-color:#ff9040; }
-.sm-verdict--critical { border-left-color:var(--accent-red); }
-.sm-verdict--muted    { border-left-color:var(--text-muted); }
-.sm-verdict-head { font-family:var(--font-display); font-size:20px; letter-spacing:1px; color:var(--text-primary); }
-.sm-verdict-sub { font-family:var(--font-mono); font-size:11px; color:var(--text-muted); margin-top:4px; }
-.sm-tallies { display:flex; gap:8px; flex-wrap:wrap; }
-.sm-tally { display:flex; flex-direction:column; align-items:center; gap:2px; min-width:74px;
-    padding:8px 10px; border-radius:8px; cursor:pointer;
-    background:var(--bg-secondary); border:1px solid var(--border); }
-.sm-tally:hover, .sm-tally.is-on { border-color:var(--accent); }
-.sm-tally-n { font-family:var(--font-mono); font-size:18px; font-weight:700; font-variant-numeric:tabular-nums;
-    color:var(--text-primary); }
-.sm-tally-l { font-family:var(--font-mono); font-size:8.5px; letter-spacing:.08em; color:var(--text-muted); white-space:nowrap; }
-/* Tone lives on the glyph+label, never on colour alone. */
-.sm-tally--good .sm-tally-l     { color:var(--accent); }
-.sm-tally--warning .sm-tally-l  { color:var(--accent-gold); }
-.sm-tally--serious .sm-tally-l  { color:#ff9040; }
-.sm-tally--critical .sm-tally-l { color:var(--accent-red); }
+.hq-divisions { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; margin-bottom:16px; }
+.hq-div { display:flex; flex-direction:column; gap:3px; padding:12px 14px; border-radius:9px;
+    background:var(--bg-card); border:1px solid var(--border); border-left:3px solid var(--border); text-decoration:none; }
+.hq-div:hover { background:var(--bg-card-hover); border-left-color:var(--accent); }
+.hq-div.is-current { border-left-color:var(--accent); background:color-mix(in srgb,var(--accent) 6%,transparent); }
+.hq-div-k { font-family:var(--font-display); font-size:13px; letter-spacing:1.4px; text-transform:uppercase; color:var(--text-primary); }
+.hq-div-d { font-size:11px; color:var(--text-muted); line-height:1.45; }
 
-/* ── Pills ───────────────────────────────────────────────────────── */
-.sm-pill { font-family:var(--font-mono); font-size:8.5px; font-weight:700; letter-spacing:.1em;
-    padding:3px 7px; border-radius:4px; white-space:nowrap;
-    background:var(--bg-secondary); color:var(--text-muted); }
-.sm-pill--good     { color:var(--accent);     background:color-mix(in srgb, var(--accent) 14%, transparent); }
-.sm-pill--warning  { color:var(--accent-gold);background:color-mix(in srgb, var(--accent-gold) 15%, transparent); }
-.sm-pill--serious  { color:#ff9040;           background:color-mix(in srgb, #ff9040 15%, transparent); }
-.sm-pill--critical { color:var(--accent-red); background:color-mix(in srgb, var(--accent-red) 15%, transparent); }
+/* ── Bar ─────────────────────────────────────────────────────────── */
+.tm-bar { display:flex; justify-content:space-between; align-items:center; gap:16px;
+    flex-wrap:wrap; margin-bottom:14px; }
+.tm-legend { display:flex; gap:6px; flex-wrap:wrap; }
+.tm-leg { display:flex; align-items:center; gap:6px; padding:6px 10px; border-radius:7px; cursor:pointer;
+    background:var(--bg-card); border:1px solid var(--border); }
+.tm-leg:hover, .tm-leg.is-on { border-color:var(--accent); }
+.tm-leg-n { font-family:var(--font-mono); font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--text-primary); }
+.tm-leg-l { font-family:var(--font-mono); font-size:8.5px; letter-spacing:.08em; color:var(--text-muted); white-space:nowrap; }
+.tm-leg--good .tm-leg-l     { color:var(--accent); }
+.tm-leg--warning .tm-leg-l  { color:var(--accent-gold); }
+.tm-leg--serious .tm-leg-l  { color:#ff9040; }
+.tm-leg--critical .tm-leg-l { color:var(--accent-red); }
+.tm-bar-right { display:flex; align-items:center; gap:14px; }
+.tm-refresh { font-family:var(--font-mono); font-size:10px; color:var(--text-muted); }
 
-/* ── Problems ────────────────────────────────────────────────────── */
-.sm-problems { margin-bottom:18px; }
-.sm-problem-count { font-family:var(--font-mono); font-size:11px; color:var(--accent-red);
-    background:color-mix(in srgb, var(--accent-red) 14%, transparent); padding:2px 8px; border-radius:10px; }
-.sm-problem { display:flex; align-items:flex-start; gap:12px; padding:12px 0;
-    border-bottom:1px solid var(--border); }
-.sm-problem:last-child { border-bottom:0; }
-.sm-problem-body { flex:1; min-width:0; }
-.sm-problem-title { font-size:13px; font-weight:600; color:var(--text-primary); }
-.sm-problem-why { font-size:12px; color:var(--text-secondary); line-height:1.55; margin-top:3px; }
-.sm-problem-fix { margin-top:6px; font-family:var(--font-mono); font-size:11px; }
-.sm-fix-k { color:var(--accent); letter-spacing:.1em; font-size:9px; }
-.sm-problem-fix code { background:var(--bg-secondary); padding:2px 6px; border-radius:4px; color:var(--text-primary); }
-.sm-problem-go { font-family:var(--font-mono); font-size:10px; color:var(--accent);
-    text-decoration:none; white-space:nowrap; padding-top:3px; }
+/* ── Switch. A real checkbox under a drawn control, so it is keyboard
+      reachable and announces its own state. ───────────────────────── */
+.tm-switch { position:relative; display:inline-flex; align-items:center; gap:7px; cursor:pointer; }
+.tm-switch input { position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer; }
+.tm-switch-ui { width:30px; height:16px; border-radius:9px; background:var(--bg-secondary);
+    border:1px solid var(--border); position:relative; transition:background .16s, border-color .16s; flex:0 0 auto; }
+.tm-switch-ui::after { content:""; position:absolute; top:2px; left:2px; width:10px; height:10px;
+    border-radius:50%; background:var(--text-muted); transition:transform .16s, background .16s; }
+.tm-switch input:checked + .tm-switch-ui { background:color-mix(in srgb,var(--accent) 26%,transparent); border-color:var(--accent); }
+.tm-switch input:checked + .tm-switch-ui::after { transform:translateX(14px); background:var(--accent); }
+.tm-switch input:focus-visible + .tm-switch-ui { outline:2px solid var(--accent); outline-offset:2px; }
+.tm-switch input:disabled + .tm-switch-ui { opacity:.4; cursor:wait; }
+.tm-switch-label { font-family:var(--font-mono); font-size:10px; letter-spacing:.1em; color:var(--text-muted); }
+.tm-switch--master .tm-switch-ui { width:38px; height:20px; }
+.tm-switch--master .tm-switch-ui::after { width:14px; height:14px; }
+.tm-switch--master input:checked + .tm-switch-ui::after { transform:translateX(18px); }
+.tm-switch--master.is-on .tm-switch-label { color:var(--accent); }
 
-/* ── Throughput ──────────────────────────────────────────────────── */
-.sm-axis-note { font-family:var(--font-mono); font-size:10px; color:var(--text-muted); }
-.sm-flow { display:flex; flex-direction:column; gap:2px; }
-.sm-flow-row { display:grid; grid-template-columns:88px minmax(0,1fr) 56px 160px; gap:12px;
-    align-items:center; padding:7px 4px; text-decoration:none; color:inherit; border-radius:6px; }
-.sm-flow-row:hover { background:var(--bg-card-hover); }
-.sm-flow-label { font-family:var(--font-mono); font-size:11px; color:var(--text-secondary); }
-.sm-flow-track { height:9px; background:var(--bg-secondary); border-radius:4px; overflow:hidden; }
-/* One hue, thin mark, rounded data end anchored to the baseline. */
-.sm-flow-bar { display:block; height:100%; background:var(--accent); border-radius:0 4px 4px 0; min-width:2px; }
-.sm-flow-val { font-family:var(--font-mono); font-size:12px; font-weight:700; text-align:right;
-    font-variant-numeric:tabular-nums; color:var(--text-primary); }
-.sm-flow-health { font-family:var(--font-mono); font-size:10px; color:var(--text-muted); display:flex; align-items:center; gap:6px; }
-.sm-dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto; }
-.sm-dot--good { background:var(--accent); }
-.sm-dot--serious { background:#ff9040; }
-@media (max-width:820px) {
-    .sm-flow-row { grid-template-columns:74px minmax(0,1fr) 48px; }
-    .sm-flow-health { display:none; }
-}
+/* ── Board ───────────────────────────────────────────────────────── */
+.tm-wrap { position:relative; overflow-x:auto; padding-bottom:8px; }
+.tm-edges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:0; overflow:visible; }
+.tm-board { position:relative; z-index:1; display:grid; gap:14px;
+    grid-template-columns:repeat(6, minmax(178px, 1fr)); align-items:start; min-width:1100px; }
+.tm-col { display:flex; flex-direction:column; gap:8px; }
+.tm-col-head h2 { font-family:var(--font-display); font-size:12px; letter-spacing:1.6px;
+    text-transform:uppercase; color:var(--accent); margin:0 0 2px; }
+.tm-col-head p { font-size:10.5px; color:var(--text-muted); margin:0 0 6px; line-height:1.4; }
+.tm-col-empty { font-family:var(--font-mono); font-size:10px; color:var(--text-muted); padding:8px 0; }
+/* The Eye column is the spine of the picture, so it gets the vertical anchor. */
+.tm-col--eye { align-self:stretch; }
 
-/* ── Stages & nodes ──────────────────────────────────────────────── */
-.sm-stage { margin-top:26px; }
-.sm-stage-head h2 { font-family:var(--font-display); font-size:15px; letter-spacing:1.6px;
-    text-transform:uppercase; color:var(--accent); margin:0 0 3px; }
-.sm-stage-head p { font-size:12px; color:var(--text-muted); margin:0 0 12px; max-width:70ch; line-height:1.55; }
-.sm-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); gap:12px; }
-.sm-node { background:var(--bg-card); border:1px solid var(--border); border-top-width:3px;
-    border-radius:9px; padding:13px 14px; display:flex; flex-direction:column; gap:8px; }
-.sm-node:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.sm-node--good     { border-top-color:var(--accent); }
-.sm-node--warning  { border-top-color:var(--accent-gold); }
-.sm-node--serious  { border-top-color:#ff9040; }
-.sm-node--critical { border-top-color:var(--accent-red); }
-.sm-node--muted    { border-top-color:var(--text-muted); }
-.sm-node-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-.sm-node-name { font-size:13.5px; font-weight:600; color:var(--text-primary); }
-.sm-node-metric { display:flex; align-items:baseline; gap:6px; flex-wrap:wrap; }
-.sm-metric-n { font-family:var(--font-mono); font-size:23px; font-weight:700;
-    font-variant-numeric:tabular-nums; color:var(--text-primary); line-height:1; }
-.sm-metric-l { font-family:var(--font-mono); font-size:9.5px; letter-spacing:.09em;
-    text-transform:uppercase; color:var(--text-muted); }
-.sm-metric-age { margin-left:auto; font-family:var(--font-mono); font-size:9.5px; color:var(--text-muted); }
-.sm-node-why { font-size:12px; line-height:1.55; color:var(--text-secondary); margin:0; }
-.sm-node-detail { display:none; border-top:1px solid var(--border); padding-top:9px; }
-.sm-node.is-open .sm-node-detail { display:block; }
-.sm-detail-row { display:flex; gap:9px; padding:3px 0; font-size:11.5px; line-height:1.5; }
-.sm-detail-row .k { font-family:var(--font-mono); font-size:9px; letter-spacing:.1em;
-    text-transform:uppercase; color:var(--text-muted); min-width:44px; flex:0 0 auto; padding-top:2px; }
-.sm-detail-row code { background:var(--bg-secondary); padding:1px 5px; border-radius:3px; }
-.sm-said { font-family:var(--font-mono); font-size:10.5px; color:var(--text-muted); word-break:break-word; }
-.sm-node-foot { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:auto; padding-top:2px; }
-.sm-more { background:none; border:1px solid var(--border); border-radius:5px; cursor:pointer;
-    font-family:var(--font-mono); font-size:9px; letter-spacing:.08em; text-transform:uppercase;
-    color:var(--text-muted); padding:4px 8px; }
-.sm-more:hover { color:var(--text-primary); border-color:var(--text-muted); }
-.sm-go { font-family:var(--font-mono); font-size:10px; color:var(--accent); text-decoration:none; }
+.tm-node { background:var(--bg-card); border:1px solid var(--border); border-left:3px solid var(--border);
+    border-radius:8px; padding:8px 10px; cursor:pointer; display:flex; flex-direction:column; gap:5px;
+    transition:border-color .14s, background .14s, opacity .14s; }
+.tm-node:hover { background:var(--bg-card-hover); }
+.tm-node:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.tm-node.is-selected { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 8%,transparent); }
+.tm-node--good     { border-left-color:var(--accent); }
+.tm-node--warning  { border-left-color:var(--accent-gold); }
+.tm-node--serious  { border-left-color:#ff9040; }
+.tm-node--critical { border-left-color:var(--accent-red); }
+.tm-node--muted    { border-left-color:var(--text-muted); opacity:.72; }
+.tm-node-top { display:flex; align-items:center; gap:7px; }
+.tm-node-name { flex:1; font-size:11.5px; font-weight:600; color:var(--text-primary); line-height:1.3; min-width:0; }
+.tm-state { font-size:11px; line-height:1; flex:0 0 auto; }
+.tm-state--good { color:var(--accent); }
+.tm-state--warning { color:var(--accent-gold); }
+.tm-state--serious { color:#ff9040; }
+.tm-state--critical { color:var(--accent-red); }
+.tm-state--muted { color:var(--text-muted); }
+.tm-node-foot { display:flex; justify-content:space-between; gap:8px;
+    font-family:var(--font-mono); font-size:9px; color:var(--text-muted); }
+.tm-node-metric em { font-style:normal; letter-spacing:.06em; }
 
-/* ── Legend ──────────────────────────────────────────────────────── */
-.sm-legend { margin-top:26px; }
-.sm-legend-row { display:flex; align-items:center; gap:12px; padding:6px 0; font-size:12px; color:var(--text-secondary); }
-.sm-legend-note { margin-top:12px; padding-top:12px; border-top:1px solid var(--border);
-    font-size:12px; color:var(--text-muted); line-height:1.6; max-width:80ch; }
-.sm-node.is-hidden { display:none; }
+/* The Eye. Bigger, centred, and the only node that draws itself. */
+.tm-node--eye { padding:14px 12px; align-items:center; text-align:center;
+    background:radial-gradient(ellipse at center, color-mix(in srgb,var(--accent) 11%,var(--bg-card)), var(--bg-card));
+    border-color:color-mix(in srgb,var(--accent) 45%,transparent); border-left-width:1px; }
+.tm-node--eye .tm-node-name { font-family:var(--font-display); font-size:14px; letter-spacing:2px; text-align:center; }
+.tm-eye-mark { color:var(--accent); opacity:.75; width:100%; }
+.tm-eye-mark svg { width:100%; height:auto; display:block; }
+.tm-node--bot { border-style:solid; }
+
+/* ── Edges ───────────────────────────────────────────────────────── */
+.tm-edge { fill:none; stroke:var(--border); stroke-width:1.3; }
+/* Only an edge whose source is actually producing gets the flow animation —
+   a moving dash on a dead feed is the map telling a lie. */
+.tm-edge--live { stroke:color-mix(in srgb,var(--accent) 55%,transparent); stroke-width:1.5;
+    stroke-dasharray:5 7; animation:tmFlow 1.5s linear infinite; }
+.tm-edge--dim { stroke:var(--border); opacity:.35; }
+.tm-edge--hot { stroke:var(--accent); stroke-width:2.2; stroke-dasharray:none; opacity:1; }
+@keyframes tmFlow { to { stroke-dashoffset:-24; } }
+@media (prefers-reduced-motion: reduce) { .tm-edge--live { animation:none; } }
+.tm-node.is-faded { opacity:.22; }
+
+/* ── Inspector ───────────────────────────────────────────────────── */
+.tm-inspect { position:fixed; top:0; right:0; bottom:0; width:min(380px,92vw);
+    background:var(--bg-card); border-left:1px solid var(--border);
+    box-shadow:-18px 0 48px rgba(0,0,0,.5); display:flex; flex-direction:column;
+    transform:translateX(100%); transition:transform .2s cubic-bezier(.2,.7,.3,1);
+    z-index:calc(var(--z-panel, 2000) + var(--sv-stack, 0)); visibility:hidden; }
+.tm-inspect.is-open { transform:translateX(0); visibility:visible; }
+.tm-inspect-head { display:flex; align-items:center; gap:9px; padding:14px 16px; border-bottom:1px solid var(--border); }
+.tm-inspect-title { flex:1; font-family:var(--font-display); font-size:14px; letter-spacing:1px; color:var(--text-primary); }
+.tm-inspect-x { background:none; border:0; font-size:22px; line-height:1; color:var(--text-muted); cursor:pointer; }
+.tm-inspect-x:hover { color:var(--text-primary); }
+.tm-inspect-body { padding:16px; overflow-y:auto; flex:1; }
+.tm-inspect-hint { font-size:12px; color:var(--text-muted); line-height:1.6; }
+.tm-ins-why { font-size:12.5px; line-height:1.6; color:var(--text-secondary); margin:0 0 14px; }
+.tm-ins-row { display:flex; gap:10px; padding:6px 0; border-bottom:1px solid var(--border); font-size:11.5px; }
+.tm-ins-row:last-child { border-bottom:0; }
+.tm-ins-row .k { font-family:var(--font-mono); font-size:9px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--text-muted); min-width:62px; flex:0 0 auto; padding-top:2px; }
+.tm-ins-row .v { color:var(--text-primary); word-break:break-word; }
+.tm-ins-chips { display:flex; flex-wrap:wrap; gap:5px; }
+.tm-ins-chip { font-family:var(--font-mono); font-size:9px; padding:2px 6px; border-radius:4px;
+    background:var(--bg-secondary); color:var(--text-secondary); }
+.tm-ins-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; padding-top:14px; border-top:1px solid var(--border); }
+.tm-ins-note { margin-top:12px; font-size:11px; color:var(--text-muted); line-height:1.55; }
+.tm-ins-note--found { margin:0 0 14px; padding:9px 11px; border-left:2px solid var(--accent-gold);
+    background:color-mix(in srgb,var(--accent-gold) 7%,transparent); border-radius:0 5px 5px 0;
+    color:var(--text-secondary); font-size:11.5px; }
+
+.tm-problems { margin-top:20px; }
+.tm-problem-count { font-family:var(--font-mono); font-size:11px; color:var(--accent-red);
+    background:color-mix(in srgb,var(--accent-red) 14%,transparent); padding:2px 8px; border-radius:10px; }
+.tm-problem { display:flex; align-items:flex-start; gap:11px; padding:11px 0; border-bottom:1px solid var(--border); }
+.tm-problem:last-child { border-bottom:0; }
+.tm-problem-body { flex:1; min-width:0; }
+.tm-problem-title { font-size:12.5px; font-weight:600; color:var(--text-primary); }
+.tm-problem-why { font-size:11.5px; color:var(--text-secondary); line-height:1.55; margin-top:2px; }
+.tm-problem-fix { margin-top:5px; font-family:var(--font-mono); font-size:10px; color:var(--accent); }
+.tm-problem-fix code { background:var(--bg-secondary); padding:2px 6px; border-radius:4px; color:var(--text-primary); }
+.tm-problem-go { font-family:var(--font-mono); font-size:10px; color:var(--accent); text-decoration:none; white-space:nowrap; }
+
+.tm-orphans { margin-top:20px; }
+.tm-orphan-note { font-size:12px; color:var(--text-muted); line-height:1.6; margin:0 0 10px; max-width:80ch; }
+.tm-orphan-list { display:flex; flex-wrap:wrap; gap:6px; }
+.tm-orphan-list code { font-size:10.5px; background:var(--bg-secondary); padding:3px 7px; border-radius:4px; }
 </style>
 
+{{ nodes_payload|json_script:"tmNodeData" }}
+{{ edges_payload|json_script:"tmEdgeData" }}
 <script>
-/* Evidence toggles, and the tallies double as filters — clicking BROKEN shows
-   only the broken nodes, which is how you use this page when something is
-   actually wrong. */
+/* The map. Three jobs: draw the wiring from where the nodes actually are,
+   let a click inspect a node, and let a switch change the platform without
+   leaving the page. */
 (function () {
     "use strict";
+    var wrap = document.getElementById("tmWrap");
+    var board = document.getElementById("tmBoard");
+    var svg = document.getElementById("tmEdges");
+    var inspect = document.getElementById("tmInspect");
+    var insTitle = document.getElementById("tmInsTitle");
+    var insGlyph = document.getElementById("tmInsGlyph");
+    var insBody = document.getElementById("tmInsBody");
+    if (!wrap || !board || !svg) return;
+
+    var NODES = JSON.parse(document.getElementById("tmNodeData").textContent);
+    var EDGES = JSON.parse(document.getElementById("tmEdgeData").textContent);
+    var byKey = {};
+    NODES.forEach(function (n) { byKey[n.key] = n; });
+    var NS = "http://www.w3.org/2000/svg";
+    var selected = null;
+
+    function csrf() {
+        var m = document.cookie.match(/csrftoken=([^;]+)/);
+        return m ? m[1] : "";
+    }
+    function esc(v) {
+        return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    /* ── Edges ────────────────────────────────────────────────────── */
+    function drawEdges() {
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+        var origin = wrap.getBoundingClientRect();
+        svg.setAttribute("viewBox", "0 0 " + wrap.scrollWidth + " " + wrap.scrollHeight);
+        svg.setAttribute("width", wrap.scrollWidth);
+        svg.setAttribute("height", wrap.scrollHeight);
+
+        EDGES.forEach(function (e) {
+            var a = document.getElementById("node-" + e.from);
+            var b = document.getElementById("node-" + e.to);
+            if (!a || !b) return;
+            if (a.classList.contains("is-hidden") || b.classList.contains("is-hidden")) return;
+
+            var ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+            var x1 = ra.right - origin.left + wrap.scrollLeft;
+            var y1 = ra.top + ra.height / 2 - origin.top + wrap.scrollTop;
+            var x2 = rb.left - origin.left + wrap.scrollLeft;
+            var y2 = rb.top + rb.height / 2 - origin.top + wrap.scrollTop;
+
+            /* A learn-loop edge runs right-to-left; route it under the board
+               instead of straight back through every node in between. */
+            var backwards = x2 < x1;
+            var d;
+            if (backwards) {
+                var dip = Math.max(ra.bottom, rb.bottom) - origin.top + wrap.scrollTop + 26;
+                x1 = ra.left + ra.width / 2 - origin.left + wrap.scrollLeft;
+                y1 = ra.bottom - origin.top + wrap.scrollTop;
+                x2 = rb.left + rb.width / 2 - origin.left + wrap.scrollLeft;
+                y2 = rb.bottom - origin.top + wrap.scrollTop;
+                d = "M " + x1 + " " + y1 + " C " + x1 + " " + dip + ", " + x2 + " " + dip + ", " + x2 + " " + y2;
+            } else {
+                var mid = x1 + (x2 - x1) / 2;
+                d = "M " + x1 + " " + y1 + " C " + mid + " " + y1 + ", " + mid + " " + y2 + ", " + x2 + " " + y2;
+            }
+            var p = document.createElementNS(NS, "path");
+            p.setAttribute("d", d);
+            p.setAttribute("class", "tm-edge " + (e.live ? "tm-edge--live" : "tm-edge--dim"));
+            p.dataset.from = e.from;
+            p.dataset.to = e.to;
+            svg.appendChild(p);
+        });
+    }
+
+    function highlight(key) {
+        svg.querySelectorAll(".tm-edge").forEach(function (p) {
+            var on = !key || p.dataset.from === key || p.dataset.to === key;
+            p.classList.toggle("tm-edge--hot", !!key && on);
+        });
+        board.querySelectorAll(".tm-node").forEach(function (n) {
+            if (!key) { n.classList.remove("is-faded"); return; }
+            var k = n.dataset.node;
+            var touching = k === key || EDGES.some(function (e) {
+                return (e.from === key && e.to === k) || (e.to === key && e.from === k);
+            });
+            n.classList.toggle("is-faded", !touching);
+        });
+    }
+
+    /* ── Inspector ────────────────────────────────────────────────── */
+    function row(k, v) {
+        if (v === "" || v === null || v === undefined) return "";
+        return '<div class="tm-ins-row"><span class="k">' + esc(k) + '</span><span class="v">' + v + "</span></div>";
+    }
+    function chips(list) {
+        if (!list || !list.length) return "";
+        return '<span class="tm-ins-chips">' + list.map(function (x) {
+            return '<span class="tm-ins-chip">' + esc(x) + "</span>";
+        }).join("") + "</span>";
+    }
+
+    function open(key) {
+        var n = byKey[key];
+        if (!n) return;
+        selected = key;
+        board.querySelectorAll(".tm-node").forEach(function (el) {
+            el.classList.toggle("is-selected", el.dataset.node === key);
+            el.setAttribute("aria-expanded", el.dataset.node === key ? "true" : "false");
+        });
+        insTitle.textContent = n.label;
+        insGlyph.textContent = n.meta.glyph;
+        insGlyph.className = "tm-state tm-state--" + n.meta.tone;
+
+        var feeds = EDGES.filter(function (e) { return e.from === key; })
+                         .map(function (e) { return (byKey[e.to] || {}).label || e.to; });
+        var fedBy = EDGES.filter(function (e) { return e.to === key; })
+                         .map(function (e) { return (byKey[e.from] || {}).label || e.from; });
+
+        var html =
+            '<p class="tm-ins-why"><strong>' + esc(n.meta.label) + "</strong> — " + esc(n.why) + "</p>" +
+            /* The traced note: what a run record cannot tell you. A component
+               with no credential reports a clean success forever, so this is
+               often the only place the real reason appears. */
+            (n.note ? '<p class="tm-ins-note tm-ins-note--found">' + esc(n.note) + "</p>" : "") +
+            row("Does", esc(n.purpose)) +
+            row("Writes", n.writes && n.writes.length ? chips(n.writes)
+                : '<span class="sv-unknown">nothing — this node produces no rows</span>') +
+            row("Feeds", feeds.length ? chips(feeds)
+                : '<span class="sv-unknown">nothing on this map reads it</span>') +
+            row("Fed by", fedBy.length ? chips(fedBy) : '<span class="sv-unknown">nothing upstream</span>') +
+            row("Last run", esc(n.last_run) + (n.last_status ? " · " + esc(n.last_status) : "")) +
+            row("Runs", n.runs + " / " + n.errors + " errors") +
+            (n.last_message ? row("Said", '<span style="font-family:var(--font-mono);font-size:10.5px;">' + esc(n.last_message) + "</span>") : "");
+
+        var actions = [];
+        if (n.can_toggle) {
+            actions.push('<button type="button" class="btn btn-sm" data-ins-toggle="' +
+                esc(n.kind === "bot" ? n.config_id : (n.toggle_key || n.key)) +
+                '" data-ins-kind="' + (n.kind === "bot" ? "bot" : "component") +
+                '" data-node-ref="' + esc(n.key) + '">' +
+                (n.enabled ? "Switch off" : "Switch on") + "</button>");
+        }
+        (n.flags || []).forEach(function (f) {
+            actions.push('<button type="button" class="btn btn-sm" data-ins-toggle="' + esc(f.key) +
+                '" data-ins-kind="component" data-node-ref="' + esc(n.key) + '">' +
+                esc(f.label) + " · " + (f.on ? "ON" : "OFF") + "</button>");
+        });
+        if (n.link) actions.push('<a class="btn btn-sm" href="' + esc(n.link) + '">Open ▸</a>');
+        if (actions.length) html += '<div class="tm-ins-actions">' + actions.join("") + "</div>";
+
+        if (n.kind === "bot") {
+            html += '<p class="tm-ins-note">Shadow mode, circuit reset and broker reconcile live on '
+                 +  'the admin bot panel — they change money-moving state, so they are kept behind '
+                 +  'their own confirmation.</p>';
+        }
+        insBody.innerHTML = html;
+        inspect.classList.add("is-open");
+        highlight(key);
+    }
+
+    function close() {
+        inspect.classList.remove("is-open");
+        selected = null;
+        board.querySelectorAll(".tm-node").forEach(function (el) {
+            el.classList.remove("is-selected");
+            el.setAttribute("aria-expanded", "false");
+        });
+        highlight(null);
+    }
+
+    /* ── Toggling ─────────────────────────────────────────────────── */
+    function applyToggle(kind, key, nodeRef, input) {
+        var body = new URLSearchParams();
+        body.append("kind", kind);
+        body.append("key", key);
+        if (input) input.disabled = true;
+        return fetch("{% url 'system_map_toggle' %}", {
+            method: "POST", credentials: "same-origin",
+            headers: { "X-CSRFToken": csrf(), "Content-Type": "application/x-www-form-urlencoded" },
+            body: body.toString()
+        })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+            if (!res.ok || !res.j.ok) {
+                /* Put the switch back. A control that shows a state the server
+                   never accepted is worse than one that refuses. */
+                if (input) input.checked = !input.checked;
+                SV.overlay.alert({
+                    title: "Could not switch that",
+                    message: (res.j && res.j.error) || "The server refused the change.",
+                    detail: "Only a superuser can arm or disarm parts of the platform."
+                });
+                return;
+            }
+            var n = byKey[nodeRef];
+            if (n) n.enabled = res.j.enabled;
+            if (input) input.checked = res.j.enabled;
+            refresh();
+        })
+        .catch(function (e) {
+            if (input) input.checked = !input.checked;
+            SV.overlay.alert({ title: "Network error", message: String(e) });
+        })
+        .finally(function () { if (input) input.disabled = false; });
+    }
+
+    document.addEventListener("change", function (e) {
+        var input = e.target.closest && e.target.closest("[data-toggle-key]");
+        if (!input) return;
+        applyToggle(input.dataset.toggleKind, input.dataset.toggleKey,
+                    input.dataset.nodeRef || input.dataset.toggleKey, input);
+    });
+
     document.addEventListener("click", function (e) {
-        var more = e.target.closest && e.target.closest(".sm-more");
-        if (more) {
-            var card = more.closest(".sm-node");
-            var open = card.classList.toggle("is-open");
-            card.setAttribute("aria-expanded", open ? "true" : "false");
-            more.textContent = open ? "Hide" : "Evidence";
+        var insBtn = e.target.closest && e.target.closest("[data-ins-toggle]");
+        if (insBtn) {
+            applyToggle(insBtn.dataset.insKind, insBtn.dataset.insToggle,
+                        insBtn.dataset.nodeRef, null).then(function () {
+                if (selected) open(selected);
+            });
             return;
         }
-        var tally = e.target.closest && e.target.closest(".sm-tally");
-        if (!tally) return;
-        var want = tally.dataset.filter;
-        var on = !tally.classList.contains("is-on");
-        document.querySelectorAll(".sm-tally").forEach(function (t) { t.classList.remove("is-on"); });
-        if (on) tally.classList.add("is-on");
-        document.querySelectorAll(".sm-node").forEach(function (n) {
-            n.classList.toggle("is-hidden", on && n.dataset.state !== want);
-        });
-        /* A stage whose every node is filtered out would leave a heading over
-           empty space. */
-        document.querySelectorAll(".sm-stage").forEach(function (s) {
-            var any = s.querySelector(".sm-node:not(.is-hidden)");
-            s.classList.toggle("is-hidden", on && !any);
-        });
+        var leg = e.target.closest && e.target.closest(".tm-leg");
+        if (leg) {
+            var want = leg.dataset.filter;
+            var on = !leg.classList.contains("is-on");
+            document.querySelectorAll(".tm-leg").forEach(function (l) { l.classList.remove("is-on"); });
+            if (on) leg.classList.add("is-on");
+            board.querySelectorAll(".tm-node").forEach(function (n) {
+                n.classList.toggle("is-hidden", on && n.dataset.state !== want);
+                n.style.display = (on && n.dataset.state !== want) ? "none" : "";
+            });
+            drawEdges();
+            return;
+        }
+        var node = e.target.closest && e.target.closest(".tm-node");
+        if (node) { open(node.dataset.node); return; }
+        if (!e.target.closest(".tm-inspect")) close();
     });
+
+    board.addEventListener("keydown", function (e) {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        var node = e.target.closest && e.target.closest(".tm-node");
+        if (!node) return;
+        e.preventDefault();
+        open(node.dataset.node);
+    });
+    document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && inspect.classList.contains("is-open")) close();
+    });
+
+    board.addEventListener("mouseover", function (e) {
+        var n = e.target.closest && e.target.closest(".tm-node");
+        if (n && !selected) highlight(n.dataset.node);
+    });
+    board.addEventListener("mouseout", function (e) {
+        if (!selected && !e.relatedTarget) highlight(null);
+        else if (!selected && !board.contains(e.relatedTarget)) highlight(null);
+    });
+
+    /* ── Live refresh ─────────────────────────────────────────────── */
+    function refresh() {
+        return fetch("{% url 'system_map_state' %}", { credentials: "same-origin" })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                d.nodes.forEach(function (u) {
+                    var n = byKey[u.key];
+                    if (!n) return;
+                    Object.assign(n, u);
+                    var el = document.getElementById("node-" + u.key);
+                    if (!el) return;
+                    el.dataset.state = u.state;
+                    el.className = el.className.replace(/tm-node--(good|warning|serious|critical|muted)/,
+                                                        "tm-node--" + u.meta.tone);
+                    var g = el.querySelector(".tm-state");
+                    if (g) { g.textContent = u.meta.glyph; g.className = "tm-state tm-state--" + u.meta.tone; }
+                    var age = el.querySelector(".tm-node-age");
+                    if (age) age.textContent = u.last_run;
+                    var box = el.querySelector("[data-toggle-key]");
+                    if (box && document.activeElement !== box) box.checked = u.enabled;
+                });
+                EDGES.forEach(function (e) {
+                    var m = d.edges.find(function (x) { return x.from === e.from && x.to === e.to; });
+                    if (m) e.live = m.live;
+                });
+                drawEdges();
+                if (selected) highlight(selected);
+            })
+            .catch(function () { /* a failed poll must not blank the map */ });
+    }
+
+    drawEdges();
+    window.addEventListener("resize", drawEdges);
+    wrap.addEventListener("scroll", drawEdges);
+    setInterval(refresh, 15000);
 })();
 </script>
 {% endblock %}

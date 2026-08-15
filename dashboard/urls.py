@@ -64,7 +64,7 @@ from .views_rule_control import rule_control_dashboard
 from .views_calibration import calibration_dashboard
 from .views_ai_models import ai_models_dashboard
 from .views_system_health import system_health
-from .views_system_map import system_map
+from .views_topology import system_map, system_map_state, system_map_toggle
 from .views_forensics import forensics_list, forensics_detail
 from .views_bot_charts import bot_charts
 from .views_allocator import allocator_dashboard
@@ -159,6 +159,8 @@ urlpatterns = [
     # The admin panel's second division: not "is it switched on?" but "is data
     # moving?" — the question neither the registry nor the health checks asked.
     path("admin-dashboard/system-map/", system_map, name="system_map"),
+    path("admin-dashboard/system-map/state/", system_map_state, name="system_map_state"),
+    path("admin-dashboard/system-map/toggle/", system_map_toggle, name="system_map_toggle"),
     path("bot-charts/", bot_charts, name="bot_charts"),
     path("forensics/", forensics_list, name="forensics_list"),
     path("forensics/<int:trade_id>/", forensics_detail, name="forensics_detail"),
