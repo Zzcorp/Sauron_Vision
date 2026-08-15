@@ -133,6 +133,17 @@ class GateEventsViewTests(TestCase):
         self.assertContains(r, "0.30")  # 3/10 rejection rate
 
 
+def _symbols(response):
+    """Symbols in the fills TABLE, not in the whole document.
+
+    The info-panel headband in base.html now lists the operator's OPEN
+    positions on every page, so a symbol belonging to one of them appears in
+    the chrome of every response — correctly. Asserting its absence from the
+    raw HTML therefore tests the headband, not the filter. Assert on the rows
+    the view actually selected instead.
+    """
+    return [t.symbol for t in response.context["page"]]
+
 # ── eye_fills ─────────────────────────────────────────────────────────────
 
 class FillsViewTests(TestCase):
@@ -157,8 +168,7 @@ class FillsViewTests(TestCase):
         _trade(self.cfg, symbol="LONGSYM", side="BUY")
         _trade(self.cfg, symbol="DOWNSYM", side="SELL")
         r = self.client.get("/eye/fills/?side=BUY")
-        self.assertContains(r, "LONGSYM")
-        self.assertNotContains(r, "DOWNSYM")
+        self.assertEqual(_symbols(r), ["LONGSYM"])
 
     def test_outcome_filter(self):
         _trade(self.cfg, symbol="WIN", side="BUY", status="CLOSED",
@@ -168,8 +178,7 @@ class FillsViewTests(TestCase):
                 outcome="stopped_out", realized_r=-1.0,
                 exit_price=Decimal("95"), pnl=Decimal("-5"))
         r = self.client.get("/eye/fills/?outcome=hit_target")
-        self.assertContains(r, "WIN")
-        self.assertNotContains(r, "LOSS")
+        self.assertEqual(_symbols(r), ["WIN"])
 
     def test_mode_filter(self):
         # Symbols must not collide with words rendered by the base-template
@@ -178,8 +187,7 @@ class FillsViewTests(TestCase):
         _trade(self.cfg, symbol="PAPSYM", side="BUY", paper=True)
         _trade(self.cfg, symbol="LIVSYM", side="BUY", paper=False)
         r = self.client.get("/eye/fills/?mode=live")
-        self.assertContains(r, "LIVSYM")
-        self.assertNotContains(r, "PAPSYM")
+        self.assertEqual(_symbols(r), ["LIVSYM"])
 
     def test_user_scoping(self):
         other = _user("fl_other")
@@ -187,8 +195,7 @@ class FillsViewTests(TestCase):
         _trade(other_cfg, symbol="OTHER", side="BUY")
         _trade(self.cfg, symbol="MINE", side="BUY")
         r = self.client.get("/eye/fills/")
-        self.assertContains(r, "MINE")
-        self.assertNotContains(r, "OTHER")
+        self.assertEqual(_symbols(r), ["MINE"])
 
 
 # ── eye_exposure ──────────────────────────────────────────────────────────

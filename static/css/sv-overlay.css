@@ -331,6 +331,82 @@ body.sv-scroll-locked { overflow: hidden; }
 .tp-stale-chip { display: none; }
 [data-sv-staleable].is-stale .tp-stale-chip { display: inline-block; }
 
+/* ── 5c. INFO-PANEL ROWS ────────────────────────────────────────────────
+   The bottom headband's dropdowns used to hold a title and a link to the page
+   you were one click from anyway; two of them held nothing else at all. These
+   are the row shapes that let each panel carry the actual data — a position
+   with its live R, a signal with its score, an alert with its kind. */
+.ip-dropdown .ip-dd-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    border-bottom: 1px solid color-mix(in srgb, var(--pop-border) 55%, transparent);
+}
+.ip-dropdown .ip-dd-row:last-of-type { border-bottom: 0; }
+.ip-dropdown .ip-dd-row--stack {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+}
+.ipr-sym   { font-weight: 700; color: var(--text-primary, #e6edf3); min-width: 62px; }
+.ipr-side  { font-size: 8.5px; font-weight: 700; letter-spacing: .1em; padding: 1px 5px; border-radius: 3px; }
+.ipr-side--buy, .ipr-side--long, .ipr-side--bullish  { color: var(--accent-green, #00e868); background: color-mix(in srgb, var(--accent-green, #00e868) 14%, transparent); }
+.ipr-side--sell, .ipr-side--short, .ipr-side--bearish { color: var(--accent-red, #ff4d4d); background: color-mix(in srgb, var(--accent-red, #ff4d4d) 14%, transparent); }
+.ipr-qty   { color: var(--text-secondary, #9aa4b2); }
+.ipr-r     { font-weight: 700; margin-left: auto; }
+.ipr-pct   { min-width: 56px; text-align: right; }
+.ipr-score { font-weight: 700; color: var(--text-primary, #e6edf3); min-width: 22px; text-align: right; }
+.ipr-age   { margin-left: auto; }
+.ipr-kind  { font-size: 8.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent, #00e868); }
+.ipr-title { font-size: 11.5px; color: var(--text-primary, #e6edf3); font-family: var(--font-body, inherit); line-height: 1.35; }
+/* A conviction bar, so a score is read against its scale rather than as a
+   bare number. */
+.ipr-meter { flex: 1; height: 4px; min-width: 40px; border-radius: 2px; background: var(--pop-bg-2); overflow: hidden; }
+.ipr-meter-fill { display: block; height: 100%; background: var(--accent, #00e868); }
+.ip-dd-note {
+    padding: 8px 16px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-secondary, #9aa4b2);
+    border-top: 1px solid var(--pop-border);
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.ip-dropdown .sv-empty { padding: 14px 16px; }
+
+/* ── 5d. ASK SAURON BUBBLE TOOLS ────────────────────────────────────────
+   Copy and delete on each turn in the floating panel. Revealed on hover so a
+   quiet thread stays quiet, but always reachable by keyboard. */
+.se-bubble { position: relative; }
+.se-bubble-tools {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    display: flex;
+    gap: 3px;
+    opacity: 0;
+    transition: opacity .15s;
+}
+.se-bubble:hover .se-bubble-tools,
+.se-bubble:focus-within .se-bubble-tools { opacity: 1; }
+.se-bubble-tool {
+    background: var(--bg-card, #0e1117);
+    border: 1px solid var(--border, rgba(255,255,255,.12));
+    border-radius: 4px;
+    color: var(--text-muted, #7d8590);
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    letter-spacing: .06em;
+    padding: 2px 5px;
+    cursor: pointer;
+}
+.se-bubble-tool:hover { color: var(--text-primary, #e6edf3); }
+.se-bubble-tool--danger:hover { color: var(--accent-red, #ff4d4d); border-color: var(--accent-red, #ff4d4d); }
+.se-bubble-body { min-width: 0; }
+
 /* ── 6. HOVER CARD ──────────────────────────────────────────────────────
    Read-only detail on hover. Never contains a control the operator must
    reach, because a card that disappears when you move toward it cannot hold

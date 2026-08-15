@@ -10,6 +10,186 @@ from .exchange_status import get_exchange_status
 logger = logging.getLogger(__name__)
 
 
+def _panel_detail(user):
+    """The contents of the info-panel dropdowns.
+
+    Several of these cells opened a panel containing a title and a link to the
+    page you were already one click from. ALERTS and WATCHLIST had literally
+    nothing else in them; DRAWDOWN and VOLATILITY had no panel at all. A
+    dropdown that tells you nothing you did not already read on the cell is
+    worse than no dropdown, because it costs a hover to discover that.
+
+    Cached for 20 seconds per user. This runs on EVERY page render, and the
+    aggregate queries below are not free — but the underlying numbers only
+    move when a scan or a fill lands, so a short TTL costs nothing in accuracy
+    and takes the whole block off the critical path for the other 19 seconds.
+    """
+    import sys
+    from django.core.cache import cache
+
+    # The cache is keyed on the user's primary key, which is stable and unique
+    # in production. Under the test runner it is neither: every TestCase rolls
+    # the database back, so primary keys restart and a payload cached by one
+    # test is served to a different user in the next. That made assertions on
+    # anything in the headband depend on how long the preceding test took.
+    testing = "test" in sys.argv or any("pytest" in a for a in sys.argv)
+
+    key = f"sv:panel_detail:{user.pk}"
+    if not testing:
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+
+    out = {}
+    now = timezone.now()
+    day_ago = now - timedelta(hours=24)
+
+    # ── Open bot trades, with live risk ──────────────────────────────────
+    # The R-multiple is the number that says whether a position is working,
+    # and it is computable here: we hold the entry, the stop it opened with,
+    # and a live quote. Position.unrealized_pnl is deliberately NOT used —
+    # nothing in the codebase ever writes it, so it would render +0.00 on
+    # every row forever.
+    try:
+        from bot_program.models import AssetBotTrade
+        from market_data.models import LiveQuote
+
+        trades = list(AssetBotTrade.objects.filter(
+            config__user=user, status__in=("OPEN", "CLOSE_PENDING")
+        ).order_by("-opened_at")[:6])
+        quotes = {}
+        if trades:
+            symbols = {t.symbol for t in trades}
+            quotes = {q.instrument.symbol: q for q in LiveQuote.objects
+                      .select_related("instrument")
+                      .filter(instrument__symbol__in=symbols)}
+
+        rows = []
+        for t in trades:
+            q = quotes.get(t.symbol)
+            last = float(q.last) if q and q.last is not None else None
+            entry = float(t.entry_price or 0)
+            stop = float(t.stop_loss) if t.stop_loss is not None else None
+            r_mult = pct = None
+            if last is not None and entry:
+                direction = 1 if (t.side or "").upper() in ("BUY", "LONG") else -1
+                pct = (last - entry) / entry * 100 * direction
+                if stop is not None and abs(entry - stop) > 1e-12:
+                    r_mult = (last - entry) * direction / abs(entry - stop)
+            rows.append({
+                "symbol": t.symbol, "side": (t.side or "").upper(),
+                "qty": t.qty, "entry": entry, "stop": stop, "last": last,
+                "r": None if r_mult is None else round(r_mult, 2),
+                "pct": None if pct is None else round(pct, 2),
+                "paper": t.paper, "opened_at": t.opened_at,
+            })
+        out["panel_open_trades"] = rows
+
+        closed = AssetBotTrade.objects.filter(
+            config__user=user, status="CLOSED", closed_at__gte=day_ago)
+        n_closed = closed.count()
+        wins = closed.filter(pnl__gt=0).count() if n_closed else 0
+        out["panel_bot_trades_24h"] = n_closed
+        out["panel_bot_winrate"] = round(wins / n_closed * 100) if n_closed else None
+        last_closed = closed.order_by("-closed_at").first()
+        out["panel_bot_last"] = ({
+            "symbol": last_closed.symbol,
+            "outcome": (last_closed.outcome or "closed").replace("_", " "),
+            "r": last_closed.realized_r,
+            "when": last_closed.closed_at,
+        } if last_closed else None)
+    except Exception as e:
+        logger.debug(f"Panel bot detail unavailable: {e}")
+
+    # ── The signals themselves, not just how many ────────────────────────
+    try:
+        from signals.models import Signal
+        out["panel_top_signals"] = [{
+            "symbol": s.instrument.symbol,
+            "direction": s.direction,
+            "score_pct": int(round((s.score or 0) * 100)),
+            "rule": s.rule_name or s.signal_type or "",
+            "created_at": s.created_at,
+            "entry": s.suggested_entry,
+            "stop": s.suggested_stop,
+        } for s in Signal.objects.filter(is_active=True)
+            .select_related("instrument").order_by("-score")[:4]]
+    except Exception as e:
+        logger.debug(f"Panel signal detail unavailable: {e}")
+
+    # ── Watchlist with prices, so the cell is a watchlist and not a count ─
+    try:
+        from instruments.models import Instrument
+        from market_data.models import LiveQuote
+        wl = list(Instrument.objects.filter(is_watchlist=True, is_active=True)[:6])
+        wq = {q.instrument_id: q for q in LiveQuote.objects.filter(
+            instrument__in=wl)} if wl else {}
+        out["panel_watchlist_rows"] = [{
+            "symbol": i.symbol,
+            "last": wq[i.id].last if i.id in wq else None,
+            "change": float(wq[i.id].change_pct or 0) if i.id in wq else None,
+        } for i in wl]
+    except Exception as e:
+        logger.debug(f"Panel watchlist detail unavailable: {e}")
+
+    # ── Drawdown, with the peak it is measured from ──────────────────────
+    try:
+        from portfolio.models import PortfolioSnapshot
+        from portfolio.services import get_or_create_default_portfolio
+        pf = get_or_create_default_portfolio(user=user)
+        snaps = list(PortfolioSnapshot.objects.filter(portfolio=pf)
+                     .order_by("-date")[:180])
+        if snaps:
+            peak = max(snaps, key=lambda s: s.total_value or 0)
+            cur = snaps[0]
+            out["panel_dd_peak"] = peak.total_value
+            out["panel_dd_peak_date"] = peak.date
+            out["panel_dd_current"] = cur.total_value
+            out["panel_dd_snapshots"] = len(snaps)
+    except Exception as e:
+        logger.debug(f"Panel drawdown detail unavailable: {e}")
+
+    # ── Realised volatility. There is no VIX feed in this platform, and the
+    #    cell was labelled "VIX index" while rendering a variable nobody set.
+    #    This is what we can actually measure: 20-day annualised realised
+    #    volatility of the instrument with the most price history.
+    try:
+        import statistics
+        from market_data.models import PriceData
+
+        # Periods per year, for annualising. Do NOT hardcode a timeframe: this
+        # deployment holds 4h and 1h bars and no daily ones at all, so asking
+        # for "1d" found nothing and the cell would have stayed blank forever
+        # while looking like a missing feed.
+        PERIODS = {"1d": 252, "4h": 252 * 6, "1h": 252 * 24}
+        for tf, per_year in PERIODS.items():
+            bars = list(PriceData.objects.filter(timeframe=tf)
+                        .order_by("-timestamp")
+                        .values_list("instrument__symbol", "close")[:600])
+            by_symbol = {}
+            for sym, close in bars:
+                by_symbol.setdefault(sym, []).append(float(close))
+            best = max(by_symbol.items(), key=lambda kv: len(kv[1]), default=None)
+            if not best or len(best[1]) < 21:
+                continue
+            closes = best[1][:21]                     # newest first
+            rets = [(closes[i] - closes[i + 1]) / closes[i + 1]
+                    for i in range(20) if closes[i + 1]]
+            if len(rets) >= 10:
+                out["panel_vol_pct"] = round(
+                    statistics.pstdev(rets) * (per_year ** 0.5) * 100, 1)
+                out["panel_vol_symbol"] = best[0]
+                out["panel_vol_days"] = len(rets)
+                out["panel_vol_tf"] = tf
+                break
+    except Exception as e:
+        logger.debug(f"Panel volatility unavailable: {e}")
+
+    if not testing:
+        cache.set(key, out, 20)
+    return out
+
+
 def _compact(value):
     """Money at a glance: 1.2B, 340M, 18K.
 
@@ -299,6 +479,12 @@ def sauron_context(request):
     # its own try, and if it fails before assigning day_ago every panel below
     # would die on a NameError swallowed as "no data".
     day_ago = timezone.now() - timedelta(hours=24)
+
+    # Everything the info-panel dropdowns show, behind a 20s cache.
+    try:
+        ctx.update(_panel_detail(request.user))
+    except Exception as e:
+        logger.debug(f"Panel detail unavailable: {e}")
 
     # ── Bot program ──
     try:

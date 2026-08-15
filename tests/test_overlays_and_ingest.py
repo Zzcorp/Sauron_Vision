@@ -323,6 +323,248 @@ class LegacyModalMigrationTests(TestCase):
                 f"{path} broke")
 
 
+class NotificationPanelTests(TestCase):
+    """The bell panel opened underneath the signals rail, because it lived
+    inside .topbar — which carries backdrop-filter, and that creates a
+    stacking context no descendant can climb out of by declaring a bigger
+    z-index."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="np_u", password="x")
+        self.client.force_login(self.user)
+        from alerts.models import Notification
+        Notification.objects.create(user=self.user, notification_type="bot",
+                                    title="Bot disarmed", body="after 3 losses",
+                                    url="/asset-bots/")
+        self.body = self.client.get(
+            "/signals/", HTTP_HOST="127.0.0.1").content.decode("utf-8", "replace")
+
+    def test_the_panel_leaves_the_topbar_when_it_opens(self):
+        self.assertIn('id="notifPanel"', self.body)
+        self.assertIn("data-sv-portal", self.body)
+
+    def test_the_controller_really_moves_it_to_the_body(self):
+        js = _read("static", "js", "sv-overlay.js")
+        self.assertIn("d.body.appendChild(el)", js)
+        self.assertIn("portalHome", js)
+
+    def test_it_is_returned_to_its_own_parent_on_close(self):
+        """An overlay orphaned on <body> survives an htmx swap of the region
+        it came from, and the next render produces a second copy."""
+        js = _read("static", "js", "sv-overlay.js")
+        self.assertIn("home.parent.insertBefore(el, home.next)", js)
+
+    def test_the_bell_is_a_button_the_keyboard_can_reach(self):
+        self.assertIn('<button type="button" class="notif-bell"', self.body)
+        self.assertIn('data-sv-open="notifPanel"', self.body)
+
+    def test_the_bespoke_outside_click_handler_is_gone(self):
+        self.assertNotIn("bell.classList.remove('open')", self.body)
+
+    def test_a_row_says_what_kind_of_event_it_was(self):
+        """Ten identically-styled titles gave the operator no way to pick the
+        one that mattered."""
+        self.assertIn("ni-kind", self.body)
+        self.assertIn("ni-bot", self.body)
+
+
+class InfoPanelDetailTests(TestCase):
+    """Several bottom-headband dropdowns held a title and a link to the page
+    you were one click from anyway. ALERTS and WATCHLIST held nothing else at
+    all; DRAWDOWN and VOLATILITY had no panel."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="ipd_u", password="x")
+        from django.core.cache import cache
+        cache.clear()
+
+    def _detail(self):
+        from core.context_processors import _panel_detail
+        return _panel_detail(self.user)
+
+    def test_an_open_position_carries_its_live_r(self):
+        """R is the number that says whether a position is working, and it is
+        computable from the entry, the opening stop and a live quote."""
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        from instruments.models import Instrument
+        from market_data.models import LiveQuote
+        from decimal import Decimal
+
+        inst, _ = Instrument.objects.get_or_create(
+            symbol="BTCUSD", defaults={"name": "B", "asset_class": "crypto"})
+        LiveQuote.objects.update_or_create(
+            instrument=inst, defaults={"last": Decimal("110")})
+        cfg = AssetBotConfig.objects.create(user=self.user, asset_class="crypto",
+                                            name="c", enabled=True, mode="paper")
+        AssetBotTrade.objects.create(config=cfg, asset_class="crypto",
+                                     symbol="BTCUSD", side="BUY", qty=1,
+                                     entry_price=100, stop_loss=95, status="OPEN")
+        row = self._detail()["panel_open_trades"][0]
+        # entry 100, stop 95 -> 5 of risk; last 110 -> +10 -> 2R
+        self.assertAlmostEqual(row["r"], 2.0, places=2)
+        self.assertAlmostEqual(row["pct"], 10.0, places=2)
+
+    def test_a_position_with_no_quote_reports_unknown_not_zero(self):
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        cfg = AssetBotConfig.objects.create(user=self.user, asset_class="crypto",
+                                            name="c2", enabled=True, mode="paper")
+        AssetBotTrade.objects.create(config=cfg, asset_class="crypto",
+                                     symbol="NOQUOTE", side="BUY", qty=1,
+                                     entry_price=100, stop_loss=95, status="OPEN")
+        row = next(r for r in self._detail()["panel_open_trades"]
+                   if r["symbol"] == "NOQUOTE")
+        self.assertIsNone(row["r"])
+
+    def test_the_signals_panel_names_the_signals(self):
+        """It rendered four counts and not one of the actual signals."""
+        from instruments.models import Instrument
+        from signals.models import Signal
+        inst, _ = Instrument.objects.get_or_create(
+            symbol="ETHUSD", defaults={"name": "E", "asset_class": "crypto"})
+        Signal.objects.create(instrument=inst, signal_type="technical",
+                              direction="bullish", urgency="high", title="t",
+                              score=0.8, is_active=True, price_at_signal=1)
+        top = self._detail()["panel_top_signals"]
+        self.assertEqual(top[0]["symbol"], "ETHUSD")
+        self.assertEqual(top[0]["score_pct"], 80)
+
+    def test_volatility_is_not_pinned_to_a_timeframe_we_may_not_hold(self):
+        """It asked for 1d bars. This deployment holds 4h and 1h and no daily
+        bars at all, so the cell could never have filled."""
+        from instruments.models import Instrument
+        from market_data.models import PriceData
+        inst, _ = Instrument.objects.get_or_create(
+            symbol="VOLT", defaults={"name": "V", "asset_class": "crypto"})
+        base = timezone.now()
+        for i in range(30):
+            PriceData.objects.create(
+                instrument=inst, timeframe="4h",
+                timestamp=base - timedelta(hours=4 * i),
+                open=100 + i, high=101 + i, low=99 + i,
+                close=100 + (i % 5), volume=1)
+        d = self._detail()
+        self.assertIsNotNone(d.get("panel_vol_pct"))
+        self.assertEqual(d.get("panel_vol_tf"), "4h")
+
+    def test_the_detail_is_cached_so_it_does_not_cost_every_page(self):
+        import inspect
+        from core import context_processors
+        src = inspect.getsource(context_processors._panel_detail)
+        self.assertIn("cache.set(", src)
+
+    def test_the_cache_is_bypassed_under_the_test_runner(self):
+        """Primary keys restart after every rollback, so a payload cached for
+        user 3 in one test would be served to a different user 3 in the next —
+        which made any assertion touching the headband depend on how long the
+        preceding test happened to take."""
+        import inspect
+        from core import context_processors
+        src = inspect.getsource(context_processors._panel_detail)
+        self.assertIn("testing", src)
+        self.assertIn("if not testing:", src)
+
+
+class AskSauronTests(TestCase):
+    """The chat was a form POST that reloaded the whole page, messages could
+    not be deleted, and past conversations were listed in a table with no way
+    to open one."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="as_u", password="x")
+        self.client.force_login(self.user)
+
+    def _conv(self):
+        from brain.research_agent import get_or_create_active_conversation
+        return get_or_create_active_conversation(self.user)
+
+    def _msg(self, role, content, conv=None):
+        from brain.research_models import ResearchMessage
+        return ResearchMessage.objects.create(
+            conversation=conv or self._conv(), role=role, content=content)
+
+    def test_the_page_renders_as_a_chat(self):
+        body = self.client.get("/research/", HTTP_HOST="127.0.0.1").content.decode(
+            "utf-8", "replace")
+        for part in ("chat-log", "chat-compose", "turn-tool", "chat-intro"):
+            self.assertIn(part, body)
+
+    def test_deleting_a_question_takes_its_answer_with_it(self):
+        """A question and the reply it produced are one exchange; deleting the
+        question alone leaves the assistant talking to itself."""
+        from brain.research_models import ResearchMessage
+        q = self._msg("user", "why?")
+        a = self._msg("assistant", "because.")
+        r = self.client.post(f"/research/message/{q.id}/delete/",
+                             HTTP_HOST="127.0.0.1")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["ok"])
+        self.assertFalse(ResearchMessage.objects.filter(
+            pk__in=[q.pk, a.pk]).exists())
+
+    def test_deleting_an_answer_leaves_the_question(self):
+        from brain.research_models import ResearchMessage
+        q = self._msg("user", "why?")
+        a = self._msg("assistant", "because.")
+        self.client.post(f"/research/message/{a.id}/delete/", HTTP_HOST="127.0.0.1")
+        self.assertTrue(ResearchMessage.objects.filter(pk=q.pk).exists())
+        self.assertFalse(ResearchMessage.objects.filter(pk=a.pk).exists())
+
+    def test_another_users_message_cannot_be_deleted(self):
+        from brain.research_agent import get_or_create_active_conversation
+        from brain.research_models import ResearchMessage
+        other = User.objects.create_user(username="as_other", password="x")
+        theirs = ResearchMessage.objects.create(
+            conversation=get_or_create_active_conversation(other),
+            role="user", content="private")
+        r = self.client.post(f"/research/message/{theirs.id}/delete/",
+                             HTTP_HOST="127.0.0.1")
+        self.assertEqual(r.status_code, 404)
+        self.assertTrue(ResearchMessage.objects.filter(pk=theirs.pk).exists())
+
+    def test_deleting_a_conversation_removes_its_messages(self):
+        from brain.research_models import ResearchConversation, ResearchMessage
+        conv = self._conv()
+        self._msg("user", "a", conv)
+        r = self.client.post(f"/research/conversation/{conv.id}/delete/",
+                             HTTP_HOST="127.0.0.1")
+        self.assertTrue(r.json()["ok"])
+        self.assertFalse(ResearchConversation.objects.filter(pk=conv.pk).exists())
+        self.assertFalse(ResearchMessage.objects.filter(conversation_id=conv.pk).exists())
+
+    def test_deleting_the_open_thread_leaves_one_to_type_into(self):
+        from brain.research_models import ResearchConversation
+        conv = self._conv()
+        self.client.post(f"/research/conversation/{conv.id}/delete/",
+                         HTTP_HOST="127.0.0.1")
+        self.assertTrue(ResearchConversation.objects.filter(
+            user=self.user, is_active=True).exists())
+
+    def test_a_past_conversation_can_be_reopened(self):
+        """The history was visible and unreachable: the only thing you could
+        do with a thread was start a new one on top of it."""
+        from brain.research_agent import archive_active_conversation
+        from brain.research_models import ResearchConversation
+        old = self._conv()
+        self._msg("user", "older question", old)
+        archive_active_conversation(self.user)
+        self._conv()                                  # a new active thread
+
+        r = self.client.post(f"/research/conversation/{old.id}/open/",
+                             HTTP_HOST="127.0.0.1")
+        self.assertEqual(r.status_code, 302)
+        old.refresh_from_db()
+        self.assertTrue(old.is_active)
+        self.assertEqual(ResearchConversation.objects.filter(
+            user=self.user, is_active=True).count(), 1,
+            "exactly one thread may be active")
+
+    def test_the_floating_panel_can_delete_a_turn_too(self):
+        body = self.client.get("/signals/", HTTP_HOST="127.0.0.1").content.decode(
+            "utf-8", "replace")
+        self.assertIn("data-se-del", body)
+        self.assertIn("se-bubble-tools", body)
+
+
 class DestructiveActionTests(TestCase):
     """window.confirm cannot show the thing being destroyed. On this platform
     the guarded actions are disarming a bot and flattening the book, where the
@@ -669,3 +911,155 @@ class DeadModuleTests(TestCase):
             symbol="SOLUSD",
             defaults={"name": "Sol", "asset_class": "crypto", "is_watchlist": True})
         self.assertEqual([i.symbol for i in _scan_universe()], ["SOLUSD"])
+
+
+class SystemMapTests(TestCase):
+    """The admin panel could say whether a task was switched on and whether it
+    raised. It could not say whether anything arrived — which is why six
+    scrapers sat at last_status='success' holding zero rows between them, with
+    the earnings calendar among them and the bot's earnings blackout silently
+    inert."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            username="sm_u", password="x", email="sm@x.co")
+        self.client.force_login(self.user)
+
+    def _map(self):
+        from dashboard.views_system_map import collect_system_map
+        return collect_system_map(self.user)
+
+    def _nodes(self):
+        out = {}
+        for stage in self._map()["stages"]:
+            for n in stage["nodes"]:
+                out[n["key"]] = n
+        return out
+
+    def test_the_page_renders_for_staff(self):
+        r = self.client.get("/admin-dashboard/system-map/", HTTP_HOST="127.0.0.1")
+        self.assertEqual(r.status_code, 200)
+
+    def test_it_is_not_reachable_by_a_normal_operator(self):
+        User.objects.create_user(username="sm_plain", password="x")
+        self.client.logout()
+        self.client.login(username="sm_plain", password="x")
+        r = self.client.get("/admin-dashboard/system-map/", HTTP_HOST="127.0.0.1")
+        self.assertIn(r.status_code, (302, 403))
+
+    def test_every_node_carries_a_state_and_an_explanation(self):
+        """A state with no sentence behind it sends the admin hunting, which is
+        the thing this page exists to stop."""
+        from dashboard.views_system_map import STATE_META
+        for key, n in self._nodes().items():
+            self.assertIn(n["state"], STATE_META, key)
+            self.assertTrue(n["why"].strip(), f"{key} has a state and no reason")
+            self.assertTrue(n["purpose"].strip(), f"{key} does not say what it does")
+
+    def test_an_empty_table_is_never_reported_as_healthy(self):
+        n = self._nodes()["calendar"]
+        self.assertIn(n["state"], ("idle", "stale", "unconfigured", "off"))
+        self.assertNotEqual(n["state"], "live")
+
+    def test_the_empty_calendar_names_the_guard_it_disables(self):
+        """The whole point of the page: say what the empty table costs."""
+        why = self._nodes()["calendar"]["why"].lower()
+        self.assertIn("blackout", why)
+
+    def test_data_that_stopped_arriving_reads_stale_not_live(self):
+        from instruments.models import Instrument
+        from market_data.models import PriceData
+        inst, _ = Instrument.objects.get_or_create(
+            symbol="OLD", defaults={"name": "O", "asset_class": "crypto"})
+        PriceData.objects.create(
+            instrument=inst, timeframe="4h",
+            timestamp=timezone.now() - timedelta(days=9),
+            open=1, high=1, low=1, close=1, volume=1)
+        n = self._nodes()["bars"]
+        self.assertEqual(n["state"], "stale")
+        self.assertIn("nothing new", n["why"])
+
+    def test_fresh_data_reads_live(self):
+        from instruments.models import Instrument
+        from market_data.models import PriceData
+        inst, _ = Instrument.objects.get_or_create(
+            symbol="NEW", defaults={"name": "N", "asset_class": "crypto"})
+        PriceData.objects.create(
+            instrument=inst, timeframe="4h", timestamp=timezone.now(),
+            open=1, high=1, low=1, close=1, volume=1)
+        self.assertEqual(self._nodes()["bars"]["state"], "live")
+
+    def test_a_disabled_component_outranks_its_data_verdict(self):
+        """OFF is an answer. STALE on a switched-off task is a red herring."""
+        from core.platform_control import PlatformComponent
+        PlatformComponent.objects.update_or_create(
+            key="scraper_calendar",
+            defaults={"name": "Economic Calendar", "category": "scraper",
+                      "is_enabled": False})
+        self.assertEqual(self._nodes()["calendar"]["state"], "off")
+
+    def test_a_component_that_stored_nothing_reads_stale(self):
+        """This is the exact failure the platform had: the task returns without
+        raising, the gate marks it a warning, and the map must show it."""
+        from core.platform_control import PlatformComponent
+        PlatformComponent.objects.update_or_create(
+            key="scraper_news",
+            defaults={"name": "Breaking News", "category": "scraper",
+                      "is_enabled": True, "last_status": "warning",
+                      "last_message": "parsed 40 rows and stored none"})
+        n = self._nodes()["news"]
+        self.assertEqual(n["state"], "stale")
+        self.assertIn("stored none", n["why"])
+
+    def test_a_stranded_close_is_the_worst_state_available(self):
+        """A position still open at the broker after a failed close needs a
+        human, so it must outrank everything else on the page."""
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        cfg = AssetBotConfig.objects.create(
+            user=self.user, asset_class="crypto", name="c",
+            enabled=True, mode="paper")
+        AssetBotTrade.objects.create(
+            config=cfg, asset_class="crypto", symbol="BTCUSD", side="BUY",
+            qty=1, entry_price=100, status="CLOSE_PENDING")
+        m = self._map()
+        trades = self._nodes()["trades"]
+        self.assertEqual(trades["state"], "broken")
+        self.assertEqual(m["verdict"], "critical")
+        self.assertEqual(m["problems"][0]["key"], "trades")
+
+    def test_problems_are_ranked_worst_first(self):
+        from dashboard.views_system_map import STATE_ORDER
+        problems = self._map()["problems"]
+        ranks = [STATE_ORDER.index(p["state"]) for p in problems]
+        self.assertEqual(ranks, sorted(ranks))
+
+    def test_healthy_nodes_stay_out_of_the_problem_list(self):
+        for p in self._map()["problems"]:
+            self.assertIn(p["state"], ("broken", "stale", "unconfigured"))
+
+    def test_throughput_bars_are_proportional_to_the_busiest_stage(self):
+        for row in self._map()["stage_rows"]:
+            self.assertGreaterEqual(row["pct"], 0)
+            self.assertLessEqual(row["pct"], 100)
+
+    def test_a_state_is_never_communicated_by_colour_alone(self):
+        """Every pill ships a glyph and a word beside its tone."""
+        from dashboard.views_system_map import STATE_META
+        for key, meta in STATE_META.items():
+            self.assertTrue(meta["glyph"], key)
+            self.assertTrue(meta["label"], key)
+            self.assertTrue(meta["hint"], key)
+
+    def test_the_admin_panel_links_to_both_divisions(self):
+        body = self.client.get(
+            "/admin-dashboard/", HTTP_HOST="127.0.0.1").content.decode("utf-8", "replace")
+        self.assertIn("hq-divisions", body)
+        self.assertIn("/admin-dashboard/system-map/", body)
+
+    def test_the_page_renders_no_leaked_template_tags(self):
+        """Django's {# #} is single-line only; a multi-line one is not a
+        comment and renders as literal text on the page."""
+        body = self.client.get(
+            "/admin-dashboard/system-map/", HTTP_HOST="127.0.0.1").content.decode("utf-8", "replace")
+        self.assertNotIn("{#", body)
+        self.assertNotIn("{% comment", body)

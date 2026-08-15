@@ -4,6 +4,42 @@
 {% block page_title %}ADMIN CONTROL CENTER{% endblock %}
 
 {% block content %}
+{% comment %}
+The admin panel's two divisions. CONTROL is this page — the switches. MAP is
+the second one: not "is it switched on?" but "is data moving?", which is the
+question neither this registry nor the health checks ever asked, and the reason
+six scrapers could sit green with zero rows between them.
+{% endcomment %}
+<nav class="hq-divisions">
+    <a class="hq-div is-current" href="{% url 'admin_dashboard' %}">
+        <span class="hq-div-k">Control</span>
+        <span class="hq-div-d">Switches, users, brokers, manual runs</span>
+    </a>
+    <a class="hq-div" href="{% url 'system_map' %}">
+        <span class="hq-div-k">System Map <span class="hq-div-new">live</span></span>
+        <span class="hq-div-d">What is running, what it produced, and what is stuck</span>
+    </a>
+    <a class="hq-div" href="{% url 'system_health' %}">
+        <span class="hq-div-k">Health</span>
+        <span class="hq-div-d">Pass/fail checks on the things that must be true</span>
+    </a>
+</nav>
+<style>
+.hq-divisions { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+    gap:10px; margin-bottom:22px; }
+.hq-div { display:flex; flex-direction:column; gap:3px; padding:12px 14px; border-radius:9px;
+    background:var(--bg-card); border:1px solid var(--border); border-left:3px solid var(--border);
+    text-decoration:none; transition:border-color .15s, background .15s; }
+.hq-div:hover { background:var(--bg-card-hover); border-left-color:var(--accent); }
+.hq-div.is-current { border-left-color:var(--accent); background:color-mix(in srgb,var(--accent) 6%,transparent); }
+.hq-div-k { font-family:var(--font-display); font-size:13px; letter-spacing:1.4px;
+    text-transform:uppercase; color:var(--text-primary); }
+.hq-div-d { font-size:11px; color:var(--text-muted); line-height:1.45; }
+.hq-div-new { font-family:var(--font-mono); font-size:8px; letter-spacing:.1em; color:var(--accent);
+    background:color-mix(in srgb,var(--accent) 15%,transparent); padding:1px 5px; border-radius:3px;
+    vertical-align:middle; }
+</style>
+
 {% if messages %}
 <div style="margin-bottom:20px;">
     {% for msg in messages %}

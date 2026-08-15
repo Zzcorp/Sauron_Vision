@@ -109,6 +109,73 @@
         return out;
     }
 
+    /* ── portalling ──────────────────────────────────────────────────────
+     * The only way out of a stacking context is to leave it. `position:
+     * fixed` does NOT escape one — a fixed element still paints inside its
+     * ancestor's context — which is why the topbar menus were stuck behind
+     * the signals rail no matter what z-index they declared: .topbar carries
+     * backdrop-filter, and that creates a stacking context on its own.
+     *
+     * So an overlay marked data-sv-portal is physically moved to <body> when
+     * it opens, anchored to its trigger in viewport coordinates, and put back
+     * where it came from when it closes. Putting it back matters: htmx swaps
+     * and Django partials both re-render by parent, and an overlay orphaned
+     * on <body> would survive as a duplicate.
+     */
+    function anchor(el, trigger) {
+        if (!trigger || !trigger.getBoundingClientRect) return;
+        var r = trigger.getBoundingClientRect();
+        var gap = 8, edge = 8;
+        var w = el.offsetWidth, h = el.offsetHeight;
+
+        /* Right-aligned to the trigger, because these hang off the top-right
+         * chrome and a left-aligned menu would run off the screen. */
+        var vw = window.innerWidth || d.documentElement.clientWidth;
+        var left = r.right - w;
+        var maxLeft = vw - w - edge;
+        if (left > maxLeft) left = maxLeft;
+        if (left < edge) left = edge;
+
+        var vh = window.innerHeight || d.documentElement.clientHeight;
+        var top = r.bottom + gap;
+        /* Flip above the trigger rather than hang off the bottom. */
+        if (top + h > vh - edge) {
+            var above = r.top - h - gap;
+            top = above >= edge ? above : Math.max(edge, vh - h - edge);
+        }
+        el.style.left = Math.round(left) + "px";
+        el.style.top = Math.round(top) + "px";
+    }
+
+    function portalOut(el, trigger) {
+        if (!el.hasAttribute("data-sv-portal")) return;
+        el._svHome = { parent: el.parentNode, next: el.nextSibling };
+        d.body.appendChild(el);
+        el.style.position = "fixed";
+        anchor(el, trigger);
+        el._svAnchor = function () { anchor(el, trigger); };
+        window.addEventListener("resize", el._svAnchor);
+        /* Capture phase: the trigger may sit inside a scrolling region. */
+        window.addEventListener("scroll", el._svAnchor, true);
+    }
+
+    function portalHome(el) {
+        if (!el._svHome) return;
+        if (el._svAnchor) {
+            window.removeEventListener("resize", el._svAnchor);
+            window.removeEventListener("scroll", el._svAnchor, true);
+            el._svAnchor = null;
+        }
+        var home = el._svHome;
+        el._svHome = null;
+        el.style.position = "";
+        el.style.left = "";
+        el.style.top = "";
+        if (home.parent && d.contains(home.parent)) {
+            home.parent.insertBefore(el, home.next);
+        }
+    }
+
     function backdropFor(el) {
         var sel = el.getAttribute("data-sv-backdrop");
         /* Some dialogs ARE their own scrim: a full-viewport `inset: 0` box
@@ -190,6 +257,9 @@
         el.style.setProperty("--sv-stack", String(depth));
         el.classList.add("is-open");
         el.removeAttribute("hidden");
+        /* After is-open, so the element has been laid out and offsetWidth /
+         * offsetHeight are real numbers to anchor against. */
+        portalOut(el, trigger);
 
         if (modal) {
             el.setAttribute("role", el.getAttribute("role") || "dialog");
@@ -240,6 +310,7 @@
         el.classList.remove("is-open");
         el.style.removeProperty("--sv-stack");
         el.removeAttribute("aria-modal");
+        portalHome(el);
 
         /* Only hide the backdrop if nothing else is still using it. */
         if (entry.backdrop) {

@@ -455,28 +455,57 @@
                   </div>
                 </div>
                 
-                <!-- Notification Bell -->
-                <div class="notif-bell" onclick="this.classList.toggle('open')" id="notifBell">
+                {% comment %}
+                Notification bell. The panel is a sibling of the trigger, not a
+                child of it, and carries data-sv-portal: .topbar has a
+                backdrop-filter, which creates a stacking context, and a
+                stacking context cannot be escaped by declaring a bigger
+                z-index — only by leaving the DOM subtree. That is why this
+                panel used to open UNDERNEATH the signals rail down the right
+                edge. The controller moves it to <body> on open, anchors it to
+                the bell, and puts it back on close.
+                {% endcomment %}
+                <button type="button" class="notif-bell" id="notifBell"
+                        data-sv-open="notifPanel" aria-haspopup="true"
+                        aria-expanded="false"
+                        aria-label="Notifications{% if notification_count %} — {{ notification_count }} unread{% endif %}">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;"><path d="M8 1C5.8 1 4 2.8 4 5v3l-1 2h10l-1-2V5c0-2.2-1.8-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="8" cy="14" r="1.5" fill="currentColor"/></svg>
                     {% if notification_count %}<span class="notif-badge">{{ notification_count }}</span>{% endif %}
-                    <div class="notif-dropdown" onclick="event.stopPropagation()">
-                        <div class="notif-header">
-                            <span>Notifications</span>
-                            <div style="display:flex;gap:10px;">
-                                <a href="{% url 'mark_all_notifications_read' %}" style="color:var(--text-muted);font-size:9px;text-decoration:none;">Mark all read</a>
-                                <a href="{% url 'user_notifications' %}" style="color:var(--accent);font-size:10px;text-decoration:none;">Settings</a>
-                            </div>
+                </button>
+                <div class="notif-dropdown" id="notifPanel" role="menu"
+                     data-sv-overlay="menu" data-sv-portal>
+                    <div class="notif-header">
+                        <span>Notifications{% if notification_count %} <span class="nh-count">{{ notification_count }} new</span>{% endif %}</span>
+                        <div style="display:flex;gap:10px;align-items:center;">
+                            {% if notification_count %}<a href="{% url 'mark_all_notifications_read' %}" class="nh-link">Mark all read</a>{% endif %}
+                            <a href="{% url 'user_notifications' %}" class="nh-link nh-link--accent">Settings</a>
                         </div>
-                        {% for n in recent_notifications %}
-                        <div class="notif-item {% if not n.read %}unread{% endif %}" onclick="window.location='{{ n.url }}'">
-                            <div class="ni-title">{{ n.title }}</div>
-                            <div class="ni-body">{{ n.body|truncatechars:80 }}</div>
-                            <div class="ni-time">{{ n.created_at|timesince }} ago</div>
-                        </div>
-                        {% empty %}
-                        <div class="notif-empty">No notifications yet</div>
-                        {% endfor %}
                     </div>
+                    <div class="notif-scroll">
+                    {% for n in recent_notifications %}
+                        {% comment %}
+                        Each row now says what KIND of event it was and how old
+                        it is, in a colour that matches its severity. A stack of
+                        identically-styled titles gave the operator no way to
+                        pick the one that mattered out of ten.
+                        {% endcomment %}
+                        <a class="notif-item ni-{{ n.notification_type }} {% if not n.read %}unread{% endif %}"
+                           href="{{ n.url|default:'/notifications/' }}" role="menuitem">
+                            <span class="ni-kind">{{ n.get_notification_type_display|default:n.notification_type }}</span>
+                            <div class="ni-title">{{ n.title }}</div>
+                            {% if n.body %}<div class="ni-body">{{ n.body|truncatechars:110 }}</div>{% endif %}
+                            <div class="ni-time"><span class="sv-age" data-sv-at="{{ n.created_at|date:'c' }}">{{ n.created_at|timesince }} ago</span></div>
+                        </a>
+                    {% empty %}
+                        <div class="sv-empty">
+                            <b>Nothing yet</b>
+                            Fills, new signals and bot events land here as they happen.
+                        </div>
+                    {% endfor %}
+                    </div>
+                    {% if recent_notifications %}
+                    <a class="notif-foot" href="{% url 'user_notifications' %}">View all notifications &#9656;</a>
+                    {% endif %}
                 </div>
                 {% get_display_name as uname %}
                 <div class="user-menu" id="userMenu">
@@ -728,12 +757,41 @@
                     <span class="ip-sub">open now</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">OPEN POSITIONS</div>
-                        {% for p in panel_recent_positions %}
-                        <div class="ip-dd-item">
-                            <span style="font-weight:700;color:var(--text-primary);">{{ p.instrument.symbol }}</span>
-                            <span style="font-size:9px;">{{ p.direction|upper }}</span>
+                        {% comment %}
+                        The R-multiple is the number that says whether a
+                        position is working, and it is computable here from the
+                        entry, the stop it opened with and a live quote.
+                        Position.unrealized_pnl is deliberately not used:
+                        nothing in the codebase ever writes it, so it would
+                        render +0.00 on every row forever.
+                        {% endcomment %}
+                        {% for t in panel_open_trades %}
+                        <div class="ip-dd-row">
+                            <span class="ipr-sym">{{ t.symbol }}</span>
+                            <span class="ipr-side ipr-side--{{ t.side|lower }}">{{ t.side }}</span>
+                            <span class="ipr-qty">{{ t.qty|floatformat:"-4" }}</span>
+                            {% if t.r is not None %}
+                              <span class="ipr-r {% if t.r >= 0 %}up{% else %}down{% endif %}">{{ t.r|floatformat:2 }}R</span>
+                            {% else %}
+                              <span class="ipr-r sv-unknown" title="No live quote for this symbol">&mdash;</span>
+                            {% endif %}
+                            {% if t.pct is not None %}
+                              <span class="ipr-pct {% if t.pct >= 0 %}up{% else %}down{% endif %}">{{ t.pct|floatformat:2 }}%</span>
+                            {% else %}<span class="ipr-pct sv-unknown">&mdash;</span>{% endif %}
+                            {% if t.paper %}<span class="sv-chip sv-chip--muted">paper</span>{% endif %}
                         </div>
-                        {% empty %}<div class="ip-dd-empty">No open positions</div>{% endfor %}
+                        {% empty %}
+                        <div class="sv-empty"><b>Nothing open</b>Positions the bot opens appear here with their live R.</div>
+                        {% endfor %}
+                        {% for p in panel_recent_positions %}
+                        <div class="ip-dd-row">
+                            <span class="ipr-sym">{{ p.instrument.symbol }}</span>
+                            <span class="ipr-side ipr-side--{{ p.direction|lower }}">{{ p.direction|upper }}</span>
+                            <span class="ipr-qty">{{ p.quantity|floatformat:"-4" }}</span>
+                            <span class="ipr-pct">@ {{ p.entry_price|floatformat:"-4" }}</span>
+                            <span class="sv-chip sv-chip--muted">manual</span>
+                        </div>
+                        {% endfor %}
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View All Positions</div>
                     </div>
                 </a>
@@ -753,7 +811,16 @@
                             <div class="ip-dd-cell"><span class="dk">MODE</span><span class="dv">{{ panel_bot_mode|default:"—"|upper }}</span></div>
                             <div class="ip-dd-cell"><span class="dk">OPEN</span><span class="dv">{% if panel_bot_open is None %}<span class="sv-unknown">&mdash;</span>{% else %}{{ panel_bot_open }}{% endif %}</span></div>
                             <div class="ip-dd-cell"><span class="dk">24H P&amp;L</span><span class="dv">{% if panel_bot_pnl_24h_display %}{{ panel_bot_pnl_24h_display }}{% else %}<span class="sv-unknown" title="No bot trades closed in the last 24 hours">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">CLOSED 24H</span><span class="dv">{{ panel_bot_trades_24h|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">WIN RATE</span><span class="dv">{% if panel_bot_winrate is not None %}{{ panel_bot_winrate }}%{% else %}<span class="sv-unknown" title="Nothing closed in the last 24 hours">&mdash;</span>{% endif %}</span></div>
                         </div>
+                        {% if panel_bot_last %}
+                        <div class="ip-dd-note">
+                            Last close: <strong>{{ panel_bot_last.symbol }}</strong> {{ panel_bot_last.outcome }}{% if panel_bot_last.r is not None %}
+                            <span class="{% if panel_bot_last.r >= 0 %}up{% else %}down{% endif %}">{{ panel_bot_last.r|floatformat:2 }}R</span>{% endif %}
+                            <span class="sv-age" data-sv-at="{{ panel_bot_last.when|date:'c' }}"></span>
+                        </div>
+                        {% endif %}
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Go to Bot Program</div>
                     </div>
                 </a>
@@ -784,6 +851,16 @@
                             <div class="ip-dd-cell"><span class="dk">TOTAL</span><span class="dv">{{ panel_signals|default:"0" }}</span></div>
                             <div class="ip-dd-cell"><span class="dk">24H NEW</span><span class="dv">{{ panel_signals_24h|default:"0" }}</span></div>
                         </div>
+                        {% comment %} The counts said how many. They never said which. {% endcomment %}
+                        {% for sig in panel_top_signals %}
+                        <div class="ip-dd-row">
+                            <span class="ipr-sym">{{ sig.symbol }}</span>
+                            <span class="ipr-side ipr-side--{{ sig.direction }}">{{ sig.direction|upper|slice:":4" }}</span>
+                            <span class="ipr-meter"><span class="ipr-meter-fill" style="width:{{ sig.score_pct }}%;"></span></span>
+                            <span class="ipr-score">{{ sig.score_pct }}</span>
+                            <span class="ipr-age sv-age" data-sv-at="{{ sig.created_at|date:'c' }}"></span>
+                        </div>
+                        {% endfor %}
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Signals</div>
                     </div>
                 </a>
@@ -851,29 +928,104 @@
                     <span class="ip-count gold">{{ notification_count|default:"0" }}</span>
                     <span class="ip-sub">unread</span>
                     <div class="ip-dropdown">
-                        <div class="ip-dd-head">ALERTS</div>
+                        <div class="ip-dd-head">UNREAD ALERTS</div>
+                        {% for na in recent_notifications %}
+                            {% if not na.read %}
+                            <div class="ip-dd-row ip-dd-row--stack">
+                                <span class="ipr-kind">{{ na.get_notification_type_display|default:na.notification_type }}</span>
+                                <span class="ipr-title">{{ na.title|truncatechars:58 }}</span>
+                                <span class="ipr-age sv-age" data-sv-at="{{ na.created_at|date:'c' }}"></span>
+                            </div>
+                            {% endif %}
+                        {% empty %}
+                        <div class="sv-empty"><b>All clear</b>Fills, new signals and bot events land here.</div>
+                        {% endfor %}
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Notifications</div>
                     </div>
                 </a>
-                <div class="ip-cat">
+                {% comment %}
+                DRAWDOWN and VOLATILITY had no panel at all, and DRAWDOWN
+                rendered `|default:"0"` — so with no snapshot ever taken it
+                showed a confident red 0%, which reads as "no downside".
+                {% endcomment %}
+                <a href="{% url 'portfolio_overview' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">DRAWDOWN</span>
-                    <span class="ip-count red">{{ panel_drawdown|default:"0" }}%</span>
+                    <span class="ip-count red">{% if panel_drawdown %}{{ panel_drawdown }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
                     <span class="ip-sub">from peak</span>
-                </div>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">DRAWDOWN FROM PEAK</div>
+                        {% if panel_dd_snapshots %}
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">CURRENT</span><span class="dv red">{% if panel_drawdown %}{{ panel_drawdown }}%{% else %}&mdash;{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">LIMIT</span><span class="dv">{{ panel_max_dd }}%</span></div>
+                            <div class="ip-dd-cell"><span class="dk">PEAK VALUE</span><span class="dv">&euro;{{ panel_dd_peak|floatformat:0 }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">NOW</span><span class="dv">&euro;{{ panel_dd_current|floatformat:0 }}</span></div>
+                        </div>
+                        <div class="ip-dd-note">
+                            Peak set {{ panel_dd_peak_date|date:"M j, Y" }} · measured over
+                            {{ panel_dd_snapshots }} daily snapshot{{ panel_dd_snapshots|pluralize }}
+                        </div>
+                        {% else %}
+                        <div class="sv-empty">
+                            <b>Not measurable yet</b>
+                            Drawdown is computed from daily portfolio snapshots, and none have been taken.
+                        </div>
+                        {% endif %}
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Portfolio</div>
+                    </div>
+                </a>
                 <a href="{% url 'instruments_list' %}?filter=watchlist" class="ip-cat ip-cat-link">
                     <span class="ip-label">WATCHLIST</span>
                     <span class="ip-count">{{ panel_watchlist|default:"0" }}</span>
                     <span class="ip-sub">tracked</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">WATCHLIST</div>
+                        {% for w in panel_watchlist_rows %}
+                        <div class="ip-dd-row">
+                            <span class="ipr-sym">{{ w.symbol }}</span>
+                            <span class="ipr-qty">{% if w.last %}{{ w.last }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                            {% if w.change is not None %}
+                            <span class="ipr-pct {% if w.change >= 0 %}up{% else %}down{% endif %}">{{ w.change|floatformat:2 }}%</span>
+                            {% else %}<span class="ipr-pct sv-unknown">no quote</span>{% endif %}
+                        </div>
+                        {% empty %}
+                        <div class="sv-empty"><b>No watchlist</b>Nothing is flagged for tracking yet.</div>
+                        {% endfor %}
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Instruments</div>
                     </div>
                 </a>
-                <div class="ip-cat">
+                {% comment %}
+                This said "VIX index" and rendered a variable nothing assigns.
+                There is no VIX feed anywhere in this platform, so the label
+                was promising data that could never arrive. It now reports what
+                we can actually measure from our own bars.
+                {% endcomment %}
+                <a href="{% url 'instruments_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">VOLATILITY</span>
-                    <span class="ip-count">{{ panel_vix|default:"—" }}</span>
-                    <span class="ip-sub">VIX index</span>
-                </div>
+                    <span class="ip-count {% if panel_vol_pct >= 60 %}red{% elif panel_vol_pct >= 30 %}gold{% endif %}">{% if panel_vol_pct %}{{ panel_vol_pct }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub">{% if panel_vol_symbol %}{{ panel_vol_symbol }} realised{% else %}no bars{% endif %}</span>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">REALISED VOLATILITY</div>
+                        {% if panel_vol_pct %}
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">ANNUALISED</span><span class="dv">{{ panel_vol_pct }}%</span></div>
+                            <div class="ip-dd-cell"><span class="dk">SYMBOL</span><span class="dv">{{ panel_vol_symbol }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">WINDOW</span><span class="dv">{{ panel_vol_days }} bars</span></div>
+                            <div class="ip-dd-cell"><span class="dk">BASIS</span><span class="dv">{{ panel_vol_tf }} bars</span></div>
+                        </div>
+                        <div class="ip-dd-note">
+                            Standard deviation of {{ panel_vol_tf }} returns, annualised.
+                            Measured from our own price history — not an implied-volatility index.
+                        </div>
+                        {% else %}
+                        <div class="sv-empty">
+                            <b>Not enough history</b>
+                            Needs at least 21 daily bars on one instrument.
+                        </div>
+                        {% endif %}
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Instruments</div>
+                    </div>
+                </a>
                 <a href="{% url 'ai_chat' %}" class="ip-cat ip-cat-link ip-cat-ai">
                     <span class="ip-label">SAURON AI</span>
                     <span class="ip-count">&#x25B8;</span>
@@ -1736,11 +1888,9 @@ function toggleSidebar() {
         });
     }
 })();
-// Close notification dropdown on outside click
-document.addEventListener('click', function(e) {
-    var bell = document.getElementById('notifBell');
-    if (bell && !bell.contains(e.target)) { bell.classList.remove('open'); }
-});
+/* The notification panel's outside-click handler used to live here. It is now
+   the overlay controller's job, along with Escape, focus return, and closing
+   whenever another menu opens — none of which this listener did. */
 // User menu (top-right username dropdown)
 (function(){
     var um = document.getElementById('userMenu');
@@ -2783,13 +2933,72 @@ if ('serviceWorker' in navigator) {
         opts = opts || {};
         var b = document.createElement('div');
         b.className = 'se-bubble ' + role + (opts.error ? ' error' : '');
-        if (opts.html) { b.innerHTML = content; }
-        else { b.textContent = content; }
+
+        /* Copy and delete on every real turn. A chat you cannot prune keeps
+           every mistyped question and every failed answer, and failures are
+           persisted here as error-stamped assistant messages. The thinking
+           placeholder gets no tools — there is nothing yet to act on. */
+        if (role === 'user' || role === 'assistant') {
+            var tools = document.createElement('div');
+            tools.className = 'se-bubble-tools';
+            tools.innerHTML =
+                '<button type="button" class="se-bubble-tool" data-se-copy>copy</button>' +
+                (opts.msgId ? '<button type="button" class="se-bubble-tool se-bubble-tool--danger" ' +
+                              'data-se-del="' + opts.msgId + '" data-se-role="' + role + '">delete</button>' : '');
+            b.appendChild(tools);
+        }
+
+        var body = document.createElement('div');
+        body.className = 'se-bubble-body';
+        if (opts.html) { body.innerHTML = content; }
+        else { body.textContent = content; }
+        b.appendChild(body);
+
         if (opts.id) b.id = opts.id;
+        if (opts.msgId) b.dataset.seMsgId = opts.msgId;
         msgs.appendChild(b);
         msgs.scrollTop = msgs.scrollHeight;
         return b;
     }
+
+    /* Bubble tools, delegated so bubbles added later are covered too. */
+    msgs && msgs.addEventListener('click', function (e) {
+        var copy = e.target.closest && e.target.closest('[data-se-copy]');
+        if (copy) {
+            var bod = copy.closest('.se-bubble').querySelector('.se-bubble-body');
+            navigator.clipboard && navigator.clipboard.writeText(bod ? bod.innerText : '');
+            copy.textContent = 'copied';
+            setTimeout(function () { copy.textContent = 'copy'; }, 1400);
+            return;
+        }
+        var del = e.target.closest && e.target.closest('[data-se-del]');
+        if (!del) return;
+        var id = del.getAttribute('data-se-del');
+        SV.overlay.confirm({
+            title: 'Delete this message',
+            message: del.getAttribute('data-se-role') === 'user'
+                ? 'The reply it produced goes with it — a question and its answer are one exchange.'
+                : 'This answer is removed from the thread.',
+            detail: 'This cannot be undone.',
+            danger: true,
+            confirmLabel: 'Delete'
+        }).then(function (ok) {
+            if (!ok) return;
+            fetch('/research/message/' + id + '/delete/', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'X-CSRFToken': csrf() }
+            }).then(function (r) { return r.json(); }).then(function (d) {
+                if (!d.ok) {
+                    return SV.overlay.alert({ title: 'Could not delete',
+                                              message: d.error || 'The server did not say why.' });
+                }
+                (d.deleted || []).forEach(function (mid) {
+                    var el = msgs.querySelector('[data-se-msg-id="' + mid + '"]');
+                    if (el) el.remove();
+                });
+            });
+        });
+    });
 
     /* Auto-resize the textarea so it grows with content up to its
        CSS max-height, then scrolls. Reset to 'auto' first so shrinking
@@ -2809,7 +3018,7 @@ if ('serviceWorker' in navigator) {
         input.value = '';
         autoResizeInput();
         if (sendBtn) { sendBtn.disabled = true; sendBtn.classList.add('working'); }
-        appendBubble('user', q);
+        var userBubble = appendBubble('user', q);
         var thinking = appendBubble('thinking', 'Sauron is thinking');
         fab.classList.add('working');
 
@@ -2823,12 +3032,23 @@ if ('serviceWorker' in navigator) {
         .then(function(r){ return r.json().catch(function(){return {ok:false, error:'bad json'};}); })
         .then(function(j) {
             thinking && thinking.remove();
+            /* Stamp the question with its id now it has one, so it can be
+               deleted like any other turn. */
+            if (userBubble && j.user_message_id) {
+                userBubble.dataset.seMsgId = j.user_message_id;
+                var ut = userBubble.querySelector('.se-bubble-tools');
+                if (ut) {
+                    ut.insertAdjacentHTML('beforeend',
+                        '<button type="button" class="se-bubble-tool se-bubble-tool--danger" ' +
+                        'data-se-del="' + j.user_message_id + '" data-se-role="user">delete</button>');
+                }
+            }
             if (j.ok && j.assistant_html) {
-                appendBubble('assistant', j.assistant_html, {html: true});
+                appendBubble('assistant', j.assistant_html, {html: true, msgId: j.assistant_message_id});
             } else if (j.assistant_html) {
-                appendBubble('assistant', j.assistant_html, {html: true, error: true});
+                appendBubble('assistant', j.assistant_html, {html: true, error: true, msgId: j.assistant_message_id});
             } else {
-                appendBubble('assistant', j.error || 'No response.', {error: true});
+                appendBubble('assistant', j.error || 'No response.', {error: true, msgId: j.assistant_message_id});
             }
         })
         .catch(function(e) {

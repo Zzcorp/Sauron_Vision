@@ -137,8 +137,11 @@ class ForensicsTests(TestCase):
         _instrument("TSLA")
         _trade(self.cfg, symbol="TSLA")
         r = self.client.get("/forensics/?symbol=TSLA")
-        self.assertContains(r, "TSLA")
-        self.assertNotContains(r, ">AAPL<")
+        # Assert on the rows the view selected, not on the whole document: the
+        # info-panel headband in base.html now lists the operator's OPEN
+        # positions on every page, and _trade() opens its trades — so AAPL
+        # appears in the chrome of every response, correctly.
+        self.assertEqual([t.symbol for t in r.context["page"]], ["TSLA"])
 
     def test_detail_shows_reasons_and_lifecycle(self):
         trade = _trade(self.cfg, metadata={"fill_source": "broker"})

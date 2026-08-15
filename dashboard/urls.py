@@ -28,6 +28,8 @@ from .views_brain_phase38 import (
     earnings_reviews_dashboard, earnings_reviewer_run_now,
     research_view, research_ask, research_new_conversation,
     research_save_as_draft, research_ask_ajax,
+    research_delete_message, research_delete_conversation,
+    research_open_conversation,
 )
 
 from .views_signals_htmx import signal_cards_htmx, signal_performance_htmx
@@ -62,6 +64,7 @@ from .views_rule_control import rule_control_dashboard
 from .views_calibration import calibration_dashboard
 from .views_ai_models import ai_models_dashboard
 from .views_system_health import system_health
+from .views_system_map import system_map
 from .views_forensics import forensics_list, forensics_detail
 from .views_bot_charts import bot_charts
 from .views_allocator import allocator_dashboard
@@ -153,6 +156,9 @@ urlpatterns = [
     path("calibration/", calibration_dashboard, name="calibration_dashboard"),
     path("ai-models/", ai_models_dashboard, name="ai_models_dashboard"),
     path("health/", system_health, name="system_health"),
+    # The admin panel's second division: not "is it switched on?" but "is data
+    # moving?" — the question neither the registry nor the health checks asked.
+    path("admin-dashboard/system-map/", system_map, name="system_map"),
     path("bot-charts/", bot_charts, name="bot_charts"),
     path("forensics/", forensics_list, name="forensics_list"),
     path("forensics/<int:trade_id>/", forensics_detail, name="forensics_detail"),
@@ -380,4 +386,12 @@ urlpatterns = [
          name="research_save_as_draft"),
     # Phase 64 — JSON ask endpoint for the global floating chat widget.
     path("research/ask-ajax/", research_ask_ajax, name="research_ask_ajax"),
+    # Chat housekeeping: a thread you cannot prune accumulates every mistyped
+    # question and every failed answer forever.
+    path("research/message/<int:message_id>/delete/", research_delete_message,
+         name="research_delete_message"),
+    path("research/conversation/<int:conversation_id>/delete/",
+         research_delete_conversation, name="research_delete_conversation"),
+    path("research/conversation/<int:conversation_id>/open/",
+         research_open_conversation, name="research_open_conversation"),
 ]

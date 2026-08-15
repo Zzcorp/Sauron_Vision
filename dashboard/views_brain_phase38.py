@@ -579,6 +579,87 @@ def research_new_conversation(request):
 
 @login_required
 @require_POST
+def research_delete_message(request, message_id: int):
+    """Delete one message from the operator's own conversation.
+
+    A chat you cannot prune is a chat that accumulates every mistyped question
+    and every failed answer forever, and here those failures are stored as
+    error-stamped assistant messages that stay in the thread.
+
+    Scoped to conversation__user, so a message id from someone else's thread
+    is a 404 rather than a deletion.
+    """
+    from django.http import JsonResponse
+    from brain.research_models import ResearchMessage
+
+    msg = ResearchMessage.objects.filter(
+        pk=message_id, conversation__user=request.user).first()
+    if msg is None:
+        return JsonResponse({"ok": False, "error": "not found"}, status=404)
+
+    # A question and the answer it produced are one exchange; deleting the
+    # question and leaving the reply orphaned reads as the assistant talking
+    # to itself.
+    removed = [msg.pk]
+    if msg.role == ResearchMessage.ROLE_USER:
+        reply = (ResearchMessage.objects
+                 .filter(conversation=msg.conversation,
+                         role=ResearchMessage.ROLE_ASSISTANT,
+                         created_at__gt=msg.created_at)
+                 .order_by("created_at").first())
+        if reply is not None:
+            removed.append(reply.pk)
+            reply.delete()
+    msg.delete()
+    return JsonResponse({"ok": True, "deleted": removed})
+
+
+@login_required
+@require_POST
+def research_delete_conversation(request, conversation_id: int):
+    """Delete a whole thread. Messages cascade."""
+    from django.http import JsonResponse
+    from brain.research_models import ResearchConversation
+
+    conv = ResearchConversation.objects.filter(
+        pk=conversation_id, user=request.user).first()
+    if conv is None:
+        return JsonResponse({"ok": False, "error": "not found"}, status=404)
+    was_active = conv.is_active
+    conv.delete()
+    # Deleting the open thread must leave one to type into, or the page comes
+    # back with no conversation at all.
+    if was_active:
+        from brain.research_agent import get_or_create_active_conversation
+        get_or_create_active_conversation(request.user)
+    return JsonResponse({"ok": True, "was_active": was_active})
+
+
+@login_required
+@require_POST
+def research_open_conversation(request, conversation_id: int):
+    """Resume an archived thread.
+
+    Past conversations were listed in a table with no way to open one, so the
+    history was visible and unreachable — the only thing you could do with a
+    conversation was start a new one on top of it.
+    """
+    from brain.research_models import ResearchConversation
+
+    conv = ResearchConversation.objects.filter(
+        pk=conversation_id, user=request.user).first()
+    if conv is not None:
+        # Exactly one active thread per user is the invariant the rest of this
+        # module relies on.
+        ResearchConversation.objects.filter(
+            user=request.user, is_active=True).update(is_active=False)
+        conv.is_active = True
+        conv.save(update_fields=["is_active"])
+    return HttpResponseRedirect(reverse("research_view"))
+
+
+@login_required
+@require_POST
 def research_save_as_draft(request, message_id: int):
     """Phase-59: extract a strategy-draft block from an assistant message
     and persist it as a Phase-41 GeneratedSetupProposal (is_active=False,
