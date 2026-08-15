@@ -179,7 +179,7 @@ which is how it catches a task that reports success and writes nothing.
     background:var(--bg-card); border:1px solid var(--border); }
 .tm-leg:hover, .tm-leg.is-on { border-color:var(--accent); }
 .tm-leg-n { font-family:var(--font-mono); font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--text-primary); }
-.tm-leg-l { font-family:var(--font-mono); font-size:8.5px; letter-spacing:.08em; color:var(--text-muted); white-space:nowrap; }
+.tm-leg-l { font-family:var(--font-mono); font-size:9.5px; letter-spacing:.08em; color:var(--text-muted); white-space:nowrap; }
 .tm-leg--good .tm-leg-l     { color:var(--accent); }
 .tm-leg--warning .tm-leg-l  { color:var(--accent-gold); }
 .tm-leg--serious .tm-leg-l  { color:#ff9040; }
@@ -248,7 +248,7 @@ which is how it catches a task that reports success and writes nothing.
 .tm-node--critical { border-left-color:var(--accent-red); }
 .tm-node--muted    { border-left-color:var(--text-muted); opacity:.72; }
 .tm-node-top { display:flex; align-items:center; gap:7px; }
-.tm-node-name { flex:1; font-size:11.5px; font-weight:600; color:var(--text-primary); line-height:1.3; min-width:0; }
+.tm-node-name { flex:1; font-size:12.5px; font-weight:600; color:var(--text-primary); line-height:1.3; min-width:0; }
 .tm-state { font-size:11px; line-height:1; flex:0 0 auto; }
 .tm-state--good { color:var(--accent); }
 .tm-state--warning { color:var(--accent-gold); }
@@ -256,7 +256,7 @@ which is how it catches a task that reports success and writes nothing.
 .tm-state--critical { color:var(--accent-red); }
 .tm-state--muted { color:var(--text-muted); }
 .tm-node-foot { display:flex; justify-content:space-between; gap:8px;
-    font-family:var(--font-mono); font-size:9px; color:var(--text-muted); }
+    font-family:var(--font-mono); font-size:10px; color:var(--text-muted); }
 .tm-node-metric em { font-style:normal; letter-spacing:.06em; }
 
 /* The Eye. Bigger, centred, and the only node that draws itself. */
@@ -280,33 +280,38 @@ which is how it catches a task that reports success and writes nothing.
 @media (prefers-reduced-motion: reduce) { .tm-edge--live { animation:none; } }
 .tm-node.is-faded { opacity:.22; }
 
-/* ── Inspector ───────────────────────────────────────────────────── */
-.tm-inspect { position:fixed; top:0; right:0; bottom:0; width:min(380px,92vw);
+/* ── Inspector ────────────────────────────────────────────────────
+   Sized to be READ. The first cut used chart-annotation type (9-11px)
+   for prose the operator actually has to act on — a truncated reason in
+   a font you squint at is a detail panel in name only. ─────────────── */
+.tm-inspect { position:fixed; top:0; right:0; bottom:0; width:min(460px,94vw);
     background:var(--bg-card); border-left:1px solid var(--border);
     box-shadow:-18px 0 48px rgba(0,0,0,.5); display:flex; flex-direction:column;
     transform:translateX(100%); transition:transform .2s cubic-bezier(.2,.7,.3,1);
     z-index:calc(var(--z-panel, 2000) + var(--sv-stack, 0)); visibility:hidden; }
 .tm-inspect.is-open { transform:translateX(0); visibility:visible; }
 .tm-inspect-head { display:flex; align-items:center; gap:9px; padding:14px 16px; border-bottom:1px solid var(--border); }
-.tm-inspect-title { flex:1; font-family:var(--font-display); font-size:14px; letter-spacing:1px; color:var(--text-primary); }
+.tm-inspect-title { flex:1; font-family:var(--font-display); font-size:15px; letter-spacing:1px; color:var(--text-primary); }
 .tm-inspect-x { background:none; border:0; font-size:22px; line-height:1; color:var(--text-muted); cursor:pointer; }
 .tm-inspect-x:hover { color:var(--text-primary); }
-.tm-inspect-body { padding:16px; overflow-y:auto; flex:1; }
-.tm-inspect-hint { font-size:12px; color:var(--text-muted); line-height:1.6; }
-.tm-ins-why { font-size:12.5px; line-height:1.6; color:var(--text-secondary); margin:0 0 14px; }
-.tm-ins-row { display:flex; gap:10px; padding:6px 0; border-bottom:1px solid var(--border); font-size:11.5px; }
+.tm-inspect-body { padding:18px 16px; overflow-y:auto; flex:1; }
+.tm-inspect-hint { font-size:13px; color:var(--text-muted); line-height:1.6; }
+.tm-ins-why { font-size:13.5px; line-height:1.65; color:var(--text-secondary); margin:0 0 14px; }
+.tm-ins-row { display:flex; gap:12px; padding:8px 0; border-bottom:1px solid var(--border);
+    font-size:13px; line-height:1.55; }
 .tm-ins-row:last-child { border-bottom:0; }
-.tm-ins-row .k { font-family:var(--font-mono); font-size:9px; letter-spacing:.1em; text-transform:uppercase;
-    color:var(--text-muted); min-width:62px; flex:0 0 auto; padding-top:2px; }
-.tm-ins-row .v { color:var(--text-primary); word-break:break-word; }
-.tm-ins-chips { display:flex; flex-wrap:wrap; gap:5px; }
-.tm-ins-chip { font-family:var(--font-mono); font-size:9px; padding:2px 6px; border-radius:4px;
+.tm-ins-row .k { font-family:var(--font-mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--text-muted); min-width:84px; flex:0 0 auto; padding-top:3px; }
+.tm-ins-row .v { color:var(--text-primary); word-break:break-word; min-width:0; }
+.tm-ins-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.tm-ins-chip { font-family:var(--font-mono); font-size:11px; padding:3px 8px; border-radius:4px;
     background:var(--bg-secondary); color:var(--text-secondary); }
+.tm-ins-said { font-family:var(--font-mono); font-size:12px; line-height:1.6; }
 .tm-ins-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; padding-top:14px; border-top:1px solid var(--border); }
-.tm-ins-note { margin-top:12px; font-size:11px; color:var(--text-muted); line-height:1.55; }
-.tm-ins-note--found { margin:0 0 14px; padding:9px 11px; border-left:2px solid var(--accent-gold);
+.tm-ins-note { margin-top:12px; font-size:12.5px; color:var(--text-muted); line-height:1.6; }
+.tm-ins-note--found { margin:0 0 14px; padding:10px 12px; border-left:2px solid var(--accent-gold);
     background:color-mix(in srgb,var(--accent-gold) 7%,transparent); border-radius:0 5px 5px 0;
-    color:var(--text-secondary); font-size:11.5px; }
+    color:var(--text-secondary); font-size:13px; line-height:1.6; }
 
 .tm-problems { margin-top:20px; }
 .tm-problem-count { font-family:var(--font-mono); font-size:11px; color:var(--accent-red);
@@ -461,7 +466,7 @@ which is how it catches a task that reports success and writes nothing.
             row("Fed by", fedBy.length ? chips(fedBy) : '<span class="sv-unknown">nothing upstream</span>') +
             row("Last run", esc(n.last_run) + (n.last_status ? " · " + esc(n.last_status) : "")) +
             row("Runs", n.runs + " / " + n.errors + " errors") +
-            (n.last_message ? row("Said", '<span style="font-family:var(--font-mono);font-size:10.5px;">' + esc(n.last_message) + "</span>") : "");
+            (n.last_message ? row("Said", '<span class="tm-ins-said">' + esc(n.last_message) + "</span>") : "");
 
         var actions = [];
         if (n.can_toggle) {

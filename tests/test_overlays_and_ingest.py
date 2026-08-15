@@ -1277,31 +1277,88 @@ class TaskGateThroughputTests(TestCase):
 
 
 class ForexBudgetTests(TestCase):
-    """Alpha Vantage's free tier is 25 requests a day. The task charged the
-    budget for every loop iteration — including the ones where the adapter
-    returned None before making a request, which is what it does when no key
-    is configured. So ~20 no-op calls a day exhausted a quota belonging to a
-    key that does not exist, and the task then reported 'budget spent', which
-    reads as 'we used our allowance' rather than 'we are not configured'."""
+    """Alpha Vantage's free tier is 25 requests a day, and the key was never
+    even set — which used to mean forex had no quote path at all: bars,
+    signals, an enabled bot, and no mark to measure a stop against. The task
+    now covers every pair keylessly through yfinance, and the paid budget is
+    only ever charged for requests that actually went out."""
 
-    def test_no_key_means_no_budget_is_charged(self):
+    def setUp(self):
+        self._forget_budget()
+
+    def tearDown(self):
+        # A spent allowance must not leak into whatever test runs next — but
+        # only THIS key is deleted: with a real Redis behind the cache,
+        # cache.clear() is FLUSHDB on the db that also carries the Celery
+        # broker and the channel layer.
+        self._forget_budget()
+
+    def _forget_budget(self):
+        from django.core.cache import cache
+        from market_data.tasks import _budget_key
+        cache.delete(_budget_key("alpha_vantage"))
+
+    def _fake_yf(self, price=1.0912):
+        from unittest.mock import MagicMock
+        fake = MagicMock()
+        fake.Ticker.return_value.info = {
+            "regularMarketPrice": price,
+            "regularMarketChangePercent": 0.12,
+        }
+        return fake
+
+    def test_no_key_charges_nothing_and_yfinance_covers_the_universe(self):
         from unittest.mock import patch
+        from instruments.models import Instrument
+        Instrument.objects.get_or_create(
+            symbol="EURUSD", defaults={"name": "EURUSD", "asset_class": "forex"})
+        fake = self._fake_yf()
         with patch("market_data.tasks._record_api_call") as charged, \
              patch("market_data.adapters.alpha_vantage.API_KEY", ""), \
-             patch("core.market_calendar.is_forex_open", return_value=True):
+             patch("core.market_calendar.is_forex_open", return_value=True), \
+             patch.dict("sys.modules", {"yfinance": fake}):
             from market_data.tasks import fetch_forex_quotes
             result = fetch_forex_quotes.__wrapped__.__wrapped__()
         charged.assert_not_called()
-        self.assertEqual(result["skipped"], "no_api_key")
+        self.assertGreaterEqual(result["fetched"], 1)
+        self.assertEqual(result["av_used"], 0)
+        # A covered universe is healthy, not a 'not configured' warning.
+        self.assertNotIn("skipped", result)
+        # The pair went out in Yahoo's spelling, or the empty frame would
+        # have read as 'no history available'.
+        fake.Ticker.assert_any_call("EURUSD=X")
+        from market_data.models import LiveQuote
+        self.assertEqual(
+            LiveQuote.objects.get(instrument__symbol="EURUSD").source,
+            "yfinance")
 
     def test_the_unconfigured_case_is_not_dressed_as_an_exhausted_quota(self):
         from unittest.mock import patch
         with patch("market_data.adapters.alpha_vantage.API_KEY", ""), \
-             patch("core.market_calendar.is_forex_open", return_value=True):
+             patch("core.market_calendar.is_forex_open", return_value=True), \
+             patch.dict("sys.modules", {"yfinance": self._fake_yf()}):
             from market_data.tasks import fetch_forex_quotes
             result = fetch_forex_quotes.__wrapped__.__wrapped__()
-        self.assertNotIn("budget", str(result.get("reason", "")).lower())
-        self.assertIn("ALPHA_VANTAGE_API_KEY", result["hint"])
+        self.assertNotIn("budget", str(result.get("note", "")).lower())
+        self.assertIn("ALPHA_VANTAGE_API_KEY", result["note"])
+
+    def test_a_spent_budget_no_longer_silences_forex_marks(self):
+        """The budget caps what Alpha Vantage is asked; it must not cap the
+        keyless fallback that keeps the marks alive."""
+        from unittest.mock import patch
+        from instruments.models import Instrument
+        from market_data.tasks import _record_api_call, AV_DAILY_LIMIT
+        Instrument.objects.get_or_create(
+            symbol="EURUSD", defaults={"name": "EURUSD", "asset_class": "forex"})
+        _record_api_call("alpha_vantage", AV_DAILY_LIMIT)
+        fake = self._fake_yf()
+        with patch("market_data.adapters.alpha_vantage.API_KEY", "a-key"), \
+             patch("core.market_calendar.is_forex_open", return_value=True), \
+             patch.dict("sys.modules", {"yfinance": fake}):
+            from market_data.tasks import fetch_forex_quotes
+            result = fetch_forex_quotes.__wrapped__.__wrapped__()
+        self.assertEqual(result["av_used"], 0)
+        self.assertGreaterEqual(result["fetched"], 1)
 
 
 class QuotePrecedenceTests(TestCase):

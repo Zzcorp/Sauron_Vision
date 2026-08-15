@@ -33,16 +33,43 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Platform spelling -> Yahoo spelling. Only entries that genuinely differ.
+#
+# Every entry was verified against the live API before it was written down
+# (2026-08-15): a wrong mapping returns an empty frame rather than an error,
+# so an unverified guess here is a symbol that silently never has bars.
 YF_SYMBOL_MAP = {
     # Metals and energy: Yahoo quotes the front-month future.
     "XAUUSD": "GC=F", "XAGUSD": "SI=F", "XPTUSD": "PL=F", "XPDUSD": "PA=F",
     "WTIUSD": "CL=F", "BRNUSD": "BZ=F", "NGUSD": "NG=F", "HGUSD": "HG=F",
-    # Grains and softs.
+    "HEATOILUSD": "HO=F", "GASOLINEUSD": "RB=F", "OILFUTURES": "CL=F",
+    "ALUMUSD": "ALI=F",
+    # Grains, softs and meats, in the catalogue's spelling. The short forms
+    # (ZCUSD, KCUSD...) predate seed_instruments and are kept as aliases.
+    "WHEATUSD": "ZW=F", "CORNUSD": "ZC=F", "SOYUSD": "ZS=F",
+    "COFFEEUSD": "KC=F", "COCOAUSD": "CC=F", "COTTONUSD": "CT=F",
+    "SUGARUSD": "SB=F", "OATS": "ZO=F", "RICE": "ZR=F",
+    "ORANGEJUICE": "OJ=F", "LUMBER": "LBR=F",
+    "LIVECATTLE": "LE=F", "LEANHOGS": "HE=F",
     "ZCUSD": "ZC=F", "ZWUSD": "ZW=F", "ZSUSD": "ZS=F",
     "KCUSD": "KC=F", "CTUSD": "CT=F", "SBUSD": "SB=F", "CCUSD": "CC=F",
-    # Indices.
+    # Indices, in the catalogue's spelling. The short forms are aliases.
+    "SPX500": "^GSPC", "NSDQ100": "^NDX", "DJ30": "^DJI",
+    "RUSSELL2000": "^RUT", "FTSE100": "^FTSE", "DAX40": "^GDAXI",
+    "CAC40": "^FCHI", "STOXX50": "^STOXX50E", "NIKKEI225": "^N225",
+    "HANGSENG": "^HSI", "ASX200": "^AXJO", "IBEX35": "^IBEX",
+    "DXY": "DX-Y.NYB",
     "SPX": "^GSPC", "NDX": "^NDX", "DJI": "^DJI", "RUT": "^RUT",
     "VIX": "^VIX", "FTSE": "^FTSE", "DAX": "^GDAXI", "N225": "^N225",
+}
+
+# Catalogue symbols with NO free keyless source. The LME base metals are not
+# on Yahoo (ZINC.L and TIN.L look plausible and return an LSE equity and NaN
+# closes — worse than nothing), and the gold/silver crosses have no =X pair.
+# Pollers skip these by name instead of warning about them forever; they get
+# data the day a broker feed covers them.
+YF_UNAVAILABLE = {
+    "ZINCUSD", "NICKELUSD", "LEADUSD", "TINUSD",
+    "XAUGBP", "XAUEUR", "XAGEUR",
 }
 
 # Yahoo only serves intraday history for a limited window.

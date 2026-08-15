@@ -79,8 +79,9 @@ DEFAULT_COMPONENTS = [
 
     # Scrapers
     {"key": "scraper_live_quotes", "name": "Live Quotes Fetcher", "description": "Fetch real-time price quotes for watchlist (every 60s)", "category": "scraper"},
-    {"key": "scraper_forex", "name": "Forex Quotes", "description": "Fetch forex pair quotes (every 2 min)", "category": "scraper"},
-    {"key": "scraper_commodities", "name": "Commodity Quotes", "description": "Fetch commodity prices (every 5 min)", "category": "scraper"},
+    {"key": "scraper_forex", "name": "Forex Quotes", "description": "Forex marks — Alpha Vantage when a key is set, keyless yfinance for the rest (every 10 min)", "category": "scraper"},
+    {"key": "scraper_commodities", "name": "Commodity Quotes", "description": "Commodity prices from the catalogue via yfinance (every 5 min)", "category": "scraper"},
+    {"key": "scraper_indices", "name": "Index Quotes", "description": "Index levels via yfinance — feeds the headband, no bot reads these (every 5 min)", "category": "scraper"},
     {"key": "scraper_news", "name": "Breaking News", "description": "Fetch news from APIs and RSS (every 3 min)", "category": "scraper"},
     {"key": "scraper_sentiment", "name": "Social Sentiment", "description": "Reddit, StockTwits sentiment (every 30 min)", "category": "scraper"},
     {"key": "scraper_calendar", "name": "Economic Calendar", "description": "Check upcoming economic events (every 30 min)", "category": "scraper"},

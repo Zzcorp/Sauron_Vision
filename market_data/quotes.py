@@ -101,9 +101,15 @@ def _dec(value):
     if value is None:
         return None
     try:
-        return Decimal(str(value))
+        d = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return None
+    # Decimal("nan") parses cleanly — the except above never fires — and any
+    # ordering comparison against it raises InvalidOperation, so a NaN that
+    # reached `price <= 0` would kill the caller mid-task. Yahoo genuinely
+    # serves NaN closes (in-progress FX candles, thin listings): non-finite
+    # is "no value", not a value.
+    return d if d.is_finite() else None
 
 
 def write_quote(symbol: str, *, last, source: str, change_pct=None,

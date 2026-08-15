@@ -29,6 +29,116 @@ def _record_api_call(provider: str, n: int = 1) -> None:
     cache.set(key, int(cache.get(key, 0)) + n, 60 * 60 * 26)
 
 
+def _finite(value):
+    """float(value) when it is a real, finite number — else None.
+
+    Yahoo genuinely serves NaN: an in-progress FX candle keeps a null Close
+    that survives yfinance's row cleanup, and NaN is truthy, parses cleanly
+    into Decimal, and then raises InvalidOperation on the first comparison.
+    A NaN must die here, not three frames deeper inside a task loop.
+    """
+    import math
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _yf_market_quote(ysym: str) -> dict | None:
+    """Last price for a Yahoo symbol, keyless. None when Yahoo has nothing.
+
+    `.info` carries the change percent the headband shows; when it is missing
+    or empty (FX pairs sometimes return a hollow dict) the 1-minute history
+    still has a last print.
+    """
+    import yfinance as yf
+
+    try:
+        info = yf.Ticker(ysym).info or {}
+        price = (_finite(info.get("regularMarketPrice"))
+                 or _finite(info.get("previousClose")))
+        if price:
+            return {"last": price,
+                    "change_pct": _finite(info.get("regularMarketChangePercent")),
+                    "volume": info.get("volume")}
+    except Exception as e:
+        logger.debug("[yf quote] info(%s) failed: %s", ysym, e)
+    try:
+        df = yf.Ticker(ysym).history(period="1d", interval="1m")
+        if df is not None and not df.empty:
+            last = _finite(df["Close"].iloc[-1])
+            if last:
+                return {"last": last, "change_pct": None, "volume": None}
+    except Exception as e:
+        logger.warning("[yf quote] history(%s) failed: %s", ysym, e)
+    return None
+
+
+def _held_symbols(instruments, source: str) -> set[str]:
+    """Symbols whose LiveQuote a fresher, higher-priority feed currently holds.
+
+    Polling them is pure waste three times over: the network call is spent,
+    the write is refused by source precedence, and the run is then scored
+    'handled N rows and stored none' — a warning earned for having BETTER
+    data than this poller provides. Skip them before the request goes out.
+    """
+    from market_data.models import LiveQuote
+    from market_data.quotes import should_write
+
+    held = set()
+    for lq in LiveQuote.objects.filter(
+            instrument__in=list(instruments)).select_related("instrument"):
+        if not should_write(lq, source):
+            held.add(lq.instrument.symbol)
+    return held
+
+
+def _rotation_offset(asset_class: str, length: int) -> int:
+    """One step forward per run, counted — never derived from the clock.
+
+    A wall-clock offset aliases against the beat cadence: a 300s beat
+    advances a minute-keyed offset by exactly 5, and whenever gcd(5, length)
+    is not 1 the offset is pinned to a residue class — with 15 rotating
+    commodities, six of them were unreachable on every run, forever. A
+    counter cannot alias.
+    """
+    from django.core.cache import cache
+    key = f"quoterot:{asset_class}"
+    try:
+        counter = cache.incr(key)
+    except ValueError:
+        cache.set(key, 1, None)
+        counter = 1
+    return counter % length
+
+
+def _quote_universe(asset_class: str, limit: int) -> list:
+    """Instruments to poll: the scan universe first, topped up from the
+    catalogue.
+
+    quote_targets alone is watchlist + enabled-bot symbols, which on a fresh
+    install is empty for commodities and indices — and the headband reads
+    those quotes, so an empty universe would mean a permanently blank band.
+    The top-up rotates one step per run so a truncated tail still cycles
+    through the cadence rather than leaving the same symbols unpolled.
+    """
+    from instruments.models import Instrument
+    from signals.universe import quote_targets
+
+    targets = quote_targets(asset_class, limit=limit)
+    if len(targets) < limit:
+        have = {i.symbol for i in targets}
+        extra = [i for i in Instrument.objects.filter(
+                     is_active=True, asset_class=asset_class).order_by("symbol")
+                 if i.symbol not in have]
+        if extra:
+            offset = _rotation_offset(asset_class, len(extra))
+            extra = extra[offset:] + extra[:offset]
+        targets = list(targets) + extra[:limit - len(targets)]
+    return targets
+
+
 
 @shared_task(bind=True, max_retries=3)
 @guarded_task("scraper_live_quotes")
@@ -71,106 +181,198 @@ def fetch_live_quotes(self, watchlist_only=True):
 @shared_task
 @guarded_task("scraper_forex")
 def fetch_forex_quotes():
-    """Tier 1: Fetch forex rates via Alpha Vantage."""
-    from instruments.models import Instrument
-    from market_data.models import LiveQuote
-    from market_data.adapters.alpha_vantage import fetch_forex_rate
+    """Tier 1: forex marks — Alpha Vantage when configured, yfinance always.
+
+    A forex bot's paper mark comes from LiveQuote, and for months the only
+    writer of forex rows was Alpha Vantage behind a key nobody had set — so
+    every forex pair had bars, signals, even a bot, and no price to measure
+    a stop against. Yahoo quotes every pair in the catalogue keylessly
+    (EURUSD -> EURUSD=X), so the free feed now covers whatever the paid one
+    does not, and "no key" stopped being "no marks".
+
+    Alpha Vantage still goes first when a key exists: it is the better print
+    (real bid/ask) and outranks yfinance in the source-precedence table.
+    """
     from core.market_calendar import is_forex_open
+    from market_data.public_feed import yf_symbol
 
     if not is_forex_open():
         return {"status": "skipped", "reason": "forex_closed"}
 
-    from signals.universe import quote_targets
-    fetched = 0
-
-    # Alpha Vantage's free tier allows 25 requests A DAY. At the old 120s
-    # cadence x 10 pairs this ran ~288x over the cap, so every call after
-    # the first few returned a throttle notice and forex quotes silently
-    # stopped updating. Budget the day's calls and spend them evenly.
     from market_data.quotes import write_quote
     from market_data.adapters.alpha_vantage import API_KEY as AV_KEY
+    from market_data.adapters.alpha_vantage import fetch_forex_rate
 
-    # Without a key, fetch_forex_rate returns None before making a request.
-    # The loop below still charged the day's budget for every one of those
-    # non-requests, so ~20 no-op calls a day exhausted a quota belonging to a
-    # key that does not exist — and the task then reported "budget spent",
-    # which reads as "we used our allowance" rather than "we are not
-    # configured". Two very different problems wearing the same message.
-    if not AV_KEY:
-        return {"status": "success", "fetched": 0, "attempted": 0,
-                "skipped": "no_api_key",
-                "hint": "ALPHA_VANTAGE_API_KEY is not set. OANDA practice "
-                        "streaming is free and broker-grade."}
+    fetched = attempted = av_used = held_n = 0
+    covered: set[str] = set()
 
+    # Alpha Vantage's free tier allows 25 requests A DAY. Budget the day's
+    # calls, and never charge the budget for a request that was not made:
+    # the unconfigured case used to burn ~20 phantom calls a day and then
+    # report "budget spent" — an exhausted quota and a missing key are two
+    # very different problems that must not wear the same words.
+    # A zero limit means "no limit" to quote_targets, so a spent budget must
+    # short-circuit here rather than be passed down as a cap.
     budget = _daily_budget_remaining("alpha_vantage", limit=AV_DAILY_LIMIT)
-    if budget <= 0:
-        return {"status": "skipped", "reason": "alpha_vantage daily budget spent",
-                "hint": "OANDA practice streaming is free and broker-grade"}
+    if AV_KEY and budget > 0:
+        from signals.universe import quote_targets
+        targets = quote_targets("forex", limit=budget)
+        held = _held_symbols(targets, "alpha_vantage")
+        held_n += len(held)
+        for inst in targets:
+            if inst.symbol in held:
+                # A streamer owns this row right now. Spending one of the 20
+                # daily calls on a print that precedence will refuse is the
+                # budget subsidising a worse feed.
+                continue
+            # One bad pair must cost that pair, not the run: everything
+            # after an unguarded raise would silently lose its mark update,
+            # and the yfinance phase below would never execute at all.
+            try:
+                rate = fetch_forex_rate(inst.symbol[:3], inst.symbol[3:])
+                if rate and write_quote(inst.symbol, last=rate["rate"],
+                                        source="alpha_vantage",
+                                        bid=rate.get("bid"),
+                                        ask=rate.get("ask"),
+                                        instrument=inst):
+                    fetched += 1
+                    covered.add(inst.symbol)
+            except Exception as e:
+                logger.warning("[forex quotes] %s via alpha_vantage "
+                               "failed: %s", inst.symbol, e)
+            finally:
+                # Charge for a request that actually went out (or plausibly
+                # did before failing). A None can still mean a spent call —
+                # throttled, bad symbol — but never one that was not made.
+                _record_api_call("alpha_vantage")
+                attempted += 1
+                av_used += 1
 
-    attempted = 0
-    for inst in quote_targets("forex", limit=budget):
-        from_cur = inst.symbol[:3]
-        to_cur = inst.symbol[3:]
-        rate = fetch_forex_rate(from_cur, to_cur)
-        # Charge the budget for a request that actually went out. A None here
-        # can still mean a spent call (throttled, bad symbol), but it can no
-        # longer mean a call that was never attempted.
-        _record_api_call("alpha_vantage")
-        attempted += 1
-        if rate and write_quote(inst.symbol, last=rate["rate"],
-                                 source="alpha_vantage",
-                                 bid=rate.get("bid"), ask=rate.get("ask"),
-                                 instrument=inst):
-            fetched += 1
+    # Keyless coverage for every pair the budget did not reach. Priority 20
+    # vs Alpha Vantage's 30, so a fresher paid print is never clobbered.
+    yf_targets = [i for i in _quote_universe("forex", limit=50)
+                  if i.symbol not in covered]
+    held = _held_symbols(yf_targets, "yfinance")
+    held_n += len(held)
+    for inst in yf_targets:
+        if inst.symbol in held:
+            continue
+        try:
+            attempted += 1
+            quote = _yf_market_quote(yf_symbol(inst.symbol, "forex"))
+            if quote and write_quote(inst.symbol, last=quote["last"],
+                                     source="yfinance",
+                                     change_pct=quote.get("change_pct"),
+                                     instrument=inst):
+                fetched += 1
+        except Exception as e:
+            logger.warning("[forex quotes] %s via yfinance failed: %s",
+                           inst.symbol, e)
 
-    return {"status": "success", "fetched": fetched, "attempted": attempted}
+    if attempted == 0 and fetched == 0 and held_n:
+        # Every symbol is held by a fresher, higher-priority feed — the
+        # streamers are doing this task's job better than it can. That is
+        # an intentional skip, not 'ran and produced nothing'.
+        return {"status": "skipped",
+                "reason": f"{held_n} symbol(s) held by fresher "
+                          f"higher-priority sources"}
+
+    result = {"status": "success", "fetched": fetched, "attempted": attempted,
+              "av_used": av_used, "held": held_n}
+    if not AV_KEY:
+        result["note"] = ("ALPHA_VANTAGE_API_KEY is not set — forex marks "
+                          "come from keyless yfinance. OANDA practice "
+                          "streaming is free and broker-grade.")
+    return result
 
 
 @shared_task
 @guarded_task("scraper_commodities")
 def fetch_commodity_quotes():
-    """Tier 1: Fetch commodity prices via yfinance."""
-    from market_data.adapters.yfinance_adapter import save_quote_to_db
+    """Tier 1: Fetch commodity prices via yfinance.
 
-    # yfinance commodity symbols
-    commodities = {
-        "XAUUSD": "GC=F",    # Gold
-        "XAGUSD": "SI=F",    # Silver
-        "WTIUSD": "CL=F",    # WTI Oil
-        "BRNUSD": "BZ=F",    # Brent
-        "NGUSD": "NG=F",     # Natural Gas
-        "HGUSD": "HG=F",     # Copper
-    }
+    The universe is the catalogue, not a hardcoded list. The old six-symbol
+    dict meant 26 of the 32 seeded commodities could never have a mark, and
+    a commodity bot on corn or coffee would have had bars and no price. The
+    shared symbol map carries the spelling translation (CORNUSD -> ZC=F),
+    and the symbols with no free source are skipped by name rather than
+    warned about forever.
 
-    # Through write_quote, not straight into LiveQuote. This was the only
-    # market poller writing the row directly, which meant it skipped the
-    # source-precedence rule that every other feed obeys — and yfinance is the
-    # lowest-priority source on the platform because it is fifteen minutes
-    # delayed for most listings. A five-minute poll could therefore overwrite
-    # a live broker tick on XAUUSD with a stale print, which is precisely the
-    # defect market_data/quotes.py was written to stop.
+    Through write_quote, not straight into LiveQuote: yfinance is the
+    lowest-priority source on the platform, and a five-minute poll must not
+    overwrite a live broker tick with a fifteen-minute-delayed print.
+    """
+    from market_data.public_feed import YF_UNAVAILABLE, yf_symbol
     from market_data.quotes import write_quote
 
+    targets = [i for i in _quote_universe("commodity", limit=20)
+               if i.symbol not in YF_UNAVAILABLE]
+    held = _held_symbols(targets, "yfinance")
     fetched = attempted = 0
-    for sauron_sym, yf_sym in commodities.items():
+    for inst in targets:
+        if inst.symbol in held:
+            continue
         try:
-            import yfinance as yf
-
-            ticker = yf.Ticker(yf_sym)
-            info = ticker.info
-            price = info.get("regularMarketPrice", info.get("previousClose", 0))
-            if not price:
+            quote = _yf_market_quote(yf_symbol(inst.symbol, "commodity"))
+            if not quote:
                 continue
-
             attempted += 1
-            if write_quote(sauron_sym, last=price, source="yfinance",
-                           change_pct=info.get("regularMarketChangePercent"),
-                           volume=info.get("volume")):
+            if write_quote(inst.symbol, last=quote["last"], source="yfinance",
+                           change_pct=quote.get("change_pct"),
+                           volume=quote.get("volume"), instrument=inst):
                 fetched += 1
         except Exception as e:
-            logger.warning(f"Commodity fetch failed for {sauron_sym}: {e}")
+            logger.warning(f"Commodity fetch failed for {inst.symbol}: {e}")
 
-    return {"status": "success", "fetched": fetched, "attempted": attempted}
+    if attempted == 0 and fetched == 0 and held:
+        return {"status": "skipped",
+                "reason": f"{len(held)} symbol(s) held by fresher "
+                          f"higher-priority sources"}
+    return {"status": "success", "fetched": fetched, "attempted": attempted,
+            "held": len(held)}
+
+
+@shared_task
+@guarded_task("scraper_indices")
+def fetch_index_quotes():
+    """Tier 1: index levels via yfinance.
+
+    The last piece of the headband: SPX500, DAX40 and friends had Instrument
+    rows, a symbol map entry and no task that ever wrote their LiveQuote, so
+    the dashboard's index strip rendered em-dashes forever. Indices have no
+    bot class, so nothing here feeds execution — this is measurement.
+    """
+    from core.market_calendar import is_any_market_open
+    from market_data.public_feed import yf_symbol
+    from market_data.quotes import write_quote
+
+    if not is_any_market_open():
+        return {"status": "skipped", "reason": "markets_closed"}
+
+    targets = _quote_universe("index", limit=13)
+    held = _held_symbols(targets, "yfinance")
+    fetched = attempted = 0
+    for inst in targets:
+        if inst.symbol in held:
+            continue
+        try:
+            quote = _yf_market_quote(yf_symbol(inst.symbol, "index"))
+            if not quote:
+                continue
+            attempted += 1
+            if write_quote(inst.symbol, last=quote["last"], source="yfinance",
+                           change_pct=quote.get("change_pct"),
+                           volume=quote.get("volume"), instrument=inst):
+                fetched += 1
+        except Exception as e:
+            logger.warning(f"Index fetch failed for {inst.symbol}: {e}")
+
+    if attempted == 0 and fetched == 0 and held:
+        return {"status": "skipped",
+                "reason": f"{len(held)} symbol(s) held by fresher "
+                          f"higher-priority sources"}
+    return {"status": "success", "fetched": fetched, "attempted": attempted,
+            "held": len(held)}
 
 
 @shared_task

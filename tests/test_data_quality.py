@@ -140,19 +140,28 @@ class ApiBudgetTests(TestCase):
         _record_api_call("testprov", 3)
         self.assertEqual(_daily_budget_remaining("testprov", limit=3), 0)
 
-    def test_forex_task_skips_once_the_daily_budget_is_spent(self):
-        from market_data.tasks import _record_api_call, AV_DAILY_LIMIT
+    def test_forex_task_is_gated_before_it_can_spend_anything(self):
+        """Called through its decorators with no component registry seeded,
+        the task must skip at the platform gate — no budget charged, no
+        network touched. (The budget-spent path itself is pinned in
+        ForexBudgetTests: yfinance now covers what Alpha Vantage cannot.)"""
         from market_data.tasks import fetch_forex_quotes
         _instrument("EURUSD", asset_class="forex")
-        _record_api_call("alpha_vantage", AV_DAILY_LIMIT)
         result = fetch_forex_quotes()
         self.assertEqual(result.get("status"), "skipped")
+        self.assertEqual(result.get("reason"), "platform_disabled")
 
     def test_beat_cadences_respect_free_tier_limits(self):
         """Alpha Vantage allows 25 calls/day; the old 120s cadence was
-        ~288x over."""
+        ~288x over. Its spend is now budgeted inside the forex task, so the
+        forex floor is about being a polite yfinance citizen — and the
+        CEILING matters as much: the paper trader rejects quotes older than
+        900s, so a cadence above that leaves forex marks stale for half
+        their life."""
         from config.celery import app
         schedule = app.conf.beat_schedule
-        self.assertGreaterEqual(schedule["fetch-forex-live"]["schedule"], 900)
+        self.assertGreaterEqual(schedule["fetch-forex-live"]["schedule"], 300)
+        self.assertLessEqual(schedule["fetch-forex-live"]["schedule"], 900)
         self.assertGreaterEqual(schedule["fetch-breaking-news"]["schedule"], 600)
         self.assertGreaterEqual(schedule["fetch-crypto-prices"]["schedule"], 300)
+        self.assertGreaterEqual(schedule["fetch-index-live"]["schedule"], 300)

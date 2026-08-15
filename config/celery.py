@@ -110,16 +110,22 @@ app.conf.beat_schedule = {
         "schedule": 60.0,
         "kwargs": {"watchlist_only": True},
     },
-    # Alpha Vantage free tier is 25 requests A DAY; the task now budgets
-    # them, and this cadence spends the budget across the session instead
-    # of exhausting it in the first half hour. For real forex ticks enable
-    # the OANDA streamer — free, broker-grade, already written.
+    # Alpha Vantage spend is budgeted inside the task (25/day), so cadence
+    # no longer decides the paid-API bill — the rest of each run is keyless
+    # yfinance. 600s keeps forex marks inside the paper trader's 900s
+    # freshness window: at the old 1800s a forex quote was stale for half
+    # its life and the mark silently fell back to bar closes. For real
+    # forex ticks enable the OANDA streamer — free, broker-grade.
     "fetch-forex-live": {
         "task": "market_data.tasks.fetch_forex_quotes",
-        "schedule": 1800.0,
+        "schedule": 600.0,
     },
     "fetch-commodity-live": {
         "task": "market_data.tasks.fetch_commodity_quotes",
+        "schedule": 300.0,
+    },
+    "fetch-index-live": {
+        "task": "market_data.tasks.fetch_index_quotes",
         "schedule": 300.0,
     },
     # CoinGecko's demo tier is ~10k calls/month; 120s exceeded it. The

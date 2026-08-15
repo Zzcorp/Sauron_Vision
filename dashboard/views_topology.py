@@ -64,9 +64,11 @@ WIRING = {
     "scraper_crypto":       {"layer": "ingest", "writes": ["LiveQuote"], "feeds": ["execute_bots", "kill_switch", "pipeline_opportunity_scanner"],
                              "note": "Keyless Binance public ticker — the healthiest feed on the platform."},
     "scraper_commodities":  {"layer": "ingest", "writes": ["LiveQuote"], "feeds": ["execute_bots", "kill_switch", "pipeline_opportunity_scanner"],
-                             "note": "Writes LiveQuote directly instead of through quotes.write_quote, so it bypasses the source-precedence guard: a delayed yfinance print can overwrite a fresh broker tick."},
-    "scraper_forex":        {"layer": "ingest", "writes": [], "feeds": ["execute_bots", "kill_switch"],
-                             "note": "ALPHA_VANTAGE_API_KEY is empty, so the write is unreachable and the enabled EURUSD bot has no mark to measure its stop against."},
+                             "note": "Universe is the commodity catalogue through the shared Yahoo symbol map. The LME base metals and the gold crosses have no free source and are skipped by name rather than warned about forever."},
+    "scraper_forex":        {"layer": "ingest", "writes": ["LiveQuote"], "feeds": ["execute_bots", "kill_switch", "pipeline_opportunity_scanner"],
+                             "note": "Alpha Vantage first when a key is configured (25/day, budgeted in-task); every pair the budget does not reach gets a keyless yfinance mark, so a forex bot always has a price to measure its stop against."},
+    "scraper_indices":      {"layer": "ingest", "writes": ["LiveQuote"], "feeds": ["pipeline_opportunity_scanner"],
+                             "note": "Indices have no bot class, so nothing here reaches execution — the dashboard headband and the scanner are the consumers."},
     "scraper_eod":          {"layer": "ingest", "writes": ["PriceData 1d"], "feeds": ["pipeline_indicators", "pipeline_opportunity_scanner"],
                              "note": "Has never run: zero PriceData rows carry timeframe=1d. All 5,600 bars come from the bot-bar refresh instead."},
     "feed_bot_bars":        {"layer": "ingest", "writes": ["PriceData 1h/4h"], "feeds": ["pipeline_indicators", "pipeline_signals", "execute_bots"],
@@ -182,10 +184,12 @@ def _component_state(comp):
     if not comp.is_enabled:
         return "off", "Switched off."
     status = (comp.last_status or "").lower()
+    # No truncation: the model already caps last_message at 500 chars, and a
+    # clipped reason in the inspector is a reason the operator cannot act on.
     if status == "error":
-        return "broken", f"Last run failed: {(comp.last_message or '')[:140]}"
+        return "broken", f"Last run failed: {comp.last_message or ''}"
     if status == "warning":
-        return "silent", f"Ran, stored nothing: {(comp.last_message or '')[:140]}"
+        return "silent", f"Ran, stored nothing: {comp.last_message or ''}"
     if not comp.last_run_at:
         return "idle", "Enabled, but has never run."
     age = _age(comp.last_run_at)
@@ -282,7 +286,7 @@ def build_topology(user):
             "feeds": wiring["feeds"],
             "last_run": _fmt_age(_age(comp.last_run_at)),
             "last_status": comp.last_status or "never run",
-            "last_message": (comp.last_message or "")[:220],
+            "last_message": comp.last_message or "",
             "runs": comp.run_count, "errors": comp.error_count,
             "flags": flags,
             "can_toggle": True,

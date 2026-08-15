@@ -9,6 +9,23 @@ def _safe(fn, default=None):
     try: return fn()
     except Exception: return default
 
+
+# Headband symbols, in catalogue spelling — every entry MUST exist in
+# seed_instruments' catalogue, because a symbol with no Instrument row can
+# only ever render the em-dash and its click 404s. The first version used
+# exchange shorthand (SPX, CL, ZC...) plus six bond tickers and BNBUSD,
+# none of which any seeder creates; a test now pins membership.
+HEADBAND_SYMBOLS = [
+    "SPX500", "NSDQ100", "DJ30", "RUSSELL2000",
+    "FTSE100", "DAX40", "NIKKEI225", "HANGSENG", "STOXX50",
+    "BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD",
+    "DOGEUSD", "ADAUSD", "AVAXUSD", "LINKUSD", "DOTUSD",
+    "DXY", "EURUSD", "GBPUSD", "USDJPY", "USDCHF",
+    "AUDUSD", "NZDUSD", "USDCAD", "EURGBP", "EURJPY",
+    "XAUUSD", "XAGUSD", "WTIUSD", "NGUSD", "HGUSD",
+    "XPTUSD", "XPDUSD", "CORNUSD", "WHEATUSD", "COFFEEUSD",
+]
+
 def ui_extras(request):
     data = {
         "ui_watchlist": [],
@@ -100,19 +117,8 @@ def ui_extras(request):
     # ── Dashboard headband metrics ─────────────────────────
     try:
         from market_data.models import LiveQuote
-        tracked = [
-            "SPX", "NDX", "DJI", "RUT", "VIX",
-            "FTSE", "DAX", "NKY", "HSI", "STOXX50",
-            "BTCUSD", "ETHUSD", "SOLUSD", "BNBUSD", "XRPUSD",
-            "DOGEUSD", "ADAUSD", "AVAXUSD", "LINKUSD", "DOTUSD",
-            "DXY", "EURUSD", "GBPUSD", "USDJPY", "USDCHF",
-            "AUDUSD", "NZDUSD", "USDCAD", "EURGBP", "EURJPY",
-            "XAUUSD", "XAGUSD", "CL", "NG", "HG", "PL", "PA",
-            "ZC", "ZW", "KC",
-            "US02Y", "US10Y", "US30Y", "DE10Y", "UK10Y", "JP10Y",
-        ]
         band = []
-        for sym in tracked:
+        for sym in HEADBAND_SYMBOLS:
             q = LiveQuote.objects.filter(instrument__symbol__iexact=sym).first()
             if q:
                 from django.utils.timesince import timesince
