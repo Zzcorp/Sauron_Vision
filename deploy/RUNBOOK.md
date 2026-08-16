@@ -131,7 +131,8 @@ healthy while doing nothing at all.
 
 Log in, open `/admin-dashboard/`, press **START PLATFORM**, then enable:
 
-- `scraper_live_quotes`, `scraper_crypto`
+- `scraper_live_quotes`, `scraper_crypto`, `scraper_forex`,
+  `scraper_commodities`, `scraper_indices`
 - `pipeline_indicators`, `pipeline_signals`, `pipeline_asset_bots`, `pipeline_exposure`
 
 Leave OFF for now: `actuator_mode_live`, `meta_allocator_mode_live`,
@@ -147,16 +148,28 @@ docker compose --env-file .env -f deploy/docker-compose.yml logs --tail=50 worke
 # the "[GATE] Platform master switch OFF" stream must stop
 ```
 
-## 6. Create your first bot
+## 6. Create your first bots
 
-Broker credentials are a prerequisite for **market bars**, not just for live
-trading — a bot with no broker route gets no 4h bars, and with no bars it can
-never form a decision. Paper/practice keys are enough:
+The fastest path is the seeded paper fleet — six configs (FX majors and
+crosses, metals, energy, softs, megacap stocks), all paper:
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml exec web \
+  python manage.py seed_bots --activate
+```
+
+**No broker account is needed for paper trading.** Bars and marks arrive
+keylessly for every asset class (Binance public for crypto, yfinance for the
+rest) within ~10 minutes of enabling the bots and the scrapers from step 5.
+Do **not** use `backfill_bars` for non-crypto symbols — it is Binance-only.
+
+Broker credentials are for **live trading** and for real-time marks that beat
+the delayed public feeds:
 
 | Asset class      | Broker  | Notes                                        |
 | ---------------- | ------- | -------------------------------------------- |
 | stock, etf, index| Alpaca  | paper keys work                              |
-| forex            | OANDA   | practice keys work                           |
+| forex            | OANDA   | practice keys work (streamer uses them too)  |
 | crypto           | Binance | live-endpoint spot key (read-only is enough) |
 | options, cfd     | IBKR    | must be reachable from inside the container  |
 
@@ -257,10 +270,12 @@ docker compose --env-file .env -f deploy/docker-compose.yml ps   # nothing Resta
 requires the trading PIN from step 4, and a live bot whose broker credentials
 are missing refuses to trade rather than recording paper fills as real ones.
 
-**Broker credentials are stored, not proven.** Saving them means "these were
-written down", not "these work". Confirm on `/health/` → live-mode readiness
-before arming anything, and remember that a key pasted against the wrong
-endpoint (live vs paper) looks identical until it trades.
+**Broker credentials are verified when you save them.** OANDA and Alpaca are
+checked with an authenticated account call; Binance with the signed account
+endpoint; IBKR verification only proves the TWS socket answers, not that the
+account id is valid — the flash message says which was checked. A save that
+fails verification keeps the row but leaves it `connected = False`, so
+`/health/` → live-mode readiness tells the truth.
 
 **Positions survive the box being down.** Entries attach broker-side stop and
 target orders where the broker supports it (Alpaca brackets, OANDA on-fill), so
