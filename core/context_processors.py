@@ -315,54 +315,17 @@ def sauron_context(request):
         day_ago = now - timedelta(hours=24)
         ticker = []
 
-        # Quotes
-        for q in LiveQuote.objects.select_related("instrument").order_by("-updated_at")[:15]:
-            change = float(q.change_pct or 0)
-            spread_pct = None
-            try:
-                if q.bid and q.ask and float(q.ask) > 0:
-                    spread_pct = (float(q.ask) - float(q.bid)) / float(q.ask) * 100
-            except Exception:
-                spread_pct = None
-            age_s = int((now - q.updated_at).total_seconds()) if q.updated_at else None
-            if age_s is None:
-                age_display = "unknown"
-            elif age_s < 90:
-                age_display = "just now"
-            elif age_s < 3600:
-                age_display = f"{age_s // 60}m ago"
-            elif age_s < 86400:
-                age_display = f"{age_s // 3600}h ago"
-            else:
-                age_display = f"{age_s // 86400}d ago"
-            ticker.append({
-                "type": "quote", "symbol": q.instrument.symbol,
-                "name": q.instrument.name or "",
-                "price": str(q.last), "change": change,
-                "change_display": f"+{change:.2f}%" if change >= 0 else f"{change:.2f}%",
-                "asset_class": q.instrument.asset_class,
-                "bid": q.bid, "ask": q.ask,
-                "spread_pct": round(spread_pct, 3) if spread_pct is not None else None,
-                "volume": q.volume,
-                # A price with no age is a price you cannot act on: the quote
-                # pollers are rate-limited and a "live" number can be hours old.
-                "age_s": age_s, "age_display": age_display,
-                "stale": bool(age_s is not None and age_s > 900),
-                # The ISO stamp is what makes the age LIVE. Everything above is
-                # decided once, at render time, so a dashboard left open for an
-                # hour on a dead feed still read "just now" and could never
-                # show the STALE chip — the single state worth showing.
-                "quoted_at": q.updated_at.isoformat() if q.updated_at else "",
-                "source": q.source or "",
-                "url": f"/instruments/{q.instrument.symbol}/",
-            })
+        # No quotes here, deliberately. The headband directly above this bar
+        # already shows live prices for forty catalogue symbols — the ticker
+        # duplicated them cell for cell, and the duplication crowded out the
+        # things a price cannot say. The ticker's job is signals and news.
 
         # Signals. The popup used to carry only score, urgency and direction —
         # so hovering a signal told you a setup existed but nothing about the
         # trade it proposes. The levels are the whole point of a signal: where
         # to get in, where you are wrong, and what you are playing for.
         active_signals = Signal.objects.filter(is_active=True)
-        for s in active_signals.select_related("instrument").order_by("-score")[:5]:
+        for s in active_signals.select_related("instrument").order_by("-score")[:8]:
             entry = s.suggested_entry or s.price_at_signal
             rr = s.risk_reward_ratio
             if rr is None and entry and s.suggested_stop and s.suggested_target:
@@ -397,7 +360,7 @@ def sauron_context(request):
             })
 
         # News
-        for n in NewsArticle.objects.prefetch_related("ai_affected_instruments").order_by("-published_at")[:12]:
+        for n in NewsArticle.objects.prefetch_related("ai_affected_instruments").order_by("-published_at")[:18]:
             try:
                 affected_list = list(n.ai_affected_instruments.all()[:6])
                 affected_chips = [i.symbol for i in affected_list]

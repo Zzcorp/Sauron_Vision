@@ -97,7 +97,12 @@ class SignalTickerPayloadTests(TestCase):
         self.assertGreaterEqual(self._first_signal_item()["age_min"], 89)
 
 
-class QuoteTickerPayloadTests(TestCase):
+class TickerCompositionTests(TestCase):
+    """The headband directly above the ticker already shows live prices, so
+    quote items duplicated it cell for cell and crowded out the things a
+    price cannot say. The ticker carries signals and news now — prices have
+    exactly one home."""
+
     def setUp(self):
         self.user = User.objects.create_user(username="tq_u", password="x")
         self.inst = _instrument("ETHUSD")
@@ -108,26 +113,30 @@ class QuoteTickerPayloadTests(TestCase):
         req.user = self.user
         return sauron_context(req).get("ticker_items") or []
 
-    def test_a_quote_states_its_age(self):
-        """The pollers are rate-limited enough that a "live" price can be
-        hours old, and a price with no age is one you cannot act on."""
+    def test_quotes_never_reach_the_ticker(self):
         from market_data.models import LiveQuote
         LiveQuote.objects.update_or_create(
             instrument=self.inst,
             defaults={"last": Decimal("2000"), "change_pct": Decimal("1.5")})
-        item = next(i for i in self._ticker() if i.get("type") == "quote")
-        self.assertIn("age_display", item)
-        self.assertFalse(item["stale"], "a fresh quote should not read stale")
+        self.assertFalse(
+            [i for i in self._ticker() if i.get("type") == "quote"],
+            "a quote item reached the ticker — prices belong to the headband")
 
-    def test_an_old_quote_is_flagged_stale(self):
-        from market_data.models import LiveQuote
-        q, _ = LiveQuote.objects.update_or_create(
-            instrument=self.inst, defaults={"last": Decimal("2000")})
-        LiveQuote.objects.filter(pk=q.pk).update(
-            updated_at=timezone.now() - timedelta(hours=6))
-        item = next(i for i in self._ticker() if i.get("type") == "quote")
-        self.assertTrue(item["stale"])
-        self.assertIn("ago", item["age_display"])
+    def test_signals_and_news_still_do(self):
+        from django.utils import timezone as tz
+        from scraping.models import NewsArticle
+        from signals.models import Signal
+        Signal.objects.create(
+            instrument=self.inst, signal_type="technical",
+            direction="bullish", urgency="high", title="ETH LONG",
+            description="d", rule_name="r", score=0.7, sub_scores={},
+            price_at_signal=Decimal("100"), is_active=True)
+        NewsArticle.objects.create(
+            title="Copper rallies", source="Reuters",
+            url="https://example.test/copper", published_at=tz.now())
+        types = {i.get("type") for i in self._ticker()}
+        self.assertIn("signal", types)
+        self.assertIn("news", types)
 
 
 class NewSignalEventTests(TestCase):

@@ -569,6 +569,12 @@
                 </svg>
             </button>
             <div class="ticker-track" id="tickerTrack">
+                {% if not ticker_items %}
+                <span class="ticker-item" data-type="empty" style="color:var(--text-muted);cursor:default;">
+                    <span class="t-badge news">FEED</span>
+                    <span>Quiet — signals and news appear here as the scanners run</span>
+                </span>
+                {% endif %}
                 {% for item in ticker_items %}
                 <a href="{{ item.url }}" class="ticker-item" data-type="{{ item.type }}">
                     {% if item.type == "quote" %}
