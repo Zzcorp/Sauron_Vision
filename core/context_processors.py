@@ -325,7 +325,10 @@ def sauron_context(request):
         # trade it proposes. The levels are the whole point of a signal: where
         # to get in, where you are wrong, and what you are playing for.
         active_signals = Signal.objects.filter(is_active=True)
-        for s in active_signals.select_related("instrument").order_by("-score")[:8]:
+        # Order of appearance — newest signal first. Ranking by score made
+        # the bar look frozen: a strong old signal squatted at the front for
+        # days while new setups appeared mid-stream, unseen.
+        for s in active_signals.select_related("instrument").order_by("-created_at")[:8]:
             entry = s.suggested_entry or s.price_at_signal
             rr = s.risk_reward_ratio
             if rr is None and entry and s.suggested_stop and s.suggested_target:

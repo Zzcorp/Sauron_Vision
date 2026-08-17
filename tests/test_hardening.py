@@ -347,6 +347,19 @@ class PositionMarkTests(TestCase):
         self.assertAlmostEqual(
             out["exposure_by_asset_class"]["stock"], 550.0, places=1)
 
+    def test_the_first_run_ever_survives_creating_the_portfolio(self):
+        """Settings hand initial_capital over as a FLOAT, and a freshly
+        created instance keeps its given types until reloaded — so the run
+        that both creates and uses the portfolio crashed on float + Decimal.
+        On a fresh deploy that is the very first exposure run; found live,
+        nineteen minutes after the platform was switched on."""
+        from portfolio.models import Portfolio
+        from portfolio.tasks import recalculate_exposure
+        self.assertFalse(Portfolio.objects.exists(),
+                         "this test must be the portfolio's creator")
+        out = recalculate_exposure.__wrapped__.__wrapped__()
+        self.assertEqual(out["status"], "ok")
+
 
 # ── COT: the parser reads the real formats ──────────────────────────────
 

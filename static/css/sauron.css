@@ -882,8 +882,10 @@
 
 
         /* ── Headband collapse system: dynamic offsets ── */
-        /* ticker height matches actual .ticker-bar height (38px) so the data
-           headband sits flush against it with no gap */
+        /* Stacking order: PRICES first (data headband, directly under the
+           topbar), the signal/news ticker beneath it. Heights are variables
+           so the bars sit flush and everything below adapts when either
+           collapses. */
         body { --hb-ticker-h: 38px; --hb-data-h: 48px; }
         body.hb-ticker-hidden { --hb-ticker-h: 0px; }
         body.hb-data-hidden   { --hb-data-h: 0px; }
@@ -893,11 +895,13 @@
             height: 38px; background: var(--bg-primary);
             border-top: 1px solid rgba(0,232,104,0.10);
             border-bottom: 1px solid var(--border);
-            overflow: hidden; position: fixed; top: var(--topbar-height);
+            overflow: hidden; position: fixed;
+            top: calc(var(--topbar-height) + var(--hb-data-h));
             left: var(--sidebar-width); right: 0;
             z-index: 45; white-space: nowrap;
             box-shadow: 0 2px 0 rgba(0,232,104,0.04);
-            transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+            transition: top 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+                        transform 0.45s cubic-bezier(0.4, 0, 0.2, 1),
                         opacity 0.35s ease;
         }
         .ticker-bar.collapsed {
@@ -1554,13 +1558,14 @@
         .hb-restore-tab svg { width: 12px; height: 12px; }
         body:has(.signals-rail) .hb-restore-tab { right: 44px; }
         body:has(.signals-rail.open) .hb-restore-tab { right: 280px; }
-        /* Position restore tabs at the band's slot, even when collapsed */
-        .hb-restore-tab.ticker { top: calc(var(--topbar-height) + 2px); height: 38px; }
-        .hb-restore-tab.data   { top: calc(var(--topbar-height) + var(--hb-ticker-h) + 4px); height: 40px; }
+        /* Position restore tabs at the band's slot, even when collapsed:
+           prices on top, ticker beneath. The var-driven calc means a hidden
+           headband collapses to 0px and the ticker tab rides up on its own —
+           no special-case selector needed. */
+        .hb-restore-tab.data   { top: calc(var(--topbar-height) + 4px); height: 40px; }
+        .hb-restore-tab.ticker { top: calc(var(--topbar-height) + var(--hb-data-h) + 2px); height: 38px; }
         body.hb-ticker-hidden .hb-restore-tab.ticker { display: flex; opacity: 1; }
         body.hb-data-hidden   .hb-restore-tab.data   { display: flex; opacity: 1; }
-        /* When data is shown but ticker is hidden, the data restore tab needs to sit at topbar level */
-        body.hb-ticker-hidden:not(.hb-data-hidden) .hb-restore-tab.data { top: calc(var(--topbar-height) + var(--hb-ticker-h) + 4px); }
         .ticker-item[data-type="news"] .ticker-popup { min-width: 360px; max-width: 420px; }
         .tnp-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
         .tnp-source { font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px; color: var(--accent); text-transform: uppercase; }
@@ -1749,7 +1754,7 @@
         /* ═══════════════════════════════════════════════════════════ */
         .data-headband {
             position: fixed; left: var(--sidebar-width); right: 0;
-            top: calc(var(--topbar-height) + var(--hb-ticker-h));
+            top: var(--topbar-height);
             height: 48px;
             background: linear-gradient(180deg, rgba(8,20,16,0.98), rgba(3,8,6,0.99));
             border-bottom: 1px solid var(--border-glow);
@@ -1773,7 +1778,11 @@
         body:has(.sidebar.mini) .data-headband { left: 68px; }
         body:has(.signals-rail) .data-headband { right: 44px; }
         body:has(.signals-rail.open) .data-headband { right: 280px; }
-        @media (max-width: 768px) { .data-headband { left: 0 !important; right: 0 !important; height: 42px; } }
+        @media (max-width: 768px) {
+            body { --hb-data-h: 42px; }
+            body.hb-data-hidden { --hb-data-h: 0px; }
+            .data-headband { left: 0 !important; right: 0 !important; height: 42px; }
+        }
         .dh-item {
             display: inline-flex; align-items: center; gap: 12px;
             padding: 0 22px; border-right: 1px solid rgba(19,48,32,0.7); height: 48px;

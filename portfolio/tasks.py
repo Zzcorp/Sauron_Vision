@@ -113,8 +113,11 @@ def recalculate_exposure():
             Decimal(str(exposure_by_currency.get(currency, 0))) + value
         )
 
-    # Update portfolio current_value = cash + positions
-    portfolio.current_value = portfolio.cash_available + total_position_value
+    # Update portfolio current_value = cash + positions. The str() round-trip
+    # is deliberate: on the run that CREATES the portfolio, cash_available is
+    # still whatever type the creator passed in.
+    portfolio.current_value = (
+        Decimal(str(portfolio.cash_available or 0)) + total_position_value)
     portfolio.save(update_fields=["current_value", "updated_at"])
 
     logger.info(

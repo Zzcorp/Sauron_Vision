@@ -113,8 +113,8 @@ WIRING = {
                                  "note": "Deliberately ungated: it must keep working when everything else is switched off. Operator-triggered only."},
     "feature_ai_pretrade_gate": {"layer": "gate", "writes": ["AgentPrediction"], "feeds": [],
                                  "note": "Consulted only by the legacy crypto bot, which is itself unscheduled."},
-    "pipeline_exposure":        {"layer": "gate", "writes": ["Portfolio.current_value"], "feeds": ["execute_bots"],
-                                 "note": "Computes three exposure breakdowns and returns them without storing — only current_value survives the run."},
+    "pipeline_exposure":        {"layer": "gate", "writes": ["Portfolio.current_value", "Position marks"], "feeds": ["execute_bots"],
+                                 "note": "Marks open positions to market (current_price + unrealized P&L, day-fresh data only), then recomputes exposure. The three per-category breakdowns are still returned without being stored."},
 
     # ── learn ─────────────────────────────────────────────────────────
     "pipeline_snapshot":        {"layer": "learn", "writes": ["PortfolioSnapshot"], "feeds": ["eye_core"],
