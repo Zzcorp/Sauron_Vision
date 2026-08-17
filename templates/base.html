@@ -1073,6 +1073,10 @@
         <div class="rail-body">
             {% for s in panel_recent_signals %}
             <div class="sr-signal-wrap" data-signal-id="{{ s.id }}">
+                <button type="button" class="sr-x"
+                        title="Dismiss — hides this signal for you; the engine still sees it"
+                        aria-label="Dismiss {{ s.instrument.symbol }} signal"
+                        onclick="event.preventDefault(); event.stopPropagation(); window.dismissSignal && window.dismissSignal({{ s.id }});">&times;</button>
                 <a href="{% url 'signals_list' %}" class="sr-signal" style="text-decoration:none;">
                     <div class="sr-dot" style="background:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %};"></div>
                     <div class="sr-detail">

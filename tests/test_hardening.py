@@ -543,3 +543,121 @@ class FinvizRemovalTests(SimpleTestCase):
                          {c["key"] for c in DEFAULT_COMPONENTS})
         self.assertNotIn("fetch-finviz-screener", app.conf.beat_schedule)
         self.assertNotIn("scraper_finviz", WIRING)
+
+
+# ── Charts work from day one ────────────────────────────────────────────
+
+class ChartDataFallbackTests(TestCase):
+    """Charts draw DAILY candles, but a fresh deployment has intraday bars
+    days before its first 1d row (the bot-bar feed writes 1h/4h; the EOD
+    scraper runs nightly and was stock-only) — so every chart on a new box
+    queried an empty table and rendered blank while the data to draw it
+    sat one timeframe over."""
+
+    def _bar(self, inst, tf, when, o, h, l, c, vol=0):
+        from market_data.models import PriceData
+        return PriceData.objects.create(
+            instrument=inst, timeframe=tf, timestamp=when,
+            open=Decimal(str(o)), high=Decimal(str(h)), low=Decimal(str(l)),
+            close=Decimal(str(c)), volume=vol, source="test")
+
+    def test_daily_candles_are_synthesized_from_4h_bars(self):
+        from dashboard.views import _daily_chart_bars
+        inst = _instrument("EURUSD")
+        base = timezone.now().replace(hour=8, minute=0, second=0,
+                                      microsecond=0)
+        self._bar(inst, "4h", base, 1.10, 1.12, 1.09, 1.11, vol=10)
+        self._bar(inst, "4h", base + timedelta(hours=4),
+                  1.11, 1.15, 1.10, 1.14, vol=5)
+        bars = _daily_chart_bars(inst)
+        self.assertEqual(len(bars), 1)
+        day = bars[0]
+        self.assertEqual(day["open"], 1.10)
+        self.assertEqual(day["high"], 1.15)
+        self.assertEqual(day["low"], 1.09)
+        self.assertEqual(day["close"], 1.14)
+        self.assertEqual(day["volume"], 15)
+
+    def test_real_daily_bars_win_when_present(self):
+        from dashboard.views import _daily_chart_bars
+        inst = _instrument("EURUSD")
+        now = timezone.now()
+        self._bar(inst, "1d", now, 1.20, 1.21, 1.19, 1.20)
+        self._bar(inst, "4h", now, 9, 9, 9, 9)
+        bars = _daily_chart_bars(inst)
+        self.assertEqual(bars[-1]["close"], 1.20)
+
+    def test_the_api_serves_the_synthesized_bars(self):
+        from django.contrib.auth import get_user_model
+        inst = _instrument("EURUSD")
+        self._bar(inst, "4h", timezone.now(), 1.10, 1.12, 1.09, 1.11)
+        user = get_user_model().objects.create_user("chart_u", password="x")
+        self.client.force_login(user)
+        resp = self.client.get("/api/chart-data/?symbol=EURUSD&timeframe=1d",
+                               HTTP_HOST="127.0.0.1")
+        data = resp.json()
+        self.assertTrue(data["bars"], "the fallback never reached the API")
+
+
+class EodUniverseTests(SimpleTestCase):
+    def test_the_eod_task_covers_every_mapped_class_not_just_stocks(self):
+        """Stock-only EOD was the other half of the blank-charts bug: no
+        daily bar was ever written for forex, commodities or indices."""
+        import inspect
+        from market_data import tasks
+        src = inspect.getsource(tasks.fetch_eod_all_instruments)
+        self.assertIn("SUPPORTED_ASSET_CLASSES", src)
+        self.assertIn("yf_symbol", src)
+        self.assertIn("YF_UNAVAILABLE", src)
+        self.assertNotIn('asset_class="stock"', src)
+
+
+# ── The watchlist star ──────────────────────────────────────────────────
+
+class WatchlistToggleTests(TestCase):
+    """The star is how an operator widens what the platform watches:
+    scan_universe and the quote pollers read is_watchlist, so starring an
+    instrument is a data decision, not a bookmark."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        self.user = get_user_model().objects.create_user("wl_u", password="x")
+        self.inst = _instrument("EURUSD")
+        self.client.force_login(self.user)
+
+    def _toggle(self, **extra):
+        return self.client.post("/instruments/EURUSD/watchlist/",
+                                extra, HTTP_HOST="127.0.0.1")
+
+    def test_the_star_toggles_both_ways(self):
+        self.assertFalse(self.inst.is_watchlist)
+        self._toggle()
+        self.inst.refresh_from_db()
+        self.assertTrue(self.inst.is_watchlist)
+        self._toggle()
+        self.inst.refresh_from_db()
+        self.assertFalse(self.inst.is_watchlist)
+
+    def test_it_returns_where_the_operator_was(self):
+        resp = self._toggle(next="/instruments/?filter=forex")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, "/instruments/?filter=forex")
+
+    def test_a_hostile_next_is_ignored(self):
+        resp = self._toggle(next="https://evil.example/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/instruments/EURUSD/", resp.url)
+
+    def test_get_is_refused(self):
+        resp = self.client.get("/instruments/EURUSD/watchlist/",
+                               HTTP_HOST="127.0.0.1")
+        self.assertEqual(resp.status_code, 405)
+
+    def test_anonymous_users_are_bounced_and_nothing_changes(self):
+        self.client.logout()
+        resp = self._toggle()
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("next=/instruments/EURUSD/watchlist/", resp.url)
+        self.inst.refresh_from_db()
+        self.assertFalse(self.inst.is_watchlist,
+                         "an anonymous POST must not touch the watchlist")

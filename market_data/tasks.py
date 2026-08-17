@@ -403,16 +403,30 @@ def fetch_fred_updates():
 @shared_task
 @guarded_task("scraper_eod")
 def fetch_eod_all_instruments():
-    """Tier 5: End-of-day data for all stock instruments via yfinance."""
+    """Tier 5: End-of-day daily bars for the whole yfinance universe.
+
+    This was stock-only for its whole life, which is half of why every
+    chart on a fresh deployment rendered blank: charts draw DAILY candles,
+    and nothing ever wrote a daily bar for forex, commodities or indices.
+    The shared symbol map carries the spelling translation now, so daily
+    history accumulates for every class Yahoo serves.
+    """
     from instruments.models import Instrument
     from market_data.adapters.yfinance_adapter import save_history_to_db
+    from market_data.public_feed import (SUPPORTED_ASSET_CLASSES,
+                                         YF_UNAVAILABLE, yf_symbol)
 
-    instruments = Instrument.objects.filter(is_active=True, asset_class="stock")
+    instruments = Instrument.objects.filter(
+        is_active=True, asset_class__in=sorted(SUPPORTED_ASSET_CLASSES))
     total = 0
 
     for inst in instruments:
+        if inst.symbol in YF_UNAVAILABLE:
+            continue
         try:
-            count = save_history_to_db(inst.symbol, period="5d")
+            count = save_history_to_db(
+                inst.symbol, period="5d",
+                fetch_symbol=yf_symbol(inst.symbol, inst.asset_class))
             total += count
         except Exception as e:
             logger.warning(f"EOD fetch failed for {inst.symbol}: {e}")

@@ -189,7 +189,18 @@
             <tbody>
             {% for item in items %}
             <tr onclick="window.location='{% url 'instrument_detail' item.symbol %}'" style="cursor:pointer;" data-instrument="{{ item.symbol }}">
-                <td>{% if item.is_watchlist %}<span style="color:var(--accent-gold);">&#9733;</span>{% else %}<span style="color:var(--text-muted);">&#9734;</span>{% endif %}</td>
+                <td onclick="event.stopPropagation();">
+                    <form method="post" action="{% url 'toggle_watchlist' item.symbol %}" style="display:inline;margin:0;">{% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit"
+                                title="{% if item.is_watchlist %}Remove from watchlist{% else %}Add to watchlist — bars, quotes and signal scans follow{% endif %}"
+                                aria-pressed="{% if item.is_watchlist %}true{% else %}false{% endif %}"
+                                aria-label="Toggle watchlist for {{ item.symbol }}"
+                                style="background:none;border:0;cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;color:{% if item.is_watchlist %}var(--accent-gold){% else %}var(--text-muted){% endif %};">
+                            {% if item.is_watchlist %}&#9733;{% else %}&#9734;{% endif %}
+                        </button>
+                    </form>
+                </td>
                 <td>
                     <a href="{% url 'instrument_detail' item.symbol %}" style="font-family:var(--font-display);font-size:13px;color:var(--accent);text-decoration:none;font-weight:700;" data-instrument="{{ item.symbol }}">{{ item.symbol }}</a>
                 </td>

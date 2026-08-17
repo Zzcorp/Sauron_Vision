@@ -1547,20 +1547,12 @@ def instrument_detail(request, symbol):
 
     instrument = get_object_or_404(Instrument, symbol=symbol)
 
-    # Get price data for chart
-    prices = PriceData.objects.filter(
-        instrument=instrument, timeframe="1d"
-    ).order_by("timestamp")[:200]
-
-    price_data = []
-    for p in prices:
-        price_data.append({
-            "time": p.timestamp.strftime("%Y-%m-%d"),
-            "open": float(p.open),
-            "high": float(p.high),
-            "low": float(p.low),
-            "close": float(p.close),
-        })
+    # Chart data — daily candles, synthesized from intraday bars when no
+    # real 1d rows exist yet (see _daily_chart_bars).
+    price_data = [
+        {k: v for k, v in bar.items() if k != "volume"}
+        for bar in _daily_chart_bars(instrument, limit=200)
+    ]
 
     # Get quote
     quote = None
@@ -1587,6 +1579,34 @@ def instrument_detail(request, symbol):
         "news": news,
         "price_data_json": json.dumps(price_data),
     })
+
+
+@login_required
+def toggle_watchlist(request, symbol):
+    """POST — star or unstar an instrument.
+
+    The star is not cosmetic: scan_universe and the quote pollers read
+    is_watchlist, so this is how an operator widens what the platform
+    watches — bars, quotes and signal scans follow — without creating a
+    bot for it.
+    """
+    from django.contrib import messages
+    from django.http import HttpResponseNotAllowed
+    from django.utils.http import url_has_allowed_host_and_scheme
+    from instruments.models import Instrument
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    instrument = get_object_or_404(Instrument, symbol=symbol)
+    instrument.is_watchlist = not instrument.is_watchlist
+    instrument.save(update_fields=["is_watchlist"])
+    verb = "added to" if instrument.is_watchlist else "removed from"
+    messages.success(request, f"{instrument.symbol} {verb} the watchlist.")
+    nxt = request.POST.get("next", "")
+    if nxt and url_has_allowed_host_and_scheme(
+            nxt, allowed_hosts={request.get_host()}):
+        return redirect(nxt)
+    return redirect("instrument_detail", symbol=instrument.symbol)
 
 
 @login_required
@@ -2188,6 +2208,61 @@ def intro_page(request):
 
 # ── Chart Data API ──────────────────────────────────────────────────────────
 
+def _daily_chart_bars(instrument, since=None, limit=None):
+    """Daily OHLCV dicts for a chart, synthesized from intraday bars when
+    no real daily rows exist.
+
+    A fresh deployment has 1h/4h bars DAYS before its first daily row: the
+    bot-bar feed writes intraday only, and the EOD scraper runs nightly and
+    covered a subset of instruments — so every chart on a new box queried
+    an empty table and rendered blank while the data to draw it sat one
+    timeframe over. A daily candle IS the aggregate of its day's intraday
+    bars, so the synthesis is exact for the hours the platform has.
+    """
+    from market_data.models import PriceData
+
+    def _rows(tf):
+        qs = PriceData.objects.filter(instrument=instrument, timeframe=tf)
+        if since is not None:
+            qs = qs.filter(timestamp__gte=since)
+        return qs.order_by("timestamp")
+
+    bars = [{
+        "time":   p.timestamp.strftime("%Y-%m-%d"),
+        "open":   float(p.open),
+        "high":   float(p.high),
+        "low":    float(p.low),
+        "close":  float(p.close),
+        "volume": float(p.volume) if p.volume else 0,
+    } for p in _rows("1d")]
+
+    if not bars:
+        for intraday_tf in ("4h", "1h"):
+            days = {}
+            for p in _rows(intraday_tf):
+                key = p.timestamp.strftime("%Y-%m-%d")
+                d = days.get(key)
+                if d is None:
+                    days[key] = {
+                        "time": key, "open": float(p.open),
+                        "high": float(p.high), "low": float(p.low),
+                        "close": float(p.close),
+                        "volume": float(p.volume) if p.volume else 0,
+                    }
+                else:
+                    d["high"] = max(d["high"], float(p.high))
+                    d["low"] = min(d["low"], float(p.low))
+                    d["close"] = float(p.close)
+                    d["volume"] += float(p.volume) if p.volume else 0
+            if days:
+                bars = [days[k] for k in sorted(days)]
+                break
+
+    if limit:
+        bars = bars[-int(limit):]
+    return bars
+
+
 @login_required
 def chart_data_api(request):
     """
@@ -2199,7 +2274,6 @@ def chart_data_api(request):
     """
     from django.http import JsonResponse
     from instruments.models import Instrument
-    from market_data.models import PriceData
     from django.utils import timezone
     from datetime import timedelta
 
@@ -2214,43 +2288,12 @@ def chart_data_api(request):
     except Instrument.DoesNotExist:
         return JsonResponse({"error": f"Symbol '{symbol}' not found", "bars": []})
 
-    # Map UI timeframe to DB timeframe label and date cutoff
-    TF_MAP = {
-        "1d":  ("1d",  90),    # daily bars, last 90 days shown by default
-        "1w":  ("1d",  365),   # weekly view using daily bars, 1 year
-        "1m":  ("1d",  90),    # 1 month range
-        "3m":  ("1d",  180),   # 3 month range
-        "1y":  ("1d",  365),   # 1 year range
-    }
-    db_tf, days_back = TF_MAP.get(timeframe, ("1d", 90))
-
-    # Override days_back for specific timeframes
-    days_override = {
-        "1m": 30,
-        "3m": 90,
-    }
-    if timeframe in days_override:
-        days_back = days_override[timeframe]
-
+    # UI timeframe -> how far back to look. All views draw daily candles.
+    DAYS_BACK = {"1d": 90, "1w": 365, "1m": 30, "3m": 90, "1y": 365}
+    days_back = DAYS_BACK.get(timeframe, 90)
     since = timezone.now() - timedelta(days=days_back)
 
-    qs = PriceData.objects.filter(
-        instrument=instrument,
-        timeframe=db_tf,
-        timestamp__gte=since,
-    ).order_by("timestamp")
-
-    bars = []
-    for p in qs:
-        bars.append({
-            "time":   p.timestamp.strftime("%Y-%m-%d"),
-            "open":   float(p.open),
-            "high":   float(p.high),
-            "low":    float(p.low),
-            "close":  float(p.close),
-            "volume": float(p.volume) if p.volume else 0,
-        })
-
+    bars = _daily_chart_bars(instrument, since=since)
     return JsonResponse({"symbol": symbol, "timeframe": timeframe, "bars": bars})
 
 

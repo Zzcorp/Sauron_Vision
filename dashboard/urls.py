@@ -95,6 +95,7 @@ urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("instruments/", views.instruments_list, name="instruments_list"),
     path("instruments/<str:symbol>/", views.instrument_detail, name="instrument_detail"),
+    path("instruments/<str:symbol>/watchlist/", views.toggle_watchlist, name="toggle_watchlist"),
     path("api/instrument-preview/<str:symbol>/", views.instrument_preview_api, name="instrument_preview_api"),
     path("quotes/", views.market_quotes, name="market_quotes"),
     path("calendar/", views.economic_calendar, name="economic_calendar"),

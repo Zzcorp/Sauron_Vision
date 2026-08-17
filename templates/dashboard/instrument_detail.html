@@ -5,7 +5,18 @@
 {% block content %}
 <div class="detail-header fade-in-up">
     <div>
-        <h2>{{ instrument.symbol }}</h2>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <h2 style="margin:0;">{{ instrument.symbol }}</h2>
+            <form method="post" action="{% url 'toggle_watchlist' instrument.symbol %}" style="display:inline;margin:0;">{% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button type="submit" class="wl-star {% if instrument.is_watchlist %}on{% endif %}"
+                        title="{% if instrument.is_watchlist %}Remove from watchlist{% else %}Add to watchlist — bars, quotes and signal scans follow{% endif %}"
+                        aria-pressed="{% if instrument.is_watchlist %}true{% else %}false{% endif %}"
+                        aria-label="Toggle watchlist for {{ instrument.symbol }}">
+                    {% if instrument.is_watchlist %}&#9733;{% else %}&#9734;{% endif %}
+                </button>
+            </form>
+        </div>
         <div class="detail-meta">
             <span class="badge badge-{{ instrument.asset_class }}">{{ instrument.asset_class }}</span>
             <span>{{ instrument.exchange }}</span>
@@ -14,6 +25,13 @@
     </div>
     <a href="{% url 'instruments_list' %}" class="btn">← Back</a>
 </div>
+<style>
+    .wl-star { background:none; border:1px solid var(--border); border-radius:6px;
+        cursor:pointer; font-size:18px; line-height:1; padding:4px 9px;
+        color:var(--text-muted); transition:color .15s, border-color .15s; }
+    .wl-star:hover, .wl-star:focus-visible { color:var(--accent-gold); border-color:var(--accent-gold); outline:none; }
+    .wl-star.on { color:var(--accent-gold); border-color:var(--accent-gold); }
+</style>
 
 <!-- TradingView Lightweight Chart (chart widget) -->
 <div class="card fade-in-up delay-1" style="margin-bottom:20px;padding:0;overflow:hidden;">

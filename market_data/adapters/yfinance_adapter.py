@@ -78,12 +78,17 @@ def fetch_info(symbol):
         return None
 
 
-def save_history_to_db(symbol, period="3mo"):
-    """Fetch history and save to PriceData."""
+def save_history_to_db(symbol, period="3mo", fetch_symbol=None):
+    """Fetch history and save to PriceData.
+
+    `fetch_symbol` is the Yahoo spelling when it differs from the platform
+    one (CORNUSD -> ZC=F, SPX500 -> ^GSPC) — without it, only identity-
+    mapped classes (stocks, ETFs) could ever get daily bars.
+    """
     from instruments.models import Instrument
     from market_data.models import PriceData
 
-    history = fetch_history(symbol, period=period, interval="1d")
+    history = fetch_history(fetch_symbol or symbol, period=period, interval="1d")
     if not history:
         return 0
 

@@ -1275,6 +1275,19 @@
            wrap (clean DOM), but use position:fixed so the rail can't
            clip us at its left edge.                                    */
         .sr-signal-wrap { position: relative; }
+        /* Dismiss lived only as PASS inside the hover popup — functional and
+           undiscovered. The card carries its own ×, hover-revealed so the
+           age chip it briefly covers stays readable at rest. */
+        .sr-x {
+            position: absolute; top: 3px; right: 5px; z-index: 2;
+            background: none; border: 0; cursor: pointer;
+            color: var(--text-muted); font-size: 14px; line-height: 1;
+            padding: 2px 5px; opacity: 0;
+            transition: opacity .15s, color .15s;
+        }
+        .sr-signal-wrap:hover .sr-x { opacity: 1; }
+        .sr-x:hover, .sr-x:focus-visible { color: var(--accent-red); opacity: 1; outline: none; }
+        .signals-rail:not(.open) .sr-x { display: none; }
         .sr-popup {
             position: fixed;
             top: 0; left: 0;             /* updated by JS on hover */

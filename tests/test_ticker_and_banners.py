@@ -138,6 +138,62 @@ class TickerCompositionTests(TestCase):
         self.assertIn("signal", types)
         self.assertIn("news", types)
 
+    def test_new_signals_enter_feeds_at_the_top(self):
+        """Both the ticker and the signals rail are FEEDS — newest first.
+        Ranking by score parked a strong old signal at the front for days
+        while new arrivals appeared buried mid-stream; the score is already
+        painted on every card, the position should carry recency."""
+        from django.utils import timezone as tz
+        from core.context_processors import sauron_context
+        from signals.models import Signal
+
+        def make(symbol, score):
+            inst = _instrument(symbol)
+            return Signal.objects.create(
+                instrument=inst, signal_type="technical",
+                direction="bullish", urgency="high", title=symbol,
+                description="d", rule_name="r", score=score, sub_scores={},
+                price_at_signal=Decimal("100"), is_active=True)
+
+        old_strong = make("BTCUSD", 0.95)
+        Signal.objects.filter(pk=old_strong.pk).update(
+            created_at=tz.now() - timedelta(days=2))
+        make("ETHUSD", 0.40)
+
+        req = RequestFactory().get("/")
+        req.user = self.user
+        ctx = sauron_context(req)
+        rail = ctx.get("panel_recent_signals") or []
+        self.assertEqual(rail[0].instrument.symbol, "ETHUSD",
+                         "the rail's top slot belongs to the newest signal")
+        ticker_signals = [i for i in (ctx.get("ticker_items") or [])
+                          if i.get("type") == "signal"]
+        self.assertEqual(ticker_signals[0]["symbol"], "ETHUSD",
+                         "the ticker's first signal is the newest")
+
+
+class RailDismissTests(TestCase):
+    """Dismissal existed only as PASS inside the hover popup — functional
+    and undiscovered. Each rail card now carries its own ×, wired to the
+    same client-side mechanism (localStorage hide: the engine still sees
+    the signal; a UI click must never delete evidence the bots act on)."""
+
+    def test_each_rail_card_carries_a_dismiss_button(self):
+        from decimal import Decimal as D
+        from signals.models import Signal
+        user = User.objects.create_user(username="dx_u", password="x")
+        inst = _instrument("BTCUSD")
+        Signal.objects.create(
+            instrument=inst, signal_type="technical", direction="bullish",
+            urgency="high", title="t", description="d", rule_name="r",
+            score=0.7, sub_scores={}, price_at_signal=D("100"),
+            is_active=True)
+        self.client.force_login(user)
+        resp = self.client.get("/instruments/", HTTP_HOST="127.0.0.1")
+        html = resp.content.decode()
+        self.assertIn("sr-x", html)
+        self.assertIn("dismissSignal", html)
+
 
 class NewSignalEventTests(TestCase):
     """A new setup is the thing an operator most wants to know the moment it
