@@ -29,7 +29,9 @@ Copy your SSH key to the new user, then **disable password login** in
 `/etc/ssh/sshd_config` (`PasswordAuthentication no`) and `systemctl restart ssh`.
 
 ```bash
-apt update && apt install -y docker.io docker-compose-v2 ufw fail2ban rclone
+# git and python3-cryptography are NOT on minimal cloud images, and both are
+# needed below: git for the clone, cryptography for the FERNET_KEY one-liner.
+apt update && apt install -y git docker.io docker-compose-v2 ufw fail2ban rclone python3-cryptography
 usermod -aG docker sauron
 systemctl enable --now docker fail2ban
 
