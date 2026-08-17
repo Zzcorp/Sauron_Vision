@@ -88,8 +88,15 @@ class EmailSettingsTests(TestCase):
             self.assertTrue(hasattr(settings, name), name)
 
     def test_console_backend_when_no_smtp_host(self):
-        if not settings.EMAIL_HOST:
-            self.assertIn("console", settings.EMAIL_BACKEND)
+        """Read the settings MODULE, not django.conf.settings: the test
+        harness patches the runtime EMAIL_BACKEND to locmem, so the
+        runtime value can never show what settings.py decided. (Locally
+        an EMAIL_HOST in .env made this vacuously pass; CI has none and
+        saw the locmem patch.)"""
+        import importlib
+        smod = importlib.import_module("config.settings")
+        if not smod.EMAIL_HOST:
+            self.assertIn("console", smod.EMAIL_BACKEND)
 
     def test_mail_is_actually_deliverable_in_tests(self):
         from django.core import mail

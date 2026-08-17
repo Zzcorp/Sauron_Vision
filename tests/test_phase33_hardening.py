@@ -389,10 +389,18 @@ class BackupTaskTests(TestCase):
         self.assertEqual(r["reason"], "not_postgres")
 
     def test_skipped_when_pg_dump_missing(self):
-        """pg_dump not on PATH → returns reason='pg_dump_not_found'."""
+        """pg_dump not on PATH → returns reason='pg_dump_not_found'.
+
+        The backup dir must be controlled too: the default /app/backups is
+        creatable on Windows (C:\\app) but not on a CI runner, so without
+        the patch this asserted different reasons on different machines.
+        """
+        import tempfile
         from core.backups import run_postgres_backup
-        with patch.dict(settings.DATABASES["default"],
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.dict(settings.DATABASES["default"],
                          {"ENGINE": "django.db.backends.postgresql"}), \
+             patch("core.backups._backup_dir", return_value=Path(tmp)), \
              patch("core.backups.shutil.which", return_value=None):
             r = run_postgres_backup()
         self.assertFalse(r["ok"])

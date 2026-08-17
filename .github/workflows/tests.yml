@@ -20,6 +20,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # WhiteNoise serves from STATIC_ROOT; a test asserts every template
+      # asset was actually collected, so CI must collect like a deploy does.
+      - name: Collect static assets
+        env:
+          DB_ENGINE: sqlite
+        run: python manage.py collectstatic --noinput
+
       # No Postgres/Redis services on purpose: settings.py degrades to
       # SQLite + locmem cache + in-memory channels, which is exactly the
       # environment the suite is written for.
