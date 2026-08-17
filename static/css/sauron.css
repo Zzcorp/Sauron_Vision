@@ -1755,9 +1755,32 @@
         }
         .wl-chg.up { color: var(--accent); background: rgba(0,232,104,0.10); }
         .wl-chg.down { color: var(--accent-red); background: rgba(255,94,94,0.10); }
+        /* Second line under the acronym — full name + asset-class chip. */
+        .wl-rowname {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 8px; margin-top: -2px;
+        }
+        .wl-name {
+            font-size: 10px; color: var(--text-secondary);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            min-width: 0;
+        }
+        .wl-class {
+            font-family: var(--font-mono); font-size: 8px; font-weight: 700;
+            letter-spacing: 1px; padding: 1px 5px; border-radius: 2px;
+            color: var(--text-muted); border: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .wl-class-crypto    { color: #e8a33d; border-color: rgba(232,163,61,0.4); }
+        .wl-class-forex     { color: #4db8ff; border-color: rgba(77,184,255,0.4); }
+        .wl-class-stock     { color: var(--accent); border-color: rgba(0,232,104,0.4); }
+        .wl-class-etf       { color: #b98aff; border-color: rgba(185,138,255,0.4); }
+        .wl-class-index     { color: #ff9ac2; border-color: rgba(255,154,194,0.4); }
+        .wl-class-commodity { color: #ffd166; border-color: rgba(255,209,102,0.4); }
         .signals-rail:not(.open) .wl-item { padding: 6px 0; justify-content: center; flex-direction: row; }
         .signals-rail:not(.open) .wl-sym { font-size: 9px; min-width: 0; text-align: center; }
         .signals-rail:not(.open) .wl-row1, .signals-rail:not(.open) .wl-row2,
+        .signals-rail:not(.open) .wl-rowname,
         .signals-rail:not(.open) .wl-last, .signals-rail:not(.open) .wl-chg,
         .signals-rail:not(.open) .wl-spark { display: none; }
 
@@ -1851,6 +1874,33 @@
         .dh-pop-bar-fill { height: 100%; transition: width .3s; }
         .dh-pop-cta { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
                       font-size: 10px; color: var(--accent); text-align: right; }
+        /* Small chart inside the hover popups (headband + watchlist).
+           Same renderer as the rail sparks; dimensions come from data-w/h. */
+        .pop-spark { margin: 0 0 12px; }
+        .pop-spark svg { width: 100%; height: 56px; display: block; }
+        .pop-spark svg path {
+            fill: none; stroke: var(--accent); stroke-width: 1.6;
+            filter: drop-shadow(0 0 3px rgba(0,232,104,0.35));
+        }
+        .pop-spark[data-up="0"] svg path {
+            stroke: var(--accent-red);
+            filter: drop-shadow(0 0 3px rgba(232,48,48,0.35));
+        }
+        /* SHORT — the red twin of the TAKE TRADE/LONG primary button. */
+        .sr-pop-btn-short {
+            background: linear-gradient(180deg, rgba(232,48,48,0.26), rgba(154,20,20,0.26));
+            border-color: rgba(232,48,48,0.60);
+            color: #ff7a7a;
+            font-weight: 700; font-size: 11px;
+            letter-spacing: 1.5px;
+            padding: 7px 10px;
+        }
+        .sr-pop-btn-short:hover {
+            background: linear-gradient(180deg, rgba(255,90,90,0.38), rgba(184,24,24,0.38));
+            border-color: var(--accent-red);
+            color: #ffffff;
+            box-shadow: 0 4px 10px rgba(232,48,48,0.35);
+        }
 
         /* Push page content down for headbands — dynamic via CSS variables
            so collapse/expand of either headband animates the page upward. */

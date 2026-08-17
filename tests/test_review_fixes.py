@@ -463,9 +463,13 @@ class ProviderFailureTests(TestCase):
         from ai_agents.providers.claude_provider import ClaudeProvider
         provider = ClaudeProvider()
         client = MagicMock()
-        client.messages.create = MagicMock(return_value=MagicMock(
+        # Provider streams (SDK ten-minute guard) — mock the context-manager
+        # chain stream(...) -> __enter__ -> get_final_message().
+        response = MagicMock(
             content=blocks, stop_reason=stop_reason, stop_details=None,
-            usage=MagicMock(input_tokens=5, output_tokens=5)))
+            usage=MagicMock(input_tokens=5, output_tokens=5))
+        (client.messages.stream.return_value.__enter__
+         .return_value.get_final_message.return_value) = response
         return provider, client
 
     def test_empty_response_raises_instead_of_returning_blank(self):
@@ -490,7 +494,7 @@ class ProviderFailureTests(TestCase):
         provider, client = self._provider_with([block])
         with patch.object(provider, "_get_client", return_value=client):
             provider.complete("s", "m", model="claude-opus-5")
-            thinking_budget = client.messages.create.call_args.kwargs["max_tokens"]
+            thinking_budget = client.messages.stream.call_args.kwargs["max_tokens"]
             provider.complete("s", "m", model="claude-haiku-4-5")
-            haiku_budget = client.messages.create.call_args.kwargs["max_tokens"]
+            haiku_budget = client.messages.stream.call_args.kwargs["max_tokens"]
         self.assertGreater(thinking_budget, haiku_budget)

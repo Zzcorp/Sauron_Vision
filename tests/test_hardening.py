@@ -612,6 +612,48 @@ class EodUniverseTests(SimpleTestCase):
         self.assertNotIn('asset_class="stock"', src)
 
 
+# ── The star delivers bars, not just quotes ─────────────────────────────
+
+class WatchlistBarsTests(TestCase):
+    """Bars were fetched only for enabled bots' symbols, so a starred
+    instrument's chart stayed blank and its rules could never fire —
+    quietly contradicting what the star promises. The bar refresh now runs
+    a watchlist pass through the keyless public feeds."""
+
+    def _klines(self, n=3):
+        base = int(timezone.now().timestamp() * 1000) - n * 3600_000
+        return [[base + i * 3600_000, "1.10", "1.12", "1.09", "1.11", "0"]
+                for i in range(n)]
+
+    def test_a_starred_instrument_gets_bars_without_a_bot(self):
+        from instruments.models import Instrument
+        from market_data.bot_bars import refresh_watchlist_bars
+        from market_data.models import PriceData
+        inst = _instrument("EURUSD")
+        Instrument.objects.filter(pk=inst.pk).update(is_watchlist=True)
+        client = MagicMock()
+        client.klines = MagicMock(return_value=self._klines())
+        client._sv_public_feed = True
+        with patch("market_data.public_feed.public_feed_for",
+                   return_value=client):
+            out = refresh_watchlist_bars()
+        self.assertEqual(out["symbols"], 1)
+        self.assertGreater(out["bars"], 0)
+        self.assertTrue(PriceData.objects.filter(instrument=inst).exists())
+
+    def test_fleet_symbols_are_not_fetched_twice(self):
+        from instruments.models import Instrument
+        from market_data.bot_bars import refresh_watchlist_bars
+        inst = _instrument("EURUSD")
+        Instrument.objects.filter(pk=inst.pk).update(is_watchlist=True)
+        client = MagicMock()
+        with patch("market_data.public_feed.public_feed_for",
+                   return_value=client):
+            out = refresh_watchlist_bars(covered={"EURUSD"})
+        client.klines.assert_not_called()
+        self.assertEqual(out["symbols"], 0)
+
+
 # ── The watchlist star ──────────────────────────────────────────────────
 
 class WatchlistToggleTests(TestCase):

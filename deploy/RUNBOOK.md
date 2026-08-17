@@ -145,6 +145,23 @@ Log in, open `/admin-dashboard/`, press **START PLATFORM**, then enable:
 Leave OFF for now: `actuator_mode_live`, `meta_allocator_mode_live`,
 `feature_ai_pretrade_gate`, and every `agent_*`.
 
+**News & sentiment** are their own set — enable when you want them:
+
+- `scraper_news` — RSS + MarketAux headlines every 3 min. The RSS side is
+  keyless and includes crypto (CoinDesk, Cointelegraph, Decrypt);
+  `MARKETAUX_API_KEY` in `.env` widens it.
+- `scraper_sentiment` — Reddit + StockTwits every 30 min. Reddit REQUIRES
+  `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` in `.env` (create a free
+  "script" app at reddit.com/prefs/apps); without them it silently stores
+  nothing. Covers r/wallstreetbets, r/investing, r/stocks,
+  r/CryptoCurrency, r/Bitcoin.
+- `pipeline_sentiment_agg` — hourly aggregation into per-instrument scores.
+- `agent_news_analyst` — AI turns headlines into structured sentiment.
+  Needs `ANTHROPIC_API_KEY` and spends tokens; enable deliberately.
+
+After editing `.env`, run `dc up -d` — **not** `restart`, which keeps the
+old environment.
+
 > Do **not** use "Start All" on the *system* category — it flips
 > `actuator_mode_live` alongside the master switch.
 

@@ -88,11 +88,16 @@ class ProviderTests(TestCase):
         block.type = "text"
         block.text = text
         client = MagicMock()
-        client.messages.create = MagicMock(return_value=MagicMock(
+        # The provider streams (the SDK's ten-minute guard rejects big
+        # non-streaming requests), so the mock mirrors the context-manager
+        # shape: stream(...) -> __enter__ -> get_final_message().
+        response = MagicMock(
             content=[block],
             usage=MagicMock(input_tokens=input_tokens,
                             output_tokens=output_tokens),
-        ))
+        )
+        (client.messages.stream.return_value.__enter__
+         .return_value.get_final_message.return_value) = response
         return client
 
     def test_effort_is_sent_only_for_supporting_models(self):
@@ -103,13 +108,13 @@ class ProviderTests(TestCase):
         with patch.object(provider, "_get_client", return_value=client):
             provider.complete("sys", "msg", model="claude-opus-5", effort="high")
             self.assertEqual(
-                client.messages.create.call_args.kwargs["output_config"],
+                client.messages.stream.call_args.kwargs["output_config"],
                 {"effort": "high"})
 
-            client.messages.create.reset_mock()
+            client.messages.stream.reset_mock()
             provider.complete("sys", "msg", model="claude-haiku-4-5", effort="high")
             self.assertNotIn("output_config",
-                             client.messages.create.call_args.kwargs)
+                             client.messages.stream.call_args.kwargs)
 
     def test_cost_uses_catalog_pricing(self):
         from ai_agents.providers.claude_provider import ClaudeProvider

@@ -153,15 +153,76 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
     return out
 
 
+# Starred instruments beyond the fleet get bars too, capped per pass —
+# keyless requests are cheap, not free.
+WATCHLIST_BAR_CAP = 30
+
+
+def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
+                           limit=DEFAULT_LIMIT, covered=None) -> dict:
+    """Bars for STARRED instruments no enabled bot already covers.
+
+    The star used to bring quotes and signal scans but not bars — so a
+    starred instrument's chart stayed blank and its rules could never
+    fire, which quietly contradicted what the star promises. The keyless
+    public feeds close the gap; symbols with no free source are skipped
+    by name.
+    """
+    from instruments.models import Instrument
+    from market_data.public_feed import (SUPPORTED_ASSET_CLASSES,
+                                         YF_UNAVAILABLE, public_feed_for)
+
+    out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0}
+    covered = covered or set()
+    classes = sorted(SUPPORTED_ASSET_CLASSES | {"crypto"})
+    qs = (Instrument.objects.filter(is_watchlist=True, is_active=True,
+                                    asset_class__in=classes)
+          .order_by("symbol"))
+    for inst in qs[:WATCHLIST_BAR_CAP]:
+        if inst.symbol in covered or inst.symbol in YF_UNAVAILABLE:
+            continue
+        client = public_feed_for(inst.asset_class)
+        if client is None:
+            out["no_client"] += 1
+            continue
+        fetch_symbol = inst.symbol
+        if inst.asset_class == "crypto":
+            from market_data.management.commands.backfill_bars import (
+                venue_symbol,
+            )
+            fetch_symbol = venue_symbol(inst.symbol)
+        source = type(client).__name__.replace("Trader", "").replace(
+            "Client", "").lower() or "broker"
+        if getattr(client, "_sv_public_feed", False):
+            source += "_public"
+        out["symbols"] += 1
+        for interval in intervals:
+            try:
+                rows = client.klines(fetch_symbol, interval=interval,
+                                     limit=limit)
+            except Exception as e:
+                logger.warning("[bars] watchlist klines(%s, %s) failed: %s",
+                               inst.symbol, interval, e)
+                out["errors"] += 1
+                continue
+            written, skipped = _upsert_rows(inst, interval, rows, source)
+            out["bars"] += written
+            out["skipped"] += skipped
+    return out
+
+
 def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dict:
-    """Refresh bars for every enabled AssetBotConfig across all users."""
+    """Refresh bars for every enabled AssetBotConfig, then for starred
+    instruments the fleet does not already cover."""
     from bot_program.models import AssetBotConfig
 
     totals = {"configs": 0, "symbols": 0, "bars": 0, "skipped": 0, "errors": 0,
               "no_client": 0}
+    covered: set = set()
     for cfg in (AssetBotConfig.objects.filter(enabled=True)
                 .select_related("user")):
         totals["configs"] += 1
+        covered.update(s for s in (cfg.symbols or []) if s)
         try:
             res = refresh_bars_for_config(cfg, intervals=intervals, limit=limit)
         except Exception as e:
@@ -170,5 +231,15 @@ def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dic
             continue
         for k in ("symbols", "bars", "skipped", "errors", "no_client"):
             totals[k] += res.get(k, 0)
+
+    try:
+        wl = refresh_watchlist_bars(intervals=intervals, limit=limit,
+                                    covered=covered)
+        for k in ("symbols", "bars", "skipped", "errors", "no_client"):
+            totals[k] += wl.get(k, 0)
+    except Exception as e:
+        logger.exception("[bars] watchlist pass failed: %s", e)
+        totals["errors"] += 1
+
     logger.info("[bars] refresh complete: %s", totals)
     return totals

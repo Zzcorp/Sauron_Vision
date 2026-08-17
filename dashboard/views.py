@@ -1582,6 +1582,63 @@ def instrument_detail(request, symbol):
 
 
 @login_required
+def take_trade_preview(request, signal_id):
+    """POST — the facts the TAKE TRADE confirm popup shows: sized quantity,
+    levels, dollar risk, capital position and (when capital is short) the
+    proposed funding closes. Nothing is executed here."""
+    from django.http import HttpResponseNotAllowed, JsonResponse
+    from bot_program.manual_trade import preview_take_trade
+    from signals.models import Signal
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    signal = get_object_or_404(Signal, pk=signal_id, is_active=True)
+    return JsonResponse(preview_take_trade(request.user, signal))
+
+
+@login_required
+def take_trade_execute(request, signal_id):
+    """POST — execute the trade previewed above, optionally closing the
+    listed manual positions first to free capital. Paper venue only in this
+    wave; the live path adds the PIN and the pending-close machinery."""
+    import json as _json
+    from django.http import HttpResponseNotAllowed, JsonResponse
+    from bot_program.manual_trade import execute_take_trade
+    from signals.models import Signal
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    signal = get_object_or_404(Signal, pk=signal_id, is_active=True)
+    body, err = _parse_trade_body(request)
+    if err:
+        return JsonResponse({"error": err}, status=400)
+    return JsonResponse(execute_take_trade(request.user, signal,
+                                           body["close_ids"]))
+
+
+def _parse_trade_body(request):
+    """Parse an execute body into {"close_ids": [...], "side": ...}.
+
+    Strict on shape: a non-object body 500'd (AttributeError on .get), and
+    a string close_ids like "12" iterated per character into [1, 2] —
+    closing trades nobody named.
+    """
+    import json as _json
+    try:
+        body = _json.loads(request.body.decode() or "{}")
+    except ValueError:
+        return None, "Body must be JSON"
+    if not isinstance(body, dict):
+        return None, "Body must be a JSON object"
+    raw_ids = body.get("close_ids") or []
+    if not isinstance(raw_ids, list):
+        return None, "close_ids must be a list"
+    close_ids = [int(i) for i in raw_ids if str(i).isdigit()]
+    return {"close_ids": close_ids,
+            "side": str(body.get("side", "")).upper()}, None
+
+
+@login_required
 def toggle_watchlist(request, symbol):
     """POST — star or unstar an instrument.
 
@@ -1607,6 +1664,42 @@ def toggle_watchlist(request, symbol):
             nxt, allowed_hosts={request.get_host()}):
         return redirect(nxt)
     return redirect("instrument_detail", symbol=instrument.symbol)
+
+
+@login_required
+def asset_trade_preview(request, symbol):
+    """POST {side} — signal-less TAKE TRADE preview from an instrument
+    popup (watchlist rail, price headband). Levels come from the engine's
+    ATR machinery; everything else matches the signal path."""
+    from django.http import HttpResponseNotAllowed, JsonResponse
+    from bot_program.manual_trade import preview_asset_trade
+    from instruments.models import Instrument
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    inst = get_object_or_404(Instrument, symbol=symbol, is_active=True)
+    body, err = _parse_trade_body(request)
+    if err:
+        return JsonResponse({"error": err}, status=400)
+    return JsonResponse(preview_asset_trade(request.user, inst, body["side"]))
+
+
+@login_required
+def asset_trade_execute(request, symbol):
+    """POST {side, close_ids} — execute the signal-less trade previewed
+    above. Same paper venue, same funding-close chain."""
+    from django.http import HttpResponseNotAllowed, JsonResponse
+    from bot_program.manual_trade import execute_asset_trade
+    from instruments.models import Instrument
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    inst = get_object_or_404(Instrument, symbol=symbol, is_active=True)
+    body, err = _parse_trade_body(request)
+    if err:
+        return JsonResponse({"error": err}, status=400)
+    return JsonResponse(execute_asset_trade(request.user, inst,
+                                            body["side"], body["close_ids"]))
 
 
 @login_required

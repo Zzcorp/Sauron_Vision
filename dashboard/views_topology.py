@@ -73,7 +73,7 @@ WIRING = {
                              "note": "Has never run: zero PriceData rows carry timeframe=1d. All 5,600 bars come from the bot-bar refresh instead."},
     "feed_bot_bars":        {"layer": "ingest", "writes": ["PriceData 1h/4h"], "feeds": ["pipeline_indicators", "pipeline_signals", "execute_bots"],
                              "synthetic": True, "task": "market_data.tasks.refresh_bot_bars_task", "interval": 600,
-                             "note": "The actual writer of every bar the rule layer reads — scheduled, ungated, and absent from the component registry, so there is no switch for it. Its universe is the enabled bots, so the bots gate their own input."},
+                             "note": "The actual writer of every bar the rule layer reads — scheduled, ungated, and absent from the component registry, so there is no switch for it. Its universe is the enabled bots PLUS starred instruments (keyless feeds), so the star delivers bars as well as quotes."},
     "scraper_news":         {"layer": "ingest", "writes": ["NewsArticle"], "feeds": ["agent_news_analyst"]},
     "scraper_crypto_news":  {"layer": "ingest", "writes": ["NewsArticle"], "feeds": ["agent_news_analyst"]},
     "scraper_sentiment":    {"layer": "ingest", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_sentiment_agg", "pipeline_opportunity_scanner"],

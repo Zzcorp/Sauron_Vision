@@ -55,6 +55,13 @@ RSS_FEEDS = {
     "marketwatch": "https://feeds.marketwatch.com/marketwatch/topstories/",
     "bloomberg_markets": "https://feeds.bloomberg.com/markets/news.rss",
     "seeking_alpha": "https://seekingalpha.com/market_currents.xml",
+    # Crypto — the original nine feeds were all equities/macro, so the
+    # platform traded BTC and ETH while structurally unable to hear a word
+    # about them. All three verified live and keyless (2026-08-18);
+    # coindesk 308s on the trailing-slash spelling, hence the exact URL.
+    "coindesk": "https://www.coindesk.com/arc/outboundfeeds/rss",
+    "cointelegraph": "https://cointelegraph.com/rss",
+    "decrypt": "https://decrypt.co/feed",
 }
 
 # Words that are also tickers. Matching these bare would tag half the feed.

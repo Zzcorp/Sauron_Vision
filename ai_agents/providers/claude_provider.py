@@ -40,7 +40,13 @@ class ClaudeProvider:
         # for the answer alone truncates it. Thinking models get headroom.
         max_tokens = 32000 if supports_thinking(model) else 8192
 
-        response = client.messages.create(
+        # Streamed, not create(): the SDK refuses a non-streaming request
+        # whose max_tokens could outlive its ten-minute HTTP window, and the
+        # 32k thinking budget is over that line — every deep-tier call died
+        # with "Streaming is required for operations that may take longer
+        # than 10 minutes" before a single token was generated. The stream
+        # accumulates into the same Message object create() would return.
+        with client.messages.stream(
             model=model,
             max_tokens=max_tokens,
             system=system_prompt,
@@ -48,7 +54,8 @@ class ClaudeProvider:
                 {"role": "user", "content": user_message}
             ],
             **kwargs,
-        )
+        ) as stream:
+            response = stream.get_final_message()
 
         # Adaptive-thinking models may put a thinking block before the text
         # block, and a safety refusal can return no text at all — never index

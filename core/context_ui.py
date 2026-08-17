@@ -26,6 +26,45 @@ HEADBAND_SYMBOLS = [
     "XPTUSD", "XPDUSD", "CORNUSD", "WHEATUSD", "COFFEEUSD",
 ]
 
+def _recent_closes(inst_id, n=12):
+    """Last n closes, oldest-first — daily bars when they exist, 1h bars
+    otherwise. The fallback matters: bot bars are written at 1h/4h and the
+    watchlist pass mirrors that, so daily-only sparklines were blank for
+    exactly the instruments the operator starred."""
+    from market_data.models import PriceData
+    for tf in ("1d", "1h"):
+        rows = list(PriceData.objects.filter(
+            instrument_id=inst_id, timeframe=tf)
+            .order_by("-timestamp").values_list("close", flat=True)[:n])
+        if len(rows) >= 2:
+            return [float(c) for c in reversed(rows)]
+    return []
+
+
+def _headband_sparks():
+    """{symbol: {"spark": [...], "min": x, "max": y}} for the headband,
+    cached for 5 minutes — ~38 symbols x up to 2 bar queries is too much
+    to pay on every request for a chart that moves daily."""
+    from django.core.cache import cache
+    sparks = cache.get("hb:sparks")
+    if sparks is not None:
+        return sparks
+    from instruments.models import Instrument
+    sparks = {}
+    insts = {i.symbol.upper(): i.id for i in Instrument.objects.filter(
+        symbol__in=HEADBAND_SYMBOLS, is_active=True)}
+    for sym in HEADBAND_SYMBOLS:
+        inst_id = insts.get(sym.upper())
+        if inst_id is None:
+            continue
+        closes = _recent_closes(inst_id)
+        if len(closes) >= 2:
+            sparks[sym] = {"spark": closes,
+                           "min": min(closes), "max": max(closes)}
+    cache.set("hb:sparks", sparks, 300)
+    return sparks
+
+
 def ui_extras(request):
     data = {
         "ui_watchlist": [],
@@ -52,6 +91,13 @@ def ui_extras(request):
         # Reverse so they're oldest-first, cap at 12.
         for k in spark_by_inst:
             spark_by_inst[k] = list(reversed(spark_by_inst[k]))[-12:]
+        # 1h fallback for instruments with no (or one) daily bar — starred
+        # symbols get 1h/4h bars from the watchlist pass, not daily ones.
+        for inst in qs:
+            if len(spark_by_inst.get(inst.id, [])) < 2:
+                closes = _recent_closes(inst.id)
+                if closes:
+                    spark_by_inst[inst.id] = closes
 
         items = []
         for inst in qs:
@@ -117,8 +163,10 @@ def ui_extras(request):
     # ── Dashboard headband metrics ─────────────────────────
     try:
         from market_data.models import LiveQuote
+        sparks = _safe(_headband_sparks, {}) or {}
         band = []
         for sym in HEADBAND_SYMBOLS:
+            sp = sparks.get(sym) or {}
             q = LiveQuote.objects.filter(instrument__symbol__iexact=sym).first()
             if q:
                 from django.utils.timesince import timesince
@@ -134,10 +182,19 @@ def ui_extras(request):
                     "source": q.source or "",
                     "updated": q.updated_at.isoformat() if q.updated_at else "",
                     "updated_human": (timesince(q.updated_at) + " ago") if q.updated_at else "—",
+                    "spark": sp.get("spark", []),
+                    "spark_min": sp.get("min", 0),
+                    "spark_max": sp.get("max", 0),
                 })
             else:
+                # No quote yet — the spark still renders when bars exist,
+                # so a keyless install's popups are not entirely blank.
                 band.append({"symbol": sym, "last": None, "change_pct": 0,
-                             "name": sym, "asset_class": "", "volume": 0, "updated": ""})
+                             "name": sym, "asset_class": "", "volume": 0,
+                             "updated": "",
+                             "spark": sp.get("spark", []),
+                             "spark_min": sp.get("min", 0),
+                             "spark_max": sp.get("max", 0)})
         data["ui_headband"] = band
     except Exception:
         pass

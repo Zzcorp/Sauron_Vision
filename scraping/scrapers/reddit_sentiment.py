@@ -41,7 +41,10 @@ COMMON_WORDS = {
     "SIX", "STO", "TAX", "TEN", "TRY", "TWO", "WAR", "WIN", "YET",
 }
 
-DEFAULT_SUBREDDITS = ["wallstreetbets", "investing", "stocks"]
+# CryptoCurrency and Bitcoin were absent from the first cut — the platform
+# scored social sentiment for stocks only while quoting a crypto fleet.
+DEFAULT_SUBREDDITS = ["wallstreetbets", "investing", "stocks",
+                      "CryptoCurrency", "Bitcoin"]
 
 # Ticker patterns
 DOLLAR_TICKER_RE = re.compile(r'\$([A-Z]{1,5})')

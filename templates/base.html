@@ -1124,11 +1124,17 @@
                         <div><span class="sr-pop-k">stop</span><span class="sr-pop-v down">{{ s.suggested_stop|default:"—" }}</span></div>
                         <div><span class="sr-pop-k">target</span><span class="sr-pop-v up">{{ s.suggested_target|default:"—" }}</span></div>
                     </div>
-                    {# Reaction row (act / pass) — primary decisions. #}
+                    {% comment %}Reaction row (take trade / pass) — primary
+                    decisions. TAKE TRADE only for directional signals: a
+                    neutral verdict carries no side, and the server refuses
+                    it too.{% endcomment %}
                     <div class="sr-pop-actions sr-pop-actions-react">
-                        <a href="{% url 'instrument_detail' s.instrument.symbol %}"
-                           class="sr-pop-btn sr-pop-btn-act"
-                           data-signal-id="{{ s.id }}">▶ ACT</a>
+                        {% if s.direction == "bullish" or s.direction == "bearish" %}
+                        <button type="button"
+                                class="sr-pop-btn sr-pop-btn-act"
+                                data-signal-id="{{ s.id }}"
+                                onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ s.id }});">▶ TAKE TRADE</button>
+                        {% endif %}
                         <button type="button"
                                 class="sr-pop-btn sr-pop-btn-pass"
                                 data-signal-id="{{ s.id }}"
@@ -1172,6 +1178,12 @@
                     <span class="wl-sym">{{ w.symbol }}</span>
                     <span class="wl-last">{% if w.last %}{{ w.last|floatformat:4 }}{% else %}—{% endif %}</span>
                 </div>
+                {% if w.name and w.name != w.symbol %}
+                <div class="wl-rowname">
+                    <span class="wl-name">{{ w.name|truncatechars:26 }}</span>
+                    {% if w.asset_class %}<span class="wl-class wl-class-{{ w.asset_class }}">{{ w.asset_class|upper|slice:":6" }}</span>{% endif %}
+                </div>
+                {% endif %}
                 <div class="wl-row2">
                     {% if w.spark and w.spark|length > 1 %}
                     <span class="wl-spark"
@@ -1190,6 +1202,57 @@
                         {% if w.change_pct >= 0 %}+{% endif %}{{ w.change_pct|floatformat:2 }}%
                     </span>
                 </div>
+                {% comment %}Hover popup — same portal pattern as the
+                headband's. Reuses .dh-pop styling; .wl-pop is the JS
+                hook.{% endcomment %}
+                <div class="dh-pop wl-pop">
+                    <div class="dh-pop-head">
+                        <div>
+                            <div class="dh-pop-title">{{ w.symbol }}</div>
+                            <div class="dh-pop-name">{{ w.name|default:w.symbol }}</div>
+                        </div>
+                        <div class="dh-pop-badge {% if w.change_pct > 0 %}up{% elif w.change_pct < 0 %}down{% else %}flat{% endif %}">
+                            {% if w.change_pct >= 0 %}▲{% else %}▼{% endif %}
+                        </div>
+                    </div>
+                    <div class="dh-pop-big">
+                        <span class="dh-pop-price">{% if w.last %}{{ w.last|floatformat:4 }}{% else %}—{% endif %}</span>
+                        <span class="dh-pop-pct" style="color:{% if w.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
+                            {% if w.change_pct >= 0 %}+{% endif %}{{ w.change_pct|floatformat:2 }}%
+                        </span>
+                    </div>
+                    {% if w.spark and w.spark|length > 1 %}
+                    <div class="pop-spark"
+                         data-points="{% for v in w.spark %}{{ v|floatformat:6 }}{% if not forloop.last %},{% endif %}{% endfor %}"
+                         data-min="{{ w.spark_min|floatformat:6 }}"
+                         data-max="{{ w.spark_max|floatformat:6 }}"
+                         data-up="{% if w.change_pct >= 0 %}1{% else %}0{% endif %}"
+                         data-w="330" data-h="56">
+                        <svg viewBox="0 0 330 56" preserveAspectRatio="none"><path d=""/></svg>
+                    </div>
+                    {% endif %}
+                    <div class="dh-pop-row"><span class="k">Asset class</span><span class="v">{{ w.asset_class|default:"—"|upper }}</span></div>
+                    {% if w.bid %}<div class="dh-pop-row"><span class="k">Bid / Ask</span><span class="v">{{ w.bid|floatformat:4 }} / {{ w.ask|floatformat:4 }}</span></div>{% endif %}
+                    <div class="dh-pop-row"><span class="k">24h volume</span><span class="v">{% if w.volume %}{{ w.volume|floatformat:0 }}{% else %}—{% endif %}</span></div>
+                    <div class="sr-pop-actions sr-pop-actions-react" style="margin-top:12px;">
+                        <button type="button" class="sr-pop-btn sr-pop-btn-act"
+                                onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTradeAsset && window.svTakeTradeAsset('{{ w.symbol|escapejs }}', 'BUY');">▲ LONG</button>
+                        <button type="button" class="sr-pop-btn sr-pop-btn-short"
+                                onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTradeAsset && window.svTakeTradeAsset('{{ w.symbol|escapejs }}', 'SELL');">▼ SHORT</button>
+                    </div>
+                    <div class="sr-pop-actions">
+                        {% comment %}A BUTTON, not an <a>: this popup sits
+                        inside the wl-item anchor, and a nested <a> gets
+                        reparented out of it by the HTML parser, after
+                        which the hover binder never finds the
+                        popup.{% endcomment %}
+                        <button type="button" class="sr-pop-btn"
+                                onclick="event.preventDefault(); event.stopPropagation(); window.location.assign('{% url 'instrument_detail' w.symbol %}');">▸ VIEW ASSET</button>
+                        <button type="button" class="sr-pop-btn"
+                                data-ask-sauron="{{ w.symbol }}{% if w.name and w.name != w.symbol %} ({{ w.name }}){% endif %}"
+                                data-ask-kind="instrument">▸ ASK SAURON</button>
+                    </div>
+                </div>
             </a>
             {% empty %}
             <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:11px;">
@@ -1203,10 +1266,12 @@
 </div>
 
 <script>
-/* Phase 62 — render watchlist sparkline paths from data-points attrs */
+/* Phase 62 — render sparkline paths from data-points attrs. Dimensions
+   come from data-w/data-h so the same renderer draws the 80x18 rail
+   sparks and the 330x56 popup charts. */
 (function(){
   function renderSparks() {
-    document.querySelectorAll('.wl-spark[data-points]').forEach(function(el) {
+    document.querySelectorAll('.wl-spark[data-points], .pop-spark[data-points]').forEach(function(el) {
       var svg = el.querySelector('svg'); if (!svg) return;
       var path = svg.querySelector('path'); if (!path) return;
       var pts = (el.dataset.points || '').split(',')
@@ -1215,7 +1280,9 @@
       var min = parseFloat(el.dataset.min);
       var max = parseFloat(el.dataset.max);
       var span = (max - min) || 1;
-      var W = 80, H = 18, pad = 1.5;
+      var W = parseFloat(el.dataset.w) || 80,
+          H = parseFloat(el.dataset.h) || 18,
+          pad = 1.5;
       var cmds = [];
       for (var i = 0; i < pts.length; i++) {
         var x = (i / (pts.length - 1)) * (W - 2 * pad) + pad;
@@ -1368,6 +1435,129 @@
     applyDismissals();
   }
   document.addEventListener('htmx:afterSwap', applyDismissals);
+})();
+
+/* ── TAKE TRADE — a signal proposes, the operator disposes ─────────────
+   Shared runner: preview (sizing, levels, dollar risk, capital position,
+   funding proposal) → house confirm dialog with the facts → execute.
+   Entered from the signal rail (svTakeTrade) and from the instrument
+   popups (svTakeTradeAsset). Paper venue in this wave; the live path adds
+   the PIN. */
+(function () {
+  function csrf() {
+    var m = document.cookie.match(/csrftoken=([^;]+)/);
+    return m ? m[1] : '';
+  }
+  /* A non-JSON response is a real state, not a "network error": a 404 is
+     a signal that expired between hover and click, a redirect-to-login is
+     an expired session, a 403 is CSRF. Decode to something actionable. */
+  function decode(r) {
+    return r.text().then(function (t) {
+      try { return JSON.parse(t); }
+      catch (e) {
+        var msg = r.status === 404
+          ? 'This signal is no longer active — it expired or its levels were hit.'
+          : r.status === 403
+            ? 'Not allowed — refresh the page and try again.'
+            : (r.redirected || t.indexOf('<html') !== -1)
+              ? 'Session expired — refresh the page and log in again.'
+              : 'HTTP ' + r.status;
+        return { error: msg };
+      }
+    });
+  }
+  var inflight = false;   /* double-click / two-tab guard, client half */
+  function tradeFlow(previewUrl, executeUrl, extraBody) {
+    if (inflight) return;
+    inflight = true;
+    var done = function () { inflight = false; };
+    fetch(previewUrl, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'X-CSRFToken': csrf(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(extraBody || {})
+    }).then(decode).then(function (p) {
+      if (p.error) {
+        done();
+        SV.overlay.alert({ title: 'Cannot take this trade', message: p.error });
+        return;
+      }
+      var facts = [
+        ['Trade', p.side + ' ' + p.qty + ' ' + p.symbol],
+        ['Entry ~', p.entry],
+        ['Stop', p.stop + (p.stop_widened ? '  (widened by the stop floor)' : '')],
+        ['Target', p.target],
+        ['Risk', '$' + p.risk_dollars],
+        ['Notional', '$' + p.notional +
+          (p.capital_use != null && p.capital_use !== p.notional
+            ? '  (ties up $' + p.capital_use + ' margin)' : '')],
+        ['Capital free', '$' + p.available + ' of $' + p.capital],
+        ['Venue', String(p.venue || 'paper').toUpperCase()]
+      ];
+      var closeIds = [];
+      if (!p.sufficient) {
+        (p.close_proposal || []).forEach(function (c) {
+          closeIds.push(c.trade_id);
+          facts.push(['Close first', c.side + ' ' + c.qty + ' ' + c.symbol +
+                      '  (frees ~$' + c.freed + ')']);
+        });
+      }
+      if (p.managed === false) {
+        facts.push(['⚠ UNMANAGED', 'The bot tick is OFF — the stop and target will NOT be enforced until Multi-Asset Bots is enabled']);
+      }
+      SV.overlay.confirm({
+        title: 'Take this trade?',
+        message: (p.sufficient
+          ? 'Executes immediately on the paper venue.'
+          : 'Capital is short — the listed positions close first, then the trade opens. One chain, paper venue.') +
+          (p.managed === false ? '' : ' The 5-minute tick manages the stop and target from here.'),
+        facts: facts,
+        confirmLabel: p.sufficient ? 'TAKE TRADE' : 'CLOSE + TAKE',
+        danger: !p.sufficient
+      }).then(function (ok) {
+        if (!ok) { done(); return; }
+        var body = Object.assign({ close_ids: closeIds }, extraBody || {});
+        fetch(executeUrl, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'X-CSRFToken': csrf(), 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }).then(decode).then(function (res) {
+          done();
+          if (res.error) {
+            /* If funding closes already happened, the operator must know —
+               capital moved even though nothing opened. */
+            SV.overlay.alert({
+              title: 'Trade not taken',
+              message: res.error + (res.closed && res.closed.length
+                ? '  ·  Already closed for funding: ' + res.closed.join(', ')
+                : '')
+            });
+            return;
+          }
+          SV.overlay.alert({
+            title: 'Position open',
+            message: res.side + ' ' + res.qty + ' ' + res.symbol + ' @ ' + res.entry +
+              (res.closed && res.closed.length
+                ? ' — closed first: ' + res.closed.join(', ') : '')
+          });
+        }).catch(function (e) {
+          done();
+          SV.overlay.alert({ title: 'Network error', message: String(e) });
+        });
+      });
+    }).catch(function (e) {
+      done();
+      SV.overlay.alert({ title: 'Network error', message: String(e) });
+    });
+  }
+  window.svTakeTrade = function (signalId) {
+    tradeFlow('/signals/' + signalId + '/take-trade/preview/',
+              '/signals/' + signalId + '/take-trade/', null);
+  };
+  window.svTakeTradeAsset = function (symbol, side) {
+    tradeFlow('/instruments/' + encodeURIComponent(symbol) + '/take-trade/preview/',
+              '/instruments/' + encodeURIComponent(symbol) + '/take-trade/',
+              { side: side });
+  };
 })();
 
 /* ── Mini-sidebar JS-portal tooltip ──────────────────────────────
@@ -2228,7 +2418,16 @@ function toggleSidebar() {
        their cursor onto the popup to click links/buttons inside.    */
     pop.style.pointerEvents = 'auto';
     var r = item.getBoundingClientRect();
-    pop.style.top = (r.bottom + 4) + 'px';
+    /* Vertical clamp: headband items sit at the top, watchlist items can
+       sit anywhere — a popup opened near the bottom must slide up, not
+       run off-screen. display:block is already set, so offsetHeight is
+       measurable. */
+    var top = r.bottom + 4;
+    var ph = pop.offsetHeight || 0;
+    if (ph && top + ph > window.innerHeight - 12) {
+      top = Math.max(12, window.innerHeight - ph - 12);
+    }
+    pop.style.top = top + 'px';
     var left = r.left;
     if (left + maxW > window.innerWidth - 16) left = window.innerWidth - maxW - 16;
     if (left < 16) left = 16;
@@ -2272,6 +2471,15 @@ function toggleSidebar() {
   document.querySelectorAll('.data-headband .dh-item').forEach(function(item){
     var pop = item.querySelector('.dh-pop');
     item.addEventListener('mouseenter', function(){ showPortalPopup(item, '.dh-pop', 380); });
+    item.addEventListener('mouseleave', function(){ scheduleHidePortalPopup(item, item._portalPop || pop); });
+  });
+
+  // Watchlist rail popups — same portal, same lifecycle. The rail hugs the
+  // right edge, so showPortalPopup's viewport clamp slides the popup left.
+  document.querySelectorAll('.wl-item').forEach(function(item){
+    var pop = item.querySelector('.wl-pop');
+    if (!pop) return;
+    item.addEventListener('mouseenter', function(){ showPortalPopup(item, '.wl-pop', 380); });
     item.addEventListener('mouseleave', function(){ scheduleHidePortalPopup(item, item._portalPop || pop); });
   });
 

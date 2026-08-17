@@ -21,6 +21,16 @@
         {% if m.change_pct >= 0 %}+{% endif %}{{ m.change_pct|floatformat:2 }}%
       </span>
     </div>
+    {% if m.spark and m.spark|length > 1 %}
+    <div class="pop-spark"
+         data-points="{% for v in m.spark %}{{ v|floatformat:6 }}{% if not forloop.last %},{% endif %}{% endfor %}"
+         data-min="{{ m.spark_min|floatformat:6 }}"
+         data-max="{{ m.spark_max|floatformat:6 }}"
+         data-up="{% if m.change_pct >= 0 %}1{% else %}0{% endif %}"
+         data-w="330" data-h="56">
+      <svg viewBox="0 0 330 56" preserveAspectRatio="none"><path d=""/></svg>
+    </div>
+    {% endif %}
     <div class="dh-pop-row"><span class="k">Asset class</span><span class="v">{{ m.asset_class|default:"—"|upper }}</span></div>
     <div class="dh-pop-row"><span class="k">24h volume</span><span class="v">{% if m.volume %}{{ m.volume|floatformat:0 }}{% else %}—{% endif %}</span></div>
     {% if m.bid %}<div class="dh-pop-row"><span class="k">Bid / Ask</span><span class="v">{{ m.bid|floatformat:4 }} / {{ m.ask|floatformat:4 }}</span></div>{% endif %}
@@ -31,6 +41,28 @@
         style="width:{% if m.change_pct >= 0 %}{% widthratio m.change_pct 1 10 %}%{% else %}0%{% endif %};
         background:{% if m.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};"></div>
     </div>
-    <div class="dh-pop-cta">▸ Click to view full chart</div>
+    {% comment %}Reaction row — the popup is portaled to <body>, but
+    belt-and-braces stopPropagation keeps clicks from ever reaching the
+    anchor.{% endcomment %}
+    <div class="sr-pop-actions sr-pop-actions-react" style="margin-top:12px;">
+      <button type="button" class="sr-pop-btn sr-pop-btn-act"
+              onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTradeAsset && window.svTakeTradeAsset('{{ m.symbol|escapejs }}', 'BUY');">▲ LONG</button>
+      <button type="button" class="sr-pop-btn sr-pop-btn-short"
+              onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTradeAsset && window.svTakeTradeAsset('{{ m.symbol|escapejs }}', 'SELL');">▼ SHORT</button>
+    </div>
+    <div class="sr-pop-actions">
+      {% comment %}A BUTTON, not an <a>: this popup sits inside the
+      dh-item anchor, and a nested <a> triggers the HTML parser's
+      adoption-agency reparenting — the popup gets ejected out of the
+      item and the hover binder never finds it again.{% endcomment %}
+      <button type="button" class="sr-pop-btn"
+              onclick="event.preventDefault(); event.stopPropagation(); window.location.assign('{% url 'instrument_detail' m.symbol %}');">▸ VIEW ASSET</button>
+      {% comment %}No inline stopPropagation here — the Ask-Sauron launcher
+      is a document-level delegated listener and must see the
+      bubble.{% endcomment %}
+      <button type="button" class="sr-pop-btn"
+              data-ask-sauron="{{ m.symbol }}{% if m.name and m.name != m.symbol %} ({{ m.name }}){% endif %}"
+              data-ask-kind="instrument">▸ ASK SAURON</button>
+    </div>
   </div>
 </a>
