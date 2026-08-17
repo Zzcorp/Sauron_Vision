@@ -60,10 +60,15 @@ dig +short your-domain.com     # must print this box's IP
 ```bash
 su - sauron
 git clone https://github.com/Zzcorp/Sauron_Vision.git
-cd Sauron_Vision/SAURON_V/sauron_vision
+cd Sauron_Vision
 
 cp .env.production.example .env
 ```
+
+The clone root IS the project root — `manage.py` sits directly inside
+`~/Sauron_Vision`. (An earlier version of this file said
+`cd Sauron_Vision/SAURON_V/sauron_vision`, a nesting that exists only on the
+development machine; it failed on every fresh clone.)
 
 Fill in the REQUIRED block. Generate the two keys:
 
