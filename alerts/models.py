@@ -181,6 +181,11 @@ class Notification(models.Model):
                 title=title, body=body, url=url,
             ))
         cls.objects.bulk_create(notifs)
+        # bulk_create fires no post_save — this loop is the explicit
+        # complement to the receiver below. Each push lands only on ITS
+        # user's per-user socket group, so there is no fan-out flood.
+        for n in notifs:
+            _push_live(n)
         return len(notifs)
 
     @classmethod
@@ -198,6 +203,48 @@ class Notification(models.Model):
     @classmethod
     def recent(cls, user, limit=15):
         return cls.objects.filter(user=user).order_by("-created_at")[:limit]
+
+
+def _push_live(notification):
+    """Announce a freshly created notification on its user's live socket.
+
+    The browser turns it into a 4s hover-pausing banner and a bell-badge
+    refresh. Best-effort by construction: a broken channel layer must
+    never break notification creation, and quiet hours are respected only
+    for EXTERNAL channels — the in-app row (and therefore this banner)
+    always exists, matching the settings page's own promise.
+
+    Producers that already raise a richer banner for the same event (bot
+    fills) set `_banner_silent` on the instance before save: the push
+    still goes out so the badge moves, but the client draws no card.
+    """
+    try:
+        from dashboard.consumers import push_eye_event
+        push_eye_event(notification.user, "notification", {
+            "id": notification.pk,
+            "type": notification.notification_type,
+            "title": notification.title,
+            "body": (notification.body or "")[:140],
+            "url": notification.url or "/notifications/",
+            "silent": bool(getattr(notification, "_banner_silent", False)),
+        })
+    except Exception:  # noqa: BLE001 — the row matters, the push is gravy
+        import logging
+        logging.getLogger(__name__).debug(
+            "live notification push failed", exc_info=True)
+
+
+from django.db.models.signals import post_save  # noqa: E402
+from django.dispatch import receiver  # noqa: E402
+
+
+@receiver(post_save, sender=Notification)
+def _notification_created(sender, instance, created, **kwargs):
+    """Every save-path creation pushes live — .objects.create,
+    create_for_user, and the five direct-create producer sites alike.
+    bulk_create (create_for_all) is complemented explicitly above."""
+    if created:
+        _push_live(instance)
 
 
 class PriceAlert(models.Model):

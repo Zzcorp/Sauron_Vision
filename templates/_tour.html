@@ -1,0 +1,70 @@
+{% comment %}
+The guided platform tour — spotlight + step card, engine in
+static/js/sv-tour.js. Rendered for every authenticated user (so the
+user-menu replay works forever); autostart fires only while the user's
+TraderProfile.tour_completed_at is null. Step copy is grounded in what
+the chrome and pages actually do — if a claim here stops being true,
+fix the claim.
+{% endcomment %}
+{% load sauron_tags %}
+{% tour_pending as tour_show %}
+
+{# The veil is the HIT-TESTABLE scrim: the spot's box-shadow only PAINTS #}
+{# the darkness — shadows have no pointer area, so without this layer the #}
+{# dimmed page stayed fully clickable under the tour. #}
+<div class="sv-tour-veil" id="svTourVeil" aria-hidden="true"></div>
+<div class="sv-tour-spot" id="svTourSpot" aria-hidden="true"></div>
+<div class="sv-tour-card" id="svTourCard" role="dialog" aria-modal="false"
+     aria-labelledby="svTourTitle">
+    <div class="sv-tour-step" id="svTourStep"></div>
+    <div class="sv-tour-title" id="svTourTitle"></div>
+    <div class="sv-tour-body" id="svTourBody"></div>
+    <div class="sv-tour-dots" id="svTourDots"></div>
+    <div class="sv-tour-foot">
+        <button type="button" class="sv-tour-btn" id="svTourBack">&#9664; BACK</button>
+        <button type="button" class="sv-tour-btn sv-tour-btn--go" id="svTourNext">NEXT &#9654;</button>
+        <span id="svTourExtra" style="display:flex;gap:8px;"></span>
+        <button type="button" class="sv-tour-skip" id="svTourSkip">SKIP TOUR</button>
+    </div>
+</div>
+
+<script>
+window.SV_TOUR = {
+    autostart: {{ tour_show|yesno:"true,false" }},
+    completeUrl: "{% url 'tour_complete' %}",
+    steps: [
+        { title: "Welcome to Sauron Vision",
+          body: "An AI trading-intelligence platform: it watches markets around the clock, scores trading signals, proposes and evolves strategies, and can automate execution — paper first, live only when you arm it with your PIN. This two-minute tour shows you where everything lives. Use the arrow keys to move, Escape to skip — and replay it anytime from your user menu." },
+        { sel: "#mainSidebar", title: "Everything starts in the sidebar",
+          body: "Pages are grouped by job: Command Center for live operations, Markets for instruments and the economic calendar, Intelligence for signals, strategies, opportunities, news and risk, Automation for the bot program, Portfolio for your book, and AI Agents for the platform's minds. We'll visit the key stops." },
+        { sel: ".sidebar-nav a[href='{% url 'command_center' %}']", title: "Operations Center",
+          body: "Your home screen — a live overview of what the system is doing right now: data feeds, open positions, fresh signals, bot activity and agent work, all on one page with live tabs." },
+        { sel: "#tickerBar", title: "The live ticker",
+          body: "Quotes and breaking headlines stream across every page. Hover an item for details; click a symbol to open its full instrument page with candlestick charts down to the minute." },
+        { sel: "#infoPanelWrap", title: "The cockpit strip",
+          body: "Always at the bottom: portfolio value and exposure, open positions with live R-multiples, the bot's armed state and 24h P&L, signal counts, news, funding, liquidations, unread alerts and drawdown from peak. Hover any cell for its detail panel; click to jump to the page. A dash (—) always means 'not measured yet' — never zero." },
+        { sel: "#signalsRail", title: "The signals rail",
+          body: "A live feed of active signals beside your starred watchlist, following you on every page. New signals slide in the moment they fire; hover a card for entry, stop, target and the TAKE TRADE and PASS buttons — acted-on signals slide back out." },
+        { sel: ".sidebar-nav a[href='{% url 'signals_list' %}']", title: "Signals",
+          body: "Scored, directional trade ideas — each with entry, stop, target and the rule that found it. Signal Performance tracks how past signals actually resolved, so conviction is measured, not vibes." },
+        { sel: ".sidebar-nav a[href='{% url 'strategies_list' %}']", title: "Strategies & Opportunities",
+          body: "Strategies hold your multi-leg trade plans; Opportunities is the automated stable the scanner runs — seeded setups start PAUSED until you arm them. Strategy Evolution is where Sauron mutates decaying rules, walk-forward tests the mutants, and shows you the evidence before you fork or reject." },
+        { sel: ".sidebar-nav a[href='{% url 'bot_home' %}']", title: "The Bot Program",
+          body: "Automated execution across crypto, stocks, forex and commodities. Bots always start on the paper venue; going live requires arming with your PIN. Every entry passes risk sizing, the promotion ladder and the cross-asset orchestrator — new strategies must earn live capital with out-of-sample evidence." },
+        { sel: ".sidebar-nav a[href='{% url 'portfolio_overview' %}']", title: "Portfolio & Positions",
+          body: "Holdings, cash, exposure, drawdown and your full position history — including every trade you take from the signals rail. Tax Lots keeps cost-basis bookkeeping in your chosen method (FIFO, LIFO or HIFO — set it in Profile)." },
+        { sel: "#notifBell", title: "Notifications",
+          body: "Fills, new signals, bot events and critical news land here — and as live banners — the moment they happen. Click the bell for the latest ten, 'View all' for the full inbox, and Settings to route alerts to Telegram, email or WhatsApp." },
+        { sel: "#userMenuTrigger", title: "Your account",
+          body: "Profile and trading preferences, password, and the trading PIN — the second factor on every money-arming action. The Platform Tour lives here too, whenever you want this walk again." },
+        { sel: "#seEyeFab", title: "The Palantír",
+          body: "Click the eye — or press Ctrl+K anywhere — and ask Sauron about your own data: 'why did the bot close EURUSD?', 'what is my dollar exposure?'. The full research conversation lives under AI Agents → Ask Sauron." },
+        { sel: ".theme-toggle-btn", title: "Make it yours",
+          body: "Light or dark, saved to your profile. And press ? anywhere for the keyboard map — g then a letter jumps straight between pages." },
+        { title: "You're set",
+          body: "Two pages worth opening next: Setup, for capital, risk limits and broker connections — and Getting Started, for API keys and the workers that fill the platform with live data. Replay this tour anytime from your user menu.",
+          links: [ { href: "{% url 'setup' %}", label: "OPEN SETUP" },
+                   { href: "{% url 'getting_started' %}", label: "GETTING STARTED" } ] }
+    ]
+};
+</script>

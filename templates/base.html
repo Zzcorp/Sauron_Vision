@@ -42,6 +42,8 @@
     <link rel="stylesheet" href="{% static 'css/sv-overlay.css' %}">
     <script src="{% static 'js/sv-overlay.js' %}" defer></script>
     <script src="{% static 'js/sv-flash.js' %}" defer></script>
+    <link rel="stylesheet" href="{% static 'css/sv-tour.css' %}">
+    <script src="{% static 'js/sv-tour.js' %}" defer></script>
 {% block extra_css %}{% endblock %}
 </head>
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}">
@@ -557,6 +559,10 @@
                             <a class="um-link" href="{% url 'getting_started' %}" role="menuitem">
                                 <span class="um-icon">★</span> Getting Started
                             </a>
+                            <button type="button" class="um-link" id="umReplayTour" role="menuitem"
+                                    style="width:100%;text-align:left;background:none;border:0;cursor:pointer;">
+                                <span class="um-icon">◈</span> Platform Tour
+                            </button>
                             {% if request.user.is_staff %}
                             <a class="um-link" href="{% url 'admin:index' %}" role="menuitem">
                                 <span class="um-icon">⚙</span> Admin Panel
@@ -823,7 +829,7 @@
                 </a>
                 <a href="{% url 'notifications_inbox' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">ALERTS</span>
-                    <span class="ip-count gold">{{ notification_count|default:"0" }}</span>
+                    <span class="ip-count gold" id="ipAlertsCount">{{ notification_count|default:"0" }}</span>
                     <span class="ip-sub">unread</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">UNREAD ALERTS</div>
@@ -2226,9 +2232,37 @@ function toggleSidebar() {
           if (bot && typeof c.bot_open !== 'undefined') bot.textContent = c.bot_open;
           const wl = document.getElementById('ipWatchlistCount');
           if (wl && typeof c.watchlist !== 'undefined') wl.textContent = c.watchlist;
+          const alerts = document.getElementById('ipAlertsCount');
+          if (alerts && typeof c.notifications !== 'undefined') alerts.textContent = c.notifications;
+          syncNotifBadge(c.notifications);
         })
         .catch(() => {});
     }, 800);
+  };
+
+  /* The bell badge, from server truth. The template renders NO span at
+     count 0, so this creates/removes it as the count crosses zero. */
+  function syncNotifBadge(count) {
+    if (typeof count === 'undefined') return;
+    const bell = document.getElementById('notifBell');
+    if (!bell) return;
+    let badge = bell.querySelector('.notif-badge');
+    if (count > 0) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'notif-badge';
+        bell.appendChild(badge);
+      }
+      badge.textContent = count;
+    } else if (badge) {
+      badge.remove();
+    }
+    bell.setAttribute('aria-label',
+      'Notifications' + (count > 0 ? ' — ' + count + ' unread' : ''));
+  }
+  window.refreshNotifBadge = function () {
+    /* Same debounced pipe as the panel counts — one fetch serves both. */
+    window.refreshPanelCounts();
   };
 
   function connect() {
@@ -3776,6 +3810,7 @@ if ('serviceWorker' in navigator) {
 </script>
 
 {% if request.user.is_authenticated %}
+{% include "_tour.html" %}
 <div id="svBannerStack" aria-live="polite" aria-label="Live trading events"></div>
 <script>
 /* Live event banners.
@@ -3796,8 +3831,8 @@ if ('serviceWorker' in navigator) {
 
     var MAX_VISIBLE = 4;
     var TTL = { fill_open: 15000, new_signal: 18000, fill_close: 30000,
-                sauron_answer: 25000,
-                close_pending: 0 };   /* 0 = sticky: this one needs a human */   /* 0 = sticky: this one needs a human */
+                sauron_answer: 25000, notification: 4000,
+                close_pending: 0 };   /* 0 = sticky: this one needs a human */
 
     function esc(v) {
         return String(v === undefined || v === null ? "" : v)
@@ -3874,15 +3909,85 @@ if ('serviceWorker' in navigator) {
                 href: "/asset-bots/"
             };
         }
+        if (kind === "notification") {
+            /* Every alert row raises a live banner the moment it is
+               written. `silent` rows (bot fills, which already raise their
+               own richer banner above) skip the card but still reach the
+               listener so the bell badge updates. */
+            if (d.silent) return null;
+            var typeCls = { signal: "signal", portfolio: "warn",
+                            bot: "open", news: "signal" };
+            var typeLabel = { signal: "New signal", strategy: "Strategy",
+                              news: "Breaking news", portfolio: "Portfolio alert",
+                              system: "System", newsletter: "Newsletter",
+                              bot: "Bot event" };
+            return {
+                cls: typeCls[d.type] || "close",
+                kind: typeLabel[d.type] || "Alert",
+                sym: "", val: "", valCls: "",
+                line: d.title || "",
+                more: row("", d.body),
+                href: d.url || "/notifications/"
+            };
+        }
         return null;
     }
 
+    /* Replay/burst guards for notification banners: ids we already showed
+       (multi-tab reconnects can replay), and the symbols of recent
+       new_signal banners so a staff user's mirrored Notification row does
+       not raise a second banner for the same signal. */
+    var seenNotifIds = [];
+    var recentSignalSyms = {};
+
     function add(kind, data) {
-        var m = describe(kind, data || {});
+        var d = data || {};
+        if (kind === "notification" && d.id !== undefined) {
+            if (seenNotifIds.indexOf(d.id) !== -1) return;
+            seenNotifIds.push(d.id);
+            if (seenNotifIds.length > 50) seenNotifIds.shift();
+        }
+        if (kind === "new_signal" && d.symbol) {
+            recentSignalSyms[d.symbol] = Date.now();
+        }
+        if (kind === "notification" && d.type === "signal") {
+            /* Staff already saw the richer new_signal banner for this. */
+            var fresh = false;
+            for (var s in recentSignalSyms) {
+                if (Date.now() - recentSignalSyms[s] < 10000
+                    && (d.title || "").indexOf(s) !== -1) { fresh = true; }
+            }
+            if (fresh) return;
+        }
+        var m = describe(kind, d);
         if (!m) return;
+
+        /* Bursts coalesce: one alert = one banner; ten alerts = one banner
+           that says ten. The stack must never become a slot machine.
+           Never coalesce INTO a banner mid-exit — its removal timers are
+           already running and would take the new alert's text down with
+           them; a leaving banner is past saving, so a fresh card spawns. */
+        if (kind === "notification") {
+            var existing = stack.querySelector(
+                '.sv-banner[data-notif="1"]:not(.sv-banner--leaving)');
+            if (existing) {
+                var n = (parseInt(existing.getAttribute("data-notif-n"), 10) || 1) + 1;
+                existing.setAttribute("data-notif-n", n);
+                var lineEl = existing.querySelector(".sv-banner-line");
+                if (lineEl) lineEl.textContent =
+                    n + " new alerts — latest: " + (m.line || "");
+                var kindEl = existing.querySelector(".sv-banner-kind");
+                if (kindEl) kindEl.textContent = "Alerts";
+                var openLink = existing.querySelector('a.sv-banner-btn');
+                if (openLink) openLink.setAttribute("href", "/notifications/");
+                if (existing._rearm) existing._rearm();
+                return;
+            }
+        }
 
         var el = document.createElement("div");
         el.className = "sv-banner sv-banner--" + m.cls;
+        if (kind === "notification") el.setAttribute("data-notif", "1");
         el.innerHTML =
             '<div class="sv-banner-head">' +
               '<span class="sv-banner-kind">' + esc(m.kind) + '</span>' +
@@ -3917,14 +4022,62 @@ if ('serviceWorker' in navigator) {
         });
 
         stack.appendChild(el);
-        while (stack.children.length > MAX_VISIBLE) stack.removeChild(stack.firstChild);
+        /* Evict the oldest NON-sticky banner: a sticky close_pending needs
+           a human and used to be silently pushed out by chatter. */
+        while (stack.children.length > MAX_VISIBLE) {
+            var victim = null;
+            for (var i = 0; i < stack.children.length - 1; i++) {
+                if (!stack.children[i]._sticky) { victim = stack.children[i]; break; }
+            }
+            if (!victim) break;
+            stack.removeChild(victim);
+        }
 
         var ttl = TTL[kind];
+        el._sticky = !ttl;
         if (ttl) {
-            setTimeout(function () {
-                /* An expanded banner is one the operator is still reading. */
-                if (!el.classList.contains("is-open")) el.remove();
-            }, ttl);
+            /* Auto-dismiss, PAUSED while hovered or focused: a banner being
+               read must never vanish mid-sentence; leaving restarts a full
+               ttl. Exit is animated (instant under reduced motion). */
+            var timer = null;
+            function dismiss() {
+                if (el.classList.contains("is-open")) return;  /* being read */
+                if (window.matchMedia &&
+                    window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+                    el.remove();
+                    return;
+                }
+                el._leaving = true;
+                el.classList.add("sv-banner--leaving");
+                /* Both removal paths honour a rescue: disarm() clears the
+                   safety AND the _leaving flag, so a hover during the
+                   180ms exit genuinely saves the banner instead of
+                   snapping it back only for the timer to kill it under
+                   the cursor. */
+                el._safety = setTimeout(function () {
+                    if (el._leaving) el.remove();
+                }, 300);
+                el.addEventListener("animationend", function () {
+                    if (el._safety) clearTimeout(el._safety);
+                    if (el._leaving) el.remove();
+                }, { once: true });
+            }
+            function arm() {
+                if (timer) clearTimeout(timer);
+                timer = setTimeout(dismiss, ttl);
+            }
+            function disarm() {
+                if (timer) { clearTimeout(timer); timer = null; }
+                el._leaving = false;
+                if (el._safety) { clearTimeout(el._safety); el._safety = null; }
+                el.classList.remove("sv-banner--leaving");
+            }
+            el.addEventListener("mouseenter", disarm);
+            el.addEventListener("mouseleave", arm);
+            el.addEventListener("focusin", disarm);
+            el.addEventListener("focusout", arm);
+            el._rearm = arm;
+            arm();
         }
     }
 
@@ -3953,6 +4106,11 @@ if ('serviceWorker' in navigator) {
                      || msg.kind === "close_pending")
                     && window.refreshPanelCounts) {
                     window.refreshPanelCounts();
+                }
+                /* Every notification — silent ones included — moves the
+                   bell badge; the count comes from the server, never ++. */
+                if (msg.kind === "notification" && window.refreshNotifBadge) {
+                    window.refreshNotifBadge();
                 }
             }
         };

@@ -1764,10 +1764,16 @@ def panel_counts_json(request):
         pos_open = 0
     watchlist = Instrument.objects.filter(
         is_watchlist=True, is_active=True).count()
+    try:
+        from alerts.models import Notification
+        unread = Notification.unread_count(request.user)
+    except Exception:  # noqa: BLE001 — counts must never 500 the panel
+        unread = 0
     return JsonResponse({
         "positions": pos_open + bot_open,
         "bot_open": bot_open,
         "watchlist": watchlist,
+        "notifications": unread,
     })
 
 
@@ -2180,6 +2186,22 @@ def user_notifications(request):
         "prefs": prefs,
         "rules": rules,
     })
+
+
+@login_required
+def tour_complete(request):
+    """Stamp the guided tour finished (or skipped — same thing: the user
+    decided). POST-only like every other state change; replay runs are
+    purely client-side and never call this."""
+    from django.http import HttpResponseNotAllowed, JsonResponse
+    from django.utils import timezone as _tz
+    from portfolio.trader_profile import get_or_create_profile
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    profile = get_or_create_profile(request.user)
+    profile.tour_completed_at = _tz.now()
+    profile.save(update_fields=["tour_completed_at", "updated_at"])
+    return JsonResponse({"status": "ok"})
 
 
 @login_required

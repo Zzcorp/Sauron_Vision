@@ -435,13 +435,18 @@ class AssetBot(ABC):
                 created_at__gte=timezone.now() - _td(hours=1),
             ).exists()
             if not recent:
-                _N.objects.create(
+                n = _N(
                     user=self.user, notification_type="bot", title=title,
                     body=(f"Broker close order failed for {self.asset_class} "
                           f"trade #{trade.id} ({reason}). The position is "
                           f"still open at the broker; retrying every 5 min."),
                     url="/eye/fills/",
                 )
+                # The caller pushes the sticky red close_pending banner
+                # right after this — the same incident must not also draw
+                # a green transient "Bot event" card. Badge still moves.
+                n._banner_silent = True
+                n.save()
         except Exception as e:
             logger.warning("[%s_bot] close-pending notification failed: %s",
                            self.asset_class, e)

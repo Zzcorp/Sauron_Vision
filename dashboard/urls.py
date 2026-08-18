@@ -252,6 +252,7 @@ urlpatterns = [
     path("notifications/read/<int:notif_id>/", views.mark_notification_read, name="mark_notification_read"),
     path("notifications/read-all/", views.mark_all_notifications_read, name="mark_all_notifications_read"),
     path("intro/", views.intro_page, name="intro"),
+    path("tour/complete/", views.tour_complete, name="tour_complete"),
 
     # ── API Endpoints ───────────────────────────────────────
     path("api/instruments/", market_views.InstrumentListView.as_view(), name="api-instrument-list"),

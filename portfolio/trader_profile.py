@@ -146,6 +146,13 @@ class TraderProfile(models.Model):
     ])
 
     access_pin_hash = models.CharField(max_length=128, blank=True, default="", help_text="Hashed PIN code (2nd-factor)")
+    # Null = the guided platform tour has not been finished or skipped —
+    # it autostarts once on the next page load. A timestamp (not a bool)
+    # so we know WHEN, and so every pre-existing user sees it once too.
+    tour_completed_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When the guided platform tour was finished or skipped. "
+                  "Null = show once on next login.")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

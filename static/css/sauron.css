@@ -3913,8 +3913,17 @@ button:focus-visible,
     from { opacity: 0; transform: translateX(14px); }
     to   { opacity: 1; transform: none; }
 }
+/* Timed banners leave the way they came — a short slide-out the JS waits
+   on (animationend) before removing. Hovering a banner pauses its clock
+   entirely; this is only the exit choreography. */
+@keyframes svBannerOut {
+    from { opacity: 1; transform: none; }
+    to   { opacity: 0; transform: translateX(14px); }
+}
+.sv-banner--leaving { animation: svBannerOut .18s ease-in forwards; }
 @media (prefers-reduced-motion: reduce) {
     .sv-banner { animation: none; }
+    .sv-banner--leaving { animation: none; }
 }
 
 .sv-banner--open   { border-left-color: var(--accent); }

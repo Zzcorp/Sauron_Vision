@@ -56,23 +56,59 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
             snap["observations_count_by_kind"].get(o["kind"], 0) + 1)
 
     # 2. Open positions across all users — keep it light, just the shape.
+    # BOTH books: the legacy Position table AND the AssetBotTrades that
+    # every interactive and bot path actually writes. The brain used to
+    # read only the former, so a manual TAKE TRADE produced trade_open
+    # audit events against an "empty" positions table — and the brain
+    # escalated its own blind spot as a ledger desync ("your risk number
+    # is fiction"). The desync was in this function.
+    # Bot book FIRST and CLOSE_PENDING before all: it is the actively
+    # managed ledger, and an in-flight failed close is the row the brain
+    # most needs to see. Appending it after the legacy book meant the cap
+    # silently dropped bot rows first — partially recreating the blind
+    # spot this union exists to close. The cap is per-book and the counts
+    # are stated, so truncation reads as truncation, never as "flat".
+    bot_rows: list[dict] = []
+    pf_rows: list[dict] = []
+    n_bot = n_pf = 0
+    try:
+        from bot_program.models import AssetBotTrade
+        qs_bot = AssetBotTrade.objects.filter(
+            status__in=("OPEN", "CLOSE_PENDING"))
+        n_bot = qs_bot.count()
+        for t in qs_bot.order_by("status", "-opened_at")[:20]:
+            # "CLOSE_PENDING" < "OPEN" lexically — pendings sort first.
+            bot_rows.append({
+                "symbol": t.symbol,
+                "asset_class": t.asset_class,
+                "side": (t.side or "").upper(),
+                "rule_name": t.rule_name or "",
+                "paper": bool(t.paper),
+                "status": t.status,
+                "book": "bot",
+            })
+    except Exception:
+        pass
     try:
         from portfolio.models import Position
-        open_pos = list(Position.objects.filter(closed_at__isnull=True)
-                          .select_related("instrument", "strategy")
-                          .order_by("-opened_at")[:30])
-        snap["open_positions"] = [
-            {
+        qs_pf = Position.objects.filter(closed_at__isnull=True)
+        n_pf = qs_pf.count()
+        for p in (qs_pf.select_related("instrument", "strategy")
+                  .order_by("-opened_at")[:20]):
+            pf_rows.append({
                 "symbol": p.instrument.symbol,
                 "asset_class": getattr(p.instrument, "asset_class", ""),
                 "side": getattr(p, "side", ""),
                 "rule_name": getattr(p.strategy, "name", "") if p.strategy else "",
                 "unrealized_r": float(p.unrealized_pnl or 0),
-            }
-            for p in open_pos
-        ]
+                "book": "portfolio",
+            })
     except Exception:
-        snap["open_positions"] = []
+        pass
+    snap["open_positions"] = bot_rows + pf_rows
+    snap["open_positions_total"] = n_bot + n_pf
+    if n_bot + n_pf > len(snap["open_positions"]):
+        snap["open_positions_truncated"] = True
 
     # 3. Per-rule recent track record.
     try:
@@ -98,22 +134,39 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
             hurst_exponent, hurst_regime_label, garch_lite_forecast,
         )
         from market_data.models import PriceData
+        # Watchlist first — an unordered [:8] slice sampled arbitrary
+        # instruments and could miss everything the operator watches.
         candidates = list(
-            Instrument.objects.filter(is_active=True)[:8]
+            Instrument.objects.filter(is_active=True)
+            .order_by("-is_watchlist", "symbol")[:8]
         )
         regime_probes = []
         for inst in candidates:
-            closes = list(PriceData.objects
-                          .filter(instrument=inst, timeframe="1d")
-                          .order_by("-timestamp").values_list("close", flat=True)[:150])
-            closes = [float(c) for c in reversed(closes)]
-            if len(closes) < 30:
+            # Do NOT hardcode a timeframe: this deployment holds 4h and
+            # 1h bars and no daily ones at all, so probing "1d" found
+            # nothing for ANY instrument and the brain read six straight
+            # regime-unknown reports as a telemetry blackout — while
+            # diagnosing its own hardcoded filter as a dead scheduler.
+            # (The realized-vol headband cell hit this exact trap first.)
+            closes = []
+            probe_tf = None
+            for tf in ("1d", "4h", "1h"):
+                rows = list(PriceData.objects
+                            .filter(instrument=inst, timeframe=tf)
+                            .order_by("-timestamp")
+                            .values_list("close", flat=True)[:150])
+                if len(rows) >= 30:
+                    closes = [float(c) for c in reversed(rows)]
+                    probe_tf = tf
+                    break
+            if not closes:
                 continue
             h = hurst_exponent(closes, max_lag=20)
             sigma = garch_lite_forecast(closes)
             regime_probes.append({
                 "symbol": inst.symbol,
                 "asset_class": inst.asset_class,
+                "timeframe": probe_tf,
                 "hurst": round(h, 3) if h is not None else None,
                 "regime": hurst_regime_label(h),
                 "vol_forecast_pct": round(sigma * 100, 3) if sigma is not None else None,

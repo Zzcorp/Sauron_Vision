@@ -70,10 +70,16 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
     # don't buzz an external channel while they're sleeping.
     try:
         from alerts.models import Notification
-        Notification.objects.create(
+        n = Notification(
             user=user, notification_type="bot",
             title=title[:200], body=body, url=url[:200],
         )
+        # Fills already raise their own richer live banner straight from
+        # the engine (fill_open/fill_close on /ws/eye/). Mark this row
+        # banner-silent so the bell badge still updates live but the same
+        # event never shows two cards.
+        n._banner_silent = kind in ("bot_fill_open", "bot_fill_close")
+        n.save()
         delivered = True
     except Exception as e:
         logger.warning("dispatch_notification: in-app log failed: %s", e)

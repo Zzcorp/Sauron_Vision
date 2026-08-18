@@ -54,6 +54,64 @@ class WorldSnapshotTests(TestCase):
         self.assertIn("gate_reject", snap["observations_count_by_kind"])
 
 
+# ── Snapshot truthfulness ─────────────────────────────────────────────────
+
+class SnapshotBothBooksTests(TestCase):
+    def test_bot_trades_reach_the_snapshot(self):
+        """The brain read only the legacy Position book, so a manual TAKE
+        TRADE produced trade_open audit events against an 'empty'
+        positions table — and the brain escalated its own blind spot as a
+        ledger desync. Both books now feed open_positions."""
+        from decimal import Decimal
+        from django.utils import timezone as _tz
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        from brain.synthesizer import _build_world_snapshot
+        u = User.objects.create_user("snap_u")
+        cfg = AssetBotConfig.objects.create(
+            user=u, asset_class="forex", name="manual",
+            symbols=[], enabled=True, mode="paper")
+        AssetBotTrade.objects.create(
+            config=cfg, asset_class="forex", symbol="USDCHF", side="BUY",
+            qty=Decimal("1000"), entry_price=Decimal("0.8116"),
+            status="OPEN", paper=True, rule_name="manual_take",
+            opened_at=_tz.now())
+        snap = _build_world_snapshot()
+        bot_rows = [p for p in snap["open_positions"]
+                    if p.get("book") == "bot"]
+        self.assertEqual(len(bot_rows), 1)
+        self.assertEqual(bot_rows[0]["symbol"], "USDCHF")
+        self.assertEqual(bot_rows[0]["rule_name"], "manual_take")
+
+    def test_regime_probes_fall_back_past_missing_daily_bars(self):
+        """This deployment holds 4h/1h bars and no daily ones — a probe
+        hardcoded to '1d' found nothing for ANY instrument, and six
+        straight regime-unknown reports read as a telemetry blackout."""
+        from datetime import timedelta
+        from decimal import Decimal
+        from instruments.models import Instrument
+        from market_data.models import PriceData
+        from brain.synthesizer import _build_world_snapshot
+        inst, _ = Instrument.objects.get_or_create(
+            symbol="PROBEX", defaults={"name": "PROBEX",
+                                       "asset_class": "crypto"})
+        Instrument.objects.filter(pk=inst.pk).update(
+            is_watchlist=True, is_active=True)
+        now = timezone.now()
+        PriceData.objects.bulk_create([
+            PriceData(instrument=inst, timeframe="4h",
+                      timestamp=now - timedelta(hours=4 * i),
+                      open=Decimal("100"), high=Decimal("101"),
+                      low=Decimal("99"),
+                      close=Decimal(str(100 + (i % 7))),
+                      volume=1, source="test")
+            for i in range(60)])
+        snap = _build_world_snapshot()
+        probes = {p["symbol"]: p for p in snap["regime_probes"]}
+        self.assertIn("PROBEX", probes,
+                      "no probe — the 1d hardcode is back")
+        self.assertEqual(probes["PROBEX"]["timeframe"], "4h")
+
+
 # ── Response parsing ──────────────────────────────────────────────────────
 
 class ParseResponseTests(TestCase):
