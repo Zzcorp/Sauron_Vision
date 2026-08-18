@@ -1001,3 +1001,163 @@ def disconnect_broker(request):
     acct.save()
     messages.success(request, f"{broker.title()} disconnected for {target_username}.")
     return redirect("admin_dashboard")
+
+
+# ── The Eye — who is on the platform, from where, holding what ──────────────
+
+# Resolve locations for at most this many users per page view: each cold
+# lookup is a real network call with a 4s ceiling, and an admin page must
+# stay an admin page even when the geo service is down.
+EYE_GEO_BUDGET = 25
+
+
+@login_required
+def admin_eye(request):
+    """Live operator view of the user base: connected-now, last address
+    and location, device, last page touched, and what each account holds
+    (allocated capital, bots, open positions, manual takes). GET-only,
+    superuser-only — this page shows addresses."""
+    if not request.user.is_superuser:
+        return HttpResponseForbidden("Superuser access required.")
+
+    from datetime import timedelta
+
+    from django.contrib.auth.models import User
+    from django.contrib.sessions.models import Session
+    from django.db.models import Count, Q, Sum
+    from django.shortcuts import render
+    from django.utils import timezone
+
+    from bot_program.manual_trade import MANUAL_RULE
+    from bot_program.models import AssetBotConfig, AssetBotTrade
+    from core.presence import (ONLINE_WINDOW_SECONDS, UserPresence,
+                               device_label, geo_for_ip)
+
+    now = timezone.now()
+    online_cutoff = now - timedelta(seconds=ONLINE_WINDOW_SECONDS)
+    day_ago = now - timedelta(hours=24)
+    week_ago = now - timedelta(days=7)
+
+    presences = {p.user_id: p for p in UserPresence.objects.all()}
+
+    # CLOSE_PENDING is still live exposure — the broker holds the position
+    # until the close retry lands, and every other exposure count on the
+    # platform includes it.
+    live_statuses = ("OPEN", "CLOSE_PENDING")
+    open_by_user = {r["config__user"]: r["n"] for r in
+                    AssetBotTrade.objects.filter(status__in=live_statuses)
+                    .values("config__user").annotate(n=Count("id"))}
+    manual_by_user = {r["config__user"]: r["n"] for r in
+                      AssetBotTrade.objects.filter(rule_name=MANUAL_RULE)
+                      .values("config__user").annotate(n=Count("id"))}
+    cap_by_user = {r["user"]: r for r in
+                   AssetBotConfig.objects.values("user").annotate(
+                       total=Sum("capital"), bots=Count("id"),
+                       bots_on=Count("id", filter=Q(enabled=True)))}
+
+    rows = []
+    for u in User.objects.order_by("-date_joined"):
+        p = presences.get(u.id)
+        cap = cap_by_user.get(u.id) or {}
+        rows.append({
+            "user": u,
+            "presence": p,
+            "online": bool(p and p.last_seen >= online_cutoff),
+            # cached_only: the render path NEVER does a network lookup —
+            # a page of N users during a geo outage must not serially
+            # block the shared sync thread. The page warms cold entries
+            # through the /eye/geo/ endpoint after it has rendered.
+            "geo": geo_for_ip(p.last_ip, cached_only=True) if p else "",
+            "device": device_label(p.user_agent) if p else "—",
+            "capital": cap.get("total") or 0,
+            "bots": cap.get("bots") or 0,
+            "bots_on": cap.get("bots_on") or 0,
+            "open_trades": open_by_user.get(u.id, 0),
+            "manual_taken": manual_by_user.get(u.id, 0),
+        })
+    # Online first, then most recently seen, then newest account.
+    rows.sort(key=lambda r: (
+        not r["online"],
+        -(r["presence"].last_seen.timestamp() if r["presence"] else 0),
+    ))
+
+    online_now = sum(1 for r in rows if r["online"])
+    seen_24h = sum(1 for p in presences.values() if p.last_seen >= day_ago)
+
+    metrics = {
+        "users_total": len(rows),
+        "online_now": online_now,
+        "seen_24h": seen_24h,
+        "new_7d": User.objects.filter(date_joined__gte=week_ago).count(),
+        "sessions_active": Session.objects.filter(
+            expire_date__gte=now).count(),
+        "open_trades": AssetBotTrade.objects.filter(
+            status__in=live_statuses).count(),
+        "capital_total": AssetBotConfig.objects.aggregate(
+            t=Sum("capital"))["t"] or 0,
+    }
+    try:
+        from signals.models import Signal
+        metrics["signals_active"] = Signal.objects.filter(
+            is_active=True).count()
+    except Exception:  # noqa: BLE001
+        metrics["signals_active"] = 0
+    try:
+        from scraping.models import NewsArticle
+        metrics["news_24h"] = NewsArticle.objects.filter(
+            scraped_at__gte=day_ago).count()
+    except Exception:  # noqa: BLE001
+        metrics["news_24h"] = 0
+    try:
+        from market_data.models import LiveQuote
+        metrics["quotes_fresh"] = LiveQuote.objects.filter(
+            updated_at__gte=now - timedelta(minutes=15)).count()
+    except Exception:  # noqa: BLE001
+        metrics["quotes_fresh"] = 0
+    try:
+        from ai_agents.models import AgentTask
+        ai = AgentTask.objects.filter(created_at__gte=day_ago)
+        metrics["ai_24h"] = ai.count()
+        metrics["ai_cost_24h"] = float(sum(
+            float(t.cost_usd or 0) for t in ai))
+    except Exception:  # noqa: BLE001
+        metrics["ai_24h"], metrics["ai_cost_24h"] = 0, 0.0
+
+    return render(request, "dashboard/admin_eye.html", {
+        "page_id": "admin_eye",
+        "rows": rows,
+        "metrics": metrics,
+    })
+
+
+# Wall-clock ceiling for one geo-warm pass. Individual lookups are
+# time-limited too, but DNS resolution is not — the monotonic check
+# between lookups is what bounds the whole request.
+EYE_GEO_TIME_BUDGET_SECONDS = 8.0
+
+
+@login_required
+def admin_eye_geo(request):
+    """GET — resolve locations for the most recent presences, cached a
+    day. Called by the Eye page AFTER it renders, so the slow part (up to
+    EYE_GEO_BUDGET keyless lookups) never blocks the page — or, via the
+    shared sync-view executor, anyone else's page."""
+    if not request.user.is_superuser:
+        return HttpResponseForbidden("Superuser access required.")
+    import time
+
+    from django.http import JsonResponse
+
+    from core.presence import UserPresence, geo_for_ip
+
+    out = {}
+    started = time.monotonic()
+    newest = (UserPresence.objects.exclude(last_ip="")
+              .order_by("-last_seen")[:EYE_GEO_BUDGET])
+    for p in newest:
+        if time.monotonic() - started > EYE_GEO_TIME_BUDGET_SECONDS:
+            break
+        label = geo_for_ip(p.last_ip)
+        if label:
+            out[p.last_ip] = label
+    return JsonResponse({"geo": out})

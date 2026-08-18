@@ -132,6 +132,9 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # After auth (needs request.user); stamps who-is-online for the admin
+    # Eye, throttled to one write per user per minute.
+    "core.presence.PresenceMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "core.security.LoginRateLimitMiddleware",

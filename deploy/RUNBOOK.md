@@ -150,6 +150,9 @@ Leave OFF for now: `actuator_mode_live`, `meta_allocator_mode_live`,
 - `scraper_news` — RSS + MarketAux headlines every 3 min. The RSS side is
   keyless and includes crypto (CoinDesk, Cointelegraph, Decrypt);
   `MARKETAUX_API_KEY` in `.env` widens it.
+- `scraper_crypto_news` — the dedicated crypto RSS pass every 10 min
+  (CoinDesk, Cointelegraph, The Block, Decrypt). Overlaps the above
+  harmlessly — articles dedupe by URL.
 - `scraper_sentiment` — Reddit + StockTwits every 30 min. Reddit REQUIRES
   `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` in `.env` (create a free
   "script" app at reddit.com/prefs/apps); without them it silently stores

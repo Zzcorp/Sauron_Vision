@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}The Eye — Sauron Vision{% endblock %}
+{% block page_title %}◉ THE EYE{% endblock %}
+
+{% block content %}
+{% include "dashboard/_hq_divisions.html" with hq_current="eye" %}
+
+{% comment %}
+The operator's people-view: not "is the machine healthy" (Health) or "is
+data moving" (Map), but WHO is on the platform right now, from where, on
+what device, and holding what. Everything here reads existing rows plus
+the presence table the middleware stamps — nothing on this page can slow
+a user's request down.
+{% endcomment %}
+
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ONLINE NOW</span>
+        <span class="oc-strip-value" style="color:var(--accent);">{{ metrics.online_now }}</span>
+        <span class="oc-strip-sub">seen in the last 5 min</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SEEN 24H</span>
+        <span class="oc-strip-value">{{ metrics.seen_24h }}</span>
+        <span class="oc-strip-sub">of {{ metrics.users_total }} accounts</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SESSIONS</span>
+        <span class="oc-strip-value">{{ metrics.sessions_active }}</span>
+        <span class="oc-strip-sub">unexpired logins</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">NEW 7D</span>
+        <span class="oc-strip-value">{{ metrics.new_7d }}</span>
+        <span class="oc-strip-sub">accounts joined</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">OPEN POSITIONS</span>
+        <span class="oc-strip-value">{{ metrics.open_trades }}</span>
+        <span class="oc-strip-sub">platform-wide</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ALLOCATED</span>
+        <span class="oc-strip-value">${{ metrics.capital_total|floatformat:0 }}</span>
+        <span class="oc-strip-sub">bot capital, all users</span>
+    </div>
+</div>
+
+<div class="oc-strip" style="margin-bottom:22px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ACTIVE SIGNALS</span>
+        <span class="oc-strip-value">{{ metrics.signals_active }}</span>
+        <span class="oc-strip-sub">in the rail</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">NEWS 24H</span>
+        <span class="oc-strip-value">{{ metrics.news_24h }}</span>
+        <span class="oc-strip-sub">articles stored</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">FRESH QUOTES</span>
+        <span class="oc-strip-value">{{ metrics.quotes_fresh }}</span>
+        <span class="oc-strip-sub">updated &lt; 15 min</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">AI TASKS 24H</span>
+        <span class="oc-strip-value">{{ metrics.ai_24h }}</span>
+        <span class="oc-strip-sub">${{ metrics.ai_cost_24h|floatformat:4 }} spent</span>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">USERS — online first</span>
+    </div>
+    <div class="table-wrapper"><table class="sv-perf-table">
+        <thead><tr>
+            <th>USER</th>
+            <th>STATUS</th>
+            <th>FROM</th>
+            <th>DEVICE</th>
+            <th>LAST PAGE</th>
+            <th style="text-align:right;">CAPITAL</th>
+            <th style="text-align:right;">BOTS</th>
+            <th style="text-align:right;">OPEN</th>
+            <th style="text-align:right;">TAKEN</th>
+            <th>JOINED</th>
+        </tr></thead>
+        <tbody>
+        {% for r in rows %}
+        <tr>
+            <td>
+                <strong>{{ r.user.username }}</strong>
+                {% if r.user.is_superuser %}<span class="eye-chip eye-chip-admin">ADMIN</span>
+                {% elif r.user.is_staff %}<span class="eye-chip">STAFF</span>{% endif %}
+                {% if not r.user.is_active %}<span class="eye-chip eye-chip-off">DISABLED</span>{% endif %}
+            </td>
+            <td>
+                {% if r.online %}
+                <span class="eye-online">● ONLINE</span>
+                {% elif r.presence %}
+                <span style="color:var(--text-muted);">{{ r.presence.last_seen|timesince }} ago</span>
+                {% else %}
+                <span style="color:var(--text-muted);">never seen</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if r.presence.last_ip %}
+                <span class="sv-mono">{{ r.presence.last_ip }}</span>
+                <div class="eye-geo" data-geo-ip="{{ r.presence.last_ip }}"
+                     style="font-size:10px;color:var(--text-muted);">{{ r.geo }}</div>
+                {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+            </td>
+            <td>{{ r.device }}</td>
+            <td>
+                {% if r.presence.last_path %}
+                <span class="sv-mono" style="font-size:10.5px;">{{ r.presence.last_path|truncatechars:28 }}</span>
+                {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+            </td>
+            <td style="text-align:right;" class="sv-mono">${{ r.capital|floatformat:0 }}</td>
+            <td style="text-align:right;" class="sv-mono">{{ r.bots_on }}/{{ r.bots }}</td>
+            <td style="text-align:right;" class="sv-mono">{{ r.open_trades }}</td>
+            <td style="text-align:right;" class="sv-mono">{{ r.manual_taken }}</td>
+            <td style="color:var(--text-muted);">{{ r.user.date_joined|date:"M d, Y" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="10" style="text-align:center;color:var(--text-muted);">No users.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    <div style="margin-top:10px;font-size:10.5px;color:var(--text-muted);font-family:var(--font-mono);">
+        Presence is stamped once a minute per user by the request middleware.
+        BOTS is enabled/total configs · OPEN is open positions · TAKEN is
+        manual TAKE TRADE executions, all-time. Locations are best-effort
+        (keyless lookup, cached a day) and resolve only for the
+        most-recently-seen users.
+    </div>
+</div>
+
+<style>
+.eye-online { color: var(--accent); font-family: var(--font-mono);
+    font-size: 10.5px; letter-spacing: 1px; font-weight: 700;
+    text-shadow: 0 0 8px rgba(0,232,104,0.35); }
+body.light-mode .eye-online { text-shadow: none; }
+.eye-chip { font-family: var(--font-mono); font-size: 8px; letter-spacing: 1px;
+    padding: 1px 5px; border-radius: 2px; margin-left: 6px;
+    color: var(--text-muted); border: 1px solid var(--border); vertical-align: middle; }
+.eye-chip-admin { color: var(--accent); border-color: rgba(0,232,104,0.4); }
+.eye-chip-off { color: var(--accent-red); border-color: rgba(232,48,48,0.4); }
+.sv-mono { font-family: var(--font-mono); font-size: 11px; }
+</style>
+
+<script>
+/* Locations arrive AFTER the page: the render path only reads the geo
+   cache, and this one call warms it (server-side wall-clock budget, one
+   keyless lookup per distinct address per day). textContent only — the
+   labels come from a third-party service. */
+(function () {
+  var cells = document.querySelectorAll('.eye-geo[data-geo-ip]');
+  if (!cells.length) return;
+  fetch('{% url "admin_eye_geo" %}', { credentials: 'same-origin' })
+    .then(function (r) { return r.ok ? r.json() : { geo: {} }; })
+    .then(function (data) {
+      var geo = (data && data.geo) || {};
+      cells.forEach(function (cell) {
+        var label = geo[cell.dataset.geoIp];
+        if (label && !cell.textContent.trim()) cell.textContent = label;
+      });
+    })
+    .catch(function () { /* locations are decoration — never an error */ });
+})();
+</script>
+{% endblock %}

@@ -47,3 +47,6 @@ celerybeat.pid
 
 # Claude Code local state
 .claude/
+
+# Operator screenshots dropped locally — never ship into the public static root
+static/screen/

@@ -37,6 +37,7 @@ from .views_performance import performance_dashboard
 from .views_risk import risk_dashboard
 from .views_ai_insights import ai_insights_dashboard
 from .views_admin_hq import (
+    admin_eye, admin_eye_geo,
     flatten_all_positions,
     run_signal_scan, run_smc_lifecycle, run_grade_signals,
     run_decay_investigation, run_daily_snapshot, run_recalc_exposure,
@@ -130,6 +131,8 @@ urlpatterns = [
     path("getting-started/", views.getting_started, name="getting_started"),
     path("toggle-theme/", views.toggle_theme, name="toggle_theme"),
     path("admin-dashboard/", views.admin_dashboard, name="admin_dashboard"),
+    path("admin-dashboard/eye/", admin_eye, name="admin_eye"),
+    path("admin-dashboard/eye/geo/", admin_eye_geo, name="admin_eye_geo"),
     path("admin-dashboard/toggle/", views.admin_toggle_component, name="admin_toggle_component"),
     path("admin-dashboard/bulk-toggle/", views.admin_bulk_toggle, name="admin_bulk_toggle"),
     path("admin-dashboard/create-user/", views.admin_create_user, name="admin_create_user"),

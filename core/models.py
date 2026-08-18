@@ -7,6 +7,8 @@ from .audit import AuditLog  # noqa
 
 from .compliance import TradingRestriction  # noqa
 
+from .presence import UserPresence  # noqa
+
 from django.db import models
 
 

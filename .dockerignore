@@ -48,3 +48,6 @@ env/
 test_backups/
 .claude/
 *.sql
+
+# Local screenshots must not reach collectstatic in the image
+static/screen/
