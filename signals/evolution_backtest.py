@@ -28,11 +28,13 @@ Public API
 ----------
 
     register_evaluator(rule_name, fn)
+    register_universe(rule_name, fn)   (optional; pins the instrument set per score)
     has_evaluator(rule_name) -> bool
     walk_forward_window(lookback_days=180, train_frac=0.7) -> (train_start, train_end, test_start, test_end)
     backtest_with_params(rule_name, params, start, end) -> dict
+    walkforward_context(rule_name, parent_params) -> dict  (parent baselines, once per sweep)
     score_mutant_walkforward(rule_name, mutant_params, parent_params,
-                             lookback_days=180) -> dict
+                             lookback_days=180, context=None) -> dict
 """
 from __future__ import annotations
 
@@ -64,12 +66,51 @@ INSUFFICIENT_DATA_PENALTY = -1.0  # in R-units
 EvaluatorFn = Callable[[dict, datetime, datetime], list[float]]
 EVALUATOR_REGISTRY: dict[str, EvaluatorFn] = {}
 
+# Optional per-rule universe resolvers: fn(start) -> list of instrument ids
+# eligible for backtesting a window that begins at `start`. A rule that
+# registers one commits its evaluator to accepting a `universe=` kwarg.
+# The point is pinning: the resolver runs ONCE per walk-forward score (at
+# the full window's start) and the same list feeds all four evaluator legs
+# — otherwise each leg re-resolves against live tables, and a signal-scan
+# or watchlist write landing mid-sweep scores mutants against a universe
+# the frozen parent baselines never saw.
+UNIVERSE_REGISTRY: dict[str, Callable] = {}
+
 
 def register_evaluator(rule_name: str, fn: EvaluatorFn) -> None:
     """Register a backtest evaluator for `rule_name`. Idempotent — re-registering overrides."""
     if not callable(fn):
         raise TypeError("evaluator must be callable(params, start, end) -> list[float]")
     EVALUATOR_REGISTRY[rule_name] = fn
+
+
+def register_universe(rule_name: str, fn: Callable) -> None:
+    """Register a universe resolver for `rule_name`. Idempotent."""
+    if not callable(fn):
+        raise TypeError("universe resolver must be callable(start) -> list")
+    UNIVERSE_REGISTRY[rule_name] = fn
+
+
+def resolve_universe(rule_name: str, start: datetime):
+    """The pinned instrument set for a window starting at `start`, or None
+    when the rule has no resolver (its evaluator self-resolves per call).
+
+    A resolver that RAISES pins the empty set, never None: mapping failure
+    to None would silently hand every leg back to per-call self-resolution
+    — the drifting, candidate-dependent universe this registry exists to
+    eliminate — on exactly the kind of transient DB hiccup a sweep can
+    provoke. Empty fails closed instead: zero trades, insufficient-data
+    penalty, promotion gate blocked on sample count."""
+    fn = UNIVERSE_REGISTRY.get(rule_name)
+    if fn is None:
+        return None
+    try:
+        return list(fn(start))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[evolution_backtest] universe resolver(%s) raised: %s"
+                       " — pinning the empty set (fail closed)",
+                       rule_name, e)
+        return []
 
 
 def has_evaluator(rule_name: str) -> bool:
@@ -98,8 +139,13 @@ def walk_forward_window(lookback_days: int = DEFAULT_LOOKBACK_DAYS,
 # ── Backtest invocation ─────────────────────────────────────────────────────
 
 def backtest_with_params(rule_name: str, params: dict,
-                          start: datetime, end: datetime) -> dict:
+                          start: datetime, end: datetime,
+                          *, universe=None) -> dict:
     """Invoke the registered evaluator and return summary stats.
+
+    `universe` (a pinned instrument-id list from `resolve_universe`) is only
+    forwarded when given — evaluators without a registered resolver keep
+    the plain (params, start, end) contract.
 
     Returns dict: {n, expectancy, hit_rate, std, realized_r_list}.
     Raises LookupError if no evaluator is registered.
@@ -109,7 +155,10 @@ def backtest_with_params(rule_name: str, params: dict,
 
     fn = EVALUATOR_REGISTRY[rule_name]
     try:
-        rs = list(fn(params, start, end))
+        if universe is not None:
+            rs = list(fn(params, start, end, universe=universe))
+        else:
+            rs = list(fn(params, start, end))
     except Exception as e:
         logger.warning("[evolution_backtest] evaluator(%s) raised: %s", rule_name, e)
         rs = []
@@ -133,10 +182,36 @@ def backtest_with_params(rule_name: str, params: dict,
 
 # ── Walk-forward scoring ────────────────────────────────────────────────────
 
+def walkforward_context(rule_name: str, parent_params: dict,
+                        *, lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+                        now=None) -> dict:
+    """Freeze the split windows and compute the parent's train/test
+    baselines ONCE for a whole proposal sweep.
+
+    Without this, every one of the 20 mutants in a sweep re-derived its
+    windows from a fresh timezone.now() and re-ran the parent's two
+    backtests — half the sweep's ~80 evaluator invocations recomputed the
+    identical parent result, and a 4h bar closing mid-sweep meant the
+    top-K sort compared scores measured on different data."""
+    tr_s, tr_e, te_s, te_e = walk_forward_window(lookback_days, now=now)
+    # Universe pinned once, at the FULL window's start: the same instrument
+    # set feeds train and test for parent and every mutant, so deltas
+    # measure the parameter change, never the instrument mix.
+    universe = resolve_universe(rule_name, tr_s)
+    return {
+        "windows": (tr_s, tr_e, te_s, te_e),
+        "universe": universe,
+        "train_parent": backtest_with_params(rule_name, parent_params,
+                                             tr_s, tr_e, universe=universe),
+        "test_parent": backtest_with_params(rule_name, parent_params,
+                                            te_s, te_e, universe=universe),
+    }
+
+
 def score_mutant_walkforward(rule_name: str, mutant_params: dict,
                               parent_params: dict,
                               *, lookback_days: int = DEFAULT_LOOKBACK_DAYS,
-                              now=None) -> dict:
+                              now=None, context: Optional[dict] = None) -> dict:
     """Score a mutant via walk-forward backtesting against the parent.
 
     Returns a dict with:
@@ -155,12 +230,18 @@ def score_mutant_walkforward(rule_name: str, mutant_params: dict,
     if not has_evaluator(rule_name):
         raise LookupError(f"No evaluator registered for '{rule_name}'.")
 
-    tr_s, tr_e, te_s, te_e = walk_forward_window(lookback_days, now=now)
+    if context is None:
+        context = walkforward_context(rule_name, parent_params,
+                                      lookback_days=lookback_days, now=now)
+    tr_s, tr_e, te_s, te_e = context["windows"]
+    universe = context.get("universe")
+    train_parent = context["train_parent"]
+    test_parent = context["test_parent"]
 
-    train_mutant = backtest_with_params(rule_name, mutant_params, tr_s, tr_e)
-    test_mutant = backtest_with_params(rule_name, mutant_params, te_s, te_e)
-    train_parent = backtest_with_params(rule_name, parent_params, tr_s, tr_e)
-    test_parent = backtest_with_params(rule_name, parent_params, te_s, te_e)
+    train_mutant = backtest_with_params(rule_name, mutant_params, tr_s, tr_e,
+                                        universe=universe)
+    test_mutant = backtest_with_params(rule_name, mutant_params, te_s, te_e,
+                                       universe=universe)
 
     # Insufficient data on either side → mutant is heavily penalised.
     sufficient = (

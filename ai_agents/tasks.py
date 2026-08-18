@@ -907,21 +907,49 @@ def resolve_pending_calibrations():
 @shared_task
 @guarded_task("pipeline_ai_decay")
 def investigate_decaying_rules():
-    """Phase-3 nightly task: investigate every rule that decay_flag flags as decaying."""
-    if not _ai_enabled():
-        return {"status": "skipped", "reason": "no_anthropic_api_key"}
+    """Phase-3 nightly task: investigate every rule that decay_flag flags
+    as decaying.
 
+    The decay scan and the evolution trigger run BEFORE the AI-key gate —
+    both are pure DB statistics and component checks, no LLM anywhere.
+    Behind the gate they were silently dead on keyless deployments (a
+    supported mode), so a rule could decay all week while the operator
+    believed the nightly reflex existed."""
     from signals.models import Signal
     from signals.performance import decay_flag
-    from ai_agents.agents.decay_investigator import investigate_decaying_rule
 
+    # order_by clears Signal's Meta.ordering — left in place it rides into
+    # the DISTINCT, returning one row per (rule_name, created_at) pair, and
+    # every decayed rule got investigated once per duplicate occurrence.
     rules = (
         Signal.objects
         .filter(is_active=False).exclude(outcome="").exclude(rule_name="")
-        .values_list("rule_name", flat=True).distinct()
+        .values_list("rule_name", flat=True)
+        .distinct().order_by("rule_name")
     )
 
     decaying = [r for r in rules if r and decay_flag(r)["is_decaying"]]
+
+    # Event-driven evolution: confirmed decay IS the trigger — the fix
+    # proposal goes on the operator's desk tonight, not next Sunday, key
+    # or no key. Fully gated inside (component switches, schema, stale-
+    # proposal expiry, open-proposal dedupe) and never raises.
+    evolutions_triggered = 0
+    for rn in decaying:
+        try:
+            from signals.evolution import propose_if_fresh
+            out = propose_if_fresh(rn)
+            evolutions_triggered += out.get("proposed", 0)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("decay-triggered evolution failed for %s: %s", rn, e)
+
+    if not _ai_enabled():
+        return {"status": "skipped", "reason": "no_anthropic_api_key",
+                "decaying": len(decaying),
+                "evolutions_triggered": evolutions_triggered}
+
+    from ai_agents.agents.decay_investigator import investigate_decaying_rule
+
     investigations = []
     for rn in decaying:
         try:
@@ -934,9 +962,10 @@ def investigate_decaying_rules():
 
     return {
         "status": "ok",
-        "rules_scanned": Signal.objects.filter(is_active=False).exclude(outcome="").exclude(rule_name="").values("rule_name").distinct().count(),
+        "rules_scanned": Signal.objects.filter(is_active=False).exclude(outcome="").exclude(rule_name="").order_by().values("rule_name").distinct().count(),
         "decaying": len(decaying),
         "investigations_created": len(investigations),
         "investigations": investigations,
+        "evolutions_triggered": evolutions_triggered,
     }
 

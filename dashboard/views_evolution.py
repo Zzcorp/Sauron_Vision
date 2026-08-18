@@ -6,7 +6,12 @@ from django.shortcuts import render
 @login_required
 def evolution_dashboard(request):
     from signals.models import RuleMutation
-    from signals.evolution import SCHEMA_REGISTRY
+    from signals.evolution import SCHEMA_REGISTRY, _ensure_rules_registered
+
+    # Registration is a lazy per-process side effect; a fresh web worker
+    # has never run a proposal task, so without this the panel renders
+    # "no schemas registered" while celery is actively proposing.
+    _ensure_rules_registered()
 
     proposed = list(
         RuleMutation.objects.filter(state=RuleMutation.STATE_PROPOSED)

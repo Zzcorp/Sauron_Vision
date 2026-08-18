@@ -32,17 +32,34 @@ MIN_TEST_EXPECTANCY = 0.0
 MIN_RETENTION = 0.5
 
 
+def _evaluator_name(rule_name: str) -> str:
+    """Evolved forks (`{parent}_evolved_vN`) reuse the PARENT's evaluator —
+    same detector, different constants — with the fork's own parameters.
+    Without this resolution every fork hit the exact-name lookup, found
+    nothing, and walked into live stages via the fail-open path unbacktested."""
+    import re
+    return re.sub(r"_evolved_v\d+$", "", rule_name or "")
+
+
 def evaluate_rule(rule_name: str, *, lookback_days: int = 180) -> dict:
     """Walk-forward result for a rule.
 
     Returns {available, passed, reason, train, test}. `available` is False
     when the rule has no evaluator to backtest.
     """
+    from signals.evolution import _ensure_rules_registered
     from signals.evolution_backtest import (
-        backtest_with_params, has_evaluator, walk_forward_window,
+        backtest_with_params, has_evaluator, resolve_universe,
+        walk_forward_window,
     )
 
-    if not has_evaluator(rule_name):
+    # Registrations are per-process import side effects; the promotion
+    # worker has no reason to have imported them. Without this, the gate
+    # silently fails open in any process that never ran a proposal task.
+    _ensure_rules_registered()
+
+    eval_name = _evaluator_name(rule_name)
+    if not has_evaluator(eval_name):
         return {"available": False, "passed": None,
                 "reason": "no evaluator registered — cannot backtest",
                 "train": None, "test": None}
@@ -51,8 +68,16 @@ def evaluate_rule(rule_name: str, *, lookback_days: int = 180) -> dict:
         params = _current_params(rule_name)
         train_start, train_end, test_start, test_end = walk_forward_window(
             lookback_days=lookback_days)
-        train = backtest_with_params(rule_name, params, train_start, train_end)
-        test = backtest_with_params(rule_name, params, test_start, test_end)
+        # One universe for BOTH halves, resolved at the train window's
+        # start: an instrument eligible only by test time would otherwise
+        # appear in one half alone, and the retention ratio would compare
+        # different instrument sets — able to pass or block a live
+        # promotion on composition alone.
+        universe = resolve_universe(eval_name, train_start)
+        train = backtest_with_params(eval_name, params, train_start,
+                                     train_end, universe=universe)
+        test = backtest_with_params(eval_name, params, test_start, test_end,
+                                    universe=universe)
     except Exception as e:
         logger.warning("[promotion_evidence] %s backtest failed: %s",
                        rule_name, e)

@@ -167,14 +167,45 @@ def run_full_universe_scan():
 
 # ─── Phase 5: rule actuator — closed-loop self-adjustment ─────────────────
 
+# Evidence-adaptive cadence: below this many closed trades in the last
+# seven days, the mid-week sweeps skip — there is no new information
+# between runs to react to, and extra runs would only chase noise. The
+# Sunday run is unconditional so the weekly rhythm is guaranteed.
+EVOLUTION_DENSE_MIN_CLOSED_7D = 50
+
+
 @shared_task
 @guarded_task("pipeline_evolution")
 def propose_strategy_evolutions():
     """Phase 9: scan decaying rules with a parameter schema, propose mutations.
 
-    Idempotent — proposals accumulate as PROPOSED RuleMutation rows. Admin
-    decides which to apply.
+    Beat fires this DAILY; the task decides whether today deserves a run.
+    Sundays always run. Other days run only when the fleet closed at least
+    EVOLUTION_DENSE_MIN_CLOSED_7D trades in the last week — cadence scales
+    with the evidence rate instead of the calendar. (Decay-triggered
+    proposals bypass this entirely: confirmed decay fires propose_if_fresh
+    from the nightly investigator regardless of the day — with or without
+    an AI key, since the decay scan and trigger sit before that task's
+    key gate. Only the pipeline_ai_decay component switch governs it.)
+
+    Idempotent — proposals accumulate as PROPOSED RuleMutation rows, one
+    open set per rule. Admin decides which to apply.
     """
+    from datetime import timedelta
+    from django.utils import timezone
+
+    if timezone.now().weekday() != 6:  # 6 = Sunday, the guaranteed run
+        from bot_program.models import AssetBotTrade
+        closed_7d = AssetBotTrade.objects.filter(
+            status="CLOSED",
+            closed_at__gte=timezone.now() - timedelta(days=7)).count()
+        if closed_7d < EVOLUTION_DENSE_MIN_CLOSED_7D:
+            return {"status": "skipped",
+                    "reason": (f"cadence gate: {closed_7d}/"
+                               f"{EVOLUTION_DENSE_MIN_CLOSED_7D} closed trades "
+                               f"in 7d — weekly rhythm until evidence "
+                               f"densifies")}
+
     from signals.evolution import propose_for_decaying_rules
     result = propose_for_decaying_rules()
     logger.info("Evolution proposer: %d rules decaying with schema, %d proposals",

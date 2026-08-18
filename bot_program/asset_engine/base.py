@@ -950,14 +950,43 @@ class AssetBot(ABC):
         if max_age_hours > 0:
             cutoff = timezone.now() - timedelta(hours=max_age_hours)
             qs = qs.filter(created_at__gte=cutoff)
-        active = list(qs.order_by("-score")[:8])
-        if not active:
+        # Pulled wider than the 8-vote consensus window because the stage
+        # filter below must run BEFORE that cap: research forks tie their
+        # parent's hardcoded score, and letting them occupy top-8 slots
+        # they cannot vote from would silently crowd tradeable signals out
+        # of the consensus. Per-rule dedupe keeps the real row count near
+        # the rule count; 32 merely bounds pathological data.
+        candidates = list(qs.order_by("-score")[:32])
+        if not candidates:
             stale = Signal.objects.filter(instrument=inst, is_active=True).count()
             if stale:
                 return BotDecision("HOLD", 0, [
                     f"{stale} active signal(s) but none within "
                     f"{max_age_hours:.0f}h — stale"])
             return BotDecision("HOLD", 0, ["no active signals"])
+
+        # Research-stage rules are watched, not traded — and that has to
+        # include their VOTES. An applied evolution fork is the same
+        # detector as its parent with different constants; letting its
+        # research-stage signals count toward min_signals_for_entry (or
+        # stack net weight) manufactures "independent" confirmations for
+        # the parent's live orders. The stage gate below only inspects the
+        # single winning rule_name, so the filter must happen here, before
+        # the consensus ever sees the row.
+        may_vote: dict = {}
+        for s in candidates:
+            rn = s.rule_name or ""
+            if rn and rn not in may_vote:
+                try:
+                    from signals.rule_actuator import stage_policy
+                    may_vote[rn] = bool(stage_policy(rn)["may_trade"])
+                except Exception:
+                    may_vote[rn] = True
+        active = [s for s in candidates
+                  if may_vote.get(s.rule_name or "", True)][:8]
+        if not active:
+            return BotDecision("HOLD", 0, [
+                "only research-stage signals — watched, not traded"])
 
         bullish = [s for s in active if s.direction == "bullish"
                    and s.score >= self.cfg.entry_score_min]

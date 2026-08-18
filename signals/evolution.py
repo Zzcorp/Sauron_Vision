@@ -91,6 +91,22 @@ def register_schema(rule_name: str, schema: dict[str, dict[str, Any]]) -> None:
     SCHEMA_REGISTRY[rule_name] = schema
 
 
+def _ensure_rules_registered() -> None:
+    """Populate the registries before any proposal work.
+
+    Registrations live in `signals.evolution_rules`; nothing guarantees a
+    worker imported it before proposing. For its first months this layer
+    was dormant for exactly that class of reason. And a bare import is not
+    enough: import side effects fire once per process, so a registry
+    cleared afterwards (test isolation does this) stayed empty forever —
+    hence the explicit, idempotent `register()` call."""
+    try:
+        import signals.evolution_rules as _rules
+        _rules.register()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[evolution] rule registrations failed to load: %s", e)
+
+
 def has_schema(rule_name: str) -> bool:
     return rule_name in SCHEMA_REGISTRY
 
@@ -217,19 +233,24 @@ def score_mutant_heuristic(rule_name: str, mutant_params: dict, *,
 
 
 def score_mutant(rule_name: str, mutant_params: dict, parent_params: dict,
-                 *, rng: Optional[random.Random] = None) -> dict:
+                 *, rng: Optional[random.Random] = None,
+                 wf_context: Optional[dict] = None) -> dict:
     """Phase 9.5: dispatch to the best available scorer for this rule.
 
     Picks walk-forward backtest scoring when an evaluator is registered for
     the rule (via `evolution_backtest.register_evaluator`); otherwise falls
-    back to the heuristic placeholder.
+    back to the heuristic placeholder. `wf_context` (from
+    `walkforward_context`) freezes the windows and parent baselines so a
+    sweep scores every mutant against the same data instead of recomputing
+    the parent per mutant on a drifting clock.
 
     Returns dict: {method, score, details}.
     """
     from signals.evolution_backtest import has_evaluator, score_mutant_walkforward
     if has_evaluator(rule_name):
         try:
-            wf = score_mutant_walkforward(rule_name, mutant_params, parent_params)
+            wf = score_mutant_walkforward(rule_name, mutant_params,
+                                          parent_params, context=wf_context)
             return {
                 "method": wf["method"],
                 "score": wf["score"],
@@ -261,6 +282,69 @@ class EvolutionError(Exception):
     pass
 
 
+# How long an undecided proposal batch may block re-proposing. Every
+# sibling proposal pipeline expires (RuleAction 7d, brain proposals 14d,
+# DiscoveredSetup TTL); without this, one ignored batch silenced evolution
+# for that rule indefinitely — and its walk-forward scores, frozen at
+# proposal time, only grew staler.
+PROPOSAL_TTL_DAYS = 14
+
+
+def expire_stale_mutations() -> int:
+    """Move PROPOSED RuleMutations past their TTL to EXPIRED. Returns the
+    count. After an expiry, the next sweep may ask the question again with
+    freshly scored candidates."""
+    from signals.models import RuleMutation
+    cutoff = timezone.now() - timedelta(days=PROPOSAL_TTL_DAYS)
+    n = RuleMutation.objects.filter(
+        state=RuleMutation.STATE_PROPOSED,
+        proposed_at__lt=cutoff).update(state=RuleMutation.STATE_EXPIRED)
+    if n:
+        logger.info("[evolution] expired %d stale proposal(s) past %dd TTL",
+                    n, PROPOSAL_TTL_DAYS)
+    return n
+
+
+def has_open_proposal(rule_name: str) -> bool:
+    """An undecided proposal is a question already on the operator's desk —
+    asking it again with three more rows is noise, not diligence."""
+    from signals.models import RuleMutation
+    return RuleMutation.objects.filter(
+        parent_rule=rule_name, state=RuleMutation.STATE_PROPOSED).exists()
+
+
+def propose_if_fresh(rule_name: str) -> dict:
+    """Event-driven entry point — called the moment decay is CONFIRMED for
+    a rule (by the nightly investigator), instead of waiting for the next
+    weekly sweep. Creation becomes a reflex to evidence, not a calendar
+    appointment.
+
+    Every gate the weekly path enforces applies here too: the component
+    switches, a registered schema, and the open-proposal dedupe. Returns
+    {"proposed": n, "reason": ...} and never raises — decay investigation
+    must not fail because a proposal could not be made.
+    """
+    _ensure_rules_registered()
+    try:
+        from core.platform_control import is_component_enabled
+        if not (is_component_enabled("platform_master")
+                and is_component_enabled("pipeline_evolution")):
+            return {"proposed": 0, "reason": "pipeline_evolution is off"}
+        if not has_schema(rule_name):
+            return {"proposed": 0, "reason": "no parameter schema"}
+        expire_stale_mutations()
+        if has_open_proposal(rule_name):
+            return {"proposed": 0, "reason": "open proposal awaiting review"}
+        saved = propose_evolution(rule_name)
+        logger.info("[evolution] decay-triggered: %d proposal(s) for %s",
+                    len(saved), rule_name)
+        return {"proposed": len(saved), "reason": "decay-triggered"}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[evolution] decay-triggered proposal failed for %s: %s",
+                       rule_name, e)
+        return {"proposed": 0, "reason": f"error: {e}"}
+
+
 def propose_evolution(rule_name: str, *, n_mutants: int = DEFAULT_N_MUTANTS,
                       top_k: int = DEFAULT_TOP_K,
                       seed: Optional[int] = None) -> list:
@@ -268,6 +352,7 @@ def propose_evolution(rule_name: str, *, n_mutants: int = DEFAULT_N_MUTANTS,
     RuleMutation rows in PROPOSED state. Returns the persisted rows."""
     from signals.models import RuleMutation
 
+    _ensure_rules_registered()
     if not has_schema(rule_name):
         raise EvolutionError(f"No parameter schema registered for '{rule_name}'.")
 
@@ -285,6 +370,18 @@ def propose_evolution(rule_name: str, *, n_mutants: int = DEFAULT_N_MUTANTS,
     except Exception:
         use_ai = False
 
+    # One frozen context for the whole sweep: the parent's train/test
+    # baselines are computed once here instead of once per mutant, and every
+    # candidate is scored on the same windows.
+    wf_context = None
+    try:
+        from signals.evolution_backtest import has_evaluator, walkforward_context
+        if has_evaluator(rule_name):
+            wf_context = walkforward_context(rule_name, parent_params)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[evolution] walkforward context failed for %s: %s",
+                       rule_name, e)
+
     candidates = []
     for i in range(n_mutants):
         if use_ai and i == 0:
@@ -298,7 +395,8 @@ def propose_evolution(rule_name: str, *, n_mutants: int = DEFAULT_N_MUTANTS,
         # back on the original).
         if m == parent_params:
             continue
-        scored = score_mutant(rule_name, m, parent_params, rng=rng)
+        scored = score_mutant(rule_name, m, parent_params, rng=rng,
+                              wf_context=wf_context)
         candidates.append((m, scored))
 
     # Top-K by score (deterministic tiebreak by insertion order).
@@ -337,13 +435,20 @@ def propose_evolution(rule_name: str, *, n_mutants: int = DEFAULT_N_MUTANTS,
 
 def propose_for_decaying_rules() -> dict:
     """Celery entry point: scan decaying rules WITH a registered schema,
-    propose evolution candidates for each."""
+    propose evolution candidates for each. Skips rules whose previous
+    proposal is still awaiting the operator's decision — repeated sweeps
+    used to stack three more rows per pass onto an unanswered question."""
     from signals.performance import decay_flag
     from signals.models import Signal
 
+    _ensure_rules_registered()
+    expired = expire_stale_mutations()
+    # order_by clears Signal's Meta.ordering, which would otherwise ride
+    # into the DISTINCT and return one row per (rule_name, created_at) pair.
     rule_names = list(
         Signal.objects.exclude(rule_name="")
-        .values_list("rule_name", flat=True).distinct()
+        .values_list("rule_name", flat=True)
+        .distinct().order_by("rule_name")
     )
 
     proposals_per_rule: dict[str, int] = {}
@@ -355,6 +460,10 @@ def propose_for_decaying_rules() -> dict:
         except Exception:
             continue
         if not flag.get("is_decaying"):
+            continue
+        if has_open_proposal(rn):
+            logger.info("[evolution] %s: open proposal pending — not stacking",
+                        rn)
             continue
         try:
             saved = propose_evolution(rn)
@@ -368,6 +477,7 @@ def propose_for_decaying_rules() -> dict:
         "rules_decaying_evolved": len(proposals_per_rule),
         "total_proposals": sum(proposals_per_rule.values()),
         "proposals": proposals_per_rule,
+        "proposals_expired": expired,
     }
 
 

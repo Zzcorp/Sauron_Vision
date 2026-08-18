@@ -117,16 +117,40 @@ class MACDCrossoverRule(BaseRule):
 
 
 class GoldenCrossRule(BaseRule):
-    """SMA50 crosses above SMA200."""
+    """Fast SMA crosses above slow SMA — the first PARAMETER-AWARE rule.
+
+    Every constant is a parameter so Phase-9 evolution has something real
+    to mutate: window lengths and stop/target distances come from the
+    instance, defaulting to the classic 50/200 with 5%/10% brackets. An
+    evolved fork runs as its OWN instance carrying its RuleControl's
+    parameters and its forked name — without that, apply_evolution created
+    RuleControl rows that no engine ever executed, and no fork could climb
+    the promotion ladder.
+    """
     name = "golden_cross"
+    DEFAULTS = {"fast": 50, "slow": 200, "stop_pct": 0.05, "target_pct": 0.10}
+
+    def __init__(self, name=None, params=None):
+        if name:
+            self.name = name
+        self.params = {**self.DEFAULTS, **(params or {})}
 
     def evaluate(self, instrument):
-        symbol, df = _load_df(instrument, bars=300)
-        if df is None or len(df) < 210:
+        p = self.params
+        try:
+            fast, slow = int(p["fast"]), int(p["slow"])
+            stop_pct, target_pct = float(p["stop_pct"]), float(p["target_pct"])
+        except (KeyError, TypeError, ValueError):
+            fast, slow, stop_pct, target_pct = 50, 200, 0.05, 0.10
+        if fast >= slow or stop_pct <= 0 or target_pct <= 0:
+            # A degenerate mutant must go silent, not trade nonsense.
             return None
-        sma50 = df["close"].rolling(50).mean()
-        sma200 = df["close"].rolling(200).mean()
-        if sma50.iloc[-2] <= sma200.iloc[-2] and sma50.iloc[-1] > sma200.iloc[-1]:
+        symbol, df = _load_df(instrument, bars=slow + 100)
+        if df is None or len(df) < slow + 10:
+            return None
+        sma_fast = df["close"].rolling(fast).mean()
+        sma_slow = df["close"].rolling(slow).mean()
+        if sma_fast.iloc[-2] <= sma_slow.iloc[-2] and sma_fast.iloc[-1] > sma_slow.iloc[-1]:
             close = float(df["close"].iloc[-1])
             return {
                 "symbol": symbol,
@@ -134,10 +158,11 @@ class GoldenCrossRule(BaseRule):
                 "direction": "LONG",
                 "score": 0.6,
                 "headline": f"{symbol} LONG · Golden cross",
-                "thesis": "SMA50 crossed above SMA200 — long-term trend flip up.",
+                "thesis": (f"SMA{fast} crossed above SMA{slow} — "
+                           f"long-term trend flip up."),
                 "entry": close,
-                "stop": close * 0.95,
-                "target": close * 1.10,
+                "stop": close * (1 - stop_pct),
+                "target": close * (1 + target_pct),
             }
         return None
 
@@ -172,11 +197,40 @@ class BollingerSqueezeRule(BaseRule):
         return None
 
 
+def _golden_cross_family():
+    """The base rule (honouring any tuned parameters on its RuleControl)
+    plus one instance per applied evolution fork. The engine rebuilds its
+    rule list per scan, so a freshly applied fork trades on the very next
+    pass. Fenced: rules must load even where the DB is unavailable."""
+    base_params = {}
+    forks = []
+    try:
+        from signals.models import RuleControl
+        base = RuleControl.objects.filter(rule_name="golden_cross").first()
+        if base and base.parameters:
+            base_params = dict(base.parameters)
+        # Effective activity, not raw status: a REDUCED fork still trades
+        # (at the multiplier the actuator applies downstream), and a pause
+        # that has expired auto-reactivates. Filtering on status=='active'
+        # made both vanish from the engine permanently — demoted-not-dead
+        # forks could never demote further, recover, or be evaluated again.
+        forks = [
+            GoldenCrossRule(name=rc.rule_name, params=rc.parameters or {})
+            for rc in RuleControl.objects.filter(
+                rule_name__startswith="golden_cross_evolved_v")
+            if rc.is_effectively_active()
+        ]
+    except Exception as e:  # noqa: BLE001
+        logger.debug("golden cross family load failed: %s", e)
+    return [GoldenCrossRule(params=base_params)] + forks
+
+
 def get_rules():
-    """Return all technical rules."""
+    """Return all technical rules — including evolved golden-cross forks,
+    each running its own parameters under its own rule name."""
     return [
         RSIDivergenceRule(),
         MACDCrossoverRule(),
-        GoldenCrossRule(),
+        *_golden_cross_family(),
         BollingerSqueezeRule(),
     ]

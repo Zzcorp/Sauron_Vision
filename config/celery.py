@@ -270,10 +270,13 @@ app.conf.beat_schedule = {
     },
 
     # ── Phase 9 — strategy evolution: scan decaying parameter-aware rules,
-    #              propose mutations. Weekly to give parents time to mature.
+    #              propose mutations. Beat fires DAILY; the task's own
+    #              cadence gate makes non-Sunday runs conditional on the
+    #              week's closed-trade volume, so the effective rhythm is
+    #              weekly on a quiet book and near-daily on a busy one.
     "propose-strategy-evolutions": {
         "task": "signals.tasks.propose_strategy_evolutions",
-        "schedule": crontab(hour=5, minute=0, day_of_week="sunday"),
+        "schedule": crontab(hour=5, minute=0),
     },
 
     # ── Phase 10 — opportunity scanner: match registered setups against

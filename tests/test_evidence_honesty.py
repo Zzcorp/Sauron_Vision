@@ -175,6 +175,9 @@ class SkipReasonTests(TestCase):
                          skips.ALREADY_OPEN)
 
     def test_a_stage_blocked_rule_is_recorded(self):
+        """The stage gate moved upstream: a research rule's signals no
+        longer vote at all (they used to reach entry and be stopped
+        there), and the recorded reason says exactly why the bot held."""
         from bot_program.asset_engine import skips
         from signals.models_control import RuleControl
         RuleControl.objects.create(rule_name="r_chain",
@@ -183,8 +186,9 @@ class SkipReasonTests(TestCase):
         cfg = _cfg(self.user, name="SK4")
         self._run(cfg)
         cfg.refresh_from_db()
-        self.assertEqual(skips.last_by_symbol(cfg)["BTCUSD"]["code"],
-                         skips.STAGE_BLOCKED)
+        note = skips.last_by_symbol(cfg)["BTCUSD"]
+        self.assertEqual(note["code"], skips.HOLD)
+        self.assertIn("research", note["detail"])
 
     def test_counters_accumulate_and_diagnose(self):
         from bot_program.asset_engine import skips
