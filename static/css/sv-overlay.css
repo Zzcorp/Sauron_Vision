@@ -101,6 +101,7 @@
 
 /* Was 2147483000. A hover card that painted above every modal on the site. */
 .sr-popup             { z-index: var(--z-hovercard) !important; }
+.nf-pop               { z-index: var(--z-hovercard) !important; }
 
 .exchange-dropdown,
 .lsp-dropdown,
@@ -698,11 +699,12 @@ body.light-mode .sr-popup::after {
     .sv-card,
     .ticker-popup,
     .sr-popup,
-    .dh-pop { display: none !important; }
+    .dh-pop,
+    .nf-pop { display: none !important; }
 }
 
 @media (hover: none) {
-    .sv-card, .ticker-popup, .sr-popup, .dh-pop { display: none !important; }
+    .sv-card, .ticker-popup, .sr-popup, .dh-pop, .nf-pop { display: none !important; }
 }
 
 /* ── 12. MOTION ─────────────────────────────────────────────────────────
@@ -714,6 +716,7 @@ body.light-mode .sr-popup::after {
     }
     .sv-dialog, .sv-dialog.is-open { transform: translate(-50%, -50%); }
     .sv-flash { animation-duration: 1ms; }
+    .nf-pop { animation-duration: 1ms; }
     .sv-loading::after { animation: none; opacity: .7; }
 }
 

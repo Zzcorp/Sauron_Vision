@@ -1417,11 +1417,19 @@
             border-color: var(--accent-red);
             color: #ffffff;
         }
-        /* Whole signal-wrap fades out on dismiss before being removed
-           so the rail collapses gracefully. */
+        /* Leaving mirrors arriving: acting on a signal — TAKE TRADE or
+           PASS — slides the card back out the way it slid in (the same
+           46px of travel as srSlideIn), fading, and then the rail closes
+           the gap. No max-height here: dismissSignal animates it inline,
+           because the inline start value it must set would beat a class
+           declaration and freeze the collapse (it silently did, before). */
         .sr-signal-wrap.dismissing {
-            transition: opacity 0.25s ease, max-height 0.25s ease, margin 0.25s ease, padding 0.25s ease;
-            opacity: 0; max-height: 0; padding: 0; margin: 0; overflow: hidden;
+            transition: opacity .28s ease,
+                        transform .28s cubic-bezier(.55,.05,.75,.3),
+                        max-height .26s ease .12s, margin .26s ease .12s,
+                        padding .26s ease .12s;
+            opacity: 0; transform: translateX(46px);
+            padding: 0; margin: 0; overflow: hidden;
         }
         /* Popup works in collapsed-rail mode too — the JS positions it
            via fixed coords so it escapes the rail's overflow:hidden. */
@@ -1881,6 +1889,43 @@
         .dh-pop-bar-fill { height: 100%; transition: width .3s; }
         .dh-pop-cta { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
                       font-size: 10px; color: var(--accent); text-align: right; }
+        /* News-feed hover preview: armed after a 2s dwell on a feed row,
+           portal-attached to <body>, below the row or above it when the
+           viewport has no room beneath. Chrome comes from the --pop-*
+           overlay tokens (sv-overlay.css section 1) so light mode and any
+           future retune arrive for free; the z-index is in the base rule
+           like .dh-pop's, belt to sv-overlay's braces. Hoverable on
+           purpose: the card can overlap neighbouring rows, and reading it
+           must not hide it or arm a dwell on the row underneath. */
+        .nf-pop {
+            display: none; position: fixed;
+            min-width: 340px; max-width: 420px;
+            background: var(--pop-bg, var(--bg-card));
+            border: 1px solid var(--pop-border, var(--border));
+            border-radius: var(--pop-radius, var(--radius-lg));
+            padding: 14px 16px;
+            box-shadow: var(--pop-shadow, 0 12px 40px rgba(0,0,0,.7));
+            white-space: normal; overflow-y: auto;
+            pointer-events: auto;
+            z-index: var(--z-hovercard, 1200);
+            animation: dhPop .18s ease;
+        }
+        .nf-pop-title { font-family: var(--font-display); font-size: 14px; font-weight: 700;
+                        color: var(--text-primary); line-height: 1.35; margin-bottom: 6px; }
+        .nf-pop-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted);
+                       text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
+        .nf-pop-summary { font-size: 12px; line-height: 1.55; color: var(--text-secondary);
+                          margin-bottom: 10px; }
+        .nf-pop-facts { display: flex; flex-wrap: wrap; gap: 6px 12px;
+                        padding-top: 8px; border-top: 1px dashed var(--border); }
+        .nf-pop-fact { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+        /* --accent flips for light mode; --accent-green stays dark-theme
+           neon and would be near-invisible on a white card. */
+        .nf-pop-fact.up { color: var(--accent); }
+        .nf-pop-fact.down { color: var(--accent-red); }
+        .nf-pop-cta { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border);
+                      font-size: 10px; color: var(--text-muted); text-align: right; }
+
         /* Small chart inside the hover popups (headband + watchlist).
            Same renderer as the rail sparks; dimensions come from data-w/h.
            Deliberately shallow — it is a shape cue, not a chart page. */
@@ -4033,6 +4078,8 @@ body.light-mode .hb-restore-tab {
 body.light-mode .dh-pop {
     box-shadow: 0 10px 30px -8px rgba(20, 30, 24, .28);
 }
+/* .nf-pop needs no line here — its shadow is var(--pop-shadow), which
+   sv-overlay.css already re-tunes for light mode. */
 body.light-mode .dh-pop-title { text-shadow: none; }
 body.light-mode .dh-sym { text-shadow: none; }
 

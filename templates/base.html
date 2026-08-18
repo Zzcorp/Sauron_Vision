@@ -1202,17 +1202,24 @@
     var pop = wrap.querySelector('.sr-popup');
     if (pop) pop.classList.remove('show');
     /* Capture height first so the max-height transition has somewhere
-       to animate FROM. */
+       to animate FROM — and animate it INLINE: the inline start value
+       set here would beat any max-height declared on the class, so the
+       end value must be inline too or the collapse silently never runs. */
     var h = wrap.getBoundingClientRect().height;
     wrap.style.maxHeight = h + 'px';
+    /* A card that recently slid IN still carries sr-slide-in, whose
+       fill-mode:both pins transform:none over any transition — release
+       it or the slide-out plays as a plain fade. */
+    wrap.classList.remove('sr-slide-in');
     /* Force reflow before applying the dismissing class. */
     void wrap.offsetHeight;
     wrap.classList.add('dismissing');
+    wrap.style.maxHeight = '0px';
     setTimeout(function() {
       wrap.style.display = 'none';
       wrap.classList.remove('dismissing');
       wrap.style.maxHeight = '';
-    }, 280);
+    }, 400);
   };
   /* Optional: clear-all helper for the user, callable from the console. */
   window.sauronUndismissAllSignals = function() {
@@ -1257,7 +1264,7 @@
     });
   }
   var inflight = false;   /* double-click / two-tab guard, client half */
-  function tradeFlow(previewUrl, executeUrl, extraBody) {
+  function tradeFlow(previewUrl, executeUrl, extraBody, onSuccess) {
     if (inflight) return;
     inflight = true;
     var done = function () { inflight = false; };
@@ -1323,6 +1330,9 @@
             });
             return;
           }
+          /* The decision is made — retire the card while the alert is
+             up, so the rail reflects it the moment the operator looks. */
+          if (onSuccess) { try { onSuccess(res); } catch (e) { /* UI only */ } }
           SV.overlay.alert({
             title: 'Position open',
             message: res.side + ' ' + res.qty + ' ' + res.symbol + ' @ ' + res.entry +
@@ -1341,7 +1351,14 @@
   }
   window.svTakeTrade = function (signalId) {
     tradeFlow('/signals/' + signalId + '/take-trade/preview/',
-              '/signals/' + signalId + '/take-trade/', null);
+              '/signals/' + signalId + '/take-trade/', null,
+              function () {
+                /* Taken and passed cards leave the same way: the slide-out
+                   plus the local dismissal memory, so the rail's next WS
+                   refresh does not resurrect a signal already acted on.
+                   The engine still sees the signal either way. */
+                window.dismissSignal && window.dismissSignal(signalId);
+              });
   };
   window.svTakeTradeAsset = function (symbol, side) {
     tradeFlow('/instruments/' + encodeURIComponent(symbol) + '/take-trade/preview/',

@@ -122,6 +122,25 @@ class RailDismissTests(TestCase):
         self.assertIn("sr-x", html)
         self.assertIn("dismissSignal", html)
 
+    def test_taking_a_trade_retires_the_card_like_a_pass(self):
+        """Acted-on is acted-on: the TAKE TRADE success path routes the
+        card through the same dismissal (slide-out + local memory) as
+        PASS, so the rail's next refresh cannot resurrect a signal the
+        operator already decided on."""
+        user = User.objects.create_user(username="dx_u2", password="x")
+        self.client.force_login(user)
+        resp = self.client.get("/instruments/", HTTP_HOST="127.0.0.1")
+        html = resp.content.decode()
+        take_trade_runner = html.split("window.svTakeTrade = function")[1][:600]
+        self.assertIn("dismissSignal", take_trade_runner,
+                      "TAKE TRADE success no longer retires the rail card")
+        # The dismissal must release the entry animation's fill-mode pin,
+        # or the slide-out silently degrades to a plain fade on any card
+        # that recently slid in.
+        dismisser = html.split("window.dismissSignal = function")[1][:900]
+        self.assertIn("sr-slide-in", dismisser,
+                      "dismissSignal no longer releases the sr-slide-in pin")
+
 
 class NewSignalEventTests(TestCase):
     """A new setup is the thing an operator most wants to know the moment it

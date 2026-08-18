@@ -541,7 +541,11 @@ def news_feed(request):
     now = _tz.now()
     cutoff_24h = now - timedelta(hours=24)
 
+    # prefetch_related(None): the clone inherits the instruments prefetch
+    # from `qs`, and this branch never reads them — on a busy news day
+    # that was thousands of m2m rows fetched and instantly discarded.
     recent_24h = list(qs.filter(published_at__gte=cutoff_24h)
+                        .prefetch_related(None)
                         .only("ai_sentiment_score", "ai_urgency", "source",
                               "published_at"))
     n_24h = len(recent_24h)

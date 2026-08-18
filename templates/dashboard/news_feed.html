@@ -195,9 +195,18 @@
     <div class="table-wrapper">
     <table class="sv-perf-table">
         <thead><tr><th>Time</th><th>Source</th><th>Title</th><th>Sentiment</th><th>Urgency</th><th>Instruments</th></tr></thead>
-        <tbody>
+        <tbody id="newsFeedBody">
         {% for a in articles %}
-        <tr>
+        {% with syms=a.ai_affected_instruments.all %}
+        <tr class="nf-row"
+            data-nf-title="{{ a.title|truncatechars:220 }}"
+            data-nf-source="{{ a.source }}"
+            data-nf-time="{{ a.published_at|date:'M d H:i' }}"
+            data-nf-summary="{% if a.ai_summary %}{{ a.ai_summary|truncatechars:420 }}{% elif a.content_summary %}{{ a.content_summary|truncatechars:420 }}{% endif %}"
+            data-nf-sent="{% if a.ai_sentiment_score != None %}{{ a.ai_sentiment_score|floatformat:2 }}{% endif %}"
+            data-nf-sent-cls="{% if a.ai_sentiment_score != None %}{% if a.ai_sentiment_score > 0.2 %}up{% elif a.ai_sentiment_score < -0.2 %}down{% endif %}{% endif %}"
+            data-nf-urgency="{{ a.ai_urgency }}"
+            data-nf-instruments="{% for inst in syms %}{{ inst.symbol }}{% if not forloop.last %}, {% endif %}{% endfor %}">
             <td style="font-size: 11px; color: var(--text-muted); white-space: nowrap;">{{ a.published_at|date:"M d H:i" }}</td>
             <td style="font-size: 12px;">{{ a.source }}</td>
             <td><a href="{% url 'news_detail' a.id %}" style="color: var(--text-primary); text-decoration: none;">{{ a.title|truncatechars:70 }}</a> <a href="{{ a.url }}" target="_blank" style="color:var(--text-muted);font-size:10px;margin-left:6px;">↗</a></td>
@@ -210,9 +219,10 @@
             </td>
             <td>{% if a.ai_urgency %}<span class="badge badge-{{ a.ai_urgency }}">{{ a.ai_urgency }}</span>{% else %}—{% endif %}</td>
             <td style="font-family: var(--font-mono); font-size: 11px;">
-                {% for inst in a.ai_affected_instruments.all %}{{ inst.symbol }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+                {% for inst in syms %}{{ inst.symbol }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
             </td>
         </tr>
+        {% endwith %}
         {% endfor %}
         </tbody>
     </table>
@@ -229,4 +239,201 @@
     <div class="card-header"><div class="card-title">News Analytics</div></div>
     <div class="sv-metrics-wrapper" hx-get="/htmx/metrics/news/" hx-trigger="load, every 5m"></div>
 </div>
+
+{# Hover preview: a 2s dwell on a feed row opens an article preview card, #}
+{# portal-attached, placed below the row — or above when the viewport has #}
+{# more room there — never under the fixed chrome. A scroll hides it and, #}
+{# once the scroll settles, re-arms the dwell for the row now under the #}
+{# stationary pointer. The card is hoverable so it can be read even where #}
+{# it overlaps neighbouring rows; a click or Escape dismisses it and #}
+{# suppresses that row until the pointer leaves it. Content is built with #}
+{# textContent only — scraped headlines never reach innerHTML. #}
+<script>
+(function () {
+    var body = document.getElementById('newsFeedBody');
+    if (!body || document.querySelector('.nf-pop')) return;
+    // Touch-only devices can never show the card (sv-overlay hides it);
+    // do not make them pay for timers and forced reflows either.
+    if (window.matchMedia && !window.matchMedia('(hover: hover)').matches) return;
+    var HOVER_DELAY_MS = 2000, GAP = 8;
+
+    var pop = document.createElement('div');
+    pop.className = 'nf-pop';
+    // Permanently hidden from assistive tech ON PURPOSE: the card is a
+    // mouse-only duplicate of the row plus the summary, and the summary's
+    // accessible path is the article detail page the title links to.
+    pop.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(pop);
+
+    var timer = null, current = null, suppressed = null, settleTimer = null;
+    var lastX = -1, lastY = -1;
+
+    function el(parent, tag, cls, text) {
+        if (!text) return;
+        var node = document.createElement(tag);
+        node.className = cls;
+        node.textContent = text;
+        parent.appendChild(node);
+    }
+
+    function build(row) {
+        var d = row.dataset;
+        pop.textContent = '';
+        el(pop, 'div', 'nf-pop-title', d.nfTitle);
+        el(pop, 'div', 'nf-pop-meta',
+           [d.nfSource, d.nfTime].filter(Boolean).join(' · '));
+        el(pop, 'div', 'nf-pop-summary', d.nfSummary ||
+           'No summary yet — the analyst pass has not reached this article.');
+        var facts = document.createElement('div');
+        facts.className = 'nf-pop-facts';
+        // The up/down verdict is server-computed from the RAW score
+        // (data-nf-sent-cls) with the same predicate as the row's cell —
+        // re-deriving it here from the rounded display string disagreed
+        // with the cell at the 0.2 boundary.
+        el(facts, 'span',
+           'nf-pop-fact' + (d.nfSentCls ? ' ' + d.nfSentCls : ''),
+           d.nfSent && 'SENT ' + d.nfSent);
+        el(facts, 'span', 'nf-pop-fact',
+           d.nfUrgency && 'URGENCY ' + d.nfUrgency.toUpperCase());
+        el(facts, 'span', 'nf-pop-fact',
+           d.nfInstruments && 'TAGS ' + d.nfInstruments);
+        if (facts.children.length) pop.appendChild(facts);
+        el(pop, 'div', 'nf-pop-cta',
+           'click the title for details · ↗ opens the source');
+    }
+
+    // The viewport minus the fixed chrome: a card clamped to the raw
+    // viewport top would paint BEHIND the topbar (z-menu beats
+    // z-hovercard). Measured per placement — the bars collapse.
+    function chromeBounds() {
+        var vh = document.documentElement.clientHeight;
+        var top = 0, bottom = vh;
+        document.querySelectorAll(
+            '.topbar, .ticker-bar, .data-headband, .info-bar'
+        ).forEach(function (bar) {
+            if (getComputedStyle(bar).position !== 'fixed') return;
+            var r = bar.getBoundingClientRect();
+            if (!r.height) return;
+            if (r.top + r.height / 2 < vh / 2) top = Math.max(top, r.bottom);
+            else bottom = Math.min(bottom, r.top);
+        });
+        return { top: top + GAP, bottom: bottom - GAP };
+    }
+
+    function place(row) {
+        var r = row.getBoundingClientRect();
+        var vw = document.documentElement.clientWidth;
+        var cb = chromeBounds();
+        // Measure at 0,0 with no height cap: a leftover `left` from the
+        // previous placement constrains a fixed box's shrink-to-fit width
+        // and poisons both measurements. Nothing paints mid-function.
+        pop.style.maxHeight = '';
+        pop.style.left = '0px';
+        pop.style.top = '0px';
+        pop.style.display = 'block';
+        var pw = pop.offsetWidth, ph = pop.offsetHeight;
+        var spaceBelow = cb.bottom - (r.bottom + GAP);
+        var spaceAbove = (r.top - GAP) - cb.top;
+        var below = spaceBelow >= ph || spaceBelow >= spaceAbove;
+        var space = Math.max(60, below ? spaceBelow : spaceAbove);
+        if (ph > space) { pop.style.maxHeight = space + 'px'; ph = space; }
+        pop.style.left = Math.max(8, Math.min(r.left + 24, vw - pw - 8)) + 'px';
+        pop.style.top = (below ? r.bottom + GAP
+                               : Math.max(cb.top, r.top - GAP - ph)) + 'px';
+    }
+
+    function hide() {
+        if (!timer && !current && pop.style.display !== 'block') return;
+        if (timer) { clearTimeout(timer); timer = null; }
+        current = null;
+        pop.style.display = 'none';
+    }
+
+    function arm(row) {
+        current = row;
+        timer = setTimeout(function () {
+            timer = null;
+            build(row);
+            place(row);
+        }, HOVER_DELAY_MS);
+    }
+
+    body.addEventListener('pointerover', function (e) {
+        if (e.pointerType && e.pointerType !== 'mouse') return;
+        lastX = e.clientX; lastY = e.clientY;
+        var row = e.target.closest && e.target.closest('tr.nf-row');
+        if (!row) return;
+        if (row === suppressed) {
+            // Movement within the dismissed row keeps it quiet; a fresh
+            // entry from outside means the dismissal has served its term.
+            if (e.relatedTarget && row.contains(e.relatedTarget)) return;
+            suppressed = null;
+        }
+        if (row === current) return;
+        hide();
+        arm(row);
+    });
+
+    body.addEventListener('pointermove', function (e) {
+        if (!e.pointerType || e.pointerType === 'mouse') {
+            lastX = e.clientX; lastY = e.clientY;
+        }
+    }, { passive: true });
+
+    body.addEventListener('pointerout', function (e) {
+        if (e.pointerType && e.pointerType !== 'mouse') return;
+        var row = e.target.closest && e.target.closest('tr.nf-row');
+        if (!row) return;
+        var to = e.relatedTarget;
+        if (row === suppressed && !(to && row.contains(to))) suppressed = null;
+        if (row !== current) return;
+        if (to && (row.contains(to) || pop.contains(to))) return;
+        hide();
+    });
+
+    // Reading the card must not kill it: it is hoverable, and leaving it
+    // back into its own row keeps the row current.
+    pop.addEventListener('pointerleave', function (e) {
+        var to = e.relatedTarget;
+        if (to && current && current.contains(to)) return;
+        hide();
+    });
+
+    // A scroll makes the anchor stale — hide, then once the scroll
+    // settles re-arm the dwell for whatever row now sits under the
+    // (possibly stationary) pointer, since no pointerover will fire.
+    window.addEventListener('scroll', function () {
+        hide();
+        if (settleTimer) clearTimeout(settleTimer);
+        settleTimer = setTimeout(function () {
+            settleTimer = null;
+            if (lastX < 0) return;
+            var under = document.elementFromPoint(lastX, lastY);
+            var row = under && under.closest && under.closest('tr.nf-row');
+            if (row && row !== suppressed && body.contains(row)) arm(row);
+        }, 160);
+    }, { passive: true, capture: true });
+
+    document.addEventListener('pointerdown', function () {
+        if (current) suppressed = current;
+        hide();
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        if (current) suppressed = current;
+        hide();
+    });
+    window.addEventListener('resize', hide);
+    window.addEventListener('blur', hide);
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) hide();
+    });
+    // bfcache restore would otherwise resurrect a frozen card and a
+    // paused dwell timer at pre-navigation coordinates.
+    window.addEventListener('pageshow', function () {
+        suppressed = null;
+        hide();
+    });
+})();
+</script>
 {% endblock %}
