@@ -5,7 +5,7 @@
 {% block content %}
 <div class="detail-header fade-in-up">
     <div>
-        <div style="display:flex;align-items:center;gap:12px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
             <h2 style="margin:0;">{{ instrument.symbol }}</h2>
             <form method="post" action="{% url 'toggle_watchlist' instrument.symbol %}" style="display:inline;margin:0;">{% csrf_token %}
                 <input type="hidden" name="next" value="{{ request.get_full_path }}">
@@ -16,14 +16,33 @@
                     {% if instrument.is_watchlist %}&#9733;{% else %}&#9734;{% endif %}
                 </button>
             </form>
+            {% if quote %}
+            <div class="dtl-price">
+                <span class="dtl-last">{{ quote.last|floatformat:4 }}</span>
+                <span class="dtl-chg {% if quote.change_pct >= 0 %}up{% else %}down{% endif %}">
+                    {% if quote.change_pct >= 0 %}▲ +{% else %}▼ {% endif %}{{ quote.change_pct|floatformat:2 }}%
+                </span>
+            </div>
+            {% endif %}
         </div>
         <div class="detail-meta">
             <span class="badge badge-{{ instrument.asset_class }}">{{ instrument.asset_class }}</span>
-            <span>{{ instrument.exchange }}</span>
+            {% if instrument.exchange %}<span>{{ instrument.exchange }}</span>{% endif %}
             <span>{{ instrument.name }}</span>
         </div>
     </div>
-    <a href="{% url 'instruments_list' %}" class="btn">← Back</a>
+    <div class="dtl-actions">
+        {% comment %}The same engine as the popups' LONG/SHORT — one
+        manual-trade path everywhere.{% endcomment %}
+        <button type="button" class="sr-pop-btn sr-pop-btn-act"
+                onclick="window.svTakeTradeAsset && window.svTakeTradeAsset('{{ instrument.symbol|escapejs }}', 'BUY');">▲ LONG</button>
+        <button type="button" class="sr-pop-btn sr-pop-btn-short"
+                onclick="window.svTakeTradeAsset && window.svTakeTradeAsset('{{ instrument.symbol|escapejs }}', 'SELL');">▼ SHORT</button>
+        <button type="button" class="sr-pop-btn"
+                data-ask-sauron="{{ instrument.symbol }}{% if instrument.name and instrument.name != instrument.symbol %} ({{ instrument.name }}){% endif %}"
+                data-ask-kind="instrument">▸ ASK SAURON</button>
+        <a href="{% url 'instruments_list' %}" class="sr-pop-btn">← BACK</a>
+    </div>
 </div>
 <style>
     .wl-star { background:none; border:1px solid var(--border); border-radius:6px;
@@ -31,6 +50,18 @@
         color:var(--text-muted); transition:color .15s, border-color .15s; }
     .wl-star:hover, .wl-star:focus-visible { color:var(--accent-gold); border-color:var(--accent-gold); outline:none; }
     .wl-star.on { color:var(--accent-gold); border-color:var(--accent-gold); }
+    .dtl-price { display:flex; align-items:baseline; gap:10px; }
+    .dtl-last { font-family:var(--font-display); font-size:26px; font-weight:700;
+        color:var(--text-primary); letter-spacing:0.5px; }
+    .dtl-chg { font-family:var(--font-mono); font-size:13px; font-weight:700;
+        padding:2px 8px; border-radius:4px; }
+    .dtl-chg.up { color:var(--accent); background:rgba(0,232,104,0.10); }
+    .dtl-chg.down { color:var(--accent-red); background:rgba(232,48,48,0.10); }
+    .dtl-actions { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+    .dtl-actions .sr-pop-btn { flex:0 0 auto; }
+    /* Key-value rows: the raw 8-decimal values were unreadable — the
+       label column gets a fixed rhythm and the values a mono face. */
+    .kv-list .value { font-family:var(--font-mono); }
 </style>
 
 <!-- TradingView Lightweight Chart (chart widget) -->
@@ -44,11 +75,11 @@
         <div class="card-header"><span class="card-title">Latest Quote</span></div>
         {% if quote %}
         <ul class="kv-list">
-            <li><span class="label">LAST</span><span class="value" style="font-size:18px;font-weight:700;">{{ quote.last }}</span></li>
-            <li><span class="label">CHANGE</span><span class="value" style="color:{% if quote.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{{ quote.change_pct }}%</span></li>
-            <li><span class="label">BID / ASK</span><span class="value">{{ quote.bid|default:"-" }} / {{ quote.ask|default:"-" }}</span></li>
-            <li><span class="label">VOLUME</span><span class="value">{{ quote.volume|default:"-" }}</span></li>
-            <li><span class="label">SOURCE</span><span class="value">{{ quote.source }}</span></li>
+            <li><span class="label">LAST</span><span class="value" style="font-size:18px;font-weight:700;">{{ quote.last|floatformat:4 }}</span></li>
+            <li><span class="label">CHANGE 24H</span><span class="value" style="color:{% if quote.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{% if quote.change_pct >= 0 %}+{% endif %}{{ quote.change_pct|floatformat:2 }}%</span></li>
+            <li><span class="label">BID / ASK</span><span class="value">{% if quote.bid %}{{ quote.bid|floatformat:4 }}{% else %}—{% endif %} / {% if quote.ask %}{{ quote.ask|floatformat:4 }}{% else %}—{% endif %}</span></li>
+            <li><span class="label">VOLUME</span><span class="value">{% if quote.volume %}{{ quote.volume|floatformat:0 }}{% else %}—{% endif %}</span></li>
+            <li><span class="label">SOURCE</span><span class="value" style="color:var(--accent);">{{ quote.source|default:"—" }}</span></li>
             <li><span class="label">UPDATED</span><span class="value">{{ quote.updated_at|timesince }} ago</span></li>
         </ul>
         {% else %}
@@ -60,16 +91,17 @@
     <div class="card fade-in-up delay-3">
         <div class="card-header"><span class="card-title">Technical Indicators</span></div>
         {% if technicals %}
+        {% comment %}floatformat everywhere: these are 8-decimal Decimals
+        and rendered raw they read as noise, not numbers. RSI additionally
+        gets its zone spelled out — the color alone said nothing.{% endcomment %}
         <ul class="kv-list">
-            <li><span class="label">RSI (14)</span><span class="value" style="color:{% if technicals.rsi_14 and technicals.rsi_14 < 30 %}var(--accent){% elif technicals.rsi_14 and technicals.rsi_14 > 70 %}var(--accent-red){% else %}var(--text-primary){% endif %}">{{ technicals.rsi_14|default:"-"|floatformat:2 }}</span></li>
-            <li><span class="label">MACD</span><span class="value">{{ technicals.macd_line|default:"-"|floatformat:4 }}</span></li>
-            <li><span class="label">MACD Signal</span><span class="value">{{ technicals.macd_signal|default:"-"|floatformat:4 }}</span></li>
-            <li><span class="label">SMA 20</span><span class="value">{{ technicals.sma_20|default:"-" }}</span></li>
-            <li><span class="label">SMA 50</span><span class="value">{{ technicals.sma_50|default:"-" }}</span></li>
-            <li><span class="label">SMA 200</span><span class="value">{{ technicals.sma_200|default:"-" }}</span></li>
-            <li><span class="label">ATR (14)</span><span class="value">{{ technicals.atr_14|default:"-" }}</span></li>
-            <li><span class="label">Bollinger Upper</span><span class="value">{{ technicals.bollinger_upper|default:"-" }}</span></li>
-            <li><span class="label">Bollinger Lower</span><span class="value">{{ technicals.bollinger_lower|default:"-" }}</span></li>
+            <li><span class="label">RSI (14)</span><span class="value" style="color:{% if technicals.rsi_14 and technicals.rsi_14 < 30 %}var(--accent){% elif technicals.rsi_14 and technicals.rsi_14 > 70 %}var(--accent-red){% else %}var(--text-primary){% endif %}">{{ technicals.rsi_14|default:"—"|floatformat:1 }}{% if technicals.rsi_14 %}{% if technicals.rsi_14 < 30 %} · oversold{% elif technicals.rsi_14 > 70 %} · overbought{% endif %}{% endif %}</span></li>
+            <li><span class="label">MACD / SIGNAL</span><span class="value">{{ technicals.macd_line|default:"—"|floatformat:4 }} / {{ technicals.macd_signal|default:"—"|floatformat:4 }}</span></li>
+            <li><span class="label">SMA 20</span><span class="value">{{ technicals.sma_20|default:"—"|floatformat:4 }}</span></li>
+            <li><span class="label">SMA 50</span><span class="value">{{ technicals.sma_50|default:"—"|floatformat:4 }}</span></li>
+            <li><span class="label">SMA 200</span><span class="value">{{ technicals.sma_200|default:"—"|floatformat:4 }}</span></li>
+            <li><span class="label">ATR (14)</span><span class="value">{{ technicals.atr_14|default:"—"|floatformat:4 }}</span></li>
+            <li><span class="label">BOLLINGER</span><span class="value">{{ technicals.bollinger_lower|default:"—"|floatformat:4 }} → {{ technicals.bollinger_upper|default:"—"|floatformat:4 }}</span></li>
         </ul>
         {% else %}
         <div class="empty-state" style="padding:30px;"><p>NO INDICATOR DATA</p></div>
@@ -83,15 +115,29 @@
     {% if signals %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th>Time</th><th>Direction</th><th>Type</th><th>Title</th><th>Score</th></tr></thead>
+        <thead><tr><th>Time</th><th>Direction</th><th>Type</th><th>Title</th>
+            <th style="text-align:right;">Entry</th>
+            <th style="text-align:right;">Stop</th>
+            <th style="text-align:right;">Target</th>
+            <th style="text-align:right;">Score</th><th>Status</th></tr></thead>
         <tbody>
         {% for s in signals %}
         <tr>
-            <td style="font-size:11px;color:var(--text-muted);">{{ s.created_at|date:"M d H:i" }}</td>
+            <td style="font-size:11px;color:var(--text-muted);white-space:nowrap;">{{ s.created_at|date:"M d H:i" }}</td>
             <td><span class="badge badge-{{ s.direction }}">{{ s.direction }}</span></td>
             <td>{{ s.signal_type }}</td>
-            <td>{{ s.title|truncatechars:60 }}</td>
-            <td>{{ s.score|floatformat:2 }}</td>
+            <td>{{ s.title|truncatechars:40 }}</td>
+            <td style="text-align:right;font-family:var(--font-mono);">{% if s.suggested_entry %}{{ s.suggested_entry|floatformat:4 }}{% else %}—{% endif %}</td>
+            <td style="text-align:right;font-family:var(--font-mono);color:var(--accent-red);">{% if s.suggested_stop %}{{ s.suggested_stop|floatformat:4 }}{% else %}—{% endif %}</td>
+            <td style="text-align:right;font-family:var(--font-mono);color:var(--accent);">{% if s.suggested_target %}{{ s.suggested_target|floatformat:4 }}{% else %}—{% endif %}</td>
+            <td style="text-align:right;font-family:var(--font-mono);">{{ s.score|floatformat:2 }}</td>
+            <td>
+                {% if s.is_active %}
+                <span style="color:var(--accent);font-family:var(--font-mono);font-size:10px;">● ACTIVE</span>
+                {% else %}
+                <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:10px;">{{ s.outcome|default:"closed"|upper }}</span>
+                {% endif %}
+            </td>
         </tr>
         {% endfor %}
         </tbody>

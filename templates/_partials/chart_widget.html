@@ -43,6 +43,11 @@ Parameters:
 .sv-chart-type-btns {
     display: flex;
     gap: 3px;
+    align-items: center;
+}
+.sv-tf-sep {
+    width: 1px; height: 14px; margin: 0 3px;
+    background: var(--border, #1a2e1a);
 }
 .sv-tf-btn,
 .sv-type-btn {
@@ -115,11 +120,20 @@ Parameters:
     <div class="sv-chart-toolbar">
         <div class="sv-chart-symbol-badge">{{ symbol }}</div>
 
-        <!-- Timeframe buttons -->
+        {% comment %}Two families: intraday RESOLUTIONS (fetched live from
+        the keyless feed, down to the minute) and RANGES of daily candles.
+        The separator communicates the split. "1min" etc. on the wire —
+        never bare "1m", which has always meant one month here.{% endcomment %}
         <div class="sv-chart-timeframes">
+            <button class="sv-tf-btn {% if timeframe == '1min' %}active{% endif %}" data-tf="1min">1m</button>
+            <button class="sv-tf-btn {% if timeframe == '5min' %}active{% endif %}" data-tf="5min">5m</button>
+            <button class="sv-tf-btn {% if timeframe == '15min' %}active{% endif %}" data-tf="15min">15m</button>
+            <button class="sv-tf-btn {% if timeframe == '1h' %}active{% endif %}" data-tf="1h">1H</button>
+            <button class="sv-tf-btn {% if timeframe == '4h' %}active{% endif %}" data-tf="4h">4H</button>
+            <span class="sv-tf-sep" aria-hidden="true"></span>
             <button class="sv-tf-btn {% if timeframe == '1d' %}active{% endif %}" data-tf="1d">1D</button>
             <button class="sv-tf-btn {% if timeframe == '1w' %}active{% endif %}" data-tf="1w">1W</button>
-            <button class="sv-tf-btn {% if timeframe == '1m' %}active{% endif %}" data-tf="1m">1M</button>
+            <button class="sv-tf-btn {% if timeframe == '1m' or timeframe == '1mo' %}active{% endif %}" data-tf="1mo">1M</button>
             <button class="sv-tf-btn {% if timeframe == '3m' %}active{% endif %}" data-tf="3m">3M</button>
             <button class="sv-tf-btn {% if timeframe == '1y' %}active{% endif %}" data-tf="1y">1Y</button>
         </div>
@@ -309,9 +323,12 @@ Parameters:
         var vol = volumeSeries ? param.seriesData.get(volumeSeries) : null;
         if (!bar) { legendEl.textContent = ''; return; }
 
+        var intraday = ['1min','5min','15min','1h','4h'].indexOf(currentTf) !== -1;
         var d = (typeof param.time === 'object')
             ? param.time.year + '-' + String(param.time.month).padStart(2,'0') + '-' + String(param.time.day).padStart(2,'0')
-            : new Date(param.time * 1000).toISOString().slice(0, 10);
+            : intraday
+                ? new Date(param.time * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
+                : new Date(param.time * 1000).toISOString().slice(0, 10);
 
         if (chartType === 'candlestick') {
             legendEl.innerHTML =

@@ -703,3 +703,89 @@ class WatchlistToggleTests(TestCase):
         self.inst.refresh_from_db()
         self.assertFalse(self.inst.is_watchlist,
                          "an anonymous POST must not touch the watchlist")
+
+
+class IntradayChartTests(TestCase):
+    """Sub-daily chart resolutions. 1h/4h serve from stored bars; minute
+    bars are fetched live from the keyless public feed and cached for a
+    minute — persisting minute bars for every instrument would bloat
+    PriceData for the sake of a chart click. `time` must be epoch seconds:
+    lightweight-charts needs numeric time below daily resolution."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+        cls.user = get_user_model().objects.create_user("ic_u", password="x")
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client.force_login(self.user)
+        from instruments.models import Instrument
+        self.inst, _ = Instrument.objects.get_or_create(
+            symbol="BTCUSD", defaults={"name": "Bitcoin",
+                                       "asset_class": "crypto"})
+
+    def test_stored_hourly_bars_serve_the_1h_view(self):
+        from datetime import timedelta
+        from decimal import Decimal
+        from django.utils import timezone
+        from market_data.models import PriceData
+        now = timezone.now()
+        for i in range(3):
+            PriceData.objects.create(
+                instrument=self.inst, timeframe="1h",
+                timestamp=now - timedelta(hours=i),
+                open=Decimal("1"), high=Decimal("2"), low=Decimal("0.5"),
+                close=Decimal("1.5"), volume=10, source="test")
+        resp = self.client.get(
+            "/api/chart-data/?symbol=BTCUSD&timeframe=1h",
+            HTTP_HOST="127.0.0.1")
+        bars = resp.json()["bars"]
+        self.assertEqual(len(bars), 3)
+        self.assertIsInstance(bars[0]["time"], int)
+        self.assertLess(bars[0]["time"], bars[-1]["time"],
+                        "bars must be oldest-first")
+
+    def test_minute_bars_are_fetched_live_cached_and_venue_translated(self):
+        from unittest.mock import MagicMock, patch
+        feed = MagicMock()
+        feed.klines.return_value = [
+            [1700000000000, "1", "2", "0.5", "1.5", "10"],
+            [1700000060000, "1.5", "2.5", "1", "2", "12"],
+        ]
+        with patch("market_data.public_feed.public_feed_for",
+                   return_value=feed):
+            r1 = self.client.get(
+                "/api/chart-data/?symbol=BTCUSD&timeframe=1min",
+                HTTP_HOST="127.0.0.1")
+            self.client.get(
+                "/api/chart-data/?symbol=BTCUSD&timeframe=1min",
+                HTTP_HOST="127.0.0.1")
+        bars = r1.json()["bars"]
+        self.assertEqual(bars[0]["time"], 1700000000)
+        self.assertEqual(bars[1]["close"], 2.0)
+        self.assertEqual(feed.klines.call_count, 1,
+                         "the second hit inside a minute must be cached")
+        # Crypto fetches under the venue spelling (BTCUSD -> BTCUSDT).
+        self.assertEqual(feed.klines.call_args.args[0], "BTCUSDT")
+
+    def test_a_feedless_class_reports_instead_of_500ing(self):
+        from unittest.mock import patch
+        with patch("market_data.public_feed.public_feed_for",
+                   return_value=None):
+            resp = self.client.get(
+                "/api/chart-data/?symbol=BTCUSD&timeframe=5min",
+                HTTP_HOST="127.0.0.1")
+        data = resp.json()
+        self.assertEqual(data["bars"], [])
+        self.assertIn("error", data)
+
+    def test_legacy_month_timeframe_still_serves_daily(self):
+        """'1m' has always meant ONE MONTH of daily candles on this API —
+        the minute views use '1min' so old callers keep working."""
+        resp = self.client.get(
+            "/api/chart-data/?symbol=BTCUSD&timeframe=1m",
+            HTTP_HOST="127.0.0.1")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("error", resp.json())

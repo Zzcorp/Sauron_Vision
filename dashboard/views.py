@@ -2356,14 +2356,92 @@ def _daily_chart_bars(instrument, since=None, limit=None):
     return bars
 
 
+def _intraday_chart_bars(instrument, interval, limit=240):
+    """Intraday OHLCV dicts, freshest first source wins.
+
+    1h/4h come from PriceData (the bot/watchlist passes keep them warm).
+    Finer resolutions are not stored anywhere — persisting minute bars for
+    every instrument would bloat the table for a chart click — so they are
+    fetched LIVE from the keyless public feed and cached for a minute.
+    `time` is epoch seconds: lightweight-charts needs numeric time for
+    intraday resolution.
+    """
+    from django.core.cache import cache
+    from market_data.models import PriceData
+
+    if interval in ("1h", "4h"):
+        rows = (PriceData.objects.filter(instrument=instrument,
+                                         timeframe=interval)
+                .order_by("-timestamp")[:limit])
+        bars = [{
+            "time":   int(p.timestamp.timestamp()),
+            "open":   float(p.open), "high": float(p.high),
+            "low":    float(p.low), "close": float(p.close),
+            "volume": float(p.volume) if p.volume else 0,
+        } for p in reversed(list(rows))]
+        if bars:
+            return bars
+        # No stored rows (instrument outside the fleet/watchlist) — fall
+        # through to the live fetch below.
+
+    cache_key = f"chart:{instrument.symbol}:{interval}"
+    try:
+        cached = cache.get(cache_key)
+    except Exception:  # noqa: BLE001
+        cached = None
+    if cached is not None:
+        return cached
+
+    from market_data.public_feed import public_feed_for
+    client = public_feed_for(instrument.asset_class)
+    if client is None:
+        return []
+    fetch_symbol = instrument.symbol
+    if instrument.asset_class == "crypto":
+        from market_data.management.commands.backfill_bars import venue_symbol
+        fetch_symbol = venue_symbol(instrument.symbol)
+
+    bars = []
+    try:
+        for row in client.klines(fetch_symbol, interval=interval,
+                                 limit=limit) or []:
+            if not row or len(row) < 6:
+                continue
+            bars.append({
+                "time":   int(int(row[0]) / 1000),
+                "open":   float(row[1]), "high": float(row[2]),
+                "low":    float(row[3]), "close": float(row[4]),
+                "volume": float(row[5] or 0),
+            })
+    except Exception:  # noqa: BLE001 — a dead feed is an empty chart, not a 500
+        bars = []
+    try:
+        cache.set(cache_key, bars, 60)
+    except Exception:  # noqa: BLE001
+        pass
+    return bars
+
+
+# Live-fetched resolutions. 1h/4h are handled from stored bars first.
+INTRADAY_INTERVALS = {"1m": "1m", "5m": "5m", "15m": "15m",
+                      "1h": "1h", "4h": "4h"}
+
+
 @login_required
 def chart_data_api(request):
     """
     Returns OHLCV bars for a symbol + timeframe.
 
     GET /api/chart-data/?symbol=AAPL&timeframe=1d
-    Response: { "bars": [{"time": "2024-01-02", "open": 1.0, "high": 1.1, "low": 0.9, "close": 1.05, "volume": 1000}, ...] }
-    Timeframe values accepted: 1d, 1w, 1m, 3m, 1y
+    Response: { "bars": [{"time": ..., "open": ..., "high": ..., "low": ...,
+                          "close": ..., "volume": ...}, ...] }
+
+    Two families of timeframe:
+      * Ranges of DAILY candles ("1d", "1w", "1mo"/"1m", "3m", "1y") —
+        `time` is a date string.
+      * Intraday RESOLUTIONS ("1min", "5min", "15min", "1h", "4h") —
+        `time` is epoch seconds; minute bars are fetched live from the
+        keyless public feed and cached for a minute.
     """
     from django.http import JsonResponse
     from instruments.models import Instrument
@@ -2381,8 +2459,22 @@ def chart_data_api(request):
     except Instrument.DoesNotExist:
         return JsonResponse({"error": f"Symbol '{symbol}' not found", "bars": []})
 
-    # UI timeframe -> how far back to look. All views draw daily candles.
-    DAYS_BACK = {"1d": 90, "1w": 365, "1m": 30, "3m": 90, "1y": 365}
+    # The UI sends "1min"/"5min"/"15min" (never bare "1m", which has
+    # always meant ONE MONTH here — the legacy range value keeps working).
+    interval = {"1min": "1m", "5min": "5m", "15min": "15m",
+                "1h": "1h", "4h": "4h"}.get(timeframe)
+    if interval:
+        bars = _intraday_chart_bars(instrument, interval)
+        if not bars:
+            return JsonResponse({
+                "symbol": symbol, "timeframe": timeframe, "bars": [],
+                "error": f"No intraday source for {symbol} at {timeframe}"})
+        return JsonResponse({"symbol": symbol, "timeframe": timeframe,
+                             "bars": bars})
+
+    # UI timeframe -> how far back to look. These views draw daily candles.
+    DAYS_BACK = {"1d": 90, "1w": 365, "1m": 30, "1mo": 30,
+                 "3m": 90, "1y": 365}
     days_back = DAYS_BACK.get(timeframe, 90)
     since = timezone.now() - timedelta(days=days_back)
 
