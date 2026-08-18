@@ -1,0 +1,93 @@
+{% comment %}
+Both halves of the news ticker's marquee (full items + the simplified
+duplicates that make the scroll seamless). A partial for one reason:
+the ticker_partial view re-renders it when the dashboard WebSocket
+announces stored news, so fresh headlines enter the band without a
+page reload. base.html includes it for the initial render.
+{% endcomment %}
+{% if not ticker_items %}
+                <span class="ticker-item" data-type="empty" style="color:var(--text-muted);cursor:default;">
+                    <span class="t-badge news">FEED</span>
+                    <span>Quiet — news appears here as the scrapers run</span>
+                </span>
+                {% endif %}
+                {% for item in ticker_items %}
+                <a href="{{ item.url }}" class="ticker-item" data-type="{{ item.type }}"{% if item.news_id %} data-news-id="{{ item.news_id }}"{% endif %}>
+                    {% comment %}Signals were removed from this band by
+                    request — the rail is their home; the ticker is news
+                    only (quote/strategy branches remain for the payloads
+                    older pages may still hand this include).{% endcomment %}
+                    {% if item.type == "quote" %}
+                    <span class="t-sym">{{ item.symbol }}</span>
+                    <span class="t-price">{{ item.price }}</span>
+                    <span class="t-change {% if item.change >= 0 %}up{% else %}down{% endif %}">{{ item.change_display }}</span>
+                    {% elif item.type == "news" %}
+                    <span class="t-badge news">NEWS</span>
+                    <span>{{ item.title|truncatechars:50 }}</span>
+                    {% elif item.type == "strategy" %}
+                    <span class="t-badge strat">STRAT</span>
+                    <span>{{ item.title|truncatechars:40 }}</span>
+                    {% endif %}
+                    <div class="ticker-popup"{% if item.type == "quote" %} data-sv-staleable{% endif %}>
+                        {% if item.type == "quote" %}
+                        <div class="tp-head">
+                            <span class="tp-sym">{{ item.symbol }}</span>
+                            <span class="tp-chip">{{ item.asset_class }}</span>
+                            {% comment %} Rendered by CSS off .is-stale, which the age
+                               ticker sets as the quote crosses 15 minutes —
+                               rather than only if it was already stale at the
+                               moment the page happened to be built. {% endcomment %}
+                            <span class="tp-chip tp-chip--warn tp-stale-chip">STALE</span>
+                        </div>
+                        {% if item.name %}<div class="tp-sub">{{ item.name }}</div>{% endif %}
+                        <div class="tp-big {% if item.change >= 0 %}up{% else %}down{% endif %}">
+                            {{ item.price }} <span class="tp-big-delta">{{ item.change_display }}</span>
+                        </div>
+                        {% if item.bid and item.ask %}
+                        <div class="tp-row"><span class="lbl">Bid / Ask</span><span>{{ item.bid }} / {{ item.ask }}</span></div>
+                        {% endif %}
+                        {% if item.spread_pct != None %}
+                        <div class="tp-row"><span class="lbl">Spread</span><span>{{ item.spread_pct }}%</span></div>
+                        {% endif %}
+                        {% if item.volume %}<div class="tp-row"><span class="lbl">Volume</span><span>{{ item.volume }}</span></div>{% endif %}
+                        <div class="tp-row"><span class="lbl">Quoted</span><span>
+                            <span class="sv-age"{% if item.quoted_at %} data-sv-at="{{ item.quoted_at }}"{% endif %}>{{ item.age_display }}</span>{% if item.source %} · {{ item.source }}{% endif %}
+                        </span></div>
+                        <div class="tp-cta">▸ Open instrument · <span class="tp-cta-alt">shift-click to ask Sauron</span></div>
+
+                        {% elif item.type == "news" %}
+                        <div class="tnp-head">
+                          <span class="tnp-source">{{ item.source }}</span>
+                          <span class="tnp-time">{{ item.published_at }}</span>
+                        </div>
+                        <div class="tnp-title">{{ item.title }}</div>
+                        <div class="tnp-summary">{{ item.summary|truncatechars:260 }}</div>
+                        <div class="tnp-meta-row">
+                          {% if item.sentiment_score != None %}
+                            {% if item.sentiment_score > 0.2 %}<span class="tnp-sent pos">▲ BULL {{ item.sentiment_score|floatformat:2 }}</span>
+                            {% elif item.sentiment_score < -0.2 %}<span class="tnp-sent neg">▼ BEAR {{ item.sentiment_score|floatformat:2 }}</span>
+                            {% else %}<span class="tnp-sent neu">● NEUTRAL</span>{% endif %}
+                          {% endif %}
+                          {% if item.urgency %}<span class="tnp-urgency">⚡ {{ item.urgency|upper }}</span>{% endif %}
+                        </div>
+                        {% if item.implication %}<div class="tnp-implication">{{ item.implication }}</div>{% endif %}
+                        {% if item.affected_chips %}
+                          <div class="tnp-section">AFFECTED INSTRUMENTS</div>
+                          <div class="tnp-chips">{% for c in item.affected_chips %}<span class="tnp-chip">{{ c }}</span>{% endfor %}</div>
+                        {% endif %}
+                        {% if item.keywords %}
+                          <div class="tnp-section">KEYWORDS</div>
+                          <div class="tnp-chips">{% for k in item.keywords %}<span class="tnp-keyword">{{ k }}</span>{% endfor %}</div>
+                        {% endif %}
+                        <div class="tnp-cta">▸ Click for full analysis</div>
+                        {% endif %}
+                    </div>
+                </a>
+                {% endfor %}
+                {% for item in ticker_items %}
+                <a href="{{ item.url }}" class="ticker-item" data-type="{{ item.type }}"{% if item.news_id %} data-news-id="{{ item.news_id }}"{% endif %}>
+                    {% if item.type == "quote" %}<span class="t-sym">{{ item.symbol }}</span><span class="t-price">{{ item.price }}</span><span class="t-change {% if item.change >= 0 %}up{% else %}down{% endif %}">{{ item.change_display }}</span>
+                    {% elif item.type == "news" %}<span class="t-badge news">NEWS</span><span>{{ item.title|truncatechars:50 }}</span>
+                    {% endif %}
+                </a>
+                {% endfor %}

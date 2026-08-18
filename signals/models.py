@@ -71,3 +71,32 @@ from .models_control import (  # noqa: F401
 )
 from .models_opportunity import OpportunitySetup, OpportunityFlag, DiscoveredSetup  # noqa: F401
 from .models_events import FastEvent  # noqa: F401
+
+
+# ── WS push on signal creation ──────────────────────────────────────────
+# dashboard.consumers.push_signal_notification existed with ZERO call
+# sites: the frontend had a 'signal' message handler, the backend had a
+# broadcaster, and no code path ever connected a created Signal to either
+# — so the rail only ever changed on a page load. A post_save receiver is
+# the one choke point every creation path shares (rule adapter, SMC
+# bridge, opportunity scanner, event engine).
+from django.db.models.signals import post_save as _post_save  # noqa: E402
+from django.dispatch import receiver as _receiver  # noqa: E402
+
+
+@_receiver(_post_save, sender=Signal, dispatch_uid="ws_push_new_signal")
+def _push_new_signal(sender, instance, created, **kwargs):
+    if not created or not instance.is_active:
+        return
+    try:
+        from dashboard.consumers import push_signal_notification
+        push_signal_notification({
+            "id": instance.id,
+            "symbol": instance.instrument.symbol,
+            "direction": instance.direction,
+            "title": instance.title or "",
+            "score": float(instance.score or 0),
+            "urgency": instance.urgency or "",
+        })
+    except Exception:  # noqa: BLE001 — a WS hiccup must never fail creation
+        pass

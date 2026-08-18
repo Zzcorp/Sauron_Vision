@@ -496,6 +496,15 @@ def fetch_crypto_news_task():
     """Fetch crypto news from RSS feeds."""
     from market_data.adapters.crypto_news import fetch_crypto_news
     count = fetch_crypto_news()
+    if count > 0:
+        # Same announcement fetch_breaking_news makes — the browsers'
+        # ticker listens for it and pulls the fresh headlines in live.
+        try:
+            from dashboard.consumers import push_news_notification
+            push_news_notification({"count": count,
+                                    "message": f"{count} new crypto articles"})
+        except Exception as e:  # noqa: BLE001 — a WS hiccup must not fail the scrape
+            logger.warning("[crypto news] WS push failed: %s", e)
     return {"status": "success", "articles": count}
 
 

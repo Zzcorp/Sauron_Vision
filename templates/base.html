@@ -569,92 +569,7 @@
                 </svg>
             </button>
             <div class="ticker-track" id="tickerTrack">
-                {% if not ticker_items %}
-                <span class="ticker-item" data-type="empty" style="color:var(--text-muted);cursor:default;">
-                    <span class="t-badge news">FEED</span>
-                    <span>Quiet — news appears here as the scrapers run</span>
-                </span>
-                {% endif %}
-                {% for item in ticker_items %}
-                <a href="{{ item.url }}" class="ticker-item" data-type="{{ item.type }}">
-                    {% comment %}Signals were removed from this band by
-                    request — the rail is their home; the ticker is news
-                    only (quote/strategy branches remain for the payloads
-                    older pages may still hand this include).{% endcomment %}
-                    {% if item.type == "quote" %}
-                    <span class="t-sym">{{ item.symbol }}</span>
-                    <span class="t-price">{{ item.price }}</span>
-                    <span class="t-change {% if item.change >= 0 %}up{% else %}down{% endif %}">{{ item.change_display }}</span>
-                    {% elif item.type == "news" %}
-                    <span class="t-badge news">NEWS</span>
-                    <span>{{ item.title|truncatechars:50 }}</span>
-                    {% elif item.type == "strategy" %}
-                    <span class="t-badge strat">STRAT</span>
-                    <span>{{ item.title|truncatechars:40 }}</span>
-                    {% endif %}
-                    <div class="ticker-popup"{% if item.type == "quote" %} data-sv-staleable{% endif %}>
-                        {% if item.type == "quote" %}
-                        <div class="tp-head">
-                            <span class="tp-sym">{{ item.symbol }}</span>
-                            <span class="tp-chip">{{ item.asset_class }}</span>
-                            {% comment %} Rendered by CSS off .is-stale, which the age
-                               ticker sets as the quote crosses 15 minutes —
-                               rather than only if it was already stale at the
-                               moment the page happened to be built. {% endcomment %}
-                            <span class="tp-chip tp-chip--warn tp-stale-chip">STALE</span>
-                        </div>
-                        {% if item.name %}<div class="tp-sub">{{ item.name }}</div>{% endif %}
-                        <div class="tp-big {% if item.change >= 0 %}up{% else %}down{% endif %}">
-                            {{ item.price }} <span class="tp-big-delta">{{ item.change_display }}</span>
-                        </div>
-                        {% if item.bid and item.ask %}
-                        <div class="tp-row"><span class="lbl">Bid / Ask</span><span>{{ item.bid }} / {{ item.ask }}</span></div>
-                        {% endif %}
-                        {% if item.spread_pct != None %}
-                        <div class="tp-row"><span class="lbl">Spread</span><span>{{ item.spread_pct }}%</span></div>
-                        {% endif %}
-                        {% if item.volume %}<div class="tp-row"><span class="lbl">Volume</span><span>{{ item.volume }}</span></div>{% endif %}
-                        <div class="tp-row"><span class="lbl">Quoted</span><span>
-                            <span class="sv-age"{% if item.quoted_at %} data-sv-at="{{ item.quoted_at }}"{% endif %}>{{ item.age_display }}</span>{% if item.source %} · {{ item.source }}{% endif %}
-                        </span></div>
-                        <div class="tp-cta">▸ Open instrument · <span class="tp-cta-alt">shift-click to ask Sauron</span></div>
-
-                        {% elif item.type == "news" %}
-                        <div class="tnp-head">
-                          <span class="tnp-source">{{ item.source }}</span>
-                          <span class="tnp-time">{{ item.published_at }}</span>
-                        </div>
-                        <div class="tnp-title">{{ item.title }}</div>
-                        <div class="tnp-summary">{{ item.summary|truncatechars:260 }}</div>
-                        <div class="tnp-meta-row">
-                          {% if item.sentiment_score != None %}
-                            {% if item.sentiment_score > 0.2 %}<span class="tnp-sent pos">▲ BULL {{ item.sentiment_score|floatformat:2 }}</span>
-                            {% elif item.sentiment_score < -0.2 %}<span class="tnp-sent neg">▼ BEAR {{ item.sentiment_score|floatformat:2 }}</span>
-                            {% else %}<span class="tnp-sent neu">● NEUTRAL</span>{% endif %}
-                          {% endif %}
-                          {% if item.urgency %}<span class="tnp-urgency">⚡ {{ item.urgency|upper }}</span>{% endif %}
-                        </div>
-                        {% if item.implication %}<div class="tnp-implication">{{ item.implication }}</div>{% endif %}
-                        {% if item.affected_chips %}
-                          <div class="tnp-section">AFFECTED INSTRUMENTS</div>
-                          <div class="tnp-chips">{% for c in item.affected_chips %}<span class="tnp-chip">{{ c }}</span>{% endfor %}</div>
-                        {% endif %}
-                        {% if item.keywords %}
-                          <div class="tnp-section">KEYWORDS</div>
-                          <div class="tnp-chips">{% for k in item.keywords %}<span class="tnp-keyword">{{ k }}</span>{% endfor %}</div>
-                        {% endif %}
-                        <div class="tnp-cta">▸ Click for full analysis</div>
-                        {% endif %}
-                    </div>
-                </a>
-                {% endfor %}
-                {% for item in ticker_items %}
-                <a href="{{ item.url }}" class="ticker-item" data-type="{{ item.type }}">
-                    {% if item.type == "quote" %}<span class="t-sym">{{ item.symbol }}</span><span class="t-price">{{ item.price }}</span><span class="t-change {% if item.change >= 0 %}up{% else %}down{% endif %}">{{ item.change_display }}</span>
-                    {% elif item.type == "news" %}<span class="t-badge news">NEWS</span><span>{{ item.title|truncatechars:50 }}</span>
-                    {% endif %}
-                </a>
-                {% endfor %}
+                {% include "_partials/ticker_items.html" %}
             </div>
         </div>
 
@@ -1032,95 +947,8 @@
             <span class="rh-count">{{ panel_signals|default:"0" }}</span>
             <span class="rh-chev">▼</span>
         </div>
-        <div class="rail-body">
-            {% for s in panel_recent_signals %}
-            <div class="sr-signal-wrap" data-signal-id="{{ s.id }}">
-                <button type="button" class="sr-x"
-                        title="Dismiss — hides this signal for you; the engine still sees it"
-                        aria-label="Dismiss {{ s.instrument.symbol }} signal"
-                        onclick="event.preventDefault(); event.stopPropagation(); window.dismissSignal && window.dismissSignal({{ s.id }});">&times;</button>
-                <a href="{% url 'signals_list' %}" class="sr-signal" style="text-decoration:none;">
-                    <div class="sr-dot" style="background:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %};"></div>
-                    <div class="sr-detail">
-                        <div class="sr-row1">
-                            <span class="sr-sym">{{ s.instrument.symbol }}</span>
-                            <span class="sr-badge sr-badge-{{ s.direction }}">{{ s.direction|upper|slice:":4" }}</span>
-                            <span class="sr-age">{{ s.created_at|timesince|default:"—"|truncatechars:8 }}</span>
-                        </div>
-                        <div class="sr-row2">
-                            {# 5-dot score gauge: each dot ON when score crosses 0.2*i #}
-                            <span class="sr-gauge" aria-label="score {{ s.score|floatformat:2 }}">
-                                {% with sc=s.score %}
-                                    <span class="sr-gauge-dot {% if sc >= 0.2 %}on{% endif %}"></span>
-                                    <span class="sr-gauge-dot {% if sc >= 0.4 %}on{% endif %}"></span>
-                                    <span class="sr-gauge-dot {% if sc >= 0.6 %}on{% endif %}"></span>
-                                    <span class="sr-gauge-dot {% if sc >= 0.8 %}on{% endif %}"></span>
-                                    <span class="sr-gauge-dot {% if sc >= 0.95 %}on{% endif %}"></span>
-                                {% endwith %}
-                            </span>
-                            <span class="sr-score-num">{{ s.score|floatformat:2 }}</span>
-                            {% if s.urgency %}<span class="sr-urg sr-urg-{{ s.urgency }}">{{ s.urgency|upper|slice:":3" }}</span>{% endif %}
-                        </div>
-                        {% if s.rule_name %}
-                        <div class="sr-row3">{{ s.rule_name|truncatechars:34 }}</div>
-                        {% endif %}
-                    </div>
-                </a>
-                {# ── Hover popup — rich detail + action links ─────────── #}
-                <div class="sr-popup" role="dialog">
-                    <div class="sr-pop-head">
-                        <span class="sr-pop-sym">{{ s.instrument.symbol }}</span>
-                        <span class="sr-pop-dir sr-pop-dir-{{ s.direction }}">{{ s.direction|upper }}</span>
-                        {% if s.urgency %}<span class="sr-urg sr-urg-{{ s.urgency }}" style="margin-left:auto;">{{ s.urgency|upper }}</span>{% endif %}
-                    </div>
-                    {% if s.title %}
-                    <div class="sr-pop-title">{{ s.title|truncatechars:140 }}</div>
-                    {% endif %}
-                    <div class="sr-pop-grid">
-                        <div><span class="sr-pop-k">type</span><span class="sr-pop-v">{{ s.signal_type|default:"—" }}</span></div>
-                        <div><span class="sr-pop-k">score</span><span class="sr-pop-v">{{ s.score|floatformat:2 }}</span></div>
-                        <div><span class="sr-pop-k">rule</span><span class="sr-pop-v">{{ s.rule_name|default:"—"|truncatechars:18 }}</span></div>
-                        <div><span class="sr-pop-k">when</span><span class="sr-pop-v">{{ s.created_at|date:"M d H:i" }}</span></div>
-                        <div><span class="sr-pop-k">entry</span><span class="sr-pop-v">{{ s.suggested_entry|default:"—" }}</span></div>
-                        <div><span class="sr-pop-k">R:R</span><span class="sr-pop-v">{{ s.risk_reward_ratio|default:"—" }}</span></div>
-                        <div><span class="sr-pop-k">stop</span><span class="sr-pop-v down">{{ s.suggested_stop|default:"—" }}</span></div>
-                        <div><span class="sr-pop-k">target</span><span class="sr-pop-v up">{{ s.suggested_target|default:"—" }}</span></div>
-                    </div>
-                    {% comment %}Reaction row (take trade / pass) — primary
-                    decisions. TAKE TRADE only for directional signals: a
-                    neutral verdict carries no side, and the server refuses
-                    it too.{% endcomment %}
-                    <div class="sr-pop-actions sr-pop-actions-react">
-                        {% if s.direction == "bullish" or s.direction == "bearish" %}
-                        <button type="button"
-                                class="sr-pop-btn sr-pop-btn-act"
-                                data-signal-id="{{ s.id }}"
-                                onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ s.id }});">▶ TAKE TRADE</button>
-                        {% endif %}
-                        <button type="button"
-                                class="sr-pop-btn sr-pop-btn-pass"
-                                data-signal-id="{{ s.id }}"
-                                onclick="event.preventDefault(); event.stopPropagation(); window.dismissSignal && window.dismissSignal({{ s.id }});">
-                            ✕ PASS
-                        </button>
-                    </div>
-                    {# Explore row — secondary deep-dive actions. #}
-                    <div class="sr-pop-actions">
-                        <a href="{% url 'instrument_detail' s.instrument.symbol %}" class="sr-pop-btn">▸ INSTRUMENT</a>
-                        <button type="button" class="sr-pop-btn"
-                                data-ask-sauron="{{ s.direction|upper }} {{ s.instrument.symbol }}{% if s.rule_name %} ({{ s.rule_name }}){% endif %}"
-                                data-ask-kind="signal">
-                            ▸ ASK SAURON
-                        </button>
-                    </div>
-                </div>
-            </div>
-            {% empty %}
-            <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:11px;">
-                <div style="font-size:20px;margin-bottom:6px;opacity:0.3;">&#x25C8;</div>
-                No active signals
-            </div>
-            {% endfor %}
+        <div class="rail-body" id="railSignalsBody">
+            {% include "_partials/signal_rail_items.html" %}
         </div>
     </div>
 
@@ -2257,6 +2085,58 @@ function toggleSidebar() {
     setTimeout(() => { el.style.textShadow = ''; }, 250);
   }
 
+  /* New signal announced over the socket: refetch the rail's cards and
+     let the fresh ones slide in. The swap re-dispatches htmx:afterSwap so
+     the existing popup binder and dismissal filter re-run — both already
+     listen for it. */
+  let railRefreshing = false;
+  function refreshSignalRail() {
+    const body = document.getElementById('railSignalsBody');
+    if (!body || railRefreshing) return;
+    railRefreshing = true;
+    const before = new Set(
+      Array.from(body.querySelectorAll('.sr-signal-wrap[data-signal-id]'))
+        .map(w => w.dataset.signalId));
+    fetch('/partials/signal-rail/', { credentials: 'same-origin' })
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(html => {
+        body.innerHTML = html;
+        body.querySelectorAll('.sr-signal-wrap[data-signal-id]').forEach(w => {
+          if (!before.has(w.dataset.signalId)) w.classList.add('sr-slide-in');
+        });
+        document.dispatchEvent(new CustomEvent('htmx:afterSwap'));
+      })
+      .catch(() => {})
+      .finally(() => { railRefreshing = false; });
+  }
+
+  /* Fresh news announced: refetch the ticker's marquee. Debounced —
+     scrapers store articles in bursts and one swap covers the batch. The
+     track element itself is never replaced, so the scroll animation keeps
+     its phase; items whose id was not present before glow briefly as they
+     ride past. */
+  let tickerTimer = null;
+  function refreshTicker() {
+    if (tickerTimer) clearTimeout(tickerTimer);
+    tickerTimer = setTimeout(() => {
+      tickerTimer = null;
+      const track = document.getElementById('tickerTrack');
+      if (!track) return;
+      const before = new Set(
+        Array.from(track.querySelectorAll('.ticker-item[data-news-id]'))
+          .map(el => el.dataset.newsId));
+      fetch('/partials/ticker/', { credentials: 'same-origin' })
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+        .then(html => {
+          track.innerHTML = html;
+          track.querySelectorAll('.ticker-item[data-news-id]').forEach(el => {
+            if (!before.has(el.dataset.newsId)) el.classList.add('t-new');
+          });
+        })
+        .catch(() => {});
+    }, 800);
+  }
+
   function connect() {
     try { ws = new WebSocket(url); } catch(e) { scheduleReconnect(); return; }
     ws.onopen = () => { retries = 0; alive = true;
@@ -2265,6 +2145,8 @@ function toggleSidebar() {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'quote_stream' || msg.type === 'quote') applyTick(msg.data);
+        else if (msg.type === 'signal') refreshSignalRail();
+        else if (msg.type === 'news') refreshTicker();
       } catch(e) {}
     };
     ws.onclose = () => { alive = false; scheduleReconnect(); };

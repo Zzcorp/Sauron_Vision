@@ -377,7 +377,13 @@ def sauron_context(request):
         ctx["panel_positions"] = open_pos.count()
         ctx["panel_exposure"] = 100 - cash_pct
         ctx["panel_max_dd"] = f"{portfolio.max_daily_loss_pct}"
-        ctx["panel_watchlist"] = portfolio.positions.filter(instrument__is_watchlist=True).count()
+        # Starred instruments, NOT positions-on-starred-instruments: the
+        # old expression counted open portfolio positions that happened to
+        # be watchlisted, so the cell read 0 forever on a box with seven
+        # stars and no positions — while its own dropdown listed the seven.
+        from instruments.models import Instrument as _Inst
+        ctx["panel_watchlist"] = _Inst.objects.filter(
+            is_watchlist=True, is_active=True).count()
         # Expanded panel data
         ctx["panel_recent_positions"] = list(open_pos.select_related("instrument")[:5])
 

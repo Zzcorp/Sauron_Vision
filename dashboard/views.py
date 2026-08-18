@@ -1667,6 +1667,23 @@ def toggle_watchlist(request, symbol):
 
 
 @login_required
+def signal_rail_partial(request):
+    """The signal rail's cards alone. Fetched by the dashboard WebSocket
+    listener when a new signal fires, so the card slides into the rail
+    without a reload. Context processors supply panel_recent_signals."""
+    return render(request, "_partials/signal_rail_items.html")
+
+
+@login_required
+def ticker_partial(request):
+    """Both halves of the news ticker's marquee. Fetched by the dashboard
+    WebSocket listener when a scraper stores news, so fresh headlines
+    enter the band without a reload. Context processors supply
+    ticker_items."""
+    return render(request, "_partials/ticker_items.html")
+
+
+@login_required
 def asset_trade_preview(request, symbol):
     """POST {side} — signal-less TAKE TRADE preview from an instrument
     popup (watchlist rail, price headband). Levels come from the engine's

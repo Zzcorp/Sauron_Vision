@@ -1,0 +1,95 @@
+{% comment %}
+The signal rail's cards. Lives as a partial for one reason: the
+signal_rail_partial view re-renders it when the dashboard WebSocket
+announces a new signal, so a fresh card can slide into the rail
+without a page reload. base.html includes it for the initial render;
+both consumers get identical markup by construction.
+{% endcomment %}
+{% for s in panel_recent_signals %}
+            <div class="sr-signal-wrap" data-signal-id="{{ s.id }}">
+                <button type="button" class="sr-x"
+                        title="Dismiss — hides this signal for you; the engine still sees it"
+                        aria-label="Dismiss {{ s.instrument.symbol }} signal"
+                        onclick="event.preventDefault(); event.stopPropagation(); window.dismissSignal && window.dismissSignal({{ s.id }});">&times;</button>
+                <a href="{% url 'signals_list' %}" class="sr-signal" style="text-decoration:none;">
+                    <div class="sr-dot" style="background:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %};"></div>
+                    <div class="sr-detail">
+                        <div class="sr-row1">
+                            <span class="sr-sym">{{ s.instrument.symbol }}</span>
+                            <span class="sr-badge sr-badge-{{ s.direction }}">{{ s.direction|upper|slice:":4" }}</span>
+                            <span class="sr-age">{{ s.created_at|timesince|default:"—"|truncatechars:8 }}</span>
+                        </div>
+                        <div class="sr-row2">
+                            {# 5-dot score gauge: each dot ON when score crosses 0.2*i #}
+                            <span class="sr-gauge" aria-label="score {{ s.score|floatformat:2 }}">
+                                {% with sc=s.score %}
+                                    <span class="sr-gauge-dot {% if sc >= 0.2 %}on{% endif %}"></span>
+                                    <span class="sr-gauge-dot {% if sc >= 0.4 %}on{% endif %}"></span>
+                                    <span class="sr-gauge-dot {% if sc >= 0.6 %}on{% endif %}"></span>
+                                    <span class="sr-gauge-dot {% if sc >= 0.8 %}on{% endif %}"></span>
+                                    <span class="sr-gauge-dot {% if sc >= 0.95 %}on{% endif %}"></span>
+                                {% endwith %}
+                            </span>
+                            <span class="sr-score-num">{{ s.score|floatformat:2 }}</span>
+                            {% if s.urgency %}<span class="sr-urg sr-urg-{{ s.urgency }}">{{ s.urgency|upper|slice:":3" }}</span>{% endif %}
+                        </div>
+                        {% if s.rule_name %}
+                        <div class="sr-row3">{{ s.rule_name|truncatechars:34 }}</div>
+                        {% endif %}
+                    </div>
+                </a>
+                {# ── Hover popup — rich detail + action links ─────────── #}
+                <div class="sr-popup" role="dialog">
+                    <div class="sr-pop-head">
+                        <span class="sr-pop-sym">{{ s.instrument.symbol }}</span>
+                        <span class="sr-pop-dir sr-pop-dir-{{ s.direction }}">{{ s.direction|upper }}</span>
+                        {% if s.urgency %}<span class="sr-urg sr-urg-{{ s.urgency }}" style="margin-left:auto;">{{ s.urgency|upper }}</span>{% endif %}
+                    </div>
+                    {% if s.title %}
+                    <div class="sr-pop-title">{{ s.title|truncatechars:140 }}</div>
+                    {% endif %}
+                    <div class="sr-pop-grid">
+                        <div><span class="sr-pop-k">type</span><span class="sr-pop-v">{{ s.signal_type|default:"—" }}</span></div>
+                        <div><span class="sr-pop-k">score</span><span class="sr-pop-v">{{ s.score|floatformat:2 }}</span></div>
+                        <div><span class="sr-pop-k">rule</span><span class="sr-pop-v">{{ s.rule_name|default:"—"|truncatechars:18 }}</span></div>
+                        <div><span class="sr-pop-k">when</span><span class="sr-pop-v">{{ s.created_at|date:"M d H:i" }}</span></div>
+                        <div><span class="sr-pop-k">entry</span><span class="sr-pop-v">{{ s.suggested_entry|default:"—" }}</span></div>
+                        <div><span class="sr-pop-k">R:R</span><span class="sr-pop-v">{{ s.risk_reward_ratio|default:"—" }}</span></div>
+                        <div><span class="sr-pop-k">stop</span><span class="sr-pop-v down">{{ s.suggested_stop|default:"—" }}</span></div>
+                        <div><span class="sr-pop-k">target</span><span class="sr-pop-v up">{{ s.suggested_target|default:"—" }}</span></div>
+                    </div>
+                    {% comment %}Reaction row (take trade / pass) — primary
+                    decisions. TAKE TRADE only for directional signals: a
+                    neutral verdict carries no side, and the server refuses
+                    it too.{% endcomment %}
+                    <div class="sr-pop-actions sr-pop-actions-react">
+                        {% if s.direction == "bullish" or s.direction == "bearish" %}
+                        <button type="button"
+                                class="sr-pop-btn sr-pop-btn-act"
+                                data-signal-id="{{ s.id }}"
+                                onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ s.id }});">▶ TAKE TRADE</button>
+                        {% endif %}
+                        <button type="button"
+                                class="sr-pop-btn sr-pop-btn-pass"
+                                data-signal-id="{{ s.id }}"
+                                onclick="event.preventDefault(); event.stopPropagation(); window.dismissSignal && window.dismissSignal({{ s.id }});">
+                            ✕ PASS
+                        </button>
+                    </div>
+                    {# Explore row — secondary deep-dive actions. #}
+                    <div class="sr-pop-actions">
+                        <a href="{% url 'instrument_detail' s.instrument.symbol %}" class="sr-pop-btn">▸ INSTRUMENT</a>
+                        <button type="button" class="sr-pop-btn"
+                                data-ask-sauron="{{ s.direction|upper }} {{ s.instrument.symbol }}{% if s.rule_name %} ({{ s.rule_name }}){% endif %}"
+                                data-ask-kind="signal">
+                            ▸ ASK SAURON
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% empty %}
+            <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:11px;">
+                <div style="font-size:20px;margin-bottom:6px;opacity:0.3;">&#x25C8;</div>
+                No active signals
+            </div>
+            {% endfor %}

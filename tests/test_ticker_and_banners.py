@@ -216,3 +216,118 @@ class LightModeShadowTests(TestCase):
         css = self._css()
         self.assertNotIn("body.light-mode .modal-overlay", css)
         self.assertNotIn("body.light-mode .sidebar-overlay", css)
+
+
+class SignalRailLiveTests(TestCase):
+    """The WS push that was never wired: push_signal_notification had ZERO
+    call sites, so the rail only ever changed on a page load. A post_save
+    receiver is the one choke point every creation path shares, and the
+    partial endpoint is what the browser refetches when the push fires —
+    the new card slides in instead of waiting for a reload."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="rl_u", password="x")
+
+    def _signal(self, inst, **kw):
+        from signals.models import Signal
+        defaults = dict(
+            instrument=inst, signal_type="technical", direction="bullish",
+            urgency="high", title="t", description="d", rule_name="r",
+            score=0.7, sub_scores={}, price_at_signal=Decimal("100"),
+            is_active=True)
+        defaults.update(kw)
+        return Signal.objects.create(**defaults)
+
+    def test_creating_an_active_signal_pushes_to_the_socket(self):
+        from unittest.mock import patch
+        inst = _instrument("BTCUSD")
+        with patch("dashboard.consumers.push_signal_notification") as mock_push:
+            self._signal(inst)
+        mock_push.assert_called_once()
+        self.assertEqual(mock_push.call_args.args[0]["symbol"], "BTCUSD")
+
+    def test_inactive_creations_and_saves_stay_silent(self):
+        from unittest.mock import patch
+        inst = _instrument("ETHUSD")
+        with patch("dashboard.consumers.push_signal_notification") as mock_push:
+            sig = self._signal(inst, is_active=False)
+        mock_push.assert_not_called()
+        # Updates must not re-announce either — created only.
+        with patch("dashboard.consumers.push_signal_notification") as mock_push:
+            sig.score = 0.9
+            sig.save(update_fields=["score"])
+        mock_push.assert_not_called()
+
+    def test_the_partial_returns_only_the_cards(self):
+        inst = _instrument("BTCUSD")
+        self._signal(inst)
+        self.client.force_login(self.user)
+        resp = self.client.get("/partials/signal-rail/", HTTP_HOST="127.0.0.1")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "sr-signal-wrap")
+        self.assertNotContains(resp, "<html")
+
+    def test_the_partial_requires_login(self):
+        resp = self.client.get("/partials/signal-rail/", HTTP_HOST="127.0.0.1")
+        self.assertEqual(resp.status_code, 302)
+
+
+class TickerLiveTests(TestCase):
+    """News enters the band live: both news scrapers announce stored
+    articles on the socket and the browser refetches the marquee partial —
+    fresh headlines glow as they ride past instead of waiting for a
+    reload."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="tl_u", password="x")
+
+    def test_the_ticker_partial_returns_both_marquee_halves(self):
+        from django.utils import timezone as tz
+        from scraping.models import NewsArticle
+        NewsArticle.objects.create(
+            title="Copper rallies", source="Reuters",
+            url="https://example.test/live-copper", published_at=tz.now())
+        self.client.force_login(self.user)
+        resp = self.client.get("/partials/ticker/", HTTP_HOST="127.0.0.1")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn("Copper rallies", html)
+        # One tagged item per marquee half — the seamless scroll needs both.
+        self.assertEqual(html.count("data-news-id="), 2)
+        self.assertNotIn("<html", html)
+
+    def test_the_partial_requires_login(self):
+        resp = self.client.get("/partials/ticker/", HTTP_HOST="127.0.0.1")
+        self.assertEqual(resp.status_code, 302)
+
+    def test_the_crypto_scraper_announces_stored_articles(self):
+        """fetch_breaking_news already announced; the crypto pass stored
+        articles in silence, so crypto headlines never streamed in."""
+        from unittest.mock import patch
+        from core.platform_control import PlatformComponent, seed_components
+        seed_components()
+        PlatformComponent.objects.filter(
+            key__in=["platform_master", "scraper_crypto_news"]).update(
+            is_enabled=True)
+        with patch("market_data.adapters.crypto_news.fetch_crypto_news",
+                   return_value=3), \
+             patch("dashboard.consumers.push_news_notification") as mock_push:
+            from market_data.tasks import fetch_crypto_news_task
+            out = fetch_crypto_news_task()
+        self.assertEqual(out.get("articles"), 3)
+        mock_push.assert_called_once()
+        self.assertEqual(mock_push.call_args.args[0]["count"], 3)
+
+    def test_a_dry_crypto_pass_stays_silent(self):
+        from unittest.mock import patch
+        from core.platform_control import PlatformComponent, seed_components
+        seed_components()
+        PlatformComponent.objects.filter(
+            key__in=["platform_master", "scraper_crypto_news"]).update(
+            is_enabled=True)
+        with patch("market_data.adapters.crypto_news.fetch_crypto_news",
+                   return_value=0), \
+             patch("dashboard.consumers.push_news_notification") as mock_push:
+            from market_data.tasks import fetch_crypto_news_task
+            fetch_crypto_news_task()
+        mock_push.assert_not_called()
