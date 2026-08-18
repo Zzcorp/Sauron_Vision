@@ -15,8 +15,11 @@ PRICE_LOOKBACK_HOURS = 1
 def _notify(user, title: str, body: str, url: str = "/liquidations/"):
     try:
         from alerts.models import Notification
+        # notification_type was omitted for as long as this file existed,
+        # so the bell rendered a blank kind chip (class "ni-").
         Notification.objects.create(
-            user=user, title=title, body=body, url=url, read=False)
+            user=user, notification_type="signal",
+            title=title, body=body, url=url, read=False)
     except Exception as e:
         log.debug("notify failed: %s", e)
 

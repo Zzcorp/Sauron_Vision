@@ -4128,3 +4128,70 @@ body.light-mode .se-bubble.thinking {
 body.light-mode .se-bubble.error {
     background: rgba(232, 48, 48, 0.08);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   OVERFLOW HONESTY (2026-08-19)
+   ───────────────────────────────────────────────────────────────────────
+   Three shared rules conspired to CUT text on nearly every page, and
+   masked each other while doing it:
+     1. every .card/.stat-box carried overflow:hidden — anything wider or
+        taller than the box was silently amputated, no scrollbar, no wrap;
+     2. every tbody td carried white-space:nowrap — long text refused to
+        wrap and grew past the card edge for (1) to cut;
+     3. .grid-N tracks were bare 1fr with no min-width:0 on children — the
+        grid never shrank honestly, so (1) was the only thing stopping
+        page blowout. The two defects hid each other.
+   Now content wraps, grids shrink for real, and nothing is amputated.
+   Pages that legitimately clip (chart canvases, marquee tracks) declare
+   overflow inline and keep working. Colors, type and spacing untouched. */
+.card, .stat-box, .metric, .signal-item { overflow: visible; }
+
+tbody td {
+    white-space: normal;
+    /* break-word, NOT anywhere: `anywhere` counts its break points in
+       min-content sizing, which let every table compress to fit instead
+       of overflowing into its .table-wrapper scroll — and wrapped prices
+       mid-digit while doing it. break-word wraps long prose but leaves
+       intrinsic widths honest, so wide tables scroll as designed. */
+    overflow-wrap: break-word;
+}
+/* Where nowrap genuinely belongs: headers, numbers, badges, dates. */
+thead th, td.num, td.nowrap { white-space: nowrap; }
+.sv-perf-table td .badge { white-space: nowrap; }
+
+.grid > * { min-width: 0; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.grid-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.grid-sidebar { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+
+/* The re-declarations above sit AFTER the responsive collapses earlier
+   in this sheet and would silently win on source order (media queries
+   add no specificity) — restate the same breakpoints here so laptops
+   keep their 3/2-column reflow, now with honest minmax(0,·) tracks. */
+@media (max-width: 1400px) {
+    .grid-5, .grid-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 1200px) {
+    .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 769px) and (max-width: 1024px) {
+    .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-5, .grid-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* Laptop shim: inline 5/6-column grids (filter rows, stat strips) had no
+   breakpoint between 1024px and desktop, and with the sidebar plus an
+   open signals rail they crushed into unreadable slivers. The 769px
+   floor matters: below it the Phase-29 mobile rule collapses every
+   inline grid to ONE column, and this shim must not out-cascade it. */
+@media (min-width: 769px) and (max-width: 1280px) {
+    [style*="repeat(6"], [style*="repeat(5"] {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+}
+
+/* Orbitron digits are wide — money values shrink before they clip. */
+.stat-value { min-width: 0; overflow-wrap: anywhere; }

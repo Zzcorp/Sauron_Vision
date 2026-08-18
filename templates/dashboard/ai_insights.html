@@ -124,6 +124,7 @@
     <div class="card">
         <div class="card-header"><span class="card-title">By agent · 24h</span></div>
         {% if by_agent %}
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>agent</th><th>N</th><th>success%</th><th>cost</th></tr></thead>
                 <tbody>
@@ -137,6 +138,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% else %}
             <p class="oc-empty">No agent calls in the last 24h.</p>
         {% endif %}
@@ -145,6 +147,7 @@
     <div class="card">
         <div class="card-header"><span class="card-title">Top failing agents · 24h</span></div>
         {% if top_failures %}
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>agent</th><th>failures</th></tr></thead>
                 <tbody>
@@ -156,6 +159,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% else %}
             <p class="oc-empty up">All agents healthy — no failures.</p>
         {% endif %}

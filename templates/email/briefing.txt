@@ -14,4 +14,4 @@ SAURON BRIEFING — {{ b.posture|upper }}
 
 —
 View on Sauron: /briefing/
-Adjust delivery preferences at /notifications/
+Adjust delivery preferences at /notifications/settings/

@@ -328,6 +328,15 @@ which is how it catches a task that reports success and writes nothing.
     var insGlyph = document.getElementById("tmInsGlyph");
     var insBody = document.getElementById("tmInsBody");
     if (!wrap || !board || !svg) return;
+    /* Portal the inspector OUT of .page-content: its fill-forwards entry
+       animation makes that div a permanent stacking context, clamping the
+       panel's z-index below the fixed topbar/rail/headbands — the panel
+       rendered partially UNDER the chrome. As a body child its --z-panel
+       token competes at root level, and the .page-content > * filled
+       transform stops overriding the panel's own slide. */
+    if (inspect && inspect.parentNode !== document.body) {
+        document.body.appendChild(inspect);
+    }
 
     var NODES = JSON.parse(document.getElementById("tmNodeData").textContent);
     var EDGES = JSON.parse(document.getElementById("tmEdgeData").textContent);
@@ -529,6 +538,14 @@ which is how it catches a task that reports success and writes nothing.
     });
 
     document.addEventListener("click", function (e) {
+        /* The ✕ first: it carries data-sv-close, but the overlay
+           controller ignores panels it never opened, and the guard below
+           deliberately swallows clicks inside the panel — so the button
+           was a no-op and only Escape closed the inspector. */
+        if (e.target.closest && e.target.closest(".tm-inspect-x")) {
+            close();
+            return;
+        }
         var insBtn = e.target.closest && e.target.closest("[data-ins-toggle]");
         if (insBtn) {
             applyToggle(insBtn.dataset.insKind, insBtn.dataset.insToggle,

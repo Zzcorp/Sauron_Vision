@@ -179,7 +179,7 @@ class ProfileUISavesPrefTests(TestCase):
         u = User.objects.create_user(username="ui_user", password="x")
         self.client.force_login(u)
         # POST with the briefing checkbox checked.
-        r = self.client.post("/notifications/", {
+        r = self.client.post("/notifications/settings/", {
             "action": "save_prefs",
             "receive_strategist_briefing": "on",
             "receive_bot_alerts": "on",
@@ -195,7 +195,7 @@ class ProfileUISavesPrefTests(TestCase):
         UserNotificationPrefs.objects.create(
             user=u, receive_strategist_briefing=True)
         self.client.force_login(u)
-        r = self.client.post("/notifications/", {"action": "save_prefs"})
+        r = self.client.post("/notifications/settings/", {"action": "save_prefs"})
         self.assertEqual(r.status_code, 302)
         prefs = UserNotificationPrefs.objects.get(user=u)
         self.assertFalse(prefs.receive_strategist_briefing)

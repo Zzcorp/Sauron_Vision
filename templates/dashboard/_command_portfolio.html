@@ -157,6 +157,7 @@
             <span class="card-title">Top 5 winners / losers</span>
             <button class="oc-expand-btn" aria-expanded="false">+</button>
         </div>
+        <div class="table-wrapper">
         <table class="sv-perf-table">
             <thead><tr><th>symbol</th><th>side</th><th>P&amp;L</th></tr></thead>
             <tbody>
@@ -171,8 +172,10 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
         <div class="oc-expand-target">
             <strong style="font-size:12px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:1px;">Worst 5</strong>
+            <div class="table-wrapper">
             <table class="sv-perf-table" style="margin-top:6px;">
                 <tbody>
                     {% for p in worst_trades|slice:":5" %}
@@ -184,6 +187,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 </div>

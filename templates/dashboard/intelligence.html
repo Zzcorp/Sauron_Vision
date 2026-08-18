@@ -2,6 +2,11 @@
 {% block title %}Intelligence hub · Sauron's Mind{% endblock %}
 {% block content %}
 
+    {# claim tables need the full row below this width #}
+    <style>
+        @media (max-width: 1500px) { .grid-2 { grid-template-columns: minmax(0, 1fr); } }
+    </style>
+
     {# ── Hero strip — 8 cells of headline numbers ── #}
     <div class="oc-strip" style="margin-bottom:18px;">
         <div class="oc-strip-cell">
@@ -69,6 +74,7 @@
                 <span class="card-title">Open bets</span>
                 <a href="{% url 'hypotheses_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">market →</a>
             </div>
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>source</th><th>claim</th><th>conf</th><th>deadline</th></tr></thead>
                 <tbody>
@@ -84,10 +90,12 @@
                 {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
 
         <div class="card">
             <div class="card-header"><span class="card-title">Recently resolved</span></div>
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>source</th><th>claim</th><th>outcome</th></tr></thead>
                 <tbody>
@@ -106,6 +114,7 @@
                 {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 
@@ -116,6 +125,7 @@
                 <span class="card-title">Pending generated proposals</span>
                 <a href="{% url 'generated_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">review →</a>
             </div>
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>name</th><th>direction</th><th>conf</th><th>created</th></tr></thead>
                 <tbody>
@@ -131,10 +141,12 @@
                 {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
 
         <div class="card" style="{% if open_demotions %}border-left:3px solid var(--down);{% endif %}">
             <div class="card-header"><span class="card-title">Open auto-demotions</span></div>
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>rule</th><th>criterion</th><th>at</th></tr></thead>
                 <tbody>
@@ -149,6 +161,7 @@
                 {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 
@@ -175,6 +188,7 @@
             </div>
         {% endif %}
         {% if recent_overrides_list %}
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>kind</th><th>target</th><th>by</th><th>at</th></tr></thead>
                 <tbody>
@@ -188,6 +202,7 @@
                 {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% endif %}
     </div>
     {% endif %}
@@ -196,6 +211,7 @@
     {% if recent_anomaly_obs %}
     <div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent);">
         <div class="card-header"><span class="card-title">Anomalies detected (last 24h)</span></div>
+        <div class="table-wrapper">
         <table class="sv-perf-table">
             <thead><tr><th>detector</th><th>what</th><th>at</th></tr></thead>
             <tbody>
@@ -208,6 +224,7 @@
             {% endfor %}
             </tbody>
         </table>
+        </div>
     </div>
     {% endif %}
 

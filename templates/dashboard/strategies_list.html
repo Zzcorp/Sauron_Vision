@@ -197,8 +197,57 @@
     {% else %}
     <div class="empty-state">
         <div class="empty-icon">⬡</div>
-        <p>NO STRATEGIES — AI advisor proposes strategies from active signals</p>
+        <p>NO TRADE PLANS YET — this table tracks multi-leg trade plans you build with the
+           <a href="{% url 'strategy_wizard' %}" style="color:var(--accent);">strategy wizard</a>.
+           The automated strategies live below and in
+           <a href="{% url 'opportunities_dashboard' %}" style="color:var(--accent);">Opportunities</a>.</p>
     </div>
+    {% endif %}
+</div>
+
+{# ── The automated strategy stable — the setups the scanner runs ──── #}
+{# The "no strategies" confusion: seeded starter strategies are        #}
+{# OpportunitySetup rows (inactive by design until the operator arms   #}
+{# them), a different animal from the trade-plan table above. Show     #}
+{# them HERE, with their state, so the page the user intuitively       #}
+{# visits tells the whole story.                                       #}
+<div class="card" style="margin-top:18px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="card-title">Automated setups
+            <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">
+                ({{ setups_active }} active of {{ setups|length }})
+            </span>
+        </span>
+        <a href="{% url 'opportunities_dashboard' %}" class="nh-link nh-link--accent">Manage &#9656;</a>
+    </div>
+    {% if setups %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Setup</th><th>Asset class</th><th>State</th><th>Stage</th><th>Hits</th><th>Hit rate</th></tr></thead>
+        <tbody>
+        {% for s in setups %}
+        <tr>
+            <td><strong>{{ s.name }}</strong></td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{{ s.asset_class|default:"any" }}</td>
+            <td>{% if s.is_active %}<span class="badge badge-bullish">ACTIVE</span>{% else %}<span class="badge badge-medium">PAUSED</span>{% endif %}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{{ s.stage|default:"—" }}</td>
+            <td style="font-family:var(--font-mono);">{{ s.hits|default:0 }}</td>
+            <td style="font-family:var(--font-mono);">{% if s.hit_rate is not None %}{{ s.hit_rate|floatformat:0 }}%{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% if not setups_active %}
+    <p style="font-size:11px;color:var(--text-muted);padding:10px 16px;">
+        All setups are paused — the seeder leaves them off on purpose so nothing scans
+        before you decide. Arm them on the
+        <a href="{% url 'opportunities_dashboard' %}" style="color:var(--accent);">Opportunities</a>
+        page, or run <code>manage.py seed_strategies --activate</code>.
+    </p>
+    {% endif %}
+    {% else %}
+    <p class="oc-empty" style="padding:14px 16px;">No automated setups seeded yet — run <code>manage.py seed_strategies</code>.</p>
     {% endif %}
 </div>
 

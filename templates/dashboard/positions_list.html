@@ -106,6 +106,7 @@
     <div class="card">
         <div class="card-header"><span class="card-title">By asset class · open</span></div>
         {% if asset_breakdown %}
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>class</th><th>N</th><th>exposure</th><th>unreal P&amp;L</th></tr></thead>
                 <tbody>
@@ -119,6 +120,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% else %}
             <p class="oc-empty">No open positions to break down.</p>
         {% endif %}
@@ -177,13 +179,16 @@
         <tr>
             <td style="font-family: var(--font-display); font-size: 13px;">{{ p.instrument.symbol }}</td>
             <td><span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ p.direction }}</span></td>
-            <td style="font-family: var(--font-mono);">{{ p.quantity }}</td>
-            <td style="font-family: var(--font-mono);">{{ p.entry_price }}</td>
-            <td style="font-family: var(--font-mono); font-weight: 600;">{{ p.current_price }}</td>
-            <td style="font-family: var(--font-mono); color: var(--accent-red);">{{ p.stop_loss|default:"-" }}</td>
-            <td style="font-family: var(--font-mono); color: var(--accent-green);">{{ p.take_profit|default:"-" }}</td>
-            <td style="color: {% if p.unrealized_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ p.unrealized_pnl }}</td>
-            <td style="color: {% if p.unrealized_pnl_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ p.unrealized_pnl_pct|floatformat:2 }}%</td>
+            <td class="num" style="font-family: var(--font-mono);">{{ p.quantity }}</td>
+            <td class="num" style="font-family: var(--font-mono);">{{ p.entry_price }}</td>
+            {# None is a real state here (no quote for the symbol, or an #}
+            {# options row with no premium feed) — render the muted em-dash, #}
+            {# never the string "None" painted loss-red. #}
+            <td class="num" style="font-family: var(--font-mono); font-weight: 600;">{% if p.current_price is not None %}{{ p.current_price }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            <td class="num" style="font-family: var(--font-mono); color: var(--accent-red);">{{ p.stop_loss|default:"-" }}</td>
+            <td class="num" style="font-family: var(--font-mono); color: var(--accent-green);">{{ p.take_profit|default:"-" }}</td>
+            <td class="num">{% if p.unrealized_pnl is not None %}<span style="color: {% if p.unrealized_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ p.unrealized_pnl }}</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            <td class="num">{% if p.unrealized_pnl_pct is not None %}<span style="color: {% if p.unrealized_pnl_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ p.unrealized_pnl_pct|floatformat:2 }}%</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
             <td style="font-size: 12px;">{{ p.strategy.name|default:"-"|truncatechars:20 }}</td>
             <td style="font-size: 11px; color: var(--text-muted);">{{ p.opened_at|date:"M d H:i" }}</td>
         </tr>

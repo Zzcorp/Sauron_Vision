@@ -114,7 +114,7 @@ a user's request down.
             <td>{{ r.device }}</td>
             <td>
                 {% if r.presence.last_path %}
-                <span class="sv-mono" style="font-size:10.5px;">{{ r.presence.last_path|truncatechars:28 }}</span>
+                <span class="sv-mono" style="font-size:10.5px;" title="{{ r.presence.last_path }}">{{ r.presence.last_path|truncatechars:28 }}</span>
                 {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
             </td>
             <td style="text-align:right;" class="sv-mono">${{ r.capital|floatformat:0 }}</td>

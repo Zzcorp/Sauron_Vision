@@ -29,7 +29,7 @@ error-stamped assistant messages.
 
       <div class="thread thread--active">
         <div class="thread-main">
-          <div class="thread-title">{{ conversation.title|default:"Current conversation" }}</div>
+          <div class="thread-title" title="{{ conversation.title|default:'Current conversation' }}">{{ conversation.title|default:"Current conversation" }}</div>
           <div class="thread-meta">
             {{ messages_list|length }} message{{ messages_list|length|pluralize }} ·
             <span class="sv-age" data-sv-at="{{ conversation.last_message_at|date:'c' }}"></span>
@@ -43,7 +43,7 @@ error-stamped assistant messages.
         <form method="post" action="{% url 'research_open_conversation' c.id %}" class="thread-main-form">
           {% csrf_token %}
           <button type="submit" class="thread-main" title="Resume this conversation">
-            <span class="thread-title">{{ c.title|default:"(untitled)"|truncatechars:52 }}</span>
+            <span class="thread-title" title="{{ c.title|default:'(untitled)' }}">{{ c.title|default:"(untitled)"|truncatechars:52 }}</span>
             <span class="thread-meta">
               {{ c.messages.count }} message{{ c.messages.count|pluralize }} ·
               <span class="sv-age" data-sv-at="{{ c.last_message_at|date:'c' }}"></span>

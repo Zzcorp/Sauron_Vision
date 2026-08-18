@@ -72,7 +72,7 @@
                 <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ e.created_at|date:"m-d H:i:s" }}</td>
                 <td style="font-size:11px;">{{ e.user.username|default:"—" }}</td>
                 <td><span class="badge badge-medium">{{ e.kind }}</span></td>
-                <td style="font-size:11px;color:var(--text-muted);max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                <td style="font-size:11px;color:var(--text-muted);max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ e.data }}">
                     {% if e.kind == "trade_open" or e.kind == "trade_close" %}
                         {{ e.data.asset_class }}/{{ e.data.symbol }} {{ e.data.side }}
                         {% if e.kind == "trade_close" %}

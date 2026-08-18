@@ -7,6 +7,7 @@
 
   <div class="sv-section-title">Recent runs</div>
   {% if runs %}
+    <div class="table-wrapper">
     <table class="sv-perf-table">
       <thead>
         <tr><th>Name</th><th>Hash</th><th>Return</th><th>Max DD</th>
@@ -28,6 +29,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   {% else %}
     <p style="color:var(--text-muted);">No backtest runs yet. Run
       <code>python manage.py backtest_v2 --symbol BTCUSDT --persist</code></p>

@@ -59,6 +59,7 @@
 
     <div class="sv-section-title">Open positions</div>
     {% if open_trades %}
+      <div class="table-wrapper">
       <table class="sv-perf-table">
         <thead>
           <tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th>
@@ -80,12 +81,14 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p style="color:var(--text-muted);">No open positions.</p>
     {% endif %}
 
     <div class="sv-section-title">Last 10 closed trades</div>
     {% if recent_trades %}
+      <div class="table-wrapper">
       <table class="sv-perf-table">
         <thead>
           <tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th>
@@ -105,6 +108,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p style="color:var(--text-muted);">No closed trades yet.</p>
     {% endif %}

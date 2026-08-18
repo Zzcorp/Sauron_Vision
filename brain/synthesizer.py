@@ -226,10 +226,22 @@ class SauronMindAgent(BaseAgent):
                 if lines and lines[-1].startswith("```"):
                     lines = lines[:-1]
                 text = "\n".join(lines)
+        # The prompt forbids prose around the JSON, and the model still
+        # occasionally appends commentary — or a second object — after a
+        # perfectly valid report. A strict loads() threw the whole
+        # synthesis away over the tail ("Extra data: char 1476", live,
+        # 2026-08-18). Parse the FIRST complete object; log what follows.
+        start = text.find("{")
+        if start == -1:
+            raise ValueError(f"non-JSON brain output: no object: {text[:200]}")
         try:
-            data = json.loads(text)
+            data, end = json.JSONDecoder().raw_decode(text, start)
         except json.JSONDecodeError as e:
             raise ValueError(f"non-JSON brain output: {e}: {text[:200]}")
+        tail = text[end:].strip()
+        if tail:
+            logger.warning("[brain] ignored %d chars of trailing output "
+                           "after the report JSON: %.120s", len(tail), tail)
         if not isinstance(data, dict):
             raise ValueError(f"brain returned non-dict: {type(data).__name__}")
         return data

@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Notifications — Sauron Vision{% endblock %}
+{% block page_title %}◈ NOTIFICATIONS{% endblock %}
+
+{% block content %}
+{# ── Stat strip ──────────────────────────────────────────────────── #}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TOTAL</span>
+        <span class="oc-strip-value">{{ total }}</span>
+        <span class="oc-strip-sub">notifications received</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">UNREAD</span>
+        <span class="oc-strip-value {% if unread_total %}up{% endif %}">{{ unread_total }}</span>
+        <span class="oc-strip-sub">awaiting your eyes</span>
+    </div>
+    <div class="oc-strip-cell" style="justify-content:center;">
+        {% if unread_total %}
+        <form method="post" action="{% url 'mark_all_notifications_read' %}" style="margin:0;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm">MARK ALL READ</button>
+        </form>
+        {% else %}
+        <span class="oc-strip-sub">all caught up</span>
+        {% endif %}
+    </div>
+    <div class="oc-strip-cell" style="justify-content:center;">
+        <a href="{% url 'user_notifications' %}" class="btn btn-sm">⚙ DELIVERY SETTINGS</a>
+    </div>
+</div>
+
+{# ── Filter tabs ─────────────────────────────────────────────────── #}
+<div class="card" style="margin-bottom:18px;">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 16px;">
+        <a href="{% url 'notifications_inbox' %}{% if unread_only %}?unread=1{% endif %}"
+           class="btn btn-sm {% if not type_filter %}btn-primary{% endif %}">ALL · {{ total }}</a>
+        {% for key, label, n in type_tabs %}
+            {% if n %}
+            <a href="?type={{ key }}{% if unread_only %}&amp;unread=1{% endif %}"
+               class="btn btn-sm {% if type_filter == key %}btn-primary{% endif %}">
+                {{ label|upper }} · {{ n }}
+            </a>
+            {% endif %}
+        {% endfor %}
+        <span style="flex:1;"></span>
+        <a href="?{% if type_filter %}type={{ type_filter }}&amp;{% endif %}{% if not unread_only %}unread=1{% endif %}"
+           class="btn btn-sm {% if unread_only %}btn-primary{% endif %}">UNREAD ONLY</a>
+    </div>
+</div>
+
+{# ── The inbox ───────────────────────────────────────────────────── #}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Inbox
+            <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">
+                (page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }})
+            </span>
+        </span>
+    </div>
+    {% if page_obj.object_list %}
+    <div id="inboxList">
+    {% for n in page_obj.object_list %}
+        <div class="notif-item ni-{{ n.notification_type }} {% if not n.read %}unread{% endif %} inbox-row"
+             data-notif-id="{{ n.id }}" style="display:block;">
+            <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;">
+                <span class="ni-kind">{{ n.get_notification_type_display|default:n.notification_type|default:"—" }}</span>
+                <div class="ni-title" style="flex:1;min-width:200px;">{{ n.title }}</div>
+                <span class="ni-time"><span class="sv-age" data-sv-at="{{ n.created_at|date:'c' }}">{{ n.created_at|timesince }} ago</span></span>
+            </div>
+            {% if n.body %}<div class="ni-body" style="white-space:pre-line;max-height:none;">{{ n.body }}</div>{% endif %}
+            <div style="display:flex;gap:12px;margin-top:6px;align-items:center;">
+                {% if n.url %}
+                <a class="nh-link nh-link--accent" href="{{ n.url }}">Open page &#9656;</a>
+                {% endif %}
+                {% if not n.read %}
+                <button type="button" class="nh-link inbox-mark-read"
+                        data-notif-id="{{ n.id }}"
+                        style="background:none;border:0;cursor:pointer;padding:0;">Mark read</button>
+                {% endif %}
+            </div>
+        </div>
+    {% endfor %}
+    </div>
+
+    {# Pagination #}
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div style="display:flex;gap:10px;justify-content:center;padding:14px;font-family:var(--font-mono);font-size:12px;">
+        {% if page_obj.has_previous %}
+        <a class="nh-link" href="?page={{ page_obj.previous_page_number }}{% if type_filter %}&amp;type={{ type_filter }}{% endif %}{% if unread_only %}&amp;unread=1{% endif %}">&#9664; PREV</a>
+        {% endif %}
+        <span style="color:var(--text-muted);">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+        <a class="nh-link" href="?page={{ page_obj.next_page_number }}{% if type_filter %}&amp;type={{ type_filter }}{% endif %}{% if unread_only %}&amp;unread=1{% endif %}">NEXT &#9654;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">◈</div>
+        <p>NOTHING HERE — fills, signals, briefings and system alerts land in this inbox as they happen.</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+(function () {
+    var csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    function markRead(id, row) {
+        // keepalive: the "Open page" caller navigates immediately, and a
+        // plain fetch is aborted by the unload it races.
+        fetch('/notifications/read/' + id + '/', {
+            method: 'POST', credentials: 'same-origin', keepalive: true,
+            headers: { 'X-CSRFToken': csrf }
+        }).then(function () {
+            if (row) row.classList.remove('unread');
+        }).catch(function () { /* cosmetic only */ });
+    }
+    var list = document.getElementById('inboxList');
+    if (!list) return;
+    list.addEventListener('click', function (e) {
+        var btn = e.target.closest && e.target.closest('.inbox-mark-read');
+        if (btn) {
+            markRead(btn.dataset.notifId,
+                     btn.closest('.inbox-row'));
+            btn.remove();
+            return;
+        }
+        // Following a row's "Open page" link also retires its unread dot.
+        var link = e.target.closest && e.target.closest('a[href]');
+        var row = e.target.closest && e.target.closest('.inbox-row');
+        if (link && row && row.classList.contains('unread')) {
+            markRead(row.dataset.notifId, row);
+        }
+    });
+})();
+</script>
+{% endblock %}

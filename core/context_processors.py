@@ -104,6 +104,10 @@ def _panel_detail(user):
     # ── The signals themselves, not just how many ────────────────────────
     try:
         from signals.models import Signal
+        # SAME set and order as the signal rail (panel_recent_signals:
+        # newest five active). This cell used to show the top four BY
+        # SCORE, so the headband popup and the rail disagreed about what
+        # "the current signals" were — two truths on one screen.
         out["panel_top_signals"] = [{
             "symbol": s.instrument.symbol,
             "direction": s.direction,
@@ -113,7 +117,7 @@ def _panel_detail(user):
             "entry": s.suggested_entry,
             "stop": s.suggested_stop,
         } for s in Signal.objects.filter(is_active=True)
-            .select_related("instrument").order_by("-score")[:4]]
+            .select_related("instrument").order_by("-created_at")[:5]]
     except Exception as e:
         logger.debug(f"Panel signal detail unavailable: {e}")
 
@@ -374,7 +378,19 @@ def sauron_context(request):
         ctx["panel_portfolio_value"] = f"{portfolio.current_value:,.0f}"
         ctx["panel_cash"] = f"{portfolio.cash_available:,.0f}"
         ctx["panel_cash_pct"] = cash_pct
-        ctx["panel_positions"] = open_pos.count()
+        # BOTH books, or the cell lies: legacy portfolio Positions (Setup
+        # form, NL trader, eToro sync) PLUS the open AssetBotTrades that
+        # every interactive path — bots, TAKE TRADE, LONG/SHORT — actually
+        # writes. Counting only the former froze this cell forever while
+        # its own dropdown listed the live trades.
+        from bot_program.models import AssetBotTrade as _ABT
+        _bot_open = _ABT.objects.filter(
+            config__user=request.user,
+            status__in=("OPEN", "CLOSE_PENDING")).count()
+        ctx["panel_positions"] = open_pos.count() + _bot_open
+        # Reused by the BOT cell below — this context processor runs on
+        # every page render; the identical COUNT must not run twice.
+        ctx["panel_bot_open"] = _bot_open
         ctx["panel_exposure"] = 100 - cash_pct
         ctx["panel_max_dd"] = f"{portfolio.max_daily_loss_pct}"
         # Starred instruments, NOT positions-on-starred-instruments: the
@@ -427,8 +443,12 @@ def sauron_context(request):
         modes = sorted({c.mode for c in enabled})
         ctx["panel_bot_mode"] = (modes[0] if len(modes) == 1
                                  else ("mixed" if modes else "—"))
-        ctx["panel_bot_open"] = AssetBotTrade.objects.filter(
-            config__user=request.user, status__in=("OPEN", "CLOSE_PENDING")).count()
+        # Usually precomputed by the portfolio block above (one COUNT per
+        # render, not two); this fallback only fires if that block failed.
+        if "panel_bot_open" not in ctx:
+            ctx["panel_bot_open"] = AssetBotTrade.objects.filter(
+                config__user=request.user,
+                status__in=("OPEN", "CLOSE_PENDING")).count()
 
         closed_24h = AssetBotTrade.objects.filter(
             config__user=request.user, status="CLOSED", closed_at__gte=day_ago)

@@ -515,15 +515,55 @@ the broker, and the bot that would have honoured their stops switched off.
         <div>
             <div style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:1px;">PARAMETER MUTATION → FORK → PROMOTION GATE</div>
             <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;line-height:1.4;">
-                Decaying parameter-aware rules get N mutants generated, scored heuristically, top-K saved as proposals.
-                Forks start at RESEARCH and walk Phase-8 ladder. Originals untouched.
+                Decaying parameter-aware rules get mutants generated, scored by walk-forward
+                backtest, top-K saved as proposals (14d TTL). Forks start at RESEARCH and walk
+                the Phase-8 ladder. Originals untouched.
                 <a href="{% url 'evolution_dashboard' %}" style="color:var(--accent);">Full view →</a>
             </div>
         </div>
-        <form method="post" action="{% url 'hq_run_evolution' %}">
-            {% csrf_token %}<button type="submit" class="btn btn-sm">▶ Propose Now</button>
-        </form>
+        <div style="display:flex;gap:16px;align-items:center;">
+            <div style="text-align:center;">
+                <div style="font-family:var(--font-display);font-size:18px;color:{% if evo_pending %}var(--accent-gold){% else %}var(--text-muted){% endif %};">{{ evo_pending|default:0 }}</div>
+                <div style="font-size:9px;color:var(--text-muted);font-family:var(--font-mono);">PENDING</div>
+            </div>
+            <div style="text-align:center;">
+                <div style="font-family:var(--font-display);font-size:18px;">{{ evo_applied_30d|default:0 }}</div>
+                <div style="font-size:9px;color:var(--text-muted);font-family:var(--font-mono);">FORKED 30D</div>
+            </div>
+            <div style="text-align:center;">
+                <div style="font-family:var(--font-display);font-size:18px;">{{ evo_forks_alive|default:0 }}</div>
+                <div style="font-size:9px;color:var(--text-muted);font-family:var(--font-mono);">FORKS LIVE</div>
+            </div>
+            <form method="post" action="{% url 'hq_run_evolution' %}">
+                {% csrf_token %}<button type="submit" class="btn btn-sm">▶ Propose Now</button>
+            </form>
+        </div>
     </div>
+    {% if evo_pending_rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>#</th><th>Parent</th><th>Score</th><th>Evidence</th><th>Changed</th><th>Age</th><th>Decide</th></tr></thead>
+        <tbody>
+        {% for m in evo_pending_rows %}
+        <tr>
+            <td>#{{ m.id }}</td>
+            <td>{{ m.parent_rule|truncatechars:26 }}</td>
+            <td style="font-family:var(--font-mono);">{% if m.proposed_score is not None %}{{ m.proposed_score|floatformat:2 }}R{% else %}—{% endif %}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">
+                {% if m.score_method == 'walk_forward' and m.score_details.train_delta is not None %}Δtr {{ m.score_details.train_delta|floatformat:2 }} · Δte {{ m.score_details.test_delta|floatformat:2 }}{% else %}—{% endif %}
+            </td>
+            <td style="font-size:11px;color:var(--text-muted);">{{ m.parameters_changed|join:", "|truncatechars:40 }}</td>
+            <td style="font-size:11px;">{{ m.proposed_at|timesince }}</td>
+            <td style="display:flex;gap:6px;">
+                <form method="post" action="{% url 'hq_apply_evolution' %}">{% csrf_token %}<input type="hidden" name="mutation_id" value="{{ m.id }}"><button class="btn btn-sm btn-primary" type="submit">Fork</button></form>
+                <form method="post" action="{% url 'hq_reject_evolution' %}">{% csrf_token %}<input type="hidden" name="mutation_id" value="{{ m.id }}"><button class="btn btn-sm btn-danger" type="submit">Reject</button></form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
 </div>
 
 <!-- ═══ PROMOTION PIPELINE — Strict Gates Before Live Capital ═══ -->

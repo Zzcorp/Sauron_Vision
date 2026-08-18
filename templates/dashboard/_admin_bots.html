@@ -5,6 +5,7 @@
     <div style="color:var(--accent-red);">{{ error }}</div>
   {% endif %}
   {% if rows %}
+    <div class="table-wrapper">
     <table class="sv-perf-table">
       <thead>
         <tr>
@@ -41,6 +42,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   {% else %}
     <p style="color:var(--text-muted);">No bot configs found.</p>
   {% endif %}

@@ -118,6 +118,7 @@
     {% if demotions %}
     <div class="card" style="margin-bottom:20px;border-left:3px solid var(--down);">
         <div class="card-header"><span class="card-title">Recently auto-demoted (open)</span></div>
+        <div class="table-wrapper">
         <table class="sv-perf-table">
             <thead><tr><th>rule</th><th>criterion</th><th>demoted</th><th>metrics</th>{% if request.user.is_staff %}<th>action</th>{% endif %}</tr></thead>
             <tbody>
@@ -126,7 +127,7 @@
                     <td><strong>{{ d.rule_name }}</strong></td>
                     <td><span class="badge badge-bearish">{{ d.criterion }}</span></td>
                     <td>{{ d.demoted_at|date:"m-d H:i" }}</td>
-                    <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ d.metrics }}</td>
+                    <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ d.metrics }}">{{ d.metrics }}</td>
                     {% if request.user.is_staff %}
                     <td>
                         <form method="post" action="{% url 'restore_rule_now' d.rule_name %}" style="display:inline;">
@@ -139,6 +140,7 @@
             {% endfor %}
             </tbody>
         </table>
+        </div>
     </div>
     {% endif %}
 
@@ -183,6 +185,7 @@
 
     <div class="card">
         <div class="card-header"><span class="card-title">History</span></div>
+        <div class="table-wrapper">
         <table class="sv-perf-table">
             <thead><tr><th>created</th><th>name</th><th>direction</th><th>status</th><th>reviewed</th><th>by</th></tr></thead>
             <tbody>
@@ -204,6 +207,7 @@
             {% endfor %}
             </tbody>
         </table>
+        </div>
     </div>
 
 {% endblock %}

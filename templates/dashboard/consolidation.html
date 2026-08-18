@@ -76,6 +76,7 @@
 
     <div class="card">
         <div class="card-header"><span class="card-title">Recent runs</span></div>
+        <div class="table-wrapper">
         <table class="sv-perf-table">
             <thead><tr><th>started</th><th>nodes +</th><th>nodes ↻</th><th>hyp resolved</th><th>obs pruned</th><th>notes</th><th>error</th></tr></thead>
             <tbody>
@@ -94,6 +95,7 @@
             {% endfor %}
             </tbody>
         </table>
+        </div>
     </div>
 
 {% endblock %}

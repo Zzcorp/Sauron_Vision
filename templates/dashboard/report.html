@@ -65,6 +65,7 @@
         .negative { color: var(--accent-red); }
 
         /* ── Table ─────────────────────────────────────── */
+        .table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         table { width: 100%; border-collapse: collapse; font-size: 12px; }
         th {
             font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.5px;
@@ -210,6 +211,7 @@
     <!-- Best Trades -->
     {% if best_trades %}
     <div class="section-title">Best Trades (Period)</div>
+    <div class="table-wrapper">
     <table class="sv-perf-table">
         <thead>
             <tr>
@@ -240,11 +242,13 @@
         {% endfor %}
         </tbody>
     </table>
+    </div>
     {% endif %}
 
     <!-- Worst Trades -->
     {% if worst_trades %}
     <div class="section-title">Worst Trades (Period)</div>
+    <div class="table-wrapper">
     <table class="sv-perf-table">
         <thead>
             <tr>
@@ -275,6 +279,7 @@
         {% endfor %}
         </tbody>
     </table>
+    </div>
     {% endif %}
 
     <!-- Signal Accuracy -->
@@ -300,6 +305,7 @@
     <!-- Strategy Performance -->
     {% if strategies %}
     <div class="section-title">Strategy Performance</div>
+    <div class="table-wrapper">
     <table class="sv-perf-table">
         <thead>
             <tr>
@@ -330,6 +336,7 @@
         {% endfor %}
         </tbody>
     </table>
+    </div>
     {% endif %}
 
     <!-- Asset Allocation -->
@@ -351,6 +358,7 @@
     <!-- Open Positions -->
     {% if open_positions %}
     <div class="section-title">Current Open Positions</div>
+    <div class="table-wrapper">
     <table class="sv-perf-table">
         <thead>
             <tr>
@@ -381,6 +389,7 @@
         {% endfor %}
         </tbody>
     </table>
+    </div>
     {% endif %}
 
     <!-- Footer -->

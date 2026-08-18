@@ -92,6 +92,7 @@
         <div class="card">
             <div class="card-header"><span class="card-title">System footer</span></div>
             {% if latest_ok %}
+                <div class="table-wrapper">
                 <table class="sv-perf-table">
                     <tbody>
                         <tr><td style="color:var(--text-muted);">model</td><td><strong>{{ latest_ok.model_used }}</strong></td></tr>
@@ -100,6 +101,7 @@
                         <tr><td style="color:var(--text-muted);">last ok at</td><td>{{ latest_ok.created_at|date:"Y-m-d H:i" }} UTC</td></tr>
                     </tbody>
                 </table>
+                </div>
             {% else %}
                 <p class="oc-empty">No successful briefing on record.</p>
             {% endif %}
@@ -142,6 +144,7 @@
             {% if latest.watchlist %}
                 <div style="margin-top:18px;">
                     <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Watchlist</div>
+                    <div class="table-wrapper">
                     <table class="sv-perf-table" style="width:auto;">
                     {% for w in latest.watchlist %}
                         <tr>
@@ -151,6 +154,7 @@
                         </tr>
                     {% endfor %}
                     </table>
+                    </div>
                 </div>
             {% endif %}
 
@@ -185,6 +189,7 @@
 
     <div class="card">
         <div class="card-header"><span class="card-title">Recent briefings</span></div>
+        <div class="table-wrapper">
         <table class="sv-perf-table">
             <thead><tr><th>date</th><th>posture</th><th>ideas</th><th>watchlist</th><th>tokens</th><th>cost</th></tr></thead>
             <tbody>
@@ -202,6 +207,7 @@
             {% endfor %}
             </tbody>
         </table>
+        </div>
     </div>
 
 {% endblock %}

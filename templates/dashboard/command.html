@@ -475,7 +475,11 @@
     }
     .cc-expandable.expanded .cc-expand-target,
     .oc-expandable.expanded .oc-expand-target {
-        max-height: 1000px; opacity: 1; margin-top: 14px;
+        /* 4000, not 1000: the cap only exists so the transition has a
+           number to animate to — at 1000px anything taller was permanently
+           cut with no indicator. Content must never be cut by an
+           animation ceiling. */
+        max-height: 4000px; opacity: 1; margin-top: 14px;
     }
 
     /* OC-prefixed re-exports of common building blocks for tab bodies */
@@ -501,15 +505,22 @@
         font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px;
         color: var(--text-muted); text-transform: uppercase;
     }
+    /* This local re-declaration loads AFTER sauron.css and silently
+       dropped the shared sheet's ellipsis — strip values on this page
+       overflowed into their neighbours instead of ellipsizing. */
     .oc-strip-value {
         font-family: var(--font-mono); font-size: 18px; font-weight: 700;
         color: var(--text-primary); letter-spacing: 0.5px;
+        min-width: 0; white-space: nowrap;
+        overflow: hidden; text-overflow: ellipsis;
     }
     .oc-strip-value.up { color: var(--accent); }
     .oc-strip-value.down { color: #ff5e5e; }
     .oc-strip-sub {
         font-family: var(--font-mono); font-size: 10px;
         color: var(--text-muted); letter-spacing: 0.5px;
+        min-width: 0; white-space: nowrap;
+        overflow: hidden; text-overflow: ellipsis;
     }
 
     /* SPARKLINE */

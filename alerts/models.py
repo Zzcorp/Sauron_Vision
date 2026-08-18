@@ -135,14 +135,45 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            # unread_count runs on EVERY page render (bell badge).
+            models.Index(fields=["user", "read"]),
+        ]
 
     def __str__(self):
         return f"[{'READ' if self.read else 'NEW'}] {self.title}"
+
+    @staticmethod
+    def safe_url(url: str) -> str:
+        """The url a notification stores, but only if it resolves.
+
+        `url` is free text and producers have shipped literal 404s
+        ("/market-data/" lived for months). An unresolvable path is stored
+        as "" — the bell then opens the detail popup instead of a dead
+        page. External http(s) links pass through untouched.
+        """
+        u = (url or "").strip()
+        if not u:
+            return ""
+        if u.startswith(("http://", "https://")):
+            return u
+        from django.urls import Resolver404, resolve
+        try:
+            resolve(u.split("?")[0].split("#")[0])
+            return u
+        except (Resolver404, ValueError):
+            import logging
+            logging.getLogger(__name__).warning(
+                "[alerts] notification url %r does not resolve — storing "
+                "empty so the click opens the detail popup instead of a "
+                "404", u)
+            return ""
 
     @classmethod
     def create_for_all(cls, notification_type, title, body="", url=""):
         """Create a notification for all active users."""
         from django.contrib.auth.models import User as U
+        url = cls.safe_url(url)
         notifs = []
         for user in U.objects.filter(is_active=True):
             notifs.append(cls(
@@ -157,7 +188,7 @@ class Notification(models.Model):
         """Create a notification for a specific user."""
         return cls.objects.create(
             user=user, notification_type=notification_type,
-            title=title, body=body, url=url,
+            title=title, body=body, url=cls.safe_url(url),
         )
 
     @classmethod

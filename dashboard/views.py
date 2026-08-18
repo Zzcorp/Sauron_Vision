@@ -493,7 +493,32 @@ def strategies_list(request):
     top_performers = by_pnl[:5]
     worst_performers = list(reversed(by_pnl[-5:])) if len(by_pnl) > 5 else []
 
+    # The automated stable — OpportunitySetup rows the scanner runs.
+    # These are what the seeder created ("why don't I have any current
+    # strategies?" — they were here, inactive, on an unlinked page), a
+    # different model from the trade-plan table above.
+    from django.db.models import Q as _Q
+    from signals.models_control import RuleControl
+    from signals.models_opportunity import OpportunitySetup
+    stage_by_rule = dict(
+        RuleControl.objects.values_list("rule_name", "promotion_stage"))
+    setups = []
+    for s in OpportunitySetup.objects.annotate(
+            n_resolved=Count("flags", filter=_Q(
+                flags__outcome__in=["hit", "miss"])),
+            n_hits=Count("flags", filter=_Q(flags__outcome="hit"))):
+        setups.append({
+            "name": s.name,
+            "asset_class": ", ".join(s.asset_classes or []),
+            "is_active": s.is_active,
+            "stage": stage_by_rule.get(s.name, ""),
+            "hits": s.n_hits,
+            "hit_rate": (s.n_hits / s.n_resolved * 100) if s.n_resolved else None,
+        })
+
     return render(request, "dashboard/strategies_list.html", {
+        "setups": setups,
+        "setups_active": sum(1 for x in setups if x["is_active"]),
         "page_id": "strategies",
         "strategies": qs_filtered[:50],
         "status_filter": status_filter,
@@ -639,16 +664,22 @@ def portfolio_overview(request):
     from collections import defaultdict
     from datetime import timedelta
     from django.utils import timezone as _tz
-    from portfolio.services import get_or_create_default_portfolio
-    from portfolio.models import PortfolioSnapshot, Position
+    from portfolio.services import (get_or_create_default_portfolio,
+                                    unified_closed_positions,
+                                    unified_open_positions)
+    from portfolio.models import PortfolioSnapshot
+    # The SHARED "Main" book, deliberately: it is the only Position book
+    # the background pipeline maintains — snapshots, mark-to-market, the
+    # eToro sync, the REST API and the Telegram digest all operate on it.
+    # A per-user book here rendered empty equity curves and never-marked
+    # rows, and silently hid all pre-existing history.
     portfolio = get_or_create_default_portfolio()
 
-    open_positions = Position.objects.filter(
-        portfolio=portfolio, closed_at__isnull=True).select_related("instrument")
-    closed_positions = list(
-        Position.objects.filter(portfolio=portfolio, closed_at__isnull=False)
-        .select_related("instrument", "strategy")
-    )
+    # BOTH books: legacy Position rows plus the AssetBotTrades that every
+    # interactive path (bots, TAKE TRADE, LONG/SHORT) actually writes —
+    # the taken trade used to be invisible on this page by construction.
+    open_positions = unified_open_positions(request.user, portfolio)
+    closed_positions = unified_closed_positions(request.user, portfolio)
 
     # Win/loss / profit factor / unrealized stats.
     n_closed = len(closed_positions)
@@ -715,7 +746,7 @@ def portfolio_overview(request):
     return render(request, "dashboard/portfolio_overview.html", {
         "page_id": "portfolio", "portfolio": portfolio,
         "snapshots": PortfolioSnapshot.objects.filter(portfolio=portfolio).order_by("-date")[:30],
-        "open_positions_count": open_positions.count(),
+        "open_positions_count": len(open_positions),
         "open_positions": list(open_positions[:8]),
         "total_unrealized": total_unrealized,
         "n_closed": n_closed,
@@ -745,14 +776,14 @@ def positions_list(request):
     monthly P&L bars, profit factor, avg W/L, current open P&L sum.
     """
     from collections import defaultdict
-    from portfolio.services import get_or_create_default_portfolio
-    from portfolio.models import Position
-    portfolio = get_or_create_default_portfolio()
+    from portfolio.services import (unified_closed_positions,
+                                    unified_open_positions)
     tab = request.GET.get("tab", "open")
-    open_positions = list(portfolio.positions.filter(closed_at__isnull=True)
-                                              .select_related("instrument", "strategy"))
-    closed_positions = list(portfolio.positions.filter(closed_at__isnull=False)
-                                                .select_related("instrument", "strategy"))
+    # BOTH books: the maintained shared Position book plus the user's
+    # AssetBotTrades — a trade taken from a signal used to show in fills,
+    # the Op Center and forensics but never here.
+    open_positions = unified_open_positions(request.user)
+    closed_positions = unified_closed_positions(request.user)
 
     total_closed = len(closed_positions)
     winning = [p for p in closed_positions if float(p.unrealized_pnl or 0) > 0]
@@ -1178,6 +1209,9 @@ def setup(request):
     from instruments.models import Instrument
     from django.utils import timezone
 
+    # The shared "Main" book, matching the eToro sync this same page
+    # triggers and the pipeline that marks/snapshots positions — the
+    # positions pages read this book (plus the user's bot trades).
     portfolio = get_or_create_default_portfolio()
 
     if request.method == "POST":
@@ -1495,6 +1529,20 @@ def admin_dashboard(request):
         .order_by("-applied_at")[:5]
     )
 
+    # Strategy Evolution — the constant view: pending queue inline, so the
+    # operator decides from Control without leaving for /evolution/.
+    from signals.models_control import RuleControl, RuleMutation
+    context["evo_pending"] = RuleMutation.objects.filter(
+        state=RuleMutation.STATE_PROPOSED).count()
+    context["evo_pending_rows"] = list(
+        RuleMutation.objects.filter(state=RuleMutation.STATE_PROPOSED)
+        .order_by("-proposed_score")[:5])
+    context["evo_applied_30d"] = RuleMutation.objects.filter(
+        state=RuleMutation.STATE_APPLIED,
+        applied_at__gte=now - timedelta(days=30)).count()
+    context["evo_forks_alive"] = RuleControl.objects.filter(
+        rule_name__contains="_evolved_v").count()
+
     return render(request, "dashboard/admin_dashboard.html", context)
 
 
@@ -1663,6 +1711,14 @@ def toggle_watchlist(request, symbol):
     instrument.save(update_fields=["is_watchlist"])
     verb = "added to" if instrument.is_watchlist else "removed from"
     messages.success(request, f"{instrument.symbol} {verb} the watchlist.")
+    # Every OTHER open tab learns the new count live — best-effort, a
+    # broken socket must never break the toggle itself.
+    try:
+        from dashboard.consumers import push_watchlist_update
+        push_watchlist_update(instrument.symbol, instrument.is_watchlist)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).debug("watchlist push failed: %s", e)
     nxt = request.POST.get("next", "")
     if nxt and url_has_allowed_host_and_scheme(
             nxt, allowed_hosts={request.get_host()}):
@@ -1685,6 +1741,34 @@ def ticker_partial(request):
     enter the band without a reload. Context processors supply
     ticker_items."""
     return render(request, "_partials/ticker_items.html")
+
+
+@login_required
+def panel_counts_json(request):
+    """The bottom headband's live numbers, as JSON. Fetched (debounced) by
+    the /ws/eye/ listener on fill events, so the POSITIONS and BOT cells
+    move the moment a trade opens or closes — they used to be render-time
+    constants that froze until the next full reload."""
+    from django.http import JsonResponse
+    from bot_program.models import AssetBotTrade
+    from instruments.models import Instrument
+    from portfolio.services import get_or_create_default_portfolio
+
+    bot_open = AssetBotTrade.objects.filter(
+        config__user=request.user,
+        status__in=("OPEN", "CLOSE_PENDING")).count()
+    try:
+        pf = get_or_create_default_portfolio(user=request.user)
+        pos_open = pf.positions.filter(closed_at__isnull=True).count()
+    except Exception:  # noqa: BLE001 — counts must never 500 the panel
+        pos_open = 0
+    watchlist = Instrument.objects.filter(
+        is_watchlist=True, is_active=True).count()
+    return JsonResponse({
+        "positions": pos_open + bot_open,
+        "bot_open": bot_open,
+        "watchlist": watchlist,
+    })
 
 
 @login_required
@@ -2099,6 +2183,47 @@ def user_notifications(request):
 
 
 @login_required
+def notifications_inbox(request):
+    """Every notification, paginated — the bell shows ten, this shows all.
+
+    Filters: ?type=<choice> and ?unread=1. Each row shows the FULL body
+    (the bell truncates at 110 chars) plus an "open" link when the row
+    carries a resolvable url — a notification click must always lead
+    somewhere real.
+    """
+    from alerts.models import Notification
+    from django.core.paginator import Paginator
+    from django.db.models import Count, Q
+
+    qs = Notification.objects.filter(user=request.user)
+    type_filter = (request.GET.get("type") or "").strip()
+    valid_types = {t[0] for t in Notification.TYPES}
+    if type_filter in valid_types:
+        qs = qs.filter(notification_type=type_filter)
+    unread_only = request.GET.get("unread") == "1"
+    if unread_only:
+        qs = qs.filter(read=False)
+
+    counts = dict(
+        Notification.objects.filter(user=request.user)
+        .values_list("notification_type")
+        .annotate(n=Count("id")).order_by())
+    type_tabs = [(key, label, counts.get(key, 0))
+                 for key, label in Notification.TYPES]
+    page = Paginator(qs, 25).get_page(request.GET.get("page"))
+
+    return render(request, "dashboard/notifications_inbox.html", {
+        "page_id": "notifications_inbox",
+        "page_obj": page,
+        "type_tabs": type_tabs,
+        "type_filter": type_filter,
+        "unread_only": unread_only,
+        "unread_total": Notification.unread_count(request.user),
+        "total": sum(counts.values()),
+    })
+
+
+@login_required
 def mark_notification_read(request, notif_id):
     """Mark a single notification as read."""
     from alerts.models import Notification
@@ -2109,14 +2234,17 @@ def mark_notification_read(request, notif_id):
 
 @login_required
 def mark_all_notifications_read(request):
-    """Mark all notifications as read."""
+    """Mark all notifications as read. POST only — a state change on GET
+    let any prefetching proxy silently clear the operator's inbox."""
     from alerts.models import Notification
+    from django.http import HttpResponseNotAllowed, JsonResponse
     from django.shortcuts import redirect
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
     Notification.objects.filter(user=request.user, read=False).update(read=True)
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-        from django.http import JsonResponse
         return JsonResponse({"status": "ok"})
-    return redirect(request.META.get("HTTP_REFERER", "dashboard"))
+    return redirect(request.META.get("HTTP_REFERER", "/notifications/"))
 
 
 @login_required

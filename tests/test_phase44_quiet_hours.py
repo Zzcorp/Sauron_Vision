@@ -163,7 +163,7 @@ class ProfileUIQuietHoursTests(TestCase):
         from alerts.models import UserNotificationPrefs
         u = User.objects.create_user(username="ui_qh", password="x")
         self.client.force_login(u)
-        r = self.client.post("/notifications/", {
+        r = self.client.post("/notifications/settings/", {
             "action": "save_prefs",
             "quiet_start": "22:00",
             "quiet_end": "07:00",
@@ -179,7 +179,7 @@ class ProfileUIQuietHoursTests(TestCase):
         UserNotificationPrefs.objects.create(
             user=u, quiet_start=time(22, 0), quiet_end=time(7, 0))
         self.client.force_login(u)
-        r = self.client.post("/notifications/", {
+        r = self.client.post("/notifications/settings/", {
             "action": "save_prefs",
             "quiet_start": "",
             "quiet_end": "",
@@ -194,7 +194,7 @@ class ProfileUIQuietHoursTests(TestCase):
         from alerts.models import UserNotificationPrefs
         u = User.objects.create_user(username="ui_qh_bad", password="x")
         self.client.force_login(u)
-        r = self.client.post("/notifications/", {
+        r = self.client.post("/notifications/settings/", {
             "action": "save_prefs",
             "quiet_start": "not-a-time",
             "quiet_end": "07:00",

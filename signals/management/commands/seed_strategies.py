@@ -187,12 +187,20 @@ def seed_setups(*, activate: bool = False) -> dict:
             "min_match_score": spec["min_match_score"],
             "suggested_horizon_days": spec["suggested_horizon_days"],
             "sizing": spec.get("sizing", {}),
-            "is_active": activate,
         }
+        # is_active is the OPERATOR's field once the row exists: a re-run
+        # without --activate used to silently disarm setups someone had
+        # switched on by hand. Only --activate asserts it on updates; a
+        # fresh row starts at the flag's value (default: off, on purpose).
+        if activate:
+            defaults["is_active"] = activate
         obj, was_created = OpportunitySetup.objects.update_or_create(
             name=spec["name"], defaults=defaults,
         )
         if was_created:
+            if not activate:
+                OpportunitySetup.objects.filter(pk=obj.pk).update(
+                    is_active=False)
             created += 1
         else:
             updated += 1
@@ -264,3 +272,8 @@ class Command(BaseCommand):
             f"{r['created']} created / {r['updated']} updated · "
             f"RuleControl: {r['rules_created']} created / {r['rules_updated']} updated · "
             f"is_active={opts['activate']}"))
+        if not opts["activate"]:
+            self.stdout.write(
+                "  Setups are INACTIVE until you arm them: re-run with "
+                "--activate, or toggle each on /opportunities/ "
+                "(Intelligence → Opportunities).")

@@ -36,6 +36,7 @@
 
   <div class="sv-section-title">Setup performance - last 30 days</div>
   {% if setups %}
+    <div class="table-wrapper">
     <table class="sv-perf-table">
       <thead>
         <tr><th>Setup</th><th>Hit rate</th><th>Expectancy</th><th>n closed</th><th>Source</th></tr>
@@ -52,6 +53,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   {% else %}
     <p style="color:var(--text-muted);">No closed signals yet.</p>
   {% endif %}

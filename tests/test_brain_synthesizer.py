@@ -54,6 +54,47 @@ class WorldSnapshotTests(TestCase):
         self.assertIn("gate_reject", snap["observations_count_by_kind"])
 
 
+# ── Response parsing ──────────────────────────────────────────────────────
+
+class ParseResponseTests(TestCase):
+    """The prompt forbids prose around the JSON; the live model appends it
+    anyway. A strict loads() threw a whole synthesis away over trailing
+    commentary ("Extra data: char 1476", live, 2026-08-18) — the parser
+    must take the first complete object and shrug at the tail."""
+
+    def _agent(self):
+        from brain.synthesizer import SauronMindAgent
+        return SauronMindAgent.__new__(SauronMindAgent)
+
+    def test_trailing_commentary_is_ignored(self):
+        out = self._agent().parse_response(
+            '{"regime_label": "trending", "regime_confidence": 0.7}\n'
+            'Note: confidence is moderate because volume is thin.')
+        self.assertEqual(out["regime_label"], "trending")
+
+    def test_a_second_object_is_ignored(self):
+        out = self._agent().parse_response(
+            '{"regime_label": "risk_off"}{"regime_label": "risk_on"}')
+        self.assertEqual(out["regime_label"], "risk_off")
+
+    def test_leading_prose_and_fences_still_parse(self):
+        out = self._agent().parse_response(
+            '```json\nHere is the report: {"regime_label": "unknown"}\n```')
+        self.assertEqual(out["regime_label"], "unknown")
+
+    def test_no_object_still_raises(self):
+        with self.assertRaises(ValueError):
+            self._agent().parse_response("definitely not json")
+
+    def test_non_dict_first_value_raises(self):
+        # find("{") skips the array; the first OBJECT inside it parses,
+        # which is a dict — so use a payload with no object at all after
+        # a brace-less array to pin the non-dict path via a bare number
+        # wrapped in an object-less response.
+        with self.assertRaises(ValueError):
+            self._agent().parse_response('[1, 2, 3]')
+
+
 # ── Persistence + clamping ────────────────────────────────────────────────
 
 class PersistReportTests(TestCase):

@@ -2,6 +2,11 @@
 {% block title %}Hypothesis market · Sauron's Mind{% endblock %}
 {% block content %}
 
+    {# claim tables need the full row below this width #}
+    <style>
+        @media (max-width: 1500px) { .grid-2 { grid-template-columns: minmax(0, 1fr); } }
+    </style>
+
     {# ── Top stat strip — 6 cells ────────────────────────────────── #}
     <div class="oc-strip" style="margin-bottom:18px;">
         <div class="oc-strip-cell">
@@ -106,6 +111,7 @@
     <div class="grid grid-2" style="gap:14px;margin-bottom:20px;">
         <div class="card">
             <div class="card-header"><span class="card-title">Pending hypotheses</span></div>
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>source</th><th>claim</th><th>conf</th><th>deadline</th><th>votes</th></tr></thead>
                 <tbody>
@@ -122,10 +128,12 @@
                 {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
 
         <div class="card">
             <div class="card-header"><span class="card-title">Recently resolved</span></div>
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>source</th><th>claim</th><th>conf</th><th>outcome</th><th>resolved</th></tr></thead>
                 <tbody>
@@ -146,6 +154,7 @@
                 {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 
@@ -154,6 +163,7 @@
         <p style="margin:0 0 10px;font-size:11px;color:var(--text-muted);">
             <strong>Combined</strong> = 70% Brier (calibration) + 30% (1 - operator override rate). <strong>Brier-only</strong> is the pure objective signal.
         </p>
+        <div class="table-wrapper">
         <table class="sv-perf-table">
             <thead><tr><th>agent</th><th>combined</th><th>brier-only</th><th>resolved</th><th>confirmed</th><th>total</th></tr></thead>
             <tbody>
@@ -171,10 +181,12 @@
             {% endfor %}
             </tbody>
         </table>
+        </div>
     </div>
 
     <div class="card">
         <div class="card-header"><span class="card-title">Recent votes</span></div>
+        <div class="table-wrapper">
         <table class="sv-perf-table">
             <thead><tr><th>agent</th><th>stance</th><th>conf</th><th>on hypothesis</th><th>reasoning</th><th>at</th></tr></thead>
             <tbody>
@@ -196,6 +208,7 @@
             {% endfor %}
             </tbody>
         </table>
+        </div>
     </div>
 
 {% endblock %}

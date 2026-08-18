@@ -32,7 +32,7 @@
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">LAST RUN</span>
-        <span class="oc-strip-value">{% if last_run %}{{ last_run.created_at|timesince|truncatechars:8 }}{% else %}—{% endif %}</span>
+        <span class="oc-strip-value">{% if last_run %}{{ last_run.created_at|timesince }}{% else %}—{% endif %}</span>
         <span class="oc-strip-sub">{% if last_run %}{{ last_run.status|upper }}{% endif %}</span>
     </div>
 </div>

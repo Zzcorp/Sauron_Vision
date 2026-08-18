@@ -7,6 +7,7 @@
 
   <div class="sv-section-title">Positions ({{ positions|length }})</div>
   {% if positions %}
+    <div class="table-wrapper">
     <table class="sv-perf-table">
       <thead>
         <tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Current</th>
@@ -27,6 +28,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   {% else %}
     <p style="color:var(--text-muted);">No open positions.</p>
   {% endif %}

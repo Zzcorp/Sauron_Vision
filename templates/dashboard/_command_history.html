@@ -158,6 +158,7 @@
     <div class="card">
         <div class="card-header"><span class="card-title">Top 5 rules by Sharpe</span></div>
         {% if top_rules_sharpe %}
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>rule</th><th>n</th><th>avg R</th><th>Sharpe</th></tr></thead>
                 <tbody>
@@ -171,6 +172,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% else %}
             <p class="oc-empty">Need ≥5 closed trades per rule for Sharpe.</p>
         {% endif %}
@@ -212,12 +214,13 @@
         <span class="card-title">Decay alerts (unresolved)</span>
         <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ decay_alerts|length }} active</span>
     </div>
+    <div class="table-wrapper">
     <table class="sv-perf-table">
         <thead><tr><th>rule</th><th>asset</th><th>recent avg R</th><th>baseline avg R</th><th>triggers</th><th>detected</th></tr></thead>
         <tbody>
             {% for a in decay_alerts %}
                 <tr>
-                    <td><strong>{{ a.rule_name }}</strong></td>
+                    <td title="{{ a.rule_name }}"><strong>{{ a.rule_name|truncatechars:28 }}</strong></td>
                     <td><span class="badge badge-medium">{{ a.asset_class }}</span></td>
                     <td class="down">{{ a.recent_avg_r|floatformat:2 }}</td>
                     <td>{{ a.baseline_avg_r|floatformat:2 }}</td>
@@ -227,6 +230,7 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
 </div>
 {% endif %}
 

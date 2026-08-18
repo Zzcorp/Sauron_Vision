@@ -1,8 +1,23 @@
 """Anthropic Claude API provider."""
 import os
 import logging
+import time
 
 logger = logging.getLogger(__name__)
+
+# Transient API failures worth retrying. Matched on the error TEXT because
+# the SDK surfaces mid-stream errors (which it does NOT retry itself) as a
+# raw error payload in the exception message — a live "Generate now" click
+# showed the operator {'type': 'overloaded_error', ...} verbatim.
+# rate_limit is deliberately NOT here: a fixed 2s wait cannot outlast a
+# real rate-limit window; it would only re-bill a doomed generation.
+_TRANSIENT_MARKERS = ("overloaded", "internal_server_error",
+                      "'type': 'api_error'")
+# TWO attempts, not more: several callers are synchronous staff views
+# ("Run now" buttons), and each retry re-runs a potentially minutes-long
+# full generation — one second chance covers the transient case without
+# tripling the worst-case request time.
+_MAX_ATTEMPTS = 2
 
 
 class ClaudeProvider:
@@ -46,16 +61,40 @@ class ClaudeProvider:
         # with "Streaming is required for operations that may take longer
         # than 10 minutes" before a single token was generated. The stream
         # accumulates into the same Message object create() would return.
-        with client.messages.stream(
-            model=model,
-            max_tokens=max_tokens,
-            system=system_prompt,
-            messages=[
-                {"role": "user", "content": user_message}
-            ],
-            **kwargs,
-        ) as stream:
-            response = stream.get_final_message()
+        #
+        # Retried at the APP level: the SDK retries pre-stream HTTP errors
+        # but an error EVENT arriving mid-stream (529 Overloaded does this)
+        # raises without retry, and it used to bubble the raw payload all
+        # the way to the operator's screen.
+        response = None
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            try:
+                with client.messages.stream(
+                    model=model,
+                    max_tokens=max_tokens,
+                    system=system_prompt,
+                    messages=[
+                        {"role": "user", "content": user_message}
+                    ],
+                    **kwargs,
+                ) as stream:
+                    response = stream.get_final_message()
+                break
+            except Exception as e:  # noqa: BLE001 — matched on content below
+                msg = str(e)
+                transient = any(m in msg.lower() for m in _TRANSIENT_MARKERS)
+                if not transient or attempt == _MAX_ATTEMPTS:
+                    if "overloaded" in msg.lower():
+                        raise RuntimeError(
+                            "Anthropic is overloaded right now — "
+                            f"{_MAX_ATTEMPTS} attempts all bounced. "
+                            "Try again in a minute.") from e
+                    raise
+                wait = 2 * attempt  # 2s, then 4s
+                logger.warning("[claude] transient API error "
+                               "(attempt %d/%d, retrying in %ds): %.160s",
+                               attempt, _MAX_ATTEMPTS, wait, msg)
+                time.sleep(wait)
 
         # Adaptive-thinking models may put a thinking block before the text
         # block, and a safety refusal can return no text at all — never index

@@ -239,7 +239,9 @@ def run_anomaly_detection():
             notification_type="system",
             title=f"Market Anomaly Alert ({len(severe)} severe)",
             body=descriptions,
-            url="/market-data/",
+            # /quotes/ renders the same LiveQuote table the scan read;
+            # "/market-data/" was never a route and 404ed for months.
+            url="/quotes/",
         )
         logger.warning(f"Anomaly detection: {len(severe)} severe anomalies found.")
 
@@ -449,7 +451,7 @@ def generate_daily_briefing():
         notification_type="system",
         title=f"Morning Briefing — {today.strftime('%d %b %Y')}",
         body=briefing_text[:2000],
-        url="/dashboard/",
+        url="/briefing/",
     )
 
     return {
@@ -843,7 +845,7 @@ def generate_monday_plan():
         notification_type="system",
         title=f"Monday Game Plan — {today.strftime('%d %b %Y')}",
         body=plan_text[:2000],
-        url="/dashboard/",
+        url="/briefing/",
     )
 
     return {

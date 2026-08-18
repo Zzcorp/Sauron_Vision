@@ -125,6 +125,7 @@
     <div class="card">
         <div class="card-header"><span class="card-title">By asset class</span></div>
         {% if asset_breakdown %}
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>class</th><th>active</th><th>share</th></tr></thead>
                 <tbody>
@@ -137,6 +138,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% else %}
             <p class="oc-empty">No active signals.</p>
         {% endif %}
@@ -145,6 +147,7 @@
     <div class="card">
         <div class="card-header"><span class="card-title">Urgency mix</span></div>
         {% if urgency_mix %}
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>urgency</th><th>active</th><th>share</th></tr></thead>
                 <tbody>
@@ -157,6 +160,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% else %}
             <p class="oc-empty">No active signals.</p>
         {% endif %}
@@ -168,6 +172,7 @@
             <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">phase-1 graded</span>
         </div>
         {% if perf_by_type %}
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>type</th><th>N</th><th>win%</th><th>avg R</th></tr></thead>
                 <tbody>
@@ -181,6 +186,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% else %}
             <p class="oc-empty">Need ≥3 closed graded signals per type.</p>
         {% endif %}

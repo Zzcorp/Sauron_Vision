@@ -358,6 +358,8 @@
             <div class="nav-section">Intelligence</div>
             <a href="{% url 'signals_list' %}" class="nav-link {% if page_id == 'signals' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Signals</span></a>
             <a href="{% url 'strategies_list' %}" class="nav-link {% if page_id == 'strategies' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategies</span></a>
+            <a href="{% url 'opportunities_dashboard' %}" class="nav-link {% if page_id == 'opportunities' %}active{% endif %}"><span class="icon">◍</span> <span class="label-text">Opportunities</span></a>
+            <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon">🧬</span> <span class="label-text">Strategy Evolution</span></a>
             <a href="{% url 'news_feed' %}" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon">▤</span> <span class="label-text">News & Sentiment</span></a>
             <a href="{% url 'backtest_list' %}" class="nav-link {% if page_id == 'backtest' %}active{% endif %}"><span class="icon">&#x25A1;</span> <span class="label-text">Backtesting</span></a>
             <a href="{% url 'performance_dashboard' %}" class="nav-link {% if page_id == 'performance' %}active{% endif %}"><span class="icon">◮</span> <span class="label-text">Signal Performance</span></a>
@@ -390,7 +392,7 @@
             <a href="{% url 'admin_newsletters' %}" class="nav-link {% if page_id == 'admin_newsletters' %}active{% endif %}"><span class="icon">&#x25A3;</span> <span class="label-text">Newsletters</span></a>
             {% endif %}<div class="nav-section">System</div>
             <a href="{% url 'profile' %}" class="nav-link {% if page_id == 'profile' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Profile</span></a>
-            <a href="{% url 'user_notifications' %}" class="nav-link {% if page_id == 'notifications' %}active{% endif %}"><span class="icon">&#x25C9;</span> <span class="label-text">Notifications</span></a>
+            <a href="{% url 'notifications_inbox' %}" class="nav-link {% if page_id == 'notifications_inbox' or page_id == 'notifications' %}active{% endif %}"><span class="icon">&#x25C9;</span> <span class="label-text">Notifications</span></a>
             <a href="{% url 'setup' %}" class="nav-link {% if page_id == 'setup' %}active{% endif %}"><span class="icon">⚙</span> <span class="label-text">Setup</span></a>
             <a href="{% url 'getting_started' %}" class="nav-link {% if page_id == 'getting_started' %}active{% endif %}"><span class="icon">📡</span> <span class="label-text">Getting Started</span></a>
         </nav>
@@ -477,7 +479,16 @@
                     <div class="notif-header">
                         <span>Notifications{% if notification_count %} <span class="nh-count">{{ notification_count }} new</span>{% endif %}</span>
                         <div style="display:flex;gap:10px;align-items:center;">
-                            {% if notification_count %}<a href="{% url 'mark_all_notifications_read' %}" class="nh-link">Mark all read</a>{% endif %}
+                            {% if notification_count %}
+                            {# POST, not a GET link: a state change on GET let #}
+                            {# any prefetching proxy silently clear the inbox. #}
+                            <form method="post" action="{% url 'mark_all_notifications_read' %}"
+                                  id="markAllReadForm" style="margin:0;">
+                                {% csrf_token %}
+                                <button type="submit" class="nh-link"
+                                        style="background:none;border:0;cursor:pointer;padding:0;">Mark all read</button>
+                            </form>
+                            {% endif %}
                             <a href="{% url 'user_notifications' %}" class="nh-link nh-link--accent">Settings</a>
                         </div>
                     </div>
@@ -489,8 +500,12 @@
                         identically-styled titles gave the operator no way to
                         pick the one that mattered out of ten.
                         {% endcomment %}
+                        {# Empty url falls back to the INBOX (a real list page #}
+                        {# with the full body) — a click must always land #}
+                        {# somewhere. Rows mark themselves read on the way. #}
                         <a class="notif-item ni-{{ n.notification_type }} {% if not n.read %}unread{% endif %}"
-                           href="{{ n.url|default:'/notifications/' }}" role="menuitem">
+                           href="{{ n.url|default:'/notifications/' }}" role="menuitem"
+                           data-notif-id="{{ n.id }}">
                             <span class="ni-kind">{{ n.get_notification_type_display|default:n.notification_type }}</span>
                             <div class="ni-title">{{ n.title }}</div>
                             {% if n.body %}<div class="ni-body">{{ n.body|truncatechars:110 }}</div>{% endif %}
@@ -504,7 +519,7 @@
                     {% endfor %}
                     </div>
                     {% if recent_notifications %}
-                    <a class="notif-foot" href="{% url 'user_notifications' %}">View all notifications &#9656;</a>
+                    <a class="notif-foot" href="{% url 'notifications_inbox' %}">View all notifications &#9656;</a>
                     {% endif %}
                 </div>
                 {% get_display_name as uname %}
@@ -531,7 +546,7 @@
                             </a>
                         </div>
                         <div class="um-section">
-                            <a class="um-link" href="{% url 'user_notifications' %}" role="menuitem">
+                            <a class="um-link" href="{% url 'notifications_inbox' %}" role="menuitem">
                                 <span class="um-icon um-icon-svg">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M6 8a6 6 0 0 1 12 0c0 5 2 7 2 7H4s2-2 2-7"/>
@@ -636,7 +651,7 @@
                 </a>
                 <a href="{% url 'positions_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">POSITIONS</span>
-                    <span class="ip-count">{{ panel_positions|default:"0" }}</span>
+                    <span class="ip-count" id="ipPositionsCount">{{ panel_positions|default:"0" }}</span>
                     <span class="ip-sub">open now</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">OPEN POSITIONS</div>
@@ -686,7 +701,7 @@
                        state we failed to read must not be drawn as disarmed. {% endcomment %}
                     <span class="ip-label">BOT</span>
                     <span class="ip-count {% if panel_bot_armed is None %}sv-unknown{% elif not panel_bot_armed %}red{% endif %}">{% if panel_bot_armed is None %}&mdash;{% elif panel_bot_armed %}ARMED{% else %}OFF{% endif %}</span>
-                    <span class="ip-sub">{{ panel_bot_mode|default:"—" }} · {% if panel_bot_open is None %}&mdash;{% else %}{{ panel_bot_open }}{% endif %} open</span>
+                    <span class="ip-sub">{{ panel_bot_mode|default:"—" }} · <span id="ipBotOpenCount">{% if panel_bot_open is None %}&mdash;{% else %}{{ panel_bot_open }}{% endif %}</span> open</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">BOT PROGRAM</div>
                         <div class="ip-dd-grid">
@@ -806,7 +821,7 @@
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View heatmap</div>
                     </div>
                 </a>
-                <a href="{% url 'user_notifications' %}" class="ip-cat ip-cat-link">
+                <a href="{% url 'notifications_inbox' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">ALERTS</span>
                     <span class="ip-count gold">{{ notification_count|default:"0" }}</span>
                     <span class="ip-sub">unread</span>
@@ -859,7 +874,7 @@
                 </a>
                 <a href="{% url 'instruments_list' %}?filter=watchlist" class="ip-cat ip-cat-link">
                     <span class="ip-label">WATCHLIST</span>
-                    <span class="ip-count">{{ panel_watchlist|default:"0" }}</span>
+                    <span class="ip-count" id="ipWatchlistCount">{{ panel_watchlist|default:"0" }}</span>
                     <span class="ip-sub">tracked</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">WATCHLIST</div>
@@ -958,7 +973,7 @@
         <div class="rail-head" onclick="(function(){const r=document.getElementById('signalsRail');if(!r.classList.contains('open')){r.classList.add('open');localStorage.setItem('sauron_signals_rail','open');return;}document.getElementById('railWatch').classList.toggle('collapsed');localStorage.setItem('sauron_rail_watch',document.getElementById('railWatch').classList.contains('collapsed')?'1':'0');})()">
             <span class="rh-icon">◉</span>
             <span class="rh-label">WATCHLIST</span>
-            <span class="rh-count">{{ ui_watchlist|length }}</span>
+            <span class="rh-count" id="railWatchlistCount">{{ ui_watchlist|length }}</span>
             <span class="rh-chev">▼</span>
         </div>
         <div class="rail-body" id="railWatchBody">
@@ -1097,6 +1112,24 @@
    hover so the popup sits to the LEFT of the rail item, vertically
    centered, clamped to the viewport.                                  */
 (function(){
+  /* The viewport minus the fixed chrome: clamping against the RAW
+     viewport let a popup for a card near the rail's top slide under the
+     topbar/ticker/headband (their z beats the hovercard tier), so its
+     upper half was invisible. Measured per show — the bars collapse. */
+  function chromeBounds() {
+    var vh = window.innerHeight;
+    var top = 0, bottom = vh;
+    document.querySelectorAll(
+      '.topbar, .ticker-bar, .data-headband, .info-panel-wrap'
+    ).forEach(function (bar) {
+      if (getComputedStyle(bar).position !== 'fixed') return;
+      var r = bar.getBoundingClientRect();
+      if (!r.height) return;
+      if (r.top + r.height / 2 < vh / 2) top = Math.max(top, r.bottom);
+      else bottom = Math.min(bottom, r.top);
+    });
+    return { top: top + 12, bottom: bottom - 12 };
+  }
   function showPopup(wrap) {
     var pop = wrap.querySelector('.sr-popup');
     if (!pop) return;
@@ -1104,16 +1137,26 @@
     /* Make popup measurable so we can clamp to viewport vertically. */
     pop.style.visibility = 'hidden';
     pop.style.opacity = '0';
+    pop.style.maxHeight = '';
+    pop.style.overflowY = '';
     pop.classList.add('show');
     var pw = pop.offsetWidth || 300;
     var ph = pop.offsetHeight || 220;
     /* Right anchor: 12px gutter from the rail's left edge — popup
-       sits in the page content area, NOT overlapping the rail.
-       Z-index 99999 keeps it above every other element in the page. */
+       sits in the page content area, NOT overlapping the rail. */
     var rightOf = (window.innerWidth - rect.left) + 12;
-    /* Vertical: centered on the row, clamped 12..viewport-12. */
+    var cb = chromeBounds();
+    /* Taller than the space between the bands: cap and scroll — the
+       action buttons at the bottom must stay reachable. */
+    var space = cb.bottom - cb.top;
+    if (ph > space) {
+      pop.style.maxHeight = space + 'px';
+      pop.style.overflowY = 'auto';
+      ph = space;
+    }
+    /* Vertical: centered on the row, clamped between the chrome bands. */
     var top = rect.top + rect.height / 2 - ph / 2;
-    top = Math.max(12, Math.min(top, window.innerHeight - ph - 12));
+    top = Math.max(cb.top, Math.min(top, cb.bottom - ph));
     pop.style.right = rightOf + 'px';
     pop.style.left = 'auto';
     pop.style.top  = top + 'px';
@@ -2154,6 +2197,40 @@ function toggleSidebar() {
     }, 800);
   }
 
+  /* Watchlist stars broadcast their ABSOLUTE count — patch the bottom
+     headband cell and the rail header in place, no refetch needed. */
+  function applyWatchlistCount(data) {
+    if (!data || typeof data.count === 'undefined') return;
+    const ip = document.getElementById('ipWatchlistCount');
+    if (ip) ip.textContent = data.count;
+    const rail = document.getElementById('railWatchlistCount');
+    if (rail) rail.textContent = data.count;
+  }
+
+  /* Fills change the POSITIONS and BOT counts — refetch the truth,
+     debounced (a funding chain closes several trades in one burst).
+     Absolute values from the server, never client-side deltas: one missed
+     message and a delta drifts forever. Exposed for the /ws/eye/ listener,
+     which is where fill events actually arrive. */
+  let panelCountsTimer = null;
+  window.refreshPanelCounts = function () {
+    if (panelCountsTimer) clearTimeout(panelCountsTimer);
+    panelCountsTimer = setTimeout(() => {
+      panelCountsTimer = null;
+      fetch('/partials/panel-counts/', { credentials: 'same-origin' })
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(c => {
+          const pos = document.getElementById('ipPositionsCount');
+          if (pos && typeof c.positions !== 'undefined') pos.textContent = c.positions;
+          const bot = document.getElementById('ipBotOpenCount');
+          if (bot && typeof c.bot_open !== 'undefined') bot.textContent = c.bot_open;
+          const wl = document.getElementById('ipWatchlistCount');
+          if (wl && typeof c.watchlist !== 'undefined') wl.textContent = c.watchlist;
+        })
+        .catch(() => {});
+    }, 800);
+  };
+
   function connect() {
     try { ws = new WebSocket(url); } catch(e) { scheduleReconnect(); return; }
     ws.onopen = () => { retries = 0; alive = true;
@@ -2164,6 +2241,7 @@ function toggleSidebar() {
         if (msg.type === 'quote_stream' || msg.type === 'quote') applyTick(msg.data);
         else if (msg.type === 'signal') refreshSignalRail();
         else if (msg.type === 'news') refreshTicker();
+        else if (msg.type === 'watchlist') applyWatchlistCount(msg.data);
       } catch(e) {}
     };
     ws.onclose = () => { alive = false; scheduleReconnect(); };
@@ -2469,24 +2547,43 @@ function toggleSidebar() {
     });
   }
 
-  // Info panel dropdown positioning (fixed, escape clip — opens UPWARD)
+  // Info panel dropdowns — PORTALLED to <body>, opening upward. The band
+  // itself is a --z-chrome (500) stacking context, so a child dropdown's
+  // z-index is LOCAL to it: however high it claimed to be, the signals
+  // rail (600) and the sidebar (800) painted OVER it at the screen edges.
+  // As body children the dropdowns' hovercard tier wins for real. The
+  // CSS :hover display rule no longer reaches them, so JS owns show/hide,
+  // with a short grace so the pointer can travel into the dropdown.
   document.querySelectorAll('.info-panel-wrap .ip-cat').forEach(function(cat){
     var dd = cat.querySelector('.ip-dropdown');
     if(!dd) return;
+    document.body.appendChild(dd);
+    var hideTimer = null;
+    function hideSoon(){
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(function(){ dd.style.display = 'none'; }, 120);
+    }
+    function cancelHide(){
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    }
     cat.addEventListener('mouseenter', function(){
+      cancelHide();
       var r = cat.getBoundingClientRect();
-      // Temporarily show to measure height
       dd.style.visibility = 'hidden'; dd.style.display = 'block';
-      var ddH = dd.offsetHeight;
-      dd.style.display = ''; dd.style.visibility = '';
-      // Position above the panel
+      dd.style.pointerEvents = 'auto';
+      // Clamp with the MEASURED width — the old assumed 340px let the
+      // wider dropdowns overshoot the right edge by their difference.
+      var ddW = dd.offsetWidth || 340;
       dd.style.top = ''; dd.style.bottom = (window.innerHeight - r.top + 2) + 'px';
       var left = r.left;
-      var w = 340;
-      if(left + w > window.innerWidth - 16) left = window.innerWidth - w - 16;
+      if(left + ddW > window.innerWidth - 16) left = window.innerWidth - ddW - 16;
       if(left < 16) left = 16;
       dd.style.left = left + 'px';
+      dd.style.visibility = '';
     });
+    cat.addEventListener('mouseleave', hideSoon);
+    dd.addEventListener('mouseenter', cancelHide);
+    dd.addEventListener('mouseleave', hideSoon);
   });
 
   // Info panel minimize / restore toggle
@@ -2698,17 +2795,35 @@ function toggleSidebar() {
             return;
         }
 
-        // n — mark all notifications read
+        // n — mark all notifications read (the endpoint is POST-only now:
+        // a state change on GET let prefetching proxies clear the inbox)
         if (key === 'n') {
-            var readAllLink = document.querySelector('a[href*="read-all"]');
-            if (readAllLink) {
+            var readAllForm = document.getElementById('markAllReadForm');
+            if (readAllForm) {
                 showToast('Marking notifications read...');
-                readAllLink.click();
+                readAllForm.submit();
             } else {
                 showToast('No notifications to clear');
             }
             return;
         }
+    });
+})();
+
+// ── Bell rows mark themselves read on the way to their page ─────────────
+(function() {
+    var panel = document.getElementById('notifPanel');
+    if (!panel) return;
+    panel.addEventListener('click', function (e) {
+        var row = e.target.closest && e.target.closest('.notif-item[data-notif-id]');
+        if (!row || !row.classList.contains('unread')) return;
+        var csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+        // keepalive: the fetch must survive the navigation the click starts.
+        fetch('/notifications/read/' + row.dataset.notifId + '/', {
+            method: 'POST', credentials: 'same-origin', keepalive: true,
+            headers: { 'X-CSRFToken': csrf }
+        }).catch(function () { /* cosmetic only */ });
+        row.classList.remove('unread');
     });
 })();
 
@@ -3830,7 +3945,16 @@ if ('serviceWorker' in navigator) {
         ws.onmessage = function (ev) {
             var msg;
             try { msg = JSON.parse(ev.data); } catch (e) { return; }
-            if (msg && msg.type === "eye_event") add(msg.kind, msg.data);
+            if (msg && msg.type === "eye_event") {
+                add(msg.kind, msg.data);
+                /* Fills move the POSITIONS/BOT headband counts — refetch
+                   the absolute numbers (debounced in the helper). */
+                if ((msg.kind === "fill_open" || msg.kind === "fill_close"
+                     || msg.kind === "close_pending")
+                    && window.refreshPanelCounts) {
+                    window.refreshPanelCounts();
+                }
+            }
         };
         ws.onclose = schedule;
         ws.onerror = function () { try { ws.close(); } catch (e) {} };

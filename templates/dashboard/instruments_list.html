@@ -46,7 +46,7 @@
         </div>
     </div>
     <form method="get" action="{% url 'instruments_list' %}" style="padding:16px;">
-        <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr auto;gap:10px;align-items:end;">
+        <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:end;">
             <div>
                 <label class="input-label">Search</label>
                 <input type="search" name="q" value="{{ search_q }}" class="input" placeholder="Symbol, name, or sector...">

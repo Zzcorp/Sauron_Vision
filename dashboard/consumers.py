@@ -80,6 +80,13 @@ class DashboardConsumer(AsyncWebsocketConsumer):
             "data": event["data"],
         }))
 
+    async def watchlist_update(self, event):
+        """Push a watchlist change (star/unstar) with the absolute count."""
+        await self.send(text_data=json.dumps({
+            "type": "watchlist",
+            "data": event["data"],
+        }))
+
 
 def push_quote_update(symbol, price, change_pct):
     """Utility to push a quote update from any Celery task."""
@@ -136,6 +143,30 @@ def push_news_notification(article_data):
             "dashboard_live",
             {"type": "news_update", "data": article_data}
         )
+
+
+def push_watchlist_update(symbol, starred):
+    """Broadcast a watchlist star/unstar with the ABSOLUTE count.
+
+    Absolute, not a delta: deltas drift the moment one message is missed.
+    Broadcast (not per-user) is correct — is_watchlist is a global flag.
+    Before this existed, the acting tab reloaded and every other open tab
+    kept the stale WATCHLIST count until its next full load."""
+    from channels.layers import get_channel_layer
+    from asgiref.sync import async_to_sync
+    from instruments.models import Instrument
+
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
+    count = Instrument.objects.filter(
+        is_watchlist=True, is_active=True).count()
+    async_to_sync(channel_layer.group_send)(
+        "dashboard_live",
+        {"type": "watchlist_update",
+         "data": {"symbol": symbol, "starred": bool(starred),
+                  "count": count}},
+    )
 
 
 # ── Phase 23 — per-user Eye WebSocket ─────────────────────────────────────

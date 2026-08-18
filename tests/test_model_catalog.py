@@ -125,6 +125,53 @@ class ProviderTests(TestCase):
             _, usage = provider.complete("s", "m", model="claude-opus-5")
         self.assertEqual(usage["cost_usd"], 5.0)
 
+    def test_overloaded_is_retried_then_succeeds(self):
+        """529 Overloaded arrives as an error EVENT mid-stream, which the
+        SDK does not retry — a live 'Generate now' click showed the raw
+        payload to the operator. The provider now retries transients."""
+        from ai_agents.providers.claude_provider import ClaudeProvider
+
+        provider = ClaudeProvider()
+        good = self._client_returning(text="recovered")
+        boom = Exception("{'type': 'error', 'error': {'type': "
+                         "'overloaded_error', 'message': 'Overloaded'}}")
+        good.messages.stream.return_value.__enter__.side_effect = [
+            boom, good.messages.stream.return_value.__enter__.return_value]
+        with patch.object(provider, "_get_client", return_value=good), \
+             patch("ai_agents.providers.claude_provider.time.sleep") as slept:
+            text, _ = provider.complete("s", "m", model="claude-opus-5")
+        self.assertEqual(text, "recovered")
+        slept.assert_called_once_with(2)
+
+    def test_overloaded_exhaustion_raises_a_human_message(self):
+        from ai_agents.providers.claude_provider import ClaudeProvider
+
+        provider = ClaudeProvider()
+        client = self._client_returning()
+        client.messages.stream.return_value.__enter__.side_effect = \
+            Exception("{'type': 'overloaded_error', 'message': 'Overloaded'}")
+        with patch.object(provider, "_get_client", return_value=client), \
+             patch("ai_agents.providers.claude_provider.time.sleep"):
+            with self.assertRaises(RuntimeError) as ctx:
+                provider.complete("s", "m", model="claude-opus-5")
+        self.assertIn("overloaded", str(ctx.exception).lower())
+        self.assertNotIn("request_id", str(ctx.exception),
+                         "the raw payload must not reach the operator")
+
+    def test_a_non_transient_error_is_not_retried(self):
+        from ai_agents.providers.claude_provider import ClaudeProvider
+
+        provider = ClaudeProvider()
+        client = self._client_returning()
+        client.messages.stream.return_value.__enter__.side_effect = \
+            Exception("invalid_request_error: max_tokens too large")
+        with patch.object(provider, "_get_client", return_value=client), \
+             patch("ai_agents.providers.claude_provider.time.sleep") as slept:
+            with self.assertRaises(Exception):
+                provider.complete("s", "m", model="claude-opus-5")
+        slept.assert_not_called()
+        self.assertEqual(client.messages.stream.call_count, 1)
+
 
 class DashboardTests(TestCase):
     def setUp(self):

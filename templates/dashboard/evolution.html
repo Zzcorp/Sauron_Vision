@@ -70,12 +70,71 @@
     {% endif %}
 </div>
 
+{# ── Rule families: the living tree ─────────────────────────────────── #}
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="card-title">Rule families</span>
+        <a class="nh-link nh-link--accent" href="{% url 'promotions_dashboard' %}">Promotion ladder &#9656;</a>
+    </div>
+    {% if families %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Rule</th><th>Stage</th><th>Changed</th><th>Walk-forward evidence</th><th>90d record</th><th>Born</th></tr></thead>
+      <tbody>
+        {% for fam in families %}
+          <tr style="background:var(--bg-card-hover);">
+            <td><strong>{{ fam.parent.name }}</strong></td>
+            <td><span class="badge badge-{% if fam.parent.stage == 'live_full' %}bullish{% elif fam.parent.stage == 'research' %}bearish{% else %}medium{% endif %}">{{ fam.parent.stage|upper|default:"—" }}</span></td>
+            <td style="font-size:11px;color:var(--text-muted);">the original</td>
+            <td style="font-size:11px;color:var(--text-muted);">baseline</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">
+                {% if fam.parent.n_90d %}{{ fam.parent.n_90d }} tr · {{ fam.parent.expectancy_90d|floatformat:2 }}R · {{ fam.parent.hit_rate_90d|floatformat:0 }}%{% else %}—{% endif %}
+            </td>
+            <td style="font-size:11px;color:var(--text-muted);">—</td>
+          </tr>
+          {% for f in fam.forks %}
+          <tr>
+            <td style="padding-left:26px;">└ {{ f.name }}</td>
+            <td><span class="badge badge-{% if f.stage == 'live_full' %}bullish{% elif f.stage == 'research' %}bearish{% else %}medium{% endif %}">{{ f.stage|upper|default:"—" }}</span></td>
+            <td style="font-family:var(--font-mono);font-size:11px;" title="{{ f.mutated_params }}">{{ f.changed|join:", "|truncatechars:44 }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">
+                {% if f.score_method == 'walk_forward' and f.details.train_delta is not None %}
+                    Δtrain {{ f.details.train_delta|floatformat:2 }}R ·
+                    Δtest {{ f.details.test_delta|floatformat:2 }}R
+                    {% if 'ROBUST' in f.details.notes %}<span class="up">· ROBUST</span>
+                    {% elif 'OVERFIT' in f.details.notes %}<span class="down">· OVERFIT</span>{% endif %}
+                {% elif f.score_method == 'walk_forward' %}
+                    <span style="color:var(--text-muted);">insufficient data at proposal</span>
+                {% else %}
+                    <span style="color:var(--text-muted);">heuristic ({{ f.score|floatformat:2 }}R)</span>
+                {% endif %}
+            </td>
+            <td style="font-family:var(--font-mono);font-size:11px;">
+                {% if f.n_90d %}{{ f.n_90d }} tr · {{ f.expectancy_90d|floatformat:2 }}R · {{ f.hit_rate_90d|floatformat:0 }}%{% else %}<span style="color:var(--text-muted);">no closed signals yet</span>{% endif %}
+            </td>
+            <td style="font-size:11px;">{% if f.applied_at %}{{ f.applied_at|date:"M d" }}{% else %}—{% endif %}</td>
+          </tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p style="font-size:11px;color:var(--text-muted);padding:12px 16px;">
+        A fork is the same detector as its parent with mutated constants. It starts in
+        RESEARCH (watched, never traded, never voting) and must earn each stage on the
+        promotion ladder with out-of-sample evidence. May the better one win.
+    </p>
+    {% else %}
+    <p style="color:var(--text-muted);padding:16px;">No forks yet — apply a pending mutation below and its fork appears here, climbing the ladder from RESEARCH.</p>
+    {% endif %}
+</div>
+
 <div class="card fade-in-up" style="margin-bottom: 24px;">
     <div class="card-header"><span class="card-title">Pending mutations</span></div>
     {% if proposed %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
-      <thead><tr><th>#</th><th>Parent</th><th>Parent expectancy</th><th>Mutant score</th><th>Changed</th><th>Proposed</th>{% if is_admin %}<th>Decide</th>{% endif %}</tr></thead>
+      <thead><tr><th>#</th><th>Parent</th><th>Parent expectancy</th><th>Mutant score</th><th>Evidence</th><th>Changed</th><th>Proposed</th>{% if is_admin %}<th>Decide</th>{% endif %}</tr></thead>
       <tbody>
         {% for m in proposed %}
           <tr>
@@ -84,6 +143,20 @@
             <td>{% if m.parent_expectancy is not None %}{{ m.parent_expectancy|floatformat:2 }}R{% else %}—{% endif %}</td>
             <td class="{% if m.proposed_score and m.proposed_score > m.parent_expectancy %}up{% else %}down{% endif %}">
                 {% if m.proposed_score is not None %}{{ m.proposed_score|floatformat:2 }}R{% else %}—{% endif %}
+            </td>
+            <td style="font-family:var(--font-mono);font-size:11px;">
+                {# The walk-forward breakdown was persisted from day one #}
+                {# and rendered nowhere — the operator decided blind. #}
+                {% if m.score_method == 'walk_forward' and m.score_details.train_delta is not None %}
+                    Δtr {{ m.score_details.train_delta|floatformat:2 }} ·
+                    Δte {{ m.score_details.test_delta|floatformat:2 }}
+                    {% if 'ROBUST' in m.score_details.notes %}<span class="up">ROBUST</span>
+                    {% elif 'OVERFIT' in m.score_details.notes %}<span class="down">OVERFIT</span>{% endif %}
+                {% elif m.score_method == 'walk_forward' %}
+                    <span style="color:var(--text-muted);">thin data</span>
+                {% else %}
+                    <span style="color:var(--text-muted);">heuristic</span>
+                {% endif %}
             </td>
             <td style="font-size: 11px; color: var(--text-muted);">{{ m.parameters_changed|join:", "|truncatechars:60 }}</td>
             <td style="font-size: 11px;">{{ m.proposed_at|timesince }} ago</td>

@@ -101,6 +101,7 @@ urlpatterns = [
     path("instruments/<str:symbol>/take-trade/", views.asset_trade_execute, name="asset_trade_execute"),
     path("partials/signal-rail/", views.signal_rail_partial, name="signal_rail_partial"),
     path("partials/ticker/", views.ticker_partial, name="ticker_partial"),
+    path("partials/panel-counts/", views.panel_counts_json, name="panel_counts_json"),
     path("signals/<int:signal_id>/take-trade/preview/", views.take_trade_preview, name="take_trade_preview"),
     path("signals/<int:signal_id>/take-trade/", views.take_trade_execute, name="take_trade_execute"),
     path("api/instrument-preview/<str:symbol>/", views.instrument_preview_api, name="instrument_preview_api"),
@@ -242,7 +243,12 @@ urlpatterns = [
     # Phase 27 — Tax-lot bookkeeping (per user)
     path("tax-lots/", tax_lots_dashboard, name="tax_lots_dashboard"),
     path("tax-lots/export/", tax_lots_export, name="tax_lots_export"),
-    path("notifications/", views.user_notifications, name="user_notifications"),
+    # /notifications/ is the INBOX (every row, paginated). It also catches
+    # every stored notification whose url is empty — the bell's |default
+    # fallback points here — so a link-less notification still lands on a
+    # real page. The preferences form moved to /notifications/settings/.
+    path("notifications/", views.notifications_inbox, name="notifications_inbox"),
+    path("notifications/settings/", views.user_notifications, name="user_notifications"),
     path("notifications/read/<int:notif_id>/", views.mark_notification_read, name="mark_notification_read"),
     path("notifications/read-all/", views.mark_all_notifications_read, name="mark_all_notifications_read"),
     path("intro/", views.intro_page, name="intro"),

@@ -96,6 +96,7 @@
         <div class="card">
             <div class="card-header"><span class="card-title">Top symbols · 30d</span></div>
             {% if top_symbols %}
+                <div class="table-wrapper">
                 <table class="sv-perf-table">
                     <thead><tr><th>symbol</th><th>reviews</th></tr></thead>
                     <tbody>
@@ -107,6 +108,7 @@
                         {% endfor %}
                     </tbody>
                 </table>
+                </div>
             {% else %}
                 <p class="oc-empty">No reviews recorded.</p>
             {% endif %}

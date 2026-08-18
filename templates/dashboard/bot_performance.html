@@ -28,12 +28,12 @@
     <div class="oc-strip-cell">
         <span class="oc-strip-label">BEST RULE</span>
         <span class="oc-strip-value up">{% if best_rule %}+{{ best_rule.avg_r|floatformat:2 }}R{% else %}—{% endif %}</span>
-        <span class="oc-strip-sub">{% if best_rule %}{{ best_rule.rule_name|truncatechars:18 }}{% endif %}</span>
+        <span class="oc-strip-sub" {% if best_rule %}title="{{ best_rule.rule_name }}"{% endif %}>{% if best_rule %}{{ best_rule.rule_name|truncatechars:28 }}{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">WORST RULE</span>
         <span class="oc-strip-value down">{% if worst_rule %}{{ worst_rule.avg_r|floatformat:2 }}R{% else %}—{% endif %}</span>
-        <span class="oc-strip-sub">{% if worst_rule %}{{ worst_rule.rule_name|truncatechars:18 }}{% endif %}</span>
+        <span class="oc-strip-sub" {% if worst_rule %}title="{{ worst_rule.rule_name }}"{% endif %}>{% if worst_rule %}{{ worst_rule.rule_name|truncatechars:28 }}{% endif %}</span>
     </div>
 </div>
 

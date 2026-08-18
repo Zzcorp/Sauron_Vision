@@ -127,8 +127,12 @@ WIRING = {
                                  "note": "Needs ANTHROPIC_API_KEY."},
     "pipeline_ai_journal":      {"layer": "learn", "writes": ["Signal.journal"], "feeds": [],
                                  "note": "Event-driven from signal grading rather than scheduled, which is correct."},
-    "pipeline_evolution":       {"layer": "learn", "writes": [], "feeds": [],
-                                 "note": "Writes nothing — there is no proposal for it to read."},
+    "pipeline_evolution":       {"layer": "learn",
+                                 "writes": ["RuleMutation", "RuleControl"],
+                                 "feeds": ["pipeline_promotion"],
+                                 "note": "Proposes scored mutations of decaying "
+                                         "rules (daily, evidence-gated) and forks "
+                                         "approved ones into RESEARCH."},
     "pipeline_pattern_miner":   {"layer": "learn", "writes": [], "feeds": ["pipeline_opportunity_scanner"]},
     "agent_daily_briefing":     {"layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
     "agent_weekly_review":      {"layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},

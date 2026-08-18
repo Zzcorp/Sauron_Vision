@@ -67,6 +67,7 @@
     <div class="card">
         <div class="card-header"><span class="card-title">By agent · 7d</span></div>
         {% if by_agent %}
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>agent</th><th>N</th><th>success%</th><th>avg dur</th><th>cost</th></tr></thead>
                 <tbody>
@@ -81,6 +82,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% else %}
             <p class="oc-empty">No agent activity in the last 7d.</p>
         {% endif %}
@@ -89,6 +91,7 @@
     <div class="card" style="border-left:2px solid var(--accent-red);">
         <div class="card-header"><span class="card-title">Recent failures</span></div>
         {% if recent_failures %}
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>time</th><th>agent</th><th>error</th></tr></thead>
                 <tbody>
@@ -101,6 +104,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% else %}
             <p class="oc-empty up">All clean — no recent failures.</p>
         {% endif %}
@@ -109,6 +113,7 @@
     <div class="card">
         <div class="card-header"><span class="card-title">Longest tasks · 7d</span></div>
         {% if longest_rows %}
+            <div class="table-wrapper">
             <table class="sv-perf-table">
                 <thead><tr><th>agent</th><th>time</th><th>duration</th></tr></thead>
                 <tbody>
@@ -121,6 +126,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% else %}
             <p class="oc-empty">No tasks yet.</p>
         {% endif %}
@@ -147,7 +153,7 @@
             <td style="font-family: var(--font-mono);">{{ t.duration_seconds|floatformat:1 }}s</td>
             <td style="font-family: var(--font-mono); font-size: 11px;">{{ t.input_tokens }}/{{ t.output_tokens }}</td>
             <td style="font-family: var(--font-mono);">${{ t.cost_usd }}</td>
-            <td style="font-size: 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">{{ t.response_summary|truncatechars:80 }}</td>
+            <td style="font-size: 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis;" title="{{ t.response_summary }}">{{ t.response_summary|truncatechars:80 }}</td>
         </tr>
         {% endfor %}
         </tbody>

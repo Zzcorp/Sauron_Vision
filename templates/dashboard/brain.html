@@ -67,16 +67,19 @@
             {% if latest.theme_pressures %}
                 <div style="margin-top:14px;">
                     <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Theme pressures</div>
+                    <div class="table-wrapper">
                     <table class="sv-perf-table" style="width:auto;">
                         {% for k, v in latest.theme_pressures.items %}
                             <tr><td style="padding-right:14px;">{{ k }}</td><td>{{ v|floatformat:2 }}</td></tr>
                         {% endfor %}
                     </table>
+                    </div>
                 </div>
             {% endif %}
             {% if latest.rule_status_overlay %}
                 <div style="margin-top:14px;">
                     <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Rule overlay</div>
+                    <div class="table-wrapper">
                     <table class="sv-perf-table" style="width:auto;">
                         {% for k, v in latest.rule_status_overlay.items %}
                             <tr>
@@ -89,6 +92,7 @@
                             </tr>
                         {% endfor %}
                     </table>
+                    </div>
                 </div>
             {% endif %}
             <div style="margin-top:14px;font-size:11px;color:var(--text-muted);">
@@ -127,6 +131,7 @@
     <div class="card" style="margin-bottom:14px;">
         <div class="card-header"><span class="card-title">Unconsumed observations</span></div>
         {% if obs_unconsumed %}
+            <div class="table-wrapper">
             <table class="sv-perf-table" style="width:auto;">
                 <thead><tr><th>kind</th><th>count</th></tr></thead>
                 <tbody>
@@ -135,6 +140,7 @@
                 {% endfor %}
                 </tbody>
             </table>
+            </div>
         {% else %}
             <p style="color:var(--text-muted);">Queue empty — all caught up.</p>
         {% endif %}
@@ -143,6 +149,7 @@
     {# ── Timeline ── #}
     <div class="card">
         <div class="card-header"><span class="card-title">Recent reports</span></div>
+        <div class="table-wrapper">
         <table class="sv-perf-table">
             <thead><tr><th>time</th><th>regime</th><th>conf</th><th>health</th><th>concerns</th><th>obs</th><th>tokens</th><th>cost</th></tr></thead>
             <tbody>
@@ -162,6 +169,7 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
     </div>
 
 {% endblock %}
