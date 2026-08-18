@@ -117,36 +117,44 @@
     {% endif %}
 
     {% if request.user.is_staff %}
-    <form method="post" action="{% url 'briefing_run_now' %}" style="margin-bottom:20px;">
+    {# data-run-job: sv-run.js posts this via fetch — the strategist runs #}
+    {# in a worker and the result swaps into #brfMain on completion. #}
+    <form method="post" action="{% url 'briefing_run_now' %}"
+          data-run-job="Strategist briefing" data-run-refresh="#brfMain"
+          style="margin-bottom:20px;">
         {% csrf_token %}
         <button class="btn" type="submit">▶ Run strategist now (admin)</button>
     </form>
     {% endif %}
 
-    {% if latest %}
+    <div id="brfMain">
+    {% if selected %}
     <div class="card" style="margin-bottom:20px;">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="card-title">Today · {{ latest.created_at|date:"Y-m-d" }} UTC</span>
+            <span class="card-title">
+                {% if is_latest %}Today · {% endif %}{{ selected.created_at|date:"Y-m-d H:i" }} UTC
+                {% if not is_latest %}<a href="{% url 'briefing_dashboard' %}" class="nh-link nh-link--accent" style="margin-left:12px;">latest &#9656;</a>{% endif %}
+            </span>
             <span>
-                {% if latest.posture == "defensive" %}<span class="badge badge-bearish">DEFENSIVE</span>
-                {% elif latest.posture == "aggressive" %}<span class="badge badge-bullish">AGGRESSIVE</span>
+                {% if selected.posture == "defensive" %}<span class="badge badge-bearish">DEFENSIVE</span>
+                {% elif selected.posture == "aggressive" %}<span class="badge badge-bullish">AGGRESSIVE</span>
                 {% else %}<span class="badge badge-medium">BALANCED</span>{% endif %}
             </span>
         </div>
-        {% if latest.error %}
-            <div style="color:var(--down);">Strategist error: {{ latest.error|truncatechars:200 }}</div>
+        {% if selected.error %}
+            <div style="color:var(--down);">Strategist error: {{ selected.error|truncatechars:200 }}</div>
         {% else %}
-            <div style="font-size:14px;line-height:1.6;white-space:pre-wrap;">{{ latest.outlook_md }}</div>
-            {% if latest.posture_rationale %}
-                <p style="margin-top:14px;color:var(--text-muted);font-size:12px;"><em>Posture: {{ latest.posture_rationale }}</em></p>
+            <div style="font-size:14px;line-height:1.6;white-space:pre-wrap;">{{ selected.outlook_md }}</div>
+            {% if selected.posture_rationale %}
+                <p style="margin-top:14px;color:var(--text-muted);font-size:12px;"><em>Posture: {{ selected.posture_rationale }}</em></p>
             {% endif %}
 
-            {% if latest.watchlist %}
+            {% if selected.watchlist %}
                 <div style="margin-top:18px;">
                     <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Watchlist</div>
                     <div class="table-wrapper">
                     <table class="sv-perf-table" style="width:auto;">
-                    {% for w in latest.watchlist %}
+                    {% for w in selected.watchlist %}
                         <tr>
                             <td><span class="badge badge-medium">{{ w.kind }}</span></td>
                             <td><strong>{{ w.ref }}</strong></td>
@@ -158,11 +166,11 @@
                 </div>
             {% endif %}
 
-            {% if latest.ideas %}
+            {% if selected.ideas %}
                 <div style="margin-top:18px;">
                     <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Ideas</div>
                     <ul style="margin:0;padding-left:18px;">
-                    {% for i in latest.ideas %}
+                    {% for i in selected.ideas %}
                         <li>
                             {{ i.summary }}
                             <span style="color:var(--text-muted);font-size:11px;">
@@ -177,7 +185,7 @@
             {% endif %}
 
             <div style="margin-top:18px;font-size:11px;color:var(--text-muted);">
-                model: {{ latest.model_used }} · tokens {{ latest.tokens_in }} in / {{ latest.tokens_out }} out · cost ${{ latest.cost_usd|floatformat:5 }}
+                model: {{ selected.model_used }} · tokens {{ selected.tokens_in }} in / {{ selected.tokens_out }} out · cost ${{ selected.cost_usd|floatformat:5 }}
             </div>
         {% endif %}
     </div>
@@ -188,13 +196,24 @@
     {% endif %}
 
     <div class="card">
-        <div class="card-header"><span class="card-title">Recent briefings</span></div>
+        <div class="card-header"><span class="card-title">Recent briefings
+            <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">— click one to read it</span></span></div>
         <div class="table-wrapper">
         <table class="sv-perf-table">
             <thead><tr><th>date</th><th>posture</th><th>ideas</th><th>watchlist</th><th>tokens</th><th>cost</th></tr></thead>
-            <tbody>
+            <tbody id="brfHistory">
             {% for b in history %}
-                <tr>
+                {# Row = link to that briefing; data attrs feed the 2s #}
+                {# dwell preview card, same pattern as the news feed. #}
+                <tr class="brf-row {% if selected and b.pk == selected.pk %}is-selected{% endif %}"
+                    data-brf-href="{% url 'briefing_dashboard' %}?id={{ b.pk }}"
+                    data-brf-date="{{ b.created_at|date:'Y-m-d H:i' }} UTC"
+                    data-brf-posture="{% if b.error %}ERROR{% else %}{{ b.posture|upper }}{% endif %}"
+                    data-brf-summary="{% if b.error %}{{ b.error|truncatechars:200 }}{% else %}{{ b.outlook_md|truncatechars:420 }}{% endif %}"
+                    data-brf-ideas="{{ b.ideas|length }}"
+                    data-brf-watch="{{ b.watchlist|length }}"
+                    data-brf-meta="{{ b.model_used }} · ${{ b.cost_usd|floatformat:4 }}"
+                    style="cursor:pointer;{% if selected and b.pk == selected.pk %}background:var(--bg-card-hover);{% endif %}">
                     <td>{{ b.created_at|date:"m-d" }}</td>
                     <td>{% if b.error %}<span style="color:var(--down);">ERROR</span>{% else %}{{ b.posture }}{% endif %}</td>
                     <td>{{ b.ideas|length }}</td>
@@ -209,5 +228,112 @@
         </table>
         </div>
     </div>
+    </div>{# /brfMain #}
+
+{# Row clicks open the briefing; a 2s dwell shows a preview card first — #}
+{# same dwell/placement engine as the news feed, reusing the .nf-pop #}
+{# chrome so both previews look like one family. #}
+<script>
+(function () {
+    if (!document.getElementById('brfHistory')
+        || document.getElementById('brfPop')) return;
+    // Delegated from document, NOT the tbody: the run-now completion
+    // swaps #brfMain's innerHTML, replacing the tbody — listeners bound
+    // to the old node would die with it.
+    if (window.matchMedia && !window.matchMedia('(hover: hover)').matches) {
+        // Touch: no hover — rows still navigate on tap.
+        document.addEventListener('click', function (e) {
+            var row = e.target.closest && e.target.closest('tr.brf-row');
+            if (row) window.location.assign(row.dataset.brfHref);
+        });
+        return;
+    }
+    var HOVER_DELAY_MS = 2000, GAP = 8;
+    var pop = document.createElement('div');
+    pop.className = 'nf-pop';
+    pop.id = 'brfPop';
+    pop.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(pop);
+    var timer = null, current = null;
+
+    function el(parent, tag, cls, text) {
+        if (!text) return;
+        var node = document.createElement(tag);
+        node.className = cls;
+        node.textContent = text;
+        parent.appendChild(node);
+    }
+    function build(row) {
+        var d = row.dataset;
+        pop.textContent = '';
+        el(pop, 'div', 'nf-pop-title', d.brfPosture + ' · ' + d.brfDate);
+        el(pop, 'div', 'nf-pop-meta', d.brfMeta);
+        el(pop, 'div', 'nf-pop-summary', d.brfSummary || 'No outlook recorded.');
+        var facts = document.createElement('div');
+        facts.className = 'nf-pop-facts';
+        el(facts, 'span', 'nf-pop-fact', 'IDEAS ' + (d.brfIdeas || 0));
+        el(facts, 'span', 'nf-pop-fact', 'WATCHLIST ' + (d.brfWatch || 0));
+        pop.appendChild(facts);
+        el(pop, 'div', 'nf-pop-cta', 'click to open this briefing');
+    }
+    function place(row) {
+        var r = row.getBoundingClientRect();
+        var vw = document.documentElement.clientWidth;
+        var vh = document.documentElement.clientHeight;
+        pop.style.maxHeight = '';
+        pop.style.left = '0px'; pop.style.top = '0px';
+        pop.style.display = 'block';
+        var pw = pop.offsetWidth, ph = pop.offsetHeight;
+        var below = r.bottom + GAP + ph <= vh - 8;
+        pop.style.left = Math.max(8, Math.min(r.left + 24, vw - pw - 8)) + 'px';
+        pop.style.top = (below ? r.bottom + GAP
+                               : Math.max(8, r.top - GAP - ph)) + 'px';
+    }
+    function hide() {
+        if (timer) { clearTimeout(timer); timer = null; }
+        current = null;
+        pop.style.display = 'none';
+    }
+    document.addEventListener('pointerover', function (e) {
+        var row = e.target.closest && e.target.closest('tr.brf-row');
+        if (!row || row === current) return;
+        hide();
+        current = row;
+        timer = setTimeout(function () {
+            timer = null;
+            build(row);
+            place(row);
+        }, HOVER_DELAY_MS);
+    });
+    document.addEventListener('pointerout', function (e) {
+        var row = e.target.closest && e.target.closest('tr.brf-row');
+        if (!row || row !== current) return;
+        var to = e.relatedTarget;
+        // Reaching for the card crosses out of the row — it must survive
+        // that transit, and its own pointerleave takes over from there.
+        if (to && (row.contains(to) || pop.contains(to))) return;
+        hide();
+    });
+    pop.addEventListener('pointerleave', function (e) {
+        var to = e.relatedTarget;
+        if (to && current && current.contains(to)) return;
+        hide();
+    });
+    pop.addEventListener('click', function () {
+        if (current) window.location.assign(current.dataset.brfHref);
+    });
+    document.addEventListener('click', function (e) {
+        var row = e.target.closest && e.target.closest('tr.brf-row');
+        if (!row) return;
+        // Finishing a text selection dispatches a click on the common
+        // ancestor — navigating would destroy what was just selected.
+        if (window.getSelection && !window.getSelection().isCollapsed) return;
+        hide();
+        window.location.assign(row.dataset.brfHref);
+    });
+    window.addEventListener('scroll', hide, { passive: true, capture: true });
+    window.addEventListener('resize', hide);
+})();
+</script>
 
 {% endblock %}

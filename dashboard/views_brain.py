@@ -70,8 +70,16 @@ def brain_dashboard(request):
 @staff_member_required
 @require_POST
 def brain_run_now(request):
-    """Admin-only — kick off one synthesis cycle synchronously."""
+    """Admin-only — run one synthesis cycle. XHR clicks enqueue the real
+    beat task (announced live on completion); plain form POSTs keep the
+    synchronous path."""
     from brain.synthesizer import synthesize_now
+    from brain.tasks import run_sauron_mind as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Brain synthesis",
+                                reverse("brain_dashboard"))
+    if resp is not None:
+        return resp
     result = synthesize_now()
     request.session["brain_run_result"] = result
     return HttpResponseRedirect(reverse("brain_dashboard"))

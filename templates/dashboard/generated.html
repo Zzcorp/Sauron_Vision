@@ -98,11 +98,11 @@
 
     {% if request.user.is_staff %}
     <div style="display:flex;gap:8px;margin-bottom:20px;">
-        <form method="post" action="{% url 'generated_run_now' %}" style="display:inline;">
+        <form method="post" action="{% url 'generated_run_now' %}" data-run-job="Strategy generation" style="display:inline;">
             {% csrf_token %}
             <button class="btn" type="submit">▶ Generate now (admin)</button>
         </form>
-        <form method="post" action="{% url 'demoter_run_now' %}" style="display:inline;">
+        <form method="post" action="{% url 'demoter_run_now' %}" data-run-job="Auto-demoter scan" style="display:inline;">
             {% csrf_token %}
             <button class="btn" type="submit">⊘ Run demoter pass (admin)</button>
         </form>

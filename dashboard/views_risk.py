@@ -20,9 +20,12 @@ def risk_dashboard(request):
     portfolio = get_or_create_default_portfolio(user=request.user)
 
     cm = portfolio_correlation(portfolio)
+    # order_by("rule_name") clears Signal's -created_at Meta ordering so the
+    # DISTINCT really dedups rule names — before the [:30] cap, not after.
     rules = list(
         Signal.objects
         .filter(is_active=False).exclude(outcome="").exclude(rule_name="")
+        .order_by("rule_name")
         .values_list("rule_name", flat=True).distinct()[:30]
     )
     kelly_rows = []

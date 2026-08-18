@@ -156,7 +156,9 @@ def hypotheses_dashboard(request):
 
     # Agents leaderboard — Phase-56 shows BOTH the Brier-only score
     # (objective) and the combined score (Brier + operator override).
-    sources = (Hypothesis.objects
+    # order_by clears Meta.ordering, which otherwise rides into the
+    # DISTINCT projection and duplicates every agent per created_at.
+    sources = (Hypothesis.objects.order_by("source_agent")
                .values_list("source_agent", flat=True).distinct())
     leaderboard = []
     for agent in sources:
@@ -262,6 +264,12 @@ def consolidation_dashboard(request):
 @require_POST
 def consolidation_run_now(request):
     from brain.consolidation import consolidate_now
+    from brain.tasks import run_consolidation as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Consolidation",
+                                reverse("consolidation_dashboard"))
+    if resp is not None:
+        return resp
     request.session["consolidation_result"] = consolidate_now()
     return HttpResponseRedirect(reverse("consolidation_dashboard"))
 
@@ -269,8 +277,17 @@ def consolidation_run_now(request):
 @staff_member_required
 @require_POST
 def critic_run_now(request):
-    """Admin-only — run a single critic pass synchronously."""
+    """Admin-only — run a critic pass. XHR clicks enqueue the real beat
+    task (the single most expensive recurring LLM call on the platform —
+    it must not run inside a web request), announced on completion; a
+    plain form POST keeps the old synchronous path."""
     from brain.critic import run_critic_pass
+    from brain.tasks import run_critic_pass as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Critic pass",
+                                reverse("hypotheses_dashboard"))
+    if resp is not None:
+        return resp
     request.session["critic_result"] = run_critic_pass(max_n=5)
     return HttpResponseRedirect(reverse("hypotheses_dashboard"))
 
@@ -290,6 +307,18 @@ def briefing_dashboard(request):
     latest = StrategistBriefing.objects.first()
     history = list(StrategistBriefing.objects.all()[:14])
     all_recent = list(StrategistBriefing.objects.all()[:30])
+
+    # ?id= opens ANY briefing, not only the latest — the history rows
+    # are links now. Bad or missing id falls back to the latest.
+    selected = latest
+    sel_id = request.GET.get("id")
+    if sel_id:
+        try:
+            found = StrategistBriefing.objects.filter(pk=int(sel_id)).first()
+            if found:
+                selected = found
+        except (TypeError, ValueError):
+            pass
 
     n_total = StrategistBriefing.objects.count()
     n_history = len(history)
@@ -327,6 +356,9 @@ def briefing_dashboard(request):
     return render(request, "dashboard/briefing.html", {
         "page_id": "briefing",
         "latest": latest,
+        "selected": selected,
+        "is_latest": selected is not None and latest is not None
+                     and selected.pk == latest.pk,
         "history": history,
         "n_total": n_total,
         "n_history": n_history,
@@ -345,7 +377,15 @@ def briefing_dashboard(request):
 @staff_member_required
 @require_POST
 def briefing_run_now(request):
+    """XHR clicks enqueue the real beat task — which also restores the
+    @spend_guard budget check the synchronous path quietly bypassed."""
     from brain.strategist import run_strategist_now
+    from brain.tasks import run_strategist as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Strategist briefing",
+                                reverse("briefing_dashboard"))
+    if resp is not None:
+        return resp
     request.session["briefing_result"] = run_strategist_now()
     return HttpResponseRedirect(reverse("briefing_dashboard"))
 
@@ -434,6 +474,12 @@ def generated_dashboard(request):
 @require_POST
 def generated_run_now(request):
     from brain.strategy_generator import generate_strategies_now
+    from brain.tasks import run_strategy_generator as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Strategy generation",
+                                reverse("generated_dashboard"))
+    if resp is not None:
+        return resp
     request.session["generated_result"] = generate_strategies_now(max_proposals=3)
     return HttpResponseRedirect(reverse("generated_dashboard"))
 
@@ -468,6 +514,12 @@ def generated_reject(request, pk: int):
 @require_POST
 def demoter_run_now(request):
     from brain.demoter import scan_generated_rules_now
+    from brain.tasks import run_auto_demoter as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Auto-demoter scan",
+                                reverse("generated_dashboard"))
+    if resp is not None:
+        return resp
     request.session["demoter_result"] = scan_generated_rules_now()
     return HttpResponseRedirect(reverse("generated_dashboard"))
 
@@ -841,6 +893,12 @@ def earnings_reviews_dashboard(request):
 @require_POST
 def earnings_reviewer_run_now(request):
     from brain.earnings_reviewer import scan_due_earnings_now
+    from brain.tasks import run_earnings_reviewer as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Earnings reviews",
+                                reverse("earnings_reviews_dashboard"))
+    if resp is not None:
+        return resp
     request.session["earnings_reviewer_result"] = scan_due_earnings_now()
     return HttpResponseRedirect(reverse("earnings_reviews_dashboard"))
 

@@ -368,7 +368,8 @@ def build_topology(user):
     # ── The bots ──────────────────────────────────────────────────────
     try:
         from bot_program.models import AssetBotConfig, AssetBotTrade
-        for cfg in AssetBotConfig.objects.filter(user=user).order_by("asset_class"):
+        # "name" tie-breaks bots within an asset class (matches the model Meta).
+        for cfg in AssetBotConfig.objects.filter(user=user).order_by("asset_class", "name"):
             open_n = AssetBotTrade.objects.filter(config=cfg, status="OPEN").count()
             pending = AssetBotTrade.objects.filter(
                 config=cfg, status="CLOSE_PENDING").count()

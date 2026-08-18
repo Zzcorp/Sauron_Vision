@@ -176,7 +176,7 @@ EVOLUTION_DENSE_MIN_CLOSED_7D = 50
 
 @shared_task
 @guarded_task("pipeline_evolution")
-def propose_strategy_evolutions():
+def propose_strategy_evolutions(force: bool = False):
     """Phase 9: scan decaying rules with a parameter schema, propose mutations.
 
     Beat fires this DAILY; the task decides whether today deserves a run.
@@ -194,7 +194,9 @@ def propose_strategy_evolutions():
     from datetime import timedelta
     from django.utils import timezone
 
-    if timezone.now().weekday() != 6:  # 6 = Sunday, the guaranteed run
+    # force=True is the operator's "Propose Now" click routed async —
+    # a human asking IS the evidence; the cadence gate is for the beat.
+    if not force and timezone.now().weekday() != 6:  # 6 = Sunday
         from bot_program.models import AssetBotTrade
         closed_7d = AssetBotTrade.objects.filter(
             status="CLOSED",
@@ -286,10 +288,13 @@ def resolve_opportunity_flags():
 def mine_patterns():
     """Phase 11 — mine historical multi-modal data for candidate setups
     (DiscoveredSetup rows, weekly Sunday 06:00 UTC)."""
-    from signals.pattern_miner import mine_all_active
+    from signals.pattern_miner import expire_stale_discoveries, mine_all_active
 
+    # This task is the expiry sweep's only production caller — without it,
+    # PROPOSED discoveries past DISCOVERY_TTL_DAYS accumulate forever.
+    n_expired = expire_stale_discoveries()
     result = mine_all_active()
-    logger.info("Pattern mining: %s", result)
+    logger.info("Pattern mining: %s (expired %s stale)", result, n_expired)
     return result
 
 

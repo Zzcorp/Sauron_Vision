@@ -262,6 +262,10 @@ class BotConfig(models.Model):
 
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        # One config per user (OneToOne), listed admin-wide — order by owner.
+        ordering = ["user__username"]
+
     def normalized_weights(self) -> dict:
         keys = ["w_technical","w_sauron_sig","w_news","w_liquidity","w_macro","w_sentiment"]
         vals = [max(0.0, getattr(self, k)) for k in keys]

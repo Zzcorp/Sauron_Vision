@@ -1357,7 +1357,9 @@ def admin_dashboard(request):
     ai_tokens = sum(t.input_tokens + t.output_tokens for t in ai_24h)
 
     agent_stats = []
-    for agent_name in ai_24h.values_list("agent", flat=True).distinct():
+    # order_by("agent") clears AgentTask's -created_at Meta ordering, which would
+    # otherwise sneak created_at into the DISTINCT projection and yield dupes.
+    for agent_name in ai_24h.order_by("agent").values_list("agent", flat=True).distinct():
         agent_qs = ai_24h.filter(agent=agent_name)
         agent_stats.append({
             "agent": agent_name,
@@ -3143,7 +3145,7 @@ def active_sessions_api(request):
         return JsonResponse({'error': 'Cannot revoke current session'}, status=400)
 
     # List active sessions for this user
-    sessions = Session.objects.filter(expire_date__gte=timezone.now())
+    sessions = Session.objects.filter(expire_date__gte=timezone.now()).order_by("-expire_date")
     user_sessions = []
     for session in sessions:
         session_data = session.get_decoded()

@@ -68,7 +68,7 @@
     {% endif %}
 
     {% if request.user.is_staff %}
-    <form method="post" action="{% url 'consolidation_run_now' %}" style="margin-bottom:20px;">
+    <form method="post" action="{% url 'consolidation_run_now' %}" data-run-job="Consolidation" style="margin-bottom:20px;">
         {% csrf_token %}
         <button class="btn" type="submit">▶ Run consolidation now (admin)</button>
     </form>

@@ -31,6 +31,8 @@ def signals_metrics(request):
              "n_closed": v["n_closed"], "is_empirical": v["is_empirical"]}
             for k, v in perf.items()
         ]
+        # Dict order here is DB arrival order — sort so the busiest setups lead.
+        ctx["setups"].sort(key=lambda r: -(r["n_closed"] or 0))
 
         # Chart 1: signals per day stacked long/short
         since = timezone.now() - timedelta(days=14)
@@ -48,10 +50,12 @@ def signals_metrics(request):
         })
 
         # Chart 2: setup distribution donut (active signals)
+        # most_common() gives one aligned (label, value) sequence, largest first.
         setup_counts = Counter(s.setup for s in active)
+        setup_pairs = setup_counts.most_common()
         ctx["setup_dist"] = json.dumps({
-            "labels": list(setup_counts.keys()),
-            "values": list(setup_counts.values()),
+            "labels": [k for k, _ in setup_pairs],
+            "values": [v for _, v in setup_pairs],
         })
 
         # Chart 3: R-multiple histogram from closed signals (90d)
@@ -84,7 +88,14 @@ def strategies_metrics(request):
         from strategies.models import Strategy
         all_strats = Strategy.objects.all()
         status_counts = Counter(s.status for s in all_strats)
-        ctx["by_status"] = [{"status": k, "count": v} for k, v in status_counts.items()]
+        # Fixed lifecycle order — Counter order is arrival order, which shuffles
+        # the table and chart between reloads. Zero-count statuses are skipped.
+        status_order = ["active", "approved", "proposed", "completed", "paused", "rejected"]
+        by_status = [
+            {"status": k, "count": status_counts.get(k, 0)}
+            for k in status_order if status_counts.get(k, 0)
+        ]
+        ctx["by_status"] = by_status
         ctx["totals"] = {
             "total": all_strats.count(),
             "active": status_counts.get("active", 0),
@@ -92,8 +103,8 @@ def strategies_metrics(request):
             "completed": status_counts.get("completed", 0),
         }
         ctx["chart_data"] = json.dumps({
-            "labels": list(status_counts.keys()),
-            "values": list(status_counts.values()),
+            "labels": [r["status"] for r in by_status],
+            "values": [r["count"] for r in by_status],
         })
         # Per-strategy P&L bar (uses any 'realized_pnl' or 'pnl' field if present)
         labels = []

@@ -27,14 +27,16 @@ def bot_performance_dashboard(request):
 
     rows = bot_performance_summary(days=days, min_n=1)
 
-    # Filter to this user's configs only.
+    # Filter to this user's configs only. The bare .order_by() clears the model's
+    # -opened_at Meta ordering, which would otherwise join the DISTINCT projection
+    # and make the DB ship one row per trade instead of one per value.
     user_configs = set(
         AssetBotTrade.objects.filter(config__user=request.user)
-        .values_list("config__id", flat=True).distinct()
+        .order_by().values_list("config__id", flat=True).distinct()
     )
     user_rules = set(
         AssetBotTrade.objects.filter(config__user=request.user, status="CLOSED")
-        .values_list("rule_name", flat=True).distinct()
+        .order_by().values_list("rule_name", flat=True).distinct()
     )
     rows = [r for r in rows if r["rule_name"] in user_rules]
 

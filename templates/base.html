@@ -44,6 +44,7 @@
     <script src="{% static 'js/sv-flash.js' %}" defer></script>
     <link rel="stylesheet" href="{% static 'css/sv-tour.css' %}">
     <script src="{% static 'js/sv-tour.js' %}" defer></script>
+    <script src="{% static 'js/sv-run.js' %}" defer></script>
 {% block extra_css %}{% endblock %}
 </head>
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}">
@@ -3832,6 +3833,7 @@ if ('serviceWorker' in navigator) {
     var MAX_VISIBLE = 4;
     var TTL = { fill_open: 15000, new_signal: 18000, fill_close: 30000,
                 sauron_answer: 25000, notification: 4000,
+                run_complete: 8000,
                 close_pending: 0 };   /* 0 = sticky: this one needs a human */
 
     function esc(v) {
@@ -3907,6 +3909,21 @@ if ('serviceWorker' in navigator) {
                 line: "Still open at the broker — the close was rejected.",
                 more: row("Asset class", d.asset_class) + row("Trade", d.trade_id),
                 href: "/asset-bots/"
+            };
+        }
+        if (kind === "run_complete") {
+            /* A manually launched background job finished. The durable
+               Notification row raises its own banner too — this richer
+               card is for the page that launched it; the id-based dedupe
+               in add() does not apply (no id), and the two coalesce
+               visually since the notification one is often silent. */
+            return {
+                cls: d.ok === false ? "warn" : "open",
+                kind: d.ok === false ? "Run failed" : "Run finished",
+                sym: "", val: "", valCls: "",
+                line: (d.job || "job") + " — " + (d.summary || "done"),
+                more: "",
+                href: d.url || "/notifications/"
             };
         }
         if (kind === "notification") {
@@ -4112,6 +4129,13 @@ if ('serviceWorker' in navigator) {
                 if (msg.kind === "notification" && window.refreshNotifBadge) {
                     window.refreshNotifBadge();
                 }
+                /* Re-broadcast for page modules (sv-run.js resets its
+                   RUNNING buttons and refreshes result regions on
+                   kind "run_complete"). */
+                try {
+                    document.dispatchEvent(new CustomEvent("sv:eye-event",
+                                                           { detail: msg }));
+                } catch (e) { /* ancient engines */ }
             }
         };
         ws.onclose = schedule;

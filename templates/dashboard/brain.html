@@ -107,7 +107,7 @@
     {% endif %}
 
     {% if request.user.is_staff %}
-    <form method="post" action="{% url 'brain_run_now' %}" style="margin-bottom:20px;">
+    <form method="post" action="{% url 'brain_run_now' %}" data-run-job="Brain synthesis" style="margin-bottom:20px;">
         {% csrf_token %}
         <button class="btn" type="submit">▶ Run synthesis now (admin)</button>
     </form>

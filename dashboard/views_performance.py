@@ -33,9 +33,12 @@ def performance_dashboard(request):
     setups = setup_performance_summary(days=window)
 
     # Decay scan — only rules with at least one closed signal in the baseline window.
+    # order_by("rule_name") clears Signal's -created_at Meta ordering — otherwise
+    # created_at joins the DISTINCT projection and every rule comes back N times.
     rules = (
         Signal.objects
         .filter(is_active=False).exclude(outcome="")
+        .order_by("rule_name")
         .values_list("rule_name", flat=True).distinct()
     )
     decay_rows = [decay_flag(r, recent_days=14, baseline_days=90) for r in rules if r]

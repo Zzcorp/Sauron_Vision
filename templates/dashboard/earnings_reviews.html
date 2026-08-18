@@ -124,7 +124,7 @@
     {% endif %}
 
     {% if request.user.is_staff %}
-    <form method="post" action="{% url 'earnings_reviewer_run_now' %}" style="margin-bottom:20px;">
+    <form method="post" action="{% url 'earnings_reviewer_run_now' %}" data-run-job="Earnings reviews" style="margin-bottom:20px;">
         {% csrf_token %}
         <button class="btn" type="submit">▶ Scan held earnings now (admin)</button>
     </form>

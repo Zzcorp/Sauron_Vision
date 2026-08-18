@@ -145,7 +145,15 @@ def flatten_all_positions(request):
 
 
 def _run_task(task_callable, label: str, request):
-    """Run a Celery task synchronously and flash the result."""
+    """Run a run-now task: async 202 for XHR clicks (the real Celery
+    task, completion announced on the operator's socket), synchronous
+    with a flash for plain form POSTs. Returns a response to send, or
+    None when the caller should redirect as before."""
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, task_callable, label,
+                                "/admin-dashboard/")
+    if resp is not None:
+        return resp
     try:
         result = task_callable()
         if isinstance(result, dict) and result.get("status") == "skipped":
@@ -155,6 +163,7 @@ def _run_task(task_callable, label: str, request):
     except Exception as e:
         logger.exception("%s failed", label)
         messages.error(request, f"{label} failed: {e}")
+    return None
 
 
 # ── run-now endpoints ───────────────────────────────────────────────────────
@@ -162,14 +171,18 @@ def _run_task(task_callable, label: str, request):
 @_admin_only
 def run_signal_scan(request):
     from signals.tasks import run_signal_scan as task
-    _run_task(task, "Signal scan", request)
+    resp = _run_task(task, "Signal scan", request)
+    if resp is not None:
+        return resp
     return redirect("admin_dashboard")
 
 
 @_admin_only
 def run_smc_lifecycle(request):
     from signals.tasks_lifecycle import run_smc_lifecycle as task
-    _run_task(task, "SMC lifecycle pass", request)
+    resp = _run_task(task, "SMC lifecycle pass", request)
+    if resp is not None:
+        return resp
     return redirect("admin_dashboard")
 
 
@@ -190,35 +203,45 @@ def run_grade_signals(request):
 @_admin_only
 def run_decay_investigation(request):
     from ai_agents.tasks import investigate_decaying_rules as task
-    _run_task(task, "Decay investigation", request)
+    resp = _run_task(task, "Decay investigation", request)
+    if resp is not None:
+        return resp
     return redirect("admin_dashboard")
 
 
 @_admin_only
 def run_daily_snapshot(request):
     from portfolio.tasks import create_daily_snapshot as task
-    _run_task(task, "Daily portfolio snapshot", request)
+    resp = _run_task(task, "Daily portfolio snapshot", request)
+    if resp is not None:
+        return resp
     return redirect("admin_dashboard")
 
 
 @_admin_only
 def run_recalc_exposure(request):
     from portfolio.tasks import recalculate_exposure as task
-    _run_task(task, "Recalculate exposure", request)
+    resp = _run_task(task, "Recalculate exposure", request)
+    if resp is not None:
+        return resp
     return redirect("admin_dashboard")
 
 
 @_admin_only
 def run_nightly_cleanup(request):
     from market_data.cleanup_tasks import nightly_cleanup_all as task
-    _run_task(task, "Nightly cleanup", request)
+    resp = _run_task(task, "Nightly cleanup", request)
+    if resp is not None:
+        return resp
     return redirect("admin_dashboard")
 
 
 @_admin_only
 def run_full_universe_scan(request):
     from signals.tasks import run_full_universe_scan as task
-    _run_task(task, "Full universe signal scan", request)
+    resp = _run_task(task, "Full universe signal scan", request)
+    if resp is not None:
+        return resp
     return redirect("admin_dashboard")
 
 
@@ -527,6 +550,12 @@ def hq_run_asset_bot(request):
 def hq_run_all_asset_bots(request):
     """Run a tick for every enabled AssetBotConfig."""
     from bot_program.asset_engine.runner import run_all_asset_bots
+    from bot_program.tasks import tick_all_asset_bots as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Asset bots tick",
+                                "/admin-dashboard/")
+    if resp is not None:
+        return resp
     try:
         result = run_all_asset_bots()
         messages.success(
@@ -578,6 +607,12 @@ def hq_fire_test_event(request):
 def hq_run_pattern_miner(request):
     """Trigger an immediate pattern-mining pass."""
     from signals.pattern_miner import mine_all_active, expire_stale_discoveries
+    from signals.tasks import mine_patterns as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Pattern mining",
+                                "/admin-dashboard/")
+    if resp is not None:
+        return resp
     try:
         expired = expire_stale_discoveries()
         result = mine_all_active()
@@ -633,6 +668,12 @@ def hq_reject_discovery(request):
 def hq_run_opportunity_scan(request):
     """Trigger an immediate scan of all active OpportunitySetups."""
     from signals.opportunity_scanner import scan_all_setups
+    from signals.tasks import scan_opportunities as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Opportunity scan",
+                                "/admin-dashboard/")
+    if resp is not None:
+        return resp
     try:
         result = scan_all_setups()
         messages.success(
@@ -649,6 +690,12 @@ def hq_run_opportunity_scan(request):
 @_admin_only
 def hq_resolve_opportunities(request):
     from signals.opportunity_scanner import resolve_pending_flags
+    from signals.tasks import resolve_opportunity_flags as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Flag resolution",
+                                "/admin-dashboard/")
+    if resp is not None:
+        return resp
     try:
         result = resolve_pending_flags()
         messages.success(
@@ -730,6 +777,15 @@ def hq_toggle_opportunity_setup(request):
 def hq_run_evolution(request):
     """Trigger immediate evolution proposer pass over decaying parameter-aware rules."""
     from signals.evolution import propose_for_decaying_rules
+    from signals.tasks import propose_strategy_evolutions as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    # force=True: the beat task's evidence-cadence gate must not silently
+    # skip a human's explicit click.
+    resp = maybe_dispatch_async(request, _twin, "Evolution proposer",
+                                "/admin-dashboard/",
+                                kwargs={"force": True})
+    if resp is not None:
+        return resp
     try:
         result = propose_for_decaying_rules()
         messages.success(
@@ -783,6 +839,12 @@ def hq_reject_evolution(request):
 def hq_run_promotions(request):
     """Trigger an immediate auto-evaluation pass over the promotion pipeline."""
     from signals.promotion_pipeline import auto_evaluate_all_rules
+    from signals.tasks import auto_evaluate_promotions as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Promotion evaluation",
+                                "/admin-dashboard/")
+    if resp is not None:
+        return resp
     try:
         result = auto_evaluate_all_rules()
         messages.success(
@@ -836,6 +898,12 @@ def hq_demote_rule(request):
 def hq_propose_allocation(request):
     """Admin trigger for an immediate meta-allocator proposal."""
     from signals.meta_allocator import propose_allocation
+    from signals.tasks import propose_meta_allocation as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Meta-allocation proposal",
+                                "/admin-dashboard/")
+    if resp is not None:
+        return resp
     try:
         alloc = propose_allocation()
         messages.success(

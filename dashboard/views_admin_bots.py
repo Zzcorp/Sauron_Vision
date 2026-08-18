@@ -19,7 +19,8 @@ def admin_bots_panel(request):
         from bot_program.engine.heartbeat import heartbeat_age_seconds
         from bot_program.engine.shadow import is_shadow_mode
 
-        configs = BotConfig.objects.select_related("user").all()
+        # BotConfig has no Meta ordering — pin the panel to username order.
+        configs = BotConfig.objects.select_related("user").order_by("user__username")
         for cfg in configs:
             try:
                 circuit = cfg.circuit_state.halt_reason or ""

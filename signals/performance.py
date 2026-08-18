@@ -326,7 +326,9 @@ def setup_performance_summary(days=30):
     )
 
     out = {}
-    for setup in closed.values_list("setup", flat=True).distinct():
+    # order_by("setup") clears SmcSignal's -created_at Meta ordering — without it
+    # the DISTINCT projection includes created_at and each setup repeats per row.
+    for setup in closed.order_by("setup").values_list("setup", flat=True).distinct():
         setup_qs = closed.filter(setup=setup)
         n = setup_qs.count()
         if n == 0:

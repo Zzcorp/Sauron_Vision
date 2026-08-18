@@ -46,9 +46,11 @@ def liquidations_page(request):
     window = request.GET.get("window", "24h")
     hours = WINDOWS.get(window, 24)
     agg = _aggregate(symbol, hours)
+    # order_by("symbol") clears the -timestamp Meta ordering, which would ride
+    # into the DISTINCT projection and fill the [:30] cap with duplicate symbols.
     symbols = list(LiquidationEvent.objects.filter(
         timestamp__gte=timezone.now() - timedelta(days=7)
-    ).values_list("symbol", flat=True).distinct()[:30])
+    ).order_by("symbol").values_list("symbol", flat=True).distinct()[:30])
     if symbol not in symbols: symbols.insert(0, symbol)
     recent = list(LiquidationEvent.objects.filter(symbol=symbol).values(
         "side","price","qty","notional_usd","timestamp")[:30])
@@ -56,7 +58,7 @@ def liquidations_page(request):
     # Funding panel data — top symbols by recent funding activity
     funding_symbols = list(FundingRate.objects.filter(
         timestamp__gte=timezone.now() - timedelta(hours=24)
-    ).values_list("symbol", flat=True).distinct()[:8])
+    ).order_by("symbol").values_list("symbol", flat=True).distinct()[:8])
     funding_data = []
     for sym in funding_symbols:
         rows = list(FundingRate.objects.filter(
