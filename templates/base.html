@@ -572,19 +572,19 @@
                 {% if not ticker_items %}
                 <span class="ticker-item" data-type="empty" style="color:var(--text-muted);cursor:default;">
                     <span class="t-badge news">FEED</span>
-                    <span>Quiet — signals and news appear here as the scanners run</span>
+                    <span>Quiet — news appears here as the scrapers run</span>
                 </span>
                 {% endif %}
                 {% for item in ticker_items %}
                 <a href="{{ item.url }}" class="ticker-item" data-type="{{ item.type }}">
+                    {% comment %}Signals were removed from this band by
+                    request — the rail is their home; the ticker is news
+                    only (quote/strategy branches remain for the payloads
+                    older pages may still hand this include).{% endcomment %}
                     {% if item.type == "quote" %}
                     <span class="t-sym">{{ item.symbol }}</span>
                     <span class="t-price">{{ item.price }}</span>
                     <span class="t-change {% if item.change >= 0 %}up{% else %}down{% endif %}">{{ item.change_display }}</span>
-                    {% elif item.type == "signal" %}
-                    <span class="t-badge signal">SIG</span>
-                    <span class="t-sym">{{ item.symbol }}</span>
-                    <span>{{ item.direction }}</span>
                     {% elif item.type == "news" %}
                     <span class="t-badge news">NEWS</span>
                     <span>{{ item.title|truncatechars:50 }}</span>
@@ -619,43 +619,6 @@
                         </span></div>
                         <div class="tp-cta">▸ Open instrument · <span class="tp-cta-alt">shift-click to ask Sauron</span></div>
 
-                        {% elif item.type == "signal" %}
-                        <div class="tp-head">
-                            <span class="tp-sym">{{ item.symbol }}</span>
-                            <span class="tp-chip tp-chip--{{ item.direction }}">{{ item.direction|upper }}</span>
-                            {% if item.urgency %}<span class="tp-chip">{{ item.urgency|upper }}</span>{% endif %}
-                        </div>
-                        <div class="tp-sub">{{ item.title|truncatechars:90 }}</div>
-
-                        {% comment %} Conviction as a bar, because a bare 0.72 means nothing
-                           without the scale it sits on. {% endcomment %}
-                        <div class="tp-score">
-                            <div class="tp-score-track"><div class="tp-score-fill" style="width:{{ item.score_pct }}%;"></div></div>
-                            <span class="tp-score-num">{{ item.score }}</span>
-                        </div>
-
-                        {% if item.entry %}
-                        <div class="tp-levels">
-                            <div class="tp-level"><span class="lbl">ENTRY</span><span>{{ item.entry|floatformat:4 }}</span></div>
-                            {% if item.stop %}<div class="tp-level tp-level--stop"><span class="lbl">STOP</span><span>{{ item.stop|floatformat:4 }}</span></div>{% endif %}
-                            {% if item.target %}<div class="tp-level tp-level--target"><span class="lbl">TARGET</span><span>{{ item.target|floatformat:4 }}</span></div>{% endif %}
-                        </div>
-                        {% endif %}
-                        {% if item.rr %}
-                        <div class="tp-row"><span class="lbl">Reward : risk</span><span>{{ item.rr }} : 1</span></div>
-                        {% endif %}
-                        {% if item.drift_pct != None %}
-                        {% comment %} A setup is only actionable while price is still near
-                           its entry; without this the card silently ages. {% endcomment %}
-                        <div class="tp-row"><span class="lbl">Moved since</span><span class="{% if item.drift_pct >= 0 %}up{% else %}down{% endif %}">{{ item.drift_pct }}%</span></div>
-                        {% endif %}
-                        <div class="tp-row"><span class="lbl">Rule</span><span>{{ item.rule_name|default:"—"|truncatechars:26 }}</span></div>
-                        {% if item.age_min != None %}
-                        <div class="tp-row"><span class="lbl">Age</span><span>{% if item.age_min < 60 %}{{ item.age_min }}m{% else %}{{ item.age_min }}m — stale{% endif %}</span></div>
-                        {% endif %}
-                        {% if item.description %}<div class="tp-thesis">{{ item.description|truncatechars:220 }}</div>{% endif %}
-                        <div class="tp-cta">▸ Open signals · <span class="tp-cta-alt">shift-click to ask Sauron</span></div>
-
                         {% elif item.type == "news" %}
                         <div class="tnp-head">
                           <span class="tnp-source">{{ item.source }}</span>
@@ -688,7 +651,6 @@
                 {% for item in ticker_items %}
                 <a href="{{ item.url }}" class="ticker-item" data-type="{{ item.type }}">
                     {% if item.type == "quote" %}<span class="t-sym">{{ item.symbol }}</span><span class="t-price">{{ item.price }}</span><span class="t-change {% if item.change >= 0 %}up{% else %}down{% endif %}">{{ item.change_display }}</span>
-                    {% elif item.type == "signal" %}<span class="t-badge signal">SIG</span><span class="t-sym">{{ item.symbol }}</span>
                     {% elif item.type == "news" %}<span class="t-badge news">NEWS</span><span>{{ item.title|truncatechars:50 }}</span>
                     {% endif %}
                 </a>
@@ -1227,8 +1189,8 @@
                          data-min="{{ w.spark_min|floatformat:6 }}"
                          data-max="{{ w.spark_max|floatformat:6 }}"
                          data-up="{% if w.change_pct >= 0 %}1{% else %}0{% endif %}"
-                         data-w="330" data-h="56">
-                        <svg viewBox="0 0 330 56" preserveAspectRatio="none"><path d=""/></svg>
+                         data-w="330" data-h="34">
+                        <svg viewBox="0 0 330 34" preserveAspectRatio="none"><path d=""/></svg>
                     </div>
                     {% endif %}
                     <div class="dh-pop-row"><span class="k">Asset class</span><span class="v">{{ w.asset_class|default:"—"|upper }}</span></div>
@@ -2402,7 +2364,10 @@ function toggleSidebar() {
   // Moves a popup from inside a transform-animated track to <body>,
   // positions it fixed, and returns it on mouseleave.
   var activePopup = null;
-  function showPortalPopup(item, popSelector, maxW) {
+  /* placement: 'below' (default — headband cells hang their popup under
+     the band) or 'left' (rail items float theirs beside the rail, exactly
+     like the signal cards' popups). */
+  function showPortalPopup(item, popSelector, maxW, placement) {
     var pop = item.querySelector(popSelector) || item._portalPop;
     if (!pop) return;
     /* Cancel any pending hide for this item — we're moving back in. */
@@ -2418,19 +2383,25 @@ function toggleSidebar() {
        their cursor onto the popup to click links/buttons inside.    */
     pop.style.pointerEvents = 'auto';
     var r = item.getBoundingClientRect();
-    /* Vertical clamp: headband items sit at the top, watchlist items can
-       sit anywhere — a popup opened near the bottom must slide up, not
-       run off-screen. display:block is already set, so offsetHeight is
-       measurable. */
-    var top = r.bottom + 4;
     var ph = pop.offsetHeight || 0;
-    if (ph && top + ph > window.innerHeight - 12) {
-      top = Math.max(12, window.innerHeight - ph - 12);
+    var top, left;
+    if (placement === 'left') {
+      /* Beside the item, vertically centered — the signal-card pattern. */
+      top = r.top + r.height / 2 - ph / 2;
+      left = r.left - maxW - 12;
+    } else {
+      top = r.bottom + 4;
+      left = r.left;
     }
-    pop.style.top = top + 'px';
-    var left = r.left;
+    /* Clamp to the viewport on both axes: headband popups near the right
+       edge slide left; rail popups near the bottom slide up. */
+    if (ph && top + ph > window.innerHeight - 12) {
+      top = window.innerHeight - ph - 12;
+    }
+    if (top < 12) top = 12;
     if (left + maxW > window.innerWidth - 16) left = window.innerWidth - maxW - 16;
     if (left < 16) left = 16;
+    pop.style.top = top + 'px';
     pop.style.left = left + 'px';
     pop.style.animation = 'dhPop .18s ease';
     activePopup = pop;
@@ -2474,12 +2445,12 @@ function toggleSidebar() {
     item.addEventListener('mouseleave', function(){ scheduleHidePortalPopup(item, item._portalPop || pop); });
   });
 
-  // Watchlist rail popups — same portal, same lifecycle. The rail hugs the
-  // right edge, so showPortalPopup's viewport clamp slides the popup left.
+  // Watchlist rail popups — same portal, same lifecycle, but placed to the
+  // SIDE of the rail like the signal cards' popups, not under the item.
   document.querySelectorAll('.wl-item').forEach(function(item){
     var pop = item.querySelector('.wl-pop');
     if (!pop) return;
-    item.addEventListener('mouseenter', function(){ showPortalPopup(item, '.wl-pop', 380); });
+    item.addEventListener('mouseenter', function(){ showPortalPopup(item, '.wl-pop', 380, 'left'); });
     item.addEventListener('mouseleave', function(){ scheduleHidePortalPopup(item, item._portalPop || pop); });
   });
 

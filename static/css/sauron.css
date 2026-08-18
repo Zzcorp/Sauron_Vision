@@ -909,6 +909,13 @@
             opacity: 0; pointer-events: none;
         }
         body:has(.sidebar.mini) .ticker-bar { left: 68px; }
+        /* Stop short of the signals rail, exactly like the data headband
+           does. Without this the bar ran UNDER the rail and its collapse
+           button — absolute right:0 inside the bar — was buried beneath
+           it: the News band looked uncloseable while the price band's
+           twin button sat in plain sight. */
+        body:has(.signals-rail) .ticker-bar { right: 44px; }
+        body:has(.signals-rail.open) .ticker-bar { right: 280px; }
         .ticker-track {
             display: inline-flex; gap: 0;
             animation: tickerScroll 240s linear infinite;
@@ -1875,9 +1882,10 @@
         .dh-pop-cta { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
                       font-size: 10px; color: var(--accent); text-align: right; }
         /* Small chart inside the hover popups (headband + watchlist).
-           Same renderer as the rail sparks; dimensions come from data-w/h. */
-        .pop-spark { margin: 0 0 12px; }
-        .pop-spark svg { width: 100%; height: 56px; display: block; }
+           Same renderer as the rail sparks; dimensions come from data-w/h.
+           Deliberately shallow — it is a shape cue, not a chart page. */
+        .pop-spark { margin: 0 0 8px; }
+        .pop-spark svg { width: 100%; height: 34px; display: block; }
         .pop-spark svg path {
             fill: none; stroke: var(--accent); stroke-width: 1.6;
             filter: drop-shadow(0 0 3px rgba(0,232,104,0.35));
@@ -3956,4 +3964,94 @@ body.light-mode .oc-tab,
 body.light-mode .nav-link,
 body.light-mode .topbar {
     box-shadow: none;
+}
+
+/* ── Second sweep: the spots the first pass missed. Every rule below
+   exists because an element carried a HARDCODED dark background or
+   shadow that the token swap could never reach. ── */
+
+/* News band + bottom info bar. The info bar's gradient ended on
+   rgba(6,14,10) — a near-black smear across a light page. */
+body.light-mode .ticker-bar {
+    box-shadow: 0 1px 3px rgba(20, 30, 24, .07);
+    border-top-color: rgba(20, 30, 24, .08);
+}
+body.light-mode .info-panel-wrap {
+    background: var(--bg-primary);
+    box-shadow: 0 -1px 3px rgba(20, 30, 24, .07);
+}
+
+/* Headband collapse buttons + restore tabs: the dark-glass gradient
+   read as a black smudge pressed into a light band. */
+body.light-mode .hb-collapse-btn,
+body.light-mode .data-headband .hb-collapse-btn {
+    background: linear-gradient(270deg, rgba(0, 153, 77, 0.12) 0%, rgba(247, 250, 248, 0.96) 60%, rgba(247, 250, 248, 0.65) 100%);
+    border-left-color: rgba(0, 153, 77, 0.30);
+    color: #00713a;
+    box-shadow: none;
+}
+body.light-mode .hb-collapse-btn:hover,
+body.light-mode .data-headband .hb-collapse-btn:hover {
+    background: linear-gradient(270deg, rgba(0, 153, 77, 0.24) 0%, rgba(240, 246, 242, 0.98) 60%, rgba(240, 246, 242, 0.75) 100%);
+    color: #004d27;
+    box-shadow: none;
+}
+body.light-mode .hb-collapse-btn svg { filter: none; }
+body.light-mode .hb-restore-tab {
+    box-shadow: -2px 0 10px rgba(20, 30, 24, .12);
+    animation: none;
+}
+
+/* Headband + watchlist hover popups — the 70%-black drop shadow and the
+   glow text-shadows belong to the dark theme only. */
+body.light-mode .dh-pop {
+    box-shadow: 0 10px 30px -8px rgba(20, 30, 24, .28);
+}
+body.light-mode .dh-pop-title { text-shadow: none; }
+body.light-mode .dh-sym { text-shadow: none; }
+
+/* The Palantír orb: a black seeing-stone with three painted inset
+   shadows. In light mode it becomes a pale stone — the green ember
+   inside carries the identity. */
+body.light-mode .se-eye-fab {
+    background: radial-gradient(circle at 50% 55%,
+        #f8fbf9 0%, #ecf3ee 70%, #dfe9e3 100%);
+    border-color: rgba(0, 153, 77, 0.45);
+}
+
+/* …and its chat panel, whose body, header tab, buttons, input bar and
+   bubbles all had hand-painted near-black gradients. */
+body.light-mode .se-chat-panel {
+    background: linear-gradient(160deg,
+        rgba(252, 254, 253, 0.92) 0%, rgba(241, 247, 243, 0.96) 100%);
+    border-color: rgba(0, 153, 77, 0.22);
+}
+body.light-mode .se-chat-header,
+body.light-mode .se-chat-input-wrap {
+    background: rgba(255, 255, 255, 0.75);
+    border-color: rgba(0, 153, 77, 0.20);
+}
+body.light-mode .se-chat-input-wrap:focus-within {
+    box-shadow: 0 2px 10px rgba(0, 153, 77, 0.14);
+}
+body.light-mode .se-chat-header-btn,
+body.light-mode .se-suggest {
+    background: rgba(0, 153, 77, 0.07);
+    border-color: rgba(0, 153, 77, 0.30);
+}
+body.light-mode .se-bubble {
+    box-shadow: 0 2px 8px rgba(20, 30, 24, .10);
+}
+body.light-mode .se-bubble.user {
+    background: linear-gradient(180deg, rgba(0, 153, 77, 0.14), rgba(0, 153, 77, 0.08));
+    border-color: rgba(0, 153, 77, 0.35);
+}
+body.light-mode .se-bubble.assistant {
+    background: rgba(255, 255, 255, 0.85);
+}
+body.light-mode .se-bubble.thinking {
+    background: rgba(0, 153, 77, 0.05);
+}
+body.light-mode .se-bubble.error {
+    background: rgba(232, 48, 48, 0.08);
 }

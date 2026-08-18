@@ -315,52 +315,11 @@ def sauron_context(request):
         day_ago = now - timedelta(hours=24)
         ticker = []
 
-        # No quotes here, deliberately. The headband directly above this bar
-        # already shows live prices for forty catalogue symbols — the ticker
-        # duplicated them cell for cell, and the duplication crowded out the
-        # things a price cannot say. The ticker's job is signals and news.
-
-        # Signals. The popup used to carry only score, urgency and direction —
-        # so hovering a signal told you a setup existed but nothing about the
-        # trade it proposes. The levels are the whole point of a signal: where
-        # to get in, where you are wrong, and what you are playing for.
+        # No quotes here and no signals either, deliberately. The headband
+        # directly above already shows live prices, and the signals rail on
+        # the right is the signals' home — each carried in the ticker was a
+        # duplicate crowding out the one thing with no other home: news.
         active_signals = Signal.objects.filter(is_active=True)
-        # Order of appearance — newest signal first. Ranking by score made
-        # the bar look frozen: a strong old signal squatted at the front for
-        # days while new setups appeared mid-stream, unseen.
-        for s in active_signals.select_related("instrument").order_by("-created_at")[:8]:
-            entry = s.suggested_entry or s.price_at_signal
-            rr = s.risk_reward_ratio
-            if rr is None and entry and s.suggested_stop and s.suggested_target:
-                risk = abs(float(entry) - float(s.suggested_stop))
-                if risk > 0:
-                    rr = round(abs(float(s.suggested_target) - float(entry)) / risk, 2)
-            # How far price has travelled since the signal fired: a setup is
-            # only actionable while price is still near its entry.
-            drift_pct = None
-            try:
-                lq = LiveQuote.objects.filter(instrument=s.instrument).first()
-                if lq and lq.last and s.price_at_signal:
-                    drift_pct = (float(lq.last) - float(s.price_at_signal)) / float(s.price_at_signal) * 100
-            except Exception:
-                drift_pct = None
-            age_min = int((now - s.created_at).total_seconds() // 60) if s.created_at else None
-            ticker.append({
-                "type": "signal", "symbol": s.instrument.symbol,
-                "title": s.title or "",
-                "description": (s.description or "")[:400],
-                "direction": s.direction, "score": f"{s.score:.2f}",
-                "score_pct": int(round(float(s.score or 0) * 100)),
-                "urgency": s.urgency,
-                "rule_name": s.rule_name or "",
-                "signal_type": s.signal_type or "",
-                "entry": entry, "stop": s.suggested_stop,
-                "target": s.suggested_target, "rr": rr,
-                "drift_pct": round(drift_pct, 2) if drift_pct is not None else None,
-                "age_min": age_min,
-                "asset_class": s.instrument.asset_class,
-                "url": "/signals/",
-            })
 
         # News
         for n in NewsArticle.objects.prefetch_related("ai_affected_instruments").order_by("-published_at")[:18]:

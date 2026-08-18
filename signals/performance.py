@@ -48,6 +48,14 @@ SIGNAL_TTL_DAYS = 7
 # A quote older than this is not a mark-to-market price any more.
 MAX_QUOTE_AGE_SECONDS = 900
 
+# A recent bar close is a real traded price too — the same bound the paper
+# venue uses for its own marks. LiveQuote pollers cover the watchlist;
+# instruments outside it still get 1h/4h bars, and without this fallback
+# their signals stayed active FOREVER: the quote path returned None every
+# tick, so crossed levels sat in the rail for days and even the 7-day TTL
+# could never fire.
+MAX_BAR_AGE_SECONDS = 6 * 3600
+
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -96,6 +104,24 @@ def _update_extremes(signal, current_price):
             signal.mae = cp
             changed = True
     return changed
+
+
+def _bar_close_fallback(instrument):
+    """Newest 1h/4h bar close within MAX_BAR_AGE_SECONDS, or None.
+
+    Mirrors PaperTrader.ticker's quote→bar degradation, so a signal is
+    graded against the same mark the paper venue would trade it at.
+    """
+    try:
+        from market_data.models import PriceData
+        cutoff = timezone.now() - timedelta(seconds=MAX_BAR_AGE_SECONDS)
+        return (PriceData.objects.filter(
+            instrument=instrument, timeframe__in=("1h", "4h"),
+            timestamp__gte=cutoff)
+            .order_by("-timestamp")
+            .values_list("close", flat=True).first())
+    except Exception:
+        return None
 
 
 def _close_signal(signal, outcome, close_price, now):
@@ -154,13 +180,16 @@ def evaluate_signal_outcome(signal, current_price=None):
         try:
             quote = signal.instrument.live_quote
             age = (timezone.now() - quote.updated_at).total_seconds()
-            if age > MAX_QUOTE_AGE_SECONDS:
-                logger.debug("signal %s: quote %.0fs old — not resolving",
+            if age <= MAX_QUOTE_AGE_SECONDS:
+                current_price = quote.last
+            else:
+                logger.debug("signal %s: quote %.0fs old — trying bars",
                              signal.pk, age)
-                return None
-            current_price = quote.last
         except Exception:
-            return None
+            pass
+
+    if current_price is None:
+        current_price = _bar_close_fallback(signal.instrument)
 
     if current_price is None:
         return None

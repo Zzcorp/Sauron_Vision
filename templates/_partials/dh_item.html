@@ -27,8 +27,8 @@
          data-min="{{ m.spark_min|floatformat:6 }}"
          data-max="{{ m.spark_max|floatformat:6 }}"
          data-up="{% if m.change_pct >= 0 %}1{% else %}0{% endif %}"
-         data-w="330" data-h="56">
-      <svg viewBox="0 0 330 56" preserveAspectRatio="none"><path d=""/></svg>
+         data-w="330" data-h="34">
+      <svg viewBox="0 0 330 34" preserveAspectRatio="none"><path d=""/></svg>
     </div>
     {% endif %}
     <div class="dh-pop-row"><span class="k">Asset class</span><span class="v">{{ m.asset_class|default:"—"|upper }}</span></div>

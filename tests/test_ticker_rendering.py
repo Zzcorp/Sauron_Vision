@@ -33,9 +33,8 @@ QUOTE = {"type": "quote", "symbol": "HGUSD", "price": "6.60800000",
          "asset_class": "commodity", "url": "/instruments/HGUSD/"}
 NEWS = {"type": "news", "title": "Copper rallies", "source": "Reuters",
         "summary": "s", "published_at": "now", "url": "/news/"}
-SIGNAL = {"type": "signal", "symbol": "BTCUSD", "title": "BTC long",
-          "direction": "bullish", "score": "0.90", "urgency": "high",
-          "url": "/signals/"}
+# No SIGNAL fixture: signals were removed from the ticker (the rail is
+# their home), so the template has no signal branch to render.
 
 
 class TickerItemRenderingTests(TestCase):
@@ -68,7 +67,7 @@ class TickerItemRenderingTests(TestCase):
         tpl = get_template("base.html")
         # A smoke render is enough: a failed lookup inside a filter argument
         # raises during rendering, so no assertion beyond "it completed".
-        html = tpl.render({"ticker_items": [QUOTE, NEWS, SIGNAL],
+        html = tpl.render({"ticker_items": [QUOTE, NEWS],
                            "user": user, "request": None})
         self.assertIn("HGUSD", html)
 

@@ -27,81 +27,11 @@ def _instrument(symbol="BTCUSD", asset_class="crypto"):
     return inst
 
 
-class SignalTickerPayloadTests(TestCase):
-    def setUp(self):
-        self.user = User.objects.create_user(username="tk_u", password="x")
-        self.inst = _instrument()
-
-    def _signal(self, **kw):
-        from signals.models import Signal
-        defaults = dict(
-            instrument=self.inst, signal_type="technical", direction="bullish",
-            urgency="high", title="BTCUSD LONG — golden cross",
-            description="SMA50 crossed above SMA200.", rule_name="golden_cross",
-            score=0.72, sub_scores={}, price_at_signal=Decimal("100"),
-            suggested_entry=Decimal("100"), suggested_stop=Decimal("98"),
-            suggested_target=Decimal("106"), is_active=True)
-        defaults.update(kw)
-        return Signal.objects.create(**defaults)
-
-    def _ticker(self):
-        from core.context_processors import sauron_context
-        req = RequestFactory().get("/")
-        req.user = self.user
-        return sauron_context(req).get("ticker_items") or []
-
-    def _first_signal_item(self):
-        return next((i for i in self._ticker() if i.get("type") == "signal"), None)
-
-    def test_the_popup_carries_the_levels(self):
-        """Without entry, stop and target the card describes a setup you
-        cannot act on."""
-        self._signal()
-        item = self._first_signal_item()
-        self.assertIsNotNone(item, "no signal reached the ticker")
-        self.assertEqual(float(item["entry"]), 100.0)
-        self.assertEqual(float(item["stop"]), 98.0)
-        self.assertEqual(float(item["target"]), 106.0)
-
-    def test_reward_to_risk_is_derived_when_the_row_lacks_it(self):
-        self._signal(risk_reward_ratio=None)
-        item = self._first_signal_item()
-        # entry 100, stop 98 -> 2 of risk; target 106 -> 6 of reward.
-        self.assertAlmostEqual(float(item["rr"]), 3.0, places=2)
-
-    def test_it_carries_the_rule_and_the_thesis(self):
-        self._signal()
-        item = self._first_signal_item()
-        self.assertEqual(item["rule_name"], "golden_cross")
-        self.assertIn("SMA50", item["description"])
-
-    def test_the_score_is_expressed_as_a_percentage_for_the_bar(self):
-        """A bare 0.72 means nothing without the scale it sits on."""
-        self._signal(score=0.72)
-        self.assertEqual(self._first_signal_item()["score_pct"], 72)
-
-    def test_it_reports_how_far_price_has_moved_since_the_signal(self):
-        """A setup is only actionable while price is near its entry."""
-        from market_data.models import LiveQuote
-        LiveQuote.objects.update_or_create(
-            instrument=self.inst, defaults={"last": Decimal("103")})
-        self._signal()
-        self.assertAlmostEqual(float(self._first_signal_item()["drift_pct"]),
-                               3.0, places=2)
-
-    def test_age_is_reported(self):
-        s = self._signal()
-        from signals.models import Signal
-        Signal.objects.filter(pk=s.pk).update(
-            created_at=timezone.now() - timedelta(minutes=90))
-        self.assertGreaterEqual(self._first_signal_item()["age_min"], 89)
-
-
 class TickerCompositionTests(TestCase):
-    """The headband directly above the ticker already shows live prices, so
-    quote items duplicated it cell for cell and crowded out the things a
-    price cannot say. The ticker carries signals and news now — prices have
-    exactly one home."""
+    """Everything in the ticker except news duplicated another surface:
+    quotes duplicated the price headband above it, signals duplicated the
+    rail beside it. The ticker is NEWS ONLY now — the one feed with no
+    other home."""
 
     def setUp(self):
         self.user = User.objects.create_user(username="tq_u", password="x")
@@ -122,7 +52,7 @@ class TickerCompositionTests(TestCase):
             [i for i in self._ticker() if i.get("type") == "quote"],
             "a quote item reached the ticker — prices belong to the headband")
 
-    def test_signals_and_news_still_do(self):
+    def test_news_still_reaches_the_ticker_and_signals_never_do(self):
         from django.utils import timezone as tz
         from scraping.models import NewsArticle
         from signals.models import Signal
@@ -135,14 +65,16 @@ class TickerCompositionTests(TestCase):
             title="Copper rallies", source="Reuters",
             url="https://example.test/copper", published_at=tz.now())
         types = {i.get("type") for i in self._ticker()}
-        self.assertIn("signal", types)
         self.assertIn("news", types)
+        self.assertNotIn("signal", types,
+                         "a signal item reached the ticker — signals "
+                         "belong to the rail")
 
-    def test_new_signals_enter_feeds_at_the_top(self):
-        """Both the ticker and the signals rail are FEEDS — newest first.
-        Ranking by score parked a strong old signal at the front for days
-        while new arrivals appeared buried mid-stream; the score is already
-        painted on every card, the position should carry recency."""
+    def test_new_signals_enter_the_rail_at_the_top(self):
+        """The rail is a FEED — newest first. Ranking by score parked a
+        strong old signal at the front for days while new arrivals appeared
+        buried mid-stream; the score is already painted on every card, the
+        position should carry recency."""
         from django.utils import timezone as tz
         from core.context_processors import sauron_context
         from signals.models import Signal
@@ -166,10 +98,6 @@ class TickerCompositionTests(TestCase):
         rail = ctx.get("panel_recent_signals") or []
         self.assertEqual(rail[0].instrument.symbol, "ETHUSD",
                          "the rail's top slot belongs to the newest signal")
-        ticker_signals = [i for i in (ctx.get("ticker_items") or [])
-                          if i.get("type") == "signal"]
-        self.assertEqual(ticker_signals[0]["symbol"], "ETHUSD",
-                         "the ticker's first signal is the newest")
 
 
 class RailDismissTests(TestCase):
