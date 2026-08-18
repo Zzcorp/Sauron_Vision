@@ -87,9 +87,21 @@ def fetch_social_sentiment():
     except Exception as e:
         logger.error(f"StockTwits trending failed: {e}")
 
+    # The operator's OWN starred equities — trending alone samples
+    # StockTwits' universe (mostly off-catalogue small caps), which is how
+    # this task used to run green while storing nothing.
+    try:
+        from scraping.scrapers.stocktwits import fetch_watchlist_sentiment
+        results["stocktwits_watchlist"] = fetch_watchlist_sentiment()
+    except Exception as e:
+        logger.error(f"StockTwits watchlist sentiment failed: {e}")
+        results["stocktwits_watchlist"] = 0
+
     stored = SentimentSnapshot.objects.count() - before
     return {"status": "success", **results,
-            "parsed": results["reddit"] + results["stocktwits"], "stored": stored}
+            "parsed": (results["reddit"] + results["stocktwits"]
+                       + results["stocktwits_watchlist"]),
+            "stored": stored}
 
 
 @shared_task

@@ -235,6 +235,43 @@ def fetch_trending(with_sentiment: bool = True) -> list[dict]:
     return results
 
 
+"""How many of the operator's own symbols get a message-stream pass."""
+WATCHLIST_SENTIMENT_LIMIT = 8
+
+
+def fetch_watchlist_sentiment(limit: int = WATCHLIST_SENTIMENT_LIMIT) -> int:
+    """Message-stream sentiment for the operator's OWN starred equities.
+
+    Trending-only coverage sampled StockTwits' universe instead of ours:
+    most trending names are small caps outside the catalogue, so a pass
+    could fetch thirty symbols and persist zero rows — "Social Sentiment
+    ran and produced nothing" was the DESIGNED outcome on most days. The
+    symbols the operator starred are by definition in the catalogue, so
+    their snapshots always land. Stocks and ETFs only: StockTwits spells
+    crypto as BTC.X etc., which the catalogue does not.
+
+    Returns the number of symbols whose stream produced messages.
+    """
+    try:
+        from instruments.models import Instrument
+        symbols = list(Instrument.objects.filter(
+            is_watchlist=True, is_active=True,
+            asset_class__in=("stock", "etf"))
+            .order_by("symbol").values_list("symbol", flat=True)[:limit])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("StockTwits watchlist selection failed: %s", exc)
+        return 0
+
+    covered = 0
+    for sym in symbols:
+        detail = fetch_symbol_sentiment(sym)
+        if detail.get("volume"):
+            covered += 1
+    logger.info("StockTwits watchlist: sentiment for %d of %d starred equities",
+                covered, len(symbols))
+    return covered
+
+
 def _persist_sentiment_snapshot(data: dict) -> int:
     """Save a SentimentSnapshot row if the instrument is in our DB.
 

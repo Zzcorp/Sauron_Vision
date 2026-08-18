@@ -789,3 +789,53 @@ class IntradayChartTests(TestCase):
             HTTP_HOST="127.0.0.1")
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn("error", resp.json())
+
+
+class WatchlistSentimentTests(TestCase):
+    """Trending-only StockTwits coverage sampled THEIR universe — mostly
+    off-catalogue small caps, so 'Social Sentiment ran and stored nothing'
+    was the normal outcome. The watchlist pass samples OURS: starred
+    equities are in the catalogue by definition, so their snapshots land."""
+
+    def test_starred_equities_get_sentiment_snapshots(self):
+        from unittest.mock import patch
+        from instruments.models import Instrument
+        from scraping.models import SentimentSnapshot
+        from scraping.scrapers.stocktwits import fetch_watchlist_sentiment
+        inst, _ = Instrument.objects.get_or_create(
+            symbol="AAPL", defaults={"name": "Apple", "asset_class": "stock"})
+        inst.is_watchlist = True
+        inst.save(update_fields=["is_watchlist"])
+        payload = {
+            "response": {"status": 200},
+            "symbol": {"symbol": "AAPL", "title": "Apple",
+                       "watchlist_count": 5},
+            "messages": [
+                {"entities": {"sentiment": {"basic": "Bullish"}}},
+                {"entities": {"sentiment": {"basic": "Bearish"}}},
+                {"entities": {"sentiment": None}},
+            ],
+        }
+        with patch("scraping.scrapers.stocktwits._get",
+                   return_value=payload):
+            covered = fetch_watchlist_sentiment()
+        self.assertEqual(covered, 1)
+        snap = SentimentSnapshot.objects.get(instrument=inst,
+                                             source="stocktwits")
+        self.assertEqual(snap.bullish_count, 1)
+        self.assertEqual(snap.bearish_count, 1)
+
+    def test_crypto_and_unstarred_symbols_are_not_queried(self):
+        """StockTwits spells crypto BTC.X — the catalogue does not; and an
+        unstarred symbol is not the operator's to poll for."""
+        from unittest.mock import patch
+        from instruments.models import Instrument
+        from scraping.scrapers.stocktwits import fetch_watchlist_sentiment
+        inst, _ = Instrument.objects.get_or_create(
+            symbol="BTCUSD", defaults={"name": "Bitcoin",
+                                       "asset_class": "crypto"})
+        inst.is_watchlist = True
+        inst.save(update_fields=["is_watchlist"])
+        with patch("scraping.scrapers.stocktwits._get") as mock_get:
+            fetch_watchlist_sentiment()
+        mock_get.assert_not_called()
