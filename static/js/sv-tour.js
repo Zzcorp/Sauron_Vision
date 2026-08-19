@@ -224,8 +224,17 @@
         return !!d.querySelector("[data-sv-overlay].is-open");
     }
 
+    function pinLocked() {
+        // The idle lock owns the screen outright. This listener is
+        // capture-phase on document and stops what it does not handle,
+        // so without yielding here the lock screen lost Backspace, its
+        // 4→8 box growth, and Enter (which ran next() instead of
+        // verifying the PIN) — a 5-digit PIN became unenterable.
+        return !!(w.svIdleLock && w.svIdleLock.isLocked());
+    }
+
     function onKey(e) {
-        if (!active) return;
+        if (!active || pinLocked()) return;
         // The tour owns the keyboard: without this, the app's bare-key
         // shortcuts (t theme, n mark-read, g goto, ?) fire mid-walk.
         if (e.key === "Escape") {
@@ -314,8 +323,12 @@
     w.SV.tour = { start: start };
 
     if (cfg.autostart) {
-        // Let the layout and background canvases settle first.
-        var boot = function () { setTimeout(function () { start(); }, 700); };
+        // Let the layout and background canvases settle first. A locked
+        // session is not the moment for a guided tour — it would steal
+        // focus from the PIN pad and never reach /tour/complete/ anyway.
+        var boot = function () {
+            setTimeout(function () { if (!pinLocked()) start(); }, 700);
+        };
         if (d.readyState === "loading") {
             d.addEventListener("DOMContentLoaded", boot);
         } else {

@@ -1,0 +1,140 @@
+{% load static %}
+{# Standalone by design: a locked session must not render the app shell, #}
+{# and /admin/ or a PDF report would otherwise answer in full. No data. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Locked · Sauron Vision</title>
+    <link rel="icon" type="image/png" href="{% static 'logo/logo_SV.png' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/sauron.css' %}">
+    <link rel="stylesheet" href="{% static 'css/sv-overlay.css' %}">
+</head>
+<body class="{% if request.user.trader_profile.theme_mode == 'light' %}light-mode{% endif %}">
+
+<div class="lk-page">
+  <div class="lk-card">
+    <div class="lk-eye" aria-hidden="true"></div>
+    <h1 class="lk-title">SECOND GATE</h1>
+    <p class="lk-sub">Session locked after inactivity — enter your PIN to resume.</p>
+
+    <div class="lk-row" id="lkPinRow">
+      <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-lk-pin aria-label="PIN digit 1">
+      <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-lk-pin aria-label="PIN digit 2">
+      <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-lk-pin aria-label="PIN digit 3">
+      <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-lk-pin aria-label="PIN digit 4">
+    </div>
+
+    <div class="lk-err" id="lkError" hidden></div>
+    <button type="button" class="lk-unlock" id="lkUnlock">UNLOCK</button>
+
+    <form method="post" action="{% url 'logout' %}" id="lkLogoutForm">{% csrf_token %}
+      <button type="submit" class="lk-link">⏻ Disconnect</button>
+      {# Recovery lives at the login gate: log out, then "PIN forgotten?". #}
+      <button type="submit" class="lk-link">PIN forgotten?</button>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+    "use strict";
+    var NEXT = "{{ next_url|escapejs }}";
+    var MIN = 4, MAX = 8;
+    var row = document.getElementById("lkPinRow");
+    var errEl = document.getElementById("lkError");
+
+    function boxes() { return [].slice.call(row.querySelectorAll("[data-lk-pin]")); }
+    function value() { return boxes().map(function (b) { return b.value; }).join(""); }
+    function focusFirstEmpty() {
+        var b = boxes();
+        for (var i = 0; i < b.length; i++) { if (!b[i].value) { b[i].focus({preventScroll:true}); return; } }
+        if (b.length) b[b.length - 1].focus({preventScroll:true});
+    }
+    function makeBox() {
+        var inp = document.createElement("input");
+        inp.type = "password"; inp.maxLength = 1;
+        inp.setAttribute("inputmode", "numeric");
+        inp.setAttribute("autocomplete", "one-time-code");
+        inp.setAttribute("data-lk-pin", "");
+        return inp;
+    }
+    function insert(d) {
+        var b = boxes();
+        for (var i = 0; i < b.length; i++) { if (!b[i].value) { b[i].value = d; focusFirstEmpty(); return; } }
+        if (b.length < MAX) { var nb = makeBox(); row.appendChild(nb); nb.value = d; nb.focus({preventScroll:true}); }
+    }
+    function back() {
+        var b = boxes();
+        for (var i = b.length - 1; i >= 0; i--) {
+            if (b[i].value) { b[i].value = ""; if (i >= MIN) b[i].remove(); focusFirstEmpty(); return; }
+        }
+        focusFirstEmpty();
+    }
+    function clear() { boxes().forEach(function (b, i) { if (i >= MIN) b.remove(); else b.value = ""; }); }
+    function showError(msg) {
+        if (!errEl) return;
+        if (msg) { errEl.textContent = msg; errEl.hidden = false; }
+        else { errEl.textContent = ""; errEl.hidden = true; }
+    }
+    function csrf() {
+        var i = document.querySelector("#lkLogoutForm input[name=csrfmiddlewaretoken]");
+        return i ? i.value : "";
+    }
+    function submit() {
+        var pin = value();
+        if (pin.length < MIN) { showError("Enter at least " + MIN + " digits."); return; }
+        showError(null);
+        fetch("/api/session/unlock/", {
+            method: "POST", credentials: "same-origin",
+            headers: { "X-CSRFToken": csrf(), "X-Requested-With": "XMLHttpRequest",
+                       "Content-Type": "application/x-www-form-urlencoded" },
+            body: "pin=" + encodeURIComponent(pin)
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.status === "ok") {
+                try { localStorage.setItem("sv:unlockedAt", String(Date.now())); } catch (e) {}
+                window.location.assign(NEXT);
+                return;
+            }
+            if (data.status === "logged_out") { window.location.assign("/wall/"); return; }
+            clear();
+            showError((data.error || "Incorrect PIN.") +
+                (typeof data.attempts_left === "number"
+                    ? " " + data.attempts_left + " attempt" + (data.attempts_left === 1 ? "" : "s") + " left."
+                    : ""));
+            focusFirstEmpty();
+        })
+        .catch(function () { showError("Could not reach the server — try again."); });
+    }
+
+    document.addEventListener("keydown", function (e) {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        var t = e.target;
+        if (t && t.closest && t.closest("a, button")) return;
+        if (/^[0-9]$/.test(e.key)) { e.preventDefault(); insert(e.key); }
+        else if (e.key === "Backspace") { e.preventDefault(); back(); }
+        else if (e.key === "Enter") { e.preventDefault(); submit(); }
+    });
+    row.addEventListener("paste", function (e) {
+        var src = e.clipboardData || window.clipboardData;
+        var digits = ((src && src.getData("text")) || "").replace(/\D/g, "");
+        if (!digits) return;
+        e.preventDefault();
+        clear();
+        digits.slice(0, MAX).split("").forEach(insert);
+    });
+    row.addEventListener("input", function (e) {
+        var t = e.target;
+        if (!t.hasAttribute || !t.hasAttribute("data-lk-pin")) return;
+        if (t.value) { t.value = t.value.replace(/\D/g, "").slice(-1); focusFirstEmpty(); }
+    });
+    document.getElementById("lkUnlock").addEventListener("click", submit);
+    focusFirstEmpty();
+})();
+</script>
+</body>
+</html>

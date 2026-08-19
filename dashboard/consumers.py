@@ -4,6 +4,24 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from asgiref.sync import sync_to_async
 
 
+@sync_to_async
+def _session_pin_locked(scope) -> bool:
+    """True when this socket's session is idle-locked (core/idle_lock.py).
+
+    Sockets never pass through HTTP middleware, so without this check a
+    locked tab kept receiving live quotes, signals and its own fills
+    behind the gate — the one feed the lock did not stop. Reading the
+    session can touch the DB, hence the thread hop; a session backend
+    that raises must not take the socket down, so it fails OPEN (the
+    overlay still covers the screen).
+    """
+    try:
+        session = scope.get("session")
+        return bool(session is not None and session.get("pin_locked"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class DashboardConsumer(AsyncWebsocketConsumer):
     """Push live updates to dashboard clients."""
 
@@ -13,6 +31,9 @@ class DashboardConsumer(AsyncWebsocketConsumer):
         # scope["user"] is populated). Mirrors EyeConsumer.
         user = self.scope.get("user")
         if user is None or not getattr(user, "is_authenticated", False):
+            await self.close()
+            return
+        if await _session_pin_locked(self.scope):
             await self.close()
             return
         self.group_name = "dashboard_live"
@@ -184,6 +205,9 @@ class EyeConsumer(AsyncWebsocketConsumer):
         if user is None or not getattr(user, "is_authenticated", False):
             await self.close()
             return
+        if await _session_pin_locked(self.scope):
+            await self.close()
+            return
         self.group_name = f"eye_user_{user.id}"
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
@@ -195,9 +219,17 @@ class EyeConsumer(AsyncWebsocketConsumer):
 
     async def eye_event(self, event):
         """Group handler — called by `push_eye_event`."""
+        kind = event.get("kind", "")
+        if kind == "session_locked":
+            # The idle lock engaged: this socket carries the operator's
+            # own fills and notifications, so it stops here rather than
+            # streaming them at an unattended screen. The client
+            # reconnects when the PIN releases the lock.
+            await self.close()
+            return
         await self.send(text_data=json.dumps({
             "type": "eye_event",
-            "kind": event.get("kind", ""),
+            "kind": kind,
             "data": event.get("data", {}),
         }))
 

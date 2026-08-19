@@ -197,7 +197,37 @@
             <div class="form-hint">Changes apply after saving</div>
         </div>
     </div>
-    <div></div>
+    <div class="card fade-in-up delay-5" style="border-left:3px solid var(--accent-gold);">
+        <div class="card-header">
+            <span class="card-title">⊠ Security — Idle Lock</span>
+            <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">2nd factor</span>
+        </div>
+
+        <div style="margin-bottom:14px;">
+            <label class="toggle-label">
+                <input type="checkbox" name="idle_lock_enabled"
+                       {% if profile.idle_lock_enabled %}checked{% endif %}>
+                <span>Lock the session after inactivity</span>
+            </label>
+        </div>
+
+        <div style="margin-bottom:16px;">
+            <label class="form-label">LOCK AFTER</label>
+            <select name="idle_lock_minutes" class="form-input">
+                <option value="5" {% if profile.idle_lock_minutes == 5 %}selected{% endif %}>5 minutes</option>
+                <option value="10" {% if profile.idle_lock_minutes == 10 %}selected{% endif %}>10 minutes</option>
+                <option value="15" {% if profile.idle_lock_minutes == 15 %}selected{% endif %}>15 minutes</option>
+                <option value="30" {% if profile.idle_lock_minutes == 30 %}selected{% endif %}>30 minutes</option>
+                <option value="60" {% if profile.idle_lock_minutes == 60 %}selected{% endif %}>1 hour</option>
+            </select>
+            <div class="form-hint">
+                After this idle period the platform covers itself with a PIN gate;
+                your session survives, but data stops until the PIN is re-entered.
+                The lock only ever engages when an access PIN is set.
+                {% if not profile.access_pin_hash %}<b style="color:var(--accent-gold);">No PIN is currently set — set one above to arm the idle lock.</b>{% endif %}
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="section-label fade-in-up">AI & Notifications</div>

@@ -2097,6 +2097,10 @@ function toggleSidebar() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const url = `${proto}//${location.host}/ws/dashboard/`;
   let ws = null, retries = 0, alive = false;
+  /* The live socket never meets HTTP middleware, so the idle PIN lock has
+     to cut it here; the consumer also refuses to accept one while the
+     session flag is set (dashboard/consumers.py). */
+  let lockedOut = false;
 
   function applyTick(d) {
     if (!d || !d.symbol) return;
@@ -2267,6 +2271,7 @@ function toggleSidebar() {
   };
 
   function connect() {
+    if (lockedOut) return;
     try { ws = new WebSocket(url); } catch(e) { scheduleReconnect(); return; }
     ws.onopen = () => { retries = 0; alive = true;
       console.log('[sauron] live WS connected'); };
@@ -2284,10 +2289,19 @@ function toggleSidebar() {
   }
 
   function scheduleReconnect() {
+    if (lockedOut) return;
     retries = Math.min(retries + 1, 6);
     const delay = Math.min(30000, 1000 * Math.pow(2, retries)) + Math.random() * 500;
     setTimeout(connect, delay);
   }
+
+  document.addEventListener('sv:pin-locked', () => {
+    lockedOut = true;
+    try { if (ws) ws.close(); } catch(e) {}
+  });
+  document.addEventListener('sv:pin-unlocked', () => {
+    lockedOut = false; retries = 0; connect();
+  });
 
   connect();
 })();
@@ -2351,11 +2365,22 @@ function toggleSidebar() {
   function tick(){
     fetch('/api/live/health/',{credentials:'same-origin'})
       .then(function(r){
+        /* 423 = the session is PIN-locked (core/idle_lock.py). Not an
+           outage: open the gate in THIS tab too — the lock may have been
+           engaged in a sibling tab or by the server-side backstop — and
+           leave the status pill alone; "STALE" would be a lie. */
+        if(r.status===423){
+          if(window.svIdleLock) window.svIdleLock.engage(false);
+          var locked=new Error('locked'); locked.svLocked=true; throw locked;
+        }
         if(!r.ok) throw new Error('HTTP '+r.status);
         return r.json();      /* rejects on the login-page-as-200 case */
       })
       .then(render)
-      .catch(function(e){ degrade(String(e && e.message || e).slice(0,120)); });
+      .catch(function(e){
+        if(e && e.svLocked) return;
+        degrade(String(e && e.message || e).slice(0,120));
+      });
   }
 
   /* The label ships as "LIVE" in the markup, so until the first poll lands
@@ -3812,6 +3837,35 @@ if ('serviceWorker' in navigator) {
 
 {% if request.user.is_authenticated %}
 {% include "_tour.html" %}
+
+{# Idle PIN lock gate. A direct child of body ON PURPOSE: any fixed/filtered ancestor would clamp it in its own stacking context and something could paint over a "locked" screen. #}
+{# The overlay is paint over a SERVER flag (core/idle_lock.py answers 423 everywhere while pin_locked) — deleting this div from devtools unlocks nothing. #}
+<div id="idleLockOverlay" class="il-overlay" data-sv-overlay="dialog" data-sv-persist data-sv-backdrop="none" aria-labelledby="ilTitle" hidden>
+    <div class="il-card">
+        <h2 class="il-title" id="ilTitle">SECOND GATE</h2>
+        <p class="il-sub">Session locked — enter PIN</p>
+        <div class="il-err" id="ilError" hidden></div>
+        <div class="il-pin-row" id="ilPinRow">
+            <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-il-pin aria-label="PIN digit 1">
+            <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-il-pin aria-label="PIN digit 2">
+            <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-il-pin aria-label="PIN digit 3">
+            <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-il-pin aria-label="PIN digit 4">
+        </div>
+        <button type="button" class="il-unlock" id="ilUnlockBtn">Unlock</button>
+        <form method="post" action="{% url 'logout' %}" id="ilLogoutForm" style="display:none;">{% csrf_token %}</form>
+        <div class="il-actions">
+            <button type="submit" form="ilLogoutForm" class="il-disconnect">⏻ Disconnect</button>
+            {# Recovery happens at LOGIN (password re-entry → forced PIN reset), so forgetting the PIN here simply ends the session. #}
+            <button type="submit" form="ilLogoutForm" class="il-forgot">PIN forgotten?</button>
+        </div>
+    </div>
+</div>
+<script src="{% static 'js/idle-lock.js' %}" defer id="idleLockScript"
+        data-il-enabled="{{ idle_lock.enabled|yesno:'1,0' }}"
+        data-il-minutes="{{ idle_lock.minutes }}"
+        data-il-has-pin="{{ idle_lock.has_pin|yesno:'1,0' }}"
+        data-il-locked="{{ pin_locked|yesno:'1,0' }}"></script>
+
 <div id="svBannerStack" aria-live="polite" aria-label="Live trading events"></div>
 <script>
 /* Live event banners.
@@ -4099,12 +4153,23 @@ if ('serviceWorker' in navigator) {
     }
 
     var ws = null, retry = 0;
+    /* Cut by the idle PIN lock, which HTTP middleware cannot reach here. */
+    var lockedOut = false;
     function schedule() {
         /* Backed off and capped: a dead socket must not spin the browser. */
+        if (lockedOut) return;
         retry = Math.min(retry + 1, 6);
         setTimeout(connect, 1000 * Math.pow(2, retry));
     }
+    document.addEventListener("sv:pin-locked", function () {
+        lockedOut = true;
+        try { if (ws) ws.close(); } catch (e) {}
+    });
+    document.addEventListener("sv:pin-unlocked", function () {
+        lockedOut = false; retry = 0; connect();
+    });
     function connect() {
+        if (lockedOut) return;
         var proto = location.protocol === "https:" ? "wss:" : "ws:";
         try {
             ws = new WebSocket(proto + "//" + location.host + "/ws/eye/");

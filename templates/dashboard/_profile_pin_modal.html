@@ -1,10 +1,20 @@
 <form id="pin-change-form" onsubmit="event.preventDefault(); submitPinChange();">
   {% csrf_token %}
+  {% if force_pin_reset %}
+  {# Password already re-verified at the gate — asking for the lost PIN would be theatre. #}
+  <div class="input-group" style="margin-bottom:12px;">
+    <div style="color:var(--accent-green);font-size:0.85rem;line-height:1.5;">
+      IDENTITY CONFIRMED — your password was re-verified at the gate.
+      Set a new PIN below; the old one is not required.
+    </div>
+  </div>
+  {% else %}
   <div class="input-group" style="margin-bottom:12px;">
     <label class="input-label">CURRENT PIN</label>
     <input type="password" name="current_pin" class="input"
            inputmode="numeric" maxlength="8" autocomplete="off">
   </div>
+  {% endif %}
   <div class="input-group" style="margin-bottom:12px;">
     <label class="input-label">NEW PIN</label>
     <input type="password" name="new_pin" class="input"

@@ -216,9 +216,27 @@ def sauron_context(request):
 
     # ── Timezone ──
     user_tz = "UTC"
+    # ── Idle PIN lock ──
+    # pin_locked mirrors the session flag core.idle_lock enforces, so the
+    # shell can paint itself pre-locked instead of flashing data first.
+    # idle_lock feeds the client timer its config; the related-object
+    # accessor is cached on request.user, so this shares the timezone
+    # lookup's query rather than adding one.
+    pin_locked = False
+    idle_lock = {"enabled": False, "minutes": 10, "has_pin": False}
     if hasattr(request, "user") and request.user.is_authenticated:
         try:
-            user_tz = request.user.trader_profile.timezone_preference or "UTC"
+            pin_locked = bool(request.session.get("pin_locked"))
+        except Exception:
+            pass
+        try:
+            profile = request.user.trader_profile
+            user_tz = profile.timezone_preference or "UTC"
+            idle_lock = {
+                "enabled": profile.idle_lock_enabled,
+                "minutes": profile.idle_lock_minutes,
+                "has_pin": profile.has_pin,
+            }
         except Exception:
             pass
 
@@ -238,6 +256,8 @@ def sauron_context(request):
     # ── Defaults ──
     ctx = {
         "user_timezone": user_tz,
+        "pin_locked": pin_locked,
+        "idle_lock": idle_lock,
         "exchanges_open_count": exchange_data["open_count"],
         "exchanges_total": exchange_data["total"],
         "exchanges_list": exchange_data["exchanges"],

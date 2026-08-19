@@ -1173,6 +1173,18 @@ def profile(request):
         if method in ("FIFO", "LIFO", "HIFO"):
             profile_obj.tax_lot_method = method
 
+        # Idle PIN lock (enforced by core.idle_lock). Only values from
+        # the choice list are accepted — a tampered POST must not be able
+        # to set a 0-minute or 9999-minute window.
+        profile_obj.idle_lock_enabled = "idle_lock_enabled" in request.POST
+        try:
+            minutes = int(request.POST.get(
+                "idle_lock_minutes", profile_obj.idle_lock_minutes))
+            if minutes in dict(TraderProfile.IDLE_LOCK_MINUTES_CHOICES):
+                profile_obj.idle_lock_minutes = minutes
+        except (TypeError, ValueError):
+            pass  # keep current value on parse failure
+
         profile_obj.save()
         messages.success(request, "Profile updated successfully.")
 

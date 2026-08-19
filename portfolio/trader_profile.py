@@ -146,6 +146,23 @@ class TraderProfile(models.Model):
     ])
 
     access_pin_hash = models.CharField(max_length=128, blank=True, default="", help_text="Hashed PIN code (2nd-factor)")
+    # ── Idle PIN lock ────────────────────────────────
+    # After this many minutes without activity the session is flagged
+    # pin_locked (core/idle_lock.py) and the operator must re-enter the
+    # PIN. Only ever engages when a PIN is set — without one there would
+    # be nothing that could release the lock.
+    IDLE_LOCK_MINUTES_CHOICES = [
+        (5, "5 minutes"),
+        (10, "10 minutes"),
+        (15, "15 minutes"),
+        (30, "30 minutes"),
+        (60, "1 hour"),
+    ]
+    idle_lock_enabled = models.BooleanField(default=True,
+        help_text="Lock the session behind the PIN after a period of inactivity.")
+    idle_lock_minutes = models.PositiveSmallIntegerField(
+        default=10, choices=IDLE_LOCK_MINUTES_CHOICES,
+        help_text="Minutes of inactivity before the PIN lock engages.")
     # Null = the guided platform tour has not been finished or skipped —
     # it autostarts once on the next page load. A timestamp (not a bool)
     # so we know WHEN, and so every pre-existing user sees it once too.
@@ -162,6 +179,18 @@ class TraderProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.username}'s Trading Profile"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # The idle-lock middleware caches (armed, minutes) per user to
+        # avoid a query per request while a session sits idle. Setting a
+        # PIN or changing the window has to take effect now, not when
+        # that cache happens to expire.
+        try:
+            from django.core.cache import cache
+            cache.delete(f"idlelock:cfg:{self.user_id}")
+        except Exception:  # noqa: BLE001 — a dead cache must not block a save
+            pass
 
     @property
     def markets_traded(self):

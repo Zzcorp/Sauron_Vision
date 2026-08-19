@@ -135,6 +135,9 @@ MIDDLEWARE = [
     # After auth (needs request.user); stamps who-is-online for the admin
     # Eye, throttled to one write per user per minute.
     "core.presence.PresenceMiddleware",
+    # Idle PIN lock: stamps per-session activity and enforces the
+    # server-side pin_locked flag (423 for JSON, POSTs bounced).
+    "core.idle_lock.IdleLockMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "core.security.LoginRateLimitMiddleware",

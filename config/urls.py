@@ -3,7 +3,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.contrib.auth import views as auth_views
 from django.shortcuts import render, redirect
-from dashboard.auth_views import SauronLoginView, login_pin
+from dashboard.auth_views import SauronLoginView, login_pin, login_pin_forgot
 from core.health import health_check
 
 
@@ -20,6 +20,7 @@ urlpatterns = [
     path("wall/", the_wall, name="the_wall"),
     path("login/", SauronLoginView.as_view(), name="login"),
     path("login/pin/", login_pin, name="login_pin"),
+    path("login/pin/forgot/", login_pin_forgot, name="login_pin_forgot"),
     path("logout/", auth_views.LogoutView.as_view(next_page="the_wall"), name="logout"),
     path("", include("bot_program.urls")),
     path("", include("dashboard.urls")),

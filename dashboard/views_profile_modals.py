@@ -9,8 +9,15 @@ from django.contrib.auth import update_session_auth_hash
 
 @login_required
 def pin_modal(request):
-    """Render the PIN-change modal body for HTMX injection."""
-    return render(request, "dashboard/_profile_pin_modal.html", {})
+    """Render the PIN-change modal body for HTMX injection.
+
+    Someone arriving from the forgot-PIN gate must not be asked for the
+    very value they just declared lost — change_pin_modal waives the
+    check, and the form has to say so.
+    """
+    return render(request, "dashboard/_profile_pin_modal.html", {
+        "force_pin_reset": bool(request.session.get("force_pin_reset")),
+    })
 
 
 @login_required
@@ -56,7 +63,13 @@ def change_pin_modal(request):
     new_pin = request.POST.get("new_pin", "")
     confirm_pin = request.POST.get("confirm_pin", "")
 
-    if profile.access_pin_hash:
+    # The forgot-PIN flow (login_pin_forgot) re-verified the password at the
+    # gate and set this flag — the whole point is that the current PIN is
+    # unknown, so waive it here. Popped only when the reset succeeds: a typo
+    # in the new PIN must not burn the one-shot waiver and dead-end the user.
+    force_pin_reset = bool(request.session.get("force_pin_reset"))
+
+    if profile.access_pin_hash and not force_pin_reset:
         if not profile.check_pin(current_pin):
             return JsonResponse({"ok": False, "error": "Current PIN is incorrect."})
     if not new_pin or not new_pin.isdigit() or not (4 <= len(new_pin) <= 8):
@@ -66,4 +79,15 @@ def change_pin_modal(request):
 
     profile.set_pin(new_pin)
     profile.save()
+    if force_pin_reset:
+        request.session.pop("force_pin_reset", None)
+        from core.audit import AuditLog
+        AuditLog.log(
+            user=request.user,
+            action="config_change",
+            description="PIN reset via forgot-PIN flow (password re-verified at the gate)",
+            target_type="TraderProfile",
+            target_id=profile.id,
+            ip_address=request.META.get("REMOTE_ADDR"),
+        )
     return JsonResponse({"ok": True, "message": "PIN updated."})

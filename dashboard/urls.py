@@ -9,6 +9,7 @@ from .views_metrics import (
 from .views_profile_modals import (
     pin_modal, password_modal, change_password, change_pin_modal,
 )
+from .lock_views import locked_page, session_lock, session_ping, session_unlock
 from .views_admin_bots import (
     admin_bots_panel, admin_bot_toggle, admin_bot_shadow,
     admin_bot_reset_circuit, admin_bot_reconcile,
@@ -330,6 +331,11 @@ urlpatterns = [
 
     # ── Session Management ─────────────────────────────────
     path("api/sessions/", views.active_sessions_api, name="active_sessions_api"),
+    # Idle PIN lock (core/idle_lock.py enforces the flag these two move).
+    path("api/session/lock/", session_lock, name="session_lock"),
+    path("api/session/unlock/", session_unlock, name="session_unlock"),
+    path("api/session/ping/", session_ping, name="session_ping"),
+    path("locked/", locked_page, name="locked_page"),
 
     # ── Backtesting / Simulation / Sizing APIs ─────────────
     path("api/monte-carlo/", views.monte_carlo_api, name="monte_carlo_api"),

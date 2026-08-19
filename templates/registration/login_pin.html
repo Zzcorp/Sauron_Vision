@@ -71,6 +71,13 @@
 
         .pin-back{display:block;text-align:center;margin-top:14px;font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:2px;color:var(--text3);text-decoration:none;text-transform:uppercase;transition:color .3s}
         .pin-back:hover{color:var(--accent)}
+
+        /* ── Forgot-PIN escape hatch ── */
+        .pin-forgot{display:block;text-align:center;margin-top:12px;font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:2px;color:var(--text3);text-decoration:none;text-transform:uppercase;transition:color .3s}
+        .pin-forgot:hover{color:var(--accent)}
+        .forgot-label{display:block;font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:3px;color:var(--text3);text-transform:uppercase;margin-bottom:8px}
+        .forgot-input{width:100%;padding:12px 16px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:14px;outline:none;margin-bottom:14px;transition:border-color .2s,box-shadow .2s}
+        .forgot-input:focus{border-color:var(--accent);box-shadow:0 0 15px rgba(0,232,104,0.1)}
     </style>
 </head>
 <body>
@@ -125,13 +132,13 @@
         <p class="pin-subtitle fade-up d2">ENTER PIN CODE</p>
         <div class="pin-who fade-up d3">OPERATOR :: {{ username }}</div>
         <div class="pin-card fade-up d3">
-            {% if error %}<div class="pin-err">{{ error }}</div>{% endif %}
+            <div class="pin-err" id="pinErrors"{% if not error %} style="display:none"{% endif %}>{{ error }}</div>
             <form method="post" id="pinForm">{% csrf_token %}
                 <div class="pin-row">
-                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
-                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
-                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
-                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" autocomplete="one-time-code" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" autocomplete="one-time-code" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" autocomplete="one-time-code" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" autocomplete="one-time-code" data-pin>
                 </div>
                 <input type="hidden" name="pin" id="pinFinal">
                 <button type="submit" class="btn-verify">Verify</button>
@@ -149,6 +156,15 @@
                 <button type="button" data-k="clear" class="kp-fn">&times;</button>
                 <button type="button" data-k="0">0</button>
                 <button type="button" data-k="back" class="kp-fn">&#9003;</button>
+            </div>
+            <a href="#" class="pin-forgot" id="pinForgotLink">PIN forgotten?</a>
+            <div id="pinForgotPanel" style="display:none;">
+                <form method="post" action="{% url 'login_pin_forgot' %}" id="pinForgotForm">{% csrf_token %}
+                    <label class="forgot-label" for="id_forgot_password">Re-enter Access Key</label>
+                    <input class="forgot-input" type="password" name="password" id="id_forgot_password" autocomplete="current-password">
+                    <button type="submit" class="btn-verify">Verify &amp; Reset PIN</button>
+                </form>
+                <a href="#" class="pin-forgot" id="pinForgotCancel">&larr; Back to PIN</a>
             </div>
         </div>
         <a class="pin-back fade-up d5" href="{% url 'login' %}">&larr; Back</a>
@@ -244,36 +260,165 @@
             requestAnimationFrame(eyeLoop);
         })();
 
-        /* ── PIN logic ── */
-        var boxes = [].slice.call(document.querySelectorAll('[data-pin]'));
-        if (boxes[0]) boxes[0].focus();
-        boxes.forEach(function(b, i){
-            b.addEventListener('input', function(e){
-                if(e.target.value && i < boxes.length-1) boxes[i+1].focus();
-                document.getElementById('pinFinal').value = boxes.map(function(x){return x.value}).join('');
-            });
-            b.addEventListener('keydown', function(e){
-                if(e.key==='Backspace' && !b.value && i>0) boxes[i-1].focus();
-            });
+        /* ── PIN logic — dynamic 4-8 boxes, document key router ──
+           4 boxes render statically (they carry the fade-up entrance) and up
+           to 4 more are appended as digits 5-8 arrive. Deliberately
+           no auto-submit when the 4th box fills — a 6-digit operator must
+           be able to keep typing; Enter or Verify is the explicit submit. */
+        var pinForm = document.getElementById('pinForm');
+        var pinRow = pinForm.querySelector('.pin-row');
+        var pinFinal = document.getElementById('pinFinal');
+        var PIN_MIN = 4, PIN_MAX = 8;
+
+        function pinBoxes(){ return [].slice.call(pinForm.querySelectorAll('[data-pin]')); }
+        function pinValue(){ return pinBoxes().map(function(x){return x.value}).join(''); }
+        function updatePinFinal(){ pinFinal.value = pinValue(); }
+        function makePinBox(){
+            /* Same attributes as the static boxes, but no fade-up class —
+               appended boxes must not replay the entrance animation. */
+            var inp = document.createElement('input');
+            inp.type = 'password';
+            inp.maxLength = 1;
+            inp.setAttribute('inputmode', 'numeric');
+            inp.setAttribute('autocomplete', 'one-time-code');
+            inp.setAttribute('data-pin', '');
+            return inp;
+        }
+        function focusPinBox(el){ if(el) el.focus({preventScroll:true}); }
+        function focusFirstEmptyPinBox(){
+            var boxes = pinBoxes();
+            for(var i=0;i<boxes.length;i++){ if(!boxes[i].value){ focusPinBox(boxes[i]); return; } }
+            focusPinBox(boxes[boxes.length-1]);
+        }
+        function pinInsert(d){
+            var boxes = pinBoxes();
+            for(var i=0;i<boxes.length;i++){
+                if(!boxes[i].value){ boxes[i].value = d; updatePinFinal(); focusFirstEmptyPinBox(); return; }
+            }
+            if(boxes.length < PIN_MAX){
+                var nb = makePinBox();
+                pinRow.appendChild(nb);
+                nb.value = d;
+                updatePinFinal();
+                focusPinBox(nb);
+            }
+        }
+        function pinBackspace(){
+            var boxes = pinBoxes();
+            for(var i=boxes.length-1;i>=0;i--){
+                if(boxes[i].value){
+                    boxes[i].value = '';
+                    if(i >= PIN_MIN) boxes[i].remove();
+                    updatePinFinal();
+                    focusFirstEmptyPinBox();
+                    return;
+                }
+            }
+            focusFirstEmptyPinBox();
+        }
+        function pinClear(){
+            pinBoxes().forEach(function(b, i){ if(i >= PIN_MIN){ b.remove(); } else { b.value = ''; } });
+            updatePinFinal();
+            focusFirstEmptyPinBox();
+        }
+        function submitPin(){
+            updatePinFinal();
+            if(pinForm.requestSubmit){ pinForm.requestSubmit(); } else { pinForm.submit(); }
+        }
+
+        focusFirstEmptyPinBox();
+        pinForm.addEventListener('submit', updatePinFinal);
+
+        /* Mobile/paste fallback: IME keyboards may bypass the key router. */
+        pinForm.addEventListener('input', function(e){
+            var t = e.target;
+            if(!t.hasAttribute || !t.hasAttribute('data-pin')) return;
+            if(t.value) t.value = t.value.replace(/\D/g,'').slice(-1);
+            updatePinFinal();
+            if(t.value) focusFirstEmptyPinBox();
         });
-        document.getElementById('pinForm').addEventListener('submit', function(){
-            document.getElementById('pinFinal').value = boxes.map(function(x){return x.value}).join('');
+
+        /* Document key router — single writer for physical keys, so the PIN
+           lands in the boxes no matter where focus sits. Idle while the
+           forgot-PIN panel is open (the operator is typing a password). */
+        function pinForgotOpen(){
+            var panel = document.getElementById('pinForgotPanel');
+            return !!(panel && panel.style.display !== 'none');
+        }
+        document.addEventListener('keydown', function(e){
+            if(e.ctrlKey || e.metaKey || e.altKey) return;
+            if(pinForgotOpen()) return;
+            /* Links and buttons outside the pad activate with Enter and
+               nothing else — swallowing it strands a keyboard-only operator
+               with "PIN forgotten?" and "Back" unreachable. */
+            var t = e.target;
+            if(t && t.closest && t.closest('a, button') && !pinForm.contains(t)) return;
+            if(/^[0-9]$/.test(e.key)){
+                e.preventDefault();
+                pinInsert(e.key);
+            } else if(e.key === 'Backspace'){
+                e.preventDefault();
+                pinBackspace();
+            } else if(e.key === 'Enter'){
+                e.preventDefault();
+                if(pinValue().length >= PIN_MIN){
+                    submitPin();
+                } else {
+                    var pe = document.getElementById('pinErrors');
+                    if(pe){ pe.textContent = 'Enter at least 4 digits'; pe.style.display = ''; }
+                }
+            }
         });
+
+        /* A password manager or OS one-time-code fill drops the whole PIN in
+           one box, where maxlength=1 keeps a single digit. Spread it. */
+        if(pinRow){
+            pinRow.addEventListener('paste', function(e){
+                var src = e.clipboardData || window.clipboardData;
+                var digits = ((src && src.getData('text')) || '').replace(/\D/g,'');
+                if(!digits) return;
+                e.preventDefault();
+                pinClear();
+                digits.slice(0, PIN_MAX).split('').forEach(pinInsert);
+            });
+        }
 
         /* ── Keypad ── */
         document.querySelectorAll('.sauron-keypad button').forEach(function(btn){
             btn.addEventListener('click', function(){
                 var k = btn.dataset.k;
-                if(k==='clear'){
-                    boxes.forEach(function(b){b.value=''}); boxes[0].focus();
-                } else if(k==='back'){
-                    for(var i=boxes.length-1;i>=0;i--){if(boxes[i].value){boxes[i].value='';boxes[i].focus();break;}}
-                } else {
-                    for(var i=0;i<boxes.length;i++){if(!boxes[i].value){boxes[i].value=k;if(i<boxes.length-1)boxes[i+1].focus();break;}}
-                }
-                document.getElementById('pinFinal').value = boxes.map(function(x){return x.value}).join('');
+                if(k==='clear'){ pinClear(); }
+                else if(k==='back'){ pinBackspace(); }
+                else { pinInsert(k); }
             });
         });
+
+        /* ── Forgot-PIN: swap the pad for a password re-entry field ── */
+        var forgotLink = document.getElementById('pinForgotLink');
+        var forgotPanel = document.getElementById('pinForgotPanel');
+        var forgotCancel = document.getElementById('pinForgotCancel');
+        var keypadEl = document.querySelector('.sauron-keypad');
+        if(forgotLink){
+            forgotLink.addEventListener('click', function(e){
+                e.preventDefault();
+                pinForm.style.display = 'none';
+                if(keypadEl) keypadEl.style.display = 'none';
+                forgotLink.style.display = 'none';
+                forgotPanel.style.display = '';
+                var pw = document.getElementById('id_forgot_password');
+                if(pw){ pw.value=''; pw.focus({preventScroll:true}); }
+            });
+        }
+        if(forgotCancel){
+            forgotCancel.addEventListener('click', function(e){
+                e.preventDefault();
+                forgotPanel.style.display = 'none';
+                pinForm.style.display = '';
+                if(keypadEl) keypadEl.style.display = '';
+                forgotLink.style.display = '';
+                focusFirstEmptyPinBox();
+            });
+        }
     })();
     </script>
 </body>

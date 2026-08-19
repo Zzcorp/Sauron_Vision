@@ -792,6 +792,16 @@
         .sauron-keypad button.kp-fn { color: var(--text3); font-size: 14px; }
         .sauron-keypad button.kp-fn:hover { color: var(--accent-red); border-color: #581818; }
 
+        /* Forgot-PIN escape hatch — muted link + password re-entry panel */
+        .pin-forgot {
+            display: block; text-align: center; margin-top: 12px;
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 2px;
+            color: var(--text3); text-decoration: none; text-transform: uppercase;
+            transition: color 0.3s;
+        }
+        .pin-forgot:hover { color: var(--accent); }
+        .pin-forgot-panel .login-field { margin-bottom: 14px; }
+
         /* ══════════════════════════════════════════════════════════════ */
         /* PHASE-33+ ADDITIONS — pipeline, hash-chain, theme-pulse, etc. */
         /* ══════════════════════════════════════════════════════════════ */
@@ -2624,10 +2634,10 @@
             <form method="post" action="{% url 'login_pin' %}" id="pinForm">
                 {% csrf_token %}
                 <div class="pin-row">
-                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
-                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
-                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
-                    <input type="password" inputmode="numeric" maxlength="1" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" autocomplete="one-time-code" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" autocomplete="one-time-code" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" autocomplete="one-time-code" data-pin>
+                    <input type="password" inputmode="numeric" maxlength="1" autocomplete="one-time-code" data-pin>
                 </div>
                 <input type="hidden" name="pin" id="pinFinal">
                 <button type="submit" class="btn-verify">Verify</button>
@@ -2645,6 +2655,18 @@
                 <button type="button" data-k="clear" class="kp-fn">&times;</button>
                 <button type="button" data-k="0">0</button>
                 <button type="button" data-k="back" class="kp-fn">&#9003;</button>
+            </div>
+            <a href="#" class="pin-forgot pin-anim pa-4" id="pinForgotLink">PIN forgotten?</a>
+            <div class="pin-forgot-panel" id="pinForgotPanel" style="display:none;">
+                <form method="post" action="{% url 'login_pin_forgot' %}" id="pinForgotForm">
+                    {% csrf_token %}
+                    <div class="login-field">
+                        <label for="id_forgot_password">Re-enter Access Key</label>
+                        <input type="password" name="password" id="id_forgot_password" autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="btn-verify">Verify &amp; Reset PIN</button>
+                </form>
+                <a href="#" class="pin-forgot" id="pinForgotCancel">&larr; Back to PIN</a>
             </div>
         </div>
         <a href="#" class="login-back pin-anim pa-5" id="pinBack">&larr; Back</a>
@@ -2891,6 +2913,16 @@
         });
     });
 
+    // While the PIN gate is up the credentials form is still in the DOM,
+    // just invisible — disable it so stray keystrokes (or Enter) can never
+    // corrupt and re-submit it. Re-enabled by the back links below.
+    function setCredentialFieldsDisabled(disabled) {
+        var u = document.getElementById('id_username');
+        var p = document.getElementById('id_password');
+        if (u) u.disabled = disabled;
+        if (p) p.disabled = disabled;
+    }
+
     // Back button — return from login to wall
     var loginBack = document.getElementById('loginBack');
     if (loginBack) {
@@ -2898,6 +2930,8 @@
             e.preventDefault();
             document.body.classList.remove('login-mode');
             document.body.classList.remove('pin-mode');
+            setCredentialFieldsDisabled(false);
+            closePinForgot();
         });
     }
 
@@ -2907,6 +2941,8 @@
         pinBack.addEventListener('click', function(e) {
             e.preventDefault();
             document.body.classList.remove('pin-mode');
+            setCredentialFieldsDisabled(false);
+            closePinForgot();
             // Re-focus username
             setTimeout(function() {
                 var u = document.getElementById('id_username');
@@ -2933,6 +2969,10 @@
     if (loginForm) {
         loginForm.addEventListener('submit', function(e) {
             e.preventDefault();
+            // Second gate is up — nothing may re-submit the credentials
+            // form (this was how a typed PIN used to corrupt the password
+            // and surface an invisible error).
+            if (document.body.classList.contains('pin-mode')) return;
             hideError(loginErrors);
             var fd = new FormData(loginForm);
             fetch(loginForm.action, {
@@ -2954,11 +2994,20 @@
                     var op = document.getElementById('pinOperator');
                     if (op) op.textContent = 'OPERATOR :: ' + (res.body.username || '');
                     document.body.classList.add('pin-mode');
-                    // Focus first PIN box after overlay appears
-                    setTimeout(function() {
-                        var first = document.querySelector('#pinForm [data-pin]');
-                        if (first) first.focus();
-                    }, 1200);
+                    // Focus the first PIN box IMMEDIATELY — the overlay looks
+                    // ready long before the pa-* stagger ends, and focus left
+                    // in the invisible password field ate the typed PIN.
+                    setCredentialFieldsDisabled(true);
+                    // Back-then-retry lands here again: a pad still holding the
+                    // last attempt's digits would concatenate them in front of
+                    // the fresh PIN and fail a correctly typed one.
+                    closePinForgot();
+                    pinClear();
+                    hideError(pinErrors);
+                    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+                    focusFirstEmptyPinBox();
+                    // Safety net in case something steals focus mid-entrance.
+                    setTimeout(focusFirstEmptyPinBox, 1300);
                 } else {
                     showError(loginErrors, (res.body && res.body.message) || 'Authentication failed — invalid credentials');
                 }
@@ -2969,53 +3018,244 @@
         });
     }
 
-    // ── PIN form: input navigation, keypad, AJAX submit ─────────────
-    var pinBoxes = [].slice.call(document.querySelectorAll('#pinForm [data-pin]'));
+    // ── PIN form: dynamic 4-8 boxes, key router, keypad, AJAX submit ─
+    // Boxes are queried live: 4 render statically (they carry the pa-*
+    // entrance animation) and up to 4 more are appended as digits 5-8
+    // arrive. There is deliberately no auto-submit when the 4th box fills —
+    // a 6-digit operator must be able to keep typing; Enter or the Verify
+    // button is the explicit submit path.
+    var pinForm = document.getElementById('pinForm');
+    var pinRow = pinForm ? pinForm.querySelector('.pin-row') : null;
     var pinFinal = document.getElementById('pinFinal');
     var pinErrors = document.getElementById('pinErrors');
-    function updatePinFinal() {
-        if (pinFinal) pinFinal.value = pinBoxes.map(function(x){ return x.value; }).join('');
+    var PIN_MIN = 4, PIN_MAX = 8;
+
+    function pinBoxes() {
+        return pinForm ? [].slice.call(pinForm.querySelectorAll('[data-pin]')) : [];
     }
-    pinBoxes.forEach(function(b, i) {
-        b.addEventListener('input', function(e) {
-            if (e.target.value && i < pinBoxes.length - 1) pinBoxes[i+1].focus();
+    function pinValue() {
+        return pinBoxes().map(function(x) { return x.value; }).join('');
+    }
+    function updatePinFinal() {
+        if (pinFinal) pinFinal.value = pinValue();
+    }
+    function makePinBox() {
+        // Same attributes as the static boxes, but NO pin-anim/pa-* class —
+        // appended boxes must not replay the entrance animation.
+        var inp = document.createElement('input');
+        inp.type = 'password';
+        inp.maxLength = 1;
+        inp.setAttribute('inputmode', 'numeric');
+        inp.setAttribute('autocomplete', 'one-time-code');
+        inp.setAttribute('data-pin', '');
+        return inp;
+    }
+    function focusPinBox(el) {
+        if (el) el.focus({ preventScroll: true });
+    }
+    function focusFirstEmptyPinBox() {
+        var boxes = pinBoxes();
+        for (var i = 0; i < boxes.length; i++) {
+            if (!boxes[i].value) { focusPinBox(boxes[i]); return; }
+        }
+        focusPinBox(boxes[boxes.length - 1]);
+    }
+    function pinInsert(d) {
+        var boxes = pinBoxes();
+        for (var i = 0; i < boxes.length; i++) {
+            if (!boxes[i].value) {
+                boxes[i].value = d;
+                updatePinFinal();
+                focusFirstEmptyPinBox();
+                return;
+            }
+        }
+        // All boxes full — grow up to 8 for longer PINs.
+        if (boxes.length < PIN_MAX && pinRow) {
+            var nb = makePinBox();
+            pinRow.appendChild(nb);
+            nb.value = d;
             updatePinFinal();
+            focusPinBox(nb);
+        }
+    }
+    function pinBackspace() {
+        var boxes = pinBoxes();
+        for (var i = boxes.length - 1; i >= 0; i--) {
+            if (boxes[i].value) {
+                boxes[i].value = '';
+                if (i >= PIN_MIN) boxes[i].remove();
+                updatePinFinal();
+                focusFirstEmptyPinBox();
+                return;
+            }
+        }
+        focusFirstEmptyPinBox();
+    }
+    function pinClear() {
+        pinBoxes().forEach(function(b, i) {
+            if (i >= PIN_MIN) { b.remove(); } else { b.value = ''; }
         });
-        b.addEventListener('keydown', function(e) {
-            if (e.key === 'Backspace' && !b.value && i > 0) pinBoxes[i-1].focus();
+        updatePinFinal();
+        focusFirstEmptyPinBox();
+    }
+
+    // Mobile/paste fallback: IME keyboards may bypass the keydown router,
+    // so sanitise whatever lands in a box and keep pinFinal in sync.
+    if (pinForm) {
+        pinForm.addEventListener('input', function(e) {
+            var t = e.target;
+            if (!t.hasAttribute || !t.hasAttribute('data-pin')) return;
+            if (t.value) t.value = t.value.replace(/\D/g, '').slice(-1);
+            updatePinFinal();
+            if (t.value) focusFirstEmptyPinBox();
         });
+    }
+
+    // Document-level key router, active only while the second gate is up.
+    // It is the single writer for physical keys (preventDefault stops the
+    // focused box from also inserting), so PIN digits land in the boxes no
+    // matter where focus sits — this was the root cause: focus stayed in
+    // the invisible password field and silently ate the PIN.
+    function pinForgotOpen() {
+        var panel = document.getElementById('pinForgotPanel');
+        return !!(panel && panel.style.display !== 'none');
+    }
+    document.addEventListener('keydown', function(e) {
+        if (!document.body.classList.contains('pin-mode')) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        // Forgot-panel open = the operator is typing their password.
+        if (pinForgotOpen()) return;
+        // Links and buttons outside the pad activate with Enter and nothing
+        // else — swallowing it would trap a keyboard-only operator on the
+        // gate with "PIN forgotten?" and "Back" unreachable.
+        var t = e.target;
+        if (t && t.closest && t.closest('a, button') && !(pinForm && pinForm.contains(t))) return;
+        if (/^[0-9]$/.test(e.key)) {
+            e.preventDefault();
+            pinInsert(e.key);
+        } else if (e.key === 'Backspace') {
+            e.preventDefault();
+            pinBackspace();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            // Always submit: submitPin() owns the "at least 4 digits"
+            // message, so Enter is never a silent no-op.
+            submitPin();
+        }
     });
+
+    // A password manager or an OS one-time-code fill drops the whole PIN in
+    // one box, where maxlength=1 keeps a single digit. Spread it instead.
+    if (pinRow) {
+        pinRow.addEventListener('paste', function(e) {
+            var text = (e.clipboardData || window.clipboardData);
+            text = text ? text.getData('text') : '';
+            var digits = (text || '').replace(/\D/g, '');
+            if (!digits) return;
+            e.preventDefault();
+            pinClear();
+            digits.slice(0, PIN_MAX).split('').forEach(pinInsert);
+        });
+    }
+
     document.querySelectorAll('.sauron-keypad button').forEach(function(btn) {
         btn.addEventListener('click', function() {
             var k = btn.dataset.k;
             if (k === 'clear') {
-                pinBoxes.forEach(function(b) { b.value = ''; });
-                if (pinBoxes[0]) pinBoxes[0].focus();
+                pinClear();
             } else if (k === 'back') {
-                for (var i = pinBoxes.length - 1; i >= 0; i--) {
-                    if (pinBoxes[i].value) { pinBoxes[i].value = ''; pinBoxes[i].focus(); break; }
-                }
+                pinBackspace();
             } else {
-                for (var j = 0; j < pinBoxes.length; j++) {
-                    if (!pinBoxes[j].value) {
-                        pinBoxes[j].value = k;
-                        if (j < pinBoxes.length - 1) pinBoxes[j+1].focus();
-                        break;
-                    }
-                }
+                pinInsert(k);
             }
-            updatePinFinal();
         });
     });
 
-    var pinForm = document.getElementById('pinForm');
+    function submitPin() {
+        if (!pinForm) return;
+        hideError(pinErrors);
+        updatePinFinal();
+        if (pinValue().length < PIN_MIN) {
+            showError(pinErrors, 'Enter at least 4 digits');
+            return;
+        }
+        var fd = new FormData(pinForm);
+        fetch(pinForm.action, {
+            method: 'POST',
+            body: fd,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin'
+        })
+        .then(function(r) {
+            return r.json().then(function(j) { return { ok: r.ok, status: r.status, body: j }; })
+                .catch(function() { return { ok: r.ok, status: r.status, body: {} }; });
+        })
+        .then(function(res) {
+            if (res.ok && res.body.status === 'ok') {
+                window.location.href = res.body.redirect || '/intro/';
+            } else {
+                showError(pinErrors, (res.body && res.body.message) || 'Invalid PIN');
+                // A throttle refusal is not a wrong PIN — erasing a correct
+                // one and calling it invalid is how operators get stuck.
+                if (res.status !== 429) pinClear();
+            }
+        })
+        .catch(function() {
+            showError(pinErrors, 'Network error — please try again');
+        });
+    }
     if (pinForm) {
         pinForm.addEventListener('submit', function(e) {
             e.preventDefault();
+            submitPin();
+        });
+    }
+
+    // ── Forgot-PIN: swap the PIN pad for a password re-entry field ──
+    var pinKeypadEl = document.querySelector('#pinOverlay .sauron-keypad');
+    var pinForgotLink = document.getElementById('pinForgotLink');
+    var pinForgotPanel = document.getElementById('pinForgotPanel');
+    var pinForgotCancel = document.getElementById('pinForgotCancel');
+    var pinForgotForm = document.getElementById('pinForgotForm');
+
+    function openPinForgot() {
+        if (!pinForgotPanel) return;
+        hideError(pinErrors);
+        if (pinForm) pinForm.style.display = 'none';
+        if (pinKeypadEl) pinKeypadEl.style.display = 'none';
+        if (pinForgotLink) pinForgotLink.style.display = 'none';
+        pinForgotPanel.style.display = '';
+        var pw = document.getElementById('id_forgot_password');
+        if (pw) { pw.value = ''; pw.focus({ preventScroll: true }); }
+    }
+    function closePinForgot() {
+        if (!pinForgotPanel || pinForgotPanel.style.display === 'none') return;
+        pinForgotPanel.style.display = 'none';
+        if (pinForm) pinForm.style.display = '';
+        if (pinKeypadEl) pinKeypadEl.style.display = '';
+        if (pinForgotLink) pinForgotLink.style.display = '';
+        hideError(pinErrors);
+        focusFirstEmptyPinBox();
+    }
+    if (pinForgotLink) {
+        pinForgotLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            openPinForgot();
+        });
+    }
+    if (pinForgotCancel) {
+        pinForgotCancel.addEventListener('click', function(e) {
+            e.preventDefault();
+            closePinForgot();
+        });
+    }
+    if (pinForgotForm) {
+        pinForgotForm.addEventListener('submit', function(e) {
+            e.preventDefault();
             hideError(pinErrors);
-            updatePinFinal();
-            var fd = new FormData(pinForm);
-            fetch(pinForm.action, {
+            var fd = new FormData(pinForgotForm);
+            fetch(pinForgotForm.action, {
                 method: 'POST',
                 body: fd,
                 headers: { 'X-Requested-With': 'XMLHttpRequest' },
@@ -3027,13 +3267,9 @@
             })
             .then(function(res) {
                 if (res.ok && res.body.status === 'ok') {
-                    window.location.href = res.body.redirect || '/intro/';
+                    window.location.href = res.body.redirect || '/profile/?modal=pin';
                 } else {
-                    showError(pinErrors, (res.body && res.body.message) || 'Invalid PIN');
-                    // Clear PIN inputs
-                    pinBoxes.forEach(function(b) { b.value = ''; });
-                    if (pinBoxes[0]) pinBoxes[0].focus();
-                    updatePinFinal();
+                    showError(pinErrors, (res.body && res.body.message) || 'Password incorrect');
                 }
             })
             .catch(function() {

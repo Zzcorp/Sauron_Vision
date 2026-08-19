@@ -81,3 +81,46 @@ def login_pin(request):
             return JsonResponse({"status": "error", "message": error}, status=400)
     return render(request, "registration/login_pin.html",
                   {"error": error, "username": user.username})
+
+
+@csrf_protect
+@never_cache
+def login_pin_forgot(request):
+    """Escape hatch for a forgotten PIN. change_pin requires the current PIN
+    and login requires the PIN — circular, so a forgotten PIN locked the
+    account for good. Re-verify the PENDING user's password (same session
+    mechanism as login_pin), complete the login, and flag the session so the
+    profile PIN modal waives the current-PIN check exactly once."""
+    from django.contrib.auth.models import User
+    uid = request.session.get(PENDING_KEY)
+    is_ajax = _is_ajax(request)
+    if not uid:
+        if is_ajax:
+            return JsonResponse({"status": "error", "message": "Session expired"}, status=400)
+        return redirect("login")
+    try:
+        user = User.objects.get(id=uid)
+    except User.DoesNotExist:
+        request.session.pop(PENDING_KEY, None)
+        if is_ajax:
+            return JsonResponse({"status": "error", "message": "User not found"}, status=400)
+        return redirect("login")
+
+    if request.method != "POST":
+        return redirect("login_pin")
+
+    password = request.POST.get("password", "")
+    if user.check_password(password):
+        auth_login(request, user)
+        request.session["force_pin_reset"] = True
+        request.session.pop(PENDING_KEY, None)
+        request.session.pop("sauron_pending_next", None)
+        redirect_url = "/profile/?modal=pin"
+        if is_ajax:
+            return JsonResponse({"status": "ok", "redirect": redirect_url})
+        return redirect(redirect_url)
+    error = "Password incorrect"
+    if is_ajax:
+        return JsonResponse({"status": "error", "message": error}, status=400)
+    return render(request, "registration/login_pin.html",
+                  {"error": error, "username": user.username})
