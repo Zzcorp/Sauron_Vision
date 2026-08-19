@@ -115,7 +115,10 @@ def process_commands():
             if signals:
                 lines = ["*Active Signals:*\n"]
                 for s in signals:
-                    lines.append(f"{'\U0001f7e2' if s.direction == 'bullish' else '\U0001f534'} {s.instrument.symbol} {s.direction} — {s.score:.2f}")
+                    # The direction is already a word on this line, so the
+                    # coloured dot it duplicated is gone rather than replaced
+                    # — a Telegram client picks its own font for any mark.
+                    lines.append(f"{s.instrument.symbol} {s.direction} — {s.score:.2f}")
                 send_telegram("Signals", "\n".join(lines))
             else:
                 send_telegram("Signals", "No active signals.")

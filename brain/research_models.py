@@ -65,5 +65,6 @@ class ResearchMessage(models.Model):
         ]
 
     def __str__(self) -> str:
-        prefix = "👤" if self.role == self.ROLE_USER else "🦅"
+        # ▸ the operator speaking, ◉ the Eye answering.
+        prefix = "▸" if self.role == self.ROLE_USER else "◉"
         return f"{prefix} {self.content[:60]}"

@@ -154,7 +154,7 @@ def _alert_stranded(trade, attempts: int, error: str) -> None:
         from alerts.models import Notification
         Notification.objects.create(
             user=trade.config.user, notification_type="bot",
-            title=f"🚨 Stranded position: {trade.symbol}",
+            title=f"⊠ Stranded position: {trade.symbol}",
             body=(f"{trade.asset_class} trade #{trade.id} has failed to close "
                   f"{attempts} times and is STILL OPEN at the broker. "
                   f"Last error: {error[:160]}. Close it manually at the broker "
@@ -208,7 +208,7 @@ def _give_up(trade, error: str) -> None:
         from alerts.models import Notification
         Notification.objects.create(
             user=trade.config.user, notification_type="bot",
-            title=f"⛔ Close abandoned: {trade.symbol}",
+            title=f"✕ Close abandoned: {trade.symbol}",
             body=(f"{trade.asset_class} trade #{trade.id} failed to close "
                   f"{MAX_RETRY_ATTEMPTS} times and is no longer being retried. "
                   f"Last error: {error[:160]}. Verify and close it manually "

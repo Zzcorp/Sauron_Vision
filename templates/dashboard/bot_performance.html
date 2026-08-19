@@ -131,7 +131,8 @@
                     {% elif t.outcome == "stopped_out" %}
                         <span style="color:#ff5e5e;">✗ SL</span>
                     {% elif t.outcome == "expired" %}
-                        <span style="color:var(--accent-gold);">⌛ EXP</span>
+                        {# ○ completes the ✓ / ✗ pair: neither target nor stop was reached. #}
+                        <span style="color:var(--accent-gold);">○ EXP</span>
                     {% else %}
                         <span style="color:var(--text-muted);">{{ t.outcome }}</span>
                     {% endif %}

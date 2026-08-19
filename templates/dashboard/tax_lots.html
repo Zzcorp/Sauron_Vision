@@ -19,7 +19,8 @@
                     <option value="paper" {% if mode == "paper" %}selected{% endif %}>paper</option>
                 </select>
             </form>
-            <a href="{% url 'tax_lots_export' %}?year={{ year }}&mode={{ mode }}" class="btn btn-sm">⬇ Form 8949 CSV</a>
+            {# ↓ from the arrow block; the heavy download arrow it replaces renders as a colour emoji. #}
+            <a href="{% url 'tax_lots_export' %}?year={{ year }}&mode={{ mode }}" class="btn btn-sm">↓ Form 8949 CSV</a>
         </div>
     </div>
 

@@ -66,7 +66,7 @@ def scan_funding_signals():
         # (a) Sign flip
         if cur_r * prev_r < 0:
             _notify_all(
-                f"⚡ {sym} funding flipped",
+                f"⟳ {sym} funding flipped",
                 f"Funding rate flipped {prev_r*100:+.4f}% → {cur_r*100:+.4f}% · mark {cur.mark_price}",
                 sym_url,
             )
@@ -76,7 +76,7 @@ def scan_funding_signals():
         if abs(cur_r) >= EXTREME_THRESHOLD:
             direction = "CROWDED LONGS" if cur_r > 0 else "CROWDED SHORTS"
             _notify_all(
-                f"🔥 {sym} extreme funding — {direction}",
+                f"◉ {sym} extreme funding — {direction}",
                 f"Funding {cur_r*100:+.4f}% (≥±0.1%). Squeeze risk elevated.",
                 sym_url,
             )
@@ -91,14 +91,14 @@ def scan_funding_signals():
             price_chg = float(q.change_pct)
             if price_chg > 1.0 and cur_r < 0:
                 _notify_all(
-                    f"⚠ {sym} divergence — shorts bleeding",
+                    f"◈ {sym} divergence — shorts bleeding",
                     f"Price +{price_chg:.2f}% but funding {cur_r*100:+.4f}%. Classic short squeeze setup.",
                     sym_url,
                 )
                 alerts += 1
             elif price_chg < -1.0 and cur_r > 0:
                 _notify_all(
-                    f"⚠ {sym} divergence — longs bleeding",
+                    f"◈ {sym} divergence — longs bleeding",
                     f"Price {price_chg:.2f}% but funding {cur_r*100:+.4f}%. Long squeeze setup.",
                     sym_url,
                 )

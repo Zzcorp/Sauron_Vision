@@ -118,7 +118,7 @@ class CircuitBreakerTests(TestCase):
         StockBot(cfg).can_open_new()
         StockBot(cfg).can_open_new()
         self.assertEqual(Notification.objects.filter(
-            user=self.user, title__startswith="🔌 Circuit breaker").count(), 1)
+            user=self.user, title__startswith="⊟ Circuit breaker").count(), 1)
 
 
 # ── shadow mode ─────────────────────────────────────────────────────────

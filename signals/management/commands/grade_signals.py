@@ -108,7 +108,7 @@ class Command(BaseCommand):
         if not decaying:
             s.write("  no decaying rules detected.")
         else:
-            s.write(self.style.ERROR(f"  ⚠  {len(decaying)} rule(s) below half of baseline expectancy:"))
+            s.write(self.style.ERROR(f"  ▲  {len(decaying)} rule(s) below half of baseline expectancy:"))
             for d in decaying:
                 s.write(self.style.ERROR(
                     f"    {d['rule_name'][:40]:40s} recent={d['recent_expectancy']:+.2f}R "

@@ -350,11 +350,12 @@
 <!-- UPGRADE-9: sidebar toggle moved to unified edge button -->
         </div>
         <nav class="sidebar-nav">
+            {# Nav marks are drawn only from the geometric/operator sets — no pictographs — so the rail reads as one engraved vocabulary and page titles can mirror it exactly. #}
             <div class="nav-section">Command Center</div>
             <a href="{% url 'command_center' %}" class="nav-link {% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Operations Center</span></a>
             <a href="{% url 'bot_performance_dashboard' %}" class="nav-link {% if page_id == 'bot_performance' %}active{% endif %}"><span class="icon">▲</span> <span class="label-text">Bot Performance</span></a>
             <a href="{% url 'bot_backtest_list' %}" class="nav-link {% if page_id == 'bot_backtest' %}active{% endif %}"><span class="icon">⊟</span> <span class="label-text">Bot Backtest</span></a>
-            <a href="{% url 'bot_charts' %}" class="nav-link {% if page_id == 'bot_charts' %}active{% endif %}"><span class="icon">📈</span> <span class="label-text">Bot Performance</span></a>
+            <a href="{% url 'bot_charts' %}" class="nav-link {% if page_id == 'bot_charts' %}active{% endif %}"><span class="icon">▥</span> <span class="label-text">Bot Performance</span></a>
             <a href="{% url 'forensics_list' %}" class="nav-link {% if page_id == 'forensics' %}active{% endif %}"><span class="icon">◎</span> <span class="label-text">Trade Forensics</span></a>
             <a href="{% url 'system_health' %}" class="nav-link {% if page_id == 'system_health' %}active{% endif %}"><span class="icon">✚</span> <span class="label-text">System Health</span></a>
             <div class="nav-section">Markets</div>
@@ -374,7 +375,7 @@
             <a href="{% url 'allocator_dashboard' %}" class="nav-link {% if page_id == 'allocator' %}active{% endif %}"><span class="icon">⚖</span> <span class="label-text">Risk Allocator</span></a>
             <a href="{% url 'discoveries_dashboard' %}" class="nav-link {% if page_id == 'discoveries' %}active{% endif %}"><span class="icon">⊛</span> <span class="label-text">Discoveries</span></a>
             <a href="{% url 'opportunities_dashboard' %}" class="nav-link {% if page_id == 'opportunities' %}active{% endif %}"><span class="icon">◍</span> <span class="label-text">Opportunities</span></a>
-            <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon">🧬</span> <span class="label-text">Strategy Evolution</span></a>
+            <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategy Evolution</span></a>
             <a href="{% url 'news_feed' %}" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon">▤</span> <span class="label-text">News & Sentiment</span></a>
             <a href="{% url 'backtest_list' %}" class="nav-link {% if page_id == 'backtest' %}active{% endif %}"><span class="icon">&#x25A1;</span> <span class="label-text">Backtesting</span></a>
             <a href="{% url 'performance_dashboard' %}" class="nav-link {% if page_id == 'performance' %}active{% endif %}"><span class="icon">◮</span> <span class="label-text">Signal Performance</span></a>
@@ -390,7 +391,7 @@
             <a href="{% url 'ai_tasks_list' %}" class="nav-link {% if page_id == 'ai_tasks' %}active{% endif %}"><span class="icon">▸</span> <span class="label-text">Agent Tasks</span></a>
             <a href="{% url 'ai_journal_dashboard' %}" class="nav-link {% if page_id == 'ai_insights' %}active{% endif %}"><span class="icon">✎</span> <span class="label-text">AI Journal</span></a>
             <a href="{% url 'calibration_dashboard' %}" class="nav-link {% if page_id == 'calibration' %}active{% endif %}"><span class="icon">◔</span> <span class="label-text">Agent Calibration</span></a>
-            {% if request.user.is_staff %}<a href="{% url 'ai_models_dashboard' %}" class="nav-link {% if page_id == 'ai_models' %}active{% endif %}"><span class="icon">⚙</span> <span class="label-text">Model Selection</span></a>{% endif %}
+            {% if request.user.is_staff %}<a href="{% url 'ai_models_dashboard' %}" class="nav-link {% if page_id == 'ai_models' %}active{% endif %}"><span class="icon">⊚</span> <span class="label-text">Model Selection</span></a>{% endif %}
             {# Phase 64.5: standalone "AI Chat" merged into /research/ — link removed. #}
             <a href="{% url 'intelligence_hub' %}" class="nav-link {% if page_id == 'intelligence' %}active{% endif %}"><span class="icon">◯</span> <span class="label-text">Intelligence Hub</span></a>
             <a href="{% url 'briefing_dashboard' %}" class="nav-link {% if page_id == 'briefing' %}active{% endif %}"><span class="icon">✦</span> <span class="label-text">Strategist Briefing</span></a>
@@ -408,11 +409,12 @@
             {% endif %}<div class="nav-section">System</div>
             <a href="{% url 'profile' %}" class="nav-link {% if page_id == 'profile' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Profile</span></a>
             <a href="{% url 'notifications_inbox' %}" class="nav-link {% if page_id == 'notifications_inbox' or page_id == 'notifications' %}active{% endif %}"><span class="icon">&#x25C9;</span> <span class="label-text">Notifications</span></a>
-            <a href="{% url 'setup' %}" class="nav-link {% if page_id == 'setup' %}active{% endif %}"><span class="icon">⚙</span> <span class="label-text">Setup</span></a>
-            <a href="{% url 'getting_started' %}" class="nav-link {% if page_id == 'getting_started' %}active{% endif %}"><span class="icon">📡</span> <span class="label-text">Getting Started</span></a>
+            <a href="{% url 'setup' %}" class="nav-link {% if page_id == 'setup' %}active{% endif %}"><span class="icon">⊡</span> <span class="label-text">Setup</span></a>
+            <a href="{% url 'getting_started' %}" class="nav-link {% if page_id == 'getting_started' %}active{% endif %}"><span class="icon">★</span> <span class="label-text">Getting Started</span></a>
         </nav>
         <div class="sidebar-footer">
-            <a href="{% url 'admin:index' %}">⚙ Admin</a>
+            {# Same mark the Admin Panel nav-link carries, so both routes into admin read as one destination. #}
+            <a href="{% url 'admin:index' %}">⬢ Admin</a>
             <!-- 2. Logout as POST form -->
             <form method="post" action="{% url 'logout' %}" style="display:inline;">
                 {% csrf_token %}
@@ -600,7 +602,7 @@
                             </button>
                             {% if request.user.is_staff %}
                             <a class="um-link" href="{% url 'admin:index' %}" role="menuitem">
-                                <span class="um-icon">⚙</span> Admin Panel
+                                <span class="um-icon">⬢</span> Admin Panel
                             </a>
                             {% endif %}
                         </div>

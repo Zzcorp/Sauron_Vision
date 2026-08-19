@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Performance — Sauron Vision{% endblock %}
-{% block page_title %}🎯 SELF-GRADING · {{ window }}D WINDOW{% endblock %}
+{# ◮ is the sidebar's Signal Performance mark — title and nav row agree. #}
+{% block page_title %}◮ SELF-GRADING · {{ window }}D WINDOW{% endblock %}
 
 {% block content %}
 <div class="oc-strip" style="margin-bottom:18px;">
@@ -52,7 +53,8 @@
     </div>
     {% if overall.n_closed == 0 %}
         <div class="empty-state">
-            <div class="empty-icon">🔍</div>
+            {# ◌ is the declared "nothing measured yet" mark; the <p> carries the meaning. #}
+            <div class="empty-icon" aria-hidden="true">◌</div>
             <p>NO CLOSED SIGNALS IN WINDOW — grade_signals will populate this view as the lifecycle tracker resolves outcomes.</p>
         </div>
     {% else %}

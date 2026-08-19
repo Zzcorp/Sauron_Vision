@@ -3,9 +3,13 @@
 
 def format_signal_alert(signal) -> tuple:
     """Format a Signal into alert title and message."""
-    emoji = "🟢" if signal.direction == "bullish" else "🔴" if signal.direction == "bearish" else "🟡"
+    # This title lands in Telegram, Discord and mail, where the reader's own
+    # font decides whether a mark renders at all — so the direction the glyph
+    # used to carry is spelled out instead of drawn.
+    tag = ("BULLISH" if signal.direction == "bullish"
+           else "BEARISH" if signal.direction == "bearish" else "NEUTRAL")
 
-    title = f"{emoji} {signal.title}"
+    title = f"{tag} — {signal.title}"
     message = (
         f"Instrument: {signal.instrument.symbol}\n"
         f"Type: {signal.signal_type}\n"

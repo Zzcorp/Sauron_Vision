@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Liquidation Heatmap — Sauron Vision{% endblock %}
-{% block page_title %}⚡ LIQUIDATION HEATMAP{% endblock %}
+{# ▩ is the filled grid this page draws, and sits in the same shape block as ▤ ▦ ▣. #}
+{% block page_title %}▩ LIQUIDATION HEATMAP{% endblock %}
 {% block content %}
 
   <!-- Controls -->
@@ -78,7 +79,8 @@
       <!-- UPGRADE-8: Funding rate panel -->
       <div class="card funding-panel" style="margin-top:18px;">
         <div class="card-header">
-          <div class="card-title">💸 FUNDING RATES (24H)</div>
+          {# $ is the money mark the nav already uses; this card is a rate paid between sides. #}
+          <div class="card-title">$ FUNDING RATES (24H)</div>
           <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
             Positive = longs pay shorts · Negative = shorts pay longs · |≥0.1%| = extreme
           </div>
@@ -90,7 +92,8 @@
             <div class="funding-head">
               <span class="funding-sym">{{ f.symbol }}</span>
               {% if f.extreme %}<span class="funding-badge">EXTREME</span>{% endif %}
-              {% if f.sign_flips > 0 %}<span class="funding-flip">⚡{{ f.sign_flips }}</span>{% endif %}
+              {# ⇅ says what a sign flip is — the rate reversed direction — in the arrow vocabulary. #}
+              {% if f.sign_flips > 0 %}<span class="funding-flip" title="Funding sign flips in window">⇅{{ f.sign_flips }}</span>{% endif %}
             </div>
             <div class="funding-rate" style="color:{% if f.current > 0 %}var(--accent-red){% elif f.current < 0 %}var(--accent){% else %}var(--text-muted){% endif %};">
               {% if f.current >= 0 %}+{% endif %}{{ f.current_pct|floatformat:4 }}%

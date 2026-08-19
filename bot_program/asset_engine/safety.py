@@ -199,7 +199,7 @@ def notify_circuit_breaker(cfg, reasons: list) -> None:
     """Alert once an hour while a breaker is tripped."""
     try:
         from alerts.models import Notification
-        title = f"🔌 Circuit breaker: {cfg.name}"
+        title = f"⊟ Circuit breaker: {cfg.name}"
         recent = Notification.objects.filter(
             user=cfg.user, notification_type="bot", title=title,
             created_at__gte=timezone.now() - timedelta(hours=1)).exists()

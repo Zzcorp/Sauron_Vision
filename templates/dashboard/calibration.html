@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Calibration — Sauron Vision{% endblock %}
-{% block page_title %}🎯 AGENT CALIBRATION · TRUST SCORES{% endblock %}
+{# ◔ is the sidebar's Agent Calibration mark — title and nav row agree. #}
+{% block page_title %}◔ AGENT CALIBRATION · TRUST SCORES{% endblock %}
 
 {% block content %}
 <div class="oc-strip" style="margin-bottom:18px;">
@@ -67,7 +68,8 @@
         amplified when trust &gt; 1.0. Brier score: 0 = perfect, 0.25 = random, lower is better.
     </p>
     {% else %}
-    <div class="empty-state"><div class="empty-icon">🎯</div>
+    {# ◌ is the declared "nothing measured yet" mark; the <p> carries the meaning. #}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
         <p>NO AGENT PREDICTIONS YET — predictions accumulate as the AI gate, decay investigator, and other agents fire. Resolution lags by 7d (trades) or 30d (decay).</p></div>
     {% endif %}
 </div>

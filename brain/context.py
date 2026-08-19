@@ -232,7 +232,7 @@ def context_for_prompt() -> str:
             "## Sauron's Mind context (LOW-TRUST signal)\n"
             f"- Regime: {ctx['regime_label']} (confidence "
             f"{ctx['regime_confidence']:.2f})\n"
-            f"- ⚠ Brain trust score is {trust_str} — calibration is poor "
+            f"- ▲ Brain trust score is {trust_str} — calibration is poor "
             "lately. Use this only as a weak prior; do NOT let it "
             "override your direct evidence."
         )

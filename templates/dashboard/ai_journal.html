@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}AI Journal — Sauron Vision{% endblock %}
-{% block page_title %}🧠 AI JOURNAL · DECAY · COSTS{% endblock %}
+{# ✎ is the sidebar's AI Journal mark — title and nav row agree. #}
+{% block page_title %}✎ AI JOURNAL · DECAY · COSTS{% endblock %}
 
 {% block content %}
 <div class="oc-strip" style="margin-bottom:18px;">
@@ -63,7 +64,8 @@
     </div>
     {% else %}
         <div class="empty-state">
-            <div class="empty-icon">📓</div>
+            {# ◌ is the declared "unconfigured / nothing recorded yet" mark; the <p> carries the meaning. #}
+            <div class="empty-icon" aria-hidden="true">◌</div>
             <p>NO JOURNAL ENTRIES — entries are auto-generated when a signal closes with |R| ≥ 0.5.</p>
         </div>
     {% endif %}
@@ -91,7 +93,7 @@
     </div>
     {% else %}
         <div class="empty-state">
-            <div class="empty-icon">🔬</div>
+            <div class="empty-icon" aria-hidden="true">◌</div>
             <p>NO INVESTIGATIONS — investigations run nightly when decay_flag fires for a rule.</p>
         </div>
     {% endif %}

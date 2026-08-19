@@ -175,6 +175,20 @@ def _user_channel(user) -> str:
 
 # ── External channel adapters ────────────────────────────────────────────
 
+# Titles lead with the platform's own geometric mark, which the bell renders
+# in the fonts this app ships. Telegram, mail and Discord draw the same title
+# in whatever font the reader's client happens to have, where a geometric mark
+# is a coin-flip between the glyph and a tofu box on someone's phone. Every
+# title already states its event in words ("Close refused: BTCUSDT"), so the
+# mark is dropped on the way out rather than gambling on a foreign font stack.
+_PLATFORM_MARKS = "✕▲⊠⊟⟳◉⊕◯◌●"
+
+
+def _plain_title(title: str) -> str:
+    """Strip the leading platform mark — external clients get words only."""
+    return title.lstrip(_PLATFORM_MARKS).lstrip() or title
+
+
 def _send_telegram(user, title: str, body: str) -> bool:
     """Send via the platform Telegram bot to the user's chat_id.
 
@@ -189,7 +203,8 @@ def _send_telegram(user, title: str, body: str) -> bool:
         chat_id = getattr(user.notification_prefs, "telegram_chat_id", "")
         if not chat_id:
             return False
-        text = f"*{title}*\n\n{body}" if body else f"*{title}*"
+        plain = _plain_title(title)
+        text = f"*{plain}*\n\n{body}" if body else f"*{plain}*"
         r = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
@@ -207,7 +222,7 @@ def _send_email(user, title: str, body: str) -> bool:
         if not user.email:
             return False
         from alerts.channels.email_alert import send_email_alert
-        return send_email_alert(user.email, title, body)
+        return send_email_alert(user.email, _plain_title(title), body)
     except Exception as e:
         logger.warning("email dispatch failed: %s", e)
         return False
@@ -239,7 +254,8 @@ def _send_discord(user, title: str, body: str) -> bool:
         )
         if not url:
             return False
-        content = f"**{title}**\n{body}" if body else f"**{title}**"
+        plain = _plain_title(title)
+        content = f"**{plain}**\n{body}" if body else f"**{plain}**"
         r = requests.post(url, json={"content": content[:1900]}, timeout=5)
         return r.ok
     except Exception as e:
@@ -253,7 +269,7 @@ def notify_orchestrator_reject(user, *, asset_class: str, symbol: str,
                                 side: str, reason: str) -> bool:
     return dispatch_notification(
         user, "orchestrator_reject",
-        title=f"🛰 Orchestrator blocked {symbol} {side}",
+        title=f"✕ Orchestrator blocked {symbol} {side}",
         body=f"{asset_class.upper()} · {reason}",
         url="/eye/",
     )
@@ -265,7 +281,7 @@ def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
     from alerts.links import page_url
     return dispatch_notification(
         user, "bot_fill_open",
-        title=f"📈 {symbol} {side} opened",
+        title=f"◉ {symbol} {side} opened",
         body=f"{asset_class.upper()} · qty {qty} @ {entry_price}"
              + (f" · {rule_name}" if rule_name else ""),
         # The fill has a page: forensics carries the rule that fired, the
@@ -280,8 +296,9 @@ def notify_bot_fill_close(user, *, asset_class: str, symbol: str, side: str,
                            qty, exit_price, pnl, outcome: str = "",
                            trade_id=None) -> bool:
     from alerts.links import page_url
-    icon = "🎯" if outcome == "hit_target" else (
-        "🛑" if outcome == "stopped_out" else "🔚")
+    # ⊕ target struck · ⊟ cut at the stop · ◯ closed flat by anything else.
+    icon = "⊕" if outcome == "hit_target" else (
+        "⊟" if outcome == "stopped_out" else "◯")
     sign = "+" if (pnl is not None and pnl > 0) else ""
     return dispatch_notification(
         user, "bot_fill_close",
@@ -309,7 +326,7 @@ def notify_manual_close_refused(user, *, asset_class: str, symbol: str,
     from django.utils import timezone as _tz
     from alerts.links import page_url
 
-    title = f"⛔ Close refused: {symbol}"
+    title = f"✕ Close refused: {symbol}"
     try:
         from alerts.models import Notification
         recent = Notification.objects.filter(
@@ -334,7 +351,7 @@ def notify_drawdown_warning(user, *, asset_class: str, config_name: str,
                              realized_pnl, limit) -> bool:
     return dispatch_notification(
         user, "drawdown_warning",
-        title=f"⚠ Drawdown limit reached · {config_name}",
+        title=f"▲ Drawdown limit reached · {config_name}",
         body=(f"{asset_class.upper()} · realized 24h P&L {realized_pnl} "
               f"≤ limit {limit}. New entries halted."),
         url="/risk/",
@@ -353,7 +370,7 @@ def notify_track_record_decay(user, *, rule_name: str, asset_class: str,
     sign = "" if delta >= 0 else ""  # delta is negative when decaying
     return dispatch_notification(
         user, "track_record_decay",
-        title=(f"📉 {rule_name} decay · "
+        title=(f"▲ {rule_name} decay · "
                 f"recent {recent_avg_r:+.2f}R vs baseline {baseline_avg_r:+.2f}R"),
         body=(f"{asset_class.upper()} · last {recent_n} trades · "
               f"triggers: {', '.join(triggers) or '—'}"),

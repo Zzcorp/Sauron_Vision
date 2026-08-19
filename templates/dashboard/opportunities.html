@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Opportunities — Sauron Vision{% endblock %}
-{% block page_title %}🔭 OPPORTUNITY SCANNER{% endblock %}
+{# ◍ is the sidebar's Opportunities mark — title and nav row agree. #}
+{% block page_title %}◍ OPPORTUNITY SCANNER{% endblock %}
 
 {% block content %}
 <div class="oc-strip" style="margin-bottom:18px;">
@@ -64,7 +65,8 @@
     </table>
     </div>
     {% else %}
-    <div class="empty-state"><div class="empty-icon">🔭</div>
+    {# ◌ is the declared "nothing configured yet" mark; the <p> carries the meaning. #}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
         <p>NO SETUPS REGISTERED — admin can create one from the Admin Dashboard's Opportunity panel.</p></div>
     {% endif %}
 </div>

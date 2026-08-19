@@ -40,7 +40,8 @@
 <div class="card fade-in-up" style="margin-bottom:24px;">
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
         <span class="card-title">Chain integrity</span>
-        <a href="{% url 'audit_export' %}" class="btn btn-sm">⬇ Export CSV</a>
+        {# ↓ from the arrow block; the heavy download arrow it replaces renders as a colour emoji. #}
+        <a href="{% url 'audit_export' %}" class="btn btn-sm">↓ Export CSV</a>
     </div>
     <p class="form-hint" style="margin:0 0 8px;line-height:1.5;font-size:11px;">
         Each row's <code>payload_hash</code> = sha256(<code>prev_hash</code> || kind || canonical(data)).

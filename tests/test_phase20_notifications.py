@@ -238,7 +238,7 @@ class HookIntegrationTests(TestCase):
         # Simulate the can_open_new dedupe logic by checking the recency guard.
         recent = Notification.objects.filter(
             user=u, notification_type="bot",
-            title__startswith="⚠ Drawdown limit reached",
+            title__startswith="▲ Drawdown limit reached",
             created_at__gte=timezone.now() - timedelta(hours=1),
         ).exists()
         self.assertTrue(recent)

@@ -80,7 +80,7 @@ def maybe_alert_brain_failures() -> dict:
     try:
         from bot_program.notifications import notify_staff
         notify_staff(
-            title=(f"⚠ Sauron's Mind: {result['consecutive_failures']} "
+            title=(f"▲ Sauron's Mind: {result['consecutive_failures']} "
                    f"consecutive synthesis failures"),
             body=(f"Last error: {result['last_error']}\n\n"
                   f"Investigate the brain synthesizer — agents are "
@@ -169,7 +169,7 @@ def maybe_alert_critic_dissent_rate() -> dict:
     try:
         from bot_program.notifications import notify_staff
         notify_staff(
-            title=(f"⚠ Critic dissent rate {rate:.0%} — {title_suffix}"),
+            title=(f"▲ Critic dissent rate {rate:.0%} — {title_suffix}"),
             body=(f"Last 30d: {result['n_dissents']} dissents / "
                    f"{result['n_votes']} votes. Healthy band 5-50%. "
                    "If too low: the critic isn't catching bad hypotheses "
@@ -267,7 +267,7 @@ def maybe_alert_override_rates(agents=TRACKED_OVERRIDE_AGENTS) -> list[dict]:
             n_dec = result["n_decisions"]
             n_ov = result["n_overrides"]
             notify_staff(
-                title=(f"⚠ Operator override rate {rate:.0%} on {agent} "
+                title=(f"▲ Operator override rate {rate:.0%} on {agent} "
                        f"(last {result['lookback_days']}d)"),
                 body=(f"{n_ov} overrides / {n_dec} decisions over the last "
                        f"{result['lookback_days']} days. Threshold "

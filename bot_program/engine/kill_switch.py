@@ -109,7 +109,7 @@ def execute_kill_switch(user=None, reason="manual"):
     )
     if results["errors"]:
         body += (
-            f" ⚠ {len(results['errors'])} broker-close error(s) — these symbols "
+            f" ▲ {len(results['errors'])} broker-close error(s) — these symbols "
             f"may still be OPEN at the broker and need manual reconciliation."
         )
     try:

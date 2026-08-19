@@ -157,7 +157,7 @@ class ClosePendingTests(TestCase):
             retry_all_pending_closes()
 
         self.assertTrue(Notification.objects.filter(
-            user=self.user, title__startswith="🚨 Stranded position").exists())
+            user=self.user, title__startswith="⊠ Stranded position").exists())
 
     def test_beat_schedule_has_retry_task(self):
         from config.celery import app

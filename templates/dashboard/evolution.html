@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Strategy Evolution — Sauron Vision{% endblock %}
-{% block page_title %}🧬 STRATEGY EVOLUTION{% endblock %}
+{# ⬡ is the strategy mark the sidebar uses; evolution is what happens to a strategy family. #}
+{% block page_title %}⬡ STRATEGY EVOLUTION{% endblock %}
 
 {% block content %}
 {% comment %}
@@ -67,7 +68,10 @@ must not be able to pass for a card that was measured and lost.
         <span class="ev-key-v ev-key-v--robust"><i aria-hidden="true">▲</i> ROBUST <em>both halves improved</em></span>
         <span class="ev-key-v ev-key-v--overfit"><i aria-hidden="true">◆</i> OVERFIT <em>train up, test down</em></span>
         <span class="ev-key-v ev-key-v--worse"><i aria-hidden="true">▼</i> WORSE <em>measured, and it lost</em></span>
-        <span class="ev-key-v ev-key-v--thin"><i aria-hidden="true">⚠</i> NOT MEASURED <em>below the trade floor</em></span>
+        {# ◌ is the platform's declared "nothing measured" mark. ⚠ reads as a #}
+        {# warning about the RESULT, which is the exact misreading this key #}
+        {# exists to prevent: there is no result, only an absent measurement. #}
+        <span class="ev-key-v ev-key-v--thin"><i aria-hidden="true">◌</i> NOT MEASURED <em>below the trade floor</em></span>
         <span class="ev-key-v ev-key-v--unbacktested"><i aria-hidden="true">○</i> NO BACKTEST <em>heuristic placeholder</em></span>
     </div>
     <p class="ev-key-warn">
@@ -85,7 +89,8 @@ must not be able to pass for a card that was measured and lost.
 <section class="card ev-family {% if fam.n_pending %}ev-family--open{% endif %}">
     <header class="ev-fam-head">
         <div class="ev-fam-id">
-            <span class="ev-fam-glyph" aria-hidden="true">🧬</span>
+            {# Same hexagon as the page title and the sidebar: this card heads one strategy family. #}
+            <span class="ev-fam-glyph" aria-hidden="true">⬡</span>
             <div class="ev-fam-titles">
                 <h2 class="ev-fam-name">{{ fam.parent.name }}</h2>
                 <p class="ev-fam-sub">

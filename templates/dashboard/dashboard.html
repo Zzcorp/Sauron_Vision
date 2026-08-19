@@ -275,10 +275,11 @@ body.sv-editing [id^="section-"].sv-hidden-in-edit .sv-edit-x span { display: no
 (function() {
     var ICONS = {
         all:            '\u25C9',   /* ◉ */
-        morning_review: '\u{1F305}',
-        active_trading: '\u26A1',
-        end_of_day:     '\u{1F307}',
-        custom:         '\u2699',
+        /* The three time-of-day presets read as one filling dial: quarter, half, three-quarter. */
+        morning_review: '\u25D4',   /* ◔ */
+        active_trading: '\u25D1',   /* ◑ */
+        end_of_day:     '\u25D5',   /* ◕ */
+        custom:         '\u22A1',   /* ⊡ — the settings mark the nav now carries */
     };
     var CSRF = '{{ csrf_token }}';
     var ALL_PRESET_ID = '__all__';  /* client-only pseudo-preset */
@@ -315,7 +316,7 @@ body.sv-editing [id^="section-"].sv-hidden-in-edit .sv-edit-x span { display: no
             var btn = document.createElement('button');
             btn.className = 'sv-preset-pill' + (p.id === data.active_id ? ' active' : '');
             btn.dataset.id = p.id;
-            var icon = ICONS[p.preset_type] || '\u2699';
+            var icon = ICONS[p.preset_type] || '\u22A1';
             var delHtml = p.preset_type === 'custom'
                 ? '<span class="sv-preset-del" data-del="' + p.id + '" title="Delete this preset">&#x2715;</span>'
                 : '';
@@ -556,7 +557,8 @@ body.sv-editing [id^="section-"].sv-hidden-in-edit .sv-edit-x span { display: no
 <!-- ── Quick Actions Bar ──────────────────────────────── -->
 <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:10px;">
     <a href="{% url 'portfolio_report' %}" class="btn btn-sm btn-danger" title="Download PDF Portfolio Report">
-        ⬇ Download Report
+        {# ↓ from the arrow block; the heavy download arrow it replaces renders as a colour emoji. #}
+        ↓ Download Report
     </a>
 </div>
 <!-- ── Row 1: Portfolio KPIs ──────────────────────────── -->

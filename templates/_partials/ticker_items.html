@@ -68,7 +68,8 @@ page reload. base.html includes it for the initial render.
                             {% elif item.sentiment_score < -0.2 %}<span class="tnp-sent neg">▼ BEAR {{ item.sentiment_score|floatformat:2 }}</span>
                             {% else %}<span class="tnp-sent neu">● NEUTRAL</span>{% endif %}
                           {% endif %}
-                          {% if item.urgency %}<span class="tnp-urgency">⚡ {{ item.urgency|upper }}</span>{% endif %}
+                          {% comment %}✦ not a lightning bolt: ▲/▼/● already carry direction on this same row, so urgency needs a mark that cannot be misread as sentiment.{% endcomment %}
+                          {% if item.urgency %}<span class="tnp-urgency">✦ {{ item.urgency|upper }}</span>{% endif %}
                         </div>
                         {% if item.implication %}<div class="tnp-implication">{{ item.implication }}</div>{% endif %}
                         {% if item.affected_chips %}

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Rule Control — Sauron Vision{% endblock %}
-{% block page_title %}🛠️  RULE CONTROL · {% if live_mode %}LIVE{% else %}SHADOW{% endif %}{% endblock %}
+{# ⊙ is the sidebar's Rule Controls mark — title and nav row agree. #}
+{% block page_title %}⊙ RULE CONTROL · {% if live_mode %}LIVE{% else %}SHADOW{% endif %}{% endblock %}
 
 {% block content %}
 <div class="oc-strip" style="margin-bottom:18px;">
@@ -58,7 +59,8 @@
     </table>
     </div>
     {% else %}
-    <div class="empty-state"><div class="empty-icon">🛡️</div>
+    {# ◌ is the declared "nothing configured yet" mark; the <p> carries the meaning. #}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
         <p>NO RULE CONTROLS — all rules run with default settings until the actuator proposes a change.</p></div>
     {% endif %}
 </div>
@@ -88,7 +90,7 @@
     </table>
     </div>
     {% else %}
-    <div class="empty-state"><div class="empty-icon">📭</div>
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
         <p>NO PENDING PROPOSALS — the actuator runs daily at 03:00 UTC.</p></div>
     {% endif %}
 </div>

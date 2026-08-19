@@ -340,7 +340,10 @@ def check_price_alerts():
                         from alerts.channels.telegram_alert import send_telegram
                         prefs = alert.user.notification_prefs
                         if prefs.telegram_chat_id:
-                            send_telegram(prefs.telegram_chat_id, f"🔔 {title}\n{body}")
+                            # No leading mark for Telegram — the title already
+                            # opens with "Price Alert:", and a glyph here is
+                            # at the mercy of the reader's client font.
+                            send_telegram(prefs.telegram_chat_id, f"{title}\n{body}")
                     except Exception:
                         pass
 

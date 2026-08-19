@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Pattern Discoveries — Sauron Vision{% endblock %}
-{% block page_title %}🔬 PATTERN DISCOVERIES{% endblock %}
+{# ⊛ is the sidebar's Discoveries mark — title and nav row agree. #}
+{% block page_title %}⊛ PATTERN DISCOVERIES{% endblock %}
 
 {% block content %}
 <div class="oc-strip" style="margin-bottom:18px;">
@@ -68,7 +69,8 @@
         Discovered setups still walk the Phase-8 RESEARCH→PAPER→LIVE_SMALL→LIVE_FULL ladder before any live capital.
     </p>
     {% else %}
-    <div class="empty-state"><div class="empty-icon">🔬</div>
+    {# ◌ is the declared "nothing recorded yet" mark; the <p> carries the meaning. #}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
         <p>NO PENDING DISCOVERIES — miner runs Sundays at 06:00 UTC. Click "▶ Mine Now" on the admin dashboard to trigger immediately.</p></div>
     {% endif %}
 </div>

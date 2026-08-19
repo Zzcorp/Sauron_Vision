@@ -319,7 +319,10 @@ def _verdict(mutation, details, min_trades, penalty, basis, has_evaluator):
                 f"{penalty:+.2f}R placeholder")
         return {
             "key": "thin", "label": "NOT MEASURED", "tone": "warn",
-            "measured": False, "glyph": "⚠", "flag": "placeholder",
+            # ◌ is the platform's "unconfigured / nothing measured yet" mark.
+            # A warning glyph read as "this mutation is bad" when the whole
+            # point of the verdict is that nothing was measured either way.
+            "measured": False, "glyph": "◌", "flag": "placeholder",
             "headline": f"Fewer than {min_trades} trades on at least one leg.",
             "why": (f"No delta could be computed, so none was. {tail} — a "
                     f"penalty for being untested, NOT a measured loss. Read it "

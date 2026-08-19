@@ -16,7 +16,9 @@ def send_discord(title: str, message: str):
 
     payload = {
         "embeds": [{
-            "title": f"🔴 {title}",
+            # No mark on the title: the embed's own colour bar already reads
+            # as the severity, and Discord renders it in every client.
+            "title": title,
             "description": message,
             "color": 15158332,  # Red
         }]

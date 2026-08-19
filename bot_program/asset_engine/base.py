@@ -431,7 +431,7 @@ class AssetBot(ABC):
             from datetime import timedelta as _td
             from alerts.links import page_url
             from alerts.models import Notification as _N
-            title = f"⏳ Close pending: {trade.symbol}"
+            title = f"⟳ Close pending: {trade.symbol}"
             recent = _N.objects.filter(
                 user=self.user, notification_type="bot", title=title,
                 created_at__gte=timezone.now() - _td(hours=1),
@@ -494,7 +494,7 @@ class AssetBot(ABC):
                 from alerts.models import Notification as _N
                 recent = _N.objects.filter(
                     user=self.user, notification_type="bot",
-                    title__startswith="⚠ Drawdown limit reached",
+                    title__startswith="▲ Drawdown limit reached",
                     created_at__gte=timezone.now() - _td(hours=1),
                 ).exists()
                 if not recent:
@@ -870,7 +870,7 @@ class AssetBot(ABC):
         try:
             from datetime import timedelta as _td
             from alerts.models import Notification as _N
-            title = f"🛑 Live bot blocked: {self.cfg.name}"
+            title = f"✕ Live bot blocked: {self.cfg.name}"
             recent = _N.objects.filter(
                 user=self.user, notification_type="bot",
                 title=title,

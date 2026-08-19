@@ -19,7 +19,8 @@
             <td>{{ row.user.username }}</td>
             <td><span class="badge">{{ row.mode }}</span></td>
             <td>{{ row.market }}</td>
-            <td>{% if row.enabled %}✅{% else %}⏸{% endif %}</td>
+            {# ● is the declared "live" state mark; ⏸ stays because paused is not the same as off. #}
+            <td>{% if row.enabled %}●{% else %}⏸{% endif %}</td>
             <td>{% if row.shadow %}⊙{% else %}—{% endif %}</td>
             <td>{% if row.heartbeat_age %}{{ row.heartbeat_age|floatformat:0 }}s{% else %}—{% endif %}</td>
             <td>{{ row.open_trades }}</td>

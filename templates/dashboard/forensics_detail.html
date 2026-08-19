@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ trade.symbol }} #{{ trade.id }} — Forensics{% endblock %}
-{% block page_title %}🔬 {{ trade.symbol }} · {{ trade.side }} · TRADE #{{ trade.id }}{% endblock %}
+{# ◎ is the sidebar's Trade Forensics mark — title and nav row agree. #}
+{% block page_title %}◎ {{ trade.symbol }} · {{ trade.side }} · TRADE #{{ trade.id }}{% endblock %}
 
 {% block content %}
 <div class="oc-strip" style="margin-bottom:18px;">

@@ -66,7 +66,10 @@
 
         var btn = form.querySelector("button[type=submit], button");
         var oldText = btn ? btn.textContent : "";
-        if (btn) { btn.disabled = true; btn.textContent = "⏳ RUNNING…"; }
+        /* ⟳ is this codebase's own "turning" mark (the Bot Program rail
+           carries it) — the in-flight state reads in the same vocabulary
+           as the rest of the shell instead of an hourglass pictograph. */
+        if (btn) { btn.disabled = true; btn.textContent = "⟳ RUNNING…"; }
         running[job] = { btn: btn, oldText: oldText, form: form };
 
         /* Safety net: if no completion ever arrives (worker down, socket

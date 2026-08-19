@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Setup — Sauron Vision{% endblock %}
-{% block page_title %}⚙ ACCOUNT SETUP{% endblock %}
+{# ⊡ is the sidebar's Setup mark — title and nav row agree. #}
+{% block page_title %}⊡ ACCOUNT SETUP{% endblock %}
 
 {% block content %}
 {% if messages %}
@@ -83,7 +84,8 @@
 <!-- eToro Connection -->
 <div class="card fade-in-up delay-3" style="margin-bottom: 24px;">
     <div class="card-header">
-        <span class="card-title">🔗 eToro Integration</span>
+        {# ⇄ reads as the two-way sync this card configures, and stays in the arrow vocabulary. #}
+        <span class="card-title">⇄ eToro Integration</span>
         {% if etoro_connected %}
         <span class="badge badge-active">CONNECTED</span>
         {% else %}
@@ -172,7 +174,8 @@
 
 <!-- API Keys Status -->
 <div class="card fade-in-up delay-5">
-    <div class="card-header"><span class="card-title">🔑 API Keys Status</span></div>
+    {# ⚿ is the key mark the account menu already uses for credentials. #}
+    <div class="card-header"><span class="card-title">⚿ API Keys Status</span></div>
     <div class="table-wrapper">
     <table class="sv-perf-table">
         <thead><tr><th>Service</th><th>Status</th><th>Where to Get</th></tr></thead>

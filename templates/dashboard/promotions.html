@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Promotion Pipeline — Sauron Vision{% endblock %}
-{% block page_title %}🚦 PROMOTION PIPELINE{% endblock %}
+{# ⇧ is the sidebar's Promotion Ladder mark — title and nav row agree. #}
+{% block page_title %}⇧ PROMOTION PIPELINE{% endblock %}
 
 {% block content %}
 <div class="oc-strip" style="margin-bottom:18px;">
@@ -75,7 +76,8 @@
     </table>
     </div>
     {% else %}
-    <div class="empty-state"><div class="empty-icon">🚦</div>
+    {# ◌ is the declared "nothing configured yet" mark; the <p> carries the meaning. #}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
         <p>NO RULES UNDER PIPELINE — RuleControl rows appear as rules accumulate signals or as the actuator/allocator acts on them.</p></div>
     {% endif %}
 </div>

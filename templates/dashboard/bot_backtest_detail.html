@@ -102,7 +102,8 @@
         <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;">
             <div style="display:flex;justify-content:space-between;"><span>✓ Hit target</span><span class="up">{{ run.stats.by_outcome.hit_target|default:0 }}</span></div>
             <div style="display:flex;justify-content:space-between;"><span>✗ Stopped out</span><span class="down">{{ run.stats.by_outcome.stopped_out|default:0 }}</span></div>
-            <div style="display:flex;justify-content:space-between;"><span>⌛ Expired</span><span style="color:var(--text-muted);">{{ run.stats.by_outcome.expired|default:0 }}</span></div>
+            {# ○ completes the ✓ / ✗ pair: neither target nor stop was reached. #}
+            <div style="display:flex;justify-content:space-between;"><span>○ Expired</span><span style="color:var(--text-muted);">{{ run.stats.by_outcome.expired|default:0 }}</span></div>
         </div>
     </div>
 
@@ -137,7 +138,7 @@
                 <td>
                     {% if t.outcome == "hit_target" %}<span style="color:var(--accent);">✓ TP</span>
                     {% elif t.outcome == "stopped_out" %}<span style="color:#ff5e5e;">✗ SL</span>
-                    {% else %}<span style="color:var(--accent-gold);">⌛ EXP</span>{% endif %}
+                    {% else %}<span style="color:var(--accent-gold);">○ EXP</span>{% endif %}
                 </td>
                 <td class="{% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{{ t.realized_r|floatformat:2 }}</td>
                 <td>{{ t.duration_minutes }}</td>

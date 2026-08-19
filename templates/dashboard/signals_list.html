@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Signals — Sauron Vision{% endblock %}
-{% block page_title %}⚡ SIGNAL INTELLIGENCE{% endblock %}
+{# ◈ is the sidebar's Signals mark — title and nav row agree. #}
+{% block page_title %}◈ SIGNAL INTELLIGENCE{% endblock %}
 
 {% block content %}
 {# ── 1. Top stat strip — 6 cells ─────────────────────────────────── #}
@@ -200,7 +201,8 @@
         <div>
             <a href="?active=1" class="btn btn-sm {% if active_only %}btn-primary{% endif %}">Active Only</a>
             <a href="{% url 'signals_list' %}" class="btn btn-sm">All</a>
-            <a href="{% url 'performance_dashboard' %}" class="btn btn-sm">🎯 Performance</a>
+            {# ◮ is the mark the Signal Performance page and its nav row carry, so the link previews its destination. #}
+            <a href="{% url 'performance_dashboard' %}" class="btn btn-sm">◮ Performance</a>
         </div>
     </div>
     {% if signals %}
@@ -242,7 +244,8 @@
     </div>
     {% else %}
     <div class="empty-state">
-        <div class="empty-icon">⚡</div>
+        {# ◌ is the declared "nothing recorded yet" mark; the <p> carries the meaning. #}
+        <div class="empty-icon" aria-hidden="true">◌</div>
         <p>NO SIGNALS DETECTED — Signal engine scans every 15 minutes</p>
     </div>
     {% endif %}

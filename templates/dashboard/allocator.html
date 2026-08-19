@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Meta-Allocator — Sauron Vision{% endblock %}
-{% block page_title %}🎚️  META-ALLOCATOR · {% if live_mode %}LIVE{% else %}SHADOW{% endif %}{% endblock %}
+{# ⚖ is the sidebar's Risk Allocator mark — title and nav row agree. #}
+{% block page_title %}⚖ META-ALLOCATOR · {% if live_mode %}LIVE{% else %}SHADOW{% endif %}{% endblock %}
 
 {% block content %}
 <div class="oc-strip" style="margin-bottom:18px;">
@@ -60,7 +61,8 @@
         allocator lane (Phase 7) fine-tunes weights for active rules only.
     </p>
     {% else %}
-    <div class="empty-state"><div class="empty-icon">🎚️</div>
+    {# ◌ is the declared "nothing configured yet" mark; the <p> carries the meaning. #}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
         <p>NO RULE CONTROLS YET — propose an allocation to bootstrap.</p></div>
     {% endif %}
 </div>
