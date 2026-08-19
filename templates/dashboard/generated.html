@@ -2,6 +2,17 @@
 {% block title %}Generated strategies · Sauron's Mind{% endblock %}
 {% block content %}
 
+    {# Approve can be REFUSED — the conditions are re-validated at arming time — and base.html renders no messages region, so without this block the refusal was a silent redirect. #}
+    {% if messages %}
+    <div style="margin-bottom:18px;">
+        {% for msg in messages %}
+        <div class="card" style="border-color:{% if msg.tags == 'success' %}var(--accent){% else %}var(--accent-red){% endif %};padding:12px 20px;margin-bottom:8px;">
+            <span style="font-family:var(--font-mono);font-size:13px;">{% if msg.tags == 'success' %}OK{% else %}ERR{% endif %} {{ msg }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     {# ── Top stat strip — 6 cells ────────────────────────────────── #}
     <div class="oc-strip" style="margin-bottom:18px;">
         <div class="oc-strip-cell">

@@ -102,22 +102,22 @@
     <div class="card-header"><span class="card-title">Trades ({{ page.paginator.count }} total)</span></div>
     {% if page.object_list %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
-        <thead><tr><th>Opened</th><th>Class</th><th>Symbol</th><th>Side</th><th>Status</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>R</th><th>Outcome</th><th>Mode</th></tr></thead>
+    <table class="sv-perf-table sv-stack">
+        <thead><tr><th>Opened</th><th>Class</th><th>Symbol</th><th>Side</th><th>Status</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">P&amp;L</th><th class="num">R</th><th>Outcome</th><th>Mode</th></tr></thead>
         <tbody>
         {% for t in page.object_list %}
             <tr>
-                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ t.opened_at|date:"Y-m-d H:i" }}</td>
-                <td><span class="badge badge-medium">{{ t.asset_class }}</span></td>
-                <td><strong>{{ t.symbol }}</strong></td>
-                <td><span class="badge badge-{% if t.side == 'BUY' %}bullish{% else %}bearish{% endif %}">{{ t.side }}</span></td>
-                <td>{{ t.status }}</td>
-                <td>{{ t.entry_price|floatformat:4 }}</td>
-                <td>{{ t.exit_price|floatformat:4|default:"—" }}</td>
-                <td class="{% if t.pnl > 0 %}up{% elif t.pnl < 0 %}down{% endif %}">{{ t.pnl|floatformat:2 }}</td>
-                <td class="{% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{{ t.realized_r|floatformat:2|default:"—" }}</td>
-                <td>{{ t.outcome|default:"—" }}</td>
-                <td>{% if t.paper %}<span style="color:var(--text-muted);">paper</span>{% else %}<span style="color:var(--accent-gold);">LIVE</span>{% endif %}</td>
+                <td class="nowrap" data-label="Opened" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ t.opened_at|date:"Y-m-d H:i" }}</td>
+                <td data-label="Class"><span class="badge badge-medium">{{ t.asset_class }}</span></td>
+                <td data-label="Symbol"><strong>{{ t.symbol }}</strong></td>
+                <td data-label="Side"><span class="badge badge-{% if t.side == 'BUY' %}bullish{% else %}bearish{% endif %}">{{ t.side }}</span></td>
+                <td data-label="Status">{{ t.status }}</td>
+                <td class="num" data-label="Entry">{{ t.entry_price|floatformat:4 }}</td>
+                <td class="num" data-label="Exit">{{ t.exit_price|floatformat:4|default:"—" }}</td>
+                <td class="num {% if t.pnl > 0 %}up{% elif t.pnl < 0 %}down{% endif %}" data-label="P&amp;L">{{ t.pnl|floatformat:2 }}</td>
+                <td class="num {% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}" data-label="R">{{ t.realized_r|floatformat:2|default:"—" }}</td>
+                <td data-label="Outcome">{{ t.outcome|default:"—" }}</td>
+                <td data-label="Mode">{% if t.paper %}<span style="color:var(--text-muted);">paper</span>{% else %}<span style="color:var(--accent-gold);">LIVE</span>{% endif %}</td>
             </tr>
         {% endfor %}
         </tbody>

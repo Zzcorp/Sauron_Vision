@@ -487,13 +487,35 @@ def generated_run_now(request):
 @staff_member_required
 @require_POST
 def generated_approve(request, pk: int):
+    """Arm a pending proposal's draft setup, and SAY SO either way.
+
+    Approval can now be refused — `approve_proposal` re-validates the stored
+    conditions before arming — and the refusal used to be a silent no-op here:
+    the boolean was discarded and the operator was redirected to a page that
+    still showed the proposal pending, with the reason only in the worker log.
+    Every proposal written before the validator was widened refuses on the
+    first click, so this was the common path, not the edge case.
+    """
+    from django.contrib import messages
     from brain.generator_models import GeneratedSetupProposal
-    from brain.strategy_generator import approve_proposal
+    from brain.strategy_generator import approval_blocker, approve_proposal
     proposal = GeneratedSetupProposal.objects.filter(pk=pk).first()
-    if proposal is not None:
-        approve_proposal(proposal,
-                          reviewed_by=request.user.username,
-                          notes=request.POST.get("notes", ""))
+    if proposal is None:
+        messages.error(request, f"Proposal #{pk} not found.")
+    else:
+        # The blocker is read BEFORE approving: a successful approve moves the
+        # row out of PENDING, so asking afterwards would answer about the state
+        # the approval itself created.
+        blocker = approval_blocker(proposal)
+        if approve_proposal(proposal,
+                            reviewed_by=request.user.username,
+                            notes=request.POST.get("notes", "")):
+            messages.success(
+                request, f"Armed '{proposal.proposed_name}' — the scanner picks "
+                         f"it up on the next pass.")
+        else:
+            messages.error(
+                request, f"Not armed: '{proposal.proposed_name}' — {blocker}")
     return HttpResponseRedirect(reverse("generated_dashboard"))
 
 

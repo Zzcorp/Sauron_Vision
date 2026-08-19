@@ -22,14 +22,18 @@ def bot_backtest_list(request):
     runs = list(BotBacktestRun.objects.filter(user=request.user)[:30])
     all_runs = list(BotBacktestRun.objects.filter(user=request.user))
 
-    # Phase 63 — aggregates for the strip
+    # Phase 63 — aggregates for the strip.
+    # BotBacktestRun.STATUS_CHOICES are "complete" and "error"; this block
+    # counted "completed" and "failed", which no row can ever hold. Every
+    # aggregate below it was therefore permanently zero and best_run
+    # permanently None, on a page whose runs really do complete.
     n_total = len(all_runs)
-    n_completed = sum(1 for r in all_runs if r.status == "completed")
-    n_failed = sum(1 for r in all_runs if r.status == "failed")
+    n_completed = sum(1 for r in all_runs if r.status == "complete")
+    n_failed = sum(1 for r in all_runs if r.status == "error")
     n_running = sum(1 for r in all_runs if r.status in ("pending", "running"))
 
     # Aggregate stats from completed runs (stats is JSONField)
-    completed_runs = [r for r in all_runs if r.status == "completed"]
+    completed_runs = [r for r in all_runs if r.status == "complete"]
     avg_trades = (sum(r.stats.get("n_trades", 0) for r in completed_runs)
                    / max(len(completed_runs), 1))
     avg_win_rate = (sum(r.stats.get("win_rate", 0) for r in completed_runs)
@@ -139,8 +143,13 @@ def bot_backtest_run(request):
         run.error = str(e)[:1000]
         run.completed_at = timezone.now()
     run.save()
-    messages.success(request, f"Backtest {run.id} done — "
-                              f"{run.stats.get('n', 0)} trades simulated.")
+    # A run that raised still reached this line and still announced "done".
+    # The status is right in the database; only the sentence was wrong.
+    if run.status == "error":
+        messages.error(request, f"Backtest {run.id} failed — {run.error[:200]}")
+    else:
+        messages.success(request, f"Backtest {run.id} done — "
+                                  f"{run.stats.get('n', 0)} trades simulated.")
     return redirect("bot_backtest_detail", run_id=run.id)
 
 

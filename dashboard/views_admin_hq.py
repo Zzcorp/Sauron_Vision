@@ -261,8 +261,16 @@ def run_seed_strategies(request):
     The platform ships six starter and six advanced setups, and both lived
     behind management commands the deploy never ran — so an operator who
     installed everything correctly still opened the Strategies page to a
-    flat zero and reasonably concluded the engine was broken. Idempotent
-    (update_or_create), so re-running only refreshes definitions.
+    flat zero and reasonably concluded the engine was broken.
+
+    Safe to press twice. A re-run OVERWRITES the shipped definitions —
+    description, direction, asset classes, conditions, match threshold,
+    horizon, sizing, and the seed-owned keys of RuleControl.parameters — which
+    is how a repaired condition reaches rows that already exist. It does NOT
+    touch anything the operator or the engine decided: promotion stage and its
+    timestamps, pause / reduce status, weight multiplier, allocator weight,
+    notes, or whether a setup is armed. Local edits to the twelve shipped
+    definitions themselves are what a re-run discards.
     """
     from io import StringIO
 
@@ -279,9 +287,10 @@ def run_seed_strategies(request):
     from signals.models_control import RuleControl
     messages.success(
         request,
-        f"Strategies seeded — {RuleControl.objects.count()} rule(s) now on "
-        f"the promotion ladder. They start in RESEARCH and trade nothing "
-        f"until promoted.")
+        f"Strategy definitions refreshed — {RuleControl.objects.count()} "
+        f"rule(s) on the promotion ladder. New rules start in RESEARCH and "
+        f"trade nothing until promoted; existing rules keep their stage, "
+        f"pause/reduce state, allocator weight and armed/disarmed setting.")
     return redirect("admin_dashboard")
 
 
@@ -707,12 +716,35 @@ def hq_run_opportunity_scan(request):
         return resp
     try:
         result = scan_all_setups()
-        messages.success(
-            request,
+        # `matches` over `scored`, not over `evaluations`. A setup carrying a
+        # gate drops most of its asset classes before any evidence is read, so
+        # quoting the raw pair count as the denominator made a designed universe
+        # cut read as a collapse in hit rate. The skips are named so a falling
+        # flag count can be attributed rather than guessed at.
+        skipped = (result["asset_class_skipped"] + result["gate_skipped"])
+        msg = (
             f"Opportunity scan: {result['matches']} match(es) "
-            f"across {result['evaluations']} evaluations "
-            f"({result['setups_scanned']} setups × {result['instruments_scanned']} instruments)."
+            f"of {result['scored']} scored "
+            f"({result['setups_scanned']} setups × "
+            f"{result['instruments_scanned']} instruments = "
+            f"{result['evaluations']} pairs; {skipped} outside a setup's "
+            f"universe, {result['gate_skipped']} of them by gate)."
         )
+        for key, phrase in (
+            ("no_price_data", "{} match(es) had no price to build levels from."),
+            ("evaluator_errors", "{} condition(s) raised and scored 0."),
+            ("errors", "{} pair(s) failed outright."),
+        ):
+            if result.get(key):
+                msg += " " + phrase.format(result[key])
+        # A pair that raised out of scan_setup produced nothing at all, so the
+        # scan is not a clean success even though it completed. Evaluator errors
+        # only understate one leg's score, so they are reported in the text
+        # without recolouring the whole run.
+        if result["errors"]:
+            messages.warning(request, msg)
+        else:
+            messages.success(request, msg)
     except Exception as e:
         messages.error(request, f"Scan failed: {e}")
     return redirect("admin_dashboard")
@@ -742,9 +774,25 @@ def hq_resolve_opportunities(request):
 
 @_admin_only
 def hq_create_opportunity_setup(request):
-    """Create a new OpportunitySetup from the admin form."""
+    """Create a new OpportunitySetup from the admin form.
+
+    Hand-authored setups go through the SAME condition guard as the generated
+    ones. They used to go through none of it: `conditions` was checked only for
+    being a JSON list, `sizing` was not checked at all, and the row was written
+    with `is_active=True`, so an unvalidated setup was scanning on the next pass.
+
+    All three silent failure modes were reachable from this form. A param key
+    the evaluator never reads leaves the condition running on defaults; an
+    out-of-vocabulary `direction` on a two-branch evaluator does not go quiet,
+    it selects the OPPOSITE branch; a sizing key outside SIZING_KEYS is
+    discarded and the target falls back to 2R. None of them raise, and there is
+    no model-level backstop — `OpportunitySetup` defines no `clean()` and
+    `objects.create()` never calls `full_clean()`.
+    """
     import json as json_mod
+    from brain.strategy_generator import validate_conditions
     from signals.models import OpportunitySetup
+    from signals.opportunity_scanner import SIZING_KEYS, unknown_sizing_keys
 
     name = request.POST.get("name", "").strip()
     if not name:
@@ -763,11 +811,33 @@ def hq_create_opportunity_setup(request):
         messages.error(request, f"Invalid conditions JSON: {e}")
         return redirect("admin_dashboard")
 
+    ok, reason = validate_conditions(conditions)
+    if not ok:
+        messages.error(request, f"Conditions rejected: {reason}")
+        return redirect("admin_dashboard")
+
     try:
         asset_classes = json_mod.loads(request.POST.get("asset_classes", "[]"))
         sizing = json_mod.loads(request.POST.get("sizing", "{}"))
     except Exception as e:
         messages.error(request, f"Invalid asset_classes/sizing JSON: {e}")
+        return redirect("admin_dashboard")
+
+    # Types, because `scan_setup` reads both with `in` and a bare string would
+    # silently behave as a substring test over asset-class names.
+    if not isinstance(asset_classes, list):
+        messages.error(request, "asset_classes must be a JSON list (empty = all).")
+        return redirect("admin_dashboard")
+    if not isinstance(sizing, dict):
+        messages.error(request, "sizing must be a JSON object.")
+        return redirect("admin_dashboard")
+    dead = unknown_sizing_keys(sizing)
+    if dead:
+        messages.error(
+            request,
+            f"Sizing keys {dead} are never read — `_suggested_levels` builds "
+            f"the stop and target from {sorted(SIZING_KEYS)} and nothing else, "
+            f"so those values would be silently discarded.")
         return redirect("admin_dashboard")
 
     direction = request.POST.get("direction", "bullish")
@@ -779,13 +849,32 @@ def hq_create_opportunity_setup(request):
         messages.error(request, "min_match_score / suggested_horizon_days must be numbers.")
         return redirect("admin_dashboard")
 
+    # The form's min/max attributes are client-side only, and these are the same
+    # bounds `validate_proposal` holds the generated path to.
+    if not (0.0 < min_score < 1.0):
+        messages.error(request, f"min_match_score {min_score} is outside (0, 1) — "
+                                f"the composite it is compared against is a "
+                                f"normalised 0..1 score.")
+        return redirect("admin_dashboard")
+    if not (1 <= horizon <= 60):
+        messages.error(request, f"suggested_horizon_days {horizon} is outside [1, 60].")
+        return redirect("admin_dashboard")
+
+    # Created DISARMED, like every other authoring path on this platform: the
+    # seeders land at is_active=False and so does the generator's draft. This
+    # form hard-coded is_active=True, so a hand-written setup was the only kind
+    # that went live without anyone confirming it a second time — and it was
+    # also the only kind nothing had validated.
     setup = OpportunitySetup.objects.create(
         name=name, description=description, direction=direction,
         asset_classes=asset_classes, conditions=conditions,
         min_match_score=min_score, suggested_horizon_days=horizon,
-        sizing=sizing, is_active=True, created_by=request.user,
+        sizing=sizing, is_active=False, created_by=request.user,
     )
-    messages.success(request, f"Created OpportunitySetup '{setup.name}'.")
+    messages.success(
+        request,
+        f"Created OpportunitySetup '{setup.name}' — INACTIVE. Arm it from "
+        f"Intelligence → Opportunities when you want the scanner to run it.")
     return redirect("admin_dashboard")
 
 

@@ -21,19 +21,56 @@ class BacktestEngine:
         self.trades = []
         self.equity_curve = []
 
-    def run(self, df, strategy_func):
+    def _close_long(self, date, price, reason):
+        """Book the exit of the open long at `price` and return to cash."""
+        proceeds = self.position * price * (1 - self.commission_pct)
+        pnl = proceeds - (self.position * self.entry_price)
+        pnl_pct = (price - self.entry_price) / self.entry_price * 100
+        self.capital = proceeds
+        self.trades.append({
+            "date": date, "action": "SELL", "price": round(price, 8),
+            "pnl": round(pnl, 2), "pnl_pct": round(pnl_pct, 2),
+            "exit_reason": reason,
+        })
+        self.position = 0
+
+    def run(self, df, strategy_func, stop_loss_pct=None, take_profit_pct=None):
         """
         Run backtest on DataFrame with OHLCV columns.
         strategy_func(df, i) should return: "buy", "sell", or "hold"
+
+        stop_loss_pct / take_profit_pct are optional STATIC levels derived
+        from the entry price. They are deliberately not trailing: a trailing
+        level ratcheted on the same bar it is then tested against is the
+        intrabar look-ahead engine_v2 had to be fixed for. Static levels are
+        fixed at entry, so testing them against a later bar's range cannot
+        peek. Where a single bar's range spans both levels, the STOP is
+        taken — a bar reports its high and its low but not their order, and
+        the losing assumption is the only one that cannot flatter the result.
         """
         self.capital = self.initial_capital
         self.position = 0
         self.trades = []
         self.equity_curve = []
+        stop_price = target_price = None
 
         for i in range(1, len(df)):
-            price = float(df.iloc[i]["close"])
-            date = str(df.index[i] if hasattr(df.index[i], "strftime") else df.iloc[i].get("date", i))
+            row = df.iloc[i]
+            price = float(row["close"])
+            date = str(df.index[i] if hasattr(df.index[i], "strftime") else row.get("date", i))
+
+            # Protective exits resolve BEFORE this bar's signal: the levels
+            # were already resting at the broker when the bar opened, so a
+            # signal computed on this bar's close cannot pre-empt them.
+            if self.position > 0 and (stop_price is not None or target_price is not None):
+                low = float(row["low"]) if "low" in row else price
+                high = float(row["high"]) if "high" in row else price
+                if stop_price is not None and low <= stop_price:
+                    self._close_long(date, stop_price, "SL")
+                    stop_price = target_price = None
+                elif target_price is not None and high >= target_price:
+                    self._close_long(date, target_price, "TP")
+                    stop_price = target_price = None
 
             signal = strategy_func(df, i)
 
@@ -44,29 +81,30 @@ class BacktestEngine:
                 self.position = units
                 self.entry_price = price
                 self.capital = 0
+                stop_price = (price * (1 - stop_loss_pct / 100)
+                              if stop_loss_pct else None)
+                target_price = (price * (1 + take_profit_pct / 100)
+                                if take_profit_pct else None)
                 self.trades.append({"date": date, "action": "BUY", "price": price, "units": units})
 
             elif signal == "sell" and self.position > 0:
-                # Close long
-                proceeds = self.position * price * (1 - self.commission_pct)
-                pnl = proceeds - (self.position * self.entry_price)
-                pnl_pct = (price - self.entry_price) / self.entry_price * 100
-                self.capital = proceeds
-                self.trades.append({
-                    "date": date, "action": "SELL", "price": price,
-                    "pnl": round(pnl, 2), "pnl_pct": round(pnl_pct, 2),
-                })
-                self.position = 0
+                self._close_long(date, price, "SIGNAL")
+                stop_price = target_price = None
 
             # Track equity
             equity = self.capital + (self.position * price if self.position > 0 else 0)
             self.equity_curve.append({"date": date, "value": round(equity, 2)})
 
-        # Force close any open position
+        # Force close any open position. This books a TRADE as well as moving
+        # the cash: the exit used to happen silently, so a run that ended
+        # holding a position reported a final_value that included the sale
+        # while total_trades, the win/loss counts and the trades log all
+        # pretended the last round trip had never closed.
         if self.position > 0 and len(df) > 0:
             final_price = float(df.iloc[-1]["close"])
-            self.capital = self.position * final_price * (1 - self.commission_pct)
-            self.position = 0
+            final_date = str(df.index[-1] if hasattr(df.index[-1], "strftime")
+                             else df.iloc[-1].get("date", len(df) - 1))
+            self._close_long(final_date, final_price, "FORCE_CLOSE")
 
         return self._calculate_results()
 

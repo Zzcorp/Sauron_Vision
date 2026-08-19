@@ -19,41 +19,35 @@
 
 <script>
 (function() {
-    /* Phase-23 — open the per-user Eye WebSocket. Each push from the
-       orchestrator/AssetBot triggers an immediate HTMX refresh of the body.
-       The 10s `every 10s` poll stays as a fallback when WS is offline. */
-    if (typeof WebSocket === "undefined") return;
+    /* This page used to open its OWN connection to /ws/eye/ — a second
+       socket to the same endpoint, carrying the same events, for the same
+       user, purely to drive the status pill and refresh the body. base.html
+       already holds that socket for every page and re-dispatches each
+       message as "sv:eye-event", so the pill and the refresh ride the
+       shared one. Two sockets could also disagree: one reconnecting while
+       the other was up made the pill claim OFFLINE beside live content.
+       The `every 10s` HTMX poll on the body stays as the fallback. */
     var statusEl = document.getElementById("eye-ws-status");
-    var proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    var url = proto + "//" + window.location.host + "/ws/eye/";
-    var ws, reconnectTimer = null, lastEventAt = null;
     function setStatus(text, color) {
         if (!statusEl) return;
         statusEl.textContent = "LIVE: " + text;
         statusEl.style.color = color || "var(--text-muted)";
     }
-    function connect() {
-        try { ws = new WebSocket(url); } catch (e) { setStatus("offline", "#ff5e5e"); return; }
-        ws.onopen = function() { setStatus("on", "var(--accent)"); };
-        ws.onmessage = function(evt) {
-            try {
-                var msg = JSON.parse(evt.data);
-                if (msg.type === "eye_event") {
-                    lastEventAt = new Date();
-                    setStatus("on · " + (msg.kind || "event"), "var(--accent)");
-                    /* Trigger HTMX refresh so the body reflects the new event immediately. */
-                    document.body.dispatchEvent(new Event("eyeUpdate"));
-                }
-            } catch (e) { /* ignore */ }
-        };
-        ws.onclose = function() {
-            setStatus("offline", "#ff5e5e");
-            if (reconnectTimer) clearTimeout(reconnectTimer);
-            reconnectTimer = setTimeout(connect, 5000);  /* exponential would be nicer */
-        };
-        ws.onerror = function() { setStatus("error", "var(--accent-gold)"); };
+    function paint() {
+        var up = window.svLive && window.svLive.isUp();
+        setStatus(up ? "on" : "offline",
+                  up ? "var(--accent)" : "#ff5e5e");
     }
-    connect();
+    paint();
+    /* The shell's socket may not have opened yet when this runs. */
+    setInterval(paint, 3000);
+
+    document.addEventListener("sv:eye-event", function (e) {
+        var kind = (e.detail && e.detail.kind) || "event";
+        setStatus("on · " + kind, "var(--accent)");
+        /* Refresh the body so it reflects the new event immediately. */
+        document.body.dispatchEvent(new Event("eyeUpdate"));
+    });
 })();
 </script>
 

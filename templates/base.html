@@ -363,6 +363,16 @@
             <div class="nav-section">Intelligence</div>
             <a href="{% url 'signals_list' %}" class="nav-link {% if page_id == 'signals' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Signals</span></a>
             <a href="{% url 'strategies_list' %}" class="nav-link {% if page_id == 'strategies' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategies</span></a>
+            {% comment %} The four pages that explain a rule's life — where it sits on the
+               ladder, what the admin lane has done to it, what risk budget it was
+               given, and what the miner wants to add — were in no menu at all and
+               reachable only from the admin dashboard. A page nobody can find is a
+               page that does not exist, and the cards on /strategies/ deep-link into
+               these four, so they belong beside the page they explain. {% endcomment %}
+            <a href="{% url 'promotions_dashboard' %}" class="nav-link {% if page_id == 'promotions' %}active{% endif %}"><span class="icon">⇧</span> <span class="label-text">Promotion Ladder</span></a>
+            <a href="{% url 'rule_control_dashboard' %}" class="nav-link {% if page_id == 'rule_control' %}active{% endif %}"><span class="icon">⊙</span> <span class="label-text">Rule Controls</span></a>
+            <a href="{% url 'allocator_dashboard' %}" class="nav-link {% if page_id == 'allocator' %}active{% endif %}"><span class="icon">⚖</span> <span class="label-text">Risk Allocator</span></a>
+            <a href="{% url 'discoveries_dashboard' %}" class="nav-link {% if page_id == 'discoveries' %}active{% endif %}"><span class="icon">⊛</span> <span class="label-text">Discoveries</span></a>
             <a href="{% url 'opportunities_dashboard' %}" class="nav-link {% if page_id == 'opportunities' %}active{% endif %}"><span class="icon">◍</span> <span class="label-text">Opportunities</span></a>
             <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon">🧬</span> <span class="label-text">Strategy Evolution</span></a>
             <a href="{% url 'news_feed' %}" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon">▤</span> <span class="label-text">News & Sentiment</span></a>
@@ -708,6 +718,8 @@
                               <span class="ipr-pct {% if t.pct >= 0 %}up{% else %}down{% endif %}">{{ t.pct|floatformat:2 }}%</span>
                             {% else %}<span class="ipr-pct sv-unknown">&mdash;</span>{% endif %}
                             {% if t.paper %}<span class="sv-chip sv-chip--muted">paper</span>{% endif %}
+                            {# The row's own way out — the click handler cancels this anchor's navigation. #}
+                            <button type="button" class="sv-chip sv-chip--bearish" data-sv-close-trade="{{ t.id }}" title="Close this position">close</button>
                         </div>
                         {% empty %}
                         <div class="sv-empty"><b>Nothing open</b>Positions the bot opens appear here with their live R.</div>
@@ -1439,6 +1451,132 @@
               '/instruments/' + encodeURIComponent(symbol) + '/take-trade/',
               { side: side });
   };
+
+  /* ── CLOSE POSITION — the way out ────────────────────────────────────
+     TAKE TRADE gave the operator a way in; the only ways out were the
+     tick hitting a stop or target, and the kill switch flattening
+     EVERYTHING. This closes one position, from every surface that lists
+     one, through /positions/<id>/close/.
+
+     Delegated rather than per-button, so rows that arrive by htmx swap or
+     WebSocket refresh are live without rebinding — and so the headband
+     rows, which sit INSIDE a category anchor, can cancel the navigation
+     their own container would otherwise perform. */
+  /* Same decoding, different 404: on this endpoint a 404 means the trade
+     is not this user's (or is already gone), not that a signal expired. */
+  function decodeClose(r) {
+    return r.text().then(function (t) {
+      try { return JSON.parse(t); }
+      catch (e) {
+        var msg = r.status === 404
+          ? 'That position is no longer open, or is not yours to close.'
+          : r.status === 403
+            ? 'Not allowed — refresh the page and try again.'
+            : (r.redirected || t.indexOf('<html') !== -1)
+              ? 'Session expired — refresh the page and log in again.'
+              : 'HTTP ' + r.status;
+        return { error: msg };
+      }
+    });
+  }
+  var closing = false;
+  function closeFlow(btn) {
+    if (closing) return;
+    var id = btn.getAttribute('data-sv-close-trade');
+    if (!id) return;
+    closing = true;
+    var done = function () { closing = false; btn.disabled = false; };
+    btn.disabled = true;
+    fetch('/positions/' + encodeURIComponent(id) + '/close/preview/', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'X-CSRFToken': csrf(), 'Content-Type': 'application/json' },
+      body: '{}'
+    }).then(decodeClose).then(function (p) {
+      if (p.error) {
+        done();
+        SV.overlay.alert({ title: 'Cannot close this position', message: p.error });
+        return;
+      }
+      var live = p.venue === 'live';
+      var facts = [
+        ['Closing', p.side + ' ' + p.qty + ' ' + p.symbol],
+        ['Entry', p.entry],
+        /* An unmeasured number is a dash, never a zero — a legacy row with
+           no entry stop has no R, and "0.00R" would read as a scratch. */
+        ['Mark now', p.mark === null ? '—' : p.mark],
+        ['Books at', p.exit === undefined || p.exit === null ? '—' : p.exit],
+        ['Realises', (p.pnl === null || p.pnl === undefined ? '—' : p.pnl) +
+                     '  ·  ' + (p.r === null || p.r === undefined ? '—' : p.r + 'R')],
+        ['Venue', String(p.venue || 'paper').toUpperCase()]
+      ];
+      if (p.pending) {
+        facts.push(['Failed closes', String(p.attempts || 0)]);
+        facts.push(['At the broker', 'STILL OPEN']);
+      }
+      SV.overlay.confirm({
+        title: p.pending ? 'Retry this close?' : 'Close this position?',
+        message: p.pending
+          ? 'The broker refused the last close, so the position is still open there. This asks the broker whether it still holds it, then resubmits.'
+          : (live
+              ? 'This flattens a LIVE position at the broker. It cannot be undone, and re-entering costs the round trip again.'
+              : 'This books the exit on the paper venue and grades the trade.'),
+        detail: p.pending ? p.note : undefined,
+        facts: facts,
+        danger: true,
+        /* Live only. Closing REDUCES risk, so gating a paper close behind
+           the PIN would put the platform's heaviest friction on its safest
+           action — but a live close is irreversible real money, the same
+           bar the kill switch sets. */
+        secretLabel: live ? 'Trading PIN' : undefined,
+        confirmLabel: p.pending ? 'RETRY CLOSE' : (live ? 'CLOSE LIVE POSITION' : 'CLOSE POSITION')
+      }).then(function (ok) {
+        if (!ok) { done(); return; }
+        fetch('/positions/' + encodeURIComponent(id) + '/close/', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'X-CSRFToken': csrf(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: (ok === true ? '' : ok) })
+        }).then(decodeClose).then(function (res) {
+          done();
+          if (res.error) {
+            SV.overlay.alert({
+              title: res.still_open || res.pending ? 'STILL OPEN — not closed'
+                                                   : 'Position not closed',
+              message: res.error
+            });
+            return;
+          }
+          /* Retire the row immediately: the operator decided, and a row
+             still reading OPEN after a successful close is the one thing
+             that makes them press the button twice. */
+          var row = btn.closest('[data-sv-position-row]') || btn.closest('tr');
+          if (row) { row.style.opacity = '.35'; row.setAttribute('data-closed', '1'); }
+          if (window.refreshPanelCounts) window.refreshPanelCounts();
+          SV.overlay.alert({
+            title: 'Position closed',
+            message: res.side + ' ' + res.qty + ' ' + res.symbol + ' @ ' +
+              (res.exit === null || res.exit === undefined ? '—' : res.exit) +
+              '  ·  ' + (res.pnl === null || res.pnl === undefined ? '—' : res.pnl) +
+              '  ·  ' + (res.r === null || res.r === undefined ? '—' : res.r + 'R')
+          });
+        }).catch(function (e) {
+          done();
+          SV.overlay.alert({ title: 'Network error', message: String(e) });
+        });
+      });
+    }).catch(function (e) {
+      done();
+      SV.overlay.alert({ title: 'Network error', message: String(e) });
+    });
+  }
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-sv-close-trade]');
+    if (!btn) return;
+    /* The headband's rows live inside a category link — without this the
+       browser navigates away mid-confirm and the close never happens. */
+    e.preventDefault();
+    e.stopPropagation();
+    closeFlow(btn);
+  });
 })();
 
 /* ── Mini-sidebar JS-portal tooltip ──────────────────────────────
@@ -4255,7 +4393,7 @@ if ('serviceWorker' in navigator) {
         } catch (e) {
             return schedule();
         }
-        ws.onopen = function () { retry = 0; };
+        ws.onopen = function () { retry = 0; setLive(true); };
         ws.onmessage = function (ev) {
             var msg;
             try { msg = JSON.parse(ev.data); } catch (e) { return; }
@@ -4282,13 +4420,52 @@ if ('serviceWorker' in navigator) {
                 } catch (e) { /* ancient engines */ }
             }
         };
-        ws.onclose = schedule;
+        ws.onclose = function () { setLive(false); schedule(); };
         ws.onerror = function () { try { ws.close(); } catch (e) {} };
     }
+
+    /* ── Is the live pipe up, and does the operator know? ──────────────
+       A fill used to raise a banner, move the bell badge and refresh the
+       headband — all of it through this one socket, and all of it silent
+       when the socket was not there. The operator opened a trade, saw
+       nothing at all, and had to refresh to discover it had worked.
+       Two answers to that: SAY when live updates are off, and keep the
+       numbers moving anyway on a slow poll so a dead socket costs a few
+       seconds of delay rather than the whole update. */
+    var isLive = false, pollTimer = null;
+    var POLL_MS = 20000;
+
+    function setLive(up) {
+        if (up === isLive) return;
+        isLive = up;
+        var bell = document.getElementById("notifBell");
+        if (bell) {
+            bell.classList.toggle("is-offline", !up);
+            bell.setAttribute("title", up
+                ? "Notifications — live"
+                : "Notifications — live updates offline, refreshing on a timer");
+        }
+        document.body.classList.toggle("sv-live-offline", !up);
+        if (up) {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            /* Reconnected: whatever happened while the socket was down is
+               already on the server, so catch up once immediately. */
+            if (window.refreshPanelCounts) window.refreshPanelCounts();
+        } else if (!pollTimer) {
+            pollTimer = setInterval(function () {
+                if (window.refreshPanelCounts) window.refreshPanelCounts();
+            }, POLL_MS);
+        }
+    }
+
     connect();
+    /* The socket has not opened yet at this point, so the fallback poll
+       starts armed and stands down on the first onopen. */
+    setLive(false);
 
     /* Exposed so a page can raise a banner without waiting on the socket. */
     window.svBanner = add;
+    window.svLive = { isUp: function () { return isLive; } };
 })();
 </script>
 {% endif %}

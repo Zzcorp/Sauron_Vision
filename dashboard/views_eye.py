@@ -11,6 +11,7 @@ Surfaces in one view:
 
 Auto-refreshes via HTMX so the page updates without a manual reload.
 """
+import logging
 from datetime import timedelta
 from decimal import Decimal
 
@@ -18,6 +19,8 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Sum, Count
 from django.shortcuts import render
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -141,6 +144,11 @@ def _open_positions(user) -> list:
                 .order_by("-opened_at")[:50])
         for t in rows:
             out.append({
+                # id + status make the row actionable: the CLOSE control
+                # needs the trade to aim at, and CLOSE_PENDING must offer a
+                # RETRY rather than a second close.
+                "id": t.id,
+                "status": t.status,
                 "asset_class": t.asset_class,
                 "symbol": t.symbol,
                 "side": t.side,
@@ -228,19 +236,56 @@ def _recent_fills(user, limit: int = 30) -> list:
 # ── Rule control state ────────────────────────────────────────────────────
 
 def _rule_control_summary(user) -> dict:
-    """Active RuleControl + RuleAction summary. Best-effort — Phase-5 module
-    may be missing in stripped-down deployments."""
+    """The three rule-control numbers in the Eye's pill row, counted apart.
+
+    They used to share one `try/except Exception: pass`, and the middle one
+    filtered on `size_multiplier` — a field `RuleControl` has never declared.
+    Django resolves lookup names inside `filter()`, so the FieldError was
+    raised before `.count()`, the swallow ate it, and the two statements AFTER
+    it never ran either: `reduced` and `actions/24h` both showed a confident 0
+    on every install, for unrelated reasons, beside a `paused` that worked.
+    That is what made the dead pair look authoritative. Each counter now owns
+    its guard, and a failure is logged rather than absorbed.
+
+    `reduced` is `status == "reduced"`, not `weight_multiplier < 1.0` on an
+    ACTIVE row: `rule_actuator.apply_action` writes STATUS_REDUCED when it
+    reduces a rule, and `rule_size_multiplier` honours `weight_multiplier`
+    only in that status. Both conjuncts of the old filter were wrong, so
+    renaming the field alone would still have counted zero forever.
+
+    `paused` is the model's own `running_q()` inverted rather than
+    `status == "paused"`: nothing writes the column back when `paused_until`
+    elapses, so the raw status would keep reporting a rule that has been
+    signalling again for weeks as stopped.
+
+    The import keeps its own guard — the Phase-5 module really may be absent
+    in a stripped-down deployment, and that is the one failure here that is
+    expected rather than a bug.
+    """
     out = {"paused_rules": 0, "reduced_rules": 0, "live_actions_24h": 0}
     try:
         from signals.models import RuleControl, RuleAction
-        out["paused_rules"] = RuleControl.objects.filter(status="paused").count()
-        out["reduced_rules"] = RuleControl.objects.filter(
-            status="active", size_multiplier__lt=1.0).count()
-        since = timezone.now() - timedelta(hours=24)
-        out["live_actions_24h"] = RuleAction.objects.filter(
-            applied_at__gte=since).count()
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001
+        logger.info("[eye] rule-control models unavailable — panel left at 0")
+        return out
+
+    now = timezone.now()
+    counters = (
+        ("paused_rules",
+         lambda: RuleControl.objects.exclude(
+             RuleControl.running_q(now)).count()),
+        ("reduced_rules",
+         lambda: RuleControl.objects.filter(
+             status=RuleControl.STATUS_REDUCED).count()),
+        ("live_actions_24h",
+         lambda: RuleAction.objects.filter(
+             applied_at__gte=now - timedelta(hours=24)).count()),
+    )
+    for key, count in counters:
+        try:
+            out[key] = count()
+        except Exception:  # noqa: BLE001
+            logger.exception("[eye] rule-control counter %s failed", key)
     return out
 
 

@@ -80,10 +80,16 @@ class _StrategyShim:
 class UnifiedPosition:
     """Position-shaped view over an AssetBotTrade — exactly the attributes
     the portfolio/positions templates read, nothing more."""
+    # trade_id and status are what make a row ACTIONABLE: the positions and
+    # portfolio pages could show a bot position but never close one, because
+    # the normalised row carried no way to name the trade behind it.
+    # portfolio.Position rows have neither, and the templates render no close
+    # control for them — nothing in the platform can flatten one.
     __slots__ = ("instrument", "direction", "quantity", "entry_price",
                  "current_price", "stop_loss", "take_profit",
                  "unrealized_pnl", "unrealized_pnl_pct", "opened_at",
-                 "closed_at", "strategy", "source", "paper")
+                 "closed_at", "strategy", "source", "paper",
+                 "trade_id", "status")
 
 
 def _trade_to_position(trade, instruments, quotes):
@@ -108,6 +114,8 @@ def _trade_to_position(trade, instruments, quotes):
     up.strategy = _StrategyShim(trade.rule_name) if trade.rule_name else None
     up.source = "bot"
     up.paper = trade.paper
+    up.trade_id = trade.id
+    up.status = trade.status
 
     entry = float(trade.entry_price or 0)
     qty = float(trade.qty or 0)

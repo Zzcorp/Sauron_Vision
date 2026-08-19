@@ -19,22 +19,41 @@ Architecture
 Conditions are tagged by `kind`. Each kind maps to a Python evaluator function
 in `EVALUATOR_REGISTRY`. Built-in kinds (this module ships with):
 
-  - `price_pattern`     — "above_ma", "below_ma", "breakout_high",
-                          "breakout_low", "rsi_oversold", "rsi_overbought"
+  - `price_pattern`     — "above_ma", "below_ma", "breakout_high", "breakout_low"
   - `news_volume`       — count of relevant news in lookback window ≥ threshold
   - `news_sentiment`    — average AI sentiment of relevant news ≥/≤ threshold
   - `calendar_event`    — economic event matching filter occurred in lookback
+  - `quote_currency`    — the symbol's quote currency, for universe gating
 
-Adding a new kind: define an evaluator function and call `register_kind()`.
+Adding a new kind: define an evaluator function and call `register_kind()`,
+declaring every param key the function consumes and — where the evaluator
+branches on a closed set of strings — the values it accepts.
+
+Gates vs. scoring conditions
+----------------------------
+
+A condition carrying `"gate": true` says WHERE a setup applies, not how
+strongly it fires. A failed gate skips the (setup, instrument) pair outright
+and a passed one contributes nothing to the composite score. Weighting a
+universe check instead would make "does this setup even apply here" tradeable
+against evidence — and would leave the exclusion resting on an arithmetic
+balance that the next weight edit silently breaks.
 
 Public API
 ----------
 
-    register_kind(kind, fn)
+    register_kind(kind, fn, *, params=(...), choices={...})
     has_kind(kind) -> bool
-    scan_setup(setup, instrument, *, now=None) -> dict
-    scan_all_setups(*, now=None) -> dict
-    resolve_pending_flags(*, now=None) -> dict
+    param_keys(kind) -> frozenset[str]
+    param_choices(kind) -> dict[str, frozenset[str]]
+    unknown_param_keys(kind, params) -> list[str]
+    invalid_param_values(kind, params) -> list[str]
+    unknown_sizing_keys(sizing) -> list[str]
+    cot_sign(instrument) -> int
+    cot_net_speculative(report, instrument) -> int
+    scan_setup(setup, instrument, *, now=None, as_of=None) -> dict
+    scan_all_setups(*, now=None, as_of=None) -> dict
+    resolve_pending_flags(*, now=None, as_of=None) -> dict
 """
 from __future__ import annotations
 
@@ -52,28 +71,122 @@ logger = logging.getLogger(__name__)
 # ── Tunables ────────────────────────────────────────────────────────────────
 
 DEFAULT_MA_PERIOD = 50
-DEFAULT_RSI_PERIOD = 14
 DEFAULT_BREAKOUT_LOOKBACK = 20
 
 # Resolution band: |move| < this fraction × ATR-equivalent → "neutral".
 NEUTRAL_BAND_PCT = 0.5  # %, used when ATR is unavailable
 ATR_FALLBACK_PCT = 2.0  # default 2% stop when ATR can't be computed
 
+# The only keys `_suggested_levels` reads out of OpportunitySetup.sizing.
+# `sizing` never reaches the evaluator registry, so it gets none of the param
+# guard's protection: six seeded setups carried a `target_pct` nothing has ever
+# read, and their targets silently fell back to target_rr=2.0 — three of them
+# were graded against a level the seed never asked for.
+SIZING_KEYS = frozenset({"stop_pct", "target_rr"})
+
 
 # ── Evaluator registry ──────────────────────────────────────────────────────
 
-EvaluatorFn = Callable[[dict, "Instrument", datetime], dict]
+# (params, instrument, now) -> dict, plus an optional keyword-only `as_of`.
+EvaluatorFn = Callable[..., dict]
 EVALUATOR_REGISTRY: dict[str, EvaluatorFn] = {}
 
+# Every evaluator reads its params with `.get(key, default)`, so a seeded key
+# the function never reads is invisible: the condition silently runs on
+# defaults, or can never match at all. Declaring the accepted keys here gives
+# the seeders, the admin form and the AI strategy generator something to be
+# checked against — see tests/test_seed_param_integrity.py, which also asserts
+# these declarations match what each function actually reads.
+PARAM_KEYS: dict[str, frozenset[str]] = {}
 
-def register_kind(kind: str, fn: EvaluatorFn) -> None:
+# Keys alone are not enough. `{"direction": "long_increasing"}` on cot_report
+# and `{"pattern": "rsi_oversold"}` on price_pattern both declare accepted keys
+# and are both permanently inert — one falls to `else: matched = False`, the
+# other to "unknown pattern". Worse, the two-branch evaluators treat any
+# unrecognised value as the ELSE branch, so a typo does not go quiet, it
+# inverts the condition. Declaring the closed vocabularies makes both classes
+# rejectable at authoring time instead of discoverable months later.
+PARAM_CHOICES: dict[str, dict[str, frozenset[str]]] = {}
+
+# An evaluator that needs to know whether it is replaying history declares an
+# `as_of` keyword; the rest keep the three-argument signature. Resolved once at
+# registration so the scan loop never introspects per call.
+ACCEPTS_AS_OF: dict[str, bool] = {}
+
+
+def register_kind(kind: str, fn: EvaluatorFn, *, params=(), choices=None) -> None:
     if not callable(fn):
         raise TypeError("evaluator must be callable(params, instrument, now) -> dict")
+    import inspect
     EVALUATOR_REGISTRY[kind] = fn
+    PARAM_KEYS[kind] = frozenset(params)
+    PARAM_CHOICES[kind] = {k: frozenset(v) for k, v in (choices or {}).items()}
+    try:
+        ACCEPTS_AS_OF[kind] = "as_of" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        ACCEPTS_AS_OF[kind] = False
 
 
 def has_kind(kind: str) -> bool:
     return kind in EVALUATOR_REGISTRY
+
+
+def param_keys(kind: str) -> frozenset:
+    """The param keys `kind`'s evaluator consumes. Empty set for unknown kinds."""
+    return PARAM_KEYS.get(kind, frozenset())
+
+
+def param_choices(kind: str) -> dict:
+    """{param_key: accepted values} for the params `kind` branches on by name.
+
+    A key absent from this mapping takes free values (numbers, symbols, keyword
+    lists); only closed vocabularies are declared.
+    """
+    return PARAM_CHOICES.get(kind, {})
+
+
+def unknown_param_keys(kind: str, params: dict) -> list:
+    """Keys in `params` that `kind`'s evaluator will never read — i.e. keys
+    whose value has no effect on whether the condition fires."""
+    accepted = PARAM_KEYS.get(kind)
+    if accepted is None:
+        return sorted(params or {})
+    return sorted(set(params or {}) - accepted)
+
+
+def invalid_param_values(kind: str, params: dict) -> list:
+    """Human-readable complaints about values outside a declared vocabulary.
+
+    Empty for an unknown kind — `unknown_param_keys` is what reports that; this
+    function only speaks about vocabularies it has.
+    """
+    declared = PARAM_CHOICES.get(kind) or {}
+    out = []
+    for key, accepted in sorted(declared.items()):
+        if key not in (params or {}):
+            continue
+        value = params[key]
+        if value in accepted:
+            continue
+        out.append(f"{key}={value!r} (accepted: {sorted(accepted)})")
+    return out
+
+
+def unknown_sizing_keys(sizing: dict) -> list:
+    """Keys in an OpportunitySetup's `sizing` that `_suggested_levels` ignores."""
+    return sorted(set(sizing or {}) - SIZING_KEYS)
+
+
+def _is_replay(now: datetime) -> bool:
+    """Calendar fallback for a caller that did not say whether it is replaying.
+
+    Only used when `as_of` is left unset — a direct call that named a past day
+    means a past day. The scan loop always passes an explicit flag instead,
+    because any clock-derived answer makes the result depend on when the pass
+    happened to run: this one flips mid-sweep across UTC midnight, the
+    five-minute rule it replaces flipped on every slow pass.
+    """
+    return now.date() < timezone.now().date()
 
 
 # ── Built-in evaluators ─────────────────────────────────────────────────────
@@ -95,7 +208,12 @@ def _eval_price_pattern(params: dict, instrument, now: datetime) -> dict:
     """Detect simple price patterns relative to a moving average / breakout level."""
     pattern = (params or {}).get("pattern", "above_ma")
     period = int((params or {}).get("ma_period", DEFAULT_MA_PERIOD))
-    closes = _recent_closes(instrument, max(period, DEFAULT_BREAKOUT_LOOKBACK) + 5, now)
+    lookback = int((params or {}).get("lookback", DEFAULT_BREAKOUT_LOOKBACK))
+    # The window has to cover `lookback` too. Sizing it from `ma_period` alone
+    # capped the fetch at 55 bars, so every breakout asking for more than a
+    # 54-bar range failed the "need lookback+1 closes" check forever, however
+    # much price history the instrument had.
+    closes = _recent_closes(instrument, max(period, lookback, DEFAULT_BREAKOUT_LOOKBACK) + 5, now)
     if len(closes) < 5:
         return {"matched": False, "score": 0.0, "details": {"reason": "insufficient price data"}}
 
@@ -119,7 +237,6 @@ def _eval_price_pattern(params: dict, instrument, now: datetime) -> dict:
                 "details": {"last": last, "ma": ma, "period": period}}
 
     if pattern == "breakout_high":
-        lookback = int((params or {}).get("lookback", DEFAULT_BREAKOUT_LOOKBACK))
         if len(closes) < lookback + 1:
             return {"matched": False, "score": 0.0, "details": {"reason": f"need {lookback+1} closes"}}
         prior_high = max(closes[-(lookback + 1):-1])
@@ -129,7 +246,6 @@ def _eval_price_pattern(params: dict, instrument, now: datetime) -> dict:
                 "details": {"last": last, "prior_high": prior_high, "lookback": lookback}}
 
     if pattern == "breakout_low":
-        lookback = int((params or {}).get("lookback", DEFAULT_BREAKOUT_LOOKBACK))
         if len(closes) < lookback + 1:
             return {"matched": False, "score": 0.0, "details": {"reason": f"need {lookback+1} closes"}}
         prior_low = min(closes[-(lookback + 1):-1])
@@ -142,7 +258,10 @@ def _eval_price_pattern(params: dict, instrument, now: datetime) -> dict:
             "details": {"reason": f"unknown pattern '{pattern}'"}}
 
 
-register_kind("price_pattern", _eval_price_pattern)
+register_kind("price_pattern", _eval_price_pattern,
+                params=("pattern", "ma_period", "lookback"),
+                choices={"pattern": ("above_ma", "below_ma", "breakout_high",
+                                     "breakout_low")})
 
 
 def _eval_news_volume(params: dict, instrument, now: datetime) -> dict:
@@ -177,7 +296,8 @@ def _eval_news_volume(params: dict, instrument, now: datetime) -> dict:
                         "sources": list(sources) if sources else "any"}}
 
 
-register_kind("news_volume", _eval_news_volume)
+register_kind("news_volume", _eval_news_volume,
+                params=("lookback_days", "min_count", "keywords", "sources"))
 
 
 def _eval_news_sentiment(params: dict, instrument, now: datetime) -> dict:
@@ -227,7 +347,10 @@ def _eval_news_sentiment(params: dict, instrument, now: datetime) -> dict:
                         "sources": list(sources) if sources else "any"}}
 
 
-register_kind("news_sentiment", _eval_news_sentiment)
+register_kind("news_sentiment", _eval_news_sentiment,
+                params=("lookback_days", "keywords", "direction", "threshold",
+                        "min_count", "sources"),
+                choices={"direction": ("above", "below")})
 
 
 def _eval_institutional_filings(params: dict, instrument, now: datetime) -> dict:
@@ -280,7 +403,9 @@ def _eval_institutional_filings(params: dict, instrument, now: datetime) -> dict
                         "min_value_usd": min_value_usd}}
 
 
-register_kind("institutional_filings", _eval_institutional_filings)
+register_kind("institutional_filings", _eval_institutional_filings,
+                params=("change_type", "filing_type", "min_count", "lookback_days",
+                        "min_value_usd"))
 
 
 def _eval_calendar_event(params: dict, instrument, now: datetime) -> dict:
@@ -306,16 +431,21 @@ def _eval_calendar_event(params: dict, instrument, now: datetime) -> dict:
             "details": {"n": n, "title_contains": title_contains, "impact": impact}}
 
 
-register_kind("calendar_event", _eval_calendar_event)
+register_kind("calendar_event", _eval_calendar_event,
+                params=("lookback_days", "title_contains", "impact"))
 
 
-def _eval_macro_regime(params: dict, instrument, now: datetime) -> dict:
-    """A FRED-style macro indicator's `last_value` is above/below a threshold.
+def _eval_macro_regime(params: dict, instrument, now: datetime, *,
+                       as_of: Optional[bool] = None) -> dict:
+    """A FRED-style macro indicator's value as of `now` is above/below a threshold.
 
     Params:
       series_id   — e.g. "DGS10", "VIXCLS", "FEDFUNDS"
       direction   — "above" | "below"
       threshold   — numeric
+
+    `as_of` is the scan loop's statement that this is a replay; left None it
+    falls back to the calendar.
     """
     series_id = (params or {}).get("series_id", "")
     direction = (params or {}).get("direction", "above")
@@ -328,16 +458,43 @@ def _eval_macro_regime(params: dict, instrument, now: datetime) -> dict:
         return {"matched": False, "score": 0.0, "details": {"reason": "missing series_id"}}
 
     try:
-        from market_data.models import MacroIndicator
+        from market_data.models import MacroIndicator, MacroObservation
     except Exception:
         return {"matched": False, "score": 0.0, "details": {"reason": "MacroIndicator unavailable"}}
 
     indicator = MacroIndicator.objects.filter(series_id=series_id).first()
-    if indicator is None or indicator.last_value is None:
+    if indicator is None:
         return {"matched": False, "score": 0.0,
                 "details": {"reason": f"no indicator data for {series_id}"}}
 
-    val = float(indicator.last_value)
+    # `last_value` is a mutable current-value column with no history: reading it
+    # alone would answer "what is the rate today", not "what was it at `now`",
+    # which silently turns any as-of replay into lookahead. MacroObservation is
+    # the history, so the as-of read has to come from there.
+    obs = (MacroObservation.objects
+           .filter(indicator=indicator, date__lte=now.date())
+           .order_by("-date").values_list("date", "value").first())
+    if obs is None:
+        return {"matched": False, "score": 0.0,
+                "details": {"reason": f"no observation for {series_id} on or before {now.date()}"}}
+    obs_date, obs_value = obs
+
+    val = float(obs_value)
+    revised = False
+    # The history is NOT self-updating: the FRED ingest writes observation rows
+    # with get_or_create, so a re-fetched date keeps its first print forever
+    # while `last_value` is reassigned unconditionally. GDP advance -> second ->
+    # third estimate, CPI seasonal-factor revisions and M2 benchmark revisions
+    # therefore leave the two columns disagreeing about the SAME date, with the
+    # newer number only in last_value. A live read wants that number; a replay
+    # must not have it, because last_value carries no date of its own beyond
+    # `last_date`. Comparing the dates is what separates the two cases.
+    replaying = _is_replay(now) if as_of is None else as_of
+    if (not replaying and indicator.last_value is not None
+            and indicator.last_date == obs_date):
+        revised_val = float(indicator.last_value)
+        revised = revised_val != val
+        val = revised_val
     if direction == "above":
         matched = val >= threshold
         # Score scales with how far above threshold (cap at 1.0).
@@ -351,10 +508,12 @@ def _eval_macro_regime(params: dict, instrument, now: datetime) -> dict:
     return {"matched": matched, "score": round(score, 4),
             "details": {"series_id": series_id, "value": val,
                         "direction": direction, "threshold": threshold,
-                        "last_date": str(indicator.last_date) if indicator.last_date else None}}
+                        "last_date": str(obs_date), "revised": revised}}
 
 
-register_kind("macro_regime", _eval_macro_regime)
+register_kind("macro_regime", _eval_macro_regime,
+                params=("series_id", "direction", "threshold"),
+                choices={"direction": ("above", "below")})
 
 
 def _eval_macro_trend(params: dict, instrument, now: datetime) -> dict:
@@ -390,12 +549,27 @@ def _eval_macro_trend(params: dict, instrument, now: datetime) -> dict:
         return {"matched": False, "score": 0.0,
                 "details": {"reason": f"no indicator for {series_id}"}}
 
-    # Same TZ-boundary safety: skip the upper bound. Future-dated macro
-    # observations shouldn't exist; the lookback is what matters.
+    # Both bounds, on purpose. Without the upper one this reads whatever the
+    # ingest has written by wall-clock time rather than what was knowable at
+    # `now` — a no-op while scanning live (no observation is dated ahead of
+    # today) and lookahead in any replay.
+    #
+    # It is not full point-in-time correctness, and must not be described as
+    # such: MacroObservation rows are keyed by OBSERVATION PERIOD, not by
+    # publication date. For a daily series the two coincide; for a quarterly or
+    # monthly one they do not, so a replay at 2026-04-15 still sees the
+    # Q1-dated GDP row that BEA did not publish until late April. Closing that
+    # needs a publication-date column on the model, not a tighter bound here.
+    #
+    # Both endpoints are read straight from the history, first prints and all.
+    # Overlaying the revised `last_value` onto the newest endpoint (as
+    # macro_regime does for its level read) would pair a revised endpoint with
+    # an unrevised start and distort the very delta this measures — a mixed
+    # vintage is a worse answer than a consistent stale one.
     cutoff_date = (now - timedelta(days=lookback_days)).date()
     obs = list(
         MacroObservation.objects.filter(
-            indicator=indicator, date__gte=cutoff_date,
+            indicator=indicator, date__gte=cutoff_date, date__lte=now.date(),
         ).order_by("date").values_list("date", "value")
     )
     if len(obs) < 2:
@@ -445,7 +619,10 @@ def _eval_macro_trend(params: dict, instrument, now: datetime) -> dict:
                         "n_observations": len(obs)}}
 
 
-register_kind("macro_trend", _eval_macro_trend)
+register_kind("macro_trend", _eval_macro_trend,
+                params=("series_id", "direction", "lookback_days", "min_change",
+                        "min_change_pct"),
+                choices={"direction": ("rising", "falling")})
 
 
 def _eval_sentiment_snapshot(params: dict, instrument, now: datetime) -> dict:
@@ -500,7 +677,47 @@ def _eval_sentiment_snapshot(params: dict, instrument, now: datetime) -> dict:
                         "source": source or "any"}}
 
 
-register_kind("sentiment_snapshot", _eval_sentiment_snapshot)
+register_kind("sentiment_snapshot", _eval_sentiment_snapshot,
+                params=("direction", "threshold", "lookback_days", "min_count",
+                        "source"),
+                choices={"direction": ("above", "below")})
+
+
+def cot_sign(instrument) -> int:
+    """+1 if COT positioning already reads in the symbol's own frame, -1 if it
+    is expressed in the pair's QUOTE currency and has to be flipped.
+
+    The CFTC quotes an FX future in the FOREIGN currency: the contract unit of
+    'JAPANESE YEN' is the yen, so `MARKET_NAME_MAP` in
+    scraping/scrapers/cot_reports.py maps it onto USDJPY and the ingest writes
+    `net_speculative = nc_long - nc_short` through verbatim. Net LONG the yen
+    contract is net SHORT USDJPY. Every reader that took the column at face
+    value therefore inverted its own test on the four pairs the dollar is the
+    BASE of (USDJPY, USDCHF, USDCAD, USDMXN) — manufacturing divergences where
+    positioning and price agreed and scoring the genuine ones at zero.
+
+    A sign, not a universe cut. XAUUSD, OATS, LUMBER, BTCUSD and the two real
+    cross contracts (EURGBP from 'EURO FX/BRITISH POUND XRATE', EURJPY from
+    'EURO FX/JAPANESE YEN XRATE') are all quoted with the contract's unit as the
+    BASE, so their column already reads in the symbol's frame. Gating those out
+    to fix four symbols would throw away twelve correct ones.
+
+    Read off the symbol for the same reason `_eval_quote_currency` is:
+    `Instrument.currency` is seeded to the literal "USD" for every forex pair
+    and every commodity, so it carries no quote information at all. The
+    asset-class guard keeps a six-letter commodity ticker from ever being
+    decomposed as a currency pair.
+    """
+    symbol = (getattr(instrument, "symbol", "") or "").upper()
+    asset_class = (getattr(instrument, "asset_class", "") or "").lower()
+    if asset_class == "forex" and len(symbol) == 6 and symbol.startswith("USD"):
+        return -1
+    return 1
+
+
+def cot_net_speculative(report, instrument) -> int:
+    """`COTReport.net_speculative` re-expressed in `instrument`'s own frame."""
+    return cot_sign(instrument) * int(getattr(report, "net_speculative", 0) or 0)
 
 
 def _eval_cot_report(params: dict, instrument, now: datetime) -> dict:
@@ -528,12 +745,16 @@ def _eval_cot_report(params: dict, instrument, now: datetime) -> dict:
     except Exception:
         return {"matched": False, "score": 0.0, "details": {"reason": "COTReport unavailable"}}
 
-    report = (COTReport.objects.filter(instrument=instrument)
+    # The newest report AS OF `now`, not the newest row in the table: COT is
+    # backfilled weekly, so an unbounded "latest" hands a replay the positioning
+    # that was still unpublished on the date being evaluated.
+    report = (COTReport.objects.filter(instrument=instrument,
+                                       report_date__lte=now.date())
               .order_by("-report_date").first())
     if report is None:
         return {"matched": False, "score": 0.0, "details": {"reason": "no COT report"}}
 
-    net = int(report.net_speculative or 0)
+    net = cot_net_speculative(report, instrument)
     total = abs(int(report.non_commercial_long or 0)) + abs(int(report.non_commercial_short or 0))
     ratio = (abs(net) / total) if total > 0 else 0.0
 
@@ -553,10 +774,13 @@ def _eval_cot_report(params: dict, instrument, now: datetime) -> dict:
     return {"matched": matched, "score": round(score, 4),
             "details": {"net_speculative": net, "ratio": round(ratio, 4),
                         "direction": direction, "min_ratio": min_ratio,
+                        "contract_frame_flipped": cot_sign(instrument) < 0,
                         "report_date": str(report.report_date)}}
 
 
-register_kind("cot_report", _eval_cot_report)
+register_kind("cot_report", _eval_cot_report, params=("direction", "min_ratio"),
+                choices={"direction": ("long", "short", "long_extreme",
+                                       "short_extreme")})
 
 
 def _eval_options_flow(params: dict, instrument, now: datetime) -> dict:
@@ -596,7 +820,8 @@ def _eval_options_flow(params: dict, instrument, now: datetime) -> dict:
                         "sentiment": sentiment, "is_unusual": is_unusual}}
 
 
-register_kind("options_flow", _eval_options_flow)
+register_kind("options_flow", _eval_options_flow,
+                params=("sentiment", "is_unusual", "min_count", "lookback_days"))
 
 
 def _eval_volatility_regime(params: dict, instrument, now: datetime) -> dict:
@@ -645,7 +870,9 @@ def _eval_volatility_regime(params: dict, instrument, now: datetime) -> dict:
                         "direction": direction, "threshold_pct": threshold_pct}}
 
 
-register_kind("volatility_regime", _eval_volatility_regime)
+register_kind("volatility_regime", _eval_volatility_regime,
+                params=("period", "direction", "threshold_pct"),
+                choices={"direction": ("above", "below")})
 
 
 def _eval_correlation_pair(params: dict, instrument, now: datetime) -> dict:
@@ -722,14 +949,56 @@ def _eval_correlation_pair(params: dict, instrument, now: datetime) -> dict:
                         "direction": direction, "threshold": threshold}}
 
 
-register_kind("correlation_pair", _eval_correlation_pair)
+register_kind("correlation_pair", _eval_correlation_pair,
+                params=("reference_symbol", "period", "direction", "threshold"),
+                choices={"direction": ("above", "below")})
+
+
+def _eval_quote_currency(params: dict, instrument, now: datetime) -> dict:
+    """The instrument's QUOTE currency — what one unit of the base buys.
+
+    A setup whose thesis is about a CURRENCY rather than about the symbol has
+    to say so, because the platform's symbols mix quote conventions: "USD is
+    weak" means EURUSD rises and USDJPY falls, and a setup carrying one fixed
+    `direction` is right about exactly one of them. Gate on this and the fixed
+    direction becomes honest for every symbol left in the universe.
+
+    The convention is read off the symbol, because `Instrument.currency` is
+    seeded to the literal "USD" for every forex pair AND every commodity and
+    so carries no quote information at all.
+
+    The test is a suffix match, deliberately not "the last three characters are
+    a currency code": nothing distinguishes a currency suffix from the tail of
+    a ticker, so decomposing LUMBER into LUM/BER would be an invention. A
+    symbol that does not end in the wanted code is simply unmatched — which,
+    used as a gate, is the fail-closed answer.
+
+    Params:
+      currency — ISO code the symbol must be QUOTED in, e.g. "USD"
+    """
+    wanted = str((params or {}).get("currency", "USD")).upper()
+    symbol = (getattr(instrument, "symbol", "") or "").upper()
+
+    # Strictly longer, so the bare code ("USD") is not read as quoted in itself.
+    matched = len(symbol) > len(wanted) and symbol.endswith(wanted)
+    return {"matched": matched, "score": 1.0 if matched else 0.0,
+            "details": {"symbol": symbol, "wanted": wanted,
+                        "suffix": symbol[-len(wanted):] if wanted else ""}}
+
+
+register_kind("quote_currency", _eval_quote_currency, params=("currency",))
 
 
 # ── Scoring + flagging ─────────────────────────────────────────────────────
 
 def _suggested_levels(direction: str, last_price: float, sizing: dict) -> tuple:
-    """Return (entry, stop, target). Falls back to percentage stops when sizing
-    has no atr_mult and no ATR is available."""
+    """Return (entry, stop, target) from `stop_pct` and `target_rr`.
+
+    Percentage stop and an R-multiple target are the only two knobs there are —
+    there is no ATR branch and no absolute-target branch, so `stop_atr_mult`
+    and `target_pct` are silently ignored wherever they appear. `SIZING_KEYS`
+    is the declaration of that; `unknown_sizing_keys` is how a caller checks.
+    """
     sizing = sizing or {}
     stop_pct = float(sizing.get("stop_pct", ATR_FALLBACK_PCT)) / 100.0
     target_rr = float(sizing.get("target_rr", 2.0))
@@ -747,14 +1016,27 @@ def _suggested_levels(direction: str, last_price: float, sizing: dict) -> tuple:
     return entry, stop, target
 
 
-def _last_price(instrument, now: datetime) -> Optional[float]:
-    """Most recent close ≤ now."""
+def _last_price(instrument, now: datetime, *, as_of: bool = False) -> Optional[float]:
+    """Most recent close ≤ now, falling back to the live quote unless `as_of`.
+
+    `as_of` is the CALLER's statement that it is replaying history, and nothing
+    else may stand in for it. Deriving it from elapsed wall clock — "now is
+    more than five minutes old, so this must be a replay" — made a live sweep's
+    output a function of how long the sweep took: `scan_all_setups` pins one
+    `now` for the whole pass, so every instrument reached after minute five
+    silently lost its LiveQuote fallback and its matches went unflagged.
+    """
     from market_data.models import PriceData, LiveQuote
     p = (PriceData.objects
          .filter(instrument=instrument, timestamp__lte=now)
          .order_by("-timestamp").values_list("close", flat=True).first())
     if p is not None:
         return float(p)
+    # LiveQuote holds one row per instrument with no history, so it only ever
+    # answers "the price right now". Handing it to a replay would price a
+    # historical scan at today's quote; that caller gets None instead.
+    if as_of:
+        return None
     try:
         lq = instrument.live_quote
         return float(lq.last) if lq.last is not None else None
@@ -762,12 +1044,20 @@ def _last_price(instrument, now: datetime) -> Optional[float]:
         return None
 
 
-def scan_setup(setup, instrument, *, now: Optional[datetime] = None) -> dict:
+def scan_setup(setup, instrument, *, now: Optional[datetime] = None,
+               as_of: Optional[bool] = None) -> dict:
     """Run one setup against one instrument. Returns a dict and creates an
     OpportunityFlag (+ linked Signal) if the composite score meets `min_match_score`.
+
+    `as_of=True` says the caller is replaying history and must not be handed
+    present-day state. Left at None it defaults to `now is not None`, which is
+    the honest reading of a caller that named its own instant — batch callers
+    that pin one `now` for a whole live pass pass `as_of=False` explicitly.
     """
     from signals.models import OpportunityFlag, Signal
 
+    if as_of is None:
+        as_of = now is not None
     now = now or timezone.now()
 
     # Asset-class gate.
@@ -782,17 +1072,37 @@ def scan_setup(setup, instrument, *, now: Optional[datetime] = None) -> dict:
         kind = cond.get("kind", "")
         params = cond.get("params") or {}
         weight = float(cond.get("weight", 1.0))
+        # A gate answers "does this setup apply to this symbol at all", so it
+        # contributes no score and no denominator: a universe check that can be
+        # outvoted by evidence is not a universe check.
+        is_gate = bool(cond.get("gate"))
         if not has_kind(kind):
             conditions_out.append({"kind": kind, "matched": False, "score": 0.0,
-                                    "details": {"reason": "unknown kind"}, "weight": weight})
+                                    "details": {"reason": "unknown kind"},
+                                    "weight": weight, "gate": is_gate})
+            if is_gate:
+                return {"matched": False, "skipped": True, "reason": "gate_failed",
+                        "conditions": conditions_out}
             weight_sum += weight
             continue
         try:
-            res = EVALUATOR_REGISTRY[kind](params, instrument, now)
+            if ACCEPTS_AS_OF.get(kind):
+                res = EVALUATOR_REGISTRY[kind](params, instrument, now,
+                                               as_of=as_of)
+            else:
+                res = EVALUATOR_REGISTRY[kind](params, instrument, now)
         except Exception as e:
             logger.warning("[opportunity] evaluator %s raised: %s", kind, e)
             res = {"matched": False, "score": 0.0, "details": {"error": str(e)}}
-        conditions_out.append({"kind": kind, "weight": weight, **res})
+        conditions_out.append({"kind": kind, "weight": weight, "gate": is_gate, **res})
+        if is_gate:
+            # Fails closed: an unknown kind or a raising evaluator leaves the
+            # gate shut, because the alternative is a setup quietly firing on
+            # the symbols it was written to exclude.
+            if not res.get("matched"):
+                return {"matched": False, "skipped": True, "reason": "gate_failed",
+                        "conditions": conditions_out}
+            continue
         weighted_score_sum += float(res.get("score", 0.0)) * weight
         weight_sum += weight
 
@@ -804,7 +1114,7 @@ def scan_setup(setup, instrument, *, now: Optional[datetime] = None) -> dict:
                 "conditions": conditions_out}
 
     # Build the levels + Signal + Flag.
-    last_price = _last_price(instrument, now)
+    last_price = _last_price(instrument, now, as_of=as_of)
     if last_price is None or last_price <= 0:
         return {"matched": False, "skipped": True, "reason": "no_price_data",
                 "score": round(composite, 4), "conditions": conditions_out}
@@ -846,33 +1156,96 @@ def scan_setup(setup, instrument, *, now: Optional[datetime] = None) -> dict:
             "signal_id": signal.id, "conditions": conditions_out}
 
 
-def scan_all_setups(*, now: Optional[datetime] = None) -> dict:
-    """Walk every active setup × every active instrument; create flags for matches."""
+def scan_all_setups(*, now: Optional[datetime] = None,
+                    as_of: Optional[bool] = None) -> dict:
+    """Walk every active setup × every active instrument; create flags for matches.
+
+    The pass pins one `now` and hands the SAME `as_of` to every pair, so a pass
+    that takes an hour produces the same flags as one that takes a minute.
+
+    The returned dict accounts for every pair it counted in `evaluations`.
+    It used to report only (setups, instruments, evaluations, matches), and
+    `evaluations` counts every pair ATTEMPTED while `matches` counts only the
+    ones that produced a flag — so the whole middle of the funnel was invisible.
+    A gate is the sharp case: `starter_usd_weakness_macro` gates ~53 of the 79
+    symbols in its asset classes before any evidence is read, and that is by
+    design, but on this dict it looked exactly like an evaluator that had
+    started raising or a macro leg that had gone inert. The counters below name
+    each drop so a falling flag count can be attributed instead of guessed at:
+
+        asset_class_skipped  pair outside the setup's asset_classes
+        gate_skipped         a gate condition said the setup does not apply here
+        no_price_data        scored a match but had no price to build levels from
+        scored               reached the composite (the honest denominator for
+                             `matches`)
+        evaluator_errors     conditions whose evaluator raised — already logged
+                             per occurrence, now countable
+        errors               the pair itself raised out of `scan_setup`
+
+    Deliberately none of these keys is named `skipped`, `attempted`, `parsed`,
+    `stored` or `fetched`: `core.task_gate.judge_result` reads a top-level
+    `skipped` as "not configured" and treats the other four as work/done counts,
+    so either would restate a healthy scan that legitimately matched nothing as
+    a warning on the component's health record.
+    """
     from signals.models import OpportunitySetup
     from instruments.models import Instrument
 
+    if as_of is None:
+        as_of = now is not None
     now = now or timezone.now()
     setups = list(OpportunitySetup.objects.filter(is_active=True))
     instruments = list(Instrument.objects.filter(is_active=True))
 
     n_matches = 0
     n_evaluations = 0
+    n_scored = 0
+    n_errors = 0
+    n_evaluator_errors = 0
+    skips = {"asset_class_filter": 0, "gate_failed": 0, "no_price_data": 0}
     for setup in setups:
         for inst in instruments:
             n_evaluations += 1
             try:
-                result = scan_setup(setup, inst, now=now)
-                if result.get("matched"):
-                    n_matches += 1
+                result = scan_setup(setup, inst, now=now, as_of=as_of)
             except Exception as e:
+                n_errors += 1
                 logger.warning("[opportunity] scan failed setup=%s inst=%s: %s",
                                setup.name, inst.symbol, e)
+                continue
+            # An evaluator that raises is caught inside scan_setup and scored 0,
+            # which is right — one broken data source must not void a whole
+            # composite — but it leaves the score quietly understated. The
+            # detail it writes is the only record, so count it here.
+            for cond in (result.get("conditions") or []):
+                if "error" in (cond.get("details") or {}):
+                    n_evaluator_errors += 1
+            reason = result.get("reason")
+            if reason in ("asset_class_filter", "gate_failed"):
+                # Dropped before the composite — these are universe decisions.
+                skips[reason] += 1
+                continue
+            # Everything past here reached the composite, so `scored` is the
+            # denominator `matches` is honestly a numerator of:
+            #   scored + asset_class_skipped + gate_skipped + errors == evaluations
+            n_scored += 1
+            if reason == "no_price_data":
+                # Cleared the bar and then had nothing to price the levels from.
+                skips[reason] += 1
+            elif result.get("matched"):
+                n_matches += 1
 
     return {
         "setups_scanned": len(setups),
         "instruments_scanned": len(instruments),
         "evaluations": n_evaluations,
+        "scored": n_scored,
         "matches": n_matches,
+        "asset_class_skipped": skips["asset_class_filter"],
+        "gate_skipped": skips["gate_failed"],
+        "no_price_data": skips["no_price_data"],
+        "evaluator_errors": n_evaluator_errors,
+        "errors": n_errors,
     }
 
 
@@ -889,7 +1262,8 @@ except Exception as _exc:
 
 # ── Resolution (after horizon) ──────────────────────────────────────────────
 
-def resolve_pending_flags(*, now: Optional[datetime] = None) -> dict:
+def resolve_pending_flags(*, now: Optional[datetime] = None,
+                          as_of: Optional[bool] = None) -> dict:
     """Walk OpportunityFlags whose horizon has passed; mark hit/miss/neutral.
 
     A flag is hit if:
@@ -902,6 +1276,8 @@ def resolve_pending_flags(*, now: Optional[datetime] = None) -> dict:
     """
     from signals.models import OpportunityFlag
 
+    if as_of is None:
+        as_of = now is not None
     now = now or timezone.now()
     qs = OpportunityFlag.objects.filter(outcome="").select_related("instrument", "signal")
 
@@ -913,7 +1289,7 @@ def resolve_pending_flags(*, now: Optional[datetime] = None) -> dict:
             resolved["skipped"] += 1
             continue
 
-        last = _last_price(flag.instrument, now)
+        last = _last_price(flag.instrument, now, as_of=as_of)
         if last is None:
             flag.outcome = "expired"
             flag.resolved_at = now

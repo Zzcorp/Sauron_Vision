@@ -37,6 +37,10 @@ app.conf.task_routes = {
     "signals.tasks.run_signal_scan": {"queue": "fast"},
     "indicators.tasks.recalculate_watchlist_indicators": {"queue": "fast"},
     # Tier 3-6: Slow queue (analysis, AI, heavy computation)
+    # A backtest replays every bar in the window for every symbol. Left on
+    # the default queue it would sit in front of the 60-second quote poller
+    # on the fast/default worker; the slow worker exists for exactly this.
+    "backtester.tasks.*": {"queue": "slow"},
     "ai_agents.tasks.*": {"queue": "ai"},
     "strategies.tasks.*": {"queue": "slow"},
     "portfolio.tasks.*": {"queue": "slow"},

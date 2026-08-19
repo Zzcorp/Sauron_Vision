@@ -69,4 +69,97 @@
         {% endfor %}
     </div>
 </div>
+
+{# Live updates ride one socket and one channel-layer dispatch, and both #}
+{# used to fail in silence — a fill raised no banner and moved no badge, #}
+{# and the only way to find out was to open a trade and see nothing. #}
+<div class="card" style="margin-top:20px;">
+    <div class="card-header"><span class="card-title">Live delivery</span></div>
+    <p style="color:var(--text-secondary);font-size:0.88rem;line-height:1.6;margin-bottom:14px;">
+        Banners, the bell badge and the headband counters all arrive over a live
+        connection. When it is down the bell shows a gold dot, notifications still
+        land in your inbox, and the counters keep refreshing on a slower timer —
+        but nothing announces itself as it happens.
+    </p>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+        <button type="button" class="btn btn-primary" id="lcTest">Send a test banner</button>
+        <span id="lcState" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);"></span>
+    </div>
+    <div id="lcResult" style="font-family:var(--font-mono);font-size:11px;margin-top:12px;line-height:1.7;"></div>
+</div>
+
+<script>
+(function () {
+    var btn = document.getElementById("lcTest");
+    var stateEl = document.getElementById("lcState");
+    var out = document.getElementById("lcResult");
+    if (!btn) return;
+
+    function paintState() {
+        var up = window.svLive && window.svLive.isUp();
+        stateEl.textContent = up ? "socket: connected" : "socket: not connected";
+        stateEl.style.color = up ? "var(--accent)" : "var(--accent-gold)";
+    }
+    paintState();
+    setInterval(paintState, 2000);
+
+    function csrf() {
+        var i = document.querySelector("input[name=csrfmiddlewaretoken]");
+        return i ? i.value : "";
+    }
+
+    btn.addEventListener("click", function () {
+        btn.disabled = true;
+        out.textContent = "";
+        var sawBanner = false;
+        var stop = function (e) {
+            if (e.detail && e.detail.kind === "notification") sawBanner = true;
+        };
+        document.addEventListener("sv:eye-event", stop);
+
+        fetch("/api/live/selftest/", {
+            method: "POST", credentials: "same-origin",
+            headers: { "X-CSRFToken": csrf(), "X-Requested-With": "XMLHttpRequest" }
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            /* Give the round trip a moment to come back through the socket
+               before judging — the verdict is about which HALF is broken. */
+            setTimeout(function () {
+                document.removeEventListener("sv:eye-event", stop);
+                btn.disabled = false;
+                var lines = [];
+                lines.push((j.dispatched ? "OK   " : "FAIL ")
+                    + "server handed the event to the channel layer");
+                lines.push("     layer: " + j.layer
+                    + (j.layer_reachable ? " (reachable)" : " (UNREACHABLE)"));
+                if (j.detail) lines.push("     " + j.detail);
+                lines.push((sawBanner ? "OK   " : "FAIL ")
+                    + "this browser received it");
+                if (j.dispatched && !sawBanner) {
+                    lines.push("");
+                    lines.push("The server sent it and this page did not get it —");
+                    lines.push("the WebSocket is the broken half (proxy, or the");
+                    lines.push("worker and web process using different layers).");
+                } else if (!j.dispatched) {
+                    lines.push("");
+                    lines.push("The server could not dispatch — the channel layer");
+                    lines.push("is the broken half. Check REDIS_URL in the .env the");
+                    lines.push("web container reads.");
+                }
+                out.textContent = lines.join("\n");
+                out.style.whiteSpace = "pre";
+                out.style.color = (j.dispatched && sawBanner)
+                    ? "var(--accent)" : "var(--accent-gold)";
+            }, 1200);
+        })
+        .catch(function () {
+            document.removeEventListener("sv:eye-event", stop);
+            btn.disabled = false;
+            out.textContent = "Could not reach the server.";
+            out.style.color = "var(--accent-red)";
+        });
+    });
+})();
+</script>
 {% endblock %}

@@ -86,20 +86,20 @@
     <div class="card-header"><span class="card-title">Rule × Asset-Class Performance</span></div>
     {% if rows %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
-        <thead><tr><th>Rule</th><th>Class</th><th>n</th><th>Wins</th><th>Losses</th><th>Win rate</th><th>Avg R</th><th>Avg dur (min)</th><th>Last traded</th></tr></thead>
+    <table class="sv-perf-table sv-stack">
+        <thead><tr><th>Rule</th><th>Class</th><th class="num">n</th><th class="num">Wins</th><th class="num">Losses</th><th class="num">Win rate</th><th class="num">Avg R</th><th class="num">Avg dur (min)</th><th>Last traded</th></tr></thead>
         <tbody>
         {% for r in rows %}
             <tr>
-                <td><strong>{{ r.rule_name }}</strong></td>
-                <td><span class="badge badge-medium">{{ r.asset_class }}</span></td>
-                <td>{{ r.n }}</td>
-                <td>{{ r.n_wins }}</td>
-                <td>{{ r.n_losses }}</td>
-                <td>{{ r.win_rate|floatformat:2 }}</td>
-                <td class="{% if r.avg_r > 0 %}up{% elif r.avg_r < 0 %}down{% endif %}">{{ r.avg_r|floatformat:3 }}</td>
-                <td>{{ r.avg_duration_min|default:"—" }}</td>
-                <td style="font-size:11px;color:var(--text-muted);">{{ r.last_traded_at|date:"Y-m-d H:i" }}</td>
+                <td class="sv-ident" data-label="Rule"><strong>{{ r.rule_name }}</strong></td>
+                <td data-label="Class"><span class="badge badge-medium">{{ r.asset_class }}</span></td>
+                <td class="num" data-label="n">{{ r.n }}</td>
+                <td class="num" data-label="Wins">{{ r.n_wins }}</td>
+                <td class="num" data-label="Losses">{{ r.n_losses }}</td>
+                <td class="num" data-label="Win rate">{{ r.win_rate|floatformat:2 }}</td>
+                <td class="num {% if r.avg_r > 0 %}up{% elif r.avg_r < 0 %}down{% endif %}" data-label="Avg R">{{ r.avg_r|floatformat:3 }}</td>
+                <td class="num" data-label="Avg dur (min)">{{ r.avg_duration_min|default:"—" }}</td>
+                <td class="nowrap" data-label="Last traded" style="font-size:11px;color:var(--text-muted);">{{ r.last_traded_at|date:"Y-m-d H:i" }}</td>
             </tr>
         {% endfor %}
         </tbody>
@@ -115,17 +115,17 @@
     <div class="card-header"><span class="card-title">Recently Graded Trades</span></div>
     {% if recent %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
-        <thead><tr><th>Closed</th><th>Class</th><th>Symbol</th><th>Side</th><th>Rule</th><th>Outcome</th><th>R</th><th>Dur (min)</th><th>P&amp;L</th></tr></thead>
+    <table class="sv-perf-table sv-stack">
+        <thead><tr><th>Closed</th><th>Class</th><th>Symbol</th><th>Side</th><th>Rule</th><th>Outcome</th><th class="num">R</th><th class="num">Dur (min)</th><th class="num">P&amp;L</th></tr></thead>
         <tbody>
         {% for t in recent %}
             <tr>
-                <td style="font-size:11px;color:var(--text-muted);">{{ t.closed_at|date:"m-d H:i" }}</td>
-                <td><span class="badge badge-medium">{{ t.asset_class }}</span></td>
-                <td><strong>{{ t.symbol }}</strong></td>
-                <td><span class="badge badge-{% if t.side == 'BUY' %}bullish{% else %}bearish{% endif %}">{{ t.side }}</span></td>
-                <td style="font-size:11px;">{{ t.rule_name|default:"—" }}</td>
-                <td>
+                <td class="nowrap" data-label="Closed" style="font-size:11px;color:var(--text-muted);">{{ t.closed_at|date:"m-d H:i" }}</td>
+                <td data-label="Class"><span class="badge badge-medium">{{ t.asset_class }}</span></td>
+                <td data-label="Symbol"><strong>{{ t.symbol }}</strong></td>
+                <td data-label="Side"><span class="badge badge-{% if t.side == 'BUY' %}bullish{% else %}bearish{% endif %}">{{ t.side }}</span></td>
+                <td class="sv-ident" data-label="Rule" style="font-size:11px;">{{ t.rule_name|default:"—" }}</td>
+                <td data-label="Outcome">
                     {% if t.outcome == "hit_target" %}
                         <span style="color:var(--accent);">✓ TP</span>
                     {% elif t.outcome == "stopped_out" %}
@@ -136,9 +136,9 @@
                         <span style="color:var(--text-muted);">{{ t.outcome }}</span>
                     {% endif %}
                 </td>
-                <td class="{% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{{ t.realized_r|floatformat:2|default:"—" }}</td>
-                <td>{{ t.duration_minutes|default:"—" }}</td>
-                <td class="{% if t.pnl > 0 %}up{% elif t.pnl < 0 %}down{% endif %}">{{ t.pnl|floatformat:2 }}</td>
+                <td class="num {% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}" data-label="R">{{ t.realized_r|floatformat:2|default:"—" }}</td>
+                <td class="num" data-label="Dur (min)">{{ t.duration_minutes|default:"—" }}</td>
+                <td class="num {% if t.pnl > 0 %}up{% elif t.pnl < 0 %}down{% endif %}" data-label="P&amp;L">{{ t.pnl|floatformat:2 }}</td>
             </tr>
         {% endfor %}
         </tbody>

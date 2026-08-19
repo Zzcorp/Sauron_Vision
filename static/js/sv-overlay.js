@@ -481,6 +481,19 @@
                   '</b> to confirm<input type="text" autocomplete="off" spellcheck="false"></label>'
                 : "";
 
+            /* A secret the SERVER must verify — the trading PIN. requireText
+             * cannot carry one: that input is compared in the browser against
+             * a string the browser already knows, which is deliberate
+             * friction, not a credential. With `secretLabel` set the promise
+             * resolves to the typed VALUE instead of `true`; callers that
+             * never ask for one keep the boolean they have always had. */
+            var secretHtml = opts.secretLabel
+                ? '<label class="sv-dialog-confirm-text" data-role="secret-wrap">' +
+                  esc(opts.secretLabel) +
+                  '<input type="password" inputmode="numeric" autocomplete="off" ' +
+                  'spellcheck="false" data-role="secret"></label>'
+                : "";
+
             host.innerHTML =
                 '<div class="sv-dialog-head">' +
                   '<span class="sv-dialog-title" id="svDlgTitle">' + esc(opts.title || "Confirm") + "</span>" +
@@ -490,7 +503,7 @@
                   (opts.message ? '<p class="sv-dialog-msg">' + esc(opts.message) + "</p>" : "") +
                   facts +
                   (opts.detail ? '<p class="sv-dialog-detail">' + esc(opts.detail) + "</p>" : "") +
-                  typed +
+                  typed + secretHtml +
                 "</div>" +
                 '<div class="sv-dialog-foot">' +
                   (opts.alert ? "" :
@@ -504,15 +517,25 @@
             d.body.appendChild(host);
 
             var okBtn = host.querySelector('[data-role="ok"]');
-            var input = host.querySelector(".sv-dialog-confirm-text input");
+            var secretInput = host.querySelector('[data-role="secret"]');
+            var input = opts.requireText
+                ? host.querySelector(".sv-dialog-confirm-text input")
+                : null;
             var settled = false;
 
-            if (input) {
-                okBtn.disabled = true;
-                input.addEventListener("input", function () {
-                    okBtn.disabled = input.value.trim() !== opts.requireText;
-                });
+            /* Both gates in one place: an empty PIN box must disable the
+             * button exactly as an unmatched requireText does, or the
+             * operator sends a blank credential and reads the server's
+             * refusal as "the close is broken". */
+            function sync() {
+                var ok = true;
+                if (input && input.value.trim() !== opts.requireText) ok = false;
+                if (secretInput && !secretInput.value) ok = false;
+                okBtn.disabled = !ok;
             }
+            if (input) input.addEventListener("input", sync);
+            if (secretInput) secretInput.addEventListener("input", sync);
+            if (input || secretInput) sync();
 
             function finish(v) {
                 if (settled) return;
@@ -528,15 +551,20 @@
                 }, 200);
             });
 
-            okBtn.addEventListener("click", function () { finish(true); });
+            okBtn.addEventListener("click", function () {
+                finish(secretInput ? secretInput.value : true);
+            });
             var cancel = host.querySelector('[data-role="cancel"]');
             if (cancel) cancel.addEventListener("click", function () { finish(false); });
 
             /* The dangerous button is never the one focus lands on: a stray
              * Enter must not be able to disarm anything. */
-            if (!opts.danger && !input) host.setAttribute("data-sv-focus", '[data-role="ok"]');
+            if (!opts.danger && !input && !secretInput) {
+                host.setAttribute("data-sv-focus", '[data-role="ok"]');
+            }
             open(host, null);
             if (input) input.focus();
+            else if (secretInput) secretInput.focus();
         });
     }
 

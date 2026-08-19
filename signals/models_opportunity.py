@@ -57,7 +57,11 @@ class OpportunitySetup(models.Model):
 
     sizing = models.JSONField(
         default=dict, blank=True,
-        help_text='Sizing config: {stop_atr_mult: 1.5, target_rr: 2.0} or {stop_pct: 2.0, target_pct: 4.0}.',
+        # stop_atr_mult and target_pct were advertised here and read by nothing:
+        # `_suggested_levels` has no ATR branch and no absolute-target branch,
+        # so a setup typed from the old text got a 2R target it never asked for.
+        # SIZING_KEYS in opportunity_scanner is the declaration this mirrors.
+        help_text='Sizing config: {"stop_pct": 2.0, "target_rr": 2.0}. Those two keys and no others — anything else is discarded.',
     )
 
     is_active = models.BooleanField(default=True)

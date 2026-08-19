@@ -1,6 +1,10 @@
 {# PORTFOLIO tab — strategic snapshot enriched with sparkline + donut. #}
 
 {# ── 1. Top stat strip ────────────────────────────────────────────── #}
+{# Every cell here used to print a 0 when it had nothing to measure: a 0.0% #}
+{# win rate over no trades reads as "everything lost", a 0.00 profit factor #}
+{# as a broken engine, and a 0.00% max drawdown as "never lost money". An #}
+{# em-dash says the one true thing — not measured. #}
 <div class="oc-strip">
     <div class="oc-strip-cell">
         <span class="oc-strip-label">PORTFOLIO VALUE</span>
@@ -9,28 +13,28 @@
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">UNREALIZED P&amp;L</span>
-        <span class="oc-strip-value {% if total_unrealized > 0 %}up{% elif total_unrealized < 0 %}down{% endif %}">{{ total_unrealized|floatformat:2 }}</span>
-        <span class="oc-strip-sub">{{ open_positions_total }} open positions</span>
+        <span class="oc-strip-value {% if total_unrealized > 0 %}up{% elif total_unrealized < 0 %}down{% endif %}">{% if total_unrealized is not None %}{{ total_unrealized|floatformat:2 }}{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">{{ open_positions_total }} open · both books, marked to live quotes</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">WIN RATE</span>
-        <span class="oc-strip-value">{{ win_rate }}%</span>
-        <span class="oc-strip-sub">{{ n_winning }}W / {{ n_losing }}L · {{ n_closed }} closed</span>
+        <span class="oc-strip-value">{% if win_rate is not None %}{{ win_rate }}%{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">{{ n_winning }}W / {{ n_losing }}L · {{ n_closed }} graded{% if n_ungraded %} · {{ n_ungraded }} unpriced{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">PROFIT FACTOR</span>
-        <span class="oc-strip-value {% if profit_factor >= 1 %}up{% elif profit_factor > 0 %}down{% endif %}">{{ profit_factor }}</span>
-        <span class="oc-strip-sub">avg win {{ avg_win }} · avg loss {{ avg_loss }}</span>
+        <span class="oc-strip-value {% if profit_factor >= 1 %}up{% elif profit_factor > 0 %}down{% endif %}">{% if profit_factor is not None %}{{ profit_factor }}{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">avg win {{ avg_win|default_if_none:"—" }} · avg loss {{ avg_loss|default_if_none:"—" }}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">SHARPE 30D</span>
         <span class="oc-strip-value {% if sharpe_30d and sharpe_30d > 0 %}up{% elif sharpe_30d and sharpe_30d < 0 %}down{% endif %}">{% if sharpe_30d is not None %}{{ sharpe_30d }}{% else %}—{% endif %}</span>
-        <span class="oc-strip-sub">{% if sortino_30d is not None %}sortino {{ sortino_30d }}{% endif %}</span>
+        <span class="oc-strip-sub">{% if sortino_30d is not None %}sortino {{ sortino_30d }}{% else %}needs 5+ daily snapshots{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">MAX DRAWDOWN</span>
-        <span class="oc-strip-value down">{{ max_drawdown|floatformat:2 }}%</span>
-        <span class="oc-strip-sub">all-time low watermark</span>
+        <span class="oc-strip-value {% if max_drawdown %}down{% endif %}">{% if max_drawdown is not None %}{{ max_drawdown|floatformat:2 }}%{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">{% if max_drawdown is not None %}all-time low watermark{% else %}no snapshot to measure from{% endif %}</span>
     </div>
 </div>
 
@@ -184,6 +188,8 @@
                             <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
                             <td class="down">{{ p.unrealized_pnl|floatformat:2 }}</td>
                         </tr>
+                    {% empty %}
+                        <tr><td colspan="3" class="oc-empty">No losing closed trades.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -201,17 +207,28 @@
     {% if open_positions %}
         <div class="table-wrapper">
         <table class="sv-perf-table">
-            <thead><tr><th>symbol</th><th>side</th><th>qty</th><th>entry</th><th>last</th><th>unreal P&amp;L</th><th>unreal %</th></tr></thead>
+            <thead><tr><th>symbol</th><th>side</th><th>qty</th><th>entry</th><th>last</th><th>unreal P&amp;L</th><th>unreal %</th><th>book</th><th class="nowrap">action</th></tr></thead>
             <tbody>
+                {# A row with no quote shows dashes, not zeros: floatformat #}
+                {# renders None as an empty cell, which reads as a layout bug. #}
                 {% for p in open_positions %}
-                    <tr>
-                        <td><strong>{{ p.instrument.symbol }}</strong></td>
+                    <tr data-sv-position-row>
+                        <td class="nowrap"><strong>{{ p.instrument.symbol }}</strong></td>
                         <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
                         <td>{{ p.quantity|floatformat:4 }}</td>
                         <td>{{ p.entry_price|floatformat:4 }}</td>
-                        <td>{{ p.current_price|floatformat:4 }}</td>
-                        <td class="oc-mini-pnl {% if p.unrealized_pnl > 0 %}up{% elif p.unrealized_pnl < 0 %}down{% endif %}">{{ p.unrealized_pnl|floatformat:2 }}</td>
-                        <td class="{% if p.unrealized_pnl_pct > 0 %}up{% elif p.unrealized_pnl_pct < 0 %}down{% endif %}">{{ p.unrealized_pnl_pct|floatformat:2 }}%</td>
+                        <td>{% if p.current_price is not None %}{{ p.current_price|floatformat:4 }}{% else %}—{% endif %}</td>
+                        <td class="oc-mini-pnl {% if p.unrealized_pnl > 0 %}up{% elif p.unrealized_pnl < 0 %}down{% endif %}">{% if p.unrealized_pnl is not None %}{{ p.unrealized_pnl|floatformat:2 }}{% else %}—{% endif %}</td>
+                        <td class="{% if p.unrealized_pnl_pct > 0 %}up{% elif p.unrealized_pnl_pct < 0 %}down{% endif %}">{% if p.unrealized_pnl_pct is not None %}{{ p.unrealized_pnl_pct|floatformat:2 }}%{% else %}—{% endif %}</td>
+                        <td><span class="badge badge-medium">{% if p.source == 'bot' %}bot{% else %}portfolio{% endif %}</span></td>
+                        {# Only the bot book has a close path — a portfolio row has nothing anywhere in the platform that could flatten it. #}
+                        <td class="nowrap">
+                            {% if p.trade_id %}
+                                <button type="button" class="btn btn-sm btn-danger" data-sv-close-trade="{{ p.trade_id }}">{% if p.status == 'CLOSE_PENDING' %}RETRY{% else %}CLOSE{% endif %}</button>
+                            {% else %}
+                                <span class="sv-unknown">&mdash;</span>
+                            {% endif %}
+                        </td>
                     </tr>
                 {% endfor %}
             </tbody>

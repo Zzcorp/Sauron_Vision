@@ -140,20 +140,22 @@
     </div>
     {% if tasks %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
-        <thead><tr><th>Time</th><th>Agent</th><th>Provider</th><th>Model</th><th>Status</th><th>Duration</th><th>In/Out Tokens</th><th>Cost</th><th>Summary</th></tr></thead>
+    <table class="sv-perf-table sv-stack">
+        <thead><tr><th>Time</th><th>Agent</th><th>Provider</th><th>Model</th><th>Status</th><th class="num">Duration</th><th class="num">In/Out Tokens</th><th class="num">Cost</th><th>Summary</th></tr></thead>
         <tbody>
         {% for t in tasks %}
         <tr>
-            <td style="font-size: 11px; color: var(--text-muted); white-space: nowrap;">{{ t.created_at|date:"M d H:i:s" }}</td>
-            <td style="font-family: var(--font-mono);">{{ t.agent }}</td>
-            <td>{{ t.provider }}</td>
-            <td style="font-size: 10px; color: var(--text-muted);">{{ t.model|truncatechars:20 }}</td>
-            <td>{% if t.success %}<span style="color: var(--accent-green);">●</span>{% else %}<span style="color: var(--accent-red);">●</span>{% endif %}</td>
-            <td style="font-family: var(--font-mono);">{{ t.duration_seconds|floatformat:1 }}s</td>
-            <td style="font-family: var(--font-mono); font-size: 11px;">{{ t.input_tokens }}/{{ t.output_tokens }}</td>
-            <td style="font-family: var(--font-mono);">${{ t.cost_usd }}</td>
-            <td style="font-size: 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis;" title="{{ t.response_summary }}">{{ t.response_summary|truncatechars:80 }}</td>
+            <td class="nowrap" data-label="Time" style="font-size: 11px; color: var(--text-muted);">{{ t.created_at|date:"M d H:i:s" }}</td>
+            <td class="sv-ident" data-label="Agent" style="font-family: var(--font-mono);">{{ t.agent }}</td>
+            <td data-label="Provider">{{ t.provider }}</td>
+            {# Model ids are one long hyphenated token — sv-ident lets the #}
+            {# column collapse instead of setting the table's width. #}
+            <td class="sv-ident" data-label="Model" style="font-size: 10px; color: var(--text-muted);">{{ t.model|truncatechars:20 }}</td>
+            <td data-label="Status">{% if t.success %}<span style="color: var(--accent-green);">●</span>{% else %}<span style="color: var(--accent-red);">●</span>{% endif %}</td>
+            <td class="num" data-label="Duration" style="font-family: var(--font-mono);">{{ t.duration_seconds|floatformat:1 }}s</td>
+            <td class="num" data-label="In/Out Tokens" style="font-family: var(--font-mono); font-size: 11px;">{{ t.input_tokens }}/{{ t.output_tokens }}</td>
+            <td class="num" data-label="Cost" style="font-family: var(--font-mono);">${{ t.cost_usd }}</td>
+            <td data-label="Summary" style="font-size: 12px;" title="{{ t.response_summary }}">{{ t.response_summary|truncatechars:80 }}</td>
         </tr>
         {% endfor %}
         </tbody>

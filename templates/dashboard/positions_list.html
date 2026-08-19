@@ -173,11 +173,11 @@
     {% if positions %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th>Symbol</th><th>Direction</th><th>Qty</th><th>Entry</th><th>Current</th><th>Stop</th><th>Target</th><th>P&L</th><th>P&L %</th><th>Strategy</th><th>Opened</th></tr></thead>
+        <thead><tr><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
         <tbody>
         {% for p in positions %}
-        <tr>
-            <td style="font-family: var(--font-display); font-size: 13px;">{{ p.instrument.symbol }}</td>
+        <tr data-sv-position-row>
+            <td class="nowrap" style="font-family: var(--font-display); font-size: 13px;">{{ p.instrument.symbol }}</td>
             <td><span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ p.direction }}</span></td>
             <td class="num" style="font-family: var(--font-mono);">{{ p.quantity }}</td>
             <td class="num" style="font-family: var(--font-mono);">{{ p.entry_price }}</td>
@@ -189,8 +189,17 @@
             <td class="num" style="font-family: var(--font-mono); color: var(--accent-green);">{{ p.take_profit|default:"-" }}</td>
             <td class="num">{% if p.unrealized_pnl is not None %}<span style="color: {% if p.unrealized_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ p.unrealized_pnl }}</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
             <td class="num">{% if p.unrealized_pnl_pct is not None %}<span style="color: {% if p.unrealized_pnl_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ p.unrealized_pnl_pct|floatformat:2 }}%</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
-            <td style="font-size: 12px;">{{ p.strategy.name|default:"-"|truncatechars:20 }}</td>
-            <td style="font-size: 11px; color: var(--text-muted);">{{ p.opened_at|date:"M d H:i" }}</td>
+            {# sv-ident is the sheet's opt-in for identifier columns: a rule name is one long token whose min-content width would otherwise set the table's floor. #}
+            <td class="sv-ident" style="font-size: 12px;">{{ p.strategy.name|default:"-"|truncatechars:20 }}</td>
+            <td class="nowrap" style="font-size: 11px; color: var(--text-muted);">{{ p.opened_at|date:"M d H:i" }}</td>
+            {# Only bot trades have a close path; a portfolio Position row has nothing that could flatten it, so it gets a dash rather than a dead button. #}
+            <td class="nowrap">
+                {% if p.trade_id %}
+                    <button type="button" class="btn btn-sm btn-danger" data-sv-close-trade="{{ p.trade_id }}">{% if p.status == 'CLOSE_PENDING' %}RETRY CLOSE{% else %}CLOSE{% endif %}</button>
+                {% else %}
+                    <span class="sv-unknown">&mdash;</span>
+                {% endif %}
+            </td>
         </tr>
         {% endfor %}
         </tbody>
@@ -358,10 +367,17 @@
     transition: background 0.15s;
 }
 .ph-trade-card:hover { background: rgba(0,232,104,0.02); }
+/* The row is two flex clusters of fixed-min-width cells. Flex items do not
+   shrink below min-content, and .card is overflow:visible — so on any width
+   narrower than their sum the row pushed straight out of the card and took
+   the whole PAGE sideways with it. Wrapping is the honest fix: the cluster
+   drops to a second line instead of the body growing a scrollbar. */
 .ph-trade-row {
     display: flex; justify-content: space-between; align-items: center;
     padding: 12px 14px; gap: 12px;
+    flex-wrap: wrap; row-gap: 8px;
 }
+.ph-trade-row > div { min-width: 0; flex-wrap: wrap; row-gap: 4px; }
 .ph-expand-icon {
     font-size: 10px; color: var(--text-muted);
     transition: transform 0.2s;
@@ -373,12 +389,22 @@
     max-height: 0; overflow: hidden; transition: max-height 0.3s ease;
     padding: 0 14px;
 }
+/* overflow:hidden is what makes the collapse animate, and while EXPANDED it
+   was an amputation: content past the cap was cut with no scrollbar and no
+   sign. The shared sheet raises the cap; this makes the leftover scroll
+   inside the panel, so nothing in the card is ever silently lost. */
 .ph-trade-card.expanded .ph-trade-detail {
-    max-height: 300px; padding: 0 14px 16px;
+    max-height: 300px; padding: 0 14px 16px; overflow: auto;
 }
 
+/* Bare 1fr tracks cannot shrink below their content, so this grid set the
+   card's floor width and blew the page out sideways with it. The shared
+   sheet now restates the tracks one selector deeper (.card .ph-detail-grid,
+   auto-fit) and wins here — this stays honest as the standalone floor. */
 .ph-detail-grid {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
+    gap: 12px;
     margin-bottom: 14px;
 }
 .ph-detail-item { }
@@ -416,7 +442,6 @@
 
 @media (max-width: 768px) {
     .ph-trade-row { flex-direction: column; align-items: flex-start; gap: 6px; }
-    .ph-detail-grid { grid-template-columns: repeat(2, 1fr); }
 }
 </style>
 {% endblock %}

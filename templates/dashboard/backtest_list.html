@@ -8,34 +8,46 @@
     <div class="oc-strip-cell">
         <span class="oc-strip-label">TOTAL RUNS</span>
         <span class="oc-strip-value">{{ total }}</span>
-        <span class="oc-strip-sub">{{ completed_count }} done · {{ n_running }} live · {{ n_failed }} fail</span>
+        <span class="oc-strip-sub">{{ completed_count }} done · {{ n_pending }} queued · {{ n_running }} running · {{ n_failed }} failed{% if n_stale %} · {{ n_stale }} stale{% endif %}</span>
     </div>
+    {# Nothing completed means these were never measured — an em-dash, not a 0%. #}
     <div class="oc-strip-cell">
         <span class="oc-strip-label">AVG RETURN</span>
-        <span class="oc-strip-value {% if avg_return > 0 %}up{% elif avg_return < 0 %}down{% endif %}">{{ avg_return }}%</span>
+        <span class="oc-strip-value {% if avg_return > 0 %}up{% elif avg_return < 0 %}down{% endif %}">{% if avg_return is None %}&mdash;{% else %}{{ avg_return }}%{% endif %}</span>
         <span class="oc-strip-sub">across completed runs</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">BEST RETURN</span>
-        <span class="oc-strip-value up">+{{ best_return }}%</span>
-        <span class="oc-strip-sub">worst {{ worst_return }}%</span>
+        <span class="oc-strip-value {% if best_return > 0 %}up{% elif best_return < 0 %}down{% endif %}">{% if best_return is None %}&mdash;{% else %}{% if best_return > 0 %}+{% endif %}{{ best_return }}%{% endif %}</span>
+        <span class="oc-strip-sub">worst {% if worst_return is None %}&mdash;{% else %}{{ worst_return }}%{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">AVG SHARPE</span>
-        <span class="oc-strip-value {% if avg_sharpe > 0 %}up{% elif avg_sharpe < 0 %}down{% endif %}">{{ avg_sharpe }}</span>
+        <span class="oc-strip-value {% if avg_sharpe > 0 %}up{% elif avg_sharpe < 0 %}down{% endif %}">{% if avg_sharpe is None %}&mdash;{% else %}{{ avg_sharpe }}{% endif %}</span>
         <span class="oc-strip-sub">risk-adjusted</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">AVG WIN RATE</span>
-        <span class="oc-strip-value">{{ avg_win_rate }}%</span>
+        <span class="oc-strip-value">{% if avg_win_rate is None %}&mdash;{% else %}{{ avg_win_rate }}%{% endif %}</span>
         <span class="oc-strip-sub">across completed</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">AVG DRAWDOWN</span>
-        <span class="oc-strip-value down">{{ avg_dd }}%</span>
+        <span class="oc-strip-value down">{% if avg_dd is None %}&mdash;{% else %}{{ avg_dd }}%{% endif %}</span>
         <span class="oc-strip-sub">worst path</span>
     </div>
 </div>
+
+{% if n_stale %}
+{# A run older than the in-flight lock TTL is not still working — the worker #}
+{# that owed it an answer is gone. Say so instead of spinning forever. #}
+<div class="bt-stale-banner">
+    <strong>{{ n_stale }} run{{ n_stale|pluralize }} stuck</strong> — queued or
+    running for over {{ stale_after_minutes }} minutes with no result. No worker
+    ever claimed them, or the one that did died mid-run. Check that a Celery
+    worker is consuming the <code>slow</code> queue, then launch again.
+</div>
+{% endif %}
 
 {# ── 2. Status donut + strategy breakdown ────────────────────────── #}
 <div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
@@ -184,27 +196,49 @@
     </div>
     {% if runs %}
     <div class="table-wrapper" style="max-height:500px;overflow-y:auto;">
-    <table class="sv-perf-table">
-        <thead><tr><th>Name</th><th>Strategy</th><th>Symbols</th><th>Status</th><th>Return</th><th>Sharpe</th><th>Win Rate</th><th>Trades</th><th>Max DD</th><th>Capital</th><th>Date</th></tr></thead>
+    <table class="sv-perf-table sv-stack">
+        <thead><tr><th>Name</th><th>Strategy</th><th>Symbols</th><th>Status</th><th class="num">Return</th><th class="num">Sharpe</th><th class="num">Win Rate</th><th class="num">Trades</th><th class="num">Max DD</th><th class="num">Capital</th><th>Date</th></tr></thead>
         <tbody>
         {% for r in runs %}
-        <tr>
-            <td style="font-weight:600;">{{ r.name }}</td>
-            <td><span class="badge badge-medium">{{ r.strategy_type }}</span></td>
-            <td style="font-size:11px;font-family:var(--font-mono);color:var(--accent);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ r.symbols|join:", "|default:"-" }}">{{ r.symbols|join:", "|default:"-" }}</td>
-            <td>
-                <span class="badge" style="background:{% if r.status == 'completed' %}rgba(0,232,104,0.12);color:var(--accent){% elif r.status == 'running' %}rgba(48,160,232,0.12);color:var(--accent-blue){% elif r.status == 'failed' %}rgba(232,48,48,0.12);color:var(--accent-red){% else %}rgba(216,176,32,0.12);color:var(--accent-gold){% endif %};font-size:10px;letter-spacing:1px;">
-                    {{ r.status|upper }}
-                </span>
+        {# A row with no result yet must not pass for one that has a result: #}
+        {# dimmed, em-dashes rather than zeros, and a pill that pulses only #}
+        {# while the run is genuinely live. #}
+        <tr class="{% if r.is_live %}bt-row-live{% elif r.status == 'failed' or r.is_stale %}bt-row-bad{% endif %}">
+            <td class="sv-ident" data-label="Name" style="font-weight:600;">{{ r.name }}</td>
+            <td data-label="Strategy"><span class="badge badge-medium">{{ r.strategy_type }}</span></td>
+            <td class="bt-symbols" data-label="Symbols" title="{{ r.symbols|join:", "|default:"—" }}">{{ r.symbols|join:", "|default:"—" }}</td>
+            <td data-label="Status">
+                {% if r.is_stale %}
+                    <span class="bt-pill bt-pill-stale" title="Queued or running for over {{ stale_after_minutes }} minutes with no result — nothing is working on it.">STALE</span>
+                {% elif r.status == 'completed' %}
+                    <span class="bt-pill bt-pill-done">COMPLETED</span>
+                {% elif r.status == 'running' %}
+                    <span class="bt-pill bt-pill-run">RUNNING</span>
+                {% elif r.status == 'failed' %}
+                    <span class="bt-pill bt-pill-fail">FAILED</span>
+                {% else %}
+                    <span class="bt-pill bt-pill-queue">QUEUED</span>
+                {% endif %}
             </td>
-            <td style="color:{% if r.total_return_pct and r.total_return_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};font-family:var(--font-mono);font-weight:600;">{{ r.total_return_pct|default:"-"|floatformat:1 }}%</td>
-            <td style="font-family:var(--font-mono);">{{ r.sharpe_ratio|default:"-"|floatformat:2 }}</td>
-            <td style="font-family:var(--font-mono);">{% if r.win_rate %}{{ r.win_rate|floatformat:0 }}%{% else %}-{% endif %}</td>
-            <td style="font-family:var(--font-mono);">{{ r.total_trades }}</td>
-            <td style="color:var(--accent-red);font-family:var(--font-mono);">{% if r.max_drawdown_pct %}{{ r.max_drawdown_pct|floatformat:1 }}%{% else %}-{% endif %}</td>
-            <td style="font-family:var(--font-mono);font-size:11px;">${{ r.initial_capital|floatformat:0 }}</td>
-            <td style="font-size:11px;color:var(--text-muted);">{{ r.created_at|date:"M d, H:i" }}</td>
+            <td class="num" data-label="Return" style="font-family:var(--font-mono);font-weight:600;{% if r.total_return_pct is not None %}color:{% if r.total_return_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};{% endif %}">{% if r.total_return_pct is None %}&mdash;{% else %}{{ r.total_return_pct|floatformat:1 }}%{% endif %}</td>
+            <td class="num" data-label="Sharpe" style="font-family:var(--font-mono);">{% if r.sharpe_ratio is None %}&mdash;{% else %}{{ r.sharpe_ratio|floatformat:2 }}{% endif %}</td>
+            <td class="num" data-label="Win Rate" style="font-family:var(--font-mono);">{% if r.win_rate is None %}&mdash;{% else %}{{ r.win_rate|floatformat:0 }}%{% endif %}</td>
+            {# total_trades defaults to 0 in the model, so it only means #}
+            {# "0 trades" once a run has finished measuring. #}
+            <td class="num" data-label="Trades" style="font-family:var(--font-mono);">{% if r.status == 'completed' %}{{ r.total_trades }}{% else %}&mdash;{% endif %}</td>
+            <td class="num" data-label="Max DD" style="color:var(--accent-red);font-family:var(--font-mono);">{% if r.max_drawdown_pct is None %}&mdash;{% else %}{{ r.max_drawdown_pct|floatformat:1 }}%{% endif %}</td>
+            <td class="num" data-label="Capital" style="font-family:var(--font-mono);font-size:11px;">${{ r.initial_capital|floatformat:0 }}</td>
+            <td class="nowrap" data-label="Date" style="font-size:11px;color:var(--text-muted);">{{ r.created_at|date:"M d, H:i" }}</td>
         </tr>
+        {% if r.status == 'completed' and r.total_trades == 0 %}
+        {# Zero trades is a RESULT — the strategy never triggered. Left bare #}
+        {# it reads as a malfunction, so the row says which it is. #}
+        <tr class="bt-note-row"><td colspan="11"><span class="bt-note">No trades — the strategy never triggered on this window. The run is valid; try a longer window, a different timeframe, or looser thresholds.</span></td></tr>
+        {% elif r.error %}
+        <tr class="bt-note-row"><td colspan="11"><span class="bt-note bt-note-bad">{{ r.error }}</span></td></tr>
+        {% elif r.is_stale %}
+        <tr class="bt-note-row"><td colspan="11"><span class="bt-note bt-note-bad">Filed {{ r.created_at|timesince }} ago and never picked up — no worker claimed this run.</span></td></tr>
+        {% endif %}
         {% endfor %}
         </tbody>
     </table>
@@ -212,10 +246,28 @@
     {% else %}
     <div class="empty-state">
         <div class="empty-icon">&#x25A1;</div>
-        <p>NO BACKTESTS YET — Click "New Backtest" to launch your first simulation</p>
+        <p>NO BACKTESTS YET</p>
+        <p style="font-size:11px;color:var(--text-muted);max-width:440px;margin:6px auto 0;line-height:1.6;">
+            Click <strong>New Backtest</strong>, pick a strategy and at least one
+            instrument, and choose a window your stored OHLCV history actually
+            covers. Runs execute on a worker and land here — completed, or
+            failed with the reason.
+        </p>
     </div>
     {% endif %}
 </div>
+
+{% if has_live_runs %}
+{# Only polls while something is genuinely in flight; once every row has #}
+{# settled the page is static again. The socket announce still fires — #}
+{# this is for the operator already staring at the table. #}
+<script>
+(function(){
+  var t = setTimeout(function(){ window.location.reload(); }, 15000);
+  window.addEventListener('pagehide', function(){ clearTimeout(t); });
+})();
+</script>
+{% endif %}
 
 <!-- Analytics -->
 <div class="card" style="margin-top:24px;">
@@ -247,14 +299,20 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <div class="input-group">
           <label class="input-label">Strategy Type</label>
+          {# Only what backtester.engine can actually run is selectable. The #}
+          {# rest stay visible but disabled with the reason: an option that #}
+          {# files a run and then fails is a worse answer than one that #}
+          {# says up front it cannot be run. #}
           <select name="strategy_type" class="input">
-            <option value="smc_signals">SMC Signals</option>
-            <option value="trend_follow">Trend Following</option>
-            <option value="mean_reversion">Mean Reversion</option>
-            <option value="momentum">Momentum</option>
-            <option value="breakout">Breakout</option>
-            <option value="custom">Custom</option>
+            <option value="trend_follow">Trend Following — SMA 20/50 cross</option>
+            <option value="mean_reversion">Mean Reversion — RSI 30/70</option>
+            <option value="momentum">Momentum — MACD 12/26/9 cross</option>
+            <option value="smc_signals" disabled>SMC Signals — n/a: scores each bar from live tables (look-ahead)</option>
+            <option value="breakout" disabled>Breakout — n/a: no implementation in the engine</option>
+            <option value="custom" disabled>Custom — n/a: register a strategy function first</option>
           </select>
+          <div class="input-hint">Long-only, one position at a time. Exits on the
+            opposite signal, or on the stop / target below.</div>
         </div>
         <div class="input-group">
           <label class="input-label">Timeframe</label>
@@ -384,6 +442,77 @@ body.light-mode .bt-modal { box-shadow: 0 8px 30px rgba(0,0,0,0.15); background:
     background: none; border: none; color: var(--accent-red); cursor: pointer;
     font-size: 14px; line-height: 1; padding: 0 2px;
 }
+
+/* ── Run state ───────────────────────────────────────────────────────
+   Four states that must be told apart at a glance: waiting, working,
+   done, broken. Colour alone would not do it, so the pills also differ
+   in fill vs outline and only the two live ones animate. */
+.bt-pill {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+    letter-spacing: 1px; border: 1px solid transparent;
+}
+.bt-pill-done  { background: rgba(0,232,104,0.12);  color: var(--accent); }
+.bt-pill-run   { background: rgba(48,160,232,0.12); color: var(--accent-blue);
+                 border-color: var(--accent-blue); animation: btPulse 1.4s ease-in-out infinite; }
+.bt-pill-queue { background: transparent; color: var(--accent-gold);
+                 border-color: var(--accent-gold); border-style: dashed;
+                 animation: btPulse 2.4s ease-in-out infinite; }
+.bt-pill-fail  { background: rgba(232,48,48,0.12); color: var(--accent-red); }
+.bt-pill-stale { background: transparent; color: var(--accent-red);
+                 border-color: var(--accent-red); }
+@keyframes btPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+/* Respect a reader who has asked the OS to stop things moving. */
+@media (prefers-reduced-motion: reduce) {
+    .bt-pill-run, .bt-pill-queue { animation: none; }
+}
+
+/* ── Symbols column ──────────────────────────────────────────────────
+   A twelve-instrument run lists twelve tickers, which on its own set the
+   width of an eleven-column table. One line with the full list on the
+   title attribute — and the cap lifts at the stacking breakpoint, where
+   the cell owns a whole line and an ellipsis would hide text for nothing. */
+.bt-symbols {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+}
+@media (min-width: 641px) {
+    .bt-symbols {
+        max-width: 18ch;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+/* An unfinished row carries no numbers, so it should not read as loudly
+   as one that does. */
+.bt-row-live td { opacity: 0.62; }
+.bt-row-bad td  { background: rgba(232,48,48,0.045); }
+.bt-note-row td { padding-top: 0; border-top: none; }
+.bt-note {
+    display: block; font-size: 11px; line-height: 1.5;
+    color: var(--text-muted); padding: 0 0 8px 2px;
+}
+.bt-note-bad { color: var(--accent-red); font-family: var(--font-mono); }
+.bt-stale-banner {
+    margin-bottom: 18px; padding: 10px 14px; border-radius: var(--radius);
+    border: 1px solid var(--accent-red); background: rgba(232,48,48,0.07);
+    color: var(--text-secondary); font-size: 12px; line-height: 1.55;
+}
+.bt-stale-banner strong { color: var(--accent-red); }
+.bt-stale-banner code {
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-primary);
+}
+/* Light mode needs its own tints — the dark ones vanish on a pale card. */
+body.light-mode .bt-row-bad td { background: rgba(232,48,48,0.06); }
+body.light-mode .bt-stale-banner { background: rgba(232,48,48,0.06); }
+body.light-mode .bt-pill-done { background: rgba(0,160,72,0.14); }
+
+/* A strategy the engine cannot honestly run is shown, disabled, with the
+   reason — hiding it would only make the operator wonder where it went. */
+#btForm option:disabled { color: var(--text-muted); font-style: italic; }
 </style>
 
 <script>
@@ -475,6 +604,8 @@ body.light-mode .bt-modal { box-shadow: 0 8px 30px rgba(0,0,0,0.15); background:
     .then(function(r){ return r.json(); })
     .then(function(j){
       if (j.ok) {
+        // 202 = queued on a worker; 200 = the broker was unreachable and the
+        // endpoint ran it inline, so the row is already finished.
         window.location = j.redirect || '/backtest/';
       } else {
         btn.disabled = false;

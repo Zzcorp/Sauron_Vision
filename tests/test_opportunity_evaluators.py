@@ -38,14 +38,30 @@ def _seed_prices(instrument, closes, end=None):
 
 # ── macro_regime ────────────────────────────────────────────────────────────
 
+def _seed_macro(series_id, value, name="x", category="x", when=None):
+    """An indicator plus the observation the FRED ingest writes alongside it.
+
+    macro_regime reads the observation history, not the mutable `last_value`
+    column, so that an as-of scan gets the value that was published by `now`
+    rather than the one sitting in the row today. A fixture that sets only
+    `last_value` describes a series with no history — see
+    tests/test_seed_param_integrity.py for that case.
+    """
+    from market_data.models import MacroIndicator, MacroObservation
+    when = when or date.today()
+    indicator = MacroIndicator.objects.create(
+        series_id=series_id, name=name, category=category, frequency="d",
+        last_value=Decimal(str(value)), last_date=when,
+    )
+    MacroObservation.objects.create(
+        indicator=indicator, date=when, value=Decimal(str(value)))
+    return indicator
+
+
 class MacroRegimeTests(TestCase):
     def test_above_threshold_matches(self):
         from signals.opportunity_scanner import _eval_macro_regime
-        from market_data.models import MacroIndicator
-        MacroIndicator.objects.create(
-            series_id="DGS10", name="10Y", category="rate", frequency="d",
-            last_value=Decimal("4.50"), last_date=date.today(),
-        )
+        _seed_macro("DGS10", "4.50", name="10Y", category="rate")
         inst = _instrument("MR1")
         result = _eval_macro_regime(
             {"series_id": "DGS10", "direction": "above", "threshold": 4.0},
@@ -56,11 +72,7 @@ class MacroRegimeTests(TestCase):
 
     def test_below_threshold_matches(self):
         from signals.opportunity_scanner import _eval_macro_regime
-        from market_data.models import MacroIndicator
-        MacroIndicator.objects.create(
-            series_id="VIXCLS", name="VIX", category="vol", frequency="d",
-            last_value=Decimal("12"), last_date=date.today(),
-        )
+        _seed_macro("VIXCLS", "12", name="VIX", category="vol")
         inst = _instrument("MR2")
         result = _eval_macro_regime(
             {"series_id": "VIXCLS", "direction": "below", "threshold": 20.0},
@@ -79,11 +91,7 @@ class MacroRegimeTests(TestCase):
 
     def test_above_when_value_below_threshold_no_match(self):
         from signals.opportunity_scanner import _eval_macro_regime
-        from market_data.models import MacroIndicator
-        MacroIndicator.objects.create(
-            series_id="MR4_S", name="x", category="x", frequency="d",
-            last_value=Decimal("3.0"), last_date=date.today(),
-        )
+        _seed_macro("MR4_S", "3.0")
         result = _eval_macro_regime(
             {"series_id": "MR4_S", "direction": "above", "threshold": 5.0},
             _instrument("MR4"), timezone.now(),

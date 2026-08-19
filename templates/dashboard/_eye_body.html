@@ -109,10 +109,10 @@
         {% if open_positions %}
         <div class="table-wrapper">
         <table class="sv-perf-table">
-            <thead><tr><th>Asset</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>SL</th><th>TP</th><th>Mode</th></tr></thead>
+            <thead><tr><th>Asset</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>SL</th><th>TP</th><th>Mode</th><th class="nowrap">Action</th></tr></thead>
             <tbody>
             {% for p in open_positions %}
-                <tr>
+                <tr data-sv-position-row>
                     <td><span class="badge badge-medium">{{ p.asset_class }}</span></td>
                     <td><strong>{{ p.symbol }}</strong></td>
                     <td><span class="badge badge-{% if p.side == 'BUY' %}bullish{% else %}bearish{% endif %}">{{ p.side }}</span></td>
@@ -121,6 +121,15 @@
                     <td style="color:var(--text-muted);">{{ p.stop_loss|floatformat:4|default:"—" }}</td>
                     <td style="color:var(--text-muted);">{{ p.take_profit|floatformat:4|default:"—" }}</td>
                     <td>{% if p.paper %}<span style="color:var(--text-muted);">paper</span>{% else %}<span style="color:var(--accent-gold);">LIVE</span>{% endif %}</td>
+                    {# Until this column existed a position could only leave the book by stop, target, or the kill switch flattening everything. #}
+                    <td class="nowrap">
+                        {% if p.kind == 'asset' %}
+                            <button type="button" class="btn btn-sm btn-danger" data-sv-close-trade="{{ p.id }}">{% if p.status == 'CLOSE_PENDING' %}RETRY CLOSE{% else %}CLOSE{% endif %}</button>
+                        {% else %}
+                            {# Legacy crypto BotTrade rows: no per-trade close path exists for them, and a button that cannot act is worse than none. #}
+                            <span class="sv-unknown">&mdash;</span>
+                        {% endif %}
+                    </td>
                 </tr>
             {% endfor %}
             </tbody>

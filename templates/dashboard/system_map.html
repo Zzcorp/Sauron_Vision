@@ -197,6 +197,16 @@ which is how it catches a task that reports success and writes nothing.
 @media (max-width:1240px) {
     .tm-board { grid-template-columns:repeat(3, minmax(0,1fr)); min-width:0; }
 }
+/* The breakpoint above measured the VIEWPORT while the board only ever gets
+   what the sidebar leaves it. At 1280px with the sidebar expanded the board
+   has 964px and demands 1080 — so the one width most of this runs at was
+   the one width that scrolled sideways. Collapsed sidebar keeps six. */
+@media (min-width:1241px) and (max-width:1440px) {
+    body:not(:has(.sidebar.mini)) .tm-board {
+        grid-template-columns:repeat(3, minmax(0,1fr));
+        min-width:0;
+    }
+}
 @media (max-width:760px) {
     .tm-board { grid-template-columns:repeat(2, minmax(0,1fr)); }
     .tm-col-head p { display:none; }

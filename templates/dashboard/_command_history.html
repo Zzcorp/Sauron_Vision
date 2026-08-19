@@ -1,20 +1,23 @@
 {# HISTORY tab — closed-trade analytics, decay alerts, with rich charts. #}
 
 {# ── 1. Top stat strip ────────────────────────────────────────────── #}
+{# Win rate and total R are over the GRADED closes only. A close with no #}
+{# realized_r has no initial risk to normalise by and can never be a win, so #}
+{# leaving it in the denominator dragged the rate down by a silent amount. #}
 <div class="oc-strip">
     <div class="oc-strip-cell">
         <span class="oc-strip-label">CLOSED 90D</span>
         <span class="oc-strip-value">{{ n_closed }}</span>
-        <span class="oc-strip-sub">{{ n_wins }} wins</span>
+        <span class="oc-strip-sub">{{ n_wins }} wins · {{ n_graded }} graded</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">WIN RATE</span>
-        <span class="oc-strip-value">{{ win_rate }}%</span>
-        <span class="oc-strip-sub">90d rolling</span>
+        <span class="oc-strip-value">{% if win_rate is not None %}{{ win_rate }}%{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">{% if win_rate is not None %}90d, graded closes{% else %}no graded closes in 90d{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">TOTAL R</span>
-        <span class="oc-strip-value {% if total_r > 0 %}up{% elif total_r < 0 %}down{% endif %}">{{ total_r }}R</span>
+        <span class="oc-strip-value {% if total_r > 0 %}up{% elif total_r < 0 %}down{% endif %}">{% if total_r is not None %}{{ total_r }}R{% else %}—{% endif %}</span>
         <span class="oc-strip-sub">summed across all rules</span>
     </div>
     <div class="oc-strip-cell">
@@ -88,7 +91,7 @@
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="card-title">Rolling 30d win-rate</span>
             <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
-                {% if win_rate_points %}{{ win_rate_points|length }} days · current {{ win_rate_points|last|default:"0" }}%{% endif %}
+                {% if win_rate_points %}{{ win_rate_points|length }} days · current {{ win_rate_points|last }}%{% endif %}
             </span>
         </div>
         {% if win_rate_points %}
@@ -143,7 +146,7 @@
                          style="background: {% if d.avg_r > 0 %}rgba(0,232,104,{% widthratio d.n dow_max_n 35 %}%){% elif d.avg_r < 0 %}rgba(255,94,94,{% widthratio d.n dow_max_n 35 %}%){% else %}var(--bg-card){% endif %};">
                         <div class="dow-label">{{ d.label }}</div>
                         <div class="dow-n">{{ d.n }}</div>
-                        <div class="dow-r" style="color: {% if d.avg_r > 0 %}var(--accent){% elif d.avg_r < 0 %}#ff5e5e{% else %}var(--text-muted){% endif %};">{{ d.avg_r }}R</div>
+                        <div class="dow-r" style="color: {% if d.avg_r > 0 %}var(--accent){% elif d.avg_r < 0 %}#ff5e5e{% else %}var(--text-muted){% endif %};">{% if d.n %}{{ d.avg_r }}R{% else %}—{% endif %}</div>
                     </div>
                 {% endfor %}
             </div>
@@ -195,8 +198,10 @@
                         <td><strong>{{ r.rule_name|truncatechars:32 }}</strong></td>
                         <td><span class="badge badge-medium">{{ r.asset_class }}</span></td>
                         <td>{{ r.n }}</td>
-                        <td class="{% if r.avg_r > 0 %}up{% elif r.avg_r < 0 %}down{% endif %}">{{ r.avg_r|floatformat:2 }}</td>
-                        <td class="{% if r.total_pnl > 0 %}up{% elif r.total_pnl < 0 %}down{% endif %}">{{ r.total_pnl|floatformat:2 }}</td>
+                        {# Avg/Sum over a rule whose closes are all ungraded #}
+                        {# come back None, which floatformat renders blank. #}
+                        <td class="{% if r.avg_r > 0 %}up{% elif r.avg_r < 0 %}down{% endif %}">{% if r.avg_r is not None %}{{ r.avg_r|floatformat:2 }}{% else %}—{% endif %}</td>
+                        <td class="{% if r.total_pnl > 0 %}up{% elif r.total_pnl < 0 %}down{% endif %}">{% if r.total_pnl is not None %}{{ r.total_pnl|floatformat:2 }}{% else %}—{% endif %}</td>
                     </tr>
                 {% endfor %}
             </tbody>
@@ -247,10 +252,12 @@
                         <td style="font-family:var(--font-mono);font-size:11px;">{{ t.closed_at|date:"m-d H:i" }}</td>
                         <td><strong>{{ t.symbol }}</strong></td>
                         <td><span class="oc-mini-side {{ t.side }}">{{ t.side }}</span></td>
-                        <td style="font-size:11px;">{{ t.rule_name|truncatechars:24 }}</td>
-                        <td class="{% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{{ t.realized_r|floatformat:2 }}R</td>
-                        <td class="{% if t.pnl > 0 %}up{% elif t.pnl < 0 %}down{% endif %}">{{ t.pnl|floatformat:2 }}</td>
-                        <td style="font-size:11px;color:var(--text-muted);">{{ t.outcome }}</td>
+                        <td style="font-size:11px;">{{ t.rule_name|default:"—"|truncatechars:24 }}</td>
+                        {# An ungraded close renders a bare "R" without this — #}
+                        {# floatformat turns None into the empty string. #}
+                        <td class="{% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{% if t.realized_r is not None %}{{ t.realized_r|floatformat:2 }}R{% else %}—{% endif %}</td>
+                        <td class="{% if t.pnl > 0 %}up{% elif t.pnl < 0 %}down{% endif %}">{% if t.pnl is not None %}{{ t.pnl|floatformat:2 }}{% else %}—{% endif %}</td>
+                        <td style="font-size:11px;color:var(--text-muted);">{{ t.outcome|default:"—" }}</td>
                     </tr>
                 {% endfor %}
             </tbody>

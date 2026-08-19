@@ -40,21 +40,21 @@
     <div class="card-header"><span class="card-title">Per-rule pipeline state</span></div>
     {% if rows %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
-      <thead><tr><th>Rule</th><th>Stage</th><th>Days in stage</th><th>n (90d)</th><th>Expectancy (90d)</th><th>Hit rate</th><th>Baseline</th><th>Status</th>{% if is_admin %}<th>Action</th>{% endif %}</tr></thead>
+    <table class="sv-perf-table sv-stack">
+      <thead><tr><th>Rule</th><th>Stage</th><th>Days in stage</th><th class="num">n (90d)</th><th class="num">Expectancy (90d)</th><th class="num">Hit rate</th><th class="num">Baseline</th><th>Status</th>{% if is_admin %}<th>Action</th>{% endif %}</tr></thead>
       <tbody>
         {% for r in rows %}
           <tr>
-            <td>{{ r.rule|truncatechars:40 }}</td>
-            <td><span class="badge badge-{% if r.stage == 'live_full' %}bullish{% elif r.stage == 'live_small' %}medium{% elif r.stage == 'paper' %}medium{% else %}bearish{% endif %}">{{ r.stage_display }}</span></td>
-            <td>{% if r.stage_entered %}{{ r.stage_entered|timesince }}{% else %}—{% endif %}</td>
-            <td>{{ r.n_recent }}</td>
-            <td class="{% if r.expectancy_recent and r.expectancy_recent > 0 %}up{% elif r.expectancy_recent and r.expectancy_recent < 0 %}down{% endif %}">
+            <td class="sv-ident" data-label="Rule">{{ r.rule|truncatechars:40 }}</td>
+            <td data-label="Stage"><span class="badge badge-{% if r.stage == 'live_full' %}bullish{% elif r.stage == 'live_small' %}medium{% elif r.stage == 'paper' %}medium{% else %}bearish{% endif %}">{{ r.stage_display }}</span></td>
+            <td data-label="Days in stage">{% if r.stage_entered %}{{ r.stage_entered|timesince }}{% else %}—{% endif %}</td>
+            <td class="num" data-label="n (90d)">{{ r.n_recent }}</td>
+            <td class="num {% if r.expectancy_recent and r.expectancy_recent > 0 %}up{% elif r.expectancy_recent and r.expectancy_recent < 0 %}down{% endif %}" data-label="Expectancy">
                 {% if r.expectancy_recent is not None %}{{ r.expectancy_recent|floatformat:2 }}R{% else %}—{% endif %}
             </td>
-            <td>{% if r.hit_rate_recent is not None %}{{ r.hit_rate_recent|floatformat:2 }}{% else %}—{% endif %}</td>
-            <td>{% if r.baseline is not None %}{{ r.baseline|floatformat:2 }}R{% else %}—{% endif %}</td>
-            <td style="font-size: 11px;">
+            <td class="num" data-label="Hit rate">{% if r.hit_rate_recent is not None %}{{ r.hit_rate_recent|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td class="num" data-label="Baseline">{% if r.baseline is not None %}{{ r.baseline|floatformat:2 }}R{% else %}—{% endif %}</td>
+            <td data-label="Status" style="font-size: 11px;">
               {% if r.due_demote %}<span style="color: var(--accent-red);">⚠ degraded — auto-demote pending</span>
               {% elif r.eligible_promote and r.evidence_ok is False %}
                 <span style="color: var(--accent-gold);">⏸ held — {{ r.evidence_reason }}</span>
@@ -64,7 +64,7 @@
               {% else %}<span style="color: var(--text-muted);">stable</span>{% endif %}
             </td>
             {% if is_admin %}
-            <td style="display:flex;gap:6px;">
+            <td data-label="Action" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
                 <form method="post" action="{% url 'hq_promote_rule' %}">{% csrf_token %}<input type="hidden" name="rule_name" value="{{ r.rule }}"><button class="btn btn-sm btn-primary" type="submit" {% if r.stage == 'live_full' %}disabled{% endif %}>↑</button></form>
                 <form method="post" action="{% url 'hq_demote_rule' %}">{% csrf_token %}<input type="hidden" name="rule_name" value="{{ r.rule }}"><button class="btn btn-sm btn-danger" type="submit" {% if r.stage == 'research' %}disabled{% endif %}>↓</button></form>
             </td>
@@ -84,18 +84,18 @@
     <div class="card-header"><span class="card-title">Recent transitions</span></div>
     {% if history %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
-      <thead><tr><th>Time</th><th>Rule</th><th>From → To</th><th>Reason</th><th>Expectancy</th><th>n</th><th>By</th></tr></thead>
+    <table class="sv-perf-table sv-stack">
+      <thead><tr><th>Time</th><th>Rule</th><th>From → To</th><th>Reason</th><th class="num">Expectancy</th><th class="num">n</th><th>By</th></tr></thead>
       <tbody>
         {% for e in history %}
           <tr>
-            <td>{{ e.created_at|date:"M d H:i" }}</td>
-            <td>{{ e.rule_name|truncatechars:32 }}</td>
-            <td><strong>{{ e.from_stage }}</strong> → <strong>{{ e.to_stage }}</strong></td>
-            <td><span class="badge badge-{% if 'demote' in e.reason %}bearish{% else %}medium{% endif %}">{{ e.get_reason_display }}</span></td>
-            <td>{% if e.expectancy_at_transition is not None %}{{ e.expectancy_at_transition|floatformat:2 }}R{% else %}—{% endif %}</td>
-            <td>{{ e.n_at_transition }}</td>
-            <td style="font-size: 11px;">{{ e.triggered_by.username|default:"auto" }}</td>
+            <td class="nowrap" data-label="Time">{{ e.created_at|date:"M d H:i" }}</td>
+            <td class="sv-ident" data-label="Rule">{{ e.rule_name|truncatechars:32 }}</td>
+            <td data-label="From → To"><strong>{{ e.from_stage }}</strong> → <strong>{{ e.to_stage }}</strong></td>
+            <td data-label="Reason"><span class="badge badge-{% if 'demote' in e.reason %}bearish{% else %}medium{% endif %}">{{ e.get_reason_display }}</span></td>
+            <td class="num" data-label="Expectancy">{% if e.expectancy_at_transition is not None %}{{ e.expectancy_at_transition|floatformat:2 }}R{% else %}—{% endif %}</td>
+            <td class="num" data-label="n">{{ e.n_at_transition }}</td>
+            <td data-label="By" style="font-size: 11px;">{{ e.triggered_by.username|default:"auto" }}</td>
           </tr>
         {% endfor %}
       </tbody>

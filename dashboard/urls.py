@@ -10,6 +10,7 @@ from .views_profile_modals import (
     pin_modal, password_modal, change_password, change_pin_modal,
 )
 from .lock_views import locked_page, session_lock, session_ping, session_unlock
+from .views_livecheck import live_selftest
 from .views_admin_bots import (
     admin_bots_panel, admin_bot_toggle, admin_bot_shadow,
     admin_bot_reset_circuit, admin_bot_reconcile,
@@ -33,6 +34,7 @@ from .views_brain_phase38 import (
     research_open_conversation,
 )
 
+from .views_close import close_position_preview, close_position_execute
 from .views_signals_htmx import signal_cards_htmx, signal_performance_htmx
 from .views_performance import performance_dashboard
 from .views_risk import risk_dashboard
@@ -75,7 +77,7 @@ from .views_eye import eye_dashboard, eye_partial
 from .views_eye_drilldown import eye_gate_events, eye_fills, eye_exposure
 from .views_command import (
     command_center, command_tab_live, command_tab_portfolio,
-    command_tab_history, command_tab_bots,
+    command_tab_history, command_tab_bots, command_tab_metrics,
 )
 from .views_bot_performance import bot_performance_dashboard
 from .views_bot_backtest import (
@@ -93,6 +95,9 @@ urlpatterns = [
     path("command/tab/portfolio/", command_tab_portfolio, name="command_tab_portfolio"),
     path("command/tab/history/", command_tab_history, name="command_tab_history"),
     path("command/tab/bots/", command_tab_bots, name="command_tab_bots"),
+    # The tab-head metrics and hero readouts as JSON, so they move without a
+    # page reload. Nothing recomputed them once the page was rendered.
+    path("command/tab/metrics/", command_tab_metrics, name="command_tab_metrics"),
 
     # ── Frontend Pages ──────────────────────────────────────
     path("", views.dashboard, name="dashboard"),
@@ -106,6 +111,10 @@ urlpatterns = [
     path("partials/panel-counts/", views.panel_counts_json, name="panel_counts_json"),
     path("signals/<int:signal_id>/take-trade/preview/", views.take_trade_preview, name="take_trade_preview"),
     path("signals/<int:signal_id>/take-trade/", views.take_trade_execute, name="take_trade_execute"),
+    # The way out. TAKE TRADE opened positions the operator could only
+    # leave by stop, target, or the kill switch flattening everything.
+    path("positions/<int:trade_id>/close/preview/", close_position_preview, name="close_position_preview"),
+    path("positions/<int:trade_id>/close/", close_position_execute, name="close_position_execute"),
     path("api/instrument-preview/<str:symbol>/", views.instrument_preview_api, name="instrument_preview_api"),
     path("quotes/", views.market_quotes, name="market_quotes"),
     path("calendar/", views.economic_calendar, name="economic_calendar"),
@@ -119,6 +128,8 @@ urlpatterns = [
     path("news/<int:pk>/", __import__("dashboard.news_detail", fromlist=["news_detail"]).news_detail, name="news_detail"),
     path("api/live/metrics/", __import__("dashboard.news_detail", fromlist=["live_metrics_json"]).live_metrics_json, name="live_metrics"),
     path("api/live/health/", __import__("dashboard.live_health", fromlist=["live_health"]).live_health, name="live_health"),
+    # Which half of the live pipe is broken — see dashboard/views_livecheck.py.
+    path("api/live/selftest/", live_selftest, name="live_selftest"),
     path("liquidations/", __import__("dashboard.liquidations_view", fromlist=["liquidations_page"]).liquidations_page, name="liquidations_page"),
     path("api/liquidations/", __import__("dashboard.liquidations_view", fromlist=["liquidations_json"]).liquidations_json, name="liquidations_json"),
     path("portfolio/", views.portfolio_overview, name="portfolio_overview"),

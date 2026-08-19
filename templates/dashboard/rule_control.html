@@ -40,16 +40,18 @@
     <div class="card-header"><span class="card-title">Current rule states</span></div>
     {% if controls %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
+    {# sv-ident on the rule column: a 33-character snake_case name is one #}
+    {# unbreakable word, and one of them sets the whole table's width. #}
+    <table class="sv-perf-table sv-stack">
       <thead><tr><th>Rule</th><th>Status</th><th>Weight</th><th>Paused until</th><th>Notes</th></tr></thead>
       <tbody>
         {% for c in controls %}
           <tr>
-            <td>{{ c.rule_name }}</td>
-            <td><span class="badge badge-{% if c.status == 'active' %}bullish{% elif c.status == 'paused' %}bearish{% else %}medium{% endif %}">{{ c.get_status_display }}</span></td>
-            <td>×{{ c.weight_multiplier|floatformat:2 }}</td>
-            <td>{% if c.paused_until %}{{ c.paused_until|date:"M d, Y" }}{% else %}—{% endif %}</td>
-            <td style="font-size: 11px; color: var(--text-muted);">{{ c.notes|truncatechars:80 }}</td>
+            <td class="sv-ident" data-label="Rule">{{ c.rule_name }}</td>
+            <td data-label="Status"><span class="badge badge-{% if c.status == 'active' %}bullish{% elif c.status == 'paused' %}bearish{% else %}medium{% endif %}">{{ c.get_status_display }}</span></td>
+            <td class="num" data-label="Weight">×{{ c.weight_multiplier|floatformat:2 }}</td>
+            <td class="nowrap" data-label="Paused until">{% if c.paused_until %}{{ c.paused_until|date:"M d, Y" }}{% else %}—{% endif %}</td>
+            <td data-label="Notes" style="font-size: 11px; color: var(--text-muted);">{{ c.notes|truncatechars:80 }}</td>
           </tr>
         {% endfor %}
       </tbody>
@@ -65,17 +67,17 @@
     <div class="card-header"><span class="card-title">Pending proposals</span></div>
     {% if proposed %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
+    <table class="sv-perf-table sv-stack">
       <thead><tr><th>Rule</th><th>Action</th><th>Proposed</th><th>Rationale</th>{% if is_admin %}<th>Decide</th>{% endif %}</tr></thead>
       <tbody>
         {% for a in proposed %}
           <tr>
-            <td>{{ a.rule_name }}</td>
-            <td><span class="badge badge-{% if a.action == 'pause_rule' %}bearish{% else %}medium{% endif %}">{{ a.get_action_display }}</span></td>
-            <td>{{ a.proposed_at|timesince }} ago</td>
-            <td style="font-size: 11px; color: var(--text-muted);">{{ a.rationale|truncatechars:140 }}</td>
+            <td class="sv-ident" data-label="Rule">{{ a.rule_name }}</td>
+            <td data-label="Action"><span class="badge badge-{% if a.action == 'pause_rule' %}bearish{% else %}medium{% endif %}">{{ a.get_action_display }}</span></td>
+            <td class="nowrap" data-label="Proposed">{{ a.proposed_at|timesince }} ago</td>
+            <td data-label="Rationale" style="font-size: 11px; color: var(--text-muted);">{{ a.rationale|truncatechars:140 }}</td>
             {% if is_admin %}
-            <td style="display:flex;gap:6px;">
+            <td data-label="Decide" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
                 <form method="post" action="{% url 'hq_apply_rule_action' %}">{% csrf_token %}<input type="hidden" name="action_id" value="{{ a.id }}"><button class="btn btn-sm btn-primary" type="submit" {% if not live_mode %}disabled title="Promote to LIVE mode first"{% endif %}>Apply</button></form>
                 <form method="post" action="{% url 'hq_reject_rule_action' %}">{% csrf_token %}<input type="hidden" name="action_id" value="{{ a.id }}"><button class="btn btn-sm btn-danger" type="submit">Reject</button></form>
             </td>
@@ -95,18 +97,18 @@
     <div class="card-header"><span class="card-title">Action history</span></div>
     {% if history %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
+    <table class="sv-perf-table sv-stack">
       <thead><tr><th>Rule</th><th>Action</th><th>State</th><th>When</th><th>By</th>{% if is_admin %}<th>Rollback</th>{% endif %}</tr></thead>
       <tbody>
         {% for a in history %}
           <tr>
-            <td>{{ a.rule_name }}</td>
-            <td>{{ a.get_action_display }}</td>
-            <td><span class="badge badge-{% if a.state == 'applied' %}bullish{% elif a.state == 'rolled_back' or a.state == 'rejected' %}bearish{% else %}medium{% endif %}">{{ a.get_state_display }}</span></td>
-            <td>{{ a.proposed_at|date:"M d H:i" }}</td>
-            <td style="font-size: 11px;">{{ a.confirmed_by.username|default:"—" }}</td>
+            <td class="sv-ident" data-label="Rule">{{ a.rule_name }}</td>
+            <td data-label="Action">{{ a.get_action_display }}</td>
+            <td data-label="State"><span class="badge badge-{% if a.state == 'applied' %}bullish{% elif a.state == 'rolled_back' or a.state == 'rejected' %}bearish{% else %}medium{% endif %}">{{ a.get_state_display }}</span></td>
+            <td class="nowrap" data-label="When">{{ a.proposed_at|date:"M d H:i" }}</td>
+            <td data-label="By" style="font-size: 11px;">{{ a.confirmed_by.username|default:"—" }}</td>
             {% if is_admin %}
-            <td>
+            <td data-label="Rollback">
               {% if a.state == 'applied' %}
               <form method="post" action="{% url 'hq_rollback_rule_action' %}">{% csrf_token %}<input type="hidden" name="action_id" value="{{ a.id }}"><button class="btn btn-sm btn-danger" type="submit">↶ Rollback</button></form>
               {% endif %}

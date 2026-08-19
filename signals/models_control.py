@@ -102,6 +102,33 @@ class RuleControl(models.Model):
             return False
         return True
 
+    @classmethod
+    def running_q(cls, now=None):
+        """`is_effectively_active()` expressed as a queryset filter.
+
+        The raw `status` column is NOT the population the engine runs, and every
+        query built on `status="active"` silently subtracts rules that are live:
+
+          - `reduced` is a running state. `rule_actuator.rule_size_multiplier`
+            honours `weight_multiplier` ONLY when status == "reduced" — the
+            field exists to SIZE a rule that is still trading.
+          - a `paused` rule whose `paused_until` has elapsed is running again.
+            `is_effectively_active()` computes that expiry on the fly, but
+            nothing anywhere writes the column back to "active", so the
+            help_text above is true of the engine and false of the database.
+            With PAUSE_DURATION_DAYS = 30, every served pause becomes a
+            permanently uncounted running rule.
+
+        It lives on the model rather than at each call site because a Python
+        method cannot be filtered on, so the predicate has to be restated in ORM
+        terms exactly once — next to the method it must agree with, where a
+        change to one is in the same screen as the other. Asserted against the
+        method in tests/test_engine_control_surfaces.py.
+        """
+        now = now or timezone.now()
+        return (models.Q(status__in=(cls.STATUS_ACTIVE, cls.STATUS_REDUCED))
+                | models.Q(status=cls.STATUS_PAUSED, paused_until__lte=now))
+
 
 class RuleAction(models.Model):
     """Audit log of every actuator proposal + its lifecycle."""

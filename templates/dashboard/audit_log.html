@@ -63,16 +63,18 @@
     <div class="card-header"><span class="card-title">Recent Entries</span></div>
     {% if recent %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
+    <table class="sv-perf-table sv-stack">
         <thead><tr><th>ID</th><th>When</th><th>User</th><th>Kind</th><th>Summary</th><th>Hash (prefix)</th></tr></thead>
         <tbody>
         {% for e in recent %}
             <tr>
-                <td>#{{ e.id }}</td>
-                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ e.created_at|date:"m-d H:i:s" }}</td>
-                <td style="font-size:11px;">{{ e.user.username|default:"—" }}</td>
-                <td><span class="badge badge-medium">{{ e.kind }}</span></td>
-                <td style="font-size:11px;color:var(--text-muted);max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ e.data }}">
+                <td class="num" data-label="ID">#{{ e.id }}</td>
+                <td class="nowrap" data-label="When" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ e.created_at|date:"m-d H:i:s" }}</td>
+                <td data-label="User" style="font-size:11px;">{{ e.user.username|default:"—" }}</td>
+                <td data-label="Kind"><span class="badge badge-medium">{{ e.kind }}</span></td>
+                {# The 380px ellipsis cap moved to .al-summary so the stacked #}
+                {# phone layout can lift it — an inline style cannot be. #}
+                <td class="al-summary" data-label="Summary" title="{{ e.data }}">
                     {% if e.kind == "trade_open" or e.kind == "trade_close" %}
                         {{ e.data.asset_class }}/{{ e.data.symbol }} {{ e.data.side }}
                         {% if e.kind == "trade_close" %}
@@ -84,7 +86,7 @@
                         {{ e.data|stringformat:".s"|truncatechars:120 }}
                     {% endif %}
                 </td>
-                <td style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">{{ e.payload_hash|slice:":12" }}…</td>
+                <td class="sv-ident" data-label="Hash" style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">{{ e.payload_hash|slice:":12" }}…</td>
             </tr>
         {% endfor %}
         </tbody>
@@ -99,6 +101,20 @@
 <style>
     .eye-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; font-style: italic; }
     code { font-family: var(--font-mono); font-size: 11px; color: var(--accent); }
+    .al-summary { font-size: 11px; color: var(--text-muted); }
+    /* One line of the payload, with the whole of it on the title attribute.
+       The cap is in ch so it tracks the font rather than the viewport. It
+       stops at the stacking breakpoint: once the row is a record card the
+       cell owns a full line, and an ellipsis there hides text for nothing —
+       there is no neighbouring column left for it to protect. */
+    @media (min-width: 641px) {
+        .al-summary {
+            max-width: 44ch;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    }
 </style>
 {% endblock %}
 {% endblock %}

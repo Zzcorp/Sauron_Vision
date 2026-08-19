@@ -3,256 +3,397 @@
 {% block page_title %}⬡ STRATEGY ENGINE{% endblock %}
 
 {% block content %}
-{# ── 1. Top stat strip — 6 cells ─────────────────────────────────── #}
-<div class="oc-strip" style="margin-bottom:18px;">
+{% comment %} The promotion ladder leads. Every card below is a RuleControl row —
+   what the engine actually runs — and the wizard's hand-built trade plans get
+   their own section at the bottom, labelled as the plans they are. Leading
+   with the plans is what let an install with twelve running rules report zero
+   strategies. {% endcomment %}
+
+{# ── 1. What is in the ladder, and what it has proved ────────────── #}
+<div class="oc-strip sc-strip">
     <div class="oc-strip-cell">
-        <span class="oc-strip-label">TOTAL</span>
-        <span class="oc-strip-value">{{ n_total }}</span>
-        <span class="oc-strip-sub">{{ n_30d }} created last 30d</span>
+        <span class="oc-strip-label">IN THE LADDER</span>
+        <span class="oc-strip-value">{{ n_rules }}</span>
+        {# The headband's "STRATEGIES n active" is n_running: the same rows minus the ones an admin has paused. #}
+        <span class="oc-strip-sub">{{ n_running }} running · {{ n_armed }} of {{ n_setups }} setups armed</span>
     </div>
     <div class="oc-strip-cell">
-        <span class="oc-strip-label">ACTIVE</span>
-        <span class="oc-strip-value up">{{ n_active }}</span>
-        <span class="oc-strip-sub">{{ n_proposed }} proposed · {{ n_paused }} paused</span>
+        <span class="oc-strip-label">LIVE VENUE</span>
+        <span class="oc-strip-value {% if n_live_venue %}up{% endif %}">{{ n_live_venue }}</span>
+        <span class="oc-strip-sub">{{ n_by_stage.live_small|default:0 }} quarter · {{ n_by_stage.live_full|default:0 }} full size</span>
     </div>
     <div class="oc-strip-cell">
-        <span class="oc-strip-label">WIN RATE</span>
-        <span class="oc-strip-value">{{ win_rate }}%</span>
-        <span class="oc-strip-sub">{{ n_winners }}W / {{ n_losers }}L closed</span>
+        <span class="oc-strip-label">PAPER VENUE</span>
+        <span class="oc-strip-value">{{ n_by_stage.paper|default:0 }}</span>
+        <span class="oc-strip-sub">full size, no real money</span>
     </div>
     <div class="oc-strip-cell">
-        <span class="oc-strip-label">AVG P&amp;L</span>
-        <span class="oc-strip-value {% if avg_pnl_pct > 0 %}up{% elif avg_pnl_pct < 0 %}down{% endif %}">{{ avg_pnl_pct }}%</span>
-        <span class="oc-strip-sub">across realized strategies</span>
+        <span class="oc-strip-label">RESEARCH</span>
+        <span class="oc-strip-value">{{ n_by_stage.research|default:0 }}</span>
+        <span class="oc-strip-sub">signals only · no orders</span>
     </div>
     <div class="oc-strip-cell">
-        <span class="oc-strip-label">AVG SHARPE</span>
-        <span class="oc-strip-value {% if avg_sharpe and avg_sharpe > 0 %}up{% elif avg_sharpe and avg_sharpe < 0 %}down{% endif %}">{% if avg_sharpe is not None %}{{ avg_sharpe }}{% else %}—{% endif %}</span>
-        <span class="oc-strip-sub">risk-adjusted average</span>
+        <span class="oc-strip-label">GRADED</span>
+        <span class="oc-strip-value" data-n="{{ ladder_n }}">{{ ladder_n }}</span>
+        <span class="oc-strip-sub">closed signals across all rules</span>
     </div>
     <div class="oc-strip-cell">
-        <span class="oc-strip-label">AVG DRAWDOWN</span>
-        <span class="oc-strip-value down">{{ avg_dd }}%</span>
-        <span class="oc-strip-sub">worst per-strategy DD</span>
+        <span class="oc-strip-label">EXPECTANCY</span>
+        <span class="oc-strip-value {% if ladder_expectancy > 0 %}up{% elif ladder_expectancy < 0 %}down{% endif %}" data-n="{{ ladder_n }}">
+            {% if ladder_expectancy is not None %}{{ ladder_expectancy }}R{% else %}<span class="sv-unknown" title="No closed signal has graded any rule yet">&mdash;</span>{% endif %}
+        </span>
+        <span class="oc-strip-sub">
+            {% if ladder_hit_rate is not None %}hit rate {{ ladder_hit_rate }}% · n={{ ladder_n }}{% else %}nothing measured yet{% endif %}
+        </span>
     </div>
 </div>
 
-{# ── 2. Status donut + horizon breakdown ─────────────────────────── #}
-<div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
-    <div class="card">
-        <div class="card-header"><span class="card-title">Status mix</span></div>
-        {% if status_donut %}
-            <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
-                <svg class="oc-donut" viewBox="0 0 100 100" id="strDonut">
-                    <circle cx="50" cy="50" r="35" fill="none" stroke="var(--bg-card-hover)" stroke-width="14"/>
-                </svg>
-                <div class="oc-donut-legend" style="flex:1;min-width:160px;">
-                    {% for d in status_donut %}
-                        <div class="oc-donut-legend-row">
-                            <span class="oc-donut-legend-key">
-                                <span class="oc-donut-legend-swatch" data-class="{{ d.key }}"></span>
-                                {{ d.key|upper }}
-                            </span>
-                            <span class="oc-donut-legend-pct">{{ d.n }} · {{ d.pct }}%</span>
-                        </div>
+{# ── 2. A stage is a venue, not a size ───────────────────────────── #}
+<div class="card sc-venues">
+    <div class="card-header">
+        <span class="card-title">The ladder</span>
+        <a href="{% url 'promotions_dashboard' %}" class="nh-link nh-link--accent">Promotion pipeline &#9656;</a>
+    </div>
+    <p class="sc-venues-lede">
+        A stage is a <strong>venue</strong>, not a size. It says where a rule is
+        allowed to trade, not how much of it trades. A rule leaves a venue only
+        by producing evidence at that venue.
+    </p>
+    <ul class="sc-venue-list">
+        {% for s in stage_venues %}
+        <li class="sc-venue-row" data-stage="{{ s.key }}">
+            <span class="sv-chip sc-chip--{{ s.key }}">{{ s.label }}</span>
+            <span class="sc-venue-text">{{ s.venue }}</span>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+
+{# ── 3. The stable — one card per rule, grouped by stage ─────────── #}
+{% if n_rules %}
+    <div class="sc-heading">
+        <h2 class="sc-heading-title">Automated setups</h2>
+        <p class="sc-heading-sub">
+            {{ n_rules }} rule{{ n_rules|pluralize }} the engine runs, grouped by the venue each has earned.
+            Every card carries the numbers the ladder judges it on and the gap to its next gate.
+        </p>
+    </div>
+    {% for group in stage_groups %}
+    <section class="sc-stage" id="stage-{{ group.key }}">
+        <header class="sc-stage-head">
+            <h2 class="sc-stage-title">{{ group.label }}</h2>
+            <span class="sc-stage-count" data-sc-count="stage:{{ group.key }}">{{ group.cards|length }}</span>
+            <span class="sc-stage-venue">{{ group.venue }}</span>
+        </header>
+        {% if group.cards %}
+        <div class="sc-grid">
+            {% for c in group.cards %}
+            <article class="card sc-card" data-stage="{{ c.stage }}">
+                <header class="sc-head">
+                    <span class="sc-name">{{ c.rule }}</span>
+                    {% comment %} The admin lane is orthogonal to the stage lane: a rule can sit at
+                       live_full and still be paused by hand, so the two states are shown
+                       side by side rather than folded into one word. {% endcomment %}
+                    <span class="sv-chip {% if c.status == 'active' %}sv-chip--bullish{% else %}sv-chip--warn{% endif %}">{{ c.status_display }}</span>
+                </header>
+
+                <div class="sc-chips">
+                    <span class="sv-chip sc-chip--{{ c.stage }}">{{ c.stage_display }}</span>
+                    {% if c.setup %}
+                        {% if c.setup.is_active %}<span class="sv-chip sv-chip--bullish">ARMED</span>
+                        {% else %}<span class="sv-chip sv-chip--muted">PAUSED</span>{% endif %}
+                    {% endif %}
+                    {% if c.parent %}<span class="sv-chip sv-chip--warn">FORK OF {{ c.parent }}</span>{% endif %}
+                    {% if c.paused_until %}<span class="sv-chip sv-chip--warn">UNTIL {{ c.paused_until|date:"M d" }}</span>{% endif %}
+                </div>
+
+                <p class="sc-venue-line">{{ c.venue }}</p>
+
+                {# ── Progress toward the next venue ── #}
+                <div class="sc-gate">
+                    <div class="sc-gate-head">
+                        <span class="sc-gate-label">
+                            {% if c.gate.target %}NEXT · {{ c.gate.target_label }}{% else %}STAGE{% endif %}
+                        </span>
+                        {% if c.gate.progress is not None %}
+                        <span class="sc-gate-pct" data-sc-count="gate:{{ c.rule }}">{{ c.gate.progress }}%</span>
+                        {% endif %}
+                    </div>
+                    {% if c.gate.progress is not None %}
+                    <div class="sv-meter sc-gate-meter">
+                        <span class="sv-meter-track">
+                            <span class="sv-meter-fill sc-gate-fill" style="--sc-fill: {{ c.gate.progress }}%"></span>
+                        </span>
+                    </div>
+                    {% endif %}
+                    <p class="sc-gate-why">{{ c.gate.summary }}</p>
+                    {% if c.gate.checks %}
+                    <ul class="sc-gate-list">
+                        {% for k in c.gate.checks %}
+                        <li class="sc-gate-item {% if k.met %}is-met{% endif %}">
+                            <span class="sc-gate-k">{{ k.label }}</span>
+                            <span class="sc-gate-v">{% if k.known %}{{ k.value_display }}{% else %}<span class="sv-unknown" title="Not measured — no closed trade has graded this rule">&mdash;</span>{% endif %}<span class="sc-gate-need"> / {{ k.need_display }}</span></span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                </div>
+
+                {# ── The record the ladder judges it on ── #}
+                <div class="sc-record">
+                    <div class="sc-metric">
+                        <span class="sc-k">CLOSED</span>
+                        <span class="sc-v">{{ c.record.n }}</span>
+                    </div>
+                    <div class="sc-metric">
+                        <span class="sc-k">HIT RATE</span>
+                        <span class="sc-v">{% if c.hit_rate_display %}{{ c.hit_rate_display }}{% else %}<span class="sv-unknown" title="No closed signal has graded this rule yet">&mdash;</span>{% endif %}</span>
+                    </div>
+                    <div class="sc-metric">
+                        <span class="sc-k">EXPECTANCY</span>
+                        <span class="sc-v {% if c.record.expectancy > 0 %}up{% elif c.record.expectancy < 0 %}down{% endif %}">{% if c.expectancy_display %}{{ c.expectancy_display }}{% else %}<span class="sv-unknown" title="No closed signal has graded this rule yet">&mdash;</span>{% endif %}</span>
+                    </div>
+                </div>
+
+                {# ── The conditions the scanner matches ── #}
+                {% if c.setup %}
+                <details class="sc-setup">
+                    {# A gate is not a condition with a weight, so it is not in this count. #}
+                    <summary class="sc-setup-sum">
+                        {{ c.setup.n_scoring }} scoring condition{{ c.setup.n_scoring|pluralize }}{% if c.setup.n_gates %} ·
+                        {{ c.setup.n_gates }} gate{{ c.setup.n_gates|pluralize }}{% endif %} ·
+                        {{ c.setup.direction }} · {{ c.setup.asset_classes }}
+                    </summary>
+                    <ul class="sc-cond">
+                        {% for cond in c.setup.conditions %}
+                        {# data-gate is what the tests read: the distinction has to survive in the markup, not only in the words. #}
+                        <li class="sc-cond-row"{% if cond.gate %} data-gate="1"{% endif %}>
+                            {% if cond.gate %}<span class="sv-chip sv-chip--warn">GATE</span>{% endif %}
+                            <code class="sc-cond-kind">{{ cond.kind }}</code>
+                            <span class="sc-cond-detail">{{ cond.detail|default:"no parameters" }}</span>
+                            {% if cond.gate %}
+                            <span class="sc-cond-w">required &middot; not scored</span>
+                            {% elif cond.weight is None %}
+                            <span class="sc-cond-w"><span class="sv-unknown" title="This condition's weight is not a number — the scanner raises on it rather than scoring it">&mdash;</span></span>
+                            {% else %}
+                            <span class="sc-cond-w">&times;{{ cond.weight_display }}</span>
+                            {% endif %}
+                        </li>
+                        {% empty %}
+                        <li class="sc-cond-row"><span class="sc-cond-detail">This setup carries no conditions — the scanner will never match it.</span></li>
+                        {% endfor %}
+                    </ul>
+                    <p class="sc-setup-foot">
+                        {% if c.setup.n_scoring %}match &ge; {{ c.setup.min_match_score }} of {{ c.setup.weight_sum_display }} total weight
+                        {% else %}no scoring condition &mdash; its composite is always 0
+                        {% endif %}· resolves in {{ c.setup.horizon_days }}d ·
+                        {{ c.setup.n_flags }} scanner match{{ c.setup.n_flags|pluralize:"es" }}
+                        {% if c.setup.inherited %}· definition inherited from <strong>{{ c.setup.name }}</strong>{% endif %}
+                    </p>
+                    {% if c.setup.n_gates %}
+                    <p class="sc-setup-foot">
+                        A <strong>gate</strong> is a precondition, not a leg: on a symbol
+                        where it does not pass, the setup is skipped before anything is
+                        scored. It cannot be outvoted by the conditions above it, and it
+                        adds nothing to the total weight they are divided by.
+                    </p>
+                    {% endif %}
+                </details>
+                {% else %}
+                <p class="sc-setup-none">No OpportunitySetup defines this rule — its conditions live in engine code.</p>
+                {% endif %}
+
+                {# ── Forks the evolution loop has opened on this rule ── #}
+                {% if c.forks_open or c.forks_applied %}
+                <div class="sc-forks">
+                    {% for f in c.forks_open %}
+                    <div class="sc-fork sc-fork--open">
+                        <span class="sc-fork-k">OPEN FORK</span>
+                        <span class="sc-fork-v">{{ f.changed }} · {{ f.method }} {{ f.score }}</span>
+                    </div>
+                    {% endfor %}
+                    {% for f in c.forks_applied %}
+                    <div class="sc-fork">
+                        <span class="sc-fork-k">FORKED</span>
+                        <span class="sc-fork-v">{{ f.forked|default:"unnamed" }} · {{ f.changed }}</span>
+                    </div>
                     {% endfor %}
                 </div>
-            </div>
-            <div id="strDonutData" style="display:none;"
-                 data-rows="{% for d in status_donut %}{{ d.key }}:{{ d.pct }}{% if not forloop.last %};{% endif %}{% endfor %}"></div>
-            <script>
-                (function() {
-                    var rows = (document.getElementById('strDonutData').dataset.rows || '')
-                        .split(';').map(function(r){var p=r.split(':');return {k:p[0], pct:parseFloat(p[1])};})
-                        .filter(function(r){return !isNaN(r.pct);});
-                    var colorOf = {
-                        active:'#00e868', proposed:'#5b9eff', approved:'#22d3ee',
-                        completed:'#94a3b8', paused:'#ffb000', rejected:'#ff5e5e'
-                    };
-                    document.querySelectorAll('.oc-donut-legend-swatch').forEach(function(el){
-                        if (colorOf[el.dataset.class]) el.style.background = colorOf[el.dataset.class];
-                    });
-                    var svg = document.getElementById('strDonut');
-                    if (!svg || rows.length === 0) return;
-                    var ns = 'http://www.w3.org/2000/svg';
-                    var cx=50, cy=50, r=35, c=2*Math.PI*r;
-                    var offset = -c/4;
-                    rows.forEach(function(row){
-                        var seg = document.createElementNS(ns, 'circle');
-                        var len = (row.pct/100) * c;
-                        seg.setAttribute('cx', cx); seg.setAttribute('cy', cy); seg.setAttribute('r', r);
-                        seg.setAttribute('fill','none');
-                        seg.setAttribute('stroke', colorOf[row.k] || '#5b9eff');
-                        seg.setAttribute('stroke-width', 14);
-                        seg.setAttribute('stroke-dasharray', len.toFixed(2) + ' ' + (c - len).toFixed(2));
-                        seg.setAttribute('stroke-dashoffset', offset.toFixed(2));
-                        svg.appendChild(seg);
-                        offset -= len;
-                    });
-                })();
-            </script>
-        {% else %}
-            <p class="oc-empty">No strategies created yet.</p>
-        {% endif %}
-    </div>
+                {% endif %}
 
-    <div class="card">
-        <div class="card-header"><span class="card-title">By time horizon</span></div>
-        {% if horizon_breakdown %}
-            <table class="sv-perf-table">
-                <thead><tr><th>horizon</th><th>N</th><th>W/L</th><th>avg P&amp;L</th></tr></thead>
-                <tbody>
-                    {% for h in horizon_breakdown %}
-                        <tr>
-                            <td><strong>{{ h.horizon|upper }}</strong></td>
-                            <td>{{ h.n }}</td>
-                            <td><span class="up">{{ h.pos }}</span> / <span class="down">{{ h.neg }}</span></td>
-                            <td class="{% if h.avg_pnl > 0 %}up{% elif h.avg_pnl < 0 %}down{% endif %}">{{ h.avg_pnl }}%</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                <footer class="sc-foot">
+                    <span class="sc-foot-line">
+                        {% if c.last_signal_at %}
+                            last signal <span class="sv-age" data-sv-at="{{ c.last_signal_at|date:'c' }}">{{ c.last_signal_at|timesince }} ago</span>
+                        {% else %}
+                            no signal yet
+                        {% endif %}
+                        {% if c.n_live_signals %} · {{ c.n_live_signals }} live{% endif %}
+                        {% if c.n_trades %} · {{ c.n_trades }} bot trade{{ c.n_trades|pluralize }} ({{ c.n_trades_real }} on the live venue){% if c.trade_expectancy %} at {{ c.trade_expectancy }}{% endif %}{% endif %}
+                    </span>
+                    {% comment %} These four pages explain a rule's life and were reachable only
+                       from the admin dashboard. Deep-linked from the card they explain, and
+                       restored to the sidebar under Intelligence. {% endcomment %}
+                    <span class="sc-links">
+                        <a href="{% url 'promotions_dashboard' %}">ladder</a>
+                        <a href="{% url 'rule_control_dashboard' %}">controls</a>
+                        <a href="{% url 'allocator_dashboard' %}">allocator</a>
+                        {% if c.forks_open or c.forks_applied %}<a href="{% url 'evolution_dashboard' %}">forks</a>{% endif %}
+                    </span>
+                </footer>
+            </article>
+            {% endfor %}
+        </div>
         {% else %}
-            <p class="oc-empty">No strategies to break down.</p>
+        <p class="sc-stage-empty">No rule sits at this venue.</p>
         {% endif %}
+    </section>
+    {% endfor %}
+{% else %}
+    {# ── Honest empty state: nothing seeded, and how to seed it ── #}
+    <div class="card">
+        <div class="card-header"><span class="card-title">Automated setups</span></div>
+        <div class="empty-state sc-empty">
+            <div class="empty-icon">⬡</div>
+            {# "nothing it governs", not "nothing": an armed setup with no rule row scans anyway — see the section below. #}
+            <p>NO RULE IS REGISTERED — the promotion ladder is empty, so nothing it
+               governs scans and nothing it governs trades. Seed the starter pack with
+               <code>manage.py seed_strategies</code> (six rules) and
+               <code>manage.py seed_advanced_strategies</code> (six more).
+               They arrive at <strong>research</strong>: signals only, no orders, until you
+               promote them from the
+               <a href="{% url 'promotions_dashboard' %}">promotion pipeline</a>.
+               Mined candidates waiting for review live in
+               <a href="{% url 'discoveries_dashboard' %}">discoveries</a>.</p>
+        </div>
     </div>
+{% endif %}
+
+{# ── 3b. Armed, with no row on the ladder ────────────────────────── #}
+{% if unbacked_setups %}
+<div class="card sc-orphans">
+    <div class="card-header">
+        <span class="card-title">Scanning without a ladder row
+            <span class="sc-plans-count">({{ unbacked_setups|length }})</span>
+        </span>
+        <a href="{% url 'opportunities_dashboard' %}" class="nh-link nh-link--accent">Opportunity setups &#9656;</a>
+    </div>
+    <p class="sc-orphans-lede">
+        These setups are <strong>armed</strong>: the scanner matches them on every
+        pass and writes signals from them. No <code>RuleControl</code> row carries
+        their name, so no stage governs them and no gate measures them — and the
+        actuator reads a missing row as <strong>paper</strong>, which means they
+        may place paper orders at full nominal size. They are counted in
+        &ldquo;setups armed&rdquo; above but have no card, because there is no
+        ladder position to draw. Register one under the same name to put it on
+        the ladder.
+    </p>
+    <ul class="sc-orphan-list">
+        {% for s in unbacked_setups %}
+        <li class="sc-orphan">
+            <span class="sc-orphan-name">{{ s.name }}</span>
+            <span class="sv-chip sv-chip--warn">NO RULE ROW</span>
+            {# Same split as the cards: a gate is a universe check, not a leg that votes. #}
+            <span>{{ s.n_scoring }} scoring condition{{ s.n_scoring|pluralize }}{% if s.n_gates %} · {{ s.n_gates }} gate{{ s.n_gates|pluralize }}{% endif %} · {{ s.direction }} · {{ s.asset_classes }}</span>
+            <span class="sc-orphan-meta">match &ge; {{ s.min_match_score }} · resolves in {{ s.horizon_days }}d · {{ s.n_flags }} scanner match{{ s.n_flags|pluralize:"es" }}</span>
+        </li>
+        {% endfor %}
+    </ul>
 </div>
+{% endif %}
 
-{# ── 3. Top / worst performers ──────────────────────────────────── #}
-<div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
-    <div class="card">
-        <div class="card-header"><span class="card-title">Top 5 performers</span></div>
-        {% if top_performers %}
-            <table class="sv-perf-table">
-                <thead><tr><th>strategy</th><th>horizon</th><th>P&amp;L</th><th>sharpe</th></tr></thead>
-                <tbody>
-                    {% for s in top_performers %}
-                        <tr>
-                            <td><a href="{% url 'strategy_detail' s.pk %}" style="color:var(--text-primary);text-decoration:none;"><strong>{{ s.name|truncatechars:36 }}</strong></a></td>
-                            <td><span class="badge badge-medium">{{ s.time_horizon }}</span></td>
-                            <td class="up">+{{ s.pnl_pct|floatformat:2 }}%</td>
-                            <td>{% if s.sharpe_ratio is not None %}{{ s.sharpe_ratio|floatformat:2 }}{% else %}—{% endif %}</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        {% else %}
-            <p class="oc-empty">No realized P&amp;L yet.</p>
-        {% endif %}
-    </div>
-
-    <div class="card">
-        <div class="card-header"><span class="card-title">Worst 5 performers</span></div>
-        {% if worst_performers %}
-            <table class="sv-perf-table">
-                <thead><tr><th>strategy</th><th>horizon</th><th>P&amp;L</th><th>max DD</th></tr></thead>
-                <tbody>
-                    {% for s in worst_performers %}
-                        <tr>
-                            <td><a href="{% url 'strategy_detail' s.pk %}" style="color:var(--text-primary);text-decoration:none;"><strong>{{ s.name|truncatechars:36 }}</strong></a></td>
-                            <td><span class="badge badge-medium">{{ s.time_horizon }}</span></td>
-                            <td class="down">{{ s.pnl_pct|floatformat:2 }}%</td>
-                            <td class="down">{{ s.max_drawdown|floatformat:2 }}%</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        {% else %}
-            <p class="oc-empty">No losers — yet.</p>
-        {% endif %}
-    </div>
-</div>
-
-{# ── 4. Strategy table ───────────────────────────────────────────── #}
-<div class="card">
-    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-        <span class="card-title">{% if status_filter %}{{ status_filter|capfirst }} strategies{% else %}All strategies{% endif %} <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">({{ strategies|length }} shown)</span></span>
-        <div>
+{# ── 4. Hand-built trade plans — a different animal ──────────────── #}
+<div class="card sc-plans">
+    <div class="card-header">
+        <span class="card-title">Hand-built trade plans
+            <span class="sc-plans-count">({{ n_plans }})</span>
+        </span>
+        <div class="sc-plan-filters">
             <a href="?status=active" class="btn btn-sm {% if status_filter == 'active' %}btn-primary{% endif %}">Active</a>
             <a href="?status=proposed" class="btn btn-sm {% if status_filter == 'proposed' %}btn-primary{% endif %}">Proposed</a>
             <a href="?status=completed" class="btn btn-sm {% if status_filter == 'completed' %}btn-primary{% endif %}">Completed</a>
             <a href="{% url 'strategies_list' %}" class="btn btn-sm">All</a>
         </div>
     </div>
-    {% if strategies %}
+    <p class="sc-plans-lede">
+        Multi-leg plans you wrote in the
+        <a href="{% url 'strategy_wizard' %}">strategy wizard</a>.
+        <strong>Nothing executes these</strong> — they are a record of intent, not a running
+        strategy. The rules the engine actually runs are the cards above.
+    </p>
+    {% if plans %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th>Strategy</th><th>Horizon</th><th>Status</th><th>Legs</th><th>P&amp;L</th><th>Max DD</th><th>Sharpe</th><th>Created</th></tr></thead>
+        <thead><tr><th>Plan</th><th>Horizon</th><th>Status</th><th>Legs</th><th>P&amp;L</th><th>Max DD</th><th>Sharpe</th><th>Created</th></tr></thead>
         <tbody>
-        {% for s in strategies %}
+        {% for s in plans %}
         <tr>
-            <td><a href="{% url 'strategy_detail' s.pk %}" style="color: var(--text-primary); text-decoration: none;">{{ s.name|truncatechars:50 }}</a></td>
+            <td><a href="{% url 'strategy_detail' s.pk %}" class="sc-plan-link">{{ s.name|truncatechars:50 }}</a></td>
             <td><span class="badge badge-medium">{{ s.time_horizon }}</span></td>
             <td><span class="badge badge-{{ s.status }}">{{ s.status }}</span></td>
-            <td style="font-family: var(--font-mono); font-size: 12px;">{{ s.legs.count }}</td>
-            <td style="color: {% if s.pnl_pct >= 0 %}var(--accent-green){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ s.pnl_pct|floatformat:2 }}%</td>
-            <td style="color: var(--accent-red); font-family: var(--font-mono);">{{ s.max_drawdown|floatformat:2 }}%</td>
-            <td style="font-family: var(--font-mono); font-size: 12px;">{% if s.sharpe_ratio is not None %}{{ s.sharpe_ratio|floatformat:2 }}{% else %}—{% endif %}</td>
-            <td style="color: var(--text-muted); font-size: 12px;">{{ s.created_at|date:"M d" }}</td>
+            <td>{{ s.legs.all|length }}</td>
+            <td class="{% if s.pnl_pct > 0 %}up{% elif s.pnl_pct < 0 %}down{% endif %}">{{ s.pnl_pct|floatformat:2 }}%</td>
+            <td class="down">{{ s.max_drawdown|floatformat:2 }}%</td>
+            <td>{% if s.sharpe_ratio is not None %}{{ s.sharpe_ratio|floatformat:2 }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            <td>{{ s.created_at|date:"M d" }}</td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
     </div>
     {% else %}
-    <div class="empty-state">
-        <div class="empty-icon">⬡</div>
-        <p>NO TRADE PLANS YET — this table tracks multi-leg trade plans you build with the
-           <a href="{% url 'strategy_wizard' %}" style="color:var(--accent);">strategy wizard</a>.
-           The automated strategies live below and in
-           <a href="{% url 'opportunities_dashboard' %}" style="color:var(--accent);">Opportunities</a>.</p>
-    </div>
-    {% endif %}
-</div>
-
-{# ── The automated strategy stable — the setups the scanner runs ──── #}
-{# The "no strategies" confusion: seeded starter strategies are        #}
-{# OpportunitySetup rows (inactive by design until the operator arms   #}
-{# them), a different animal from the trade-plan table above. Show     #}
-{# them HERE, with their state, so the page the user intuitively       #}
-{# visits tells the whole story.                                       #}
-<div class="card" style="margin-top:18px;">
-    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-        <span class="card-title">Automated setups
-            <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">
-                ({{ setups_active }} active of {{ setups|length }})
-            </span>
-        </span>
-        <a href="{% url 'opportunities_dashboard' %}" class="nh-link nh-link--accent">Manage &#9656;</a>
-    </div>
-    {% if setups %}
-    <div class="table-wrapper">
-    <table class="sv-perf-table">
-        <thead><tr><th>Setup</th><th>Asset class</th><th>State</th><th>Stage</th><th>Hits</th><th>Hit rate</th></tr></thead>
-        <tbody>
-        {% for s in setups %}
-        <tr>
-            <td><strong>{{ s.name }}</strong></td>
-            <td style="font-family:var(--font-mono);font-size:11px;">{{ s.asset_class|default:"any" }}</td>
-            <td>{% if s.is_active %}<span class="badge badge-bullish">ACTIVE</span>{% else %}<span class="badge badge-medium">PAUSED</span>{% endif %}</td>
-            <td style="font-family:var(--font-mono);font-size:11px;">{{ s.stage|default:"—" }}</td>
-            <td style="font-family:var(--font-mono);">{{ s.hits|default:0 }}</td>
-            <td style="font-family:var(--font-mono);">{% if s.hit_rate is not None %}{{ s.hit_rate|floatformat:0 }}%{% else %}—{% endif %}</td>
-        </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    </div>
-    {% if not setups_active %}
-    <p style="font-size:11px;color:var(--text-muted);padding:10px 16px;">
-        All setups are paused — the seeder leaves them off on purpose so nothing scans
-        before you decide. Arm them on the
-        <a href="{% url 'opportunities_dashboard' %}" style="color:var(--accent);">Opportunities</a>
-        page, or run <code>manage.py seed_strategies --activate</code>.
+    <p class="sc-stage-empty">
+        {% if status_filter %}No plan with status "{{ status_filter }}".{% else %}No plan written yet — and none is needed for the engine to run.{% endif %}
     </p>
     {% endif %}
-    {% else %}
-    <p class="oc-empty" style="padding:14px 16px;">No automated setups seeded yet — run <code>manage.py seed_strategies</code>.</p>
-    {% endif %}
 </div>
 
-<div class="card" style="margin-top:18px;">
-    <div class="card-header"><div class="card-title">Strategy Analytics</div></div>
+{# Titled for what /htmx/metrics/strategies/ actually reads: strategies.Strategy, the plans above. #}
+<div class="card sc-analytics">
+    <div class="card-header"><div class="card-title">Trade-plan analytics</div></div>
+    <p class="sc-plans-lede">
+        Charts over the hand-built plans above, and nothing else. The tiles below
+        come from that same table and keep its wording — &ldquo;Strategy
+        overview&rdquo;, Total, Active — but an <em>Active</em> here is a plan
+        someone marked active, never a rule the engine runs. On an install with
+        twelve rules running and no plan written, every figure in this card is a
+        true zero; the rules are counted in <strong>IN THE LADDER</strong> at the
+        top of the page.
+    </p>
     <div class="sv-metrics-wrapper" hx-get="/htmx/metrics/strategies/" hx-trigger="load"></div>
 </div>
+
+<script>
+(function () {
+    {% comment %} Motion here has one job: show a change. The bar fills to the rule's
+       real progress so the sweep IS the measurement, and the counts flash only
+       when they differ from what this browser last saw — a number that animates
+       on every load teaches the eye to ignore it. {% endcomment %}
+    var reduce = window.matchMedia
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // The width lives in CSS (var(--sc-fill)), so a browser that never runs
+    // this still renders the true value — the animation is the only thing JS
+    // owns here.
+    if (!reduce) {
+        var bars = document.querySelectorAll('.sc-gate-fill');
+        bars.forEach(function (el) { el.style.width = '0%'; });
+        requestAnimationFrame(function () {
+            requestAnimationFrame(function () {
+                bars.forEach(function (el) { el.style.removeProperty('width'); });
+            });
+        });
+    }
+
+    var store = null;
+    try { store = window.sessionStorage; } catch (e) { store = null; }
+    document.querySelectorAll('[data-sc-count]').forEach(function (el) {
+        var key = 'sc:' + el.getAttribute('data-sc-count');
+        var now = el.textContent.trim();
+        var was = store ? store.getItem(key) : null;
+        if (store) { store.setItem(key, now); }
+        if (!reduce && was !== null && was !== now) { el.classList.add('sc-changed'); }
+    });
+})();
+</script>
 {% endblock %}

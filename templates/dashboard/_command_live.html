@@ -166,4 +166,5 @@ Layered rendering:
 </div>
 
 {# ── 3. Eye body content (theme exposure, open positions, etc.) ────── #}
+{# The open-positions table below carries the per-trade CLOSE control; it lives in the shared partial so this tab and /eye/ cannot disagree about what is open or how to flatten it. #}
 {% include "dashboard/_eye_body.html" %}

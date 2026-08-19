@@ -10,7 +10,9 @@ Covers:
   - propose_allocation creates a shadow row regardless of data quantity
   - Shadow mode blocks apply
   - apply + rollback round-trip restores allocator_weight
-  - Active-only filter — paused/reduced rules untouched
+  - Running-only filter — a pause still in force is untouched by apply.
+    NOT "paused/reduced": a `reduced` rule is still trading and IS budgeted,
+    and so is one whose pause has elapsed. See tests/test_engine_control_surfaces.py.
 
 Run with:  python manage.py test tests.test_meta_allocator
 """

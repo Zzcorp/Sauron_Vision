@@ -42,7 +42,9 @@
     <div class="card-header"><span class="card-title">Lifecycle</span></div>
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th style="width:170px;">When</th><th style="width:180px;">Event</th><th>Detail</th></tr></thead>
+        {# ch, not px: a column sized in px is a floor the table cannot go #}
+        {# under, so 350px of fixed heading forced a scroll on a phone. #}
+        <thead><tr><th style="width:19ch;">When</th><th style="width:20ch;">Event</th><th>Detail</th></tr></thead>
         <tbody>
         {% for e in lifecycle %}
         <tr>
@@ -161,10 +163,11 @@
         <tbody>
         {% for a in audit_entries %}
         <tr>
-            <td>{{ a.id }}</td>
-            <td>{{ a.created_at|date:"m-d H:i:s" }}</td>
+            <td class="num">{{ a.id }}</td>
+            <td class="nowrap">{{ a.created_at|date:"m-d H:i:s" }}</td>
             <td>{{ a.kind }}</td>
-            <td style="font-size:11px; color:var(--text-muted);">{{ a.data }}</td>
+            {# A serialised payload is one long token to the line breaker. #}
+            <td class="sv-ident" style="font-size:11px; color:var(--text-muted);">{{ a.data }}</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -180,10 +183,11 @@
     {% if metadata_items %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th style="width:240px;">Key</th><th>Value</th></tr></thead>
+        <thead><tr><th style="width:26ch;">Key</th><th>Value</th></tr></thead>
         <tbody>
         {% for k, v in metadata_items %}
-        <tr><td>{{ k }}</td><td style="font-size:12px;">{{ v }}</td></tr>
+        {# Metadata keys and values are both machine-generated identifiers. #}
+        <tr><td class="sv-ident">{{ k }}</td><td class="sv-ident" style="font-size:12px;">{{ v }}</td></tr>
         {% endfor %}
         </tbody>
     </table>

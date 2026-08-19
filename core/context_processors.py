@@ -2,12 +2,44 @@
 import logging
 from datetime import timedelta
 
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from .exchange_status import get_exchange_status
 
 logger = logging.getLogger(__name__)
+
+
+def running_rules_q(now=None):
+    """`RuleControl.is_effectively_active()`, expressed as a queryset filter.
+
+    The raw `status` column is NOT the population the engine runs, and every
+    count built on `status="active"` silently subtracts rules that are live:
+
+      - `reduced` is a running state. The module docstring calls it "new
+        signals persist with weight_multiplier applied", and
+        `rule_actuator.rule_size_multiplier` reads weight_multiplier ONLY when
+        status == "reduced" — the field exists to size a rule that is still
+        trading. Both engine gates (`rule_actuator.is_rule_active`,
+        `technical_rules`' fork filter) call `is_effectively_active()`.
+      - a `paused` rule whose `paused_until` has elapsed is running again.
+        `is_effectively_active()` computes that expiry on the fly, but nothing
+        anywhere writes the column back to "active" — the help_text's promise
+        that "status reverts to active automatically" is true of the engine
+        and false of the database. With PAUSE_DURATION_DAYS = 30, every
+        expired pause becomes a permanently uncounted running rule.
+
+    `is_effectively_active()` is a Python method and cannot be filtered on, so
+    the predicate is restated here once and asserted against the method in
+    tests/test_strategies_page.py rather than re-derived at each call site.
+    """
+    from signals.models_control import RuleControl
+
+    now = now or timezone.now()
+    return (Q(status__in=(RuleControl.STATUS_ACTIVE,
+                          RuleControl.STATUS_REDUCED))
+            | Q(status=RuleControl.STATUS_PAUSED, paused_until__lte=now))
 
 
 def _panel_detail(user):
@@ -77,6 +109,10 @@ def _panel_detail(user):
                 if stop is not None and abs(entry - stop) > 1e-12:
                     r_mult = (last - entry) * direction / abs(entry - stop)
             rows.append({
+                # The trade id is what makes the row actionable: the
+                # headband lists open positions, and until the CLOSE
+                # control existed it could only ever be read.
+                "id": t.id,
                 "symbol": t.symbol, "side": (t.side or "").upper(),
                 "qty": t.qty, "entry": entry, "stop": stop, "last": last,
                 "r": None if r_mult is None else round(r_mult, 2),
@@ -274,7 +310,6 @@ def sauron_context(request):
         "panel_bullish": 0,
         "panel_bearish": 0,
         "panel_strategies": 0,
-        "panel_proposed": 0,
         "panel_news": 0,
         "panel_sentiment": "—",
         "panel_ai_cost": "0.00",
@@ -331,7 +366,6 @@ def sauron_context(request):
         from market_data.models import LiveQuote
         from signals.models import Signal
         from scraping.models import NewsArticle
-        from strategies.models import Strategy
         from django.utils import timezone as tz
         from datetime import timedelta
 
@@ -382,8 +416,22 @@ def sauron_context(request):
         ctx["panel_signals_24h"] = Signal.objects.filter(created_at__gte=day_ago).count()
         ctx["panel_bullish"] = active_signals.filter(direction="bullish").count()
         ctx["panel_bearish"] = active_signals.filter(direction="bearish").count()
-        ctx["panel_strategies"] = Strategy.objects.filter(status__in=["active", "approved"]).count()
-        ctx["panel_proposed"] = Strategy.objects.filter(status="proposed").count()
+        # The STRATEGIES cell counts RuleControl rows — what the ENGINE runs.
+        # It used to count strategies.Strategy, the wizard's hand-written
+        # plans that nothing executes, so an install with twelve rules running
+        # reported "STRATEGIES 0 active" in the headband of every page.
+        #
+        # The cell's sub-label is "active", and this is the population that
+        # word names: the rules allowed to emit a signal right now. That is
+        # deliberately NARROWER than the ladder count on /strategies/ ("IN THE
+        # LADDER") and on the landing page ("on the ladder"), both of which are
+        # every RuleControl row including the ones an admin has paused. Two
+        # honest numbers, two labels — so the page this cell deep-links to
+        # prints the running count next to the ladder count and the operator
+        # can see the difference resolve instead of guessing at it.
+        from signals.models_control import RuleControl
+        ctx["panel_strategies"] = RuleControl.objects.filter(
+            running_rules_q(now)).count()
         ctx["panel_news"] = NewsArticle.objects.filter(published_at__gte=day_ago).count()
 
     except Exception as e:
@@ -529,7 +577,30 @@ def sauron_context(request):
         # what just happened.
         ctx["panel_recent_signals"] = list(Signal.objects.filter(is_active=True).select_related("instrument").order_by("-created_at")[:5])
         ctx["panel_recent_news"] = list(NewsArticle.objects.order_by("-published_at")[:5])
-        ctx["panel_recent_strategies"] = list(Strategy.objects.filter(status__in=["active", "approved", "proposed"]).order_by("-created_at")[:5])
+        # Matching the count above filter for filter: the rules the engine
+        # runs, newest stage movement first, each labelled with the stage it
+        # sits at — the thing an operator wants from this dropdown ("what is
+        # running, and how far has it earned its way up").
+        #
+        # Coalesced onto created_at, and not a bare "-stage_entered_at".
+        # stage_entered_at is nullable with no default and neither seeder
+        # writes it, so all twelve shipped rules carry NULL; Django emits a
+        # bare ORDER BY … DESC and lets the backend decide where NULLs go.
+        # PostgreSQL — production — sorts NULLs largest, so DESC put every
+        # never-promoted rule ahead of every rule that had actually earned a
+        # stage, and the five slots were permanently the alphabetically-first
+        # seeds. SQLite, which dev and CI run, orders NULLs the other way, so
+        # the bug is invisible locally. Coalescing rather than nulls_last
+        # matches how dashboard.views and promotion_pipeline already read this
+        # field (`stage_entered_at or created_at`) and gives a never-moved rule
+        # a real recency instead of merely parking it at the back.
+        from signals.models_control import RuleControl
+        ctx["panel_recent_strategies"] = [
+            {"name": r.rule_name, "status": r.promotion_stage.replace("_", " ")}
+            for r in RuleControl.objects.filter(running_rules_q())
+            .order_by(Coalesce("stage_entered_at", "created_at").desc(),
+                      "rule_name")[:5]
+        ]
     except Exception as e:
         logger.debug(f"Panel signals/news unavailable: {e}")
 

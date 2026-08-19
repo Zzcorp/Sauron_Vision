@@ -3,208 +3,785 @@
 {% block page_title %}🧬 STRATEGY EVOLUTION{% endblock %}
 
 {% block content %}
-<div class="oc-strip" style="margin-bottom:18px;">
-    <div class="oc-strip-cell">
-        <span class="oc-strip-label">SCHEMAS</span>
-        <span class="oc-strip-value">{{ schemas|length }}</span>
-        <span class="oc-strip-sub">parameter registries</span>
+{% comment %}
+The mutation loop, drawn as lineage rather than tabulated as rows.
+
+Every number here was already being persisted at proposal time; the old table
+printed the deltas and left the operator to remember, unaided, that a score of
+parent-minus-one is a PENALTY for thin data and not a measured loss. That one
+confusion is what this page is shaped around: a card that was never measured
+must not be able to pass for a card that was measured and lost.
+{% endcomment %}
+
+<div class="oc-strip ev-strip">
+    <div class="oc-strip-cell oc-strip-cell--lead">
+        <span class="oc-strip-label">AWAITING YOUR DECISION</span>
+        <span class="oc-strip-value {% if n_proposed %}up{% endif %}">{{ n_proposed }}</span>
+        <span class="oc-strip-sub">{% if n_proposed %}fork it or reject it{% else %}nothing on the desk{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
-        <span class="oc-strip-label">PROPOSED</span>
-        <span class="oc-strip-value {% if proposed %}up{% endif %}">{{ proposed|length }}</span>
-        <span class="oc-strip-sub">awaiting approval</span>
+        <span class="oc-strip-label">EVIDENCE</span>
+        <span class="oc-strip-value">{{ n_measured }}<span class="ev-of">/{{ n_proposed }}</span></span>
+        <span class="oc-strip-sub">{% if n_unmeasured %}{{ n_unmeasured }} never measured{% else %}all measured{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
-        <span class="oc-strip-label">APPLIED</span>
-        <span class="oc-strip-value">{{ applied|length }}</span>
-        <span class="oc-strip-sub">forked into RESEARCH</span>
+        <span class="oc-strip-label">EVOLVABLE</span>
+        <span class="oc-strip-value">{{ n_evolvable }}<span class="ev-of">/{{ n_families }}</span></span>
+        <span class="oc-strip-sub">families with a schema</span>
     </div>
     <div class="oc-strip-cell">
-        <span class="oc-strip-label">HISTORY</span>
-        <span class="oc-strip-value">{{ history|length }}</span>
-        <span class="oc-strip-sub">all mutations resolved</span>
+        <span class="oc-strip-label">FORKS</span>
+        <span class="oc-strip-value">{{ n_applied }}</span>
+        <span class="oc-strip-sub">running beside their parent</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">NEXT EXPIRY</span>
+        <span class="oc-strip-value">{% if next_expiry_days is not None %}{{ next_expiry_days }}<span class="ev-of">d</span>{% else %}&mdash;{% endif %}</span>
+        <span class="oc-strip-sub">{{ ttl_days }}d TTL, then re-proposed</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">SCORER</span>
         <span class="oc-strip-value">WALK-FWD</span>
-        <span class="oc-strip-sub">70/30 train/test (P9.5)</span>
+        <span class="oc-strip-sub">70/30 · min(Δtrain, Δtest)</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">ROLE</span>
         <span class="oc-strip-value">{% if is_admin %}ADMIN{% else %}VIEWER{% endif %}</span>
-        <span class="oc-strip-sub">{% if is_admin %}can apply/reject{% else %}read-only{% endif %}</span>
+        <span class="oc-strip-sub">{% if is_admin %}can fork or reject{% else %}read-only{% endif %}</span>
     </div>
 </div>
 
-{% if not schemas %}
-<div class="card fade-in-up" style="margin-bottom: 24px; border-color: var(--accent-gold);">
-    <div style="padding: 16px;">
-        <div style="font-family: var(--font-display); font-size: 14px; color: var(--accent-gold); letter-spacing: 1px;">⚠ NO PARAMETER SCHEMAS REGISTERED</div>
-        <p style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin-top: 8px; line-height: 1.5;">
-            Phase 9 only evolves rules that have called <code>signals.evolution.register_schema(rule_name, schema)</code>.
-            Hand-coded rules without a schema are left alone — by design. Register a schema in your rule definition module to opt in.
-        </p>
+{# ── How to read a card. The penalty note is the reason this panel exists. ── #}
+<div class="card ev-key">
+    <div class="card-header"><span class="card-title">How a mutation is judged</span></div>
+    <div class="ev-key-flow">
+        <span class="ev-key-step"><b>1</b> mutate 1–3 constants inside the schema bounds</span>
+        <span class="ev-key-sep" aria-hidden="true">→</span>
+        <span class="ev-key-step"><b>2</b> replay parent and mutant over train and test</span>
+        <span class="ev-key-sep" aria-hidden="true">→</span>
+        <span class="ev-key-step"><b>3</b> score = backtest parent mean + min(Δtrain, Δtest)</span>
+        <span class="ev-key-sep" aria-hidden="true">→</span>
+        <span class="ev-key-step"><b>4</b> a fork trades beside its parent, never over it</span>
     </div>
+    <div class="ev-key-verdicts">
+        <span class="ev-key-v ev-key-v--robust"><i aria-hidden="true">▲</i> ROBUST <em>both halves improved</em></span>
+        <span class="ev-key-v ev-key-v--overfit"><i aria-hidden="true">◆</i> OVERFIT <em>train up, test down</em></span>
+        <span class="ev-key-v ev-key-v--worse"><i aria-hidden="true">▼</i> WORSE <em>measured, and it lost</em></span>
+        <span class="ev-key-v ev-key-v--thin"><i aria-hidden="true">⚠</i> NOT MEASURED <em>below the trade floor</em></span>
+        <span class="ev-key-v ev-key-v--unbacktested"><i aria-hidden="true">○</i> NO BACKTEST <em>heuristic placeholder</em></span>
+    </div>
+    <p class="ev-key-warn">
+        <b>The number that gets misread.</b> A mutation needs at least
+        <b>{{ min_trades }}</b> trades on every one of the four legs. Miss that on any leg and no
+        delta is computed at all — the row is stamped with the backtest parent's mean plus a flat
+        <b>{{ penalty|floatformat:2 }}R</b> placeholder, and when the parent's own legs came back
+        empty there is no mean under it either. That score is a marker for
+        <em>untested</em>, not a result. Cards in that state are drawn dashed and gold, and their
+        deltas stay as em-dashes, because there is nothing there to print.
+    </p>
 </div>
+
+{% for fam in families %}
+<section class="card ev-family {% if fam.n_pending %}ev-family--open{% endif %}">
+    <header class="ev-fam-head">
+        <div class="ev-fam-id">
+            <span class="ev-fam-glyph" aria-hidden="true">🧬</span>
+            <div class="ev-fam-titles">
+                <h2 class="ev-fam-name">{{ fam.parent.name }}</h2>
+                <p class="ev-fam-sub">
+                    {% if fam.evolvable %}evolvable · {{ fam.schema_params|join:" · " }}{% else %}no parameter schema — these mutations predate or bypass the registry{% endif %}
+                </p>
+            </div>
+        </div>
+        <div class="ev-fam-facts">
+            <span class="ev-chip ev-chip--stage-{{ fam.parent.stage|default:"unknown" }}">{{ fam.parent.stage|upper|default:"—" }}</span>
+            <span class="ev-fact">
+                <em>{{ record_days }}d record</em>
+                {% if fam.parent.n_90d %}{{ fam.parent.expectancy_90d|floatformat:2 }}R · {{ fam.parent.hit_rate_90d|floatformat:0 }}%<span class="n-badge">n={{ fam.parent.n_90d }}</span>{% else %}&mdash;<span class="n-badge n-badge--thin">n=0</span>{% endif %}
+            </span>
+            <span class="ev-fact"><em>mutations</em> {{ fam.n_total }}</span>
+            {% if fam.n_pending %}<span class="ev-fact ev-fact--open"><em>pending</em> {{ fam.n_pending }}</span>{% endif %}
+        </div>
+    </header>
+
+    {% if fam.forks %}
+    <div class="ev-forkline">
+        <span class="ev-forkline-label">forks trading beside it</span>
+        {% for f in fam.forks %}
+        <span class="ev-forkchip ev-forkchip--stage-{{ f.node.stage|default:"unknown" }}">
+            <b>{{ f.node.name }}</b>
+            <em>{{ f.node.stage|upper|default:"—" }}</em>
+            {% if f.node.n_90d %}<span>{{ f.node.expectancy_90d|floatformat:2 }}R</span><span class="n-badge">n={{ f.node.n_90d }}</span>{% else %}<span>&mdash;</span><span class="n-badge n-badge--thin">n=0</span>{% endif %}
+        </span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="ev-lineage">
+        <span class="ev-spine" aria-hidden="true"></span>
+        <div class="ev-mut-grid">
+            {% for m in fam.mutations %}
+            <article class="ev-mut ev-mut--{{ m.verdict.key }} ev-mut--state-{{ m.state }}"
+                     id="mut-{{ m.id }}"
+                     data-verdict="{{ m.verdict.key }}"
+                     data-measured="{% if m.verdict.measured %}1{% else %}0{% endif %}"
+                     aria-label="Mutation {{ m.id }} — {{ m.verdict.label }}">
+                <header class="ev-mut-top">
+                    <span class="ev-mut-ref">#{{ m.id }}</span>
+                    <span class="ev-chip ev-chip--{{ m.state_tone }}">{{ m.state_label }}</span>
+                    <span class="ev-mut-when">{{ m.proposed_at|timesince }} ago</span>
+                </header>
+
+                <div class="ev-verdict">
+                    <span class="ev-verdict-glyph" aria-hidden="true">{{ m.verdict.glyph }}</span>
+                    <span class="ev-verdict-label">{{ m.verdict.label }}</span>
+                    <span class="ev-verdict-head">{{ m.verdict.headline }}</span>
+                </div>
+
+                <div class="ev-block">
+                    <h3 class="ev-block-h">Parameters moved</h3>
+                    {% for mv in m.moves %}
+                    <div class="ev-move">
+                        <div class="ev-move-top">
+                            <span class="ev-move-name">{{ mv.name }}</span>
+                            <span class="ev-move-vals">
+                                {{ mv.from_value }} <span class="ev-arrow" aria-hidden="true">→</span> <b>{{ mv.to_value }}</b>
+                                <span class="ev-move-delta ev-move-delta--{{ mv.direction }}">{{ mv.delta_str }}</span>
+                            </span>
+                        </div>
+                        {% if mv.bounded %}
+                        {# The bar is the point: 30 means nothing, 30-inside-[10,90] means timid. #}
+                        <div class="ev-track" style="--ev-from:{{ mv.from_css }};--ev-to:{{ mv.to_css }};--ev-span-l:{{ mv.span_left_css }};--ev-span-w:{{ mv.span_width_css }};">
+                            <span class="ev-track-span {% if mv.direction == 'down' %}ev-track-span--down{% endif %}"></span>
+                            <span class="ev-dot ev-dot--from" title="parent {{ mv.from_value }}"></span>
+                            <span class="ev-dot ev-dot--to" title="mutant {{ mv.to_value }}"></span>
+                        </div>
+                        <div class="ev-track-scale"><span>{{ mv.lo }}</span><span>{{ mv.hi }}</span></div>
+                        {% else %}
+                        <div class="ev-track-none">&mdash; no declared range for this parameter</div>
+                        {% endif %}
+                    </div>
+                    {% empty %}
+                    <p class="ev-none">&mdash; no parameter delta was recorded</p>
+                    {% endfor %}
+                </div>
+
+                <div class="ev-block">
+                    <h3 class="ev-block-h">Walk-forward evidence
+                        <span class="ev-block-note">4 legs · one pinned universe</span></h3>
+                    {% if m.has_leg_detail %}
+                    <div class="ev-legs">
+                        {% for leg in m.legs %}
+                        <div class="ev-leg {% if leg.starved %}ev-leg--starved{% endif %}" style="--ev-i:{{ leg.order }};">
+                            <span class="ev-leg-name">{{ leg.window }} <em>{{ leg.side }}</em></span>
+                            <span class="ev-leg-bar" style="--ev-l:{{ leg.left_css }};--ev-w:{{ leg.width_css }};">
+                                <span class="ev-leg-fill ev-leg-fill--{{ leg.sign }}"></span>
+                            </span>
+                            <span class="ev-leg-val">{{ leg.value }}</span>
+                            <span class="n-badge {% if leg.starved %}n-badge--thin{% endif %}"{% if leg.starved %} title="below the {{ min_trades }}-trade floor — this leg starved the score"{% endif %}>n={{ leg.n_display }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="ev-none">&mdash; leg detail was not recorded for this proposal</p>
+                    {% endif %}
+                    <div class="ev-deltas">
+                        <span>Δ train <b>{{ m.train_delta }}</b></span>
+                        <span>Δ test <b>{{ m.test_delta }}</b></span>
+                        <span>worst <b>{{ m.worst_delta }}</b></span>
+                    </div>
+                </div>
+
+                <div class="ev-score">
+                    {# The arrow starts at the baseline the score was built on, never at a number from another regime. #}
+                    <div class="ev-score-nums">
+                        <span class="ev-score-parent">{{ m.basis_label }} {% if m.basis is not None %}{{ m.basis|floatformat:2 }}R{% else %}&mdash;{% endif %}</span>
+                        <span class="ev-arrow" aria-hidden="true">→</span>
+                        <span class="ev-score-val {{ m.score_tone }}">{% if m.score is not None %}{{ m.score|floatformat:2 }}R{% else %}&mdash;{% endif %}</span>
+                        {% if m.verdict.flag %}<span class="ev-score-flag">{{ m.verdict.flag }}</span>{% endif %}
+                    </div>
+                    {% if m.live_expectancy is not None %}
+                    <p class="ev-score-aside">parent's live {{ parent_window_days }}d record at proposal <b>{{ m.live_expectancy|floatformat:2 }}R</b> — closed signals, not the backtest above, so the two are not a before and after</p>
+                    {% endif %}
+                    <p class="ev-why">{{ m.verdict.why }}</p>
+                </div>
+
+                <footer class="ev-mut-foot">
+                    {% if m.state == 'proposed' %}
+                    <div class="ev-expiry {% if m.expiry_urgent %}is-urgent{% endif %}">
+                        <span class="ev-expiry-track"><span class="ev-expiry-fill" style="--ev-w:{{ m.expiry_pct_css }};"></span></span>
+                        <span class="ev-expiry-label">{{ m.days_left }}d left · expires {{ m.expires_at|date:"M d" }}</span>
+                    </div>
+                    {% if is_admin %}
+                    <div class="ev-decide">
+                        <form method="post" action="{% url 'hq_apply_evolution' %}">{% csrf_token %}<input type="hidden" name="mutation_id" value="{{ m.id }}"><button class="btn btn-sm btn-primary" type="submit">Fork</button></form>
+                        <form method="post" action="{% url 'hq_reject_evolution' %}">{% csrf_token %}<input type="hidden" name="mutation_id" value="{{ m.id }}"><button class="btn btn-sm btn-danger" type="submit">Reject</button></form>
+                    </div>
+                    {% endif %}
+                    {% elif m.state == 'applied' %}
+                    <span class="ev-foot-note">forked into <code>{{ m.forked_rule|default:"—" }}</code>{% if m.applied_at %} · {{ m.applied_at|date:"M d" }}{% endif %}{% if m.decided_by %} · {{ m.decided_by }}{% endif %}</span>
+                    {% elif m.state == 'expired' %}
+                    <span class="ev-foot-note">expired after {{ ttl_days }}d unreviewed — the next sweep asks again with freshly scored candidates</span>
+                    {% else %}
+                    <span class="ev-foot-note">rejected{% if m.decided_by %} · {{ m.decided_by }}{% endif %}</span>
+                    {% endif %}
+                </footer>
+            </article>
+            {% endfor %}
+        </div>
+        {% if fam.n_hidden %}
+        <p class="ev-more">{{ fam.n_hidden }} older mutation{{ fam.n_hidden|pluralize }} not shown</p>
+        {% endif %}
+    </div>
+</section>
+{% empty %}
+<div class="card ev-empty">
+    <div class="card-header"><span class="card-title">No mutations have been proposed yet</span></div>
+    <p class="ev-empty-lead">
+        This is the expected reading on a young install, not a fault. Nothing here is hidden
+        and nothing is pending.
+    </p>
+    <ul class="ev-empty-list">
+        <li><b>A rule needs a registered schema.</b> {{ n_evolvable }} of {{ n_families }} families
+            have one; the rest are left alone by design and are listed below with the reason.</li>
+        <li><b>A rule has to be decaying.</b> The proposer only mutates rules the decay check has
+            flagged — a rule that is working is not a question worth asking.</li>
+        <li><b>The sweep is evidence-paced.</b> It runs Sundays at 05:00 UTC without condition, on
+            other days only when the week's closed trades are dense enough to mean something, and
+            immediately whenever the nightly 02:30 UTC investigator confirms decay.</li>
+    </ul>
+    <p class="ev-empty-foot">
+        When one lands it appears here as a card: which constants moved and how far inside their
+        bounds, the four walk-forward legs behind the score, and {{ ttl_days }} days to decide
+        before it expires and is asked again.
+    </p>
+</div>
+{% endfor %}
+
+{% if n_families_hidden %}
+{# Without this the lineage above reads as the whole history rather than its newest slice. #}
+<p class="ev-more ev-more--families">{{ n_families_hidden }} further famil{{ n_families_hidden|pluralize:"y,ies" }} ha{{ n_families_hidden|pluralize:"s,ve" }} only older mutations and no fork — not shown above</p>
 {% endif %}
 
-<div class="card fade-in-up" style="margin-bottom: 24px;">
-    <div class="card-header"><span class="card-title">Registered schemas</span></div>
-    {% if schemas %}
-    <div class="table-wrapper">
-    <table class="sv-perf-table">
-      <thead><tr><th>Rule</th><th>Param count</th><th>Parameters</th></tr></thead>
-      <tbody>
-        {% for s in schemas %}
-          <tr>
-            <td>{{ s.rule_name }}</td>
-            <td>{{ s.n_params }}</td>
-            <td style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">{{ s.params|join:", " }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+{# ── The registry: what the loop can reach, and what it cannot. ── #}
+<div class="card ev-registry" data-registered-schemas="{{ n_evolvable }}">
+    <div class="card-header">
+        <span class="card-title">Parameter registry</span>
+        <span class="ev-reg-count">{{ n_evolvable }} of {{ n_families }} rule famil{{ n_families|pluralize:"y,ies" }} evolvable</span>
     </div>
-    {% else %}
-    <p style="color: var(--text-muted); padding: 16px;">None.</p>
-    {% endif %}
-</div>
-
-{# ── Rule families: the living tree ─────────────────────────────────── #}
-<div class="card fade-in-up" style="margin-bottom: 24px;">
-    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-        <span class="card-title">Rule families</span>
-        <a class="nh-link nh-link--accent" href="{% url 'promotions_dashboard' %}">Promotion ladder &#9656;</a>
-    </div>
-    {% if families %}
-    <div class="table-wrapper">
-    <table class="sv-perf-table">
-      <thead><tr><th>Rule</th><th>Stage</th><th>Changed</th><th>Walk-forward evidence</th><th>90d record</th><th>Born</th></tr></thead>
-      <tbody>
-        {% for fam in families %}
-          <tr style="background:var(--bg-card-hover);">
-            <td><strong>{{ fam.parent.name }}</strong></td>
-            <td><span class="badge badge-{% if fam.parent.stage == 'live_full' %}bullish{% elif fam.parent.stage == 'research' %}bearish{% else %}medium{% endif %}">{{ fam.parent.stage|upper|default:"—" }}</span></td>
-            <td style="font-size:11px;color:var(--text-muted);">the original</td>
-            <td style="font-size:11px;color:var(--text-muted);">baseline</td>
-            <td style="font-family:var(--font-mono);font-size:11px;">
-                {% if fam.parent.n_90d %}{{ fam.parent.n_90d }} tr · {{ fam.parent.expectancy_90d|floatformat:2 }}R · {{ fam.parent.hit_rate_90d|floatformat:0 }}%{% else %}—{% endif %}
-            </td>
-            <td style="font-size:11px;color:var(--text-muted);">—</td>
-          </tr>
-          {% for f in fam.forks %}
-          <tr>
-            <td style="padding-left:26px;">└ {{ f.name }}</td>
-            <td><span class="badge badge-{% if f.stage == 'live_full' %}bullish{% elif f.stage == 'research' %}bearish{% else %}medium{% endif %}">{{ f.stage|upper|default:"—" }}</span></td>
-            <td style="font-family:var(--font-mono);font-size:11px;" title="{{ f.mutated_params }}">{{ f.changed|join:", "|truncatechars:44 }}</td>
-            <td style="font-family:var(--font-mono);font-size:11px;">
-                {% if f.score_method == 'walk_forward' and f.details.train_delta is not None %}
-                    Δtrain {{ f.details.train_delta|floatformat:2 }}R ·
-                    Δtest {{ f.details.test_delta|floatformat:2 }}R
-                    {% if 'ROBUST' in f.details.notes %}<span class="up">· ROBUST</span>
-                    {% elif 'OVERFIT' in f.details.notes %}<span class="down">· OVERFIT</span>{% endif %}
-                {% elif f.score_method == 'walk_forward' %}
-                    <span style="color:var(--text-muted);">insufficient data at proposal</span>
-                {% else %}
-                    <span style="color:var(--text-muted);">heuristic ({{ f.score|floatformat:2 }}R)</span>
-                {% endif %}
-            </td>
-            <td style="font-family:var(--font-mono);font-size:11px;">
-                {% if f.n_90d %}{{ f.n_90d }} tr · {{ f.expectancy_90d|floatformat:2 }}R · {{ f.hit_rate_90d|floatformat:0 }}%{% else %}<span style="color:var(--text-muted);">no closed signals yet</span>{% endif %}
-            </td>
-            <td style="font-size:11px;">{% if f.applied_at %}{{ f.applied_at|date:"M d" }}{% else %}—{% endif %}</td>
-          </tr>
-          {% endfor %}
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
-    <p style="font-size:11px;color:var(--text-muted);padding:12px 16px;">
-        A fork is the same detector as its parent with mutated constants. It starts in
-        RESEARCH (watched, never traded, never voting) and must earn each stage on the
-        promotion ladder with out-of-sample evidence. May the better one win.
+    <p class="ev-reg-lead">
+        Evolution only touches a rule that has declared bounds for its own constants. That is a
+        deliberate floor, not an oversight: without a schema there is no space to mutate inside
+        and no way to keep a candidate from proposing something structurally dead.
+        {{ n_dormant }} famil{{ n_dormant|pluralize:"y is,ies are" }} dormant here for exactly that reason.
     </p>
-    {% else %}
-    <p style="color:var(--text-muted);padding:16px;">No forks yet — apply a pending mutation below and its fork appears here, climbing the ladder from RESEARCH.</p>
-    {% endif %}
-</div>
-
-<div class="card fade-in-up" style="margin-bottom: 24px;">
-    <div class="card-header"><span class="card-title">Pending mutations</span></div>
-    {% if proposed %}
-    <div class="table-wrapper">
-    <table class="sv-perf-table">
-      <thead><tr><th>#</th><th>Parent</th><th>Parent expectancy</th><th>Mutant score</th><th>Evidence</th><th>Changed</th><th>Proposed</th>{% if is_admin %}<th>Decide</th>{% endif %}</tr></thead>
-      <tbody>
-        {% for m in proposed %}
-          <tr>
-            <td>#{{ m.id }}</td>
-            <td>{{ m.parent_rule|truncatechars:30 }}</td>
-            <td>{% if m.parent_expectancy is not None %}{{ m.parent_expectancy|floatformat:2 }}R{% else %}—{% endif %}</td>
-            <td class="{% if m.proposed_score and m.proposed_score > m.parent_expectancy %}up{% else %}down{% endif %}">
-                {% if m.proposed_score is not None %}{{ m.proposed_score|floatformat:2 }}R{% else %}—{% endif %}
-            </td>
-            <td style="font-family:var(--font-mono);font-size:11px;">
-                {# The walk-forward breakdown was persisted from day one #}
-                {# and rendered nowhere — the operator decided blind. #}
-                {% if m.score_method == 'walk_forward' and m.score_details.train_delta is not None %}
-                    Δtr {{ m.score_details.train_delta|floatformat:2 }} ·
-                    Δte {{ m.score_details.test_delta|floatformat:2 }}
-                    {% if 'ROBUST' in m.score_details.notes %}<span class="up">ROBUST</span>
-                    {% elif 'OVERFIT' in m.score_details.notes %}<span class="down">OVERFIT</span>{% endif %}
-                {% elif m.score_method == 'walk_forward' %}
-                    <span style="color:var(--text-muted);">thin data</span>
-                {% else %}
-                    <span style="color:var(--text-muted);">heuristic</span>
-                {% endif %}
-            </td>
-            <td style="font-size: 11px; color: var(--text-muted);">{{ m.parameters_changed|join:", "|truncatechars:60 }}</td>
-            <td style="font-size: 11px;">{{ m.proposed_at|timesince }} ago</td>
-            {% if is_admin %}
-            <td style="display:flex;gap:6px;">
-                <form method="post" action="{% url 'hq_apply_evolution' %}">{% csrf_token %}<input type="hidden" name="mutation_id" value="{{ m.id }}"><button class="btn btn-sm btn-primary" type="submit">Fork</button></form>
-                <form method="post" action="{% url 'hq_reject_evolution' %}">{% csrf_token %}<input type="hidden" name="mutation_id" value="{{ m.id }}"><button class="btn btn-sm btn-danger" type="submit">Reject</button></form>
-            </td>
+    <div class="ev-reg-grid">
+        {% for r in registry %}
+        <div class="ev-reg {% if r.evolvable %}ev-reg--on{% else %}ev-reg--off{% endif %}">
+            <div class="ev-reg-top">
+                <span class="ev-reg-dot" aria-hidden="true"></span>
+                <span class="ev-reg-name">{{ r.rule_name }}</span>
+                <span class="ev-reg-state">{% if r.evolvable %}{{ r.n_params }} param{{ r.n_params|pluralize }}{% else %}DORMANT{% endif %}</span>
+            </div>
+            {% if r.evolvable %}
+            <table class="ev-reg-params">
+                <tbody>
+                {% for p in r.params %}
+                <tr>
+                    <th scope="row">{{ p.name }}</th>
+                    <td class="ev-reg-type">{{ p.type }}</td>
+                    <td class="ev-reg-range">{{ p.lo }} … {{ p.hi }}</td>
+                    <td class="ev-reg-def">def {{ p.default }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
             {% endif %}
-          </tr>
+            <p class="ev-reg-why">{{ r.reason }}</p>
+        </div>
+        {% empty %}
+        <p class="ev-none">&mdash; no rules could be enumerated</p>
         {% endfor %}
-      </tbody>
-    </table>
     </div>
-    <p style="font-size: 11px; color: var(--text-muted); padding: 12px 16px;">
-        Forking creates a new RuleControl with the mutated parameters in RESEARCH stage. Phase 8 takes over from there;
-        the original rule keeps running until the fork outperforms it on the promotion ladder.
-    </p>
-    {% else %}
-    <p style="color: var(--text-muted); padding: 16px;">No pending mutations. Proposer runs daily at 05:00 UTC over decaying rules with registered schemas &mdash; guaranteed Sundays, other days when the week's closed-trade evidence is dense; confirmed decay also triggers proposals from the nightly 02:30 UTC investigator.</p>
-    {% endif %}
 </div>
 
-<div class="card fade-in-up" style="margin-bottom: 24px;">
-    <div class="card-header"><span class="card-title">Decision history</span></div>
-    {% if history %}
+{% if ledger %}
+<details class="card ev-ledger">
+    <summary class="ev-ledger-sum">Decision ledger <span>newest {{ ledger|length }} of {{ n_resolved }} resolved</span></summary>
     <div class="table-wrapper">
-    <table class="sv-perf-table">
-      <thead><tr><th>#</th><th>Parent</th><th>State</th><th>Forked rule</th><th>Decided</th><th>By</th></tr></thead>
-      <tbody>
-        {% for m in history %}
-          <tr>
-            <td>#{{ m.id }}</td>
-            <td>{{ m.parent_rule|truncatechars:30 }}</td>
-            <td><span class="badge badge-{% if m.state == 'applied' %}bullish{% elif m.state == 'rejected' %}bearish{% else %}medium{% endif %}">{{ m.get_state_display }}</span></td>
-            <td>{{ m.forked_rule|default:"—"|truncatechars:36 }}</td>
-            <td>{% if m.applied_at %}{{ m.applied_at|date:"M d H:i" }}{% else %}—{% endif %}</td>
-            <td style="font-size: 11px;">{{ m.decided_by.username|default:"—" }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        <table class="sv-perf-table">
+            {# Two timestamps, because only one of them is ever recorded for a rejection or an expiry. #}
+            <thead><tr><th>#</th><th>Parent</th><th>Outcome</th><th>Forked rule</th><th>Proposed</th><th>Decided</th><th>By</th></tr></thead>
+            <tbody>
+                {% for l in ledger %}
+                <tr>
+                    <td>#{{ l.id }}</td>
+                    <td>{{ l.parent_rule|truncatechars:30 }}</td>
+                    <td><span class="ev-chip ev-chip--{{ l.state_tone }}">{{ l.state_label }}</span></td>
+                    <td>{{ l.forked_rule|default:"—"|truncatechars:36 }}</td>
+                    <td>{{ l.proposed_at|date:"M d H:i" }}</td>
+                    <td>{% if l.decided_at %}{{ l.decided_at|date:"M d H:i" }}{% else %}&mdash;{% endif %}</td>
+                    <td>{{ l.decided_by|default:"—" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
-    {% else %}
-    <p style="color: var(--text-muted); padding: 16px;">No decisions yet.</p>
-    {% endif %}
-</div>
+    <p class="ev-ledger-note">
+        Ordered by proposal time, which is the column it is sorted on. Only a fork stamps a decision
+        time; a rejection and an expiry record the outcome and not the moment, so their
+        <em>Decided</em> stays an em-dash rather than borrowing the proposal's clock — an expiry
+        would otherwise read at least {{ ttl_days }} days earlier than it happened.
+    </p>
+</details>
+{% endif %}
 
 <style>
+/* ═══════════════════════════════════════════════════════════════════════
+   STRATEGY EVOLUTION — page-local layer.
+
+   Built on the unified .card grammar (hairline ::before, accent ::after on
+   hover, .35s cubic-bezier) rather than beside it: .ev-family and .ev-key
+   ARE cards and inherit all of that. Everything new below is the lineage
+   rail, the mutation card and the two evidence instruments, all on tokens
+   so both themes follow without a second palette.
+
+   The tone variable is the spine of the whole thing: one --ev-tone per
+   verdict drives the border, the glyph, the label and the score, so a
+   never-measured card cannot accidentally borrow the colour of a measured
+   loss anywhere on the page.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ev-of { font-size: 13px; color: var(--text-muted); font-weight: 400; }
+
+/* ── The key ─────────────────────────────────────────────────────────── */
+.ev-key { margin-bottom: 18px; }
+.ev-key-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 14px; }
+.ev-key-step {
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary);
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: 7px;
+    background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+.ev-key-step b { color: var(--accent); margin-right: 5px; }
+.ev-key-sep { color: var(--text-muted); font-size: 12px; }
+.ev-key-verdicts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.ev-key-v {
+    --ev-tone: var(--text-muted);
+    display: inline-flex; align-items: baseline; gap: 6px;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em;
+    color: var(--ev-tone); padding: 5px 9px; border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--ev-tone) 40%, transparent);
+    background: color-mix(in srgb, var(--ev-tone) 8%, transparent);
+}
+.ev-key-v em { font-style: normal; color: var(--text-muted); letter-spacing: 0; }
+.ev-key-v--robust  { --ev-tone: var(--accent); }
+.ev-key-v--overfit { --ev-tone: var(--accent-red); }
+.ev-key-v--worse   { --ev-tone: var(--accent-red); }
+.ev-key-v--thin    { --ev-tone: var(--accent-gold); border-style: dashed; }
+.ev-key-warn {
+    font-family: var(--font-mono); font-size: 11.5px; line-height: 1.65;
+    color: var(--text-secondary); margin: 0;
+    padding: 12px 14px; border-radius: 8px;
+    border: 1px dashed color-mix(in srgb, var(--accent-gold) 45%, transparent);
+    background: color-mix(in srgb, var(--accent-gold) 6%, transparent);
+}
+.ev-key-warn b { color: var(--accent-gold); }
+.ev-key-warn em { color: var(--text-primary); font-style: italic; }
+
+/* ── Family ──────────────────────────────────────────────────────────── */
+.ev-family { margin-bottom: 18px; }
+.ev-family--open { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.ev-fam-head {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 14px; flex-wrap: wrap;
+    padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--border);
+}
+.ev-fam-id { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.ev-fam-glyph { font-size: 18px; line-height: 1.2; }
+.ev-fam-titles { min-width: 0; }
+.ev-fam-name {
+    font-family: var(--font-display); font-size: 15px; font-weight: 700;
+    letter-spacing: .06em; color: var(--text-primary); margin: 0;
+    overflow-wrap: anywhere;
+}
+.ev-fam-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); margin: 3px 0 0; }
+.ev-fam-facts { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
+.ev-fact { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-primary); white-space: nowrap; }
+.ev-fact em { font-style: normal; color: var(--text-muted); font-size: 9.5px; letter-spacing: .1em;
+    text-transform: uppercase; margin-right: 6px; }
+.ev-fact--open { color: var(--accent); }
+
+/* ── Chips: state and stage, one shape, tone by modifier ─────────────── */
+.ev-chip {
+    --ev-tone: var(--text-muted);
+    display: inline-block; padding: 3px 9px; border-radius: 20px;
+    font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .12em;
+    text-transform: uppercase; font-weight: 600; white-space: nowrap;
+    color: var(--ev-tone);
+    background: color-mix(in srgb, var(--ev-tone) 13%, transparent);
+    border: 1px solid color-mix(in srgb, var(--ev-tone) 32%, transparent);
+}
+.ev-chip--good  { --ev-tone: var(--accent); }
+.ev-chip--bad   { --ev-tone: var(--accent-red); }
+.ev-chip--open  { --ev-tone: var(--accent-blue); }
+.ev-chip--muted { --ev-tone: var(--text-muted); }
+.ev-chip--stage-live_full  { --ev-tone: var(--accent); }
+.ev-chip--stage-live_small { --ev-tone: var(--accent-blue); }
+.ev-chip--stage-paper      { --ev-tone: var(--accent-gold); }
+.ev-chip--stage-research   { --ev-tone: var(--accent-purple); }
+.ev-chip--stage-unknown    { --ev-tone: var(--text-muted); }
+
+/* ── Forks trading beside the parent ─────────────────────────────────── */
+.ev-forkline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.ev-forkline-label {
+    font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--text-muted);
+}
+.ev-forkchip {
+    --ev-tone: var(--text-muted);
+    display: inline-flex; align-items: baseline; gap: 7px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-primary);
+    padding: 5px 10px; border-radius: 7px;
+    border: 1px solid color-mix(in srgb, var(--ev-tone) 38%, transparent);
+    background: color-mix(in srgb, var(--ev-tone) 7%, transparent);
+    overflow-wrap: anywhere;
+}
+.ev-forkchip em { font-style: normal; font-size: 9px; letter-spacing: .1em; color: var(--ev-tone); }
+.ev-forkchip--stage-live_full  { --ev-tone: var(--accent); }
+.ev-forkchip--stage-live_small { --ev-tone: var(--accent-blue); }
+.ev-forkchip--stage-paper      { --ev-tone: var(--accent-gold); }
+.ev-forkchip--stage-research   { --ev-tone: var(--accent-purple); }
+
+/* ── The lineage rail. One line down the left with a tick per mutation,
+      so a family reads as descent rather than as an unordered pile. ─── */
+.ev-lineage { position: relative; padding-left: 22px; }
+.ev-spine {
+    position: absolute; left: 7px; top: 4px; bottom: 4px; width: 2px;
+    border-radius: 2px;
+    background: linear-gradient(180deg,
+        color-mix(in srgb, var(--accent) 55%, transparent) 0%,
+        var(--border) 100%);
+    transform-origin: top center;
+    animation: evSpineDraw .7s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes evSpineDraw { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+/* One column by default and exactly two above the breakpoint, never auto-fill:
+   the tick joining a card to the spine is only truthful for cards in the
+   first column, and an auto-fill track count cannot be selected against. */
+.ev-mut-grid { display: grid; gap: 14px; grid-template-columns: 1fr; }
+@media (min-width: 1180px) {
+    .ev-mut-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ev-mut:nth-child(2n)::before { display: none; }
+}
+.ev-more { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); margin: 12px 0 0; }
+.ev-more--families { margin: 0 0 18px; }
+
+/* ── Mutation card ───────────────────────────────────────────────────── */
+.ev-mut {
+    --ev-tone: var(--text-muted);
+    position: relative;
+    background: linear-gradient(160deg, var(--bg-card) 0%, var(--bg-void) 120%);
+    border: 1px solid var(--border);
+    border-left: 3px solid color-mix(in srgb, var(--ev-tone) 70%, transparent);
+    border-radius: var(--radius-lg);
+    padding: 14px 15px 12px;
+    transition: border-color .35s cubic-bezier(.2,.8,.2,1),
+                box-shadow .35s cubic-bezier(.2,.8,.2,1),
+                transform .35s cubic-bezier(.2,.8,.2,1);
+}
+/* The lift is on tokens, not on the .card recipe's literal dark-mode shadow:
+   .ev-mut hand-rolls the card grammar instead of carrying `card`, so none of
+   sauron.css's light-mode overrides reach it, and the copied 45%-opaque black
+   painted a halo on a white card. --shadow-card and --shadow-glow are both
+   redefined under body.light-mode, so both themes follow. */
+.ev-mut:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--ev-tone) 45%, var(--border));
+    border-left-color: var(--ev-tone);
+    box-shadow: var(--shadow-card), var(--shadow-glow);
+}
+/* The tick that joins the card to the spine — lineage, drawn not asserted. */
+.ev-mut::before {
+    content: ""; position: absolute; left: -15px; top: 22px; width: 15px; height: 2px;
+    background: color-mix(in srgb, var(--ev-tone) 55%, var(--border));
+}
+.ev-mut--robust       { --ev-tone: var(--accent); }
+.ev-mut--overfit      { --ev-tone: var(--accent-red); }
+.ev-mut--worse        { --ev-tone: var(--accent-red); }
+.ev-mut--unbacktested { --ev-tone: var(--text-muted); }
+/* Never measured: gold AND dashed. Colour alone is not a distinction — a
+   penalty card has to be recognisable by shape from across the page, and
+   this is the one confusion the layout exists to prevent. */
+.ev-mut--thin {
+    --ev-tone: var(--accent-gold);
+    border-left-style: dashed;
+    border-color: color-mix(in srgb, var(--accent-gold) 30%, var(--border));
+}
+
+.ev-mut-top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.ev-mut-ref { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.ev-mut-when { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin-left: auto; }
+
+.ev-verdict {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    padding: 8px 10px; border-radius: 7px; margin-bottom: 12px;
+    background: color-mix(in srgb, var(--ev-tone) 9%, transparent);
+    border: 1px solid color-mix(in srgb, var(--ev-tone) 26%, transparent);
+}
+.ev-mut--thin .ev-verdict { border-style: dashed; }
+.ev-verdict-glyph { color: var(--ev-tone); font-size: 12px; }
+.ev-verdict-label {
+    font-family: var(--font-display); font-size: 11px; font-weight: 700;
+    letter-spacing: .12em; color: var(--ev-tone);
+}
+.ev-verdict-head { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); }
+
+.ev-block { margin-bottom: 12px; }
+.ev-block-h {
+    font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--text-muted);
+    margin: 0 0 8px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+}
+.ev-block-note { letter-spacing: .06em; text-transform: none; opacity: .8; }
+.ev-none { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin: 0; }
+
+/* ── Parameter move: position inside the declared range ──────────────── */
+.ev-move + .ev-move { margin-top: 12px; }
+.ev-move-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ev-move-name { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-primary); }
+.ev-move-vals { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); }
+.ev-move-vals b { color: var(--text-primary); }
+.ev-arrow { color: var(--ev-tone, var(--text-muted)); margin: 0 3px; }
+.ev-move-delta { margin-left: 6px; font-size: 10.5px; }
+.ev-move-delta--up   { color: var(--accent); }
+.ev-move-delta--down { color: var(--accent-blue); }
+.ev-move-delta--flat { color: var(--text-muted); }
+
+.ev-track {
+    position: relative; height: 6px; margin: 8px 0 3px;
+    border-radius: 3px; background: var(--bg-void);
+    border: 1px solid var(--border);
+}
+.ev-track-span {
+    position: absolute; top: 0; bottom: 0;
+    left: var(--ev-span-l); width: var(--ev-span-w); min-width: 2px;
+    border-radius: 3px;
+    background: linear-gradient(90deg,
+        color-mix(in srgb, var(--accent) 25%, transparent),
+        color-mix(in srgb, var(--accent) 70%, transparent));
+    transform-origin: left center;
+    animation: evSpanGrow .7s cubic-bezier(.2,.8,.2,1) both;
+}
+.ev-track-span--down { transform-origin: right center; }
+@keyframes evSpanGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.ev-dot {
+    position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%;
+    transform: translate(-50%, -50%);
+}
+.ev-dot--from {
+    left: var(--ev-from);
+    background: var(--bg-void); border: 1.5px solid var(--text-muted);
+}
+.ev-dot--to {
+    left: var(--ev-to);
+    background: var(--accent); border: 1.5px solid var(--bg-void);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 55%, transparent);
+    animation: evDotTravel .7s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes evDotTravel { from { left: var(--ev-from); } to { left: var(--ev-to); } }
+.ev-track-scale {
+    display: flex; justify-content: space-between;
+    font-family: var(--font-mono); font-size: 9px; color: var(--text-muted);
+}
+.ev-track-none { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin-top: 6px; }
+
+/* ── The four legs. Diverging from a centre line so a negative leg points
+      the other way instead of merely being shorter. ─────────────────── */
+.ev-legs { display: grid; gap: 5px; }
+.ev-leg {
+    display: grid; align-items: center; gap: 8px;
+    grid-template-columns: 5.5rem 1fr 3.4rem auto;
+    font-family: var(--font-mono); font-size: 10.5px;
+}
+.ev-leg-name { color: var(--text-muted); letter-spacing: .06em; white-space: nowrap; }
+.ev-leg-name em { font-style: normal; color: var(--text-secondary); }
+.ev-leg-bar { position: relative; height: 8px; border-radius: 2px; background: var(--bg-void); min-width: 40px; }
+.ev-leg-bar::before {
+    content: ""; position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px;
+    background: var(--border);
+}
+.ev-leg-fill {
+    position: absolute; top: 1px; bottom: 1px;
+    left: var(--ev-l); width: var(--ev-w); border-radius: 2px;
+    animation: evLegDraw .5s cubic-bezier(.2,.8,.2,1) both;
+    animation-delay: calc(var(--ev-i, 0) * .08s);
+}
+.ev-leg-fill--pos { background: color-mix(in srgb, var(--accent) 75%, transparent); transform-origin: left center; }
+.ev-leg-fill--neg { background: color-mix(in srgb, var(--accent-red) 70%, transparent); transform-origin: right center; }
+/* Nothing measured, nothing drawn — not a zero-width loss. */
+.ev-leg-fill--none { background: none; animation: none; }
+@keyframes evLegDraw { from { transform: scaleX(0); opacity: 0; } to { transform: scaleX(1); opacity: 1; } }
+.ev-leg-val { text-align: right; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+/* A starved leg is the cause of a penalty, so it is marked at the leg and
+   not only in the verdict — otherwise "thin data" is a claim with no
+   visible evidence behind it. */
+.ev-leg--starved .ev-leg-name,
+.ev-leg--starved .ev-leg-val { color: var(--accent-gold); }
+.ev-leg--starved .ev-leg-bar {
+    background: repeating-linear-gradient(135deg,
+        color-mix(in srgb, var(--accent-gold) 16%, transparent) 0 3px,
+        transparent 3px 6px);
+}
+.ev-deltas {
+    display: flex; gap: 12px; flex-wrap: wrap; margin-top: 9px;
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted);
+}
+.ev-deltas b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+/* ── Score and the reason for it ─────────────────────────────────────── */
+.ev-score {
+    padding: 10px 11px; border-radius: 7px;
+    background: color-mix(in srgb, var(--ev-tone) 6%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--ev-tone) 20%, transparent);
+}
+/* Hatching, not just hue: the placeholder score reads as "not a measurement"
+   even in monochrome or at a glance from across the room. */
+.ev-mut--thin .ev-score,
+.ev-mut--unbacktested .ev-score {
+    background: repeating-linear-gradient(135deg,
+        color-mix(in srgb, var(--ev-tone) 12%, transparent) 0 5px,
+        transparent 5px 10px);
+}
+.ev-score-nums { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 12px; }
+.ev-score-parent { color: var(--text-muted); }
+.ev-score-val { font-size: 15px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+/* Compound, or these lose: sauron.css's bare .up/.down carry the same (0,1,0)
+   as .ev-score-val above and this block loads later in the document, so the
+   utility class the view computes was being thrown away and a mutation that
+   lost its measurement rendered identically to one that won. Ordered ahead of
+   the verdict rule below so a placeholder score keeps its own tone whatever
+   class reaches it — an untested score is neither up nor down. */
+.ev-score-val.up   { color: var(--accent); }
+.ev-score-val.down { color: var(--accent-red); }
+.ev-mut--thin .ev-score-val, .ev-mut--unbacktested .ev-score-val { color: var(--ev-tone); }
+.ev-score-aside {
+    font-family: var(--font-mono); font-size: 10px; line-height: 1.55;
+    color: var(--text-muted); margin: 6px 0 0;
+}
+.ev-score-aside b { color: var(--text-secondary); }
+.ev-score-flag {
+    font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ev-tone); padding: 2px 6px; border-radius: 4px;
+    border: 1px dashed color-mix(in srgb, var(--ev-tone) 50%, transparent);
+}
+.ev-why { font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; color: var(--text-secondary); margin: 7px 0 0; }
+
+/* ── Footer: the clock, then the decision ────────────────────────────── */
+.ev-mut-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 11px; }
+.ev-expiry { flex: 1 1 150px; min-width: 0; }
+.ev-expiry-track {
+    display: block; height: 3px; border-radius: 2px; background: var(--bg-void);
+    overflow: hidden; margin-bottom: 4px;
+}
+.ev-expiry-fill {
+    display: block; height: 100%; width: var(--ev-w);
+    background: color-mix(in srgb, var(--accent) 55%, transparent);
+    transform-origin: left center;
+    animation: evExpiryGrow .8s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes evExpiryGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.ev-expiry.is-urgent .ev-expiry-fill { background: var(--accent-gold); }
+.ev-expiry-label { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-muted); }
+.ev-expiry.is-urgent .ev-expiry-label { color: var(--accent-gold); }
+.ev-decide { display: flex; gap: 6px; }
+.ev-foot-note { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); overflow-wrap: anywhere; }
+.ev-foot-note code { color: var(--text-secondary); }
+
+/* ── Empty state ─────────────────────────────────────────────────────── */
+.ev-empty { margin-bottom: 18px; }
+.ev-empty-lead { font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); margin: 0 0 12px; line-height: 1.6; }
+.ev-empty-list { margin: 0 0 12px; padding-left: 18px; }
+.ev-empty-list li { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); line-height: 1.7; }
+.ev-empty-list b { color: var(--text-primary); }
+.ev-empty-foot { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin: 0; line-height: 1.6; }
+
+/* ── Registry ────────────────────────────────────────────────────────── */
+.ev-registry { margin-bottom: 18px; }
+.ev-reg-count { font-family: var(--font-mono); font-size: 10.5px; color: var(--accent); }
+.ev-reg-lead { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.65; color: var(--text-muted); margin: 0 0 14px; }
+.ev-reg-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); }
+.ev-reg {
+    --ev-tone: var(--text-muted);
+    padding: 11px 12px; border-radius: 8px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--ev-tone) 5%, transparent);
+}
+.ev-reg--on { --ev-tone: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+.ev-reg--off { border-style: dashed; }
+.ev-reg-top { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; flex-wrap: wrap; }
+.ev-reg-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ev-tone); flex: 0 0 auto; }
+.ev-reg--on .ev-reg-dot { box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent); }
+.ev-reg-name { font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); overflow-wrap: anywhere; }
+.ev-reg-state {
+    margin-left: auto; font-family: var(--font-mono); font-size: 9px;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--ev-tone);
+}
+.ev-reg-params { width: 100%; border-collapse: collapse; margin-bottom: 7px; }
+.ev-reg-params th, .ev-reg-params td {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 400;
+    text-align: left; padding: 2px 0; color: var(--text-muted);
+}
+.ev-reg-params th { color: var(--text-secondary); }
+.ev-reg-range { color: var(--accent); text-align: right; white-space: nowrap; }
+.ev-reg-def { text-align: right; white-space: nowrap; }
+.ev-reg-why { font-family: var(--font-mono); font-size: 10px; line-height: 1.55; color: var(--text-muted); margin: 0; }
+
+/* ── Ledger ──────────────────────────────────────────────────────────── */
+.ev-ledger { margin-bottom: 18px; }
+.ev-ledger-sum {
+    cursor: pointer; list-style: none;
+    font-family: var(--font-heading); font-size: 13px; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--text-primary);
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+}
+.ev-ledger-sum::-webkit-details-marker { display: none; }
+.ev-ledger-sum span { font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em;
+    text-transform: none; color: var(--text-muted); }
+.ev-ledger[open] .ev-ledger-sum { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.ev-ledger-note {
+    font-family: var(--font-mono); font-size: 10px; line-height: 1.6;
+    color: var(--text-muted); margin: 10px 0 0;
+}
+.ev-ledger-note em { font-style: normal; color: var(--text-secondary); }
+
+/* ── Narrow ──────────────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+    .ev-lineage { padding-left: 15px; }
+    .ev-spine { left: 3px; }
+    .ev-mut::before { left: -12px; width: 12px; }
+    .ev-fam-head { gap: 10px; }
+    .ev-leg { grid-template-columns: 4.6rem 1fr 3.2rem auto; gap: 6px; }
+    .ev-key-flow { gap: 6px; }
+    .ev-key-sep { display: none; }
+}
+/* Below this the four columns stop fitting; the leg name takes its own row
+   rather than squeezing the bar down to a stub that shows nothing. */
+@media (max-width: 420px) {
+    .ev-mut { padding: 12px 12px 10px; }
+    .ev-leg { grid-template-columns: 1fr auto auto; row-gap: 2px; }
+    .ev-leg-name { grid-column: 1 / -1; }
+    .ev-leg-bar { grid-column: 1; }
+    .ev-leg-val { grid-column: 2; }
+    .ev-leg .n-badge { grid-column: 3; }
+    .ev-verdict-head { font-size: 10.5px; }
+}
+
+/* Motion is here to explain — where it is unwelcome the resting state is
+   already the correct one, so switching it off costs nothing. */
+@media (prefers-reduced-motion: reduce) {
+    .ev-spine, .ev-track-span, .ev-dot--to, .ev-leg-fill, .ev-expiry-fill { animation: none; }
+    .ev-mut { transition: none; }
+    .ev-mut:hover { transform: none; }
+}
 </style>
 {% endblock %}

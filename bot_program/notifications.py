@@ -294,6 +294,42 @@ def notify_bot_fill_close(user, *, asset_class: str, symbol: str, side: str,
     )
 
 
+def notify_manual_close_refused(user, *, asset_class: str, symbol: str,
+                                 trade_id=None) -> bool:
+    """The operator pressed CLOSE on a live position and the platform
+    refused because the broker is unreachable.
+
+    Deliberately louder than the dialog that already said so: the dialog is
+    dismissed in a second while the position stays live and unmanaged, and
+    "I thought I closed that" is the most expensive belief in the system.
+    Deduped per trade per hour so a frustrated operator clicking four times
+    does not bury the rest of the bell.
+    """
+    from datetime import timedelta as _td
+    from django.utils import timezone as _tz
+    from alerts.links import page_url
+
+    title = f"⛔ Close refused: {symbol}"
+    try:
+        from alerts.models import Notification
+        recent = Notification.objects.filter(
+            user=user, notification_type="bot", title=title,
+            created_at__gte=_tz.now() - _td(hours=1)).exists()
+        if recent:
+            return False
+    except Exception as e:  # noqa: BLE001 — dedupe failure must not mute it
+        logger.warning("close-refused dedupe failed: %s", e)
+
+    return dispatch_notification(
+        user, "bot_error", title=title,
+        body=(f"{asset_class.upper()} trade #{trade_id} is LIVE and its "
+              f"broker is unreachable, so the close was refused rather than "
+              f"stamped on a position that is still open. The position is "
+              f"STILL OPEN at the broker."),
+        url=page_url("forensics_detail", trade_id) or "/eye/fills/",
+    )
+
+
 def notify_drawdown_warning(user, *, asset_class: str, config_name: str,
                              realized_pnl, limit) -> bool:
     return dispatch_notification(

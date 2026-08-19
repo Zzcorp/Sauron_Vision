@@ -7,6 +7,13 @@ from datetime import timedelta
 from django.db import models
 from django.db.models import Avg, Sum, Count
 
+# The one parser for the `{parent}_evolved_v{N}` fork-name scheme. This module
+# used to carry a private `_fork_parent` with its own copy of the regex, as
+# did dashboard/views_evolution.py and signals/promotion_evidence.py — three
+# copies whose docstrings each asserted that the other two agreed with them.
+# `core.fork_names` imports nothing but `re`, so the import is free here.
+from core.fork_names import FORK_INFIX, fork_parent
+
 # The mover buckets the quotes page understands. Anything else arriving in
 # ?movers= — a typo, a truncated link, an old bookmark — is not an error the
 # operator can act on, so the view falls back to "all" rather than 500ing.
@@ -478,123 +485,541 @@ def signals_list(request):
     })
 
 
-@login_required
-def strategies_list(request):
-    """Phase 63 — enriched strategy engine dashboard.
+# ══ Strategies page ═══════════════════════════════════════════════════════
+#
+# "Why still 0 strategies?" — asked while twelve rules were running. This page
+# led with `strategies.Strategy`: a multi-leg trade plan the wizard writes and
+# NOTHING executes, of which a fresh install has none. Meanwhile the public
+# landing page counts `RuleControl` as "strategies"
+# (core/wall_facts._count_strategies), so the platform gave two different
+# answers to one question, one on each side of the login. The promotion ladder
+# leads now; the wizard's plans keep their own section, labelled as what they
+# are.
+#
+# Every join between Signal / RuleControl / OpportunitySetup / AssetBotTrade is
+# a STRING (`rule_name`), not a foreign key. There is no select_related to lean
+# on, so each helper below does ONE grouped query for ALL rules and hands back
+# a dict keyed by rule_name. The alternative — calling the pipeline's own
+# per-rule helpers from inside the card loop — is a query per card.
 
-    Adds: status mix donut · top P&L performers · aggregate sharpe ·
-    horizon breakdown · activity over last 30d.
+# A stage is a VENUE, not a size. `signals.rule_actuator.stage_policy` spells
+# this out: reading it as a size is what once let a PAPER rule size to zero,
+# take no paper trade, and so never produce the evidence needed to leave paper.
+# The page says it out loud because the word "small" invites the wrong reading.
+_STAGE_VENUE = {
+    "research": "signals only — no order is ever placed",
+    "paper": "full nominal size, forced onto the paper venue",
+    "live_small": "live venue, quarter size",
+    "live_full": "live venue, full size",
+}
+
+# n=0 is a measured zero; a rate or an expectancy with no sample behind it is
+# not measured at all, and renders as an em-dash rather than as 0.
+_NO_RECORD = {"n": 0, "hits": 0, "expectancy": None, "hit_rate": None}
+
+
+# Evolution forks the RuleControl row ONLY — the OpportunitySetup holding the
+# conditions still belongs to the parent — so this page resolves a fork's name
+# to that parent with `core.fork_names.fork_parent`, the same parser
+# `promotion_evidence` resolves evaluators with. A fork and its evidence gate
+# therefore cannot disagree about who its parent is.
+
+
+def _rule_stats_map(rule_names, since_by_rule=None):
+    """Closed-signal stats per rule, in ONE grouped query.
+
+    Mirrors `promotion_pipeline._stats_since` filter for filter — same
+    is_active / outcome / realized_r exclusions, same "hit" definition, same
+    rounding — because a card that shows different numbers from the ones the
+    ladder judges on is worse than a card that shows nothing.
+
+    `since_by_rule` reproduces the per-rule `expired_at >= stage_entered_at`
+    window the PAPER and LIVE_SMALL gates read, as one OR'd filter rather than
+    one query per rule.
     """
-    from datetime import timedelta
-    from django.utils import timezone as _tz
-    from strategies.models import Strategy
+    import operator
+    from functools import reduce
+    from django.db.models import Q
+    from signals.models import Signal
 
-    qs = Strategy.objects.prefetch_related("legs").order_by("-created_at")
-    status_filter = request.GET.get("status")
-    qs_filtered = qs.filter(status=status_filter) if status_filter else qs
+    qs = (Signal.objects
+          .filter(rule_name__in=rule_names, is_active=False)
+          .exclude(outcome="").exclude(realized_r__isnull=True))
+    if since_by_rule:
+        qs = qs.filter(reduce(operator.or_, [
+            Q(rule_name=name, expired_at__gte=since)
+            for name, since in since_by_rule.items()
+        ]))
+    # Signal.Meta.ordering is ["-created_at"], and a default ordering rides
+    # into the GROUP BY of a values().annotate() — which would return one row
+    # per signal instead of one per rule. Clearing it on the selected column
+    # first is the fix.
+    rows = (qs.values("rule_name").order_by("rule_name")
+              .annotate(n=Count("id"),
+                        hits=Count("id", filter=Q(outcome="hit_target")),
+                        expectancy=Avg("realized_r")))
+    out = {}
+    for r in rows:
+        n = r["n"]
+        out[r["rule_name"]] = {
+            "n": n,
+            "hits": r["hits"],
+            "expectancy": (float(r["expectancy"])
+                           if r["expectancy"] is not None else None),
+            "hit_rate": round(r["hits"] / n, 4) if n else None,
+        }
+    return out
 
-    all_strats = list(Strategy.objects.all())
-    n_total = len(all_strats)
-    n_active = sum(1 for s in all_strats if s.status == "active")
-    n_proposed = sum(1 for s in all_strats if s.status == "proposed")
-    n_completed = sum(1 for s in all_strats if s.status == "completed")
-    n_paused = sum(1 for s in all_strats if s.status == "paused")
-    n_rejected = sum(1 for s in all_strats if s.status == "rejected")
-    n_approved = sum(1 for s in all_strats if s.status == "approved")
 
-    cutoff_30 = _tz.now() - timedelta(days=30)
-    n_30d = Strategy.objects.filter(created_at__gte=cutoff_30).count()
+def _n_gates(conditions):
+    """How many of a setup's conditions are gates (preconditions)."""
+    return sum(1 for c in (conditions or [])
+               if isinstance(c, dict) and c.get("gate"))
 
-    # Aggregate stats — only over completed/active that have realized P&L.
-    realized = [s for s in all_strats
-                if s.status in ("active", "completed") and s.pnl_pct]
-    avg_pnl_pct = sum(s.pnl_pct for s in realized) / len(realized) if realized else 0
-    avg_dd = (sum(s.max_drawdown for s in realized) / len(realized)) if realized else 0
-    sharpe_vals = [s.sharpe_ratio for s in realized if s.sharpe_ratio is not None]
-    avg_sharpe = sum(sharpe_vals) / len(sharpe_vals) if sharpe_vals else None
-    n_winners = sum(1 for s in realized if s.pnl_pct > 0)
-    n_losers = sum(1 for s in realized if s.pnl_pct < 0)
-    win_rate = round(n_winners / len(realized) * 100, 1) if realized else 0
 
-    # Status donut.
-    status_donut = []
-    for k, v in [("active", n_active), ("proposed", n_proposed),
-                  ("approved", n_approved), ("completed", n_completed),
-                  ("paused", n_paused), ("rejected", n_rejected)]:
-        if v > 0:
-            status_donut.append({"key": k, "n": v,
-                                  "pct": round(v / max(n_total, 1) * 100, 1)})
+def _n_scoring(conditions):
+    """How many actually vote — the population the composite averages over."""
+    return sum(1 for c in (conditions or [])
+               if isinstance(c, dict) and not c.get("gate"))
 
-    # Horizon breakdown.
-    horizon_rows: dict = {}
-    for s in all_strats:
-        horizon_rows.setdefault(s.time_horizon or "—",
-                                  {"n": 0, "pnl": 0, "pos": 0, "neg": 0})
-        d = horizon_rows[s.time_horizon or "—"]
-        d["n"] += 1
-        d["pnl"] += float(s.pnl_pct or 0)
-        if (s.pnl_pct or 0) > 0:
-            d["pos"] += 1
-        elif (s.pnl_pct or 0) < 0:
-            d["neg"] += 1
-    horizon_breakdown = sorted(
-        [{"horizon": k, **v, "avg_pnl": round(v["pnl"] / max(v["n"], 1), 2)}
-         for k, v in horizon_rows.items()],
-        key=lambda r: -r["n"]
-    )
 
-    # Top 5 performers + worst 5.
-    by_pnl = sorted(realized, key=lambda s: s.pnl_pct, reverse=True)
-    top_performers = by_pnl[:5]
-    worst_performers = list(reversed(by_pnl[-5:])) if len(by_pnl) > 5 else []
+def _cond_weight(cond):
+    """A condition's weight, in the type `scan_setup` reads it as.
 
-    # The automated stable — OpportunitySetup rows the scanner runs.
-    # These are what the seeder created ("why don't I have any current
-    # strategies?" — they were here, inactive, on an unlinked page), a
-    # different model from the trade-plan table above.
-    from django.db.models import Q as _Q
-    from signals.models_control import RuleControl
+    The scanner does `float(cond.get("weight", 1.0))` and does NOT catch a
+    failure there, so a hand-authored `"1,5"` or `null` is not a weight of 1.0
+    — it is a condition the scanner raises on. The page reports that as
+    unknown rather than printing a number nothing will ever multiply by.
+    """
+    try:
+        w = float(cond.get("weight", 1.0))
+    except (TypeError, ValueError):
+        return {"weight": None, "weight_display": "—"}
+    return {"weight": w, "weight_display": "{:g}".format(w)}
+
+
+def _fmt_gate(value, unit):
+    """A criterion value in the unit the ladder states it in."""
+    if value is None:
+        return "—"
+    if unit == "rate":
+        return "{:.0f}%".format(value * 100)
+    if unit == "R":
+        return "{:+.2f}R".format(value)
+    if unit == "d":
+        return "{:d}d".format(int(value))
+    return "{:d}".format(int(value))
+
+
+def _gate_check(label, value, need, unit=""):
+    """One promotion criterion, plus what fraction of it is satisfied.
+
+    `ratio` is what the stage bar fills to, so it has to respect the two
+    shapes of criterion the ladder uses. A count creeps toward its gate and
+    fills proportionally. "Expectancy ≥ 0R" does not: a rule losing money is
+    not 90% of the way to being trusted with capital, it is at zero.
+    """
+    if value is None:
+        return {"label": label, "unit": unit, "met": False, "ratio": 0.0,
+                "known": False, "value": None, "need": need,
+                "value_display": "—", "need_display": _fmt_gate(need, unit)}
+    met = value >= need
+    ratio = max(0.0, min(1.0, value / need)) if need > 0 else (1.0 if met else 0.0)
+    return {"label": label, "unit": unit, "met": met, "ratio": ratio,
+            "known": True, "value": value, "need": need,
+            "value_display": _fmt_gate(value, unit),
+            "need_display": _fmt_gate(need, unit)}
+
+
+def _next_gate(ctrl, record, stage_record, days_in_stage):
+    """What this rule is waiting for before it moves up a venue.
+
+    Thresholds are imported from the pipeline rather than restated, so
+    retuning a gate moves the page with it instead of leaving the page lying.
+    """
+    from signals import promotion_pipeline as pp
+    from signals.promotion_evidence import LIVE_STAGES
+
+    stage = ctrl.promotion_stage
+    target = pp._next_stage(stage) if stage in pp.STAGE_ORDER else None
+    if target is None:
+        return {
+            "target": None, "checks": [], "progress": None,
+            "summary": ("top of the ladder — nothing above live_full"
+                        if stage == pp.STAGE_ORDER[-1]
+                        else "not on the ladder — no recognised stage"),
+        }
+
+    if stage == "research":
+        checks = [
+            _gate_check("closed trades", record["n"],
+                        pp.PROMO_RESEARCH_TO_PAPER_MIN_N),
+            _gate_check("hit rate", record["hit_rate"],
+                        pp.PROMO_RESEARCH_TO_PAPER_MIN_HIT_RATE, unit="rate"),
+            _gate_check("expectancy", record["expectancy"],
+                        pp.PROMO_RESEARCH_TO_PAPER_MIN_EXPECTANCY, unit="R"),
+        ]
+    elif stage == "paper":
+        # No usable baseline means the pipeline falls back to "just be
+        # positive" — show the fallback, not a threshold that isn't applied.
+        base = ctrl.stage_baseline_expectancy
+        need = (base * pp.PROMO_PAPER_TO_LIVE_SMALL_RETENTION
+                if base and base > 0 else 0.0)
+        checks = [
+            _gate_check("days in paper", days_in_stage,
+                        pp.PROMO_PAPER_TO_LIVE_SMALL_MIN_DAYS, unit="d"),
+            _gate_check("closed since entry", stage_record["n"],
+                        pp.PROMO_PAPER_TO_LIVE_SMALL_MIN_N),
+            _gate_check("expectancy", stage_record["expectancy"], need, unit="R"),
+        ]
+    elif stage == "live_small":
+        base = ctrl.stage_baseline_expectancy
+        need = (base * pp.PROMO_LIVE_SMALL_TO_FULL_RETENTION
+                if base and base > 0 else 0.0)
+        checks = [
+            _gate_check("days at small", days_in_stage,
+                        pp.PROMO_LIVE_SMALL_TO_FULL_MIN_DAYS, unit="d"),
+            _gate_check("closed since entry", stage_record["n"],
+                        pp.PROMO_LIVE_SMALL_TO_FULL_MIN_N),
+            _gate_check("expectancy", stage_record["expectancy"], need, unit="R"),
+        ]
+    else:
+        checks = []
+
+    progress = int(round(min(c["ratio"] for c in checks) * 100)) if checks else None
+    unmet = [c for c in checks if not c["met"]]
+    if unmet:
+        blocker = min(unmet, key=lambda c: c["ratio"])
+        summary = "{} of {} {}".format(
+            blocker["value_display"], blocker["need_display"], blocker["label"])
+    elif target in LIVE_STAGES:
+        # Meeting the ladder's criteria is not the last gate before real
+        # money: promotion_evidence requires out-of-sample walk-forward
+        # evidence too. Saying "ready" here would be a promise the pipeline
+        # has not made.
+        summary = "criteria met — awaiting out-of-sample (walk-forward) evidence"
+    else:
+        summary = "criteria met — promotes on the next ladder pass"
+
+    return {"target": target, "target_label": target.replace("_", " "),
+            "target_venue": _STAGE_VENUE.get(target, ""),
+            "checks": checks, "progress": progress, "summary": summary}
+
+
+def _promotion_ladder(now=None):
+    """Every RuleControl row as a card, grouped by promotion stage.
+
+    Query budget is FIXED at 7 (2 when no rule exists), whatever the rule
+    count: rules, setups, all-time stats, in-stage stats, signal recency, bot
+    trades, mutations. Nothing in the per-card loop below touches the database.
+    The setup query runs even with no rules, because an armed setup with no
+    RuleControl row still scans — see the comment on it below.
+    """
+    from collections import defaultdict
+    from django.db.models import Max, Q
+    from bot_program.asset_models import AssetBotTrade
+    from signals import promotion_pipeline as pp
+    from signals.models import Signal
+    from signals.models_control import RuleControl, RuleMutation
     from signals.models_opportunity import OpportunitySetup
-    stage_by_rule = dict(
-        RuleControl.objects.values_list("rule_name", "promotion_stage"))
-    setups = []
-    for s in OpportunitySetup.objects.annotate(
-            n_resolved=Count("flags", filter=_Q(
-                flags__outcome__in=["hit", "miss"])),
-            n_hits=Count("flags", filter=_Q(flags__outcome="hit"))):
-        setups.append({
-            "name": s.name,
-            "asset_class": ", ".join(s.asset_classes or []),
-            "is_active": s.is_active,
-            "stage": stage_by_rule.get(s.name, ""),
-            "hits": s.n_hits,
-            "hit_rate": (s.n_hits / s.n_resolved * 100) if s.n_resolved else None,
+
+    now = now or timezone.now()
+    empty = {"stage_groups": [], "n_rules": 0, "n_running": 0, "n_by_stage": {},
+             "n_live_venue": 0,
+             "n_setups": 0, "n_armed": 0, "unbacked_setups": [], "ladder_n": 0,
+             "ladder_hit_rate": None, "ladder_expectancy": None,
+             "stage_venues": [{"key": s, "label": s.replace("_", " "),
+                               "venue": _STAGE_VENUE[s]}
+                              for s in pp.STAGE_ORDER]}
+
+    rules = list(RuleControl.objects.order_by("rule_name"))          # 1
+    names = [r.rule_name for r in rules]
+
+    # A fork inherits its parent's conditions, so pull the parents' setups
+    # too — bounded, because a fork of a fork of a fork is still a name.
+    wanted = set(names)
+    for name in names:
+        cur = name
+        for _ in range(4):
+            parent = fork_parent(cur)
+            if not parent:
+                break
+            wanted.add(parent)
+            cur = parent
+
+    # `| Q(is_active=True)` is what keeps an armed setup that no rule backs on
+    # this page. `scan_all_setups` iterates OpportunitySetup.objects.filter(
+    # is_active=True) and never consults RuleControl, and `stage_policy` reads
+    # a missing RuleControl row as PAPER / may_trade=True — so such a setup
+    # scans every pass, writes signals, and can place paper orders at full
+    # nominal size. Fetching only rule-backed names hid it from the one page
+    # that claims to show what is running and dropped it from the "n of m
+    # setups armed" denominator too. Both creation paths that arm a setup
+    # (hq_create_opportunity_setup, hq_toggle_opportunity_setup on a mined
+    # candidate) write no companion RuleControl, and no post_save does either,
+    # so the omission is permanent rather than a startup race.
+    setups = {                                                       # 2
+        s.name: s for s in OpportunitySetup.objects
+        .filter(Q(name__in=wanted) | Q(is_active=True)).order_by("name")
+        .annotate(n_flags=Count("flags"))
+    }
+    # `n not in wanted` implies is_active — an inactive setup only reaches
+    # this dict through the name branch.
+    # Gates are counted apart here for the same reason as on the cards: a gate
+    # is a universe check the scanner skips the setup on, not a leg that votes.
+    unbacked = [{"name": s.name,
+                 "direction": s.direction,
+                 "asset_classes": ", ".join(s.asset_classes or []) or "any",
+                 "min_match_score": s.min_match_score,
+                 "horizon_days": s.suggested_horizon_days,
+                 "n_scoring": _n_scoring(s.conditions),
+                 "n_gates": _n_gates(s.conditions),
+                 "n_flags": s.n_flags}
+                for name, s in setups.items() if name not in wanted]
+
+    if not rules:
+        return {**empty, "unbacked_setups": unbacked,
+                "n_setups": len(unbacked), "n_armed": len(unbacked)}
+
+    # The RESEARCH gate reads all-time; the PAPER and LIVE_SMALL gates read
+    # only what closed since the rule entered its current stage.
+    record_by_rule = _rule_stats_map(names)                          # 3
+    stage_record_by_rule = _rule_stats_map(names, since_by_rule={    # 4
+        r.rule_name: (r.stage_entered_at or r.created_at) for r in rules})
+
+    recency = {r["rule_name"]: r for r in                            # 5
+               Signal.objects.filter(rule_name__in=names)
+               .values("rule_name").order_by("rule_name")
+               .annotate(last_at=Max("created_at"),
+                         n_live=Count("id", filter=Q(is_active=True)))}
+
+    # What the bot actually executed under this rule — the stage claim and
+    # the trade log disagreeing is the failure this column exists to expose.
+    trades = {r["rule_name"]: r for r in                              # 6
+              AssetBotTrade.objects
+              .filter(rule_name__in=names, status="CLOSED",
+                      realized_r__isnull=False)
+              .values("rule_name").order_by("rule_name")
+              .annotate(n=Count("id"), expectancy=Avg("realized_r"),
+                        n_real=Count("id", filter=Q(paper=False)))}
+
+    forks_open, forks_applied = defaultdict(list), defaultdict(list)  # 7
+    for parent, forked, state, score, method, changed in (
+            RuleMutation.objects.filter(parent_rule__in=names)
+            .order_by("parent_rule", "-proposed_at")
+            .values_list("parent_rule", "forked_rule", "state",
+                         "proposed_score", "score_method",
+                         "parameters_changed")):
+        row = {"forked": forked, "method": method,
+               "changed": ", ".join(changed or []) or "—",
+               "score": ("{:+.3f}".format(score) if score is not None else "—")}
+        if state == "proposed":
+            forks_open[parent].append(row)
+        elif state == "applied":
+            forks_applied[parent].append(row)
+
+    by_stage = defaultdict(list)
+    ladder_n = ladder_hits = 0
+    ladder_r_sum = 0.0
+    for ctrl in rules:
+        name = ctrl.rule_name
+        record = record_by_rule.get(name, _NO_RECORD)
+        stage_record = stage_record_by_rule.get(name, _NO_RECORD)
+        entered = ctrl.stage_entered_at or ctrl.created_at
+        days_in_stage = (now - entered).days
+
+        ladder_n += record["n"]
+        ladder_hits += record["hits"]
+        if record["expectancy"] is not None:
+            ladder_r_sum += record["expectancy"] * record["n"]
+
+        # A fork with no setup of its own borrows the definition it was
+        # forked from — the card says so rather than claiming the fork
+        # authored it.
+        setup, source, cur = setups.get(name), name, name
+        for _ in range(4):
+            if setup is not None:
+                break
+            parent = fork_parent(cur)
+            if not parent:
+                break
+            setup, source, cur = setups.get(parent), parent, parent
+
+        setup_ctx = None
+        if setup is not None:
+            conditions = []
+            for cond in (setup.conditions or []):
+                if not isinstance(cond, dict):
+                    continue
+                params = cond.get("params") or {}
+                conditions.append({
+                    "kind": cond.get("kind", "?"),
+                    "detail": " · ".join(
+                        "{}={}".format(k, v) for k, v in params.items()),
+                    # A gate is a PRECONDITION, not a leg. `scan_setup` returns
+                    # {"skipped": True, "reason": "gate_failed"} before it
+                    # touches either accumulator, so a gate adds nothing to the
+                    # score AND nothing to the denominator, and no amount of
+                    # evidence can outvote it. Rendering one as "×1.0" told the
+                    # operator two false things about the only gated setup the
+                    # platform ships: that the universe check was ~29% of a
+                    # vote, and that the composite divides by 3.5 when the
+                    # scanner divides by 2.5.
+                    "gate": bool(cond.get("gate")),
+                    **_cond_weight(cond),
+                })
+            scoring = [c for c in conditions if not c["gate"]]
+            # A weight the scanner cannot float() is a weight this page must
+            # not invent one for: `float(cond.get("weight", 1.0))` raises in
+            # scan_setup, so the honest total is unknown, not a partial sum.
+            known = all(c["weight"] is not None for c in scoring)
+            weight_sum = sum(c["weight"] for c in scoring) if known else None
+            setup_ctx = {
+                "name": setup.name,
+                "inherited": source != name,
+                "is_active": setup.is_active,
+                "direction": setup.direction,
+                "asset_classes": ", ".join(setup.asset_classes or []) or "any",
+                "min_match_score": setup.min_match_score,
+                "horizon_days": setup.suggested_horizon_days,
+                "n_flags": setup.n_flags,
+                "conditions": conditions,
+                # Counted apart, because "3 conditions" over two legs and a
+                # gate describes a setup that does not exist.
+                "n_scoring": len(scoring),
+                "n_gates": len(conditions) - len(scoring),
+                # The denominator `scan_setup` actually divides by, so the
+                # operator can reproduce the threshold instead of deriving a
+                # different one from the same card.
+                "weight_sum": weight_sum,
+                "weight_sum_display": ("—" if weight_sum is None
+                                       else "{:g}".format(weight_sum)),
+            }
+
+        trade = trades.get(name)
+        seen = recency.get(name)
+        by_stage[ctrl.promotion_stage].append({
+            "rule": name,
+            "stage": ctrl.promotion_stage,
+            "stage_display": ctrl.get_promotion_stage_display(),
+            "venue": _STAGE_VENUE.get(ctrl.promotion_stage, ""),
+            "status": ctrl.status,
+            "status_display": ctrl.get_status_display(),
+            "paused_until": ctrl.paused_until,
+            "weight": ctrl.weight_multiplier,
+            "allocator_weight": ctrl.allocator_weight,
+            "entered_at": entered,
+            "days_in_stage": days_in_stage,
+            "baseline": ctrl.stage_baseline_expectancy,
+            "parent": fork_parent(name),
+            "record": record,
+            "hit_rate_display": ("{:.0f}%".format(record["hit_rate"] * 100)
+                                 if record["hit_rate"] is not None else None),
+            "expectancy_display": ("{:+.2f}R".format(record["expectancy"])
+                                   if record["expectancy"] is not None else None),
+            "stage_record": stage_record,
+            "setup": setup_ctx,
+            "last_signal_at": seen["last_at"] if seen else None,
+            "n_live_signals": seen["n_live"] if seen else 0,
+            "n_trades": trade["n"] if trade else 0,
+            "n_trades_real": trade["n_real"] if trade else 0,
+            "trade_expectancy": ("{:+.2f}R".format(trade["expectancy"])
+                                 if trade and trade["expectancy"] is not None
+                                 else None),
+            "forks_open": forks_open.get(name, []),
+            "forks_applied": forks_applied.get(name, []),
+            "gate": _next_gate(ctrl, record, stage_record, days_in_stage),
         })
 
-    return render(request, "dashboard/strategies_list.html", {
-        "setups": setups,
-        "setups_active": sum(1 for x in setups if x["is_active"]),
-        "page_id": "strategies",
-        "strategies": qs_filtered[:50],
-        "status_filter": status_filter,
-        "n_total": n_total,
-        "n_active": n_active,
-        "n_proposed": n_proposed,
-        "n_completed": n_completed,
-        "n_paused": n_paused,
-        "n_rejected": n_rejected,
-        "n_30d": n_30d,
-        "n_winners": n_winners,
-        "n_losers": n_losers,
-        "win_rate": win_rate,
-        "avg_pnl_pct": round(avg_pnl_pct, 2),
-        "avg_dd": round(avg_dd, 2),
-        "avg_sharpe": round(avg_sharpe, 2) if avg_sharpe is not None else None,
-        "status_donut": status_donut,
-        "horizon_breakdown": horizon_breakdown,
-        "top_performers": top_performers,
-        "worst_performers": worst_performers,
-    })
+    # STAGE_ORDER, not the dict's insertion order: the page reads bottom of
+    # the ladder to top, the same direction risk to capital increases in.
+    stage_groups = [{"key": stage,
+                     "label": stage.replace("_", " "),
+                     "venue": _STAGE_VENUE[stage],
+                     "cards": by_stage.get(stage, [])}
+                    for stage in pp.STAGE_ORDER]
+    # A rule carrying a stage the pipeline does not recognise is a data fault,
+    # not a rule to hide.
+    for stage in sorted(set(by_stage) - set(pp.STAGE_ORDER)):
+        stage_groups.append({"key": stage, "label": stage.replace("_", " "),
+                             "venue": "unrecognised stage — not on the ladder",
+                             "cards": by_stage[stage]})
+
+    # `wanted`, not a one-level parent set: it is the same reachability walk
+    # the card loop uses to inherit a fork's definition, so every setup that
+    # renders on a card is a setup this denominator counts. A fork of a fork
+    # used to fall between the two.
+    backed = {n: s for n, s in setups.items() if n in wanted}
+    n_by_stage = {g["key"]: len(g["cards"]) for g in stage_groups}
+    return {
+        "stage_groups": stage_groups,
+        "n_rules": len(rules),
+        # The population the headband cell means by "STRATEGIES n active",
+        # printed on the page that cell deep-links to so the two numbers can be
+        # seen to reconcile instead of reading as a contradiction. This is the
+        # model's own `is_effectively_active()` and not `status == "active"`:
+        # a reduced rule still signals, and a paused rule whose paused_until
+        # has elapsed is running again even though nothing writes the column
+        # back.
+        "n_running": sum(1 for r in rules if r.is_effectively_active(now)),
+        "n_by_stage": n_by_stage,
+        # Summed here rather than with |add: in the template — the filter
+        # returns "" on a missing key, so a fresh install printed a blank
+        # where a 0 belongs.
+        "n_live_venue": (n_by_stage.get("live_small", 0)
+                         + n_by_stage.get("live_full", 0)),
+        # The unbacked ones are armed by construction (an inactive setup never
+        # enters `unbacked`), so they raise numerator and denominator alike —
+        # the counter stops hiding them without claiming they are on the ladder.
+        "n_setups": len(backed) + len(unbacked),
+        "n_armed": (len([s for s in backed.values() if s.is_active])
+                    + len(unbacked)),
+        "unbacked_setups": unbacked,
+        "ladder_n": ladder_n,
+        "ladder_hit_rate": (round(ladder_hits / ladder_n * 100, 1)
+                            if ladder_n else None),
+        "ladder_expectancy": (round(ladder_r_sum / ladder_n, 3)
+                              if ladder_n else None),
+        "stage_venues": empty["stage_venues"],
+    }
+
+
+def _hand_built_plans(status_filter=""):
+    """`strategies.Strategy` — the wizard's multi-leg trade plans.
+
+    Kept, and kept honest: nothing in the platform executes one. They are a
+    record of a plan the operator wrote. Deleting the section would lose that
+    record; leading with it is what made an install with twelve running rules
+    report zero strategies.
+    """
+    from strategies.models import Strategy
+
+    # Strategy.Meta.ordering is ["-created_at"], which rides into the GROUP BY
+    # of a values().annotate() and returns one row per plan — order on the
+    # selected column first.
+    counts = {r["status"]: r["n"] for r in
+              Strategy.objects.values("status").order_by("status")
+              .annotate(n=Count("id"))}
+    qs = Strategy.objects.order_by("-created_at").prefetch_related("legs")
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+    return {"plans": list(qs[:50]), "n_plans": sum(counts.values())}
+
+
+@login_required
+def strategies_list(request):
+    """What is running, at what stage, and how it is doing.
+
+    Two models answer to the word "strategy" and they are not the same animal.
+    `signals.RuleControl` rows are what the engine runs and the Phase-8 ladder
+    promotes. `strategies.Strategy` rows are trade plans the wizard writes and
+    nothing executes. This page leads with the first and labels the second.
+    """
+    status_filter = request.GET.get("status") or ""
+    ctx = {"page_id": "strategies", "status_filter": status_filter}
+    ctx.update(_promotion_ladder())
+    ctx.update(_hand_built_plans(status_filter))
+    return render(request, "dashboard/strategies_list.html", ctx)
 
 
 @login_required
@@ -1609,8 +2034,12 @@ def admin_dashboard(request):
     context["evo_applied_30d"] = RuleMutation.objects.filter(
         state=RuleMutation.STATE_APPLIED,
         applied_at__gte=now - timedelta(days=30)).count()
+    # The infix comes from `core.fork_names`, the module that owns the naming
+    # scheme, so this LIKE cannot outlive a rename of it. It is the loose form
+    # of the parser on purpose — a LIKE the DB can index, over a name shape
+    # nothing but `apply_evolution` writes.
     context["evo_forks_alive"] = RuleControl.objects.filter(
-        rule_name__contains="_evolved_v").count()
+        rule_name__contains=FORK_INFIX).count()
 
     return render(request, "dashboard/admin_dashboard.html", context)
 
@@ -1892,6 +2321,7 @@ def backtest_list(request):
     import json as _json
     from collections import Counter, defaultdict
     from backtester.models import BacktestRun
+    from dashboard.run_async import LOCK_TTL_SECONDS
     from instruments.models import Instrument
 
     runs = list(BacktestRun.objects.filter(user=request.user)
@@ -1903,16 +2333,30 @@ def backtest_list(request):
     n_failed = sum(1 for r in runs if r.status == "failed")
     n_pending = sum(1 for r in runs if r.status == "pending")
 
-    avg_return = round(
-        sum(r.total_return_pct or 0 for r in completed) / max(n_completed, 1), 2)
-    best = max((r.total_return_pct or 0 for r in completed), default=0)
-    worst = min((r.total_return_pct or 0 for r in completed), default=0)
-    avg_sharpe = round(
-        sum(r.sharpe_ratio or 0 for r in completed) / max(n_completed, 1), 2)
-    avg_win_rate = round(
-        sum(r.win_rate or 0 for r in completed) / max(n_completed, 1), 1)
-    avg_dd = round(
-        sum(r.max_drawdown_pct or 0 for r in completed) / max(n_completed, 1), 2)
+    # A run that has been queued or running longer than the platform's own
+    # in-flight lock TTL is not "still working" — the worker that owed it an
+    # answer is gone. Showing it as a live spinner forever is the same lie
+    # the permanently-pending rows told, so it gets its own state.
+    stale_before = timezone.now() - timedelta(seconds=LOCK_TTL_SECONDS)
+    for r in runs:
+        r.is_stale = (r.status in ("pending", "running")
+                      and r.created_at < stale_before)
+        r.is_live = r.status in ("pending", "running") and not r.is_stale
+    n_stale = sum(1 for r in runs if r.is_stale)
+
+    # None, not 0, when there is nothing completed to average: a 0% average
+    # return across zero runs is a measurement nobody made.
+    def _avg(attr):
+        if not completed:
+            return None
+        return sum(getattr(r, attr) or 0 for r in completed) / n_completed
+
+    avg_return = None if not completed else round(_avg("total_return_pct"), 2)
+    best = max((r.total_return_pct or 0 for r in completed), default=None)
+    worst = min((r.total_return_pct or 0 for r in completed), default=None)
+    avg_sharpe = None if not completed else round(_avg("sharpe_ratio"), 2)
+    avg_win_rate = None if not completed else round(_avg("win_rate"), 1)
+    avg_dd = None if not completed else round(_avg("max_drawdown_pct"), 2)
 
     # Status donut.
     status_donut = []
@@ -1964,9 +2408,14 @@ def backtest_list(request):
         "n_running": n_running,
         "n_failed": n_failed,
         "n_pending": n_pending,
+        "n_stale": n_stale,
+        # True while anything is genuinely in flight — the page polls itself
+        # only then, so a settled history is a static page again.
+        "has_live_runs": any(r.is_live for r in runs),
+        "stale_after_minutes": LOCK_TTL_SECONDS // 60,
         "avg_return": avg_return,
-        "best_return": round(best, 2),
-        "worst_return": round(worst, 2),
+        "best_return": None if best is None else round(best, 2),
+        "worst_return": None if worst is None else round(worst, 2),
         "avg_sharpe": avg_sharpe,
         "avg_win_rate": avg_win_rate,
         "avg_dd": avg_dd,
@@ -1981,17 +2430,33 @@ def backtest_list(request):
 
 @login_required
 def backtest_create(request):
-    """Create and launch a new backtest."""
-    import json as _json
+    """Create and launch a new backtest.
+
+    "Launch" is the operative word. This endpoint used to create the row
+    and return, with the three dispatch lines commented out and no
+    backtester.tasks module to import — so every click filed a request
+    that nothing ever picked up and the row sat on "pending" forever.
+
+    The row is now handed to a worker before this function returns, and
+    if it cannot be (no broker, or a plain non-XHR form POST) it is run
+    HERE rather than filing another abandoned pending row. Either way the
+    caller gets an answer that reflects what actually happened.
+    """
     from django.http import JsonResponse
     from backtester.models import BacktestRun
+    from backtester.tasks import (BacktestConfigError, resolve_strategy,
+                                  run_backtest as run_backtest_task)
+    from dashboard.run_async import maybe_dispatch_async
 
     if request.method != "POST":
         return JsonResponse({"ok": False, "error": "POST required"}, status=405)
 
     try:
         name = request.POST.get("name", "").strip() or "Untitled Backtest"
-        strategy_type = request.POST.get("strategy_type", "smc_signals")
+        # No default strategy: the old one was "smc_signals", which no engine
+        # here can honestly run. A missing field is a caller error, not a
+        # reason to silently pick a strategy the operator did not choose.
+        strategy_type = request.POST.get("strategy_type", "")
         symbols_raw = request.POST.get("symbols", "")
         symbols = [s.strip() for s in symbols_raw.split(",") if s.strip()]
         start_date = request.POST.get("start_date")
@@ -2007,6 +2472,19 @@ def backtest_create(request):
         if request.POST.get("timeframe"):
             params["timeframe"] = request.POST["timeframe"]
 
+        # Checked BEFORE the row exists so an unrunnable strategy comes back
+        # as an inline form error, instead of littering the history with a
+        # failed run the operator has to go read to learn what went wrong.
+        try:
+            resolve_strategy(strategy_type, params)
+        except BacktestConfigError as e:
+            return JsonResponse({"ok": False, "error": str(e)}, status=400)
+        if not symbols:
+            return JsonResponse(
+                {"ok": False,
+                 "error": "Select at least one symbol to backtest."},
+                status=400)
+
         run = BacktestRun.objects.create(
             user=request.user,
             name=name,
@@ -2018,12 +2496,42 @@ def backtest_create(request):
             parameters=params,
             status="pending",
         )
-        # TODO: dispatch celery task to actually run the backtest
-        # from backtester.tasks import run_backtest
-        # run_backtest.delay(run.id)
-        return JsonResponse({"ok": True, "id": run.id, "redirect": "/backtest/"})
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=400)
+
+    # The lock inside maybe_dispatch_async is per-job. Keying it on the run
+    # id rather than a constant is what lets two backtests be in flight at
+    # once — a shared key would 409 the second launch for the whole 15-minute
+    # lock TTL. Hyphenated because the string also becomes a cache key.
+    job = f"backtest-run-{run.id}"
+    resp = maybe_dispatch_async(request, run_backtest_task, job, "/backtest/",
+                                kwargs={"run_id": run.id})
+    if resp is not None:
+        if resp.status_code != 202:
+            # A 409 means the lock for this job is already held. Pass it
+            # through rather than dressing it up as a successful launch —
+            # reporting "ok" for a run nobody started is how the row got
+            # stranded on pending in the first place.
+            return resp
+        # Enqueued. The row stays "pending" — meaning QUEUED — until a worker
+        # claims it and marks it running. Completion arrives on the operator's
+        # /ws/eye/ socket via the run_async link callbacks.
+        return JsonResponse({"ok": True, "id": run.id, "queued": True,
+                             "redirect": "/backtest/"}, status=202)
+
+    # No async lane: broker down, or a plain form POST. Run it in the request
+    # rather than leaving behind the pending row this endpoint was fixed for.
+    # The task owns the status contract, so a failure here still settles the
+    # row on "failed" with a readable error instead of raising into a 500.
+    result = run_backtest_task(run_id=run.id)
+    run.refresh_from_db()
+    if run.status == "failed":
+        return JsonResponse({"ok": False, "id": run.id, "error": run.error},
+                            status=400)
+    return JsonResponse({"ok": True, "id": run.id, "queued": False,
+                         "trades": run.total_trades,
+                         "note": result.get("note", ""),
+                         "redirect": "/backtest/"})
 
 
 @login_required

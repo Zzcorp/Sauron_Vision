@@ -40,18 +40,18 @@
     <div class="card-header"><span class="card-title">Per-agent reliability</span></div>
     {% if rows %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
-      <thead><tr><th>Agent</th><th>Resolved</th><th>Pending</th><th>Accuracy</th><th>Brier</th><th>Trust ×</th><th>Verdict</th></tr></thead>
+    <table class="sv-perf-table sv-stack">
+      <thead><tr><th>Agent</th><th class="num">Resolved</th><th class="num">Pending</th><th class="num">Accuracy</th><th class="num">Brier</th><th class="num">Trust ×</th><th>Verdict</th></tr></thead>
       <tbody>
         {% for r in rows %}
           <tr>
-            <td>{{ r.agent }}</td>
-            <td>{{ r.total }}</td>
-            <td>{{ r.pending }}</td>
-            <td>{% if r.accuracy is not None %}{{ r.accuracy|floatformat:2 }}{% else %}—{% endif %}</td>
-            <td>{% if r.brier is not None %}{{ r.brier|floatformat:3 }}{% else %}—{% endif %}</td>
-            <td><strong style="color: {% if r.trust >= 1.15 %}var(--accent-green){% elif r.trust < 0.95 %}var(--accent-red){% else %}inherit{% endif %};">{{ r.trust|floatformat:2 }}×</strong></td>
-            <td style="font-size: 11px; color: var(--text-muted);">
+            <td class="sv-ident" data-label="Agent">{{ r.agent }}</td>
+            <td class="num" data-label="Resolved">{{ r.total }}</td>
+            <td class="num" data-label="Pending">{{ r.pending }}</td>
+            <td class="num" data-label="Accuracy">{% if r.accuracy is not None %}{{ r.accuracy|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td class="num" data-label="Brier">{% if r.brier is not None %}{{ r.brier|floatformat:3 }}{% else %}—{% endif %}</td>
+            <td class="num" data-label="Trust ×"><strong style="color: {% if r.trust >= 1.15 %}var(--accent-green){% elif r.trust < 0.95 %}var(--accent-red){% else %}inherit{% endif %};">{{ r.trust|floatformat:2 }}×</strong></td>
+            <td data-label="Verdict" style="font-size: 11px; color: var(--text-muted);">
                 {% if r.trust >= 1.15 %}Boosted — well-calibrated and accurate.
                 {% elif r.trust >= 1.0 %}Trusted — average reliability.
                 {% elif r.trust >= 0.7 %}Damped — below-average accuracy.
@@ -76,19 +76,19 @@
     <div class="card-header"><span class="card-title">Recent resolutions</span></div>
     {% if recent_resolved %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
-      <thead><tr><th>Agent</th><th>Type</th><th>Predicted</th><th>Actual</th><th>Confidence</th><th>Score</th><th>Correct?</th><th>Resolved</th></tr></thead>
+    <table class="sv-perf-table sv-stack">
+      <thead><tr><th>Agent</th><th>Type</th><th>Predicted</th><th>Actual</th><th class="num">Confidence</th><th class="num">Score</th><th>Correct?</th><th>Resolved</th></tr></thead>
       <tbody>
         {% for p in recent_resolved %}
           <tr>
-            <td>{{ p.agent }}</td>
-            <td>{{ p.prediction_type }}</td>
-            <td>{{ p.predicted_value|truncatechars:30 }}</td>
-            <td>{{ p.actual_value|truncatechars:30 }}</td>
-            <td>{{ p.confidence|floatformat:2 }}</td>
-            <td class="{% if p.score and p.score > 0 %}up{% elif p.score and p.score < 0 %}down{% endif %}">{% if p.score is not None %}{{ p.score|floatformat:2 }}{% else %}—{% endif %}</td>
-            <td>{% if p.was_correct %}<span style="color: var(--accent-green);">✓</span>{% else %}<span style="color: var(--accent-red);">✗</span>{% endif %}</td>
-            <td style="font-size: 11px; color: var(--text-muted);">{{ p.evaluated_at|timesince }} ago</td>
+            <td class="sv-ident" data-label="Agent">{{ p.agent }}</td>
+            <td class="sv-ident" data-label="Type">{{ p.prediction_type }}</td>
+            <td data-label="Predicted">{{ p.predicted_value|truncatechars:30 }}</td>
+            <td data-label="Actual">{{ p.actual_value|truncatechars:30 }}</td>
+            <td class="num" data-label="Confidence">{{ p.confidence|floatformat:2 }}</td>
+            <td class="num {% if p.score and p.score > 0 %}up{% elif p.score and p.score < 0 %}down{% endif %}" data-label="Score">{% if p.score is not None %}{{ p.score|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td data-label="Correct?">{% if p.was_correct %}<span style="color: var(--accent-green);">✓</span>{% else %}<span style="color: var(--accent-red);">✗</span>{% endif %}</td>
+            <td class="nowrap" data-label="Resolved" style="font-size: 11px; color: var(--text-muted);">{{ p.evaluated_at|timesince }} ago</td>
           </tr>
         {% endfor %}
       </tbody>
@@ -103,17 +103,17 @@
     <div class="card-header"><span class="card-title">Pending — awaiting ground truth</span></div>
     {% if recent_pending %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
-      <thead><tr><th>Agent</th><th>Type</th><th>Predicted</th><th>Confidence</th><th>Created</th><th>Resolves</th></tr></thead>
+    <table class="sv-perf-table sv-stack">
+      <thead><tr><th>Agent</th><th>Type</th><th>Predicted</th><th class="num">Confidence</th><th>Created</th><th>Resolves</th></tr></thead>
       <tbody>
         {% for p in recent_pending %}
           <tr>
-            <td>{{ p.agent }}</td>
-            <td>{{ p.prediction_type }}</td>
-            <td>{{ p.predicted_value|truncatechars:30 }}</td>
-            <td>{{ p.confidence|floatformat:2 }}</td>
-            <td style="font-size: 11px; color: var(--text-muted);">{{ p.created_at|timesince }} ago</td>
-            <td style="font-size: 11px;">{% if p.expected_resolution_at %}~{{ p.expected_resolution_at|date:"M d" }}{% else %}—{% endif %}</td>
+            <td class="sv-ident" data-label="Agent">{{ p.agent }}</td>
+            <td class="sv-ident" data-label="Type">{{ p.prediction_type }}</td>
+            <td data-label="Predicted">{{ p.predicted_value|truncatechars:30 }}</td>
+            <td class="num" data-label="Confidence">{{ p.confidence|floatformat:2 }}</td>
+            <td class="nowrap" data-label="Created" style="font-size: 11px; color: var(--text-muted);">{{ p.created_at|timesince }} ago</td>
+            <td class="nowrap" data-label="Resolves" style="font-size: 11px;">{% if p.expected_resolution_at %}~{{ p.expected_resolution_at|date:"M d" }}{% else %}—{% endif %}</td>
           </tr>
         {% endfor %}
       </tbody>

@@ -34,7 +34,10 @@ Robustness layers (the "non-falling" design)
   * Decoupled from actuator — writes to `RuleControl.allocator_weight`, never
     touches `weight_multiplier` (admin's lane). Effective sizing = product of
     both, computed in `rule_actuator.rule_size_multiplier`.
-  * Skips paused/reduced rules — admin's manual decisions take precedence.
+  * Skips rules that are not RUNNING (`RuleControl.running_q()`) — an admin
+    pause still in force takes precedence. A `reduced` rule IS budgeted: it is
+    still trading, just smaller, and the two lanes multiply rather than
+    exclude each other.
 
 Public API
 ----------
@@ -98,7 +101,20 @@ ALLOCATOR_MULTIPLIER_MAX = 3.00
 # ── Data collection ─────────────────────────────────────────────────────────
 
 def _collect_rule_stats(lookback_days: int) -> dict:
-    """Per-rule stats from Phase-1 realized_r data, restricted to active rules.
+    """Per-rule stats from Phase-1 realized_r data, restricted to RUNNING rules.
+
+    "Running" is `RuleControl.running_q()`, not `status="active"`. The narrower
+    filter dropped two populations that are trading:
+
+      - `reduced` rules, which the actuator deliberately keeps live at a smaller
+        size — the allocator was budgeting risk as though they were flat;
+      - rules whose pause has EXPIRED. Nothing writes the status column back to
+        "active" on expiry, so once a 30-day pause elapsed the rule resumed
+        emitting signals while being excluded from every rebalance from then on.
+        It kept the `allocator_weight` frozen at whatever it carried the day it
+        was paused — anywhere from 0.10 to 3.00 of a uniform share — with
+        nothing left that could re-budget it, and `_to_allocator_multipliers`
+        divided the book across a denominator short by one.
 
     Returns: {rule_name: {"n": int, "mean": float, "std": float, "rs": list}}
     """
@@ -117,16 +133,28 @@ def _collect_rule_stats(lookback_days: int) -> dict:
     for rn, r in qs:
         by_rule.setdefault(rn, []).append(float(r))
 
-    # Filter to active rules only — paused/reduced rules are admin-controlled.
-    active_rules = set(
-        RuleControl.objects.filter(status=RuleControl.STATUS_ACTIVE)
+    # Filter to the rules the engine is actually running — a rule an admin has
+    # paused (and not yet served out) contributes nothing to allocate.
+    #
+    # Two sets, not one. `if running_rules and rn not in running_rules` read as
+    # "skip rules that are not running", but its guard fired on the wrong
+    # condition: with every rule paused the running set is EMPTY, the guard
+    # goes false, and the allocator budgets the whole book — the exact rules
+    # the admin took off it. A rule with no control row at all is a different
+    # case and must still be budgeted: a missing row means "not yet governed",
+    # which the rest of the platform treats as running (rule_actuator's
+    # stage_policy defaults a missing row to paper rather than to silence).
+    controlled = set(
+        RuleControl.objects.values_list("rule_name", flat=True))
+    running_rules = set(
+        RuleControl.objects.filter(RuleControl.running_q())
         .values_list("rule_name", flat=True)
     )
 
     stats = {}
     for rn, rs in by_rule.items():
-        if active_rules and rn not in active_rules:
-            # Rule has a control entry that's not active. Skip.
+        if rn in controlled and rn not in running_rules:
+            # Governed, and its governor says it is not running.
             continue
         if not rs:
             continue
@@ -353,7 +381,7 @@ def propose_allocation(lookback_days: int = 180) -> "MetaAllocation":
         },
         rules_considered=len(rules),
         rules_skipped=0,
-        notes=f"Sample tier {tier}; {len(rules)} active rule(s) considered.",
+        notes=f"Sample tier {tier}; {len(rules)} running rule(s) considered.",
     )
     logger.info("[allocator] proposed allocation #%s tier=%s rules=%d",
                 alloc.id, tier, len(rules))
@@ -382,8 +410,11 @@ def apply_allocation(allocation_id: int, user) -> "MetaAllocation":
             defaults={"status": RuleControl.STATUS_ACTIVE,
                       "weight_multiplier": 1.0, "allocator_weight": 1.0},
         )
-        # Only touch active rules — admin's pause/reduce decisions take precedence.
-        if ctrl.status != RuleControl.STATUS_ACTIVE:
+        # Only touch rules that are RUNNING — an admin pause still in force takes
+        # precedence. `is_effectively_active()` and not `status == "active"`, so
+        # a rule whose pause elapsed between propose and apply gets its budget
+        # written instead of being frozen at the value it carried into the pause.
+        if not ctrl.is_effectively_active():
             continue
         previous[rule_name] = ctrl.allocator_weight
         ctrl.allocator_weight = float(new_mult)

@@ -1,6 +1,9 @@
 {# BOTS tab — per-AssetBotConfig overview with health + cooldown. #}
 
 {# ── 1. Top stat strip ────────────────────────────────────────────── #}
+{# With no bot configured there is no population to count enabled, live or #}
+{# alive members of, and a red "0" under ALIVE 6H reads as "your bots died" #}
+{# rather than "you have none". The colour keys off n_configs for that. #}
 <div class="oc-strip">
     <div class="oc-strip-cell">
         <span class="oc-strip-label">CONFIGS</span>
@@ -9,18 +12,18 @@
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">ENABLED</span>
-        <span class="oc-strip-value {% if n_enabled %}up{% endif %}">{{ n_enabled }}</span>
+        <span class="oc-strip-value {% if n_configs and n_enabled %}up{% endif %}">{{ n_enabled }}</span>
         <span class="oc-strip-sub">currently scanning</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">LIVE-MODE</span>
-        <span class="oc-strip-value {% if n_live %}up{% endif %}">{{ n_live }}</span>
+        <span class="oc-strip-value {% if n_configs and n_live %}up{% endif %}">{{ n_live }}</span>
         <span class="oc-strip-sub">real-money bots</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">ALIVE 6H</span>
-        <span class="oc-strip-value {% if n_alive %}up{% else %}down{% endif %}">{{ n_alive }}</span>
-        <span class="oc-strip-sub">recent trade activity</span>
+        <span class="oc-strip-value {% if not n_configs %}{% elif n_alive %}up{% else %}down{% endif %}">{{ n_alive }}</span>
+        <span class="oc-strip-sub">{% if n_configs %}recent trade activity{% else %}no bots to watch{% endif %}</span>
     </div>
 </div>
 
@@ -71,7 +74,9 @@
                 <td>{{ r.open_count }}</td>
                 <td>{{ r.opens_24h }}</td>
                 <td>{{ r.closed_24h }}</td>
-                <td class="{% if r.pnl_24h > 0 %}up{% elif r.pnl_24h < 0 %}down{% endif %}">{{ r.pnl_24h|floatformat:2 }}</td>
+                {# Nothing closed in 24h is not a break-even day: floatformat #}
+                {# on a None sum leaves the cell blank, a "0.00" claims flat. #}
+                <td class="{% if r.pnl_24h > 0 %}up{% elif r.pnl_24h < 0 %}down{% endif %}">{% if r.pnl_24h is not None %}{{ r.pnl_24h|floatformat:2 }}{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
                 <td>
                     {% if r.cooldown_remaining_min > 0 %}
                         <span style="color:#ffb000;font-family:var(--font-mono);font-size:11px;">

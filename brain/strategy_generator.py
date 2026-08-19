@@ -43,11 +43,28 @@ def _build_generation_snapshot() -> dict:
     snap = {"as_of": timezone.now().isoformat()}
 
     # 1. Catalog of registered evaluator kinds — agent must pick from this list.
+    #
+    # Kind names alone are not a vocabulary. Handed only the names, the model
+    # invented plausible params (`{"regime": "low"}` on volatility_regime),
+    # every one of which the evaluator ignored — the condition then ran on
+    # defaults, which for that example is the exact inversion of what was
+    # asked for. Ship the accepted keys and the closed value sets so the model
+    # is copying a contract rather than guessing at one, and so the validator's
+    # rejections are avoidable rather than arbitrary.
     try:
-        from signals.opportunity_scanner import EVALUATOR_REGISTRY
-        snap["available_evaluators"] = sorted(EVALUATOR_REGISTRY.keys())
+        from signals.opportunity_scanner import (
+            EVALUATOR_REGISTRY, SIZING_KEYS, param_choices, param_keys,
+        )
+        snap["available_evaluators"] = [
+            {"kind": kind,
+             "params": sorted(param_keys(kind)),
+             "choices": {k: sorted(v) for k, v in param_choices(kind).items()}}
+            for kind in sorted(EVALUATOR_REGISTRY.keys())
+        ]
+        snap["accepted_sizing_keys"] = sorted(SIZING_KEYS)
     except Exception:
         snap["available_evaluators"] = []
+        snap["accepted_sizing_keys"] = []
 
     # 2. Top 10 currently best-performing rules (last 60d) — composition signal.
     try:
@@ -113,7 +130,7 @@ GENERATOR_SCHEMA = """{
       "asset_classes": ["stock", "etf", "forex", "crypto", "commodity"],
       "conditions": [
         {"kind": "MUST_BE_FROM_AVAILABLE_EVALUATORS",
-         "params": {...},
+         "params": {"ONLY_KEYS_LISTED_FOR_THAT_KIND": "ONLY_LISTED_CHOICES"},
          "weight": 0.5..2.0}
       ],
       "min_match_score": 0.5..0.85,
@@ -140,7 +157,13 @@ class StrategyGeneratorAgent(BaseAgent):
             "Hard rules:\n"
             "1. You may ONLY use evaluator `kind` values from the "
             "`available_evaluators` list in the snapshot. Inventing a new "
-            "evaluator kind is forbidden — those require code.\n"
+            "evaluator kind is forbidden — those require code. Each entry "
+            "lists the `params` keys that evaluator reads and, for the params "
+            "with a closed vocabulary, the `choices` it accepts. A key or a "
+            "value outside those lists is not a variation, it is a dead "
+            "condition: the evaluator never reads it and silently runs on its "
+            "defaults. Proposals carrying one are rejected outright. Use only "
+            "`accepted_sizing_keys` in `sizing` for the same reason.\n"
             "2. Do NOT trivially duplicate `existing_active_setups`. Your "
             "value is in NOVEL combinations, not me-toos. Read existing "
             "setups; propose something materially different.\n"
@@ -201,6 +224,63 @@ ALLOWED_ASSET_CLASSES = {"stock", "etf", "forex", "crypto", "commodity",
 SLUG_RE = re.compile(r"^[a-z0-9_]{1,30}$")
 
 
+def validate_conditions(conds) -> tuple[bool, str]:
+    """Return (ok, error_reason) for a list of `{kind, params, weight}` dicts.
+
+    Checking the `kind` alone was never enough. An unregistered kind is loud —
+    the scanner reports "unknown kind" — but a REGISTERED kind carrying a param
+    the evaluator never reads is silent: the condition runs on defaults for the
+    life of the setup, and on the two-branch evaluators an unrecognised
+    `direction` value does not go quiet, it selects the opposite branch. That
+    is the whole bug class the starter pack was just repaired for.
+
+    Every path that writes a setup a model or a human composed passes through
+    here: `validate_proposal` on the generated path, `approval_blocker` again at
+    arming time, and `dashboard.views_admin_hq.hq_create_opportunity_setup` on
+    the operator's own form. That last one is named explicitly because it used
+    to be the exception this docstring claimed did not exist — it wrote raw
+    `json.loads` output straight into `objects.create(..., is_active=True)`.
+    There is no backstop under any of them: `OpportunitySetup` defines no
+    `clean()`, and `.objects.create()` never calls `full_clean()`.
+    """
+    if not isinstance(conds, list) or not conds:
+        return False, "conditions must be a non-empty list"
+
+    try:
+        from signals.opportunity_scanner import (
+            EVALUATOR_REGISTRY, invalid_param_values, param_keys,
+            unknown_param_keys,
+        )
+        registered = set(EVALUATOR_REGISTRY)
+    except Exception:
+        return False, "evaluator registry unavailable"
+
+    for c in conds:
+        if not isinstance(c, dict):
+            return False, "condition is not a dict"
+        kind = c.get("kind")
+        if kind not in registered:
+            return False, f"unknown evaluator kind {kind!r}"
+        params = c.get("params") or {}
+        if not isinstance(params, dict):
+            return False, f"params on {kind!r} is not an object"
+        unknown = unknown_param_keys(kind, params)
+        if unknown:
+            return False, (f"{kind!r} params {unknown} are never read by that "
+                           f"evaluator (accepted: {sorted(param_keys(kind))})")
+        bad_values = invalid_param_values(kind, params)
+        if bad_values:
+            return False, f"{kind!r} params out of vocabulary: {bad_values}"
+        try:
+            w = float(c.get("weight", 1.0))
+        except (TypeError, ValueError):
+            return False, f"bad weight on {kind!r}"
+        if not (0.1 <= w <= 5.0):
+            return False, f"weight {w} out of [0.1, 5.0] on {kind!r}"
+
+    return True, ""
+
+
 def validate_proposal(proposal: dict) -> tuple[bool, str]:
     """Return (ok, error_reason). Lightweight schema/sanity check."""
     if not isinstance(proposal, dict):
@@ -220,28 +300,24 @@ def validate_proposal(proposal: dict) -> tuple[bool, str]:
     if bad:
         return False, f"unknown asset_classes: {bad}"
 
-    conds = proposal.get("conditions")
-    if not isinstance(conds, list) or not conds:
-        return False, "conditions must be a non-empty list"
+    ok, reason = validate_conditions(proposal.get("conditions"))
+    if not ok:
+        return False, reason
 
-    try:
-        from signals.opportunity_scanner import EVALUATOR_REGISTRY
-        registered = set(EVALUATOR_REGISTRY)
-    except Exception:
-        return False, "evaluator registry unavailable"
-
-    for c in conds:
-        if not isinstance(c, dict):
-            return False, "condition is not a dict"
-        kind = c.get("kind")
-        if kind not in registered:
-            return False, f"unknown evaluator kind {kind!r}"
+    sizing = proposal.get("sizing")
+    if sizing is not None:
+        if not isinstance(sizing, dict):
+            return False, "sizing is not an object"
         try:
-            w = float(c.get("weight", 1.0))
-        except (TypeError, ValueError):
-            return False, f"bad weight on {kind!r}"
-        if not (0.1 <= w <= 5.0):
-            return False, f"weight {w} out of [0.1, 5.0] on {kind!r}"
+            from signals.opportunity_scanner import (
+                SIZING_KEYS, unknown_sizing_keys,
+            )
+        except Exception:
+            return False, "evaluator registry unavailable"
+        dead = unknown_sizing_keys(sizing)
+        if dead:
+            return False, (f"sizing keys {dead} are never read; accepted: "
+                           f"{sorted(SIZING_KEYS)}")
 
     try:
         mms = float(proposal.get("min_match_score", 0.6))
@@ -361,12 +437,46 @@ def _persist_proposal(proposal: dict, *, model: str, tokens_in: int,
 
 # ── Approve / Reject / Expire ─────────────────────────────────────────────
 
+def approval_blocker(proposal) -> str:
+    """Why `approve_proposal` would refuse to arm this proposal, or "" if it
+    would arm it.
+
+    Split out of `approve_proposal` because the refusal reason is the only part
+    of it an operator can act on, and a bool cannot carry one. The approve view
+    clicks a button and gets back False; without this, the reason it was False
+    exists only in the web worker's log.
+    """
+    if proposal.status != proposal.STATUS_PENDING:
+        return f"already {proposal.status} — only a pending proposal can be armed"
+    if proposal.setup is None:
+        return "the draft setup this proposal pointed at no longer exists"
+    # Re-checked at the moment of arming, not only at proposal time. A pending
+    # proposal can sit for two weeks, and approval is the step that makes it
+    # scan; the reviewer is shown a rationale, not a param audit, so an
+    # evaluator whose accepted keys changed underneath the row must not be
+    # waved through on the strength of a validation that ran a fortnight ago.
+    #
+    # This fires TODAY, not at some future tightening: `validate_conditions` was
+    # widened from kind-only to kind + unknown keys + out-of-vocabulary values,
+    # and every proposal already sitting at PENDING was written under the old
+    # rule. The first click on one carrying an invented param key lands here.
+    ok, reason = validate_conditions(proposal.setup.conditions)
+    if not ok:
+        return reason
+    return ""
+
+
 def approve_proposal(proposal, *, reviewed_by: str = "",
                      notes: str = "") -> bool:
-    """Flip the linked OpportunitySetup to is_active=True. Returns success."""
-    if proposal.status != proposal.STATUS_PENDING:
-        return False
-    if proposal.setup is None:
+    """Flip the linked OpportunitySetup to is_active=True. Returns success.
+
+    Callers that can show a human a message should ask `approval_blocker` for
+    the reason on a False return rather than swallowing it.
+    """
+    blocker = approval_blocker(proposal)
+    if blocker:
+        logger.warning("[generator] refusing to arm %s: %s",
+                       proposal.proposed_name, blocker)
         return False
     proposal.setup.is_active = True
     proposal.setup.save(update_fields=["is_active", "updated_at"])

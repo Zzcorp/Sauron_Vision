@@ -115,15 +115,15 @@
     {% if sym_rows %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th>Symbol</th><th>Class</th><th>Lots</th><th>Qty</th><th>Cost basis</th></tr></thead>
+        <thead><tr><th>Symbol</th><th>Class</th><th class="num">Lots</th><th class="num">Qty</th><th class="num">Cost basis</th></tr></thead>
         <tbody>
         {% for r in sym_rows %}
             <tr>
                 <td><strong>{{ r.symbol }}</strong></td>
                 <td><span class="badge badge-medium">{{ r.asset_class }}</span></td>
-                <td>{{ r.lots }}</td>
-                <td>{{ r.qty }}</td>
-                <td>{{ r.cost_basis_total|floatformat:2 }}</td>
+                <td class="num">{{ r.lots }}</td>
+                <td class="num">{{ r.qty }}</td>
+                <td class="num">{{ r.cost_basis_total|floatformat:2 }}</td>
             </tr>
         {% endfor %}
         </tbody>
@@ -138,17 +138,17 @@
     <div class="card-header"><span class="card-title">All Open Lots ({{ open_lots|length }})</span></div>
     {% if open_lots %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
-        <thead><tr><th>Opened</th><th>Symbol</th><th>Class</th><th>Qty rem / init</th><th>Cost basis / unit</th><th>Method</th></tr></thead>
+    <table class="sv-perf-table sv-stack">
+        <thead><tr><th>Opened</th><th>Symbol</th><th>Class</th><th class="num">Qty rem / init</th><th class="num">Cost basis / unit</th><th>Method</th></tr></thead>
         <tbody>
         {% for lot in open_lots %}
             <tr>
-                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ lot.opened_at|date:"Y-m-d" }}</td>
-                <td><strong>{{ lot.symbol }}</strong></td>
-                <td><span class="badge badge-medium">{{ lot.asset_class }}</span></td>
-                <td>{{ lot.qty_remaining }} / {{ lot.qty_initial }}</td>
-                <td>{{ lot.cost_basis_per_unit }}</td>
-                <td style="font-size:11px;">{{ lot.method_at_open }}</td>
+                <td class="nowrap" data-label="Opened" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ lot.opened_at|date:"Y-m-d" }}</td>
+                <td data-label="Symbol"><strong>{{ lot.symbol }}</strong></td>
+                <td data-label="Class"><span class="badge badge-medium">{{ lot.asset_class }}</span></td>
+                <td class="num" data-label="Qty rem / init">{{ lot.qty_remaining }} / {{ lot.qty_initial }}</td>
+                <td class="num" data-label="Cost / unit">{{ lot.cost_basis_per_unit }}</td>
+                <td data-label="Method" style="font-size:11px;">{{ lot.method_at_open }}</td>
             </tr>
         {% endfor %}
         </tbody>
@@ -163,18 +163,18 @@
     <div class="card-header"><span class="card-title">Recent Sales (Consumptions)</span></div>
     {% if recent_consumptions %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
-        <thead><tr><th>Sold</th><th>Symbol</th><th>Qty</th><th>Sale price</th><th>Held</th><th>Period</th><th>Gain</th></tr></thead>
+    <table class="sv-perf-table sv-stack">
+        <thead><tr><th>Sold</th><th>Symbol</th><th class="num">Qty</th><th class="num">Sale price</th><th class="num">Held</th><th>Period</th><th class="num">Gain</th></tr></thead>
         <tbody>
         {% for c in recent_consumptions %}
             <tr>
-                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ c.sold_at|date:"Y-m-d H:i" }}</td>
-                <td><strong>{{ c.lot.symbol }}</strong></td>
-                <td>{{ c.qty_consumed }}</td>
-                <td>{{ c.sale_price_per_unit }}</td>
-                <td>{{ c.holding_period_days }}d</td>
-                <td>{% if c.long_term %}<span class="up">LT</span>{% else %}<span style="color:var(--accent-gold);">ST</span>{% endif %}</td>
-                <td class="{% if c.realized_gain > 0 %}up{% elif c.realized_gain < 0 %}down{% endif %}">{{ c.realized_gain|floatformat:2 }}</td>
+                <td class="nowrap" data-label="Sold" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ c.sold_at|date:"Y-m-d H:i" }}</td>
+                <td data-label="Symbol"><strong>{{ c.lot.symbol }}</strong></td>
+                <td class="num" data-label="Qty">{{ c.qty_consumed }}</td>
+                <td class="num" data-label="Sale price">{{ c.sale_price_per_unit }}</td>
+                <td class="num" data-label="Held">{{ c.holding_period_days }}d</td>
+                <td data-label="Period">{% if c.long_term %}<span class="up">LT</span>{% else %}<span style="color:var(--accent-gold);">ST</span>{% endif %}</td>
+                <td class="num {% if c.realized_gain > 0 %}up{% elif c.realized_gain < 0 %}down{% endif %}" data-label="Gain">{{ c.realized_gain|floatformat:2 }}</td>
             </tr>
         {% endfor %}
         </tbody>

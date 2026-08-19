@@ -1074,6 +1074,20 @@
             font-size: 15px; transition: all 0.2s; color: var(--text-secondary);
         }
         .notif-bell:hover { border-color: var(--accent); color: var(--accent); }
+        /* Live updates are off: a fill will still land in the inbox and the
+           counters still move on the fallback poll, but no banner will
+           announce it. Said quietly and permanently rather than leaving the
+           operator to discover it by opening a trade and seeing nothing. */
+        .notif-bell.is-offline { border-color: var(--accent-gold); }
+        .notif-bell.is-offline::after {
+            content: ""; position: absolute; bottom: -1px; right: -1px;
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--accent-gold);
+            border: 1.5px solid var(--bg-primary);
+        }
+        body.light-mode .notif-bell.is-offline::after {
+            border-color: var(--bg-card);
+        }
         .notif-badge {
             position: absolute; top: -4px; right: -4px;
             min-width: 16px; height: 16px; border-radius: 8px;
@@ -3610,6 +3624,377 @@
     text-wrap: balance;
 }
 
+/* ── 3b. One grid, one hover tempo ───────────────────────────────────────
+   §3 above hands .card `transition: … .15s ease` while the unified card
+   recipe (~2096) still hands .stat-box / .metric / .signal-item `all .35s`.
+   Every dashboard here puts those in the same grid, so two neighbouring
+   tiles under the same pointer lifted at different speeds — which the eye
+   reads as one of them lagging, not as two styles.
+
+   Settled on the newer, faster tempo: a hover is an acknowledgement, and
+   .35s is long enough that the pointer has already moved on. Written as an
+   explicit property list rather than `all`, because `all` also transitions
+   width — which is how a stage bar that is supposed to fill once ends up
+   easing every time the card is hovered.                                  */
+:root {
+    --card-hover-dur: .18s;
+    --card-hover-ease: cubic-bezier(.2, .8, .2, 1);
+}
+.card, .stat-box, .metric, .signal-item {
+    transition: border-color var(--card-hover-dur) var(--card-hover-ease),
+                transform    var(--card-hover-dur) var(--card-hover-ease),
+                box-shadow   var(--card-hover-dur) var(--card-hover-ease),
+                background   var(--card-hover-dur) var(--card-hover-ease);
+}
+
+/* ── 3c. Strategy ladder cards ───────────────────────────────────────────
+   The Strategies page's real estate: one card per RuleControl row, grouped
+   by promotion stage. Built ON the .card recipe above — the hairline, the
+   accent bar, the lift and now the tempo are all inherited — so this block
+   only adds what is specific to a rule: the gate meter, the criteria list,
+   the record row. Every colour is a token, so light mode follows for free. */
+.sc-strip { margin-bottom: 18px; }
+
+.sc-venues { margin-bottom: 22px; }
+.sc-venues-lede {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+    margin-bottom: 12px;
+}
+.sc-venue-list { list-style: none; display: grid; gap: 7px; }
+.sc-venue-row {
+    display: flex; align-items: baseline; gap: 10px;
+    flex-wrap: wrap;
+}
+.sc-venue-text {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.sc-heading { margin: 26px 0 12px; }
+.sc-heading-title {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-primary);
+}
+.sc-heading-sub {
+    margin-top: 5px;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    max-width: 68ch;
+}
+
+.sc-stage { margin-bottom: 22px; }
+.sc-stage-head {
+    display: flex; align-items: baseline; gap: 10px;
+    flex-wrap: wrap;
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+.sc-stage-title {
+    font-family: var(--font-heading);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: var(--text-primary);
+}
+.sc-stage-count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    padding: 1px 7px;
+    border: 1px solid var(--border-glow);
+    border-radius: 10px;
+}
+.sc-stage-venue {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+.sc-stage-empty {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: .6px;
+    color: var(--text-muted);
+    padding: 8px 2px;
+}
+
+.sc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+    gap: 14px;
+}
+.sc-card {
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+}
+.sc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.sc-name {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    letter-spacing: .2px;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+.sc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sc-venue-line {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+/* The stage chips carry the ladder's own ordering in colour: research is
+   unlit, live_full is the accent. `.sv-chip` (sv-overlay.css) loads AFTER
+   this file and sets its own background, so these have to be compound
+   selectors to win — a bare .sc-chip--* would silently lose. */
+.sv-chip.sc-chip--research {
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
+}
+.sv-chip.sc-chip--paper {
+    color: var(--accent-blue);
+    background: color-mix(in srgb, var(--accent-blue) 15%, transparent);
+}
+.sv-chip.sc-chip--live_small {
+    color: var(--accent-gold);
+    background: color-mix(in srgb, var(--accent-gold) 16%, transparent);
+}
+.sv-chip.sc-chip--live_full {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* ── The gate: how far this rule is from its next venue ── */
+.sc-gate {
+    padding: 10px 0 0;
+    border-top: 1px dashed var(--border);
+}
+.sc-gate-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.sc-gate-label {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.sc-gate-pct {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+.sc-gate-meter { margin: 7px 0 6px; }
+/* The fill animates once, from 0 to the rule's real progress, so the sweep
+   IS the measurement. The width lives here and not in JS, so a browser that
+   runs no script still shows the true value.
+
+   `display: block` is load-bearing, not tidiness. The fill is a <span> inside
+   `.sv-meter-track`, which is a plain block container (its own parent is the
+   flex box, so blockification stops at the track and never reaches this
+   child). Width and height do not apply to a non-replaced inline box, so
+   without this the span had a zero-sized content box and every gate meter on
+   the page painted an empty groove at every stage and every percentage —
+   the one piece of motion that was supposed to explain promotion progress
+   drawing nothing. `.ipr-meter-fill`, the sibling component that works,
+   declares exactly this. */
+.sv-meter-fill.sc-gate-fill {
+    display: block;
+    width: var(--sc-fill, 0%);
+    transition: width .85s var(--card-hover-ease);
+}
+.sc-card[data-stage="research"]   .sv-meter-fill.sc-gate-fill { background: var(--text-secondary); }
+.sc-card[data-stage="paper"]      .sv-meter-fill.sc-gate-fill { background: var(--accent-blue); }
+.sc-card[data-stage="live_small"] .sv-meter-fill.sc-gate-fill { background: var(--accent-gold); }
+.sc-card[data-stage="live_full"]  .sv-meter-fill.sc-gate-fill { background: var(--accent); }
+.sc-gate-why {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+.sc-gate-list { list-style: none; display: grid; gap: 3px; margin-top: 8px; }
+.sc-gate-item {
+    display: flex; justify-content: space-between; gap: 10px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+}
+.sc-gate-item.is-met .sc-gate-v { color: var(--accent); }
+.sc-gate-k { letter-spacing: .3px; }
+.sc-gate-v { color: var(--text-primary); white-space: nowrap; }
+.sc-gate-need { color: var(--text-muted); }
+
+/* ── The record the ladder judges on ── */
+.sc-record {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    padding: 10px 0;
+    border-top: 1px dashed var(--border);
+}
+.sc-metric { display: flex; flex-direction: column; gap: 3px; }
+.sc-k {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 1.2px;
+    color: var(--text-muted);
+}
+.sc-v {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+
+/* ── The conditions behind the rule ── */
+.sc-setup { border-top: 1px dashed var(--border); padding-top: 9px; }
+.sc-setup-sum {
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: .4px;
+    color: var(--text-secondary);
+}
+.sc-setup-sum:hover { color: var(--accent); }
+.sc-cond { list-style: none; display: grid; gap: 5px; margin: 9px 0 0; }
+.sc-cond-row {
+    display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap;
+    font-size: 11px;
+}
+.sc-cond-kind {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--accent);
+    background: var(--bg-void);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+}
+.sc-cond-detail { color: var(--text-muted); overflow-wrap: anywhere; }
+.sc-cond-w { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.sc-setup-foot, .sc-setup-none {
+    margin-top: 9px;
+    font-size: 10.5px;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+.sc-setup-none { border-top: 1px dashed var(--border); padding-top: 9px; margin-top: 0; }
+
+/* ── Evolution forks hanging off this rule ── */
+.sc-forks { display: grid; gap: 5px; }
+.sc-fork {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-muted);
+}
+.sc-fork-k {
+    font-size: 9px;
+    letter-spacing: 1.1px;
+    color: var(--text-secondary);
+}
+.sc-fork--open .sc-fork-k { color: var(--accent-gold); }
+.sc-fork-v { overflow-wrap: anywhere; }
+
+.sc-foot {
+    margin-top: auto;
+    padding-top: 9px;
+    border-top: 1px solid var(--border);
+    display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    font-size: 10.5px;
+    color: var(--text-muted);
+}
+.sc-links { display: flex; gap: 9px; flex-wrap: wrap; }
+.sc-links a, .sc-plan-link, .sc-plans-lede a, .sc-empty a {
+    color: var(--accent);
+    text-decoration: none;
+}
+.sc-links a:hover, .sc-plan-link:hover, .sc-plans-lede a:hover, .sc-empty a:hover {
+    text-decoration: underline;
+}
+.sc-empty code, .sc-orphans-lede code {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    background: var(--bg-void);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+}
+.sc-plan-link { color: var(--text-primary); }
+
+/* A count that animates on every load teaches the eye to ignore it. This
+   one only fires when the value differs from what the browser last saw. */
+@keyframes scCountChanged {
+    0%   { color: var(--accent); text-shadow: 0 0 14px var(--accent-glow); }
+    100% { color: inherit; text-shadow: none; }
+}
+.sc-changed { animation: scCountChanged 1.4s ease-out 1; }
+
+/* ── Armed, but carrying no ladder row ───────────────────────────────────
+   The scanner runs `OpportunitySetup.objects.filter(is_active=True)` and
+   never consults RuleControl, so these setups scan every pass; the actuator
+   reads a missing RuleControl as PAPER/may_trade, so they can place paper
+   orders at full nominal size. Gold rather than red: an unregistered setup
+   is a hole in the registry, not a fault in the setup. Compound selector on
+   the border for the reason stated at the stage chips — a bare .sc-orphans
+   would be racing `.card`'s own border declaration. */
+.card.sc-orphans { margin-top: 26px; border-color: var(--accent-gold); }
+.sc-orphans-lede {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.55;
+    margin-bottom: 12px;
+    max-width: 72ch;
+}
+.sc-orphan-list { list-style: none; display: grid; gap: 7px; }
+.sc-orphan {
+    display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap;
+    padding: 7px 0;
+    border-top: 1px dashed var(--border);
+    font-size: 11.5px;
+    color: var(--text-muted);
+}
+.sc-orphan-name {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+.sc-orphan-meta { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; }
+
+/* ── Hand-built plans: a different animal, said out loud ── */
+.sc-plans { margin-top: 26px; }
+.sc-plans-count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.sc-plan-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.sc-plans-lede {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.55;
+    margin-bottom: 12px;
+    max-width: 72ch;
+}
+.sc-analytics { margin-top: 18px; }
+
+@media (max-width: 640px) {
+    .sc-grid { grid-template-columns: 1fr; }
+    .sc-stage-venue { margin-left: 0; flex-basis: 100%; }
+}
+
 /* ── 4. Tables ───────────────────────────────────────────────────────────
    These carry the actual evidence — trades, rules, R-multiples — and were
    the least designed surface in the system: no zebra, no row hover, no
@@ -4515,3 +4900,270 @@ body.light-mode .il-title { color: var(--text-primary); }
 .lk-link:hover, .lk-link:focus-visible { color: var(--accent); outline: none; }
 body.light-mode .lk-unlock { background: var(--accent); color: #ffffff; }
 body.light-mode .lk-row input, body.light-mode .lk-title { color: var(--text-primary); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CARD CONTAINMENT (2026-08-19)
+   ───────────────────────────────────────────────────────────────────────
+   OVERFLOW HONESTY (above) stopped content being amputated. It did not
+   stop it needing a sideways drag to read, and it changed the failure
+   mode: with .card at overflow:visible, anything that refuses to shrink
+   now leans out over the card's own border instead of being cut at it.
+
+   The rule this section enforces: a CARD never scrolls and never bleeds.
+   Content earns its width honestly; the only thing allowed to scroll
+   sideways is a .table-wrapper around something that is genuinely a
+   table, and below phone width not even that.
+
+   Nothing here introduces a colour, a face or a size that was not already
+   in the token set, so both themes follow without a single override.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── One radius across one grid ──────────────────────────────────────────
+   The §3 refinement gave .card an 8px radius while the unified recipe
+   (~2110) left .stat-box, .metric and .signal-item at --radius-lg. Every
+   dashboard here puts those in the SAME grid, so a single row of tiles
+   rendered two different corner radii — which the eye reads as sloppy
+   alignment rather than as two components. Settled on the tighter one:
+   the sharper corner is what the rest of the system (.oc-strip-cell,
+   .sc-card, .empty-state) already draws. */
+:root { --radius-card: 8px; }
+.card, .stat-box, .metric, .signal-item { border-radius: var(--radius-card); }
+
+/* A card that is itself a flex or grid item must be allowed to shrink.
+   `min-width: auto` on such an item resolves to its min-content width, so
+   one long unbroken string inside a card widened the CARD past its track
+   and pushed its whole row off the screen. .grid > * already carries this;
+   cards laid out by an inline flex row did not. */
+.card, .stat-box, .metric, .signal-item { min-width: 0; }
+
+/* ── Inline flex rows wrap instead of pushing ────────────────────────────
+   Dozens of templates lay a card's internals out with an inline
+   `display:flex` and no wrap. A flex line never breaks on its own, so the
+   moment such a row's content exceeded the card it leaned out over the
+   border — the monthly-P&L label strip on Positions is the clearest case,
+   twelve month labels on one unbreakable line inside a third-width card.
+
+   A row that states its own flex-wrap (either value) is left exactly as
+   its author meant it. The match is on `flex-wrap` rather than on `wrap`,
+   which would also have caught every `white-space: nowrap` in the sheet
+   and quietly skipped the rows most likely to overflow.
+
+   Chart tracks and sparkline strips are safe under this: their cells are
+   `flex: 1` around empty divs, so the row's content never exceeds the
+   line and the wrap never triggers. */
+.card [style*="display:flex"]:not([style*="flex-wrap"]),
+.card [style*="display: flex"]:not([style*="flex-wrap"]) {
+    flex-wrap: wrap;
+}
+
+/* ── Inline grid tracks shrink honestly ──────────────────────────────────
+   Around forty templates declare `grid-template-columns: 1fr 1fr` (or
+   repeat(N, 1fr)) in an inline style, and a bare fr track is exactly the
+   defect OVERFLOW HONESTY fixed for .grid-N: an fr item's automatic
+   minimum is its min-content width, so the track never shrinks past the
+   longest thing in it and the grid pushes its card wider.
+
+   min-width:0 on the children is the same fix as rewriting every track to
+   minmax(0, 1fr), applied in one place — and it reaches inline styles,
+   which a grid-template-columns declaration in this sheet never could. */
+.card [style*="grid-template-columns"] > *,
+.stat-box [style*="grid-template-columns"] > *,
+.metric [style*="grid-template-columns"] > * { min-width: 0; }
+
+/* ── Only a genuinely wide table gets a runway ───────────────────────────
+   The Phase-29 mobile rule set `min-width: 600px` on EVERY .sv-perf-table.
+   That is where most of the sideways dragging came from: the two- and
+   three-column breakdown tables that fill the small cards on nearly every
+   page fit a 360px phone with room to spare, and were being forced into a
+   600px scroll regardless. Six columns is where a phone genuinely runs
+   out — and a table that stacks (below) needs no runway at all. */
+@media (max-width: 768px) {
+    .sv-perf-table { min-width: 0; }
+    .table-wrapper .sv-perf-table:has(thead th:nth-child(6)) { min-width: 34rem; }
+}
+
+/* When a wrapper does still scroll, say so quietly instead of dropping the
+   platform's default bar across the card's own border. */
+.table-wrapper {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-glow) transparent;
+}
+
+/* ── Numbers ─────────────────────────────────────────────────────────────
+   Every figure in these tables comes out of floatformat with a fixed
+   decimal count, so right-aligned tabular figures line their decimal
+   points up down the column for free. tabular-nums is set at table level
+   rather than on .num because .num is on 15 cells platform-wide and the
+   other few thousand still deserve to line up. */
+.sv-perf-table {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+}
+table td.num, table th.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Identifier columns ──────────────────────────────────────────────────
+   `starter_commodity_vol_compression` is one 33-character word, and
+   overflow-wrap:break-word deliberately leaves such a word's min-content
+   width intact (see OVERFLOW HONESTY) — so a rule-name column on its own
+   could demand 270px and put an otherwise-narrow table into scroll.
+   `anywhere` is correct HERE and wrong as a blanket: on an identifier we
+   would rather wrap the name than drag the table, whereas collapsing
+   min-content on a price column is exactly what broke numbers mid-digit.
+   Opt in per column, never on tbody td. */
+.sv-ident { overflow-wrap: anywhere; }
+
+/* ── Stat values ─────────────────────────────────────────────────────────
+   .stat-value already shrinks; .oc-strip-value did not, and it carries the
+   biggest figures on the platform inside 8.5rem cells on a phone. */
+.oc-strip-value {
+    min-width: 0;
+    overflow-wrap: break-word;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STACKED TABLES (.sv-stack)
+   ───────────────────────────────────────────────────────────────────────
+   Below 640px a seven-to-eleven column table cannot be a table: 304px of
+   content box divided eleven ways is 27px a column. Rather than hide the
+   columns or hand the operator a horizontal drag, each row becomes its
+   own small record card — label left in the mono uppercase idiom the
+   table headers already use, value right where the eye expects it.
+
+   Labels come from `data-label` on each <td>, which is why this is opt-in
+   per table: a stacked row with no labels is worse than a scroll, so a
+   table only stacks once someone has actually named its columns.
+
+   The two Positions tables are pinned in by selector rather than by class
+   because that page's markup is owned elsewhere this wave. They are
+   matched by shape (eleven headers) and by the partial's own wrapper
+   class, so a column APPENDED to either table leaves the existing labels
+   correct; a column PREPENDED would shift them, and at that point the
+   pair below should be deleted in favour of data-label in the template.
+   ═══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+    :is(.sv-stack,
+        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .positions-metrics table) {
+        display: block;
+        min-width: 0;
+    }
+    /* Visually hidden, not display:none — the header text is still the
+       accessible name for each cell in the a11y tree. */
+    :is(.sv-stack,
+        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .positions-metrics table) thead {
+        position: absolute;
+        width: 1px; height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+    :is(.sv-stack,
+        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .positions-metrics table) tbody { display: block; }
+
+    :is(.sv-stack,
+        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .positions-metrics table) tbody tr {
+        display: block;
+        margin-bottom: 10px;
+        padding: 2px 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-card);
+        background: color-mix(in srgb, var(--bg-card-hover, var(--bg-card)) 30%, transparent);
+    }
+    :is(.sv-stack,
+        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .positions-metrics table) tbody tr:last-child { margin-bottom: 0; }
+
+    :is(.sv-stack,
+        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .positions-metrics table) tbody td {
+        display: grid;
+        grid-template-columns: minmax(0, 10ch) minmax(0, 1fr);
+        gap: 12px;
+        align-items: baseline;
+        padding: 7px 0;
+        text-align: left;
+        border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+        /* Several pages cap a summary cell with an inline max-width and an
+           ellipsis. That is a desktop affordance; stacked, the cell owns a
+           whole line and should simply use it. */
+        max-width: none;
+    }
+    :is(.sv-stack,
+        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .positions-metrics table) tbody td:last-child { border-bottom: none; }
+
+    :is(.sv-stack,
+        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .positions-metrics table) tbody td::before {
+        font-family: var(--font-mono);
+        font-size: 9.5px;
+        line-height: 1.9;
+        letter-spacing: 1.2px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+    }
+    .sv-stack tbody td::before { content: attr(data-label); }
+    /* An action cell (a button, a link) names itself — give it the line. */
+    .sv-stack tbody td:not([data-label]) { grid-template-columns: minmax(0, 1fr); }
+    .sv-stack tbody td:not([data-label])::before { content: none; }
+
+    /* Numerics keep their tabular figures but drop the right edge: in a
+       one-value-per-line layout there is no column left to align to. */
+    :is(.sv-stack,
+        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .positions-metrics table) tbody td.num { text-align: left; }
+
+    /* Positions — Current Positions (11 columns). */
+    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(1)::before { content: "Symbol"; }
+    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(2)::before { content: "Direction"; }
+    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(3)::before { content: "Qty"; }
+    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(4)::before { content: "Entry"; }
+    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(5)::before { content: "Current"; }
+    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(6)::before { content: "Stop"; }
+    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(7)::before { content: "Target"; }
+    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(8)::before { content: "P&L"; }
+    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(9)::before { content: "P&L %"; }
+    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(10)::before { content: "Strategy"; }
+    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(11)::before { content: "Opened"; }
+    /* Anything appended past the eleven is an action, not a field. */
+    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(n+12) {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    /* Positions — the htmx analytics partial (6 columns). */
+    .positions-metrics table td:nth-child(1)::before { content: "Symbol"; }
+    .positions-metrics table td:nth-child(2)::before { content: "Side"; }
+    .positions-metrics table td:nth-child(3)::before { content: "Entry"; }
+    .positions-metrics table td:nth-child(4)::before { content: "Current"; }
+    .positions-metrics table td:nth-child(5)::before { content: "Unrealized"; }
+    .positions-metrics table td:nth-child(6)::before { content: "%"; }
+}
+
+/* ── Positions: the closed-trade cards ───────────────────────────────────
+   These live in positions_list.html's own <style>, which the browser reads
+   AFTER this file — so the overrides below are deliberately one selector
+   deeper than the originals rather than !important.
+
+   `repeat(4, 1fr)` never shrank below its content: "3 days, 4 hours" and
+   "1000 × 123.45" are the widest values there, and four of them side by
+   side pushed the detail panel past the card. auto-fit with a min() floor
+   drops to three, two and one column on its own.
+
+   The 300px cap is the other half of the same bug: once the grid wrapped,
+   the panel was taller than its own max-height and the mini chart at the
+   bottom was silently cut off — an expanded row that hides the thing you
+   expanded it for. */
+.card .ph-detail-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
+}
+.card .ph-trade-card.expanded .ph-trade-detail { max-height: 60rem; }
+.card .ph-detail-value { overflow-wrap: break-word; }
+.card .ph-kv { gap: 12px; flex-wrap: wrap; }
+.card .ph-kv span:last-child { text-align: right; }

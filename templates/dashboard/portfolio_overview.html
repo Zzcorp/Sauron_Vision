@@ -201,17 +201,25 @@
     </div>
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th>symbol</th><th>side</th><th>qty</th><th>entry</th><th>last</th><th>unreal P&amp;L</th><th>%</th></tr></thead>
+        <thead><tr><th>symbol</th><th>side</th><th class="num">qty</th><th class="num">entry</th><th class="num">last</th><th class="num">unreal P&amp;L</th><th class="num">%</th><th class="nowrap">action</th></tr></thead>
         <tbody>
             {% for p in open_positions %}
-            <tr>
-                <td><strong>{{ p.instrument.symbol }}</strong></td>
+            <tr data-sv-position-row>
+                <td class="nowrap"><strong>{{ p.instrument.symbol }}</strong></td>
                 <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
-                <td>{{ p.quantity|floatformat:4 }}</td>
-                <td>{{ p.entry_price|floatformat:4 }}</td>
-                <td>{{ p.current_price|floatformat:4 }}</td>
-                <td class="oc-mini-pnl {% if p.unrealized_pnl > 0 %}up{% elif p.unrealized_pnl < 0 %}down{% endif %}">{{ p.unrealized_pnl|floatformat:2 }}</td>
-                <td class="{% if p.unrealized_pnl_pct > 0 %}up{% elif p.unrealized_pnl_pct < 0 %}down{% endif %}">{{ p.unrealized_pnl_pct|floatformat:2 }}%</td>
+                <td class="num">{{ p.quantity|floatformat:4 }}</td>
+                <td class="num">{{ p.entry_price|floatformat:4 }}</td>
+                <td class="num">{% if p.current_price is not None %}{{ p.current_price|floatformat:4 }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+                <td class="num oc-mini-pnl {% if p.unrealized_pnl > 0 %}up{% elif p.unrealized_pnl < 0 %}down{% endif %}">{% if p.unrealized_pnl is not None %}{{ p.unrealized_pnl|floatformat:2 }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+                <td class="num {% if p.unrealized_pnl_pct > 0 %}up{% elif p.unrealized_pnl_pct < 0 %}down{% endif %}">{% if p.unrealized_pnl_pct is not None %}{{ p.unrealized_pnl_pct|floatformat:2 }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+                {# Bot trades can be flattened from here; a portfolio Position row has no close path anywhere in the platform, so it gets a dash. #}
+                <td class="nowrap">
+                    {% if p.trade_id %}
+                        <button type="button" class="btn btn-sm btn-danger" data-sv-close-trade="{{ p.trade_id }}">{% if p.status == 'CLOSE_PENDING' %}RETRY{% else %}CLOSE{% endif %}</button>
+                    {% else %}
+                        <span class="sv-unknown">&mdash;</span>
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>

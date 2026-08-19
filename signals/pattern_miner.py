@@ -256,7 +256,13 @@ def _feat_cot_extreme(side: str, min_ratio: float = 0.4):
                   .order_by("-report_date").first())
         if not report:
             return False
-        net = int(report.net_speculative or 0)
+        # In the SYMBOL's frame. The CFTC denominates an FX future in the
+        # foreign currency, so the raw column is sign-inverted on the pairs the
+        # dollar is the base of — see `opportunity_scanner.cot_sign`. Mined
+        # features feed DiscoveredSetup proposals, so an inverted feature here
+        # becomes a setup someone is asked to approve.
+        from signals.opportunity_scanner import cot_net_speculative
+        net = cot_net_speculative(report, instrument)
         total = abs(int(report.non_commercial_long or 0)) + abs(int(report.non_commercial_short or 0))
         if total <= 0:
             return False

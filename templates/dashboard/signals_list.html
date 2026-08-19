@@ -205,24 +205,25 @@
     </div>
     {% if signals %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
+    {# sv-stack: eleven columns cannot be eleven columns on a phone. #}
+    <table class="sv-perf-table sv-stack">
         <thead><tr><th>Time</th><th>Symbol</th><th>Type</th><th>Direction</th><th>Urgency</th><th>Title</th><th>Score</th><th>Entry</th><th>Stop</th><th>Target</th><th>R:R</th></tr></thead>
         <tbody>
         {% for s in signals %}
         <tr>
-            <td style="font-size: 11px; color: var(--text-muted);">{{ s.created_at|date:"M d H:i" }}</td>
-            <td style="font-family: var(--font-display); font-size: 12px;">
+            <td data-label="Time" style="font-size: 11px; color: var(--text-muted);">{{ s.created_at|date:"M d H:i" }}</td>
+            <td data-label="Symbol" style="font-family: var(--font-display); font-size: 12px;">
                 {{ s.instrument.symbol }}
                 {% comment %} Every signal can be handed to Sauron as a subject. {% endcomment %}
                 <button type="button" class="ask-sauron"
                         data-ask-sauron="{{ s.direction|upper }} {{ s.instrument.symbol }}{% if s.rule_name %} ({{ s.rule_name }}){% endif %}"
                         data-ask-kind="signal" title="Ask Sauron about this signal">◬ ask</button>
             </td>
-            <td><span class="badge badge-medium">{{ s.signal_type }}</span></td>
-            <td><span class="badge badge-{{ s.direction }}">{{ s.direction }}</span></td>
-            <td><span class="badge badge-{{ s.urgency }}">{{ s.urgency }}</span></td>
-            <td>{{ s.title|truncatechars:50 }}</td>
-            <td>
+            <td data-label="Type"><span class="badge badge-medium">{{ s.signal_type }}</span></td>
+            <td data-label="Direction"><span class="badge badge-{{ s.direction }}">{{ s.direction }}</span></td>
+            <td data-label="Urgency"><span class="badge badge-{{ s.urgency }}">{{ s.urgency }}</span></td>
+            <td data-label="Title">{{ s.title|truncatechars:50 }}</td>
+            <td data-label="Score">
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span>{{ s.score|floatformat:2 }}</span>
                     <div class="score-bar" style="width: 50px;">
@@ -230,10 +231,10 @@
                     </div>
                 </div>
             </td>
-            <td style="font-family: var(--font-mono); font-size: 12px;">{{ s.suggested_entry|default:"-" }}</td>
-            <td style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-red);">{{ s.suggested_stop|default:"-" }}</td>
-            <td style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-green);">{{ s.suggested_target|default:"-" }}</td>
-            <td>{{ s.risk_reward_ratio|default:"-" }}</td>
+            <td class="num" data-label="Entry" style="font-family: var(--font-mono); font-size: 12px;">{{ s.suggested_entry|default:"-" }}</td>
+            <td class="num" data-label="Stop" style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-red);">{{ s.suggested_stop|default:"-" }}</td>
+            <td class="num" data-label="Target" style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-green);">{{ s.suggested_target|default:"-" }}</td>
+            <td class="num" data-label="R:R">{{ s.risk_reward_ratio|default:"-" }}</td>
         </tr>
         {% endfor %}
         </tbody>

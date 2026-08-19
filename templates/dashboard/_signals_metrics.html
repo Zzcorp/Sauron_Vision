@@ -20,7 +20,8 @@
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:2fr 1fr;gap:20px;">
+  {# minmax(0,·): a bare fr track never shrinks below its chart canvas. #}
+  <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:20px;">
     <div>
       <div class="sv-section-title">Signals per day (14d)</div>
       <div class="sv-chart-container"><canvas id="signals-daily-chart"></canvas></div>
@@ -39,15 +40,15 @@
     <div class="table-wrapper">
     <table class="sv-perf-table">
       <thead>
-        <tr><th>Setup</th><th>Hit rate</th><th>Expectancy</th><th>n closed</th><th>Source</th></tr>
+        <tr><th>Setup</th><th class="num">Hit rate</th><th class="num">Expectancy</th><th class="num">n closed</th><th>Source</th></tr>
       </thead>
       <tbody>
         {% for s in setups %}
           <tr>
-            <td>{{ s.name }}</td>
-            <td>{% if s.hit_rate %}{{ s.hit_rate|floatformat:2 }}{% else %}-{% endif %}</td>
-            <td>{% if s.expectancy %}{{ s.expectancy|floatformat:2 }}R{% else %}-{% endif %}</td>
-            <td>{{ s.n_closed }}</td>
+            <td class="sv-ident">{{ s.name }}</td>
+            <td class="num">{% if s.hit_rate %}{{ s.hit_rate|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td class="num">{% if s.expectancy %}{{ s.expectancy|floatformat:2 }}R{% else %}-{% endif %}</td>
+            <td class="num">{{ s.n_closed }}</td>
             <td>{% if s.is_empirical %}empirical{% else %}fallback{% endif %}</td>
           </tr>
         {% endfor %}

@@ -226,3 +226,105 @@ class TourWalksToRealPagesTests(TestCase):
             src = fh.read()
         self.assertIn("function fencePanes", src)
         self.assertIn("onSpotlightClick", src)
+
+
+class StrategiesStepIsGroundedTests(TestCase):
+    """The tour NAVIGATES to /strategies/ and then describes it.
+
+    That page was rewritten to lead with the promotion ladder — one card per
+    RuleControl row the engine runs, grouped by venue — while this step still
+    described the old page, where the wizard's trade plans led and the
+    automated stable was somewhere else entirely. So the walk arrived at one
+    page and narrated another, to the one audience that cannot tell: a
+    first-run operator. The file's own header makes that a defect by its own
+    standard — "if a claim here stops being true, fix the claim".
+
+    Each test below pins one claim in the step to the thing that makes it
+    true, so the claim cannot rot again without failing here.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user("tour_strat")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def _step(self):
+        """The one step object, from the page that really renders the tour."""
+        body = self.client.get("/getting-started/").content.decode(
+            "utf-8", "replace")
+        start = body.index('title: "Strategies & Opportunities"')
+        return body[start:body.index("{ sel:", start)]
+
+    def _strategies_page(self):
+        from django.urls import reverse
+        return self.client.get(reverse("strategies_list"),
+                               HTTP_HOST="127.0.0.1").content.decode(
+                                   "utf-8", "replace")
+
+    def test_the_step_no_longer_leads_with_the_plans_nothing_executes(self):
+        """The stale sentence was not a lie in isolation — it was a false
+        EXCLUSIVE: it gave "the automated stable" to Opportunities while the
+        page it walks to now leads with a section headed "Automated setups"
+        and puts the plans four sections down."""
+        step = self._step()
+        self.assertNotIn("Strategies hold your multi-leg trade plans", step)
+        self.assertIn("promotion ladder", step)
+
+    def test_what_the_step_says_leads_the_page_really_leads_it(self):
+        page = self._strategies_page()
+        lead = page.index("Automated setups")
+        plans = page.index("Hand-built trade plans")
+        self.assertLess(lead, plans,
+                        "the tour says the engine's rules lead and the plans "
+                        "sit further down")
+        self.assertIn("Nothing executes these", page)
+
+    def test_the_venues_the_step_names_are_the_venues_the_page_prints(self):
+        """research / paper / quarter / full — the step describes each one, so
+        each has to still be what `_STAGE_VENUE` says it is."""
+        step, page = self._step(), self._strategies_page()
+        for phrase in ("research", "paper", "quarter"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, step)
+        for venue in ("no order is ever placed", "full nominal size",
+                      "quarter size", "full size"):
+            with self.subTest(venue=venue):
+                self.assertIn(venue, page)
+
+    def test_the_step_still_promises_a_gate_and_a_record_per_card(self):
+        from signals.models_control import RuleControl
+        RuleControl.objects.create(rule_name="tour_rule",
+                                   promotion_stage="research")
+        step, page = self._step(), self._strategies_page()
+        self.assertIn("next gate", step)
+        self.assertIn("record", step)
+        # Both really are ON the card, not only in the prose about it.
+        self.assertIn('class="sc-gate"', page)
+        self.assertIn('class="sc-record"', page)
+
+    def test_the_paused_claim_is_what_the_seeders_actually_do(self):
+        """"seeded setups start PAUSED until you arm them" survived the wave;
+        this is the assertion that says so out loud."""
+        from signals.management.commands.seed_strategies import seed_setups
+        from signals.models_opportunity import OpportunitySetup
+        seed_setups(activate=False)
+        self.assertTrue(OpportunitySetup.objects.exists())
+        self.assertFalse(
+            OpportunitySetup.objects.filter(is_active=True).exists(),
+            "the tour tells a first-run user nothing is armed yet")
+        self.assertIn("PAUSED", self._step())
+
+    def test_the_step_does_not_promise_a_viewer_the_decide_buttons(self):
+        """/evolution/ shows every user the evidence and only an admin the
+        fork/reject controls, so the step no longer says "before you fork or
+        reject" to a reader who will not see a button."""
+        step = self._step()
+        self.assertNotIn("before you fork or reject", step)
+        self.assertIn("admin", step)
+
+    def test_the_step_still_walks_where_it_claims_to(self):
+        from django.urls import reverse
+        self.assertIn('url: "{}"'.format(reverse("strategies_list")),
+                      self._step())

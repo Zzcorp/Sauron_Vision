@@ -18,9 +18,14 @@ All setups are seeded into RuleControl at stage='research' with weight=1.0 so
 they go through the Phase-8 promotion pipeline before any live sizing.
 
 Run:
-    python manage.py seed_advanced_strategies              # idempotent
+    python manage.py seed_advanced_strategies              # refresh definitions
     python manage.py seed_advanced_strategies --activate   # also is_active=True
     python manage.py seed_advanced_strategies --reset      # delete the seeded rows
+
+A re-run refreshes DEFINITIONS ONLY: promotion stage, pause/reduce state,
+allocator budget, notes, and whether the operator armed the setup all survive.
+The RuleControl half of that guarantee lives in `seed_strategies`, shared
+verbatim so the two packs cannot drift apart on it.
 """
 from django.core.management.base import BaseCommand
 
@@ -171,17 +176,26 @@ def _setup_definitions() -> list[dict]:
         {
             "name": "advanced_smart_money_pivot",
             "description": (
-                "COT non-commercials positioned OPPOSITE recent price slope "
+                "COT non-commercials net LONG into a falling price "
                 "(divergence) + bullish FVG remaining + price in a trending "
                 "regime by Hurst. Trade with the smart money against retail "
-                "momentum."
+                "momentum. Positioning is read in the SYMBOL's frame, so the "
+                "pairs the dollar is the base of (USDJPY, USDCHF, USDCAD, "
+                "USDMXN) are scored right-way-up rather than gated out."
             ),
             "direction": "bullish",
             "asset_classes": ["forex", "commodity"],
             "conditions": [
+                # `direction`, because the setup's own direction is fixed at
+                # "bullish" and the scanner writes it verbatim into the Signal
+                # and the flag. Left unqualified this leg also matched the
+                # mirror-image divergence — price RISING into a net-short book,
+                # which is a short thesis — and the setup published those as
+                # bullish flags. The gate mechanism is not the tool here: the
+                # branch is what is wrong, not the universe.
                 {"kind": "smart_money_divergence",
                  "params": {"slope_lookback": 20, "slope_threshold": 0.0005,
-                            "min_ratio": 0.3},
+                            "min_ratio": 0.3, "direction": "bullish"},
                  "weight": 1.5},
                 {"kind": "fair_value_gap",
                  "params": {"direction": "bullish", "max_age": 8},
@@ -199,7 +213,8 @@ def _setup_definitions() -> list[dict]:
 
 def seed_setups(*, activate: bool = False) -> dict:
     from signals.models_opportunity import OpportunitySetup
-    from signals.models_control import RuleControl
+
+    from .seed_strategies import rule_parameters, upsert_rule_control
 
     created = updated = rules_created = rules_updated = 0
     for spec in _setup_definitions():
@@ -211,31 +226,29 @@ def seed_setups(*, activate: bool = False) -> dict:
             "min_match_score": spec["min_match_score"],
             "suggested_horizon_days": spec["suggested_horizon_days"],
             "sizing": spec.get("sizing", {}),
-            "is_active": activate,
         }
+        # is_active is the OPERATOR's field once the row exists. Hard-coding it
+        # to `activate` meant the admin panel's one-click re-seed — which
+        # passes no flags — disarmed every advanced setup someone had switched
+        # on by hand. Only --activate asserts it on an existing row.
+        if activate:
+            defaults["is_active"] = activate
         obj, was_created = OpportunitySetup.objects.update_or_create(
             name=spec["name"], defaults=defaults,
         )
         if was_created:
+            if not activate:
+                OpportunitySetup.objects.filter(pk=obj.pk).update(
+                    is_active=False)
             created += 1
         else:
             updated += 1
 
-        rule, rule_was_created = RuleControl.objects.update_or_create(
+        rule, rule_was_created = upsert_rule_control(
             rule_name=spec["name"],
-            defaults={
-                "status": "active",
-                "weight_multiplier": 1.0,
-                "allocator_weight": 1.0,
-                "promotion_stage": "research",
-                "notes": (f"Seeded by Phase 34-36 advanced pack. "
-                          f"{spec['description'][:80]}..."),
-                "parameters": {
-                    "asset_classes": spec["asset_classes"],
-                    "min_match_score": spec["min_match_score"],
-                    "horizon_days": spec["suggested_horizon_days"],
-                },
-            },
+            seed_notes=(f"Seeded by Phase 34-36 advanced pack. "
+                        f"{spec['description'][:80]}..."),
+            parameters=rule_parameters(spec),
         )
         if rule_was_created:
             rules_created += 1

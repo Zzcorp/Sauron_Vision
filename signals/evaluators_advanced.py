@@ -48,7 +48,9 @@ from typing import Optional
 
 from django.utils import timezone
 
-from .opportunity_scanner import register_kind, _recent_closes
+from .opportunity_scanner import (
+    cot_net_speculative, cot_sign, register_kind, _recent_closes,
+)
 from .quant_primitives import (
     hurst_exponent,
     hurst_regime_label,
@@ -146,7 +148,9 @@ def _eval_hurst_regime(params: dict, instrument, now: datetime) -> dict:
                         "expected": regime, "lookback": lookback}}
 
 
-register_kind("hurst_regime", _eval_hurst_regime)
+register_kind("hurst_regime", _eval_hurst_regime,
+                params=("regime", "lookback", "max_lag"),
+                choices={"regime": ("trending", "mean_reverting", "random")})
 
 
 def _eval_garch_vol_forecast(params: dict, instrument, now: datetime) -> dict:
@@ -190,7 +194,9 @@ def _eval_garch_vol_forecast(params: dict, instrument, now: datetime) -> dict:
                         "lambda": lambda_decay}}
 
 
-register_kind("garch_vol_forecast", _eval_garch_vol_forecast)
+register_kind("garch_vol_forecast", _eval_garch_vol_forecast,
+                params=("direction", "threshold_pct", "lambda_decay", "lookback"),
+                choices={"direction": ("above", "below")})
 
 
 def _eval_cvar_tail_risk(params: dict, instrument, now: datetime) -> dict:
@@ -244,7 +250,9 @@ def _eval_cvar_tail_risk(params: dict, instrument, now: datetime) -> dict:
                         "n_returns": len(rets)}}
 
 
-register_kind("cvar_tail_risk", _eval_cvar_tail_risk)
+register_kind("cvar_tail_risk", _eval_cvar_tail_risk,
+                params=("direction", "alpha", "threshold_pct", "lookback"),
+                choices={"direction": ("worse_than", "better_than")})
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -307,7 +315,9 @@ def _eval_liquidity_sweep(params: dict, instrument, now: datetime) -> dict:
                             "direction": direction}}
 
 
-register_kind("liquidity_sweep", _eval_liquidity_sweep)
+register_kind("liquidity_sweep", _eval_liquidity_sweep,
+                params=("direction", "lookback", "wick_pct"),
+                choices={"direction": ("bullish_sweep", "bearish_sweep")})
 
 
 def _eval_fair_value_gap(params: dict, instrument, now: datetime) -> dict:
@@ -361,7 +371,8 @@ def _eval_fair_value_gap(params: dict, instrument, now: datetime) -> dict:
             "details": {"reason": f"no {direction} FVG in last {max_age} bars"}}
 
 
-register_kind("fair_value_gap", _eval_fair_value_gap)
+register_kind("fair_value_gap", _eval_fair_value_gap, params=("direction", "max_age"),
+                choices={"direction": ("bullish", "bearish")})
 
 
 def _eval_order_block(params: dict, instrument, now: datetime) -> dict:
@@ -441,7 +452,10 @@ def _eval_order_block(params: dict, instrument, now: datetime) -> dict:
                         "direction": direction}}
 
 
-register_kind("order_block", _eval_order_block)
+register_kind("order_block", _eval_order_block,
+                params=("direction", "lookback", "impulse_window", "min_impulse_pct",
+                        "proximity_pct"),
+                choices={"direction": ("bullish", "bearish")})
 
 
 def _eval_session_break(params: dict, instrument, now: datetime) -> dict:
@@ -495,7 +509,9 @@ def _eval_session_break(params: dict, instrument, now: datetime) -> dict:
                         "range_hours": range_hours, "timeframe": timeframe}}
 
 
-register_kind("session_break", _eval_session_break)
+register_kind("session_break", _eval_session_break,
+                params=("range_hours", "timeframe", "direction"),
+                choices={"direction": ("above", "below")})
 
 
 def _eval_relative_volume(params: dict, instrument, now: datetime) -> dict:
@@ -536,7 +552,8 @@ def _eval_relative_volume(params: dict, instrument, now: datetime) -> dict:
                         "period": period}}
 
 
-register_kind("relative_volume", _eval_relative_volume)
+register_kind("relative_volume", _eval_relative_volume,
+                params=("period", "timeframe", "threshold"))
 
 
 def _eval_anchored_vwap_break(params: dict, instrument, now: datetime) -> dict:
@@ -586,7 +603,9 @@ def _eval_anchored_vwap_break(params: dict, instrument, now: datetime) -> dict:
                         "direction": direction, "n_bars": len(anchored)}}
 
 
-register_kind("anchored_vwap_break", _eval_anchored_vwap_break)
+register_kind("anchored_vwap_break", _eval_anchored_vwap_break,
+                params=("anchor_days_ago", "direction", "timeframe"),
+                choices={"direction": ("above", "below")})
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -676,7 +695,11 @@ def _eval_news_price_divergence(params: dict, instrument, now: datetime) -> dict
                         "lookback_days": lookback_days}}
 
 
-register_kind("news_price_divergence", _eval_news_price_divergence)
+register_kind("news_price_divergence", _eval_news_price_divergence,
+                params=("lookback_days", "keywords", "sentiment_dir", "min_articles",
+                        "min_sentiment", "max_price_move_pct"),
+                choices={"sentiment_dir": ("bullish_news_bearish_price",
+                                           "bearish_news_bullish_price")})
 
 
 def _eval_crowd_extreme(params: dict, instrument, now: datetime) -> dict:
@@ -739,7 +762,9 @@ def _eval_crowd_extreme(params: dict, instrument, now: datetime) -> dict:
                         "n_snapshots": len(scores), "source": source or "any"}}
 
 
-register_kind("crowd_extreme", _eval_crowd_extreme)
+register_kind("crowd_extreme", _eval_crowd_extreme,
+                params=("direction", "window", "z_threshold", "source", "lookback_days"),
+                choices={"direction": ("euphoric", "panic")})
 
 
 def _eval_anchoring_zone(params: dict, instrument, now: datetime) -> dict:
@@ -806,7 +831,10 @@ def _eval_anchoring_zone(params: dict, instrument, now: datetime) -> dict:
     return {"matched": False, "score": 0.0, "details": {"reason": f"unknown mode {mode}"}}
 
 
-register_kind("anchoring_zone", _eval_anchoring_zone)
+register_kind("anchoring_zone", _eval_anchoring_zone,
+                params=("mode", "proximity_pct", "lookback"),
+                choices={"mode": ("round_number", "prior_swing_high",
+                                  "prior_swing_low")})
 
 
 def _eval_capitulation_detector(params: dict, instrument, now: datetime) -> dict:
@@ -888,7 +916,9 @@ def _eval_capitulation_detector(params: dict, instrument, now: datetime) -> dict
                         "decline_bars": decline_bars}}
 
 
-register_kind("capitulation_detector", _eval_capitulation_detector)
+register_kind("capitulation_detector", _eval_capitulation_detector,
+                params=("decline_bars", "decline_min_pct", "body_z", "vol_multiplier",
+                        "window"))
 
 
 def _eval_parabolic_exhaustion(params: dict, instrument, now: datetime) -> dict:
@@ -941,7 +971,9 @@ def _eval_parabolic_exhaustion(params: dict, instrument, now: datetime) -> dict:
                         "direction": direction, "n": len(tail)}}
 
 
-register_kind("parabolic_exhaustion", _eval_parabolic_exhaustion)
+register_kind("parabolic_exhaustion", _eval_parabolic_exhaustion,
+                params=("direction", "min_consecutive"),
+                choices={"direction": ("exhaustion_up", "exhaustion_down")})
 
 
 def _eval_fakeout_pattern(params: dict, instrument, now: datetime) -> dict:
@@ -1006,7 +1038,9 @@ def _eval_fakeout_pattern(params: dict, instrument, now: datetime) -> dict:
                             "direction": direction}}
 
 
-register_kind("fakeout_pattern", _eval_fakeout_pattern)
+register_kind("fakeout_pattern", _eval_fakeout_pattern,
+                params=("direction", "lookback", "recovery_bars"),
+                choices={"direction": ("bull_trap", "bear_trap")})
 
 
 def _eval_narrative_consensus(params: dict, instrument, now: datetime) -> dict:
@@ -1070,7 +1104,9 @@ def _eval_narrative_consensus(params: dict, instrument, now: datetime) -> dict:
                         "lookback_days": lookback_days}}
 
 
-register_kind("narrative_consensus", _eval_narrative_consensus)
+register_kind("narrative_consensus", _eval_narrative_consensus,
+                params=("lookback_days", "keywords", "min_articles",
+                        "max_price_move_pct"))
 
 
 def _eval_smart_money_divergence(params: dict, instrument, now: datetime) -> dict:
@@ -1081,12 +1117,30 @@ def _eval_smart_money_divergence(params: dict, instrument, now: datetime) -> dic
     Combines COT with a price-slope check: if price is rising but the
     non-commercials are net short and getting shorter, that's a divergence.
 
+    Two things about this test point in a DIRECTION, and a setup that fixes one
+    `direction` on its own row has to say which it wants:
+
+      1. The COT column is denominated in the CFTC contract's unit, which for an
+         FX future is the FOREIGN currency — see `cot_sign`. Read raw, the
+         divergence test was inverted on USDJPY / USDCHF / USDCAD / USDMXN.
+      2. A divergence is bullish or bearish depending on which way it points.
+         "Price up, smart money short" is a SHORT thesis; "price down, smart
+         money long" is a LONG one. `scan_setup` writes `setup.direction`
+         verbatim into the Signal and the flag, so a setup pinned to "bullish"
+         that accepts both branches publishes half its flags upside-down. The
+         `direction` param is how a setup asks for the branch it means.
+
     Params:
       slope_lookback    — bars for price slope (default 20)
       slope_threshold   — minimum |slope|/price (default 0.0005, ~0.05%/bar)
       min_ratio         — non-commercial extreme ratio (default 0.3)
+      direction         — "bullish" (price falling, specs long)
+                          | "bearish" (price rising, specs short)
+                          | "any" (either — the default, and what an
+                            unqualified caller has always meant)
     """
     slope_lookback = int((params or {}).get("slope_lookback", 20))
+    direction = (params or {}).get("direction", "any")
     try:
         slope_threshold = float((params or {}).get("slope_threshold", 0.0005))
         min_ratio = float((params or {}).get("min_ratio", 0.3))
@@ -1099,7 +1153,11 @@ def _eval_smart_money_divergence(params: dict, instrument, now: datetime) -> dic
         return {"matched": False, "score": 0.0,
                 "details": {"reason": "COTReport unavailable"}}
 
-    report = (COTReport.objects.filter(instrument=instrument)
+    # Bounded by `now` for the same reason as cot_report: the price slope below
+    # is already as-of, so an unbounded COT read would diverge the two halves of
+    # the divergence test onto different dates.
+    report = (COTReport.objects.filter(instrument=instrument,
+                                       report_date__lte=now.date())
               .order_by("-report_date").first())
     if report is None:
         return {"matched": False, "score": 0.0,
@@ -1116,7 +1174,8 @@ def _eval_smart_money_divergence(params: dict, instrument, now: datetime) -> dic
     avg_price = statistics.fmean(closes[-slope_lookback:])
     norm_slope = slope / max(avg_price, 1e-9)
 
-    net = int(report.net_speculative or 0)
+    # In the SYMBOL's frame, not the contract's — see `cot_sign`.
+    net = cot_net_speculative(report, instrument)
     total = abs(int(report.non_commercial_long or 0)) + abs(int(report.non_commercial_short or 0))
     ratio = (abs(net) / total) if total > 0 else 0.0
 
@@ -1131,22 +1190,34 @@ def _eval_smart_money_divergence(params: dict, instrument, now: datetime) -> dic
                 "details": {"reason": f"COT ratio {ratio:.2f} < {min_ratio}",
                             "net_speculative": net}}
 
-    matched = (price_rising and spec_short) or (price_falling and spec_long)
+    long_thesis = price_falling and spec_long     # price down, smart money long
+    short_thesis = price_rising and spec_short    # price up, smart money short
+    if direction == "bullish":
+        matched = long_thesis
+    elif direction == "bearish":
+        matched = short_thesis
+    else:  # "any"
+        matched = long_thesis or short_thesis
     if not matched:
         return {"matched": False, "score": 0.0,
                 "details": {"price_rising": price_rising, "price_falling": price_falling,
                             "spec_long": spec_long, "spec_short": spec_short,
-                            "ratio": round(ratio, 4)}}
+                            "wanted": direction, "ratio": round(ratio, 4)}}
 
     score = min(1.0, ratio / max(min_ratio * 2, 1e-6))
     return {"matched": True, "score": round(score, 4),
             "details": {"norm_slope": round(norm_slope, 6),
                         "net_speculative": net, "ratio": round(ratio, 4),
-                        "direction": "price_up_smart_short" if price_rising else "price_down_smart_long",
+                        "contract_frame_flipped": cot_sign(instrument) < 0,
+                        "wanted": direction,
+                        "direction": "price_up_smart_short" if short_thesis else "price_down_smart_long",
                         "report_date": str(report.report_date)}}
 
 
-register_kind("smart_money_divergence", _eval_smart_money_divergence)
+register_kind("smart_money_divergence", _eval_smart_money_divergence,
+                params=("slope_lookback", "slope_threshold", "min_ratio",
+                        "direction"),
+                choices={"direction": ("bullish", "bearish", "any")})
 
 
 # ── Module-load summary ─────────────────────────────────────────────────────
