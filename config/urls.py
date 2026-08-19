@@ -5,13 +5,25 @@ from django.contrib.auth import views as auth_views
 from django.shortcuts import render, redirect
 from dashboard.auth_views import SauronLoginView, login_pin, login_pin_forgot
 from core.health import health_check
+from core.wall_facts import market_sessions, wall_facts
 
 
 def the_wall(request):
-    """Public landing page — redirects authenticated users to dashboard."""
+    """Public landing page — redirects authenticated users to dashboard.
+
+    `wall` carries the real platform counts (see core.wall_facts): the page
+    used to hardcode them, so it kept claiming 667 green tests roughly 1,250
+    tests later. wall_facts() is cached and cannot raise — this is the login
+    gateway, and no counter is worth a 500 on the front door.
+    """
     if request.user.is_authenticated:
         return redirect("dashboard")
-    return render(request, "landing/the_wall.html")
+    return render(request, "landing/the_wall.html", {
+        # Not cached with the facts: session state is clock arithmetic, and a
+        # five-minute-stale "OPEN" is the kind of small lie this page forbids.
+        "wall": wall_facts(),
+        "sessions": market_sessions(),
+    })
 
 
 urlpatterns = [

@@ -803,7 +803,7 @@
         .pin-forgot-panel .login-field { margin-bottom: 14px; }
 
         /* ══════════════════════════════════════════════════════════════ */
-        /* PHASE-33+ ADDITIONS — pipeline, hash-chain, theme-pulse, etc. */
+        /* PIPELINE, HASH-CHAIN, THEME-PULSE, BROKER TILES               */
         /* ══════════════════════════════════════════════════════════════ */
 
         /* Pipeline diagram — 5 nodes flowing left → right with glowing
@@ -1347,6 +1347,298 @@
             0%, 100% { box-shadow: 0 0 0 rgba(216,176,32,0.3); }
             50% { box-shadow: 0 0 12px rgba(216,176,32,0.45); }
         }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* OPERATIONS COCKPIT — signal rail, session pills, inbox         */
+        /* Same frame recipe as the orchestrator demo so the cockpit      */
+        /* reads as one more panel of the same machine.                   */
+        /* ══════════════════════════════════════════════════════════════ */
+        .ops-frame {
+            position: relative;
+            margin: 36px auto 0;
+            max-width: 1080px;
+            padding: 22px 22px 18px;
+            background: linear-gradient(180deg, var(--bg2), var(--bg3));
+            border: 1px solid var(--border-glow);
+            border-radius: 16px;
+            box-shadow: 0 0 0 1px rgba(0,232,104,0.04) inset,
+                        0 18px 48px rgba(0,0,0,0.45);
+            overflow: hidden;
+            text-align: left;
+        }
+        .ops-frame::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: 0.5;
+        }
+        .ops-head {
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 12px; flex-wrap: wrap; margin-bottom: 14px;
+        }
+        .ops-head-title {
+            font-family: var(--font-d); font-size: 11px; font-weight: 700;
+            letter-spacing: 2.5px; color: var(--text2);
+        }
+        .ops-head-right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .ops-pill {
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 1.5px;
+            padding: 4px 12px; border-radius: 12px; white-space: nowrap;
+            border: 1px solid var(--border-glow); color: var(--text2);
+        }
+        .ops-pill.paper {
+            color: var(--gold); border-color: rgba(216,176,32,0.35);
+            background: rgba(216,176,32,0.06);
+        }
+        .ops-pill.ws {
+            color: var(--accent); border-color: var(--accent-dim);
+            background: var(--accent-glow);
+        }
+        .ops-pill .blip { animation: liveBlink 1.4s ease-in-out infinite; }
+
+        /* Exchange-session indicators — the four sessions, in UTC */
+        .sess-row {
+            display: flex; gap: 8px; flex-wrap: wrap;
+            padding-bottom: 14px; border-bottom: 1px solid var(--border);
+            margin-bottom: 14px;
+        }
+        .sess-pill {
+            display: inline-flex; align-items: center; gap: 7px;
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 1px;
+            padding: 5px 12px; border-radius: 12px;
+            border: 1px solid var(--border); color: var(--text3);
+        }
+        .sess-pill .utc { opacity: 0.65; }
+        .sess-pill.open {
+            color: var(--accent); border-color: var(--accent-dim);
+            background: rgba(0,232,104,0.06);
+        }
+        .sess-pill.open::before {
+            content: ''; width: 6px; height: 6px; border-radius: 50%;
+            background: var(--accent); box-shadow: 0 0 8px var(--accent);
+            animation: liveBlink 1.6s ease-in-out infinite;
+        }
+
+        /* Cockpit body — signal rail | notifications inbox */
+        .ops-body {
+            display: grid; grid-template-columns: 1fr 290px;
+            gap: 16px; align-items: start;
+        }
+        @media (max-width: 900px) { .ops-body { grid-template-columns: 1fr; } }
+        .ops-panel {
+            padding: 12px; background: rgba(0,0,0,0.35);
+            border: 1px solid var(--border); border-radius: 10px;
+            min-width: 0;
+        }
+        .ops-panel-title {
+            display: flex; justify-content: space-between; gap: 8px;
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 2px;
+            color: var(--text3); text-transform: uppercase; margin-bottom: 10px;
+        }
+        .ops-panel-title .live-pulse {
+            color: var(--accent); animation: liveBlink 1.4s ease-in-out infinite;
+        }
+        .ops-card {
+            padding: 10px 12px; margin-bottom: 8px;
+            background: var(--bg2); border: 1px solid var(--border);
+            border-left: 2px solid var(--accent-dim); border-radius: 8px;
+            transition: border-color 0.3s, transform 0.3s;
+        }
+        .ops-card:last-child { margin-bottom: 0; }
+        .ops-card:hover {
+            border-color: var(--accent-dim); border-left-color: var(--accent);
+            transform: translateX(2px);
+        }
+        .ops-card-head {
+            display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+            font-family: var(--font-m); font-size: 11px; color: var(--text);
+        }
+        .ops-side {
+            font-family: var(--font-d); font-size: 9px; font-weight: 700;
+            letter-spacing: 1.5px; padding: 2px 7px; border-radius: 4px;
+        }
+        .ops-side.long { color: var(--accent); background: rgba(0,232,104,0.08); border: 1px solid var(--accent-dim); }
+        .ops-side.short { color: var(--accent-red); background: rgba(232,48,48,0.08); border: 1px solid rgba(232,48,48,0.3); }
+        .ops-rule {
+            font-family: var(--font-m); font-size: 9px; color: var(--text3);
+            letter-spacing: 0.5px; margin-top: 5px; word-break: break-word;
+        }
+        .ops-conf {
+            height: 4px; border-radius: 2px; margin-top: 8px;
+            background: var(--bg3); overflow: hidden;
+        }
+        .ops-conf > i {
+            display: block; height: 100%;
+            background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+            box-shadow: 0 0 8px var(--accent);
+        }
+        .ops-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+        .ops-btn {
+            font-family: var(--font-d); font-size: 9px; font-weight: 700;
+            letter-spacing: 2px; padding: 6px 14px; border-radius: 6px;
+            border: 1px solid var(--accent-dim); background: rgba(0,232,104,0.06);
+            color: var(--accent);
+        }
+        .ops-btn.pass { border-color: var(--border); background: transparent; color: var(--text3); }
+        .ops-inbox-row {
+            display: flex; gap: 8px; align-items: flex-start;
+            font-family: var(--font-m); font-size: 10px; line-height: 1.45;
+            color: var(--text2); padding: 7px 8px; margin-bottom: 6px;
+            border-radius: 6px; border-left: 2px solid var(--border);
+            background: rgba(0,0,0,0.18); word-break: break-word;
+        }
+        .ops-inbox-row:last-child { margin-bottom: 0; }
+        .ops-inbox-row .k { flex-shrink: 0; color: var(--accent); }
+        .ops-inbox-row.warn { border-left-color: var(--gold); }
+        .ops-inbox-row.warn .k { color: var(--gold); }
+        .ops-inbox-row.bad { border-left-color: var(--accent-red); }
+        .ops-inbox-row.bad .k { color: var(--accent-red); }
+
+        /* Market-data headband strip — the cells, not anybody's numbers */
+        .ops-band {
+            display: flex; gap: 8px; flex-wrap: wrap;
+            margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+        }
+        .ops-band-cell {
+            flex: 1 1 130px; padding: 8px 10px;
+            border: 1px solid var(--border); border-radius: 8px;
+            background: rgba(0,0,0,0.2);
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 1.5px;
+            color: var(--text3); text-transform: uppercase;
+        }
+        .ops-band-cell b {
+            display: block; margin-top: 4px; font-weight: 700;
+            font-family: var(--font-d); font-size: 13px; letter-spacing: 1px;
+            color: var(--text2);
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* PROMOTION LADDER — four rungs, promote up, demote back         */
+        /* ══════════════════════════════════════════════════════════════ */
+        .ladder {
+            position: relative;
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+            padding: 30px 12px;
+            border: 1px solid var(--border); border-radius: 18px;
+            background: linear-gradient(180deg, rgba(0,232,104,0.025), rgba(0,232,104,0.005));
+            overflow: hidden;
+        }
+        .ladder-flow {
+            position: absolute; top: 50%; transform: translateY(-50%);
+            left: 0; right: 0; height: 2px; z-index: 1; pointer-events: none;
+            background: linear-gradient(90deg, transparent, rgba(0,232,104,0.18), transparent);
+            background-size: 200% 100%;
+            animation: pipeFlow 4s linear infinite;
+        }
+        .rung {
+            position: relative; z-index: 2;
+            padding: 16px 12px; text-align: center;
+            background: var(--bg2); border: 1px solid var(--border-glow);
+            border-radius: 12px;
+            transition: transform 0.4s, border-color 0.4s, box-shadow 0.4s;
+        }
+        .rung:hover {
+            transform: translateY(-3px); border-color: var(--accent-dim);
+            box-shadow: 0 8px 24px rgba(0,232,104,0.12);
+        }
+        .rung-step {
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 2px;
+            color: var(--text3);
+        }
+        .rung-name {
+            font-family: var(--font-d); font-size: 12px; font-weight: 700;
+            letter-spacing: 1.2px; color: var(--text); margin-top: 6px;
+        }
+        .rung-sub {
+            font-family: var(--font-m); font-size: 10px; color: var(--text2);
+            letter-spacing: 0.5px; margin-top: 6px; line-height: 1.5;
+        }
+        .rung-bar {
+            height: 3px; border-radius: 2px; margin-top: 12px;
+            background: var(--accent-dim);
+        }
+        .rung.r3 .rung-bar,
+        .rung.r4 .rung-bar {
+            background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+            box-shadow: 0 0 8px rgba(0,232,104,0.3);
+        }
+        .rung.r4 .rung-name { color: var(--accent); }
+        .ladder-demote {
+            font-family: var(--font-m); font-size: 11px; letter-spacing: 1px;
+            color: var(--text3); margin-top: 14px;
+        }
+        .ladder-demote .down { color: var(--accent-red); }
+        @media (max-width: 768px) {
+            .ladder { grid-template-columns: 1fr; gap: 14px; }
+            .ladder-flow { display: none; }
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* ASK SAURON TERMINAL — the research chat, in the wall's mono    */
+        /* ══════════════════════════════════════════════════════════════ */
+        .ask-term {
+            position: relative; overflow: hidden;
+            padding: 18px; border-radius: 14px;
+            background: rgba(0,0,0,0.40);
+            border: 1px solid var(--border-glow);
+            box-shadow: 0 0 0 1px rgba(0,232,104,0.04) inset,
+                        0 18px 48px rgba(0,0,0,0.45);
+        }
+        .ask-term::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: 0.5;
+        }
+        .ask-term-bar {
+            display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 2px;
+            color: var(--text3); text-transform: uppercase;
+            padding-bottom: 12px; margin-bottom: 14px;
+            border-bottom: 1px solid var(--border);
+        }
+        .ask-term-bar .ro { color: var(--gold); }
+        .ask-line {
+            font-family: var(--font-m); font-size: 12px; line-height: 1.65;
+            margin-bottom: 12px; word-break: break-word; overflow-wrap: anywhere;
+        }
+        .ask-line:last-child { margin-bottom: 0; }
+        .ask-q { color: var(--text); }
+        .ask-q::before { content: '> '; color: var(--accent); }
+        .ask-a {
+            color: var(--text2); padding-left: 12px;
+            border-left: 1px solid var(--border-glow);
+        }
+        .ask-caret {
+            display: inline-block; width: 7px; height: 13px;
+            background: var(--accent); vertical-align: -2px; margin-left: 2px;
+            animation: liveBlink 1.1s steps(1) infinite;
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* NAV BREATHING ROOM — two more anchors than the nav was built   */
+        /* for, so it tightens instead of overflowing on narrow laptops.  */
+        /* ══════════════════════════════════════════════════════════════ */
+        @media (min-width: 769px) and (max-width: 1420px) {
+            .wall-nav { padding: 18px 24px; }
+            .nav-links { gap: 18px; }
+            .nav-links a:not(.btn-access) { font-size: 10px; letter-spacing: 1.5px; }
+        }
+        /* Four extra anchors: below this the least load-bearing ones stand
+           down rather than wrapping the bar onto a second line. */
+        @media (min-width: 769px) and (max-width: 1080px) {
+            .nav-links { gap: 14px; }
+            .nav-links a[href="#demo"],
+            .nav-links a[href="#brokers"] { display: none; }
+        }
+
+        /* Motion added by the sections above respects the same preference
+           the parallax/pupil tracking already honours in JS. */
+        @media (prefers-reduced-motion: reduce) {
+            .ops-pill .blip,
+            .sess-pill.open::before,
+            .ops-panel-title .live-pulse,
+            .ladder-flow,
+            .ask-caret { animation: none; }
+        }
     </style>
 </head>
 <body>
@@ -1376,7 +1668,7 @@
         <ellipse cx="400" cy="400" rx="390" ry="240" fill="none" stroke="#00e868" stroke-width="3.5"/>
         <ellipse cx="400" cy="400" rx="360" ry="210" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.5"/>
         <circle cx="400" cy="400" r="160" fill="none" stroke="#00e868" stroke-width="2.5"/>
-        <!-- Pupil group — translated by JS to track cursor (Phase-trio upgrade) -->
+        <!-- Pupil group — translated by JS to track the cursor -->
         <g id="wallPupilGroup" style="transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);">
             <circle cx="400" cy="400" r="60" fill="none" stroke="#00e868" stroke-width="3"/>
             <circle cx="400" cy="400" r="40" fill="url(#wallPupilFill)" filter="url(#wallEyeGlow)"/>
@@ -1415,6 +1707,10 @@
         <a href="#platform">Platform</a>
         <a href="#pipeline">Pipeline</a>
         <a href="#demo">Demo</a>
+        <a href="#operations">Operations</a>
+        <a href="#fleet">Fleet</a>
+        <a href="#mind">Mind</a>
+        <a href="#research">Ask</a>
         <a href="#brokers">Brokers</a>
         <a href="#trust">Trust</a>
         <a href="{% url 'login' %}" class="btn-access">Access Terminal</a>
@@ -1438,7 +1734,7 @@
             Autonomous, multi-asset trading across stocks, forex, commodities, options, crypto, and CFDs &mdash;
             unified by a closed-loop intelligence engine that generates signals, gates risk across themes,
             executes through six brokers, grades every outcome, and feeds the result back into the next decision.
-            Built end-to-end. <span class="hash-shimmer">667 tests green.</span>
+            Built end-to-end. <span class="hash-shimmer">{{ wall.tests_green }} tests green.</span>
         </p>
         <div class="hero-badge reveal delay-5">Institutional-Grade · Production-Hardened · Fully Auditable</div>
         <div class="hero-cta reveal delay-6">
@@ -1464,24 +1760,25 @@
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <section class="wall-section" id="platform">
     <div class="container">
+        {# Every target below is a server-side aggregate COUNT from the wall context — never a price, a symbol or an account figure. #}
         <div class="stats-bar reveal">
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="6">0</span></div>
+                <div class="stat-number"><span class="count-up" data-target="{{ wall.asset_classes }}">0</span></div>
                 <div class="stat-label">Asset Classes</div>
                 <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="6">0</span></div>
+                <div class="stat-number"><span class="count-up" data-target="{{ wall.broker_adapters }}">0</span></div>
                 <div class="stat-label">Broker Adapters</div>
                 <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="12">0</span></div>
+                <div class="stat-number"><span class="count-up" data-target="{{ wall.evaluators }}">0</span></div>
                 <div class="stat-label">Signal Evaluators</div>
                 <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="667">0</span></div>
+                <div class="stat-number"><span class="count-up" data-target="{{ wall.tests_green }}">0</span></div>
                 <div class="stat-label">Tests Passing</div>
                 <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
@@ -1491,7 +1788,7 @@
         <h2 class="section-title reveal delay-1">A Closed-Loop Intelligence Engine</h2>
         <p class="section-desc reveal delay-2">
             Sauron isn't a signal feed or a bot framework &mdash; it's the synthesis of both, plus everything
-            that connects them. Twelve evaluators fuse price, news, macro, COT, options flow and 13F filings
+            that connects them. {{ wall.evaluators }} evaluators fuse price, news, macro, COT, options flow and 13F filings
             into composite signals. A multi-dimensional risk gate prevents stacked exposure across asset classes.
             Six broker adapters route execution. Every trade is graded, every gate decision audited, every dollar
             tracked. Then the results feed back into how the next decision gets made.
@@ -1573,10 +1870,10 @@
                 </div>
                 <div class="feature-title">Strategy Evolution + AI Mutator</div>
                 <div class="feature-text">
-                    Phase-9 evolution mutates rule parameters; opt-in Claude-powered mutator proposes
-                    grounded changes given recent track record. Walk-forward backtester
-                    (with transaction costs + slippage) confirms before deployment. Auto-promotion through
-                    research → paper → live-small → live-full.
+                    Decaying rules get mutated candidates; an opt-in Claude mutator proposes
+                    grounded changes given the recent track record. A walk-forward backtester
+                    (with transaction costs + slippage) confirms before anything deploys.
+                    <a href="#evolution" style="color:var(--accent);text-decoration:none;">See how a fork earns its capital →</a>
                 </div>
             </div>
             <div class="feature-card reveal delay-5">
@@ -1650,7 +1947,7 @@
                 <h2 class="section-title">12 Evaluators.<br>One Composite Score.</h2>
                 <div class="sep sep-left"></div>
                 <p class="section-desc" style="margin-bottom:0;">
-                    The opportunity scanner fuses twelve evaluator kinds into multi-modal setups.
+                    The opportunity scanner fuses {{ wall.evaluators }} evaluator kinds into multi-modal setups.
                     Each setup is admin-editable, weighted, and emits an
                     <code>OpportunityFlag</code> only when the composite score crosses your threshold.
                     Every flag becomes a Signal that gets graded against its actual outcome &mdash;
@@ -2015,11 +2312,12 @@
             </p>
         </div>
     </div>
-</section>
 
+<!-- Kept inside #demo: .wall-section:nth-child(even) tints the page, and a -->
+<!-- sibling <script> between sections would shift every stripe after it.   -->
 <script>
 (function() {
-    /* Phase-trio orchestrator demo (v2). Three columns: live exposure
+    /* Orchestrator demo (v2). Three columns: live exposure
        bars (left) · stage (center) · persistent decision log (right).
        Scenario presets bias which trades stream so visitors can see
        specific failure modes. */
@@ -2312,6 +2610,478 @@
     io.observe(document.getElementById('demo'));
 })();
 </script>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- LIVE OPERATIONS — the cockpit you actually run the platform from   -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="operations">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">Live Operations <span class="new-pill">COCKPIT</span></div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            One Screen. Everything Moving.
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            The Operations Center is the home screen: what the system is doing <em>right now</em>.
+            Live signals arrive on a rail that follows you across every page, fills and gate rejections
+            land as banners the moment they happen, and the headband along the bottom keeps portfolio,
+            exposure, bot state and drawdown in view without a click. Everything below is one page.
+        </p>
+
+        <div class="ops-frame reveal-scale delay-4">
+            <div class="ops-head">
+                <div class="ops-head-title">◉ OPERATIONS_CENTER · LIVE</div>
+                <div class="ops-head-right">
+                    <span class="ops-pill paper"><span class="blip">◌</span> PAPER</span>
+                    <span class="ops-pill ws">⟂ WS PUSH</span>
+                    <span class="ops-pill">UTC</span>
+                </div>
+            </div>
+
+            {# Real state from the server clock — a painted-on "OPEN" would be #}
+            {# the same fabrication as the invented prices this page dropped. #}
+            <div class="sess-row">
+                {% for s in sessions %}
+                <span class="sess-pill{% if s.is_open %} open{% endif %}">{{ s.name }} <span class="utc">{{ s.window }}</span></span>
+                {% endfor %}
+            </div>
+
+            <div class="ops-body">
+                <!-- LEFT: the live signal rail with one-click execution -->
+                <div class="ops-panel">
+                    <div class="ops-panel-title">
+                        <span>Signal Rail</span>
+                        <span class="live-pulse">● STREAMING</span>
+                    </div>
+
+                    <div class="ops-card">
+                        <div class="ops-card-head">
+                            <span>EURUSD</span>
+                            <span class="ops-side long">LONG</span>
+                            <span style="color:var(--text3);">entry · stop · target</span>
+                        </div>
+                        <div class="ops-rule">rule: macro_trend + cot_report · composite above threshold</div>
+                        <div class="ops-conf"><i style="width:82%;"></i></div>
+                        <div class="ops-actions">
+                            <span class="ops-btn">TAKE TRADE</span>
+                            <span class="ops-btn pass">PASS</span>
+                        </div>
+                    </div>
+
+                    <div class="ops-card">
+                        <div class="ops-card-head">
+                            <span>NVDA</span>
+                            <span class="ops-side short">SHORT</span>
+                            <span style="color:var(--text3);">entry · stop · target</span>
+                        </div>
+                        <div class="ops-rule">rule: options_flow + volatility_regime · sized from your risk %</div>
+                        <div class="ops-conf"><i style="width:64%;"></i></div>
+                        <div class="ops-actions">
+                            <span class="ops-btn">TAKE TRADE</span>
+                            <span class="ops-btn pass">PASS</span>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- RIGHT: the notifications inbox -->
+                <div class="ops-panel">
+                    <div class="ops-panel-title">
+                        <span>Inbox</span>
+                        <span class="live-pulse">● LIVE</span>
+                    </div>
+                    <div class="ops-inbox-row"><span class="k">◉</span><span>Fill &mdash; bot opened a position and the rail card slid out</span></div>
+                    <div class="ops-inbox-row warn"><span class="k">▣</span><span>Gate reject &mdash; the orchestrator refused a stacked entry</span></div>
+                    <div class="ops-inbox-row"><span class="k">◬</span><span>New signal &mdash; composite crossed your threshold</span></div>
+                    <div class="ops-inbox-row bad"><span class="k">▼</span><span>Decay &mdash; a rule's 7d fell behind its 30d baseline</span></div>
+                    <div class="ops-inbox-row warn"><span class="k">✦</span><span>Critical news on an instrument you hold</span></div>
+                    <div style="font-family:var(--font-m);font-size:9px;color:var(--text3);letter-spacing:1px;margin-top:10px;line-height:1.5;">
+                        Same events route to Telegram, email, Discord and WhatsApp &mdash;
+                        one toggle per channel.
+                    </div>
+                </div>
+            </div>
+
+            <!-- The headband — pinned along the bottom of every page in the app -->
+            <div class="ops-band">
+                <div class="ops-band-cell">Portfolio<b>—</b></div>
+                <div class="ops-band-cell">Exposure<b>—</b></div>
+                <div class="ops-band-cell">Open R<b>—</b></div>
+                <div class="ops-band-cell">Bot state<b>—</b></div>
+                <div class="ops-band-cell">Unread<b>—</b></div>
+                <div class="ops-band-cell">Drawdown<b>—</b></div>
+            </div>
+        </div>
+
+        <div class="pillar-row reveal delay-5" style="max-width: 1080px; margin: 32px auto 0;">
+            <div class="pillar">
+                <div class="pillar-num">1 CLICK</div>
+                <div class="pillar-lbl">Take Trade</div>
+                <div class="pillar-desc">A signal becomes a position from the rail itself &mdash; sized from your risk
+                settings, then graded, reconciled, kill-switchable and audited exactly like a bot's.
+                Executes on the paper venue: the bots are what trade live, once they have earned it.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.instruments }}">0</span></div>
+                <div class="pillar-lbl">Instruments Watched</div>
+                <div class="pillar-desc">Every one clickable through to its own page &mdash; candlesticks down to
+                the minute, the signals that fired on it, and the news that moved it.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.news_24h }}">0</span></div>
+                <div class="pillar-lbl">Headlines · 24h</div>
+                <div class="pillar-desc">Ingested, scored and attached to the instruments they touch. A dash in
+                the headband always means &ldquo;not measured yet&rdquo; &mdash; never a zero dressed up as data.</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- BOT FLEET & PROMOTION LADDER                                       -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="fleet">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">Bot Fleet <span class="new-pill">TRIAL BY FIRE</span></div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            Nothing Reaches Live<br>Without Earning It.
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            One bot per asset class, each with its own entry logic, sizing, cooldowns and skip reasons &mdash;
+            all of them starting on the paper venue. A strategy climbs the ladder only on evidence,
+            and falls back down the moment the evidence stops. Nobody has to be watching.
+        </p>
+
+        <div class="broker-grid reveal delay-4">
+            <div class="broker-tile live">
+                <div class="broker-name">STOCKS</div>
+                <div class="broker-meta">sector-aware · earnings blackout</div>
+            </div>
+            <div class="broker-tile live">
+                <div class="broker-name">FOREX</div>
+                <div class="broker-meta">per-currency exposure caps</div>
+            </div>
+            <div class="broker-tile live">
+                <div class="broker-name">COMMODITIES</div>
+                <div class="broker-meta">metals · energy · agriculture</div>
+            </div>
+            <div class="broker-tile live">
+                <div class="broker-name">CRYPTO</div>
+                <div class="broker-meta">24/7 · funding + liquidation aware</div>
+            </div>
+            <div class="broker-tile live">
+                <div class="broker-name">OPTIONS</div>
+                <div class="broker-meta">flow-driven · defined risk</div>
+            </div>
+            <div class="broker-tile">
+                <div class="broker-name">MANUAL</div>
+                <div class="broker-meta">your Take-Trade book, same rails</div>
+            </div>
+        </div>
+
+        <div class="ladder reveal-scale delay-5" style="margin-top: 36px;">
+            <div class="ladder-flow"></div>
+
+            <div class="rung r1">
+                <div class="rung-step">STAGE 01</div>
+                <div class="rung-name">RESEARCH</div>
+                <div class="rung-sub">signals recorded<br>and graded, no capital</div>
+                <div class="rung-bar"></div>
+            </div>
+            <div class="rung r2">
+                <div class="rung-step">STAGE 02</div>
+                <div class="rung-name">PAPER</div>
+                <div class="rung-sub">executes on the<br>simulated venue</div>
+                <div class="rung-bar"></div>
+            </div>
+            <div class="rung r3">
+                <div class="rung-step">STAGE 03</div>
+                <div class="rung-name">LIVE · SMALL</div>
+                <div class="rung-sub">real money,<br>scaled-down sizing</div>
+                <div class="rung-bar"></div>
+            </div>
+            <div class="rung r4">
+                <div class="rung-step">STAGE 04</div>
+                <div class="rung-name">LIVE · FULL</div>
+                <div class="rung-sub">full sizing,<br>still under the gate</div>
+                <div class="rung-bar"></div>
+            </div>
+        </div>
+        <p class="ladder-demote reveal delay-6">
+            <span class="down">▼</span> and back down again &mdash; a decayed rule is demoted automatically,
+            with <span class="count-up" data-target="{{ wall.strategies }}">0</span> strategies currently on the ladder.
+        </p>
+
+        <div class="pillar-row reveal delay-6" style="max-width: 1080px; margin: 32px auto 0;">
+            <div class="pillar">
+                <div class="pillar-num">BACKTEST</div>
+                <div class="pillar-lbl">The Bot, Not the Rule</div>
+                <div class="pillar-desc">Replay historical signals through the exact bot config &mdash; SL/TP,
+                cooldowns, sizing &mdash; walking bars to find each real exit. A config that wins on train and
+                loses on test is overfit, and says so before any capital moves.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num">FORENSICS</div>
+                <div class="pillar-lbl">Why Did It Do That?</div>
+                <div class="pillar-desc">One timeline per fill: the rule that fired, the signals that voted,
+                the gate decision, the brain's advisory, the sizing multipliers in force, and the audit rows.
+                No archaeology across five pages.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.bots }}">0</span></div>
+                <div class="pillar-lbl">Configured Bots</div>
+                <div class="pillar-desc">Every one of them disabled and flattened in a single action by the
+                kill switch &mdash; which itself needs your PIN.</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- STRATEGY EVOLUTION                                                 -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="evolution">
+    <div class="container">
+        <div class="split" style="direction: rtl;">
+            <div class="split-visual reveal-right" style="direction: ltr;">
+                <div class="visual-grid"></div>
+                <svg viewBox="0 0 400 300" style="position:absolute;inset:0;width:100%;height:100%;opacity:0.65;">
+                    <line x1="70" y1="150" x2="170" y2="150" stroke="#3a6850" stroke-width="1" opacity="0.5"/>
+                    <line x1="170" y1="150" x2="270" y2="80" stroke="#8840d0" stroke-width="0.8" opacity="0.45"/>
+                    <line x1="170" y1="150" x2="270" y2="150" stroke="#8840d0" stroke-width="0.8" opacity="0.45"/>
+                    <line x1="170" y1="150" x2="270" y2="220" stroke="#8840d0" stroke-width="0.8" opacity="0.45"/>
+                    <line x1="270" y1="80" x2="345" y2="80" stroke="#00e868" stroke-width="1" opacity="0.5"/>
+                    <line x1="270" y1="150" x2="345" y2="150" stroke="#3a6850" stroke-width="1" opacity="0.4"/>
+                    <line x1="270" y1="220" x2="345" y2="220" stroke="#e83030" stroke-width="0.8" opacity="0.35"/>
+                    <circle cx="70" cy="150" r="9" fill="none" stroke="#3a6850" stroke-width="1.2"/>
+                    <circle cx="170" cy="150" r="7" fill="none" stroke="#d8b020" stroke-width="1.2"/>
+                    <circle cx="270" cy="80" r="6" fill="none" stroke="#8840d0" stroke-width="1"/>
+                    <circle cx="270" cy="150" r="6" fill="none" stroke="#8840d0" stroke-width="1"/>
+                    <circle cx="270" cy="220" r="6" fill="none" stroke="#8840d0" stroke-width="1"/>
+                    <circle cx="345" cy="80" r="7" fill="#00e868" opacity="0.16" stroke="#00e868" stroke-width="1"/>
+                    <circle cx="345" cy="150" r="6" fill="none" stroke="#3a6850" stroke-width="0.8"/>
+                    <circle cx="345" cy="220" r="6" fill="none" stroke="#e83030" stroke-width="0.8" opacity="0.6"/>
+                    <text x="46" y="176" fill="#3a6850" font-size="8" font-family="monospace">PARENT</text>
+                    <text x="146" y="176" fill="#d8b020" font-size="8" font-family="monospace">DECAY</text>
+                    <text x="240" y="248" fill="#8840d0" font-size="8" font-family="monospace">MUTANTS</text>
+                    <text x="322" y="60" fill="#00e868" font-size="8" font-family="monospace">FORK</text>
+                    <circle r="3" fill="#8840d0" opacity="0.85">
+                        <animateMotion dur="4s" repeatCount="indefinite" path="M70,150 L170,150 L270,80 L345,80"/>
+                    </circle>
+                </svg>
+                <div class="split-visual-inner">MUTATION LINEAGE</div>
+            </div>
+            <div class="split-content reveal-left" style="direction: ltr;">
+                <div class="section-label">Strategy Evolution</div>
+                <h2 class="section-title">Decay Is the Trigger.<br>Evidence Is the Judge.</h2>
+                <div class="sep sep-left"></div>
+                <p class="section-desc" style="margin-bottom:0;">
+                    Rules opt in by declaring a parameter schema. When the nightly investigator
+                    <em>confirms</em> decay on one of them, mutation proposals are generated that same
+                    night &mdash; creation is a reflex to evidence, not a calendar appointment. Each candidate
+                    perturbs one to three parameters inside their declared bounds, and every one of them
+                    has to prove itself on data the parent never saw before an operator is even asked.
+                </p>
+                <ul class="check-list">
+                    <li><span class="check-mark">&#x2713;</span>Confirmed decay fires proposals immediately; nothing waits for a weekly sweep</li>
+                    <li><span class="check-mark">&#x2713;</span>Adaptive cadence: mid-week runs skip when the fleet closed too little to learn from</li>
+                    <li><span class="check-mark">&#x2713;</span>Walk-forward evidence packet: train/test split, mutant vs parent on both halves</li>
+                    <li><span class="check-mark">&#x2713;</span>Overfit candidates are penalised by their <em>worse</em> half &mdash; good train, bad test never wins</li>
+                    <li><span class="check-mark">&#x2713;</span>Approved mutants fork into research and trade beside the parent, which is never overwritten</li>
+                    <li><span class="check-mark">&#x2713;</span>Undecided proposals expire &mdash; an unanswered question does not pile up into noise</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- SAURON'S MIND                                                      -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="mind">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">Sauron's Mind <span class="new-pill">SYNTHESIS</span></div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            A Machine That Argues<br>With Itself.
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            Above the signal engine sits a layer whose only job is to <em>understand</em>. It reads the
+            platform's own state on a loop, writes down what it believes, invites its own agents to
+            attack those beliefs, keeps what survives, and forgets the rest. Every claim carries a
+            deadline, and every deadline is graded.
+        </p>
+
+        <div class="features-grid" style="text-align: left; margin-top: 36px;">
+            <div class="feature-card reveal delay-1">
+                <div class="feature-icon">
+                    <!-- Synthesis sigil — concentric aperture drawing the world into one point -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,2 21,7 21,17 12,22 3,17 3,7"/>
+                        <polygon points="12,6.5 17.5,9.5 17.5,14.5 12,17.5 6.5,14.5 6.5,9.5"/>
+                        <circle cx="12" cy="12" r="1.4" fill="var(--accent)" stroke="none"/>
+                        <line x1="12" y1="2" x2="12" y2="6.5"/>
+                        <line x1="21" y1="17" x2="17.5" y2="14.5"/>
+                        <line x1="3" y1="17" x2="6.5" y2="14.5"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Brain Synthesis</div>
+                <div class="feature-text">
+                    Every thirty minutes a structured world snapshot &mdash; observations, portfolio state,
+                    exposure, rule track records, regime probes &mdash; becomes one report with a regime
+                    call, a confidence and a handful of <em>falsifiable</em> predictions. If synthesis
+                    fails it says so; downstream agents degrade instead of guessing.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-2">
+                <div class="feature-icon blue">
+                    <!-- Knowledge graph — nodes bound by edges into a lattice -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <line x1="6" y1="6" x2="12" y2="12"/>
+                        <line x1="18" y1="6" x2="12" y2="12"/>
+                        <line x1="6" y1="18" x2="12" y2="12"/>
+                        <line x1="18" y1="18" x2="12" y2="12"/>
+                        <circle cx="6" cy="6" r="2"/>
+                        <circle cx="18" cy="6" r="2"/>
+                        <circle cx="6" cy="18" r="2"/>
+                        <circle cx="18" cy="18" r="2"/>
+                        <circle cx="12" cy="12" r="2.6"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Knowledge Graph</div>
+                <div class="feature-text">
+                    Settled facts &mdash; regimes, theme states, rule states, persistent anomalies,
+                    narrative threads &mdash; get promoted out of the raw observation queue into durable
+                    nodes with a history you can walk. What the graph holds is what the agents are
+                    allowed to treat as known.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-3">
+                <div class="feature-icon gold">
+                    <!-- Hypothesis market — a claim on the scales -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <line x1="12" y1="3" x2="12" y2="21"/>
+                        <line x1="4" y1="7" x2="20" y2="7"/>
+                        <polygon points="4,7 1.5,13 6.5,13"/>
+                        <polygon points="20,7 17.5,13 22.5,13"/>
+                        <line x1="8" y1="21" x2="16" y2="21"/>
+                        <circle cx="12" cy="3.5" r="0.9" fill="var(--gold)" stroke="none"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Hypothesis Market</div>
+                <div class="feature-text">
+                    Any agent may post a claim &mdash; with a confidence and a deadline. Other agents vote
+                    to co-sign, refine or dissent. When the deadline passes the claim is resolved against
+                    what actually happened, and the result flows straight into the poster's calibration.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-4">
+                <div class="feature-icon red">
+                    <!-- The critic — a shield cut by the dissenting stroke -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,2.5 20,6 20,13 12,21.5 4,13 4,6"/>
+                        <line x1="7.5" y1="8" x2="16.5" y2="16"/>
+                        <line x1="16.5" y1="8" x2="7.5" y2="16"/>
+                        <circle cx="12" cy="12" r="1" fill="var(--accent-red)" stroke="none"/>
+                    </svg>
+                </div>
+                <div class="feature-title">The Critic</div>
+                <div class="feature-text">
+                    A red-team agent whose job is to argue against Sauron's own ideas. It reviews claims
+                    from low-trust agents, sanity-checks every high-confidence one, and samples the rest.
+                    When it dissents strongly it must post its own counter-claim &mdash; so the quality of
+                    the dissent is measured too.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-5">
+                <div class="feature-icon purple">
+                    <!-- Consolidation — the sieve: wide mouth, narrow keep -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="3,3 21,3 14,12 14,20 10,22 10,12"/>
+                        <line x1="6" y1="7" x2="18" y2="7"/>
+                        <line x1="9" y1="10" x2="15" y2="10"/>
+                        <circle cx="12" cy="16" r="0.9" fill="var(--purple)" stroke="none"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Consolidation &amp; Forgetting</div>
+                <div class="feature-text">
+                    Once a night the day's observations are compacted: load-bearing facts move into the
+                    graph, everything that led nowhere is pruned. Without a forgetting mechanism the queue
+                    grows without bound and every agent drowns in noise. Pure, deterministic, cheap.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-6">
+                <div class="feature-icon">
+                    <!-- Calibration reticle — the scoring of a prediction against truth -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <circle cx="12" cy="12" r="9"/>
+                        <circle cx="12" cy="12" r="4.5"/>
+                        <line x1="12" y1="1.5" x2="12" y2="5"/>
+                        <line x1="12" y1="19" x2="12" y2="22.5"/>
+                        <line x1="1.5" y1="12" x2="5" y2="12"/>
+                        <line x1="19" y1="12" x2="22.5" y2="12"/>
+                        <circle cx="12" cy="12" r="1" fill="var(--accent)" stroke="none"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Generated Strategies · Journal · Trust</div>
+                <div class="feature-text">
+                    The Mind also writes candidate strategies of its own &mdash; and they enter the same
+                    ladder as everything else, with no shortcut for being AI-authored. The AI journal
+                    records what each agent said, what it cost, and how it aged; Brier-scored calibration
+                    turns that history into per-agent trust, and low trust means less weight downstream.
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- ASK SAURON — the research conversation                             -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="research">
+    <div class="container">
+        <div class="split">
+            <div class="ask-term reveal-left">
+                <div class="ask-term-bar">
+                    <span>◬ ASK_SAURON · RESEARCH</span>
+                    <span class="ro">READ-ONLY</span>
+                </div>
+                <div class="ask-line ask-q">What's your current read on the dollar?</div>
+                <div class="ask-line ask-a">
+                    Reading the last 72h of reports, graph nodes and open hypotheses &mdash; here is the
+                    posture, what changed, and the two claims that would falsify it.
+                </div>
+                <div class="ask-line ask-q">Why did you pause that momentum rule?</div>
+                <div class="ask-line ask-a">
+                    Its recent window fell behind its own baseline; the decay investigator confirmed it,
+                    the actuator paused it, and the audit row is linked below.
+                </div>
+                <div class="ask-line ask-q">Where did our recent dissents come from?<span class="ask-caret"></span></div>
+            </div>
+            <div class="split-content reveal-right">
+                <div class="section-label">Ask Sauron</div>
+                <h2 class="section-title">Interrogate Your<br>Own Machine.</h2>
+                <div class="sep sep-left"></div>
+                <p class="section-desc" style="margin-bottom:0;">
+                    A conversation with the platform about the platform. It reads Sauron's own accumulated
+                    state &mdash; brain reports, knowledge nodes, hypotheses, rule track records, your book
+                    &mdash; and answers in plain English with the rows it used. It has <strong>no tools to
+                    change anything</strong>: the research agent can only look. Press Ctrl+K on any page,
+                    or open the full conversation from AI Agents.
+                </p>
+                <ul class="check-list">
+                    <li><span class="check-mark">&#x2713;</span>Retrieval over your real history &mdash; not a general-purpose chatbot with a ticker</li>
+                    <li><span class="check-mark">&#x2713;</span>Intelligence hub: reports, graph, hypotheses and dissents in one reading room</li>
+                    <li><span class="check-mark">&#x2713;</span>Daily strategist briefing: outlook, posture, watchlist and three actionable ideas</li>
+                    <li><span class="check-mark">&#x2713;</span>Each briefing idea is posted as a hypothesis &mdash; the strategist gets graded too</li>
+                    <li><span class="check-mark">&#x2713;</span>Earnings reviews on the names you hold, written before the print and read after it</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</section>
 
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <!-- BROKERS                                                            -->
@@ -2386,7 +3156,7 @@
     <div class="container">
         <div class="split">
             <div class="split-content reveal-left">
-                <div class="section-label">Trust &amp; Compliance <span class="new-pill">PHASE 28</span></div>
+                <div class="section-label">Trust &amp; Compliance <span class="new-pill">HASH-CHAINED</span></div>
                 <h2 class="section-title">Every Decision.<br>Hashed. Forever.</h2>
                 <div class="sep sep-left"></div>
                 <p class="section-desc" style="margin-bottom:0;">
@@ -2427,6 +3197,47 @@
                     </div>
                 </div>
                 <div class="split-visual-inner">AUDIT CHAIN</div>
+            </div>
+        </div>
+
+        <div class="section-label reveal" style="margin-top: 90px; text-align: center;">Second Gate</div>
+        <h2 class="section-title reveal delay-1" style="text-align: center; margin-left:auto; margin-right:auto;">
+            The Audit Trail Guards the Past.<br>The PIN Guards the Present.
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;text-align:center;">
+            A password gets you a session. It does not get you money. Every action that can move capital
+            sits behind a second factor you hold, and a screen left unattended stops being a screen
+            anyone can use.
+        </p>
+
+        <div class="pillar-row reveal delay-4" style="margin-top: 32px; text-align: center;">
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.chain_length }}">0</span></div>
+                <div class="pillar-lbl">Audit Chain</div>
+                <div class="pillar-desc">Append-only entries, each hashed onto the last. Editing any past
+                row breaks every hash after it, and verification names the break.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num">2ND GATE</div>
+                <div class="pillar-lbl">PIN on Login</div>
+                <div class="pillar-desc">Credentials accepted is not signed in. A 4-to-8 digit PIN stands
+                between the password and the terminal, throttled against guessing, with a
+                password-verified reset as the only way back.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num">ARMED</div>
+                <div class="pillar-lbl">PIN to Go Live</div>
+                <div class="pillar-desc">Bots run on paper until you arm them &mdash; and arming live takes
+                the PIN, every time. The emergency kill switch that disables every bot and flattens the
+                book is behind the same gate.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num">IDLE</div>
+                <div class="pillar-lbl">Auto-Lock</div>
+                <div class="pillar-desc">After your chosen quiet period the session locks itself to a bare
+                PIN screen &mdash; no shell, no data, no admin, no report. An unattended desk stops being
+                an open terminal.</div>
             </div>
         </div>
     </div>
@@ -2476,7 +3287,7 @@
     <div class="container" style="text-align: center;">
         <div class="section-label reveal">Intelligence Network</div>
         <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
-            Twelve Lenses. One Eye.
+            Many Lenses. One Eye.
         </h2>
         <div class="sep reveal delay-2"></div>
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
@@ -2678,18 +3489,48 @@
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <script>
 (function(){
-    // ── Particles with price labels ──────────────────────────────────
+    // ── Platform counters ────────────────────────────────────────────
+    // Server-side aggregates only. Every value is a COUNT of rows this
+    // deployment holds — never a quote, a P&L, an account or a symbol.
+    // The ticker and the particle labels both read from here, so the
+    // page can never drift back into inventing market prices.
+    var WALL = {
+        tests:       {{ wall.tests_green|default:0 }},
+        assets:      {{ wall.asset_classes|default:0 }},
+        brokers:     {{ wall.broker_adapters|default:0 }},
+        evaluators:  {{ wall.evaluators|default:0 }},
+        instruments: {{ wall.instruments|default:0 }},
+        signals:     {{ wall.signals_graded|default:0 }},
+        trades:      {{ wall.trades_graded|default:0 }},
+        strategies:  {{ wall.strategies|default:0 }},
+        chain:       {{ wall.chain_length|default:0 }},
+        news:        {{ wall.news_24h|default:0 }},
+        bots:        {{ wall.bots|default:0 }}
+    };
+    function wallNum(n) {
+        return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+
+    // ── Particles carrying platform counters ─────────────────────────
     var canvas = document.getElementById('bgCanvas');
     var ctx = canvas.getContext('2d');
     var W, H;
     function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
     resize(); window.addEventListener('resize', resize);
 
-    var symbols = ['EURUSD','BTCUSD','XAUUSD','SPX','AAPL','TSLA','NVDA','NKY','DAX','USDJPY','ETHUSD','GBPUSD','CL','VIX','DXY'];
-    var prices = {};
-    symbols.forEach(function(s) {
-        prices[s] = { val: (Math.random()*5000+10).toFixed(2), chg: ((Math.random()-0.45)*4).toFixed(2) };
-    });
+    var particleTags = [
+        ['SIGNALS GRADED', wallNum(WALL.signals)],
+        ['TRADES GRADED',  wallNum(WALL.trades)],
+        ['CHAIN LENGTH',   wallNum(WALL.chain)],
+        ['STRATEGIES',     wallNum(WALL.strategies)],
+        ['INSTRUMENTS',    wallNum(WALL.instruments)],
+        ['EVALUATORS',     wallNum(WALL.evaluators)],
+        ['ASSET BOTS',     wallNum(WALL.bots)],
+        ['NEWS · 24H',     wallNum(WALL.news)],
+        ['BROKERS',        wallNum(WALL.brokers)],
+        ['ASSET CLASSES',  wallNum(WALL.assets)],
+        ['TESTS GREEN',    wallNum(WALL.tests)]
+    ];
 
     var particles = [];
     var PARTICLE_COUNT = 80;
@@ -2698,7 +3539,7 @@
             x: Math.random()*2000, y: Math.random()*2000,
             vx: (Math.random()-0.5)*0.4, vy: (Math.random()-0.5)*0.4,
             s: Math.random()*1.8+0.3, a: Math.random()*0.25+0.06,
-            sym: i < symbols.length ? symbols[i] : null,
+            tag: i < particleTags.length ? particleTags[i] : null,
             trail: [], trailMax: 7
         });
     }
@@ -2750,54 +3591,44 @@
             ctx.fillStyle = 'rgba(0,232,104,' + p.a + ')';
             ctx.fill();
 
-            if (p.sym && prices[p.sym]) {
-                var pr = prices[p.sym];
+            if (p.tag) {
                 ctx.font = '10px "Share Tech Mono", monospace';
                 ctx.fillStyle = 'rgba(0,232,104,0.28)';
-                ctx.fillText(p.sym, p.x + 10, p.y - 5);
-                ctx.fillStyle = parseFloat(pr.chg) >= 0 ? 'rgba(0,232,104,0.18)' : 'rgba(232,48,48,0.18)';
-                ctx.fillText(pr.val, p.x + 10, p.y + 8);
+                ctx.fillText(p.tag[0], p.x + 10, p.y - 5);
+                ctx.fillStyle = 'rgba(0,232,104,0.18)';
+                ctx.fillText(p.tag[1], p.x + 10, p.y + 8);
             }
         }
         requestAnimationFrame(drawParticles);
     }
     drawParticles();
 
-    // Slowly drift prices
-    setInterval(function(){
-        symbols.forEach(function(s){
-            var v = parseFloat(prices[s].val);
-            v += (Math.random()-0.48)*v*0.001;
-            prices[s].val = v.toFixed(2);
-            prices[s].chg = ((Math.random()-0.45)*4).toFixed(2);
-        });
-    }, 2000);
-
     // ── Ticker bar population ────────────────────────────────────────
+    // The strip scrolls what the platform has actually done, straight
+    // from the wall context — no market data crosses this page.
     var tickerData = [
-        {sym:'SPX',price:'5,842.31',chg:'+0.67%',up:true},
-        {sym:'NDX',price:'20,614.50',chg:'+1.12%',up:true},
-        {sym:'DJI',price:'43,729.80',chg:'+0.34%',up:true},
-        {sym:'BTCUSD',price:'97,234.00',chg:'+2.41%',up:true},
-        {sym:'ETHUSD',price:'3,521.40',chg:'+1.88%',up:true},
-        {sym:'XAUUSD',price:'2,714.30',chg:'+0.52%',up:true},
-        {sym:'EURUSD',price:'1.0847',chg:'-0.12%',up:false},
-        {sym:'USDJPY',price:'154.32',chg:'+0.28%',up:true},
-        {sym:'VIX',price:'14.82',chg:'-3.21%',up:false},
-        {sym:'CL',price:'71.42',chg:'-0.89%',up:false},
-        {sym:'DXY',price:'106.14',chg:'+0.15%',up:true},
-        {sym:'AAPL',price:'227.48',chg:'+0.91%',up:true},
-        {sym:'NVDA',price:'141.20',chg:'+3.14%',up:true},
-        {sym:'TSLA',price:'352.80',chg:'+2.67%',up:true},
+        {label:'SIGNALS GRADED', value: WALL.signals,     unit:'TOTAL'},
+        {label:'STRATEGIES',     value: WALL.strategies,  unit:'ON THE LADDER'},
+        {label:'CHAIN LENGTH',   value: WALL.chain,       unit:'AUDIT ENTRIES'},
+        {label:'TRADES GRADED',  value: WALL.trades,      unit:'R-MULTIPLE'},
+        {label:'INSTRUMENTS',    value: WALL.instruments, unit:'ACTIVE'},
+        {label:'ASSET CLASSES',  value: WALL.assets,      unit:'COVERED'},
+        {label:'BROKER ADAPTERS',value: WALL.brokers,     unit:'ROUTED'},
+        {label:'EVALUATORS',     value: WALL.evaluators,  unit:'REGISTERED'},
+        {label:'NEWS INGESTED',  value: WALL.news,        unit:'24H'},
+        {label:'ASSET BOTS',     value: WALL.bots,        unit:'CONFIGURED'},
+        {label:'TESTS GREEN',    value: WALL.tests,       unit:'BUILD'},
     ];
     var track = document.getElementById('wallTickerTrack');
     var html = '';
-    for (var t = 0; t < 3; t++) {
+    /* Exactly two copies: the strip animates to translateX(-50%), so any
+       other count lands mid-copy and the row visibly jumps each cycle. */
+    for (var t = 0; t < 2; t++) {
         tickerData.forEach(function(d) {
             html += '<span style="display:inline-flex;align-items:center;gap:6px;margin-right:48px;">';
-            html += '<span class="ticker-sym">' + d.sym + '</span>';
-            html += '<span class="ticker-price">' + d.price + '</span>';
-            html += '<span class="ticker-chg ' + (d.up ? 'up' : 'down') + '">' + d.chg + '</span>';
+            html += '<span class="ticker-sym">' + d.label + '</span>';
+            html += '<span class="ticker-price">' + wallNum(d.value) + '</span>';
+            html += '<span class="ticker-chg up">' + d.unit + '</span>';
             html += '</span>';
         });
     }
@@ -2831,14 +3662,16 @@
             if (entry.isIntersecting) {
                 // Re-run count-up each time it comes into view
                 var el = entry.target;
-                var target = parseInt(el.dataset.target);
+                // Counts now come from the server, so they can be six
+                // figures — group them, and never render NaN.
+                var target = parseInt(el.dataset.target, 10) || 0;
                 var current = 0;
                 var step = Math.max(1, Math.floor(target / 40));
                 el.textContent = '0';
                 var interval = setInterval(function() {
                     current += step;
                     if (current >= target) { current = target; clearInterval(interval); }
-                    el.textContent = current;
+                    el.textContent = wallNum(current);
                 }, 40);
             }
         });

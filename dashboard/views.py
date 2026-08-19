@@ -3011,18 +3011,32 @@ def popout_panel(request):
 
 @login_required
 def kill_switch_api(request):
-    """Emergency kill switch endpoint — flatten all positions instantly."""
+    """Emergency kill switch endpoint — flatten all positions instantly.
+
+    PIN-gated, like the HQ button that reaches the same function
+    (views_admin_hq.flatten_all_positions). This endpoint was login-only
+    while its twin required the PIN, so a stolen session could disable
+    every bot and flatten the book with no second factor at all.
+    """
     from django.http import JsonResponse
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
 
     from bot_program.engine.kill_switch import execute_kill_switch
+    from django.contrib.auth.hashers import check_password
     import json
 
     try:
         data = json.loads(request.body) if request.body else {}
     except Exception:
         data = {}
+
+    pin = data.get('pin') or request.POST.get('pin', '')
+    prof = getattr(request.user, 'trader_profile', None)
+    if not (prof and prof.access_pin_hash
+            and check_password(pin, prof.access_pin_hash)):
+        return JsonResponse(
+            {'error': 'PIN required to flatten the book.'}, status=403)
 
     reason = data.get('reason', 'manual activation')
     results = execute_kill_switch(user=request.user, reason=reason)
