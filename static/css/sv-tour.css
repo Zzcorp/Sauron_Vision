@@ -11,25 +11,55 @@
    paints the darkness) but it CATCHES every pointer event on the dimmed
    page. The spotlighted element itself sits under the spot's own box,
    which swallows clicks too — the tour genuinely owns the page. */
+/* The veil is four panes fenced AROUND the spotlight, not one sheet over
+   everything: the highlighted control has to be genuinely clickable and
+   hoverable, or a step that says "hover a card for TAKE TRADE" is a
+   description of software the reader cannot touch. The panes still
+   swallow every click outside the cutout, so the walk keeps its rails. */
 .sv-tour-veil {
     position: fixed;
     inset: 0;
     display: none;
     background: transparent;
-    pointer-events: auto;
+    pointer-events: none;
     z-index: var(--z-backdrop, 3000);
 }
 .sv-tour-veil.is-on { display: block; }
+.sv-tour-pane {
+    position: fixed;
+    background: transparent;
+    pointer-events: auto;
+}
+
+/* A live cutout is only half a gift: the control is clickable, but every
+   surface it OPENS — the bell dropdown, the user menu, the Palantír panel,
+   the ticker and rail hover cards — sits at 1200-2000 on the ladder, i.e.
+   under this layer's 3000. They painted greyed beneath the scrim and their
+   hit area belonged to a pane, so "click the bell for the latest ten" gave
+   you a dimmed panel that ignored every click. While the walk is on, the
+   surfaces it invites you to open ride above the panes — and still below
+   the step card at --z-dialog, so the instructions stay readable. */
+body.sv-tour-on [data-sv-overlay].is-open,
+body.sv-tour-on .notif-dropdown.is-open,
+body.sv-tour-on .user-menu.open .user-menu-dropdown,
+body.sv-tour-on .user-menu-dropdown.is-open,
+body.sv-tour-on .se-chat-panel.open,
+body.sv-tour-on .sr-popup.show,
+body.sv-tour-on .ticker-popup,
+body.sv-tour-on .nf-pop {
+    z-index: calc(var(--z-backdrop, 3000) + 20) !important;
+}
 
 .sv-tour-spot {
     position: fixed;
     display: none;
     border-radius: var(--pop-radius, 10px);
     /* The 100vmax spread paints the whole viewport EXCEPT this element's
-       box — the cutout is the transparent center. Clicks on the hole are
-       swallowed so the tour owns the page while active. */
+       box — the cutout is the transparent center. Painting only: the hit
+       area belongs to the four panes, and this element must not intercept
+       the clicks the cutout is there to allow. */
     box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .62);
-    pointer-events: auto;
+    pointer-events: none;
     z-index: var(--z-backdrop, 3000);
     transition: top .28s ease, left .28s ease,
                 width .28s ease, height .28s ease;

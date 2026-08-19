@@ -43,9 +43,14 @@ def _bot_trade(user, symbol="BTCUSD", status="OPEN", **kw):
 # ── Notifications: links must lead somewhere real ───────────────────────
 
 class NotificationLinkTests(TestCase):
-    def test_safe_url_blanks_dead_paths_and_keeps_live_ones(self):
+    def test_safe_url_repairs_known_dead_paths_and_blanks_the_rest(self):
         from alerts.models import Notification
-        self.assertEqual(Notification.safe_url("/market-data/"), "")
+        # The shipped 404s are rewritten to the page they meant. They also
+        # redirect now, for the copies already sent out — but a stored
+        # notification should carry the real destination, not lean on it.
+        self.assertEqual(Notification.safe_url("/market-data/"), "/quotes/")
+        self.assertEqual(Notification.safe_url("/dashboard/"), "/")
+        self.assertEqual(Notification.safe_url("/no-such-page/"), "")
         self.assertEqual(Notification.safe_url("/quotes/"), "/quotes/")
         self.assertEqual(Notification.safe_url("/briefing/"), "/briefing/")
         self.assertEqual(Notification.safe_url("https://example.com/x"),
@@ -57,8 +62,12 @@ class NotificationLinkTests(TestCase):
         User.objects.create_user("nb_u")
         Notification.create_for_all(
             notification_type="system", title="t", url="/market-data/")
-        self.assertEqual(Notification.objects.get(title="t").url, "",
-                         "a dead link must be stored empty, not 404 later")
+        self.assertEqual(Notification.objects.get(title="t").url, "/quotes/",
+                         "the anomaly alert must land on the quotes page")
+        Notification.create_for_all(
+            notification_type="system", title="t2", url="/invented/")
+        self.assertEqual(Notification.objects.get(title="t2").url, "",
+                         "an unknown dead link is stored empty, not 404 later")
 
     def test_repair_command_rewrites_shipped_404s(self):
         from django.core.management import call_command

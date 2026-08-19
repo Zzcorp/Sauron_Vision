@@ -3,6 +3,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.contrib.auth import views as auth_views
 from django.shortcuts import render, redirect
+from django.views.generic import RedirectView
 from dashboard.auth_views import SauronLoginView, login_pin, login_pin_forgot
 from core.health import health_check
 from core.wall_facts import market_sessions, wall_facts
@@ -28,6 +29,12 @@ def the_wall(request):
 
 urlpatterns = [
     path("healthz/", health_check, name="healthz"),
+    # Links that shipped inside notifications — and therefore inside
+    # Telegram messages, emails and browser histories we cannot edit.
+    # Repairing the stored rows fixes the inbox; these keep every copy
+    # already out in the world from landing on a 404.
+    path("market-data/", RedirectView.as_view(url="/quotes/", permanent=True)),
+    path("dashboard/", RedirectView.as_view(url="/", permanent=True)),
     path("admin/", admin.site.urls),
     path("wall/", the_wall, name="the_wall"),
     path("login/", SauronLoginView.as_view(), name="login"),

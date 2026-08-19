@@ -99,3 +99,130 @@ class TourPageTests(TestCase):
                        'id="notifBell"', 'id="userMenuTrigger"',
                        'id="seEyeFab"', 'class="theme-toggle-btn"'):
             self.assertContains(resp, anchor)
+
+
+class TourWalksToRealPagesTests(TestCase):
+    """The tour used to point at a menu item and describe what lay behind
+    it — teaching nothing the sidebar label did not already say, on a page
+    the reader could not click. Steps that name a page now walk there, and
+    the spotlight is live."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user("tour_walk")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_page_steps_carry_the_page_they_describe(self):
+        """The five stops that are pages — Operations Center, Signals,
+        Strategies, the Bot Program, Portfolio — each declare their url, so
+        the walk arrives there instead of pointing at the menu entry."""
+        import re
+
+        from django.urls import reverse
+        body = self.client.get("/getting-started/").content.decode(
+            "utf-8", "replace")
+        declared = set(re.findall(r'url: "([^"]+)"', body))
+        for name in ("command_center", "signals_list", "strategies_list",
+                     "bot_home", "portfolio_overview"):
+            with self.subTest(page=name):
+                self.assertIn(reverse(name), declared)
+
+    def test_every_declared_step_url_resolves(self):
+        """A tour that walks you to a 404 is worse than one that points."""
+        import re
+
+        from django.urls import Resolver404, resolve
+        body = self.client.get("/getting-started/").content.decode(
+            "utf-8", "replace")
+        urls = re.findall(r'url: "([^"]+)"', body)
+        self.assertGreaterEqual(len(urls), 5)
+        for u in urls:
+            with self.subTest(url=u):
+                try:
+                    resolve(u)
+                except Resolver404:  # pragma: no cover - the assertion reports
+                    self.fail(f"tour step points at {u}, which does not resolve")
+
+    def test_the_engine_can_resume_after_navigation(self):
+        with open("static/js/sv-tour.js", encoding="utf-8") as fh:
+            src = fh.read()
+        # Hand-off across a page load, or the walk vanishes the moment it
+        # does its job.
+        self.assertIn("sv:tour:resume", src)
+        self.assertIn("function saveResume", src)
+        # Resume must outrank a fresh autostart, or every navigation
+        # restarts the tour at step one.
+        self.assertIn("if (resume || cfg.autostart)", src)
+
+    def test_what_the_cutout_opens_rides_above_the_scrim(self):
+        """A live cutout is half a gift if the bell dropdown it opens paints
+        under the scrim and ignores every click — which is exactly what the
+        ladder produced: menus at 1600 and panels at 2000 beneath a tour
+        layer at 3000."""
+        with open("static/css/sv-tour.css", encoding="utf-8") as fh:
+            css = fh.read()
+        self.assertIn("body.sv-tour-on", css)
+        for surface in (".user-menu-dropdown", ".se-chat-panel",
+                        ".sr-popup", ".ticker-popup", "[data-sv-overlay]"):
+            with self.subTest(surface=surface):
+                self.assertIn(surface, css)
+        # Raised above the panes, still below the step card, and via the
+        # ladder token — never a raw number.
+        self.assertIn("calc(var(--z-backdrop, 3000) + 20)", css)
+        with open("static/js/sv-tour.js", encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn('classList.add("sv-tour-on")', src)
+        self.assertIn('classList.remove("sv-tour-on")', src)
+        # Escape must close that surface rather than ending the tour.
+        self.assertIn(".se-chat-panel.open", src)
+
+    def test_a_click_in_the_cutout_does_not_claim_an_arrival(self):
+        """The operator clicked where THEY wanted. Recording it as "the
+        tour navigated for step N+1" made that step skip its own walk and
+        describe its page from whatever page the click landed on."""
+        with open("static/js/sv-tour.js", encoding="utf-8") as fh:
+            src = fh.read()
+        click_fn = src.split("function onSpotlightClick")[1].split(
+            "\n    }")[0]
+        self.assertIn("saveResume(Math.min(idx + 1, cfg.steps.length - 1), false, 1)",
+                      click_fn)
+        # A modified click opens a new tab; this page is not going anywhere.
+        self.assertIn("e.ctrlKey || e.metaKey || e.shiftKey || e.altKey",
+                      click_fn)
+        # And a handler that cancelled the navigation must not leave a
+        # hand-off behind either.
+        self.assertIn("e.defaultPrevented", click_fn)
+
+    def test_a_step_skipped_into_still_walks_to_its_own_page(self):
+        """The skip loop used to jump straight to rendering, so a step
+        skipped INTO never checked whether it lived on another page."""
+        with open("static/js/sv-tour.js", encoding="utf-8") as fh:
+            src = fh.read()
+        render_fn = src.split("function render(direction)")[1][:1400]
+        nav = render_fn.find("w.location.assign(step.url)")
+        skip = render_fn.find("idx += direction")
+        self.assertGreater(nav, 0)
+        self.assertGreater(skip, nav,
+                           "the navigation check must sit INSIDE the skip "
+                           "loop, before it advances")
+
+    def test_direction_of_travel_survives_the_page_load(self):
+        """BACK across a step that navigates must keep walking back."""
+        with open("static/js/sv-tour.js", encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn("dir: dir === -1 ? -1 : 1", src)
+        self.assertIn("render(opts.dir === -1 ? -1 : 1)", src)
+
+    def test_the_spotlight_is_clickable_and_the_rest_is_not(self):
+        with open("static/css/sv-tour.css", encoding="utf-8") as fh:
+            css = fh.read()
+        # The scrim paints; the panes fenced around the cutout carry the
+        # hit area, so the highlighted control keeps its own interactions.
+        self.assertIn(".sv-tour-pane", css)
+        self.assertIn("pointer-events: auto", css)
+        with open("static/js/sv-tour.js", encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn("function fencePanes", src)
+        self.assertIn("onSpotlightClick", src)

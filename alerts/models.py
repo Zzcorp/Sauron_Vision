@@ -143,20 +143,32 @@ class Notification(models.Model):
     def __str__(self):
         return f"[{'READ' if self.read else 'NEW'}] {self.title}"
 
+    # Paths producers have shipped that were never pages. They resolve now
+    # (config/urls.py redirects them, for the copies already sitting in
+    # Telegram messages and inboxes), so the resolve check below can no
+    # longer catch them — a stored notification should carry the real
+    # destination rather than lean on a compatibility shim.
+    LEGACY_URL_REWRITES = {
+        "/market-data/": "/quotes/",
+        "/dashboard/": "/",
+    }
+
     @staticmethod
     def safe_url(url: str) -> str:
-        """The url a notification stores, but only if it resolves.
+        """The url a notification stores, but only if it goes somewhere.
 
         `url` is free text and producers have shipped literal 404s
-        ("/market-data/" lived for months). An unresolvable path is stored
-        as "" — the bell then opens the detail popup instead of a dead
-        page. External http(s) links pass through untouched.
+        ("/market-data/" lived for months). Known-dead paths are rewritten
+        to the page they meant; anything else that does not resolve is
+        stored as "" — the bell then opens the detail popup instead of a
+        dead page. External http(s) links pass through untouched.
         """
         u = (url or "").strip()
         if not u:
             return ""
         if u.startswith(("http://", "https://")):
             return u
+        u = Notification.LEGACY_URL_REWRITES.get(u, u)
         from django.urls import Resolver404, resolve
         try:
             resolve(u.split("?")[0].split("#")[0])
