@@ -1132,6 +1132,18 @@
         .notif-item .ni-body { font-size: 11px; color: var(--text-secondary); line-height: 1.45; }
         .notif-item .ni-time { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); margin-top: 4px; }
         .notif-item.unread { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 4%, transparent); }
+        /* Retired by simply opening the bell. It keeps a dimmed version of
+           the unread mark instead of snapping to plain: the operator opened
+           the panel to read these, and rows that blanked out under the
+           cursor would take away the only cue for which ones were new. The
+           mark is gone on the next render, by which point they have been
+           seen. */
+        .notif-item.just-read {
+            border-left-color: color-mix(in srgb, var(--accent) 40%, transparent);
+            background: color-mix(in srgb, var(--accent) 2%, transparent);
+            transition: background .5s ease, border-left-color .5s ease;
+        }
+        .notif-item.just-read .ni-title { color: var(--text-secondary); }
         /* Severity by kind, so the eye sorts before it reads. */
         .notif-item.ni-portfolio .ni-kind,
         .notif-item.ni-bot .ni-kind       { color: var(--accent-gold); }
@@ -1925,6 +1937,38 @@
         .nf-pop-fact.down { color: var(--accent-red); }
         .nf-pop-cta { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border);
                       font-size: 10px; color: var(--text-muted); text-align: right; }
+        /* Notification bodies arrive as written — the bot fill summary and
+           the anomaly alert both use line breaks as their structure, and
+           collapsing them turns a list into a paragraph. */
+        .nf-pop-summary--pre { white-space: pre-line; }
+        /* One line per affected instrument, from the notification's `data`
+           payload. A notification carries a single url, so before this the
+           seven symbols named in an anomaly alert were prose the operator
+           had to retype into the search box. */
+        .nf-pop-items {
+            display: flex; flex-direction: column; gap: 1px;
+            margin: 2px 0 4px; padding-top: 8px;
+            border-top: 1px dashed var(--border);
+        }
+        .nf-pop-item {
+            display: flex; justify-content: space-between; align-items: baseline;
+            gap: 12px; padding: 5px 6px; border-radius: 4px;
+            text-decoration: none; color: inherit;
+        }
+        a.nf-pop-item:hover { background: var(--bg-card-hover); }
+        .nf-pop-item .nfi-label {
+            font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+            letter-spacing: .04em; color: var(--text-primary);
+        }
+        .nf-pop-item .nfi-detail {
+            font-family: var(--font-mono); font-size: 10px;
+            color: var(--text-muted); text-align: right;
+        }
+        /* Only the items that carry a url are links, and that difference has
+           to be visible before the pointer arrives: the card is read, not
+           scanned, and an item with no destination must not look clickable. */
+        a.nf-pop-item .nfi-label { color: var(--accent); }
+        a.nf-pop-item .nfi-label::after { content: " ›"; }
 
         /* Small chart inside the hover popups (headband + watchlist).
            Same renderer as the rail sparks; dimensions come from data-w/h.

@@ -150,6 +150,7 @@ def _record_attempt(trade, *, ok: bool, error: str = "") -> None:
 
 def _alert_stranded(trade, attempts: int, error: str) -> None:
     try:
+        from alerts.links import page_url
         from alerts.models import Notification
         Notification.objects.create(
             user=trade.config.user, notification_type="bot",
@@ -158,7 +159,10 @@ def _alert_stranded(trade, attempts: int, error: str) -> None:
                   f"{attempts} times and is STILL OPEN at the broker. "
                   f"Last error: {error[:160]}. Close it manually at the broker "
                   f"if this persists."),
-            url="/eye/fills/",
+            # The body names the trade by number and the alert wants the
+            # operator acting on it now — landing them on the full fill
+            # history to search for #4127 is the wrong page in an emergency.
+            url=page_url("forensics_detail", trade.id) or "/eye/fills/",
         )
     except Exception as e:
         logger.warning("stranded-position alert failed for #%s: %s", trade.id, e)
@@ -200,6 +204,7 @@ def _give_up(trade, error: str) -> None:
                     + " | close-abandoned").strip()[:1000]
     trade.save(update_fields=["status", "reason"])
     try:
+        from alerts.links import page_url
         from alerts.models import Notification
         Notification.objects.create(
             user=trade.config.user, notification_type="bot",
@@ -208,7 +213,9 @@ def _give_up(trade, error: str) -> None:
                   f"{MAX_RETRY_ATTEMPTS} times and is no longer being retried. "
                   f"Last error: {error[:160]}. Verify and close it manually "
                   f"at the broker."),
-            url="/forensics/",
+            # This trade's own forensics page, not the list of every fill:
+            # the retry history the operator needs is already on it.
+            url=page_url("forensics_detail", trade.id) or "/forensics/",
         )
     except Exception as e:
         logger.warning("close-abandoned alert failed for #%s: %s", trade.id, e)

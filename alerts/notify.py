@@ -8,11 +8,16 @@ logger = logging.getLogger(__name__)
 def notify_new_signal(signal):
     """Create in-app notification for a new signal."""
     try:
+        from alerts.links import instrument_url
+        symbol = signal.instrument.symbol
         Notification.create_for_all(
             notification_type="signal",
-            title=f"{signal.direction.upper()} {signal.instrument.symbol}",
+            title=f"{signal.direction.upper()} {symbol}",
             body=f"{signal.title} — Score: {signal.score:.2f}",
-            url="/signals/",
+            # A signal has no page of its own; its instrument's page has the
+            # chart, the technicals and this signal in its list. /signals/
+            # asked the reader to find the row the title already named.
+            url=instrument_url(symbol) or "/signals/",
         )
     except Exception as e:
         logger.warning(f"Failed to create signal notification: {e}")
@@ -36,11 +41,15 @@ def notify_critical_news(article):
     if article.ai_urgency not in ["critical", "high"]:
         return
     try:
+        from alerts.links import page_url
         Notification.create_for_all(
             notification_type="news",
             title=f"Breaking: {article.title[:80]}",
             body=f"Source: {article.source} — Urgency: {article.ai_urgency}",
-            url="/news/",
+            # The article the alert is about has its own page. /news/ is a
+            # feed of hundreds where the breaking item is only on top until
+            # the next scrape lands.
+            url=page_url("news_detail", article.pk) or "/news/",
         )
     except Exception as e:
         logger.warning(f"Failed to create news notification: {e}")

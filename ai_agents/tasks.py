@@ -202,6 +202,37 @@ def process_unanalyzed_news():
     return {"status": "success", "processed": processed}
 
 
+# An agent's answer is unbounded and the detail card is a popup, not a
+# page. The title keeps stating how many were severe, so a truncated card
+# under-shows rather than misreports.
+MAX_ANOMALY_ITEMS = 12
+
+
+def _anomaly_items(severe: list) -> list:
+    """One card row per severe anomaly: the asset, what the scan saw, and
+    a link to that asset's own page.
+
+    An anomaly on a symbol we do not track carries no url. The row still
+    names the asset — more than the flattened body line ever gave the
+    reader — and one unrecognised symbol never costs the others their
+    links.
+    """
+    from alerts.links import instrument_url
+
+    items = []
+    for a in severe[:MAX_ANOMALY_ITEMS]:
+        symbol = str(a.get("symbol") or "").strip()
+        description = str(a.get("description") or "").strip()
+        severity = a.get("severity")
+        detail = f"severity {severity} · {description}" if severity else description
+        items.append({
+            "label": symbol or "—",
+            "detail": detail or "—",
+            "url": instrument_url(symbol),
+        })
+    return items
+
+
 @shared_task
 @guarded_task("agent_anomaly")
 def run_anomaly_detection():
@@ -232,16 +263,31 @@ def run_anomaly_detection():
     severe = [a for a in anomalies if a.get("severity", 0) >= 7]
 
     if severe:
+        # .get, not indexing: the agent's answer is model output, and one
+        # missing key here used to raise before the notification was built
+        # — losing the whole alert over a formatting detail.
         descriptions = "; ".join(
-            f"{a['symbol']} — {a['description']}" for a in severe[:5]
+            f"{a.get('symbol') or '—'} — {a.get('description') or '—'}"
+            for a in severe[:5]
         )
+        items = _anomaly_items(severe)
+        # One severe anomaly has exactly one underlying asset, so the click
+        # belongs on that asset's page — the scan knew the symbol and made
+        # the operator go find it in a list of every quote. Several share no
+        # single destination and keep /quotes/, which renders the same
+        # LiveQuote table the scan read ("/market-data/" was never a route
+        # and 404ed for months). An untracked symbol falls back too: every
+        # asset is reachable from the list, none from a 404.
+        deep_link = items[0]["url"] if len(severe) == 1 else ""
         Notification.create_for_all(
             notification_type="system",
             title=f"Market Anomaly Alert ({len(severe)} severe)",
             body=descriptions,
-            # /quotes/ renders the same LiveQuote table the scan read;
-            # "/market-data/" was never a route and 404ed for months.
-            url="/quotes/",
+            url=deep_link or "/quotes/",
+            # The body flattens seven anomalies into one prose line and the
+            # url can only point at one page; this is where each anomaly
+            # keeps its own asset and its own link.
+            data={"items": items},
         )
         logger.warning(f"Anomaly detection: {len(severe)} severe anomalies found.")
 

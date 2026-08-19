@@ -25,6 +25,11 @@
         <span class="oc-strip-sub">currently negative</span>
     </div>
     <div class="oc-strip-cell">
+        <span class="oc-strip-label">NO DATA</span>
+        <span class="oc-strip-value">{{ unpriced|default:"0" }}</span>
+        <span class="oc-strip-sub">no change reported</span>
+    </div>
+    <div class="oc-strip-cell">
         <span class="oc-strip-label">EXCHANGES</span>
         <span class="oc-strip-value">{{ exchanges|length }}</span>
         <span class="oc-strip-sub">distinct venues</span>
@@ -46,6 +51,8 @@
         </div>
     </div>
     <form method="get" action="{% url 'instruments_list' %}" style="padding:16px;">
+        {# Search rebuilds the query from the form alone, so without this the mover pills' bucket would silently reset on every search. #}
+        <input type="hidden" name="movers" value="{{ movers }}">
         <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:end;">
             <div>
                 <label class="input-label">Search</label>
@@ -97,7 +104,7 @@
                 <button type="submit" class="btn btn-primary" style="height:38px;">Search</button>
             </div>
         </div>
-        {% if search_q or filter or exchange_filter or country_filter %}
+        {% if search_q or filter or exchange_filter or country_filter or movers != 'all' %}
         <div style="margin-top:10px;">
             <a href="{% url 'instruments_list' %}" class="btn btn-sm" style="font-size:11px;">Clear all filters</a>
         </div>
@@ -106,15 +113,32 @@
 </div>
 
 <!-- Quick Filter Pills -->
-<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;" class="fade-in-up delay-3">
-    <a href="{% url 'instruments_list' %}" class="btn btn-sm {% if not filter %}btn-primary{% endif %}">All</a>
-    <a href="?filter=watchlist" class="btn btn-sm {% if filter == 'watchlist' %}btn-primary{% endif %}">Watchlist</a>
-    <a href="?filter=stock" class="btn btn-sm {% if filter == 'stock' %}btn-primary{% endif %}">Stocks</a>
-    <a href="?filter=forex" class="btn btn-sm {% if filter == 'forex' %}btn-primary{% endif %}">Forex</a>
-    <a href="?filter=crypto" class="btn btn-sm {% if filter == 'crypto' %}btn-primary{% endif %}">Crypto</a>
-    <a href="?filter=commodity" class="btn btn-sm {% if filter == 'commodity' %}btn-primary{% endif %}">Commodities</a>
-    <a href="?filter=index" class="btn btn-sm {% if filter == 'index' %}btn-primary{% endif %}">Indices</a>
-    <a href="?filter=etf" class="btn btn-sm {% if filter == 'etf' %}btn-primary{% endif %}">ETFs</a>
+{# Every pill rebuilds the current query instead of replacing it: an asset-class click used to wipe the search, the venue and now the mover bucket too. #}
+<div class="qf-row fade-in-up delay-3">
+    <div class="qf-group">
+        <a href="{% url 'instruments_list' %}{% querystring filter=None %}" class="btn btn-sm {% if not filter %}btn-primary{% endif %}">All</a>
+        <a href="{% url 'instruments_list' %}{% querystring filter='watchlist' %}" class="btn btn-sm {% if filter == 'watchlist' %}btn-primary{% endif %}">Watchlist</a>
+        <a href="{% url 'instruments_list' %}{% querystring filter='stock' %}" class="btn btn-sm {% if filter == 'stock' %}btn-primary{% endif %}">Stocks</a>
+        <a href="{% url 'instruments_list' %}{% querystring filter='forex' %}" class="btn btn-sm {% if filter == 'forex' %}btn-primary{% endif %}">Forex</a>
+        <a href="{% url 'instruments_list' %}{% querystring filter='crypto' %}" class="btn btn-sm {% if filter == 'crypto' %}btn-primary{% endif %}">Crypto</a>
+        <a href="{% url 'instruments_list' %}{% querystring filter='commodity' %}" class="btn btn-sm {% if filter == 'commodity' %}btn-primary{% endif %}">Commodities</a>
+        <a href="{% url 'instruments_list' %}{% querystring filter='index' %}" class="btn btn-sm {% if filter == 'index' %}btn-primary{% endif %}">Indices</a>
+        <a href="{% url 'instruments_list' %}{% querystring filter='etf' %}" class="btn btn-sm {% if filter == 'etf' %}btn-primary{% endif %}">ETFs</a>
+    </div>
+    {# The bucket pills drop ?sort= so the interesting end arrives first; the Sort By select can still overrule it afterwards. #}
+    <div class="qf-group mv-group" role="group" aria-label="Mover filter">
+        <span class="qf-legend">Movers</span>
+        {# These are links, not toggle buttons, so the active one is marked with aria-current — aria-pressed on an <a> is ignored by screen readers. #}
+        <a href="{% url 'instruments_list' %}{% querystring movers=None sort=None %}"
+           class="btn btn-sm mv-pill {% if movers == 'all' %}btn-primary{% endif %}"
+           {% if movers == 'all' %}aria-current="true"{% endif %}>All <span class="mv-n">{{ total }}</span></a>
+        <a href="{% url 'instruments_list' %}{% querystring movers='winners' sort=None %}"
+           class="btn btn-sm mv-pill mv-up {% if movers == 'winners' %}btn-primary{% endif %}"
+           {% if movers == 'winners' %}aria-current="true"{% endif %}><span class="mv-ind">&#9650;</span> Winners <span class="mv-n">{{ gainers }}</span></a>
+        <a href="{% url 'instruments_list' %}{% querystring movers='losers' sort=None %}"
+           class="btn btn-sm mv-pill mv-down {% if movers == 'losers' %}btn-primary{% endif %}"
+           {% if movers == 'losers' %}aria-current="true"{% endif %}><span class="mv-ind">&#9660;</span> Losers <span class="mv-n">{{ losers }}</span></a>
+    </div>
 </div>
 
 <!-- Grid View -->
@@ -147,9 +171,9 @@
             </div>
             {% if item.last is not None %}
             <div class="inst-card-details">
-                <div class="inst-card-row"><span class="k">Bid</span><span class="v">{% if item.bid %}{{ item.bid|floatformat:4 }}{% else %}-{% endif %}</span></div>
-                <div class="inst-card-row"><span class="k">Ask</span><span class="v">{% if item.ask %}{{ item.ask|floatformat:4 }}{% else %}-{% endif %}</span></div>
-                <div class="inst-card-row"><span class="k">Volume</span><span class="v">{{ item.volume|default:"-" }}</span></div>
+                <div class="inst-card-row"><span class="k">Bid</span><span class="v">{% if item.bid %}{{ item.bid|floatformat:4 }}{% else %}&mdash;{% endif %}</span></div>
+                <div class="inst-card-row"><span class="k">Ask</span><span class="v">{% if item.ask %}{{ item.ask|floatformat:4 }}{% else %}&mdash;{% endif %}</span></div>
+                <div class="inst-card-row"><span class="k">Volume</span><span class="v">{{ item.volume|default_if_none:"&mdash;" }}</span></div>
                 <div class="inst-card-row"><span class="k">Source</span><span class="v" style="color:var(--accent);">{{ item.source }}</span></div>
             </div>
             {% endif %}
@@ -157,7 +181,13 @@
         {% empty %}
         <div class="empty-state" style="grid-column:1/-1;">
             <div class="empty-icon">&#9672;</div>
+            {% if movers == 'winners' %}
+            <p>NO WINNERS IN THIS SELECTION &mdash; nothing here is up; the {{ unpriced }} instrument{{ unpriced|pluralize }} showing &mdash; report no change and count in neither bucket</p>
+            {% elif movers == 'losers' %}
+            <p>NO LOSERS IN THIS SELECTION &mdash; nothing here is down; the {{ unpriced }} instrument{{ unpriced|pluralize }} showing &mdash; report no change and count in neither bucket</p>
+            {% else %}
             <p>No instruments match your filters</p>
+            {% endif %}
         </div>
         {% endfor %}
     </div>
@@ -167,7 +197,7 @@
 <div id="tableView" class="fade-in-up delay-3">
     <div class="card">
         <div class="card-header">
-            <span class="card-title">Instruments ({{ total }})</span>
+            <span class="card-title">Instruments ({{ shown }}{% if movers != 'all' %} of {{ total }}{% endif %})</span>
             <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);letter-spacing:1px;">HOVER FOR PREVIEW</span>
         </div>
         {% if items %}
@@ -208,14 +238,15 @@
                 <td><span class="badge badge-{{ item.asset_class }}">{{ item.asset_class }}</span></td>
                 <td style="color:var(--text-secondary);font-size:12px;">{{ item.exchange }}</td>
                 <td style="font-family:var(--font-mono);font-weight:700;font-size:13px;">
-                    {% if item.last is not None %}{{ item.last|floatformat:2 }}{% else %}<span style="color:var(--text-muted);">-</span>{% endif %}
+                    {% if item.last is not None %}{{ item.last|floatformat:2 }}{% else %}<span style="color:var(--text-muted);">&mdash;</span>{% endif %}
                 </td>
+                {# An em-dash, never 0.00%: an instrument with no LiveQuote row has not reported flat, it has not reported at all — and the mover buckets skip it on the same grounds. #}
                 <td style="font-family:var(--font-mono);font-weight:600;color:{% if item.change_pct is not None %}{% if item.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}{% else %}var(--text-muted){% endif %};">
-                    {% if item.change_pct is not None %}{% if item.change_pct >= 0 %}+{% endif %}{{ item.change_pct|floatformat:2 }}%{% else %}-{% endif %}
+                    {% if item.change_pct is not None %}{% if item.change_pct >= 0 %}+{% endif %}{{ item.change_pct|floatformat:2 }}%{% else %}&mdash;{% endif %}
                 </td>
-                <td style="font-family:var(--font-mono);font-size:12px;">{% if item.bid %}{{ item.bid|floatformat:4 }}{% else %}-{% endif %}</td>
-                <td style="font-family:var(--font-mono);font-size:12px;">{% if item.ask %}{{ item.ask|floatformat:4 }}{% else %}-{% endif %}</td>
-                <td style="font-family:var(--font-mono);font-size:12px;">{{ item.volume|default:"-" }}</td>
+                <td style="font-family:var(--font-mono);font-size:12px;">{% if item.bid %}{{ item.bid|floatformat:4 }}{% else %}&mdash;{% endif %}</td>
+                <td style="font-family:var(--font-mono);font-size:12px;">{% if item.ask %}{{ item.ask|floatformat:4 }}{% else %}&mdash;{% endif %}</td>
+                <td style="font-family:var(--font-mono);font-size:12px;">{{ item.volume|default_if_none:"&mdash;" }}</td>
                 <td style="color:var(--text-muted);font-size:11px;">{{ item.source }}</td>
             </tr>
             {% endfor %}
@@ -225,13 +256,55 @@
         {% else %}
         <div class="empty-state">
             <div class="empty-icon">&#9672;</div>
+            {# The bucket is only to blame when the selection HAS rows. #}
+            {% if total == 0 %}
             <p>No instruments match your filters — try adjusting your search</p>
+            {% elif movers == 'winners' %}
+            <p>NO WINNERS IN THIS SELECTION &mdash; nothing here is up{% if unpriced %}; {{ unpriced }} instrument{{ unpriced|pluralize }} report no change and count in neither bucket{% endif %}</p>
+            {% elif movers == 'losers' %}
+            <p>NO LOSERS IN THIS SELECTION &mdash; nothing here is down{% if unpriced %}; {{ unpriced }} instrument{{ unpriced|pluralize }} report no change and count in neither bucket{% endif %}</p>
+            {% else %}
+            <p>No instruments match your filters — try adjusting your search</p>
+            {% endif %}
         </div>
         {% endif %}
     </div>
 </div>
 
 <style>
+/* Quick-filter row: asset class on the left, mover bucket on the right.
+   Both groups wrap on their own, so the row degrades to stacked pills at
+   360px instead of pushing the page into a horizontal scroll. */
+.qf-row {
+    display: flex; flex-wrap: wrap; gap: 10px 18px;
+    justify-content: space-between; align-items: center;
+    margin-bottom: 18px;
+}
+.qf-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.qf-legend {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px;
+    color: var(--text-muted); text-transform: uppercase;
+}
+.mv-pill { max-width: 100%; }
+.mv-n {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+    letter-spacing: 0; opacity: 0.75;
+}
+/* The direction reads before the label does — but only while the pill is
+   idle, since the selected pill paints its whole face in the same colour. */
+.mv-pill.mv-up:not(.btn-primary) .mv-ind { color: var(--accent); }
+.mv-pill.mv-down:not(.btn-primary) .mv-ind { color: var(--accent-red); }
+/* A selected LOSERS pill must not glow green: the active state is the
+   house .btn-primary, recoloured to the down accent rather than replaced. */
+.mv-pill.mv-down.btn-primary {
+    background: linear-gradient(135deg, var(--accent-red-dim), var(--accent-red));
+    border-color: var(--accent-red); color: #fff;
+}
+.mv-pill.mv-down.btn-primary:hover {
+    box-shadow: 0 4px 24px rgba(232,48,48,0.25), 0 0 2px var(--accent-red);
+}
+body.light-mode .mv-pill.mv-down.btn-primary:hover { box-shadow: none; }
+
 /* Grid layout */
 .inst-grid {
     display: grid;
@@ -282,6 +355,12 @@ body.light-mode .inst-card:hover { box-shadow: none; }
 @media (max-width: 768px) {
     .inst-grid { grid-template-columns: 1fr; }
     form [style*="grid-template-columns"] { grid-template-columns: 1fr 1fr !important; }
+}
+/* Below ~420px two form columns leave the selects too narrow to read their
+   own option text, and the two pill groups stop sharing a line at all. */
+@media (max-width: 420px) {
+    form [style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
+    .qf-row { flex-direction: column; align-items: flex-start; gap: 12px; }
 }
 </style>
 

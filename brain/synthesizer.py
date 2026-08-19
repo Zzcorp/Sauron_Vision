@@ -531,6 +531,19 @@ def synthesize_now() -> dict:
     )
     n_predictions = _emit_predictions(report, parsed)
 
+    # Publish the regime to the knowledge graph NOW rather than waiting for
+    # the 03:00 consolidation. The graph labels its node CURRENT, and a node
+    # that only moves once a day spent the whole of 2026-08-19 announcing
+    # "unknown, confidence 0.00" — the blackout reading from 02:56 — while
+    # this very function had already concluded "trending, 0.78" at 05:56.
+    # The upsert no-ops when the label and confidence have not moved, so
+    # this cannot spam versions; the nightly pass still owns everything else.
+    try:
+        from .consolidation import _consolidate_regime
+        _consolidate_regime()
+    except Exception:  # noqa: BLE001 — the graph must never fail a synthesis
+        logger.warning("[brain] regime node publish failed", exc_info=True)
+
     return {
         "ok": True, "report_id": report.id,
         "regime": report.regime_label,

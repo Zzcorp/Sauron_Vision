@@ -232,6 +232,8 @@ the broker, and the bot that would have honoured their stops switched off.
         <form method="post" action="{% url 'hq_run_recalc_exposure' %}" data-run-job="Recalculate exposure">{% csrf_token %}<button type="submit" class="btn btn-sm" style="width:100%;">▶ Recalc Exposure</button></form>
         <form method="post" action="{% url 'hq_run_nightly_cleanup' %}" data-run-job="Nightly cleanup">{% csrf_token %}<button type="submit" class="btn btn-sm" style="width:100%;">▶ Nightly Cleanup</button></form>
         <form method="post" action="{% url 'hq_run_seed_components' %}">{% csrf_token %}<button type="submit" class="btn btn-sm" style="width:100%;">↻ Seed Components</button></form>
+        {# The twelve shipped setups lived behind a command the deploy never ran. #}
+        <form method="post" action="{% url 'hq_run_seed_strategies' %}">{% csrf_token %}<button type="submit" class="btn btn-sm" style="width:100%;">↻ Seed Strategies</button></form>
     </div>
 </div>
 

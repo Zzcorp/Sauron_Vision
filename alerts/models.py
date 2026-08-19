@@ -132,6 +132,12 @@ class Notification(models.Model):
     url = models.CharField(max_length=200, blank=True)  # Link to the relevant page
     read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Structured detail for the hover/click card: whatever the producer
+    # knew and the one-line body had to flatten. The anomaly alert names
+    # seven symbols in prose and can only link ONE page — here it carries
+    # them as {"items": [{"label", "detail", "url"}, ...]} so the card can
+    # offer each underlying asset as its own link.
+    data = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -182,15 +188,23 @@ class Notification(models.Model):
             return ""
 
     @classmethod
-    def create_for_all(cls, notification_type, title, body="", url=""):
-        """Create a notification for all active users."""
+    def create_for_all(cls, notification_type, title, body="", url="",
+                       data=None):
+        """Create a notification for all active users.
+
+        `data` lands on EVERY row, not just the first: the fan-out is one
+        event seen by many people, and a card that offered the anomaly's
+        seven symbols to whoever happened to be user #1 and a bare title
+        to everyone else would be the same defect one layer down.
+        """
         from django.contrib.auth.models import User as U
         url = cls.safe_url(url)
+        data = data or {}
         notifs = []
         for user in U.objects.filter(is_active=True):
             notifs.append(cls(
                 user=user, notification_type=notification_type,
-                title=title, body=body, url=url,
+                title=title, body=body, url=url, data=data,
             ))
         cls.objects.bulk_create(notifs)
         # bulk_create fires no post_save — this loop is the explicit
@@ -313,7 +327,13 @@ def check_price_alerts():
 
                 title = f"Price Alert: {alert.instrument.symbol} {alert.condition} {alert.target_price}"
                 body = f"Current price: {current_price}. {alert.note}" if alert.note else f"Current price: {current_price}"
-                Notification.create_for_user(alert.user, 'portfolio', title, body)
+                from alerts.links import page_url
+                # The user set this alert on one instrument and the row
+                # carries it — shipping no url at all sent them back to the
+                # inbox to look up the symbol the title had already named.
+                Notification.create_for_user(
+                    alert.user, 'portfolio', title, body,
+                    url=page_url("instrument_detail", alert.instrument.symbol))
 
                 if alert.notify_telegram:
                     try:

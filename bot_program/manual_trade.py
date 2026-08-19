@@ -468,7 +468,7 @@ def _execute(user, inst, side, close_ids=None, signal=None) -> dict:
         notify_bot_fill_open(
             user, asset_class=cfg.asset_class, symbol=inst.symbol,
             side=side, qty=trade.qty, entry_price=trade.entry_price,
-            rule_name=trade.rule_name)
+            rule_name=trade.rule_name, trade_id=trade.id)
     except Exception as e:  # noqa: BLE001
         logger.warning("[take-trade] open notification failed: %s", e)
     try:

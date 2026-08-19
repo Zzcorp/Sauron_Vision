@@ -1,10 +1,16 @@
 """Sauron Vision — Dashboard Views (enriched)."""
 from django.shortcuts import render, get_object_or_404, redirect
+from django.urls import reverse
 from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from datetime import timedelta
 from django.db import models
 from django.db.models import Avg, Sum, Count
+
+# The mover buckets the quotes page understands. Anything else arriving in
+# ?movers= — a typo, a truncated link, an old bookmark — is not an error the
+# operator can act on, so the view falls back to "all" rather than 500ing.
+MOVER_BUCKETS = ("all", "winners", "losers")
 
 
 @login_required
@@ -166,6 +172,9 @@ def instruments_list(request):
     sort_by = request.GET.get("sort", "symbol")
     exchange_filter = request.GET.get("exchange", "")
     country_filter = request.GET.get("country", "")
+    movers = request.GET.get("movers", "all").strip().lower()
+    if movers not in MOVER_BUCKETS:
+        movers = "all"
 
     if filter_type == "watchlist":
         qs = qs.filter(is_watchlist=True)
@@ -200,44 +209,80 @@ def instruments_list(request):
             "symbol": inst.symbol,
             "name": inst.name,
             "asset_class": inst.asset_class,
-            "exchange": inst.exchange or "-",
+            # Em-dash for unknown, like every other cell in the row — the
+            # price columns were converted and these were left, so an
+            # unpriced instrument rendered five em-dashes and two hyphens.
+            "exchange": inst.exchange or "—",
             "currency": inst.currency,
-            "sector": inst.sector or "-",
-            "country": inst.country or "-",
+            "sector": inst.sector or "—",
+            "country": inst.country or "—",
             "is_watchlist": inst.is_watchlist,
             "last": float(q.last) if q else None,
             "change_pct": float(q.change_pct) if q else None,
             "bid": float(q.bid) if q and q.bid else None,
             "ask": float(q.ask) if q and q.ask else None,
             "volume": q.volume if q else None,
-            "source": q.source if q else "-",
+            "source": q.source if q else "—",
             "updated_at": q.updated_at.isoformat() if q else None,
         })
 
+    # Summary stats — counted over the whole selection, before the mover
+    # bucket narrows it, so the strip keeps reporting the full split while
+    # WINNERS or LOSERS is showing one end of it. change_pct is None only
+    # when the instrument has no LiveQuote row at all: unknown is its own
+    # bucket and is never rolled in with the losers.
+    total = len(items)
+    with_quotes = sum(1 for i in items if i["last"] is not None)
+    gainers = sum(1 for i in items if i["change_pct"] is not None and i["change_pct"] > 0)
+    losers = sum(1 for i in items if i["change_pct"] is not None and i["change_pct"] < 0)
+    unpriced = sum(1 for i in items if i["change_pct"] is None)
+
+    if movers == "winners":
+        items = [i for i in items if i["change_pct"] is not None and i["change_pct"] > 0]
+    elif movers == "losers":
+        items = [i for i in items if i["change_pct"] is not None and i["change_pct"] < 0]
+
     # Sort
-    if sort_by == "change":
-        items.sort(key=lambda x: x["change_pct"] or 0, reverse=True)
+    if movers != "all" and request.GET.get("sort", "symbol") == "symbol":
+        # A bucket carries its own order — biggest gain / worst loss first —
+        # because the operator arriving from a market-anomaly alert wants the
+        # interesting end, not the alphabet. An explicit ?sort= is the
+        # operator overruling that, so it still wins below.
+        #
+        # Tested for the DEFAULT value rather than for the key's absence:
+        # the Search form's Sort By select is always a successful control,
+        # so every search submitted sort=symbol whether or not the operator
+        # touched it — which silently cancelled the bucket's ordering and
+        # put the alphabet back.
+        items.sort(key=lambda x: x["change_pct"], reverse=(movers == "winners"))
+    elif sort_by == "change":
+        # Unknown is not a rank: an instrument with no quote sank to the
+        # middle of the board as if it were flat at 0.00%. It sits out the
+        # ranking at the bottom instead, in both directions.
+        items.sort(key=lambda x: (x["change_pct"] is None, -(x["change_pct"] or 0)))
     elif sort_by == "change_asc":
-        items.sort(key=lambda x: x["change_pct"] or 0)
+        items.sort(key=lambda x: (x["change_pct"] is None, x["change_pct"] or 0))
     elif sort_by == "volume":
         items.sort(key=lambda x: x["volume"] or 0, reverse=True)
     elif sort_by == "name":
         items.sort(key=lambda x: x["name"].lower())
 
-    # Summary stats
-    total = len(items)
-    with_quotes = sum(1 for i in items if i["last"] is not None)
-    gainers = sum(1 for i in items if (i["change_pct"] or 0) > 0)
-    losers = sum(1 for i in items if (i["change_pct"] or 0) < 0)
+    shown = len(items)
 
-    # Unique exchanges and countries for filter dropdowns
-    all_instruments = Instrument.objects.filter(is_active=True)
-    exchanges = sorted(set(
-        i.exchange for i in all_instruments if i.exchange
-    ))
-    countries = sorted(set(
-        i.country for i in all_instruments if i.country
-    ))
+    # Unique exchanges and countries for filter dropdowns. The explicit
+    # order_by is load-bearing: Instrument.Meta.ordering is
+    # ["asset_class", "symbol"], and those columns ride into the GROUP BY of
+    # a values_list().distinct(), which would hand back one row per
+    # (exchange, asset_class, symbol) — the same exchange over and over.
+    active = Instrument.objects.filter(is_active=True)
+    exchanges = sorted(
+        active.exclude(exchange="").order_by("exchange")
+        .values_list("exchange", flat=True).distinct()
+    )
+    countries = sorted(
+        active.exclude(country="").order_by("country")
+        .values_list("country", flat=True).distinct()
+    )
 
     return render(request, "dashboard/instruments_list.html", {
         "page_id": "instruments",
@@ -248,10 +293,13 @@ def instruments_list(request):
         "sort_by": sort_by,
         "exchange_filter": exchange_filter,
         "country_filter": country_filter,
+        "movers": movers,
         "total": total,
+        "shown": shown,
         "with_quotes": with_quotes,
         "gainers": gainers,
         "losers": losers,
+        "unpriced": unpriced,
         "exchanges": exchanges,
         "countries": countries,
     })
@@ -260,7 +308,14 @@ def instruments_list(request):
 @login_required
 def market_quotes(request):
     """Redirect to unified instruments & quotes page."""
-    return redirect("instruments_list")
+    # The query string rides along so a shared or alert-borne deep link like
+    # /quotes/?movers=losers still opens on the bucket it names — the bounce
+    # used to drop it and land everyone on the unfiltered board.
+    target = reverse("instruments_list")
+    # Re-encoded from the parsed QueryDict rather than echoed from
+    # QUERY_STRING, so nothing hand-crafted reaches the Location header raw.
+    query = request.GET.urlencode()
+    return redirect(f"{target}?{query}" if query else target)
 
 
 @login_required
@@ -2270,16 +2325,51 @@ def mark_notification_read(request, notif_id):
 
 @login_required
 def mark_all_notifications_read(request):
-    """Mark all notifications as read. POST only — a state change on GET
-    let any prefetching proxy silently clear the operator's inbox."""
+    """Mark notifications as read. POST only — a state change on GET let
+    any prefetching proxy silently clear the operator's inbox.
+
+    Two callers, one endpoint. With no `ids` this is the "Mark all read"
+    control and every unread row goes. With `ids` it is the bell's
+    mark-on-view, which may only retire the rows the panel actually
+    showed — opening the bell must not clear fifty older notifications
+    nobody has laid eyes on.
+
+    Both forms filter on request.user before anything is written, so an
+    id lifted from another account matches nothing, and both are
+    idempotent: the queryset is already narrowed to read=False, so a
+    repeat POST updates zero rows.
+    """
     from alerts.models import Notification
     from django.http import HttpResponseNotAllowed, JsonResponse
     from django.shortcuts import redirect
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
-    Notification.objects.filter(user=request.user, read=False).update(read=True)
+
+    qs = Notification.objects.filter(user=request.user, read=False)
+    raw = request.POST.getlist("ids")
+    if raw:
+        # One malformed id must not cost the other nine their update, so
+        # junk is dropped rather than raised — and an all-junk list marks
+        # nothing rather than falling through to "everything".
+        ids = []
+        for value in raw:
+            for part in str(value).split(","):
+                # isdigit() is NOT int()'s alphabet: it accepts superscripts
+                # and circled digits ('²', '①') that int() then rejects with
+                # ValueError — a 500 on this endpoint from a crafted body.
+                part = part.strip()
+                try:
+                    ids.append(int(part))
+                except ValueError:
+                    continue
+        qs = qs.filter(id__in=ids)
+
+    marked = qs.update(read=True)
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-        return JsonResponse({"status": "ok"})
+        return JsonResponse({
+            "status": "ok", "marked": marked,
+            "unread": Notification.unread_count(request.user),
+        })
     return redirect(request.META.get("HTTP_REFERER", "/notifications/"))
 
 

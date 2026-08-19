@@ -43,6 +43,7 @@ from .views_admin_hq import (
     run_signal_scan, run_smc_lifecycle, run_grade_signals,
     run_decay_investigation, run_daily_snapshot, run_recalc_exposure,
     run_nightly_cleanup, run_full_universe_scan, run_seed_components,
+    run_seed_strategies,
     save_oanda_credentials, save_alpaca_credentials, save_ibkr_credentials,
     disconnect_broker,
     hq_apply_rule_action, hq_reject_rule_action, hq_rollback_rule_action,
@@ -153,6 +154,7 @@ urlpatterns = [
     path("admin-dashboard/run/nightly-cleanup/", run_nightly_cleanup, name="hq_run_nightly_cleanup"),
     path("admin-dashboard/run/full-universe-scan/", run_full_universe_scan, name="hq_run_full_universe_scan"),
     path("admin-dashboard/run/seed-components/", run_seed_components, name="hq_run_seed_components"),
+    path("admin-dashboard/run/seed-strategies/", run_seed_strategies, name="hq_run_seed_strategies"),
 
     # ── Admin HQ Console: broker credentials ─────────────────
     path("admin-dashboard/brokers/oanda/save/", save_oanda_credentials, name="hq_save_oanda"),

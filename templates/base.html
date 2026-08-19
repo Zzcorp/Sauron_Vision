@@ -45,6 +45,8 @@
     <link rel="stylesheet" href="{% static 'css/sv-tour.css' %}">
     <script src="{% static 'js/sv-tour.js' %}" defer></script>
     <script src="{% static 'js/sv-run.js' %}" defer></script>
+    {# Dwell card for notification rows — bell panel and inbox share it. #}
+    <script src="{% static 'js/sv-notif-card.js' %}" defer></script>
 {% block extra_css %}{% endblock %}
 </head>
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}">
@@ -480,7 +482,12 @@
                 <div class="notif-dropdown" id="notifPanel" role="menu"
                      data-sv-overlay="menu" data-sv-portal>
                     <div class="notif-header">
-                        <span>Notifications{% if notification_count %} <span class="nh-count">{{ notification_count }} new</span>{% endif %}</span>
+                        {# Always rendered, hidden at zero: mark-on-view has to #}
+                        {# retune this chip from the same server count that #}
+                        {# retunes the badge, and it cannot retune what is #}
+                        {# absent from the DOM. #}
+                        <span>Notifications <span class="nh-count" id="notifHeadCount"
+                              {% if not notification_count %}hidden{% endif %}>{{ notification_count|default:0 }} new</span></span>
                         <div style="display:flex;gap:10px;align-items:center;">
                             {% if notification_count %}
                             {# POST, not a GET link: a state change on GET let #}
@@ -503,16 +510,33 @@
                         identically-styled titles gave the operator no way to
                         pick the one that mattered out of ten.
                         {% endcomment %}
-                        {# Empty url falls back to the INBOX (a real list page #}
-                        {# with the full body) — a click must always land #}
-                        {# somewhere. Rows mark themselves read on the way. #}
+                        {% comment %}
+                        Empty url falls back to the INBOX (a real list page with
+                        the full body) — a click must always land somewhere.
+                        Rows mark themselves read on the way.
+
+                        The data-nc-* set is what the dwell card reads: the row
+                        shows a 110-character stub of the body and a rounded
+                        age, and the card shows the whole thing at its exact
+                        timestamp. `data` rides as json_script — server-escaped,
+                        and the WHOLE dict rather than data.items, because
+                        `n.data.items` on a payload without an "items" key
+                        resolves to dict.items() and renders "dict_items([...])"
+                        into the page.
+                        {% endcomment %}
                         <a class="notif-item ni-{{ n.notification_type }} {% if not n.read %}unread{% endif %}"
                            href="{{ n.url|default:'/notifications/' }}" role="menuitem"
-                           data-notif-id="{{ n.id }}">
+                           data-notif-id="{{ n.id }}" data-nc-row
+                           data-nc-title="{{ n.title }}"
+                           data-nc-body="{{ n.body }}"
+                           data-nc-kind="{{ n.get_notification_type_display|default:n.notification_type }}"
+                           data-nc-at="{{ n.created_at|date:'Y-m-d H:i:s T' }}"
+                           data-nc-href="{{ n.url|default:'/notifications/' }}">
                             <span class="ni-kind">{{ n.get_notification_type_display|default:n.notification_type }}</span>
                             <div class="ni-title">{{ n.title }}</div>
                             {% if n.body %}<div class="ni-body">{{ n.body|truncatechars:110 }}</div>{% endif %}
                             <div class="ni-time"><span class="sv-age" data-sv-at="{{ n.created_at|date:'c' }}">{{ n.created_at|timesince }} ago</span></div>
+                            {% if n.data %}{{ n.data|json_script }}{% endif %}
                         </a>
                     {% empty %}
                         <div class="sv-empty">
@@ -2264,6 +2288,15 @@ function toggleSidebar() {
     }
     bell.setAttribute('aria-label',
       'Notifications' + (count > 0 ? ' — ' + count + ' unread' : ''));
+    /* The panel header says the same number in words. Retuned from the
+       same server value so it cannot drift from the badge — mark-on-view
+       retires ten rows and often leaves forty behind, and a header that
+       cleared itself would be a lie about the other forty. */
+    const head = document.getElementById('notifHeadCount');
+    if (head) {
+      head.textContent = count + ' new';
+      head.hidden = count <= 0;
+    }
   }
   window.refreshNotifBadge = function () {
     /* Same debounced pipe as the panel counts — one fetch serves both. */
@@ -2884,6 +2917,52 @@ function toggleSidebar() {
             headers: { 'X-CSRFToken': csrf }
         }).catch(function () { /* cosmetic only */ });
         row.classList.remove('unread');
+    });
+})();
+
+// ── Opening the bell retires the rows it shows ──────────────────────────
+(function() {
+    var panel = document.getElementById('notifPanel');
+    if (!panel) return;
+    /* sv:open is emitted on the panel element itself, AFTER the controller
+       has portalled it to <body> — and listeners travel with the node, so
+       this fires for the portalled menu where a listener bound to the
+       topbar subtree would already have lost it. Bound to the open event
+       and nothing else: a hover over the bell must never clear an inbox. */
+    panel.addEventListener('sv:open', function () {
+        var rows = panel.querySelectorAll('.notif-item.unread[data-notif-id]');
+        if (!rows.length) return;
+        /* Only the ids this panel actually displays. The bell shows ten of
+           possibly hundreds, and "I opened the bell" is evidence about
+           those ten only. */
+        var form = new URLSearchParams();
+        Array.prototype.forEach.call(rows, function (row) {
+            form.append('ids', row.dataset.notifId);
+        });
+        var csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+        fetch('/notifications/read-all/', {
+            method: 'POST', credentials: 'same-origin',
+            headers: {
+                'X-CSRFToken': csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: form.toString()
+        }).then(function (r) {
+            /* The idle PIN lock answers 423 to XHR: nothing was written, so
+               the rows keep their unread mark and the badge keeps its
+               count. Silently dimming them here would tell the operator
+               they had read what the server still holds as unread. */
+            if (!r.ok) return;
+            Array.prototype.forEach.call(rows, function (row) {
+                row.classList.remove('unread');
+                row.classList.add('just-read');
+            });
+            /* Refetched, never decremented: another tab, the inbox page and
+               this panel all move the same counter, and a client-side
+               subtraction drifts the moment one of them acts. */
+            if (window.refreshNotifBadge) window.refreshNotifBadge();
+        }).catch(function () { /* rows stay unread, badge stays true */ });
     });
 })();
 

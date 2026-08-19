@@ -389,6 +389,7 @@ class AssetBot(ABC):
                 self.user, asset_class=self.asset_class, symbol=trade.symbol,
                 side=trade.side, qty=trade.qty, exit_price=trade.exit_price,
                 pnl=trade.pnl, outcome=trade.outcome or "",
+                trade_id=trade.id,
             )
         except Exception as e:
             logger.warning("[%s_bot] close notification failed: %s",
@@ -428,6 +429,7 @@ class AssetBot(ABC):
         """Best-effort alert for a failed live close, deduped per trade/hour."""
         try:
             from datetime import timedelta as _td
+            from alerts.links import page_url
             from alerts.models import Notification as _N
             title = f"⏳ Close pending: {trade.symbol}"
             recent = _N.objects.filter(
@@ -440,7 +442,10 @@ class AssetBot(ABC):
                     body=(f"Broker close order failed for {self.asset_class} "
                           f"trade #{trade.id} ({reason}). The position is "
                           f"still open at the broker; retrying every 5 min."),
-                    url="/eye/fills/",
+                    # Straight to the trade the body names — the fill list
+                    # makes the operator search for it while it is still
+                    # open at the broker.
+                    url=page_url("forensics_detail", trade.id) or "/eye/fills/",
                 )
                 # The caller pushes the sticky red close_pending banner
                 # right after this — the same incident must not also draw
@@ -815,6 +820,7 @@ class AssetBot(ABC):
                 self.user, asset_class=self.asset_class, symbol=symbol,
                 side=decision.direction, qty=trade.qty,
                 entry_price=trade.entry_price, rule_name=trade.rule_name,
+                trade_id=trade.id,
             )
         except Exception as e:
             logger.warning("[%s_bot] open notification failed: %s",

@@ -61,8 +61,23 @@
     {% if page_obj.object_list %}
     <div id="inboxList">
     {% for n in page_obj.object_list %}
+        {% comment %}
+        The data-nc-* set feeds the dwell card (static/js/sv-notif-card.js),
+        which is the only place a notification's structured `data` payload
+        becomes clickable: the row can show one url, the card shows one link
+        per affected instrument. `data` rides as json_script — server-escaped,
+        and the whole dict rather than data.items, because `n.data.items` on a
+        payload without an "items" key resolves to dict.items() and renders
+        "dict_items([...])" into the page.
+        {% endcomment %}
         <div class="notif-item ni-{{ n.notification_type }} {% if not n.read %}unread{% endif %} inbox-row"
-             data-notif-id="{{ n.id }}" style="display:block;">
+             data-notif-id="{{ n.id }}" style="display:block;" data-nc-row
+             data-nc-title="{{ n.title }}"
+             data-nc-body="{{ n.body }}"
+             data-nc-kind="{{ n.get_notification_type_display|default:n.notification_type|default:'—' }}"
+             data-nc-at="{{ n.created_at|date:'Y-m-d H:i:s T' }}"
+             {% if n.url %}data-nc-href="{{ n.url }}"{% endif %}>
+            {% if n.data %}{{ n.data|json_script }}{% endif %}
             <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;">
                 <span class="ni-kind">{{ n.get_notification_type_display|default:n.notification_type|default:"—" }}</span>
                 <div class="ni-title" style="flex:1;min-width:200px;">{{ n.title }}</div>

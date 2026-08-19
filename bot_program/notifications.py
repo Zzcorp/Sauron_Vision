@@ -260,18 +260,26 @@ def notify_orchestrator_reject(user, *, asset_class: str, symbol: str,
 
 
 def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
-                          qty, entry_price, rule_name: str = "") -> bool:
+                          qty, entry_price, rule_name: str = "",
+                          trade_id=None) -> bool:
+    from alerts.links import page_url
     return dispatch_notification(
         user, "bot_fill_open",
         title=f"📈 {symbol} {side} opened",
         body=f"{asset_class.upper()} · qty {qty} @ {entry_price}"
              + (f" · {rule_name}" if rule_name else ""),
-        url="/asset-bots/",
+        # The fill has a page: forensics carries the rule that fired, the
+        # signals that voted and the gate decision behind THIS trade —
+        # "why did it just buy that?", which is the question the banner
+        # provokes. /asset-bots/ is the config list and answers none of it.
+        url=page_url("forensics_detail", trade_id) or "/asset-bots/",
     )
 
 
 def notify_bot_fill_close(user, *, asset_class: str, symbol: str, side: str,
-                           qty, exit_price, pnl, outcome: str = "") -> bool:
+                           qty, exit_price, pnl, outcome: str = "",
+                           trade_id=None) -> bool:
+    from alerts.links import page_url
     icon = "🎯" if outcome == "hit_target" else (
         "🛑" if outcome == "stopped_out" else "🔚")
     sign = "+" if (pnl is not None and pnl > 0) else ""
@@ -280,7 +288,9 @@ def notify_bot_fill_close(user, *, asset_class: str, symbol: str, side: str,
         title=f"{icon} {symbol} {side} closed · {sign}{pnl}",
         body=f"{asset_class.upper()} · qty {qty} @ {exit_price}"
              + (f" · {outcome}" if outcome else ""),
-        url="/bot-performance/",
+        # Same trade, same page — the close's own timeline, grade and R
+        # multiple. /bot-performance/ aggregates every rule instead.
+        url=page_url("forensics_detail", trade_id) or "/bot-performance/",
     )
 
 

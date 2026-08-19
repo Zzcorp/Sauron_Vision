@@ -254,6 +254,37 @@ def run_seed_components(request):
     return redirect("admin_dashboard")
 
 
+@_admin_only
+def run_seed_strategies(request):
+    """Seed the twelve shipped setups into the promotion ladder.
+
+    The platform ships six starter and six advanced setups, and both lived
+    behind management commands the deploy never ran — so an operator who
+    installed everything correctly still opened the Strategies page to a
+    flat zero and reasonably concluded the engine was broken. Idempotent
+    (update_or_create), so re-running only refreshes definitions.
+    """
+    from io import StringIO
+
+    from django.core.management import call_command
+
+    out = StringIO()
+    try:
+        call_command("seed_strategies", stdout=out)
+        call_command("seed_advanced_strategies", stdout=out)
+    except Exception as exc:  # noqa: BLE001 — report, never 500 the panel
+        messages.error(request, f"Seeding failed: {exc}")
+        return redirect("admin_dashboard")
+
+    from signals.models_control import RuleControl
+    messages.success(
+        request,
+        f"Strategies seeded — {RuleControl.objects.count()} rule(s) now on "
+        f"the promotion ladder. They start in RESEARCH and trade nothing "
+        f"until promoted.")
+    return redirect("admin_dashboard")
+
+
 # ── broker credential forms ─────────────────────────────────────────────────
 
 @_admin_only

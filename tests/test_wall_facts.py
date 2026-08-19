@@ -249,9 +249,18 @@ class MarketSessionTests(TestCase):
         r = self.client.get("/wall/")
         self.assertEqual(r.status_code, 200)
         self.assertIn("sessions", r.context)
-        body = r.content.decode("utf-8", "replace")
-        # The open/closed modifier must not be hardcoded on any pill.
-        self.assertNotIn('<span class="sess-pill open">LONDON', body)
+
+    def test_no_session_pill_carries_a_hardcoded_state(self):
+        """Asserting on the RENDERED page would pass or fail with the clock
+        — London really is open for eight hours a day, and the loop then
+        emits the very markup a naive assertion reads as hardcoded. The
+        template source is the honest place to check."""
+        with open("templates/landing/the_wall.html", encoding="utf-8") as fh:
+            src = fh.read()
+        row = src.split('class="sess-row"')[1].split("</div>")[0]
+        self.assertIn("{% for s in sessions %}", row)
+        self.assertNotIn('sess-pill open"', row,
+                         "the open state must come from the server clock")
 
 
 class DegradedCacheTests(TestCase):
