@@ -20,7 +20,9 @@
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 2fr;gap:20px;">
+  {# minmax(0,…): a bare fr track refuses to shrink below the canvas's own #}
+  {# 300px intrinsic width, which is a horizontal scrollbar on a phone. #}
+  <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:20px;">
     <div>
       <div class="sv-section-title">Status mix</div>
       <div class="sv-chart-container"><canvas id="strategies-status-chart"></canvas></div>

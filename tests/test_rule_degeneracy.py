@@ -1,0 +1,704 @@
+"""Is `rule_degeneracy` real? — the two pairs the strategist briefing named.
+
+The briefing said:
+
+    rule_degeneracy — advanced_smc_long vs advanced_smc_short: Jaccard 1.0 on
+    fair_value_gap / liquidity_sweep / relative_volume. Watch for both firing
+    on the same bar — that's a net-zero-minus-spread trade. Same pathology on
+    starter_commodity_vol_compression vs starter_stock_mean_reversion.
+
+Both halves are tested here, and they come out differently.
+
+THE SMC PAIR is reachable. Jaccard 1.0 is measured on condition KINDS, which
+overstates it — the params carry opposite directions and only relative_volume
+is direction-neutral, so the honest overlap is 0.20 — but one bar shape does
+make both setups score 1.00 on the same instrument at the same instant: an
+outside bar that takes out BOTH sides of a tight multi-day coil and closes
+back inside it. A CPI/FOMC whipsaw. `DoubleSweepIsReachableTests` builds it.
+
+What follows from that is NOT the trade the briefing feared. Nothing in the
+engine will take both sides: `AssetBot.decide()` returns one BotDecision per
+symbol per tick, its headcount path vetoes outright on any disagreement, its
+weighted path nets the two sides to ~0, and `scan_symbol` refuses a second
+entry while one is on. `EngineRefusesBothSidesTests` pins all three.
+
+What DID follow is the scanner publishing a bullish and a bearish Signal on
+one instrument at one instant — two rules each graded on a coin flip, feeding
+noise back into the expectancy weights that decide the next entry.
+`ContradictionGuardTests` covers the guard added to `scan_all_setups`.
+
+THE STARTER PAIR is not degenerate at all, and the briefing is wrong about it
+three times over: both setups are BULLISH (so there is no opposite trade to
+be had), their asset_classes are disjoint (so no instrument is ever scored by
+both), and their price legs are arithmetically incompatible on any series.
+`StarterPairIsNotDegenerateTests` proves each.
+
+Run with:  python manage.py test tests.test_rule_degeneracy
+"""
+from datetime import timedelta
+from decimal import Decimal
+
+from django.contrib.auth.models import User
+from django.test import TestCase
+from django.utils import timezone
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+def _instrument(symbol, asset_class="stock"):
+    from instruments.models import Instrument
+    inst, _ = Instrument.objects.get_or_create(
+        symbol=symbol, defaults={"name": symbol, "asset_class": asset_class},
+    )
+    return inst
+
+
+def _seed_bars(instrument, bars, end=None, timeframe="1d"):
+    """Seed PriceData rows from (open, high, low, close, volume) tuples,
+    oldest first, one day apart, ending one day before `end`."""
+    from market_data.models import PriceData
+    end = end or timezone.now()
+    rows = []
+    for i, (o, h, lo, c, v) in enumerate(bars):
+        rows.append(PriceData(
+            instrument=instrument, timeframe=timeframe,
+            timestamp=end - timedelta(days=len(bars) - i),
+            open=Decimal(str(o)), high=Decimal(str(h)), low=Decimal(str(lo)),
+            close=Decimal(str(c)), volume=int(v), source="test",
+        ))
+    PriceData.objects.bulk_create(rows)
+
+
+def _setup(name, pack="advanced"):
+    """The OpportunitySetup row exactly as the seeder writes it, active."""
+    from signals.models_opportunity import OpportunitySetup
+    if pack == "advanced":
+        from signals.management.commands import seed_advanced_strategies as mod
+    else:
+        from signals.management.commands import seed_strategies as mod
+    spec = next(s for s in mod._setup_definitions() if s["name"] == name)
+    return OpportunitySetup.objects.create(
+        name=spec["name"], description=spec["description"],
+        direction=spec["direction"], asset_classes=spec["asset_classes"],
+        conditions=spec["conditions"], min_match_score=spec["min_match_score"],
+        suggested_horizon_days=spec["suggested_horizon_days"],
+        sizing=spec.get("sizing", {}), is_active=True,
+    )
+
+
+# The 17 bars of context before the interesting ones. Everything sits inside
+# [100.5, 102.0] so it never becomes the swing level either setup reads.
+_FILLER = (101.0, 102.0, 100.5, 101.5, 1000)
+
+
+def _double_sweep_bars():
+    """The bar shape that makes advanced_smc_long AND advanced_smc_short both
+    score 1.00 on the same instrument at the same instant.
+
+    Twenty bars coil inside [100.0, 104.0]. The last bar opens at 102, is
+    driven down to 96 — through the 100.0 swing low, harvesting the stops
+    under it — then reversed up to 108, through the 104.0 swing high, and
+    settles back at 102, inside the range it started in. Both wicks are a
+    third of the bar's range, so both sweeps clear the 30% wick_pct floor.
+
+    The three-bar imbalances fall out of the same session: bars B3→B5 leave a
+    bullish FVG (102.6 < 103.5) and bars B5→B7 leave a bearish one
+    (103.5 > 102.0). Volume is 4x the 20-bar average, which is
+    direction-neutral and scores 1.0 for both setups.
+
+    This is not a contrived shape. It is what a CPI print does to an
+    instrument that has been range-bound for a month.
+    """
+    window = [
+        (100.6, 101.0, 100.4, 100.8, 1000),   # B0
+        (100.8, 101.2, 100.5, 101.0, 1000),   # B1
+        (100.5, 101.0, 100.0, 100.8, 1000),   # B2 — the 20-bar low
+        (102.0, 102.6, 101.9, 102.5, 1000),   # B3 — bullish FVG floor
+        (102.6, 103.0, 102.5, 102.8, 1000),   # B4
+        (103.6, 104.0, 103.5, 103.7, 1000),   # B5 — the 20-bar high
+        (103.0, 103.3, 102.8, 102.9, 1000),   # B6
+        (102.0, 102.0, 101.5, 101.6, 1000),   # B7 — bearish FVG ceiling
+    ]
+    return [_FILLER] * 17 + window + [(102.0, 108.0, 96.0, 102.0, 4000)]
+
+
+def _bullish_sweep_only_bars():
+    """The same session with only the DOWNSIDE swept: the low side is taken
+    out and reclaimed, the high side is never touched, and the only imbalance
+    left behind is bullish. advanced_smc_long scores 1.00; advanced_smc_short
+    scores 0.24 on the volume leg alone and stays below its 0.65 bar.
+
+    Used to show the guard suppresses a contradiction where one exists and
+    nothing else.
+    """
+    window = [
+        (100.8, 101.2, 100.5, 101.0, 1000),   # C0
+        (100.9, 101.2, 100.6, 101.0, 1000),   # C1
+        (100.9, 101.2, 100.6, 101.0, 1000),   # C2
+        (100.8, 101.2, 100.5, 101.0, 1000),   # C3
+        (100.5, 101.0, 100.0, 100.8, 1000),   # C4 — 20-bar low, FVG floor
+        (101.5, 102.6, 101.4, 102.5, 1000),   # C5
+        (102.5, 103.0, 102.5, 102.9, 1000),   # C6 — FVG ceiling
+        (102.6, 103.0, 102.4, 102.7, 1000),   # C7
+    ]
+    return [_FILLER] * 17 + window + [(102.0, 102.5, 96.0, 102.0, 4000)]
+
+
+def _user(name="degen_user"):
+    return User.objects.create_user(username=name, password="x")
+
+
+def _config(user, asset_class="stock", **overrides):
+    from bot_program.models import AssetBotConfig
+    defaults = dict(
+        user=user, asset_class=asset_class, name="Degeneracy Bot",
+        enabled=True, mode="paper", symbols=[],
+        capital=Decimal("10000"), base_currency="USD",
+        position_size_pct=2.0, max_concurrent_positions=5,
+        max_daily_loss_pct=2.0, stop_loss_pct=1.5, take_profit_pct=3.0,
+        entry_score_min=0.6, min_signals_for_entry=1, cool_down_minutes=0,
+    )
+    defaults.update(overrides)
+    return AssetBotConfig.objects.create(**defaults)
+
+
+def _signal(symbol, direction, score, rule, asset_class="stock"):
+    from signals.models import Signal
+    return Signal.objects.create(
+        instrument=_instrument(symbol, asset_class), signal_type="composite",
+        direction=direction, urgency="medium",
+        title=f"{symbol} {direction}", description="t",
+        rule_name=rule, score=score, sub_scores={},
+        price_at_signal=Decimal("100"), suggested_entry=Decimal("100"),
+        suggested_stop=Decimal("95"), suggested_target=Decimal("110"),
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 1. The claim, tested: can both smc setups match one bar?
+# ══════════════════════════════════════════════════════════════════════════
+
+class DoubleSweepIsReachableTests(TestCase):
+    """Yes — and this is the exact market shape that does it."""
+
+    def test_one_bar_can_sweep_both_sides_of_the_same_coil(self):
+        from signals.evaluators_advanced import _eval_liquidity_sweep
+        inst = _instrument("SWEEP1")
+        _seed_bars(inst, _double_sweep_bars())
+        now = timezone.now()
+        params = {"lookback": 20, "wick_pct": 0.3}
+
+        up = _eval_liquidity_sweep({**params, "direction": "bullish_sweep"},
+                                   inst, now)
+        down = _eval_liquidity_sweep({**params, "direction": "bearish_sweep"},
+                                     inst, now)
+        self.assertTrue(up["matched"], up["details"])
+        self.assertTrue(down["matched"], down["details"])
+        # Both wicks are a third of the bar, so both clear wick_pct with room.
+        self.assertEqual(up["details"]["swing_low"], 100.0)
+        self.assertEqual(down["details"]["swing_high"], 104.0)
+        self.assertGreaterEqual(up["details"]["wick_ratio"], 0.3)
+        self.assertGreaterEqual(down["details"]["wick_ratio"], 0.3)
+
+    def test_where_the_bar_closes_is_what_decides_how_many_sides_can_claim_it(self):
+        """The narrowness of the shape, stated exactly. Both wicks can be
+        present on any wide bar; what makes BOTH sweeps claim it is the close
+        landing back inside the coil. Close above the swing high and only the
+        bullish sweep survives (the bearish one needs close < swing_high);
+        close below the swing low and only the bearish one does.
+
+        So the market shape is not "a volatile bar" — it is a full round trip
+        through both stop pools that ends where it started.
+        """
+        from signals.evaluators_advanced import _eval_liquidity_sweep
+        bull = {"direction": "bullish_sweep", "lookback": 20, "wick_pct": 0.3}
+        bear = {"direction": "bearish_sweep", "lookback": 20, "wick_pct": 0.3}
+        expected = {
+            102.0: (True, True),    # back inside the coil — both claim it
+            107.0: (True, False),   # closed above the high — an upside break
+            97.0: (False, True),    # closed below the low — a downside break
+        }
+        for i, (close, (want_bull, want_bear)) in enumerate(expected.items()):
+            with self.subTest(close=close):
+                inst = _instrument(f"SWEEPCLOSE{i}")
+                bars = _double_sweep_bars()
+                bars[-1] = (102.0, 108.0, 96.0, close, 4000)
+                _seed_bars(inst, bars)
+                now = timezone.now()
+                self.assertEqual(
+                    _eval_liquidity_sweep(bull, inst, now)["matched"], want_bull)
+                self.assertEqual(
+                    _eval_liquidity_sweep(bear, inst, now)["matched"], want_bear)
+
+    def test_both_imbalance_directions_live_in_the_same_five_bar_window(self):
+        """fair_value_gap scans up to `max_age` triples and returns the first
+        hit, so one window can hold a bullish gap and a bearish gap at once —
+        the FVG legs do not separate the two setups either."""
+        from signals.evaluators_advanced import _eval_fair_value_gap
+        inst = _instrument("FVGBOTH")
+        _seed_bars(inst, _double_sweep_bars())
+        now = timezone.now()
+        up = _eval_fair_value_gap({"direction": "bullish", "max_age": 5},
+                                  inst, now)
+        down = _eval_fair_value_gap({"direction": "bearish", "max_age": 5},
+                                    inst, now)
+        self.assertTrue(up["matched"], up["details"])
+        self.assertTrue(down["matched"], down["details"])
+
+    def test_each_setup_on_its_own_flags_that_instrument(self):
+        """Scored one at a time — which is what `scan_setup` does for any
+        direct caller — both setups clear 0.65 on the same bar. Nothing in
+        the per-pair path can see the problem, because the problem is a
+        property of the pair."""
+        from signals.opportunity_scanner import scan_setup
+        inst = _instrument("SMCPAIR")
+        _seed_bars(inst, _double_sweep_bars())
+        long_res = scan_setup(_setup("advanced_smc_long"), inst,
+                              now=timezone.now(), as_of=False)
+        short_res = scan_setup(_setup("advanced_smc_short"), inst,
+                               now=timezone.now(), as_of=False)
+        self.assertTrue(long_res["matched"])
+        self.assertTrue(short_res["matched"])
+        self.assertEqual(long_res["score"], 1.0)
+        self.assertEqual(short_res["score"], 1.0)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 2. The guard: one pass does not publish both sides
+# ══════════════════════════════════════════════════════════════════════════
+
+class ContradictionGuardTests(TestCase):
+    """`scan_all_setups` defers publication until the whole pass is scored,
+    then drops every match on an instrument its setups disagree about."""
+
+    def test_the_pass_publishes_neither_side_of_a_contradiction(self):
+        from signals.models import OpportunityFlag, Signal
+        from signals.opportunity_scanner import scan_all_setups
+        inst = _instrument("WHIPSAW")
+        _seed_bars(inst, _double_sweep_bars())
+        _setup("advanced_smc_long")
+        _setup("advanced_smc_short")
+
+        result = scan_all_setups()
+
+        self.assertEqual(result["matches"], 0)
+        self.assertEqual(result["contradiction_skipped"], 2)
+        # Fail towards NOT trading: no flag, and — the part that matters —
+        # no Signal, because a Signal is what the bots actually vote on.
+        self.assertEqual(OpportunityFlag.objects.count(), 0)
+        self.assertEqual(
+            Signal.objects.filter(instrument=inst).count(), 0,
+            msg="a bullish and a bearish Signal at one instant grade two "
+                "rules on a coin flip and feed that back into the weights")
+
+    def test_neither_side_wins_by_sorting_first(self):
+        """Suppressing whichever match arrived second would hand the trade to
+        whichever setup happened to sort first — which is arbitrary, and worse
+        than either honest answer. Both orderings publish nothing."""
+        from signals.models import Signal
+        from signals.opportunity_scanner import scan_all_setups
+        inst = _instrument("WHIPSAW2")
+        _seed_bars(inst, _double_sweep_bars())
+        long_setup = _setup("advanced_smc_long")
+        short_setup = _setup("advanced_smc_short")
+        # Setups are iterated in name order; rename so the bearish one leads.
+        long_setup.name = "zz_smc_long"
+        long_setup.save(update_fields=["name"])
+        short_setup.name = "aa_smc_short"
+        short_setup.save(update_fields=["name"])
+
+        result = scan_all_setups()
+        self.assertEqual(result["matches"], 0)
+        self.assertEqual(result["contradiction_skipped"], 2)
+        self.assertEqual(Signal.objects.filter(instrument=inst).count(), 0)
+
+    def test_the_suppression_is_scoped_to_the_instrument_that_disagreed(self):
+        """A whipsaw on one symbol must not silence a clean setup on another —
+        the guard is per instrument, not per pass."""
+        from signals.models import OpportunityFlag
+        from signals.opportunity_scanner import scan_all_setups
+        whip = _instrument("WHIPSAW3")
+        clean = _instrument("CLEANLONG")
+        _seed_bars(whip, _double_sweep_bars())
+        _seed_bars(clean, _bullish_sweep_only_bars())
+        _setup("advanced_smc_long")
+        _setup("advanced_smc_short")
+
+        result = scan_all_setups()
+
+        self.assertEqual(result["contradiction_skipped"], 2)
+        self.assertEqual(result["matches"], 1)
+        flags = list(OpportunityFlag.objects.all())
+        self.assertEqual(len(flags), 1)
+        self.assertEqual(flags[0].instrument_id, clean.id)
+        self.assertEqual(flags[0].direction, "bullish")
+
+    def test_setups_that_agree_are_not_suppressed(self):
+        """Two setups pointing the same way at one instrument is
+        CONFIRMATION, and the guard must leave it completely alone."""
+        from signals.models import OpportunityFlag
+        from signals.opportunity_scanner import scan_all_setups
+        inst = _instrument("AGREE1")
+        _seed_bars(inst, _double_sweep_bars())
+        long_setup = _setup("advanced_smc_long")
+        twin = _setup("advanced_smc_short")
+        # Same conditions as the long, published under a second name.
+        twin.direction = "bullish"
+        twin.conditions = long_setup.conditions
+        twin.save(update_fields=["direction", "conditions"])
+
+        result = scan_all_setups()
+
+        self.assertEqual(result["contradiction_skipped"], 0)
+        self.assertEqual(result["matches"], 2)
+        self.assertEqual(OpportunityFlag.objects.count(), 2)
+
+    def test_a_neutral_setup_contradicts_nothing(self):
+        """Only bullish-vs-bearish is a contradiction. A neutral setup states
+        no direction, so it cannot be on the other side of one."""
+        from signals.opportunity_scanner import scan_all_setups
+        inst = _instrument("NEUTRAL1")
+        _seed_bars(inst, _double_sweep_bars())
+        _setup("advanced_smc_long")
+        short_setup = _setup("advanced_smc_short")
+        short_setup.direction = "neutral"
+        short_setup.save(update_fields=["direction"])
+
+        result = scan_all_setups()
+        self.assertEqual(result["contradiction_skipped"], 0)
+        self.assertEqual(result["matches"], 2)
+
+    def test_the_counters_still_account_for_every_evaluation(self):
+        """`contradiction_skipped` names pairs that reached the composite, so
+        it is a sub-count of `scored` like `no_price_data` — it must not
+        appear in the partition of `evaluations` or the identity the operator
+        reads the funnel by stops adding up."""
+        from signals.opportunity_scanner import scan_all_setups
+        _seed_bars(_instrument("ACCT1"), _double_sweep_bars())
+        _instrument("ACCTX", asset_class="commodity")   # outside both setups
+        _setup("advanced_smc_long")
+        _setup("advanced_smc_short")
+
+        result = scan_all_setups()
+
+        self.assertEqual(
+            result["scored"] + result["asset_class_skipped"]
+            + result["gate_skipped"] + result["errors"],
+            result["evaluations"],
+        )
+        self.assertEqual(result["asset_class_skipped"], 2)
+        self.assertEqual(result["scored"], 2)
+        self.assertEqual(result["contradiction_skipped"], 2)
+
+    def test_the_new_keys_do_not_recolour_a_healthy_scan(self):
+        """`judge_result` reads a bare `skipped` as "not configured" and
+        parsed/stored/... as work counts; a new counter named into either
+        vocabulary would turn every suppressed whipsaw into a component
+        health warning."""
+        from core.task_gate import judge_result
+        from signals.opportunity_scanner import scan_all_setups
+        _seed_bars(_instrument("HEALTH1"), _double_sweep_bars())
+        _setup("advanced_smc_long")
+        _setup("advanced_smc_short")
+
+        result = scan_all_setups()
+
+        self.assertEqual(judge_result(result)[0], "success")
+        WORK_AND_DONE = {"parsed", "attempted", "stored", "written", "saved",
+                         "fetched", "observations_saved", "bars_saved",
+                         "articles", "skipped"}
+        self.assertEqual(set(result) & WORK_AND_DONE, set())
+
+    def test_emit_false_scores_the_pair_and_writes_nothing(self):
+        """The deferral is what makes the symmetric answer possible, so the
+        no-write half of it is worth pinning on its own."""
+        from signals.models import OpportunityFlag, Signal
+        from signals.opportunity_scanner import scan_setup
+        inst = _instrument("DRY1")
+        _seed_bars(inst, _double_sweep_bars())
+        res = scan_setup(_setup("advanced_smc_long"), inst,
+                         now=timezone.now(), as_of=False, emit=False)
+        self.assertTrue(res["matched"])
+        self.assertTrue(res["pending"])
+        self.assertEqual(res["score"], 1.0)
+        self.assertEqual(res["last_price"], 102.0)
+        self.assertEqual(OpportunityFlag.objects.count(), 0)
+        self.assertEqual(Signal.objects.count(), 0)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 3. The engine already refuses to take both sides
+# ══════════════════════════════════════════════════════════════════════════
+
+class EngineRefusesBothSidesTests(TestCase):
+    """The briefing's "net-zero-minus-spread TRADE" does not exist. Three
+    independent things in `bot_program/asset_engine/base.py` stop it, and one
+    of them alone would be enough. Nothing was added here; these pin what is
+    already load-bearing so a later edit cannot quietly remove it."""
+
+    def test_the_weighted_path_nets_two_opposite_signals_to_hold(self):
+        """`decide()`'s default path subtracts the opposing side instead of
+        vetoing it. On a genuine contradiction the two sides cancel and the
+        net falls under min_net_weight — so the whipsaw bar produces no
+        entry, in either direction."""
+        from bot_program.asset_engine import StockBot
+        cfg = _config(_user("weighted_u"), symbols=["ENG1"])
+        _signal("ENG1", "bullish", 0.95, "advanced_smc_long")
+        _signal("ENG1", "bearish", 0.95, "advanced_smc_short")
+        decision = StockBot(cfg).decide("ENG1")
+        self.assertEqual(decision.direction, "HOLD")
+
+    def test_the_headcount_path_vetoes_outright(self):
+        """With weighting opted out, `and not bearish` is a hard veto — any
+        disagreement at all is a HOLD, whatever the scores."""
+        from bot_program.asset_engine import StockBot
+        cfg = _config(_user("headcount_u"), symbols=["ENG2"],
+                      extras={"use_weighted_consensus": False})
+        _signal("ENG2", "bullish", 0.99, "advanced_smc_long")
+        _signal("ENG2", "bearish", 0.61, "advanced_smc_short")
+        decision = StockBot(cfg).decide("ENG2")
+        self.assertEqual(decision.direction, "HOLD")
+
+    def test_lopsided_evidence_picks_a_side_it_never_takes_both(self):
+        """The structural reason both sides are unreachable: `decide()`
+        returns ONE BotDecision and `scan_symbol` consults it once per symbol
+        per tick, so there is no code path that opens two.
+
+        This is also the residual harm the netting leaves behind, named
+        honestly: when one rule has earned a much heavier weight than its
+        mirror, the net clears the threshold and a full-size entry is taken
+        on a bar that carried no directional information at all. One trade,
+        not two — a worse entry, not a self-cancelling pair. The scanner-side
+        guard is what stops that pair of Signals existing in the first place."""
+        from unittest import mock
+        from bot_program.asset_engine import StockBot
+        cfg = _config(_user("lopsided_u"), symbols=["ENG3"])
+        _signal("ENG3", "bullish", 0.95, "advanced_smc_long")
+        _signal("ENG3", "bearish", 0.95, "advanced_smc_short")
+        weights = {"advanced_smc_long": 2.0, "advanced_smc_short": 0.25}
+        with mock.patch("bot_program.asset_engine.aggregation.rule_weight",
+                        side_effect=lambda rule, *a, **kw: weights.get(rule, 1.0)):
+            decision = StockBot(cfg).decide("ENG3")
+        self.assertEqual(decision.direction, "BUY")
+
+    def test_scan_symbol_refuses_a_second_entry_while_one_is_on(self):
+        """The backstop, for the case where two ticks disagree rather than two
+        setups: an open position on the symbol ends the scan before `decide()`
+        is ever consulted, so the reversal cannot be stacked on top."""
+        from bot_program.asset_engine import StockBot
+        from bot_program.asset_engine import skips
+        from bot_program.models import AssetBotTrade
+        cfg = _config(_user("already_u"), symbols=["ENG4"])
+        _instrument("ENG4")
+        AssetBotTrade.objects.create(
+            config=cfg, asset_class="stock", symbol="ENG4", side="BUY",
+            qty=Decimal("1"), entry_price=Decimal("100"), status="OPEN",
+        )
+        _signal("ENG4", "bearish", 0.99, "advanced_smc_short")
+
+        self.assertIsNone(StockBot(cfg).scan_symbol("ENG4"))
+        cfg.refresh_from_db()
+        self.assertEqual(skips.last_by_symbol(cfg)["ENG4"]["code"],
+                         skips.ALREADY_OPEN)
+        self.assertEqual(AssetBotTrade.objects.filter(config=cfg).count(), 1)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 4. The starter pair: the briefing is wrong three times over
+# ══════════════════════════════════════════════════════════════════════════
+
+class StarterPairIsNotDegenerateTests(TestCase):
+    """starter_commodity_vol_compression vs starter_stock_mean_reversion is
+    Jaccard 1.0 on kinds and nothing else. There is no market shape under
+    which they produce opposite trades on one instrument, because there is no
+    market shape under which they meet."""
+
+    def test_both_setups_are_bullish_so_neither_can_oppose_the_other(self):
+        a = _setup("starter_commodity_vol_compression", pack="starter")
+        b = _setup("starter_stock_mean_reversion", pack="starter")
+        self.assertEqual(a.direction, "bullish")
+        self.assertEqual(b.direction, "bullish")
+
+    def test_their_universes_are_disjoint_so_they_never_meet(self):
+        """asset_class is a single field on Instrument, so no row is both a
+        commodity and a stock. `scan_setup`'s asset-class gate drops each
+        setup on the other's symbols before a single condition is read."""
+        a = _setup("starter_commodity_vol_compression", pack="starter")
+        b = _setup("starter_stock_mean_reversion", pack="starter")
+        self.assertEqual(set(a.asset_classes) & set(b.asset_classes), set())
+
+    def test_breakout_high_and_below_ma_cannot_both_match_one_series(self):
+        """The arithmetic, which holds for every possible series: breakout_high
+        needs the last close above all 20 priors, and below_ma's mean is taken
+        over the last close plus 19 of those same priors — so a close above
+        every prior is necessarily above their mean. One excludes the other."""
+        from signals.opportunity_scanner import _eval_price_pattern
+        now = timezone.now()
+
+        rally = _instrument("STARTER_UP")
+        _seed_bars(rally, [(p, p, p, p, 1000)
+                           for p in (100.0 + i * 0.5 for i in range(40))])
+        breakout = _eval_price_pattern(
+            {"pattern": "breakout_high", "lookback": 20}, rally, now)
+        below = _eval_price_pattern(
+            {"pattern": "below_ma", "ma_period": 20}, rally, now)
+        self.assertTrue(breakout["matched"])
+        self.assertFalse(below["matched"])
+
+        washout = _instrument("STARTER_DOWN")
+        _seed_bars(washout, [(p, p, p, p, 1000)
+                             for p in (100.0 - i * 0.4 for i in range(40))])
+        self.assertFalse(_eval_price_pattern(
+            {"pattern": "breakout_high", "lookback": 20}, washout, now)["matched"])
+        self.assertTrue(_eval_price_pattern(
+            {"pattern": "below_ma", "ma_period": 20}, washout, now)["matched"])
+
+    def test_a_pass_over_both_universes_reports_no_contradiction(self):
+        """End to end: one commodity, one stock, both setups active. The
+        guard has nothing to do, which is the correct answer."""
+        from signals.opportunity_scanner import scan_all_setups
+        _setup("starter_commodity_vol_compression", pack="starter")
+        _setup("starter_stock_mean_reversion", pack="starter")
+        _seed_bars(_instrument("WTIUSD", asset_class="commodity"),
+                   [(p, p, p, p, 1000)
+                    for p in (70.0 + i * 0.1 for i in range(40))])
+        _seed_bars(_instrument("STK1", asset_class="stock"),
+                   [(p, p, p, p, 1000)
+                    for p in (100.0 - i * 0.4 for i in range(40))])
+
+        result = scan_all_setups()
+
+        self.assertEqual(result["contradiction_skipped"], 0)
+        # Each setup was gated off the other's instrument by asset class.
+        self.assertEqual(result["asset_class_skipped"], 2)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 5. Making the overlap visible, honestly
+# ══════════════════════════════════════════════════════════════════════════
+
+class ConditionOverlapTests(TestCase):
+    """`setup_overlap` is the number the briefing should have quoted. The gap
+    between `kind_jaccard` and `jaccard` IS the finding, so both are reported
+    rather than the second silently replacing the first."""
+
+    def test_the_smc_pair_reads_1_00_on_kinds_and_0_20_once_direction_counts(self):
+        from signals.opportunity_scanner import setup_overlap
+        ov = setup_overlap(_setup("advanced_smc_long"),
+                           _setup("advanced_smc_short"))
+        self.assertEqual(ov["kind_jaccard"], 1.0)
+        self.assertEqual(ov["jaccard"], 0.2)
+        # Only the direction-neutral leg is genuinely shared.
+        self.assertEqual(ov["shared"], ["relative_volume"])
+        self.assertTrue(ov["opposite_direction"])
+        self.assertTrue(ov["shares_universe"])
+
+    def test_the_starter_pair_shares_nothing_at_all(self):
+        from signals.opportunity_scanner import setup_overlap
+        ov = setup_overlap(_setup("starter_commodity_vol_compression",
+                                  pack="starter"),
+                           _setup("starter_stock_mean_reversion",
+                                  pack="starter"))
+        self.assertEqual(ov["kind_jaccard"], 1.0)
+        self.assertEqual(ov["jaccard"], 0.0)
+        self.assertEqual(ov["shared"], [])
+        self.assertFalse(ov["shares_universe"])
+        self.assertFalse(ov["opposite_direction"])
+
+    def test_a_real_duplicate_still_scores_1_00(self):
+        """The metric has to be capable of saying yes, or it is just a way of
+        making every pair look fine."""
+        from signals.models_opportunity import OpportunitySetup
+        from signals.opportunity_scanner import setup_overlap
+        a = _setup("advanced_smc_long")
+        b = OpportunitySetup.objects.create(
+            name="advanced_smc_long_copy", description="", direction="bullish",
+            asset_classes=list(a.asset_classes), conditions=a.conditions,
+            min_match_score=a.min_match_score, suggested_horizon_days=5,
+            sizing={}, is_active=True,
+        )
+        ov = setup_overlap(a, b)
+        self.assertEqual(ov["jaccard"], 1.0)
+        self.assertEqual(ov["kind_jaccard"], 1.0)
+        self.assertEqual(ov["only_a"], [])
+        self.assertEqual(ov["only_b"], [])
+
+    def test_tuning_params_are_not_identity(self):
+        """Two setups differing only in threshold ARE the same detector, and
+        folding lookbacks into the fingerprint would hide that behind a low
+        score — the failure opposite to the one being fixed."""
+        from signals.models_opportunity import OpportunitySetup
+        from signals.opportunity_scanner import setup_overlap
+        a = _setup("advanced_smc_long")
+        loosened = []
+        for cond in a.conditions:
+            cond = dict(cond, params=dict(cond["params"]))
+            if "lookback" in cond["params"]:
+                cond["params"]["lookback"] = 40
+            if "threshold" in cond["params"]:
+                cond["params"]["threshold"] = 3.0
+            loosened.append(cond)
+        b = OpportunitySetup.objects.create(
+            name="advanced_smc_long_loose", description="", direction="bullish",
+            asset_classes=list(a.asset_classes), conditions=loosened,
+            min_match_score=a.min_match_score, suggested_horizon_days=5,
+            sizing={}, is_active=True,
+        )
+        self.assertEqual(setup_overlap(a, b)["jaccard"], 1.0)
+
+    def test_a_gate_is_a_universe_not_a_leg(self):
+        """Two setups sharing only `quote_currency: USD` have nothing in
+        common but where they run, and must not read as overlapping."""
+        from signals.models_opportunity import OpportunitySetup
+        from signals.opportunity_scanner import setup_overlap
+        common_gate = {"kind": "quote_currency",
+                       "params": {"currency": "USD"}, "gate": True}
+        a = OpportunitySetup.objects.create(
+            name="gate_a", description="", direction="bullish",
+            asset_classes=["forex"],
+            conditions=[common_gate,
+                        {"kind": "price_pattern",
+                         "params": {"pattern": "breakout_high"}, "weight": 1.0}],
+            min_match_score=0.6, suggested_horizon_days=5, sizing={},
+        )
+        b = OpportunitySetup.objects.create(
+            name="gate_b", description="", direction="bearish",
+            asset_classes=["forex"],
+            conditions=[common_gate,
+                        {"kind": "hurst_regime",
+                         "params": {"regime": "trending"}, "weight": 1.0}],
+            min_match_score=0.6, suggested_horizon_days=5, sizing={},
+        )
+        ov = setup_overlap(a, b)
+        self.assertEqual(ov["shared"], [])
+        self.assertEqual(ov["jaccard"], 0.0)
+
+    def test_nothing_to_compare_reads_unknown_not_zero(self):
+        """A setup with no scoring conditions has an UNMEASURED overlap. 0.0
+        would claim it was measured and found disjoint, and an operator
+        retires rules on that number."""
+        from signals.models_opportunity import OpportunitySetup
+        from signals.opportunity_scanner import setup_overlap
+        empty_a = OpportunitySetup.objects.create(
+            name="empty_a", description="", direction="bullish",
+            asset_classes=[], conditions=[], min_match_score=0.6,
+            suggested_horizon_days=5, sizing={})
+        empty_b = OpportunitySetup.objects.create(
+            name="empty_b", description="", direction="bearish",
+            asset_classes=[], conditions=[], min_match_score=0.6,
+            suggested_horizon_days=5, sizing={})
+        ov = setup_overlap(empty_a, empty_b)
+        self.assertIsNone(ov["jaccard"])
+        self.assertIsNone(ov["kind_jaccard"])
+
+    def test_a_direction_free_kind_fingerprints_as_itself(self):
+        from signals.opportunity_scanner import condition_fingerprint
+        self.assertEqual(
+            condition_fingerprint({"kind": "relative_volume",
+                                   "params": {"period": 20, "threshold": 1.5}}),
+            "relative_volume")
+        self.assertEqual(
+            condition_fingerprint({"kind": "liquidity_sweep",
+                                   "params": {"direction": "bearish_sweep",
+                                              "lookback": 20}}),
+            "liquidity_sweep[direction=bearish_sweep]")

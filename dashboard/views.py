@@ -1,4 +1,6 @@
 """Sauron Vision — Dashboard Views (enriched)."""
+import logging
+
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
 from django.contrib.auth.decorators import login_required
@@ -18,6 +20,10 @@ from core.fork_names import FORK_INFIX, fork_parent
 # ?movers= — a typo, a truncated link, an old bookmark — is not an error the
 # operator can act on, so the view falls back to "all" rather than 500ing.
 MOVER_BUCKETS = ("all", "winners", "losers")
+
+# A view that swallows a failure has to say so somewhere. This module had no
+# logger at all, so the only alternative to a 500 was silence.
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -419,6 +425,19 @@ def signals_list(request):
         idx = min(9, max(0, int(float(s.score or 0) * 10)))
         score_buckets[idx] += 1
     score_max = max(score_buckets) if score_buckets else 0
+    # Bars for _partials/chart_bars.html. The tone carries the conviction
+    # band, which is the reason this histogram is on the page at all — the
+    # template used to re-derive it from the loop index.
+    score_bars = [
+        {
+            "label": "{:.1f}".format(i / 10),
+            "value": n,
+            "display": "{} signal{}".format(n, "" if n == 1 else "s"),
+            "note": "score {:.1f}–{:.1f}".format(i / 10, (i + 1) / 10),
+            "tone": "red" if i < 4 else ("gold" if i < 7 else "accent"),
+        }
+        for i, n in enumerate(score_buckets)
+    ]
 
     # Direction donut.
     n_neutral = max(0, n_active - n_bull - n_bear)
@@ -477,6 +496,7 @@ def signals_list(request):
         "n_24h": n_24h,
         "n_high_urg": n_high_urg,
         "score_buckets": score_buckets,
+        "score_bars": score_bars,
         "score_max": score_max,
         "direction_donut": direction_donut,
         "asset_breakdown": asset_breakdown,
@@ -1086,13 +1106,30 @@ def news_feed(request):
     sent_trend = []
     for h in range(23, -1, -1):  # oldest first → newest
         if hourly_n[h]:
+            avg = round(hourly_sum[h] / hourly_n[h], 3)
             sent_trend.append({
                 "hour": h,
-                "avg": round(hourly_sum[h] / hourly_n[h], 3),
+                "avg": avg,
                 "n": hourly_n[h],
+                "label": "-{}h".format(h),
+                "value": avg,
+                "display": "{:+.2f}".format(avg),
+                "note": "{} article{}".format(hourly_n[h],
+                                              "" if hourly_n[h] == 1 else "s"),
             })
         else:
-            sent_trend.append({"hour": h, "avg": 0, "n": 0})
+            # An hour with nothing scored is UNKNOWN, not neutral. It used to
+            # be stored as avg 0, which the chart drew as a measured zero on
+            # the mid-line — a flat reading the platform never took.
+            sent_trend.append({
+                "hour": h, "avg": None, "n": 0,
+                "label": "-{}h".format(h),
+                "value": None,
+                "display": "—",
+                "note": "nothing scored this hour",
+            })
+    sent_max = max((abs(r["avg"]) for r in sent_trend if r["avg"] is not None),
+                   default=0)
 
     # Urgency mix.
     urg_counter: Counter = Counter()
@@ -1127,26 +1164,281 @@ def news_feed(request):
         "avg_sent_24h": round(avg_sent, 3),
         "sentiment_donut": sentiment_donut,
         "sent_trend": sent_trend,
+        "sent_max": sent_max,
         "urgency_mix": urgency_mix,
         "top_tickers": top_tickers,
         "top_sources": top_sources,
     })
 
 
-@login_required
-def portfolio_overview(request):
-    """Phase 63 — enriched portfolio dashboard.
+# ═════════════════════════════════════════════════════════════════════════
+# THE NUMBERS THAT MOVE — /portfolio/ and /positions/
+# ─────────────────────────────────────────────────────────────────────────
+# Both pages computed everything once, at render, and nothing recomputed it.
+# An operator watching a position work read whatever the page said at load,
+# however many fills and quotes ago that was — on the two screens that hold
+# their money.
+#
+# Everything below feeds BOTH the first render and the live refresh, because
+# the refresh endpoints re-enter the SAME view body and re-render the SAME
+# template through a bare shell. Two formatters for one number is how a page
+# ends up disagreeing with itself after the first push, and a refresh that
+# renders its own markup is how an em-dash becomes a zero on the second read.
+# ═════════════════════════════════════════════════════════════════════════
 
-    Adds: equity sparkline · allocation donut · win/loss/profit-factor stats ·
-    Sharpe 30d · top contributors/detractors. Reuses the same rendering
-    patterns as the Operations Center PORTFOLIO tab.
+# An em-dash means NOT MEASURED. Never 0: a confident "+0.00" under
+# UNREALIZED P&L is a claim that the book is flat, which is a completely
+# different statement from "no quote arrived for anything in it".
+LIVE_DASH = "—"
+
+# The wrapper the refresh endpoints render the page through: it emits the
+# content block and nothing else, so a fragment carries the live regions in
+# exactly the markup the full page rendered.
+LIVE_SHELL = "dashboard/_live_shell.html"
+
+
+def _as_float(value):
+    """Decimal | float | str | None → float | None. None survives as None."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _live_tone(value):
+    """Colour class for a signed reading; blank for zero and for unknown."""
+    if value is None:
+        return ""
+    if value > 0:
+        return "up"
+    if value < 0:
+        return "down"
+    return ""
+
+
+def _live_num(value, spec="{:+,.2f}"):
+    """A measurement, or the em-dash when there was nothing to measure."""
+    number = _as_float(value)
+    if number is None:
+        return LIVE_DASH
+    return spec.format(number)
+
+
+def _live_cell(text, sub="", tone="", title=""):
+    """One stat-strip cell, already formatted for display.
+
+    Pre-formatted on purpose: the em-dash rule then lives in ONE place
+    instead of in eight template `{% if x is not None %}` branches, each of
+    which is another chance for a cell to quietly print a zero.
+    """
+    return {"text": text, "sub": sub, "tone": tone, "title": title}
+
+
+def _initial_stop_map(rows):
+    """{row key: the stop each open position OPENED with}.
+
+    R is measured against the risk the trade was actually taken with. The
+    CURRENT stop is the wrong denominator — a trailing stop rewrites it, so
+    risk and P&L become the same quantity and every trailed winner scores
+    ~1.0R. bot_program.manual_close._initial_stop is the platform's one
+    reader of metadata["initial_stop_loss"] (bot_grading applies the same
+    rule), so the R this page prints is the R the close dialog promises and
+    the R the ledger eventually books.
+
+    One extra query over a trade set unified_open_positions has already
+    fetched: the normalised bot row carries no metadata at all, and the
+    alternative was a second copy of the union in this module.
+    """
+    out = {}
+    ids = [r.trade_id for r in rows
+           if getattr(r, "source", "") == "bot"
+           and getattr(r, "trade_id", None)]
+    if not ids:
+        return out
+    try:
+        from bot_program.manual_close import _initial_stop
+        from bot_program.models import AssetBotTrade
+        for trade in AssetBotTrade.objects.filter(id__in=ids).only(
+                "id", "stop_loss", "metadata"):
+            out[f"bot-{trade.id}"] = _initial_stop(trade)
+    except Exception as e:
+        # Every R then renders an em-dash, which is the honest reading of "we
+        # could not find the risk". Silence here would have been a column of
+        # dashes with no explanation anywhere.
+        logger.warning("Initial stops unavailable, R reads as unmeasured: %s",
+                       e, exc_info=True)
+    return out
+
+
+def _live_row(row, stops):
+    """One open position, shaped the way the tables already read it, plus R.
+
+    A dict and not the model instance: UnifiedPosition declares __slots__, so
+    an R multiple cannot be hung on a bot row at all, and half a book
+    carrying the field would be worse than none of it. The keys mirror the
+    attribute names the templates use, so the row markup did not have to
+    move to gain a live column.
+
+    P&L arrives already marked by _open_book and is never read off
+    Position.unrealized_pnl: that column defaults to 0 and its only writer is
+    an hourly task on one book, so on a row this page renders it is a
+    permanent, confident +0.00.
+    """
+    source = getattr(row, "source", "") or "position"
+    ident = getattr(row, "trade_id", None) or getattr(row, "pk", None)
+    key = f"{'bot' if source == 'bot' else 'pos'}-{ident}"
+
+    entry = _as_float(row.entry_price)
+    mark = _as_float(row.current_price)
+    stop = stops.get(key)
+    if stop is None:
+        stop = _as_float(getattr(row, "stop_loss", None))
+    sign = -1 if (row.direction or "").lower() in ("short", "sell") else 1
+
+    # Every term has to be there. An R with no stop behind it is not 0.0R —
+    # it is a position whose risk was never recorded, and 0.0R reads as a
+    # scratch trade sitting exactly at entry.
+    r_mult = None
+    if (mark is not None and entry
+            and stop is not None and abs(entry - stop) > 1e-12):
+        r_mult = round((mark - entry) * sign / abs(entry - stop), 2)
+
+    pnl = _as_float(row.unrealized_pnl)
+    pct = _as_float(row.unrealized_pnl_pct)
+    instrument = getattr(row, "instrument", None)
+    return {
+        "key": key,
+        "instrument": instrument,
+        "symbol": getattr(instrument, "symbol", "") or "",
+        "asset_class": getattr(instrument, "asset_class", "") or "other",
+        "direction": row.direction,
+        "quantity": row.quantity,
+        "entry_price": row.entry_price,
+        "current_price": row.current_price,
+        "stop_loss": row.stop_loss,
+        "initial_stop": stop,
+        "take_profit": row.take_profit,
+        "unrealized_pnl": pnl,
+        "unrealized_pnl_pct": pct,
+        "last_text": _live_num(mark, "{:,.4f}"),
+        "pnl_text": _live_num(pnl),
+        "pnl_tone": _live_tone(pnl),
+        "pct_text": _live_num(pct, "{:+.2f}%"),
+        "pct_tone": _live_tone(pct),
+        "r_multiple": r_mult,
+        "r_text": _live_num(r_mult, "{:+.2f}R"),
+        "r_tone": _live_tone(r_mult),
+        "r_title": (
+            f"Marked at {mark:,.4f} against an entry of {entry:,.4f} and the "
+            f"stop this position opened with ({stop:,.4f})."
+            if r_mult is not None else
+            "No R: this position has no live mark, or no entry stop was ever "
+            "recorded, so there is no risk to divide the move by."),
+        "strategy": getattr(row, "strategy", None),
+        "opened_at": row.opened_at,
+        "trade_id": getattr(row, "trade_id", None),
+        "status": getattr(row, "status", ""),
+        "paper": getattr(row, "paper", True),
+        "source": source,
+    }
+
+
+def _live_open_book(user, portfolio):
+    """Every open position, both books, marked to live quotes, with R.
+
+    views_command._open_book is the platform's one union-and-mark: it reads
+    portfolio.Position AND bot_program.AssetBotTrade — exposure genuinely
+    lives in both, and reading one of them showed an empty book to an
+    operator holding trades — and it re-prices the legacy half in memory.
+    Reusing it is what stops this page and the Operations Center quoting two
+    different P&Ls for the same position.
+
+    Returns (rows, n_priced, unrealized, deployed). unrealized and deployed
+    are None when nothing could be priced: an unpriced book is unknown, not
+    flat.
+    """
+    from .views_command import _open_book
+    objects, n_priced, unrealized, deployed = _open_book(user, portfolio)
+    stops = _initial_stop_map(objects)
+    return (objects, [_live_row(r, stops) for r in objects],
+            n_priced, unrealized, deployed)
+
+
+def _closed_stats(closed_positions):
+    """Win rate / profit factor over the closed book, honestly.
+
+    A close nothing could price is held OUT of the split rather than booked
+    as a loss, which is what `float(p.unrealized_pnl or 0) <= 0` did to every
+    one of them — each unmeasurable row silently dragging the win rate down.
+    Where there is nothing to measure the answer is None, and None renders as
+    an em-dash: a 0.0% win rate over zero trades is a claim that every trade
+    lost, and a 0.00 profit factor reads as a broken system rather than an
+    unmeasured one.
+    """
+    graded = [p for p in closed_positions if p.unrealized_pnl is not None]
+    winning = [p for p in graded if float(p.unrealized_pnl) > 0]
+    losing = [p for p in graded if float(p.unrealized_pnl) < 0]
+    n_graded = len(graded)
+    gross_win = sum(float(p.unrealized_pnl) for p in winning)
+    gross_loss = abs(sum(float(p.unrealized_pnl) for p in losing))
+    return {
+        "graded": graded,
+        "n_closed": len(closed_positions),
+        "n_graded": n_graded,
+        "n_ungraded": len(closed_positions) - n_graded,
+        "n_winning": len(winning),
+        "n_losing": len(losing),
+        "win_rate": (round(len(winning) / n_graded * 100, 1)
+                     if n_graded else None),
+        "realized": (round(sum(float(p.unrealized_pnl) for p in graded), 2)
+                     if n_graded else None),
+        "avg_win": round(gross_win / len(winning), 2) if winning else None,
+        "avg_loss": round(-gross_loss / len(losing), 2) if losing else None,
+        # With one side of the ratio empty the ratio does not exist yet —
+        # it is neither 0 nor 99.99.
+        "profit_factor": (round(gross_win / gross_loss, 2)
+                          if gross_loss > 0 and winning else None),
+    }
+
+
+def _exposure_split(deployed, cash, n_open):
+    """(deployed value, cash %, deployed %) — None where unknown.
+
+    With positions open and none of them priced the split is NOT "100% cash":
+    that is a claim of no exposure at all, on a book that is carrying some.
+    """
+    if n_open == 0:
+        return 0.0, 100.0, 0.0
+    if deployed is None:
+        return None, None, None
+    total = deployed + cash
+    if total <= 0:
+        return deployed, None, None
+    return (deployed, round(cash / total * 100, 1),
+            round(deployed / total * 100, 1))
+
+
+def _live_page(request, template, context, live_only):
+    """Render a page — or only its live regions — from one template."""
+    context["live_only"] = live_only
+    context["base_template"] = LIVE_SHELL if live_only else "base.html"
+    return render(request, template, context)
+
+
+def _render_portfolio(request, live_only):
+    """Phase 63 — enriched portfolio dashboard, now live.
+
+    Equity sparkline · allocation donut · win/loss/profit-factor stats ·
+    Sharpe 30d · top contributors/detractors — and a strip whose numbers move
+    with the market instead of with the page load.
     """
     from collections import defaultdict
     from datetime import timedelta
     from django.utils import timezone as _tz
     from portfolio.services import (get_or_create_default_portfolio,
-                                    unified_closed_positions,
-                                    unified_open_positions)
+                                    unified_closed_positions)
     from portfolio.models import PortfolioSnapshot
     # The SHARED "Main" book, deliberately: it is the only Position book
     # the background pipeline maintains — snapshots, mark-to-market, the
@@ -1155,41 +1447,26 @@ def portfolio_overview(request):
     # rows, and silently hid all pre-existing history.
     portfolio = get_or_create_default_portfolio()
 
-    # BOTH books: legacy Position rows plus the AssetBotTrades that every
-    # interactive path (bots, TAKE TRADE, LONG/SHORT) actually writes —
-    # the taken trade used to be invisible on this page by construction.
-    open_positions = unified_open_positions(request.user, portfolio)
+    # BOTH books, marked to live quotes: legacy Position rows plus the
+    # AssetBotTrades that every interactive path (bots, TAKE TRADE,
+    # LONG/SHORT) actually writes — the taken trade used to be invisible on
+    # this page by construction.
+    _objects, open_rows, n_priced, unrealized, deployed = _live_open_book(
+        request.user, portfolio)
     closed_positions = unified_closed_positions(request.user, portfolio)
+    stats = _closed_stats(closed_positions)
 
-    # Win/loss / profit factor / unrealized stats.
-    n_closed = len(closed_positions)
-    winning = [p for p in closed_positions if float(p.unrealized_pnl or 0) > 0]
-    losing = [p for p in closed_positions if float(p.unrealized_pnl or 0) <= 0]
-    win_rate = round(len(winning) / n_closed * 100, 1) if n_closed else 0
-    avg_win = (sum(float(p.unrealized_pnl) for p in winning) / len(winning)) if winning else 0
-    avg_loss = (sum(float(p.unrealized_pnl) for p in losing) / len(losing)) if losing else 0
-    profit_factor = round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else 0
-    total_unrealized = sum(float(p.unrealized_pnl or 0) for p in open_positions)
+    n_open = len(open_rows)
+    cash = float(portfolio.cash_available or 0)
+    deployed_value, cash_pct, exposure_pct = _exposure_split(
+        deployed, cash, n_open)
 
-    latest_snapshot = (PortfolioSnapshot.objects.filter(portfolio=portfolio)
-                        .order_by("-date").first())
-    max_drawdown = float(latest_snapshot.max_drawdown) if latest_snapshot else 0.0
-
-    # Equity curve sparkline — last 30 days.
+    # 30d Sharpe / Sortino approximation, from the snapshot series.
     cutoff_30d = _tz.now().date() - timedelta(days=30)
-    equity_rows = list(
-        PortfolioSnapshot.objects.filter(
-            portfolio=portfolio, date__gte=cutoff_30d)
-        .order_by("date")
-        .values_list("date", "total_value")
-    )
-    equity_points = [float(v) for _, v in equity_rows]
-
-    # 30d Sharpe / Sortino approximation.
+    snaps_30d = list(PortfolioSnapshot.objects.filter(
+        portfolio=portfolio, date__gte=cutoff_30d).order_by("date"))
     sharpe_30d = sortino_30d = None
-    rets = [float(s.daily_pnl_pct or 0) for s in
-            PortfolioSnapshot.objects.filter(
-                portfolio=portfolio, date__gte=cutoff_30d)]
+    rets = [float(s.daily_pnl_pct or 0) for s in snaps_30d]
     if len(rets) >= 5:
         mean = sum(rets) / len(rets)
         var = sum((r - mean) ** 2 for r in rets) / len(rets)
@@ -1203,160 +1480,588 @@ def portfolio_overview(request):
             if d_std > 0:
                 sortino_30d = round((mean / d_std) * (252 ** 0.5), 2)
 
+    latest_snapshot = (PortfolioSnapshot.objects.filter(portfolio=portfolio)
+                        .order_by("-date").first())
+    # A book with no snapshot has no measured drawdown. "0.00%" under a MAX
+    # DRAWDOWN label reads as "this book never lost money".
+    max_drawdown = (float(latest_snapshot.max_drawdown)
+                    if latest_snapshot is not None
+                    and latest_snapshot.max_drawdown is not None else None)
+
+    priced_note = (f"{n_priced} of {n_open} open positions carry a live quote."
+                   if n_open else "No open positions in either book.")
+    strip = {
+        "value": _live_cell(
+            _live_num(portfolio.current_value, "{:,.2f}"),
+            sub=portfolio.currency,
+            title=(f"Book value of {portfolio.name} as last written "
+                   f"{portfolio.updated_at:%Y-%m-%d %H:%M} UTC. Open "
+                   f"positions are marked live separately, below.")),
+        "cash": _live_cell(
+            _live_num(portfolio.cash_available, "{:,.2f}"),
+            sub=(f"{cash_pct:.1f}% of the book" if cash_pct is not None
+                 else "share unknown — nothing could be priced"),
+            title="Cash available to deploy, and its share of cash plus "
+                  "marked exposure."),
+        "exposure": _live_cell(
+            _live_num(deployed_value, "{:,.2f}"),
+            sub=(f"{exposure_pct:.1f}% deployed" if exposure_pct is not None
+                 else "share unknown — nothing could be priced"),
+            title=f"Notional at live marks across both books. {priced_note}"),
+        "open": _live_cell(
+            str(n_open), sub="positions",
+            title="Open positions across the legacy book and the bot book."),
+        "unrealized": _live_cell(
+            _live_num(unrealized), tone=_live_tone(unrealized),
+            sub="across open positions",
+            title=(f"Marked to live quotes, never read off the stored "
+                   f"column. {priced_note}")),
+        "win_rate": _live_cell(
+            _live_num(stats["win_rate"], "{:.1f}%"),
+            sub=(f"{stats['n_winning']}W / {stats['n_losing']}L · "
+                 f"{stats['n_graded']} closed"),
+            title=(f"Over the {stats['n_graded']} closed positions that could "
+                   f"be priced; {stats['n_ungraded']} could not and are held "
+                   f"out rather than counted as losses.")),
+        "profit_factor": _live_cell(
+            _live_num(stats["profit_factor"], "{:.2f}"),
+            tone=("up" if stats["profit_factor"] is not None
+                  and stats["profit_factor"] >= 1 else ""),
+            sub=(f"avg win {_live_num(stats['avg_win'])} · avg loss "
+                 f"{_live_num(stats['avg_loss'])}"),
+            title="Gross win divided by gross loss over the closed book."),
+        "sharpe": _live_cell(
+            _live_num(sharpe_30d, "{:.2f}"), tone=_live_tone(sharpe_30d),
+            sub=(f"sortino {sortino_30d:.2f}" if sortino_30d is not None
+                 else f"{len(rets)} daily snapshots · 5 needed"),
+            title="Annualised from daily snapshot returns over 30 days."),
+        "max_dd": _live_cell(
+            _live_num(max_drawdown, "{:.2f}%"),
+            tone="down" if max_drawdown else "",
+            sub="all-time low watermark",
+            title=("From the most recent portfolio snapshot."
+                   if latest_snapshot is not None
+                   else "No snapshot has ever been taken for this book, so "
+                        "drawdown is not measured.")),
+    }
+
     # Allocation donut — by asset class from current open positions + cash.
+    # Marked value where a mark exists, entry cost otherwise: a slice sized
+    # at zero because no quote arrived would silently shrink the book.
     alloc_by_class = defaultdict(float)
-    for p in open_positions:
-        ac = getattr(p.instrument, "asset_class", "") or "other"
-        alloc_by_class[ac] += abs(float(p.quantity or 0) * float(p.current_price or 0))
-    alloc_by_class["cash"] = float(portfolio.cash_available or 0)
+    for p in open_rows:
+        price = (p["current_price"] if p["current_price"] is not None
+                 else p["entry_price"])
+        alloc_by_class[p["asset_class"]] += abs(
+            float(p["quantity"] or 0) * float(price or 0))
+    alloc_by_class["cash"] = cash
     alloc_total = sum(alloc_by_class.values()) or 1.0
     allocation = sorted(
-        ({"asset_class": k, "value": v, "pct": round(v / alloc_total * 100, 1)}
+        # "key" is the donut partial's contract; asset_class stays for the
+        # table that reads the same rows.
+        ({"asset_class": k, "key": k, "value": v,
+          "pct": round(v / alloc_total * 100, 1)}
          for k, v in alloc_by_class.items() if v > 0),
         key=lambda r: r["value"], reverse=True,
     )
 
-    # Top 3 contributors / detractors among CLOSED positions.
-    closed_sorted = sorted(closed_positions,
-                            key=lambda p: float(p.unrealized_pnl or 0),
-                            reverse=True)
-    top_contributors = closed_sorted[:3]
-    top_detractors = list(reversed(closed_sorted[-3:])) if len(closed_sorted) >= 3 else []
-
-    return render(request, "dashboard/portfolio_overview.html", {
+    context = {
         "page_id": "portfolio", "portfolio": portfolio,
-        "snapshots": PortfolioSnapshot.objects.filter(portfolio=portfolio).order_by("-date")[:30],
-        "open_positions_count": len(open_positions),
-        "open_positions": list(open_positions[:8]),
-        "total_unrealized": total_unrealized,
-        "n_closed": n_closed,
-        "n_winning": len(winning),
-        "n_losing": len(losing),
-        "win_rate": win_rate,
-        "avg_win": round(avg_win, 2),
-        "avg_loss": round(avg_loss, 2),
-        "profit_factor": profit_factor,
-        "max_drawdown": max_drawdown,
-        "sharpe_30d": sharpe_30d,
-        "sortino_30d": sortino_30d,
-        "equity_points": equity_points,
-        "equity_min": min(equity_points) if equity_points else 0,
-        "equity_max": max(equity_points) if equity_points else 0,
+        "strip": strip,
+        "open_positions_count": n_open,
+        "open_positions": open_rows[:8],
+        "n_priced": n_priced,
         "allocation": allocation,
-        "top_contributors": top_contributors,
-        "top_detractors": top_detractors,
-    })
+        # Some rows could not be priced, so the donut is drawn from entry
+        # cost for those slices — the card says so rather than implying the
+        # ring is marked to market throughout.
+        "allocation_partial": n_open > 0 and n_priced < n_open,
+    }
+
+    if not live_only:
+        # The slow half: daily snapshots and the closed book. It does not
+        # move between two fills, so the refresh does not pay for it.
+        equity_points = [float(s.total_value) for s in snaps_30d]
+        ranked = sorted(stats["graded"],
+                        key=lambda p: float(p.unrealized_pnl), reverse=True)
+        context.update({
+            "snapshots": PortfolioSnapshot.objects.filter(
+                portfolio=portfolio).order_by("-date")[:30],
+            "equity_points": equity_points,
+            "equity_min": min(equity_points) if equity_points else 0,
+            "equity_max": max(equity_points) if equity_points else 0,
+            # Only actual winners and actual losers. The old slices took the
+            # top and bottom three whatever their sign, so a book of three
+            # losses listed all three as "top contributors".
+            "top_contributors": [p for p in ranked[:3]
+                                 if float(p.unrealized_pnl) > 0],
+            "top_detractors": [p for p in reversed(ranked[-3:])
+                               if float(p.unrealized_pnl) < 0],
+        })
+
+    return _live_page(request, "dashboard/portfolio_overview.html",
+                      context, live_only)
+
+
+@login_required
+def portfolio_overview(request):
+    return _render_portfolio(request, live_only=False)
+
+
+@login_required
+def portfolio_live(request):
+    """The moving regions of /portfolio/, re-rendered.
+
+    Same view body, same template, a bare shell instead of base.html — so a
+    refreshed cell can never say something the first render would not have
+    said, and a position nothing can price stays an em-dash on the second
+    read as well as the first.
+
+    The page asks for this on the /ws/eye/ fill events the shell already
+    re-dispatches, plus a slow sweep for the marks those events say nothing
+    about. It is never on a fast unconditional timer.
+    """
+    return _render_portfolio(request, live_only=True)
+
+
+def _pos_distance(mark, level, resolves_below):
+    """(percent of the mark, already-through) for one price level.
+
+    `resolves_below` says which side of the mark resolves that level — a
+    long's stop and a short's target both sit below it. Without that the
+    card cannot tell a stop about to fill from one comfortably clear, and
+    the two most opposite states a position can be in would both read as
+    "0.4% away".
+    """
+    if level is None or not mark:
+        return "", False
+    through = (mark <= level) if resolves_below else (mark >= level)
+    return "{:.2f}".format(abs(level - mark) / abs(mark) * 100), through
+
+
+def _pos_num(value):
+    """A float, or None. Decimal, str and None all arrive here."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pos_fmt(value, digits=None):
+    """A number as the card should print it, or "" for one we do not have.
+
+    Empty string, never "0" and never "None": the row's data attributes are
+    read by sv-position-card.js, which renders an absent attribute as an
+    em-dash. A zero here would be indistinguishable from a measured zero,
+    and "None" is the string that used to be painted loss-red in the table.
+
+    digits=None means "pick the precision from the magnitude", which is what
+    prices need: this book holds instruments quoted at 60000 and instruments
+    quoted at 0.000012 in the same table, and a fixed four decimals prints
+    the second one as a flat 0 — a price of zero on a position that is very
+    much alive.
+    """
+    f = _pos_num(value)
+    if f is None:
+        return ""
+    if digits is None:
+        a = abs(f)
+        digits = 2 if a >= 100 else (4 if a >= 1 else 8)
+    text = "{:.{}f}".format(f, digits).rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _position_card_details(user, positions):
+    """One dict per position with everything the hover card shows that the
+    ROW cannot carry — aligned with `positions`, same order.
+
+    The positions table renders portfolio.services.UnifiedPosition, a
+    __slots__-bound shape that deliberately exposes only the columns the
+    table prints. Every fact the card exists to answer "why is this position
+    on, and what is it doing" with lives elsewhere: the reason the engine
+    wrote at the decision, the composite score, the stop the trade OPENED
+    with (the only correct R denominator once a trail has rewritten
+    stop_loss), the venue, the broker order, the originating Signal and its
+    sub-scores, the tax lot's cost basis. Gathered here in four bounded
+    queries plus a cached spark lookup rather than per row in the template,
+    which would be an N+1 that grows with the book.
+
+    A row this cannot enrich — a portfolio.Position from the shared book,
+    with no AssetBotTrade behind it — gets the same dict with empty values.
+    The card then degrades to em-dashes and drops its two actions, which is
+    the honest rendering: that row has no forensics page and nothing in the
+    platform can flatten it.
+    """
+    from django.core.cache import cache
+    from django.utils.timesince import timesince
+    from bot_program.models import AssetBotTrade
+    # The R denominator rule is not restated here. bot_grading, the close
+    # dialog and this card must agree on what 1R was, and the one place
+    # that decides it is manual_close — a fourth copy is how the card ends
+    # up promising an R the ledger never books.
+    from bot_program.manual_close import _initial_stop, _risk_dollars
+    from bot_program.tax_lot_models import TaxLot
+    from core.context_ui import _recent_closes
+    from instruments.models import Instrument
+    from signals.models import Signal
+
+    trade_ids = [tid for tid in
+                 (getattr(p, "trade_id", None) for p in positions) if tid]
+    # Scoped by config__user, not filtered after the fetch: another user's
+    # trade is not "hidden" from the card, it is not fetched at all.
+    trades = {t.id: t for t in AssetBotTrade.objects.filter(
+        id__in=trade_ids, config__user=user).select_related("config")} \
+        if trade_ids else {}
+
+    # ── The signal behind each trade ───────────────────────────────────
+    # metadata["signal_id"] is authoritative (manual TAKE TRADE records it).
+    # A bot entry has none, so the fallback is the newest signal on the same
+    # symbol from the same rule at or before the entry — the same join the
+    # forensics page makes, bounded so a large book cannot walk the table.
+    def _signal_id(trade):
+        raw = (trade.metadata or {}).get("signal_id")
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    wanted = {sid for sid in (_signal_id(t) for t in trades.values()) if sid}
+    by_id = {s.id: s for s in Signal.objects.filter(id__in=wanted)
+             .select_related("instrument")} if wanted else {}
+    unresolved = [t for t in trades.values() if _signal_id(t) not in by_id]
+    pool = []
+    if unresolved:
+        pool = list(Signal.objects.filter(
+            instrument__symbol__in={t.symbol for t in unresolved})
+            .select_related("instrument").order_by("-created_at")[:200])
+
+    def _signal_for(trade):
+        hit = by_id.get(_signal_id(trade))
+        if hit is not None:
+            return hit
+        # No rule to match on — a hand-taken entry, or a row from before
+        # rule_name existed. The newest signal on the symbol is NOT evidence
+        # this trade saw, and attributing it would fabricate the provenance
+        # the card exists to show. metadata["signal_id"] is the only path in
+        # for those, and its absence is an honest blank.
+        if not trade.rule_name:
+            return None
+        for s in pool:
+            if s.instrument.symbol != trade.symbol:
+                continue
+            if trade.rule_name and s.rule_name != trade.rule_name:
+                continue
+            if trade.opened_at and s.created_at > trade.opened_at:
+                continue
+            return s
+        return None
+
+    # ── Cost basis: the lot this trade opened, if the ledger tracked one ──
+    lots = {}
+    if trade_ids:
+        for lot in TaxLot.objects.filter(
+                source_trade_id__in=trade_ids, user=user).order_by("-opened_at"):
+            lots.setdefault(lot.source_trade_id, lot)
+
+    # ── 12-bar sparks, cached 300s per symbol ─────────────────────────
+    # Same renderer and the same cache window the headband popups use: the
+    # shape moves daily and is not worth a bar query per position per load.
+    symbols = {getattr(p.instrument, "symbol", "") for p in positions
+               if getattr(p, "instrument", None)}
+    symbols.discard("")
+    sparks, missing = {}, []
+    for sym in symbols:
+        hit = cache.get("pos:spark:" + sym)
+        if hit is None:
+            missing.append(sym)
+        else:
+            sparks[sym] = hit
+    if missing:
+        inst_ids = dict(Instrument.objects.filter(symbol__in=missing)
+                        .values_list("symbol", "id"))
+        for sym in missing:
+            closes = _recent_closes(inst_ids[sym]) if sym in inst_ids else []
+            sparks[sym] = closes
+            cache.set("pos:spark:" + sym, closes, 300)
+
+    details = []
+    for p in positions:
+        trade = trades.get(getattr(p, "trade_id", None))
+        is_long = p.direction == "long"
+        entry = _pos_num(p.entry_price)
+        mark = _pos_num(p.current_price)
+        stop = _pos_num(p.stop_loss)
+        target = _pos_num(p.take_profit)
+        istop = _pos_num(_initial_stop(trade)) if trade else None
+        pnl = _pos_num(p.unrealized_pnl)
+
+        stop_pct, stop_through = _pos_distance(mark, stop, is_long)
+        target_pct, target_through = _pos_distance(mark, target, not is_long)
+
+        # Where the mark stands between the ENTRY stop and the target. The
+        # formula is direction-agnostic: for a short both differences are
+        # negative and the ratio comes out the same way up.
+        progress = ""
+        if None not in (mark, istop, target) and target != istop:
+            progress = "{:.1f}".format((mark - istop) / (target - istop) * 100)
+
+        # What 1R is worth in the config's base currency — the SIZE of the
+        # risk, which no column prints. The R MULTIPLE itself is deliberately
+        # not computed here: _live_row already puts one in the row's own
+        # cell, the card floats directly over that cell, and two R's on one
+        # row is the one disagreement an operator cannot resolve. The
+        # template hands the row's r_multiple straight to the card.
+        risk = _risk_dollars(trade) if trade else 0.0
+
+        signal = _signal_for(trade) if trade else None
+        subs = ""
+        if signal and isinstance(signal.sub_scores, dict):
+            ranked = sorted(
+                ((k, v) for k, v in signal.sub_scores.items()
+                 if isinstance(v, (int, float))),
+                key=lambda kv: -kv[1])[:4]
+            subs = " · ".join("{} {:.2f}".format(k, v) for k, v in ranked)
+
+        lot = lots.get(getattr(p, "trade_id", None))
+        sym = getattr(p.instrument, "symbol", "") if getattr(p, "instrument", None) else ""
+        spark = sparks.get(sym) or []
+        paper = getattr(p, "paper", None)
+        opened = p.opened_at
+
+        details.append({
+            "symbol": sym,
+            "side": "LONG" if is_long else "SHORT",
+            "qty": _pos_fmt(p.quantity, 8),
+            "status": getattr(p, "status", "") or "",
+            "venue": "" if paper is None else ("PAPER" if paper else "LIVE"),
+            "entry": _pos_fmt(entry),
+            "mark": _pos_fmt(mark),
+            "stop": _pos_fmt(stop),
+            "target": _pos_fmt(target),
+            "initial_stop": _pos_fmt(istop),
+            "stop_pct": stop_pct,
+            "stop_through": "1" if stop_through else "",
+            "target_pct": target_pct,
+            "target_through": "1" if target_through else "",
+            "progress": progress,
+            "pnl": _pos_fmt(pnl, 2),
+            "pnl_pct": _pos_fmt(p.unrealized_pnl_pct, 2),
+            "risk": _pos_fmt(risk, 2) if risk else "",
+            "age": timesince(opened).split(",")[0] if opened else "",
+            "opened": (timezone.localtime(opened).strftime("%b %d %H:%M")
+                       if opened else ""),
+            "rule": (trade.rule_name if trade else
+                     (p.strategy.name if p.strategy else "")) or "",
+            # composite_score defaults to 0 and a hand-taken trade never
+            # sets it, so 0 here means "never scored", not "scored zero" —
+            # it renders as the em-dash rather than as a damning 0.00.
+            "score": ("{:.2f}".format(trade.composite_score)
+                      if trade and trade.composite_score else ""),
+            "reason": (trade.reason or "") if trade else "",
+            "order": (trade.broker_order_id or "") if trade else "",
+            "basis": _pos_fmt(lot.cost_basis_per_unit) if lot else "",
+            "lot_left": _pos_fmt(lot.qty_remaining, 8) if lot else "",
+            "signal": (signal.title if signal else ""),
+            "signal_dir": (signal.direction if signal else ""),
+            "signal_score": ("{:.2f}".format(signal.score)
+                             if signal and signal.score is not None else ""),
+            "signal_sub": subs,
+            # Eight places, matching PriceData's own — six flattens the
+            # spark of anything quoted below a cent into a straight line.
+            "spark": ",".join("{:.8f}".format(c) for c in spark),
+            "spark_min": _pos_fmt(min(spark), 8) if spark else "",
+            "spark_max": _pos_fmt(max(spark), 8) if spark else "",
+            "spark_up": "1" if len(spark) > 1 and spark[-1] >= spark[0] else "",
+            # The click destination. Only a bot trade has a timeline; a row
+            # from the shared book has no page to open, and the card says so
+            # rather than offering a link that 404s.
+            "href": reverse("forensics_detail", args=[trade.id]) if trade else "",
+        })
+    return details
+
+
+def _render_positions(request, live_only):
+    """Phase 63 — enriched positions dashboard, now live.
+
+    Open exposure totals, direction donut, asset-class breakdown, monthly
+    P&L bars, profit factor, avg W/L — and an open book marked to live
+    quotes, each row carrying the R multiple it is currently running at.
+    """
+    from collections import defaultdict
+    from portfolio.services import (get_or_create_default_portfolio,
+                                    unified_closed_positions)
+    tab = request.GET.get("tab", "open")
+    if tab not in ("open", "history"):
+        tab = "open"
+    # The shared "Main" book, which is what unified_open_positions defaults
+    # to — the only Position book the background pipeline maintains.
+    portfolio = get_or_create_default_portfolio()
+    # BOTH books: that shared Position book plus the user's AssetBotTrades —
+    # a trade taken from a signal used to show in fills, the Op Center and
+    # forensics but never here.
+    open_objects, open_rows, n_priced, unrealized, deployed = _live_open_book(
+        request.user, portfolio)
+    closed_positions = unified_closed_positions(request.user, portfolio)
+    stats = _closed_stats(closed_positions)
+
+    n_open = len(open_rows)
+    best_trade = (max(stats["graded"], key=lambda p: float(p.unrealized_pnl))
+                  if stats["graded"] else None)
+    worst_trade = (min(stats["graded"], key=lambda p: float(p.unrealized_pnl))
+                   if stats["graded"] else None)
+
+    priced_note = (f"{n_priced} of {n_open} open positions carry a live quote."
+                   if n_open else "No open positions in either book.")
+    strip = {
+        "open": _live_cell(
+            str(n_open), sub="currently active",
+            title="Across the legacy Position book and the bot book."),
+        "unrealized": _live_cell(
+            _live_num(unrealized), tone=_live_tone(unrealized),
+            sub="mark-to-market",
+            title=(f"Marked to live quotes, never read off the stored "
+                   f"column. {priced_note}")),
+        "exposure": _live_cell(
+            _live_num(deployed, "{:,.2f}"), sub="notional capital deployed",
+            title=f"At live marks. {priced_note}"),
+        "closed": _live_cell(
+            str(stats["n_closed"]),
+            sub=f"{stats['n_winning']}W / {stats['n_losing']}L",
+            title=(f"{stats['n_ungraded']} of them could not be priced and "
+                   f"are held out of the split rather than booked as "
+                   f"losses.")),
+        "win_rate": _live_cell(
+            _live_num(stats["win_rate"], "{:.1f}%"),
+            tone=("" if stats["win_rate"] is None else
+                  "up" if stats["win_rate"] >= 50 else
+                  "down" if stats["win_rate"] < 40 else ""),
+            sub="closed history",
+            title=f"Over {stats['n_graded']} priced closes."),
+        "realized": _live_cell(
+            _live_num(stats["realized"]), tone=_live_tone(stats["realized"]),
+            sub="all-time",
+            title="Booked P&L across every closed position that carries one."),
+        "profit_factor": _live_cell(
+            _live_num(stats["profit_factor"], "{:.2f}"),
+            tone=("" if stats["profit_factor"] is None else
+                  "up" if stats["profit_factor"] >= 1 else "down"),
+            sub="gross win / gross loss",
+            title="Undefined until the closed book holds both a win and a "
+                  "loss."),
+        "avg_wl": _live_cell(
+            f"{_live_num(stats['avg_win'])} / {_live_num(stats['avg_loss'])}",
+            sub="per closed trade",
+            title="Average winner and average loser, each over its own side "
+                  "of the book."),
+    }
+
+    # Direction donut over open positions.
+    n_long = sum(1 for p in open_rows if p["direction"] == "long")
+    n_short = n_open - n_long
+    direction_donut = []
+    if n_long:
+        direction_donut.append({"key": "long", "n": n_long,
+                                "pct": round(n_long / n_open * 100, 1)})
+    if n_short:
+        direction_donut.append({"key": "short", "n": n_short,
+                                "pct": round(n_short / n_open * 100, 1)})
+
+    # Asset-class breakdown. Exposure at the mark where there is one and at
+    # entry cost otherwise — a row sized at zero because no quote arrived
+    # reads as a position that is not there. Unrealized stays None for a
+    # class nothing in it could be priced.
+    by_class: dict = defaultdict(
+        lambda: {"n": 0, "exposure": 0.0, "unrealized": None, "n_priced": 0})
+    for p in open_rows:
+        d = by_class[p["asset_class"]]
+        d["n"] += 1
+        price = (p["current_price"] if p["current_price"] is not None
+                 else p["entry_price"])
+        d["exposure"] += abs(float(p["quantity"] or 0) * float(price or 0))
+        if p["unrealized_pnl"] is not None:
+            d["unrealized"] = (d["unrealized"] or 0.0) + p["unrealized_pnl"]
+            d["n_priced"] += 1
+    total_exposure = sum(d["exposure"] for d in by_class.values())
+    asset_breakdown = sorted(
+        [{"asset_class": k, **v,
+          "unrealized_text": _live_num(v["unrealized"]),
+          "unrealized_tone": _live_tone(v["unrealized"]),
+          "exposure_pct": (round(v["exposure"] / total_exposure * 100, 1)
+                           if total_exposure > 0 else None)}
+         for k, v in by_class.items()],
+        key=lambda r: -r["exposure"])
+
+    context = {
+        "page_id": "positions",
+        "tab": tab,
+        "strip": strip,
+        "positions": open_rows,
+        # The row loop iterates this. The card details are built from the
+        # ORIGINAL model rows — _position_card_details reads attributes off
+        # them — while the row's own cells read the live dict, so the two
+        # halves of a row cannot quote different marks. Zipped rather than
+        # keyed because a portfolio.Position row has no id to join on.
+        "positions_detailed": list(zip(
+            open_rows, _position_card_details(request.user, open_objects))),
+        "n_priced": n_priced,
+        "direction_donut": direction_donut,
+        "asset_breakdown": asset_breakdown,
+    }
+
+    if not live_only:
+        # The closed book and its 12-month bars. They only move when a trade
+        # closes — and a close reloads the whole page's live regions anyway —
+        # but the history list is long, so the refresh does not carry it.
+        from datetime import timedelta as _td
+        now = timezone.now()
+        monthly_pnl: dict = defaultdict(float)
+        for p in stats["graded"]:
+            if p.closed_at:
+                monthly_pnl[p.closed_at.strftime("%Y-%m")] += float(
+                    p.unrealized_pnl)
+        monthly_rows = []
+        for i in range(11, -1, -1):
+            month = (now - _td(days=i * 30)).replace(day=1)
+            pnl = round(monthly_pnl.get(month.strftime("%Y-%m"), 0), 2)
+            monthly_rows.append({
+                "month": month.strftime("%b"),
+                "pnl": pnl,
+                # chart_bars contract. A month with no closes really did
+                # realize nothing, so it is a zero on the axis, not unknown.
+                "label": month.strftime("%b"),
+                "value": pnl,
+                "display": "{}{:.2f}".format("+" if pnl > 0 else "", pnl),
+            })
+        monthly_max = max((abs(r["pnl"]) for r in monthly_rows), default=0)
+        context.update({
+            "closed_positions": closed_positions,
+            "total_closed": stats["n_closed"],
+            "best_trade": best_trade,
+            "worst_trade": worst_trade,
+            "monthly_rows": monthly_rows,
+            "monthly_max": monthly_max,
+            "monthly_max_display": "{:.2f}".format(monthly_max),
+        })
+
+    return _live_page(request, "dashboard/positions_list.html",
+                      context, live_only)
 
 
 @login_required
 def positions_list(request):
-    """Phase 63 — enriched positions dashboard.
+    return _render_positions(request, live_only=False)
 
-    Adds: open exposure totals, direction donut, asset-class breakdown,
-    monthly P&L bars, profit factor, avg W/L, current open P&L sum.
+
+@login_required
+def positions_live(request):
+    """The moving regions of /positions/, re-rendered — see portfolio_live.
+
+    ?tab= rides along, so the open tab refreshes its book and the history tab
+    refreshes only the regions it actually shows.
     """
-    from collections import defaultdict
-    from portfolio.services import (unified_closed_positions,
-                                    unified_open_positions)
-    tab = request.GET.get("tab", "open")
-    # BOTH books: the maintained shared Position book plus the user's
-    # AssetBotTrades — a trade taken from a signal used to show in fills,
-    # the Op Center and forensics but never here.
-    open_positions = unified_open_positions(request.user)
-    closed_positions = unified_closed_positions(request.user)
-
-    total_closed = len(closed_positions)
-    winning = [p for p in closed_positions if float(p.unrealized_pnl or 0) > 0]
-    losing = [p for p in closed_positions if float(p.unrealized_pnl or 0) < 0]
-    n_winning = len(winning)
-    n_losing = len(losing)
-    win_rate = round(n_winning / total_closed * 100, 1) if total_closed > 0 else 0
-    total_realized = sum(float(p.unrealized_pnl or 0) for p in closed_positions)
-    best_trade = max(closed_positions, key=lambda p: float(p.unrealized_pnl or 0)) if total_closed else None
-    worst_trade = min(closed_positions, key=lambda p: float(p.unrealized_pnl or 0)) if total_closed else None
-
-    # Profit factor + avg win/loss
-    gross_win = sum(float(p.unrealized_pnl or 0) for p in winning)
-    gross_loss = abs(sum(float(p.unrealized_pnl or 0) for p in losing))
-    profit_factor = round(gross_win / gross_loss, 2) if gross_loss > 0 else (0 if gross_win == 0 else 99.99)
-    avg_win = round(gross_win / max(n_winning, 1), 2)
-    avg_loss = round(-gross_loss / max(n_losing, 1), 2)
-
-    # Open P&L + exposure
-    open_unrealized = sum(float(p.unrealized_pnl or 0) for p in open_positions)
-    open_exposure = sum(
-        abs(float(p.quantity or 0) * float(p.current_price or 0))
-        for p in open_positions)
-
-    # Direction donut over open positions
-    n_long = sum(1 for p in open_positions if p.direction == "long")
-    n_short = sum(1 for p in open_positions if p.direction == "short")
-    n_open_total = n_long + n_short
-    direction_donut = []
-    if n_long:
-        direction_donut.append({"key": "long", "n": n_long,
-                                  "pct": round(n_long / max(n_open_total, 1) * 100, 1)})
-    if n_short:
-        direction_donut.append({"key": "short", "n": n_short,
-                                  "pct": round(n_short / max(n_open_total, 1) * 100, 1)})
-
-    # Asset-class breakdown over open positions
-    by_class: dict = defaultdict(
-        lambda: {"n": 0, "exposure": 0.0, "unrealized": 0.0})
-    for p in open_positions:
-        cls = (p.instrument.asset_class
-               if p.instrument else None) or "other"
-        d = by_class[cls]
-        d["n"] += 1
-        d["exposure"] += abs(float(p.quantity or 0) * float(p.current_price or 0))
-        d["unrealized"] += float(p.unrealized_pnl or 0)
-    asset_breakdown = sorted(
-        [{"asset_class": k, **v,
-          "exposure_pct": round(v["exposure"] / max(open_exposure, 1) * 100, 1)}
-         for k, v in by_class.items()],
-        key=lambda r: -r["exposure"]
-    )
-
-    # Monthly P&L (last 12 months) — bucket closed by month
-    from datetime import timedelta as _td
-    now = timezone.now()
-    monthly_pnl: dict = defaultdict(float)
-    for p in closed_positions:
-        if p.closed_at:
-            key = p.closed_at.strftime("%Y-%m")
-            monthly_pnl[key] += float(p.unrealized_pnl or 0)
-    monthly_rows = []
-    for i in range(11, -1, -1):
-        month = (now - _td(days=i * 30)).replace(day=1)
-        key = month.strftime("%Y-%m")
-        monthly_rows.append({
-            "month": month.strftime("%b"),
-            "pnl": round(monthly_pnl.get(key, 0), 2),
-        })
-    monthly_max = max((abs(r["pnl"]) for r in monthly_rows), default=0)
-
-    return render(request, "dashboard/positions_list.html", {
-        "page_id": "positions",
-        "tab": tab,
-        "positions": open_positions,
-        "closed_positions": closed_positions,
-        "total_closed": total_closed,
-        "n_winning": n_winning,
-        "n_losing": n_losing,
-        "win_rate": win_rate,
-        "total_realized": "{:.2f}".format(total_realized),
-        "best_trade": best_trade,
-        "worst_trade": worst_trade,
-        "profit_factor": profit_factor,
-        "avg_win": avg_win,
-        "avg_loss": avg_loss,
-        "open_unrealized": round(open_unrealized, 2),
-        "open_exposure": round(open_exposure, 2),
-        "direction_donut": direction_donut,
-        "asset_breakdown": asset_breakdown,
-        "monthly_rows": monthly_rows,
-        "monthly_max": monthly_max,
-    })
+    return _render_positions(request, live_only=True)
 
 
 @login_required
@@ -1422,15 +2127,27 @@ def ai_insights(request):
         d = t.created_at.date()
         cost_per_day[d] += float(t.cost_usd)
         n_per_day[d] += 1
+    # `label`/`value` is the contract of _partials/chart_bars.html — the one
+    # column chart on the platform. A day with no tasks spent nothing, which
+    # is a MEASUREMENT of zero, not a missing reading: it keeps value 0 and
+    # sits on the baseline. A missing reading would carry value None instead
+    # and draw no bar at all.
     cost_trend = []
     for i in range(6, -1, -1):
         d = (now - timedelta(days=i)).date()
+        n = n_per_day.get(d, 0)
+        cost = round(cost_per_day.get(d, 0), 4)
         cost_trend.append({
+            "label": d.strftime("%m-%d"),
+            "value": cost,
+            "display": "${:.4f}".format(cost),
+            "note": "{} task{}".format(n, "" if n == 1 else "s"),
             "date": d.strftime("%m-%d"),
-            "cost": round(cost_per_day.get(d, 0), 3),
-            "n": n_per_day.get(d, 0),
+            "cost": cost,
+            "n": n,
         })
-    max_day_cost = max((r["cost"] for r in cost_trend), default=0)
+    max_day_cost = max((r["value"] for r in cost_trend), default=0)
+    max_day_cost_display = "${:.4f}".format(max_day_cost)
 
     # Top failing agents (24h).
     fail_counter: Counter = Counter(
@@ -1458,6 +2175,7 @@ def ai_insights(request):
         "provider_donut": provider_donut,
         "cost_trend": cost_trend,
         "max_day_cost": max_day_cost,
+        "max_day_cost_display": max_day_cost_display,
         "top_failures": top_failures,
         "latest_briefing": latest_briefing,
         "recent_tasks": AgentTask.objects.order_by("-created_at")[:20],
@@ -1540,15 +2258,23 @@ def ai_tasks_list(request):
         d = t.created_at.date()
         cost_per_day[d] += float(t.cost_usd)
         n_per_day[d] += 1
+    # Same bar contract as /ai/ — see the note there on zero vs unknown.
     cost_trend = []
     for i in range(6, -1, -1):
         d = (now - timedelta(days=i)).date()
+        n = n_per_day.get(d, 0)
+        cost = round(cost_per_day.get(d, 0), 4)
         cost_trend.append({
+            "label": d.strftime("%m-%d"),
+            "value": cost,
+            "display": "${:.4f}".format(cost),
+            "note": "{} task{}".format(n, "" if n == 1 else "s"),
             "date": d.strftime("%m-%d"),
-            "cost": round(cost_per_day.get(d, 0), 3),
-            "n": n_per_day.get(d, 0),
+            "cost": cost,
+            "n": n,
         })
-    max_day_cost = max((r["cost"] for r in cost_trend), default=0)
+    max_day_cost = max((r["value"] for r in cost_trend), default=0)
+    max_day_cost_display = "${:.4f}".format(max_day_cost)
 
     return render(request, "dashboard/ai_tasks_list.html", {
         "page_id": "ai_tasks",
@@ -1568,6 +2294,7 @@ def ai_tasks_list(request):
         "longest_rows": longest_rows,
         "cost_trend": cost_trend,
         "max_day_cost": max_day_cost,
+        "max_day_cost_display": max_day_cost_display,
     })
 
 
@@ -2149,9 +2876,15 @@ def take_trade_preview(request, signal_id):
 @login_required
 def take_trade_execute(request, signal_id):
     """POST — execute the trade previewed above, optionally closing the
-    listed manual positions first to free capital. Paper venue only in this
-    wave; the live path adds the PIN and the pending-close machinery."""
-    import json as _json
+    listed manual positions first to free capital, and optionally at a size
+    the operator chose instead of the risk-derived one. Paper venue only in
+    this wave; the live path adds the PIN and the pending-close machinery.
+
+    The size arrives as a number in a request body — so it is a claim, not
+    a fact. manual_trade.validate_qty_override re-derives it against the
+    fill, the pool and the sizing caps; this view only proves it is a
+    finite number before handing it over.
+    """
     from django.http import HttpResponseNotAllowed, JsonResponse
     from bot_program.manual_trade import execute_take_trade
     from signals.models import Signal
@@ -2163,17 +2896,26 @@ def take_trade_execute(request, signal_id):
     if err:
         return JsonResponse({"error": err}, status=400)
     return JsonResponse(execute_take_trade(request.user, signal,
-                                           body["close_ids"]))
+                                           body["close_ids"],
+                                           qty=body["qty"]))
 
 
 def _parse_trade_body(request):
-    """Parse an execute body into {"close_ids": [...], "side": ...}.
+    """Parse an execute body into {"close_ids": [...], "side": ..., "qty": ...}.
 
     Strict on shape: a non-object body 500'd (AttributeError on .get), and
     a string close_ids like "12" iterated per character into [1, 2] —
     closing trades nobody named.
+
+    `qty` is the operator's size override, or None for "use the risk
+    budget". Only its SHAPE is settled here — a finite number, and not a
+    bool, because float(True) is 1.0 and a JSON `true` would otherwise
+    become a one-unit position. Whether the number is permissible is a
+    money question, answered under the execution lock against the real
+    fill, not here against a stale preview.
     """
     import json as _json
+    import math as _math
     try:
         body = _json.loads(request.body.decode() or "{}")
     except ValueError:
@@ -2184,8 +2926,21 @@ def _parse_trade_body(request):
     if not isinstance(raw_ids, list):
         return None, "close_ids must be a list"
     close_ids = [int(i) for i in raw_ids if str(i).isdigit()]
+
+    raw_qty = body.get("qty")
+    qty = None
+    if raw_qty is not None and raw_qty != "":
+        if isinstance(raw_qty, bool):
+            return None, "qty must be a number"
+        try:
+            qty = float(raw_qty)
+        except (TypeError, ValueError):
+            return None, "qty must be a number"
+        if not _math.isfinite(qty):
+            return None, "qty must be a finite number"
     return {"close_ids": close_ids,
-            "side": str(body.get("side", "")).upper()}, None
+            "side": str(body.get("side", "")).upper(),
+            "qty": qty}, None
 
 
 @login_required
@@ -2307,8 +3062,9 @@ def asset_trade_execute(request, symbol):
     body, err = _parse_trade_body(request)
     if err:
         return JsonResponse({"error": err}, status=400)
-    return JsonResponse(execute_asset_trade(request.user, inst,
-                                            body["side"], body["close_ids"]))
+    return JsonResponse(execute_asset_trade(request.user, inst, body["side"],
+                                            body["close_ids"],
+                                            qty=body["qty"]))
 
 
 @login_required

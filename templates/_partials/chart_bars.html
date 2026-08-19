@@ -1,0 +1,142 @@
+{% comment %}
+Column chart — one implementation for every "bars in a card" surface.
+
+Replaces the flex-of-divs idiom that was copy-pasted across the cost trend,
+the score histogram, the monthly P&L and the session pulse. That idiom had
+three failures this partial exists to prevent:
+
+  1. The bar height was a PERCENTAGE of a fixed-height flex column that ALSO
+     contained a value label and a date label. At the peak value the bar took
+     100% of the column on its own, so the two labels pushed the content past
+     the container and the date row printed over the card's bottom edge.
+  2. Each column carried an unbreakable mono value ("$0.0034"). A flex item
+     will not shrink below its content's min-content width, so seven of them
+     set a floor the card could not go under — the card scrolled sideways on
+     a phone. The exact value now lives in the bar's <title> (native tooltip)
+     and the peak lives in the caption, and the tick row is allowed to
+     ellipsise, so the chart shrinks to any width.
+  3. A day with no reading and a day measured at zero drew the same nothing.
+     Here `value: None` draws a muted "not measured" marker whose tooltip is
+     an em-dash, while a measured 0 draws no bar at all against a baseline
+     that is always painted — so the zero is visible AS a zero, and the two
+     states cannot be confused for each other.
+
+Geometry lives in the template, in one viewBox, so no CSS rule can override
+the coordinate space the numbers were computed against.
+
+Parameters
+  bars        list of dicts: .label (tick text), .value (number or None — an
+              absent key also resolves to None in a template condition, so
+              both read as "not measured"), optional .note (extra tooltip
+              text), optional .tone (accent|red|gold|blue|purple — overrides
+              the default colour)
+  max         maximum ABSOLUTE value in the series; falsy is handled (every
+              bar sits flat on the baseline and the caption says so)
+  signed      truthy → diverging chart with a zero line through the middle
+  unit        what the value axis measures, e.g. "USD spent per day"
+  when        what the time axis covers, e.g. "last 7 days"
+  peak        pre-formatted peak for the caption, e.g. "$0.42"
+  ends        truthy → a three-label start/mid/end axis instead of one tick
+              per bar. Pass it whenever the series is long enough that a tick
+              per bar would ellipsise to nothing on a phone (say, over ~12).
+  axis_start  / axis_mid / axis_end — used when ends is truthy
+  short       truthy → the 80px-tall variant
+  empty       message when there is nothing to plot
+{% endcomment %}
+{% if bars %}
+{% with n=bars|length %}
+{% widthratio 1 n 1000 as slot %}
+{% widthratio 74 100 slot as bar_w %}
+{% widthratio 13 100 slot as bar_pad %}
+<div class="sv-bars">
+    <svg class="sv-bars-svg{% if short %} sv-bars-svg--short{% endif %}"
+         viewBox="0 0 1000 200" preserveAspectRatio="none" role="img"
+         aria-label="{{ unit|default:'value' }} — {{ when|default:'over time' }}">
+        <title>{{ unit|default:"value" }} — {{ when|default:"over time" }}</title>
+        {% if signed %}
+            {# Positives grow up out of the zero line; the flip keeps the #}
+            {# arithmetic in the template additive — no subtraction filter. #}
+            <g transform="translate(0,100) scale(1,-1)">
+                {% for b in bars %}
+                    {% if b.value is None %}
+                        {% widthratio forloop.counter0 n 1000 as bar_x %}
+                        {# A slot with no reading gets a muted marker, not a #}
+                        {# silent gap: the reader can see WHERE the series is #}
+                        {# missing, and the tooltip says so in words. #}
+                        <rect class="sv-bar sv-bar--unknown"
+                              x="{{ bar_x|add:bar_pad }}" y="0"
+                              width="{{ bar_w }}" height="4"><title>{{ b.label }}: — not measured{% if b.note %} · {{ b.note }}{% endif %}</title></rect>
+                    {% elif b.value and b.value > 0 %}
+                        {% widthratio forloop.counter0 n 1000 as bar_x %}
+                        {% widthratio b.value max 90 as bar_h %}
+                        <rect class="sv-bar sv-bar--{{ b.tone|default:'accent' }}"
+                              x="{{ bar_x|add:bar_pad }}" y="0"
+                              width="{{ bar_w }}" height="{{ bar_h|add:2 }}"><title>{{ b.label }}: {{ b.display|default:b.value }}{% if b.note %} · {{ b.note }}{% endif %}</title></rect>
+                    {% endif %}
+                {% endfor %}
+            </g>
+            <g transform="translate(0,100)">
+                {% for b in bars %}
+                    {% if b.value is not None and b.value != '' and b.value < 0 %}
+                        {% widthratio forloop.counter0 n 1000 as bar_x %}
+                        {% widthratio b.value max -90 as bar_h %}
+                        <rect class="sv-bar sv-bar--red"
+                              x="{{ bar_x|add:bar_pad }}" y="0"
+                              width="{{ bar_w }}" height="{{ bar_h|add:2 }}"><title>{{ b.label }}: {{ b.display|default:b.value }}{% if b.note %} · {{ b.note }}{% endif %}</title></rect>
+                    {% endif %}
+                {% endfor %}
+            </g>
+            <line class="sv-bars-base" x1="0" y1="100" x2="1000" y2="100"/>
+        {% else %}
+            <g transform="translate(0,197) scale(1,-1)">
+                {% for b in bars %}
+                    {% if b.value is None %}
+                        {% widthratio forloop.counter0 n 1000 as bar_x %}
+                        {# Unknown, not zero — see the signed branch above. #}
+                        <rect class="sv-bar sv-bar--unknown"
+                              x="{{ bar_x|add:bar_pad }}" y="0"
+                              width="{{ bar_w }}" height="4"><title>{{ b.label }}: — not measured{% if b.note %} · {{ b.note }}{% endif %}</title></rect>
+                    {% endif %}
+                    {# `> 0` as well as truthiness: a negative slipped into an #}
+                    {# unsigned series would otherwise emit height="-42", and #}
+                    {# an SVG with a negative height is an error, not a bar. #}
+                    {% if b.value and b.value > 0 %}
+                        {% widthratio forloop.counter0 n 1000 as bar_x %}
+                        {% widthratio b.value max 188 as bar_h %}
+                        {# +2 so a real but tiny reading is never mistaken for a zero. #}
+                        <rect class="sv-bar sv-bar--{{ b.tone|default:'accent' }}"
+                              x="{{ bar_x|add:bar_pad }}" y="0"
+                              width="{{ bar_w }}" height="{{ bar_h|add:2 }}"><title>{{ b.label }}: {{ b.display|default:b.value }}{% if b.note %} · {{ b.note }}{% endif %}</title></rect>
+                    {% endif %}
+                {% endfor %}
+            </g>
+            <line class="sv-bars-base" x1="0" y1="198" x2="1000" y2="198"/>
+        {% endif %}
+    </svg>
+
+    {% if ends %}
+        <div class="sv-bars-axis sv-bars-axis--ends" aria-hidden="true">
+            <span>{{ axis_start|default:"older" }}</span>
+            <span>{{ axis_mid|default:"" }}</span>
+            <span>{{ axis_end|default:"newer" }}</span>
+        </div>
+    {% else %}
+        <div class="sv-bars-axis" aria-hidden="true">
+            {% for b in bars %}<span>{{ b.label }}</span>{% endfor %}
+        </div>
+    {% endif %}
+
+    <p class="sv-bars-cap">
+        {% if max %}
+            {{ unit|default:"value" }} · {{ when|default:"over time" }}{% if peak %} · peak {{ peak }}{% endif %}
+        {% else %}
+            {# No peak means no non-zero reading. Saying so beats a row of #}
+            {# empty slots, which reads as "the chart is broken". #}
+            {{ unit|default:"value" }} · {{ when|default:"over time" }} — nothing recorded, no non-zero reading in this window
+        {% endif %}
+    </p>
+</div>
+{% endwith %}
+{% else %}
+<p class="oc-empty">{{ empty|default:"Nothing to plot yet." }}</p>
+{% endif %}

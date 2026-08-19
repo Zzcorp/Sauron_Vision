@@ -87,3 +87,99 @@ def run_anomaly_scanner() -> dict:
     them in its next snapshot and consolidation promotes recurring ones."""
     from .anomaly_scanner import scan_anomalies_now
     return scan_anomalies_now()
+
+
+# ── Ask Sauron — the chat's async lane ───────────────────────────────────
+#
+# Not a beat task: dispatched by the operator asking a question. It exists
+# so the answer outlives the request that asked for it. The panel used to
+# call the agent synchronously inside the view, so changing page aborted
+# the fetch and the finished answer was never shown to anyone.
+
+@shared_task(name="brain.tasks.answer_research_question")
+def answer_research_question(*, message_id: int) -> dict:
+    """Produce one chat answer off the request thread.
+
+    Deliberately NOT wrapped in @spend_guard: that decorator's refusal path
+    returns a dict without running the body, which would leave the pending
+    bubble spinning forever with no explanation. The same ceiling is
+    enforced inside complete_ask(), where the refusal is written into the
+    bubble the operator is actually watching.
+    """
+    from .research_agent import complete_ask
+    return complete_ask(message_id)
+
+
+def _answer_payload(message_id: int, *, ok: bool, fallback: str) -> dict:
+    """The socket payload for one settled answer, read back from the DB.
+
+    Read from the row rather than trusted from the task's return value:
+    the row is what every page will render, so the banner must quote the
+    same text or the two disagree.
+    """
+    from .research_models import ResearchMessage
+    from .research_renderer import extract_action_markers, render_markers
+
+    msg = (ResearchMessage.objects.select_related("replies_to")
+           .filter(pk=message_id).first())
+    question, preview = "", fallback
+    if msg is not None:
+        if msg.replies_to is not None:
+            question = msg.replies_to.content
+        cleaned, _actions = extract_action_markers(msg.content or "")
+        text = " ".join(render_markers(cleaned).split())
+        if text:
+            preview = text[:180] + ("…" if len(text) > 180 else "")
+        ok = ok and not msg.error
+    return {"message_id": message_id, "question": question,
+            "preview": preview, "ok": bool(ok)}
+
+
+@shared_task(name="brain.tasks.announce_research_answer")
+def announce_research_answer(result, user_id, message_id) -> dict:
+    """Celery `link=` — the answer landed; say so wherever the operator is.
+
+    This is the whole point of the async lane: the banner is raised by the
+    SERVER on the user's own /ws/eye/ socket, so it reaches the page they
+    are on now rather than the page they asked from. No Notification row —
+    the conversation is already the durable record, and a second copy in
+    the bell would double every question.
+    """
+    from django.contrib.auth.models import User
+    from dashboard.consumers import push_eye_event
+
+    user = User.objects.filter(pk=user_id).first()
+    if user is None:
+        return {"status": "no_user"}
+    data = _answer_payload(message_id, ok=True, fallback="Answer ready.")
+    push_eye_event(user, "sauron_answer", data)
+    return {"status": "announced", "message_id": message_id}
+
+
+@shared_task(name="brain.tasks.announce_research_failed")
+def announce_research_failed(request, exc, traceback, user_id,
+                             message_id) -> dict:
+    """Celery `link_error=` — the worker died before it answered.
+
+    Signature contract: an errback whose header takes more than one
+    argument is invoked INLINE as errback(request, exc, traceback), with
+    those three args merged BEFORE the partials from .s(...). Getting it
+    wrong raises TypeError inside Celery's own failure handling and no
+    announcement ever fires — see dashboard.tasks.announce_run_failed.
+
+    Settling the row here is the important half: an unsettled placeholder
+    would spin on every page forever.
+    """
+    from django.contrib.auth.models import User
+    from dashboard.consumers import push_eye_event
+    from .research_agent import fail_pending
+
+    detail = str(exc)[:140] if exc else "the worker died"
+    fail_pending(message_id, detail)
+    user = User.objects.filter(pk=user_id).first()
+    if user is None:
+        return {"status": "no_user"}
+    data = _answer_payload(message_id, ok=False,
+                           fallback=f"Sauron could not answer — {detail}")
+    push_eye_event(user, "sauron_answer", data)
+    return {"status": "announced_failure", "message_id": message_id}

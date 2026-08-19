@@ -51,7 +51,9 @@
             <div style="height:6px;background:var(--bg-card-hover);border-radius:3px;overflow:hidden;">
                 {% widthratio data.value|stringformat:"f"|cut:"-" data.cap 100 as pct %}
                 <div style="height:100%;width:{% if pct %}{{ pct|default:0 }}{% else %}0{% endif %}%;
-                            background: {% if data.status == 'over' %}#ff5e5e{% elif data.status == 'near' %}var(--accent-gold){% else %}var(--accent){% endif %};"></div>
+                            {# was a literal #ff5e5e, the one bar on this page #}
+                            {# that kept the dark-mode red after a theme swap #}
+                            background: {% if data.status == 'over' %}var(--accent-red){% elif data.status == 'near' %}var(--accent-gold){% else %}var(--accent){% endif %};"></div>
             </div>
         </div>
         {% endfor %}

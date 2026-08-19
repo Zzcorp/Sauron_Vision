@@ -636,42 +636,11 @@
         overflow: hidden; text-overflow: ellipsis;
     }
 
-    /* SPARKLINE */
-    .oc-sparkline {
-        width: 100%; height: 48px; display: block;
-    }
-    .oc-sparkline path {
-        fill: none; stroke: var(--accent); stroke-width: 1.5;
-        stroke-linejoin: round; stroke-linecap: round;
-        filter: drop-shadow(0 0 4px rgba(0,232,104,0.4));
-    }
-    .oc-sparkline.bearish path { stroke: #ff5e5e; filter: drop-shadow(0 0 4px rgba(255,94,94,0.4)); }
-    .oc-sparkline-fill {
-        fill: url(#oc-spark-grad); opacity: 0.18;
-    }
-
-    /* DONUT */
-    .oc-donut {
-        width: 140px; height: 140px;
-    }
-    .oc-donut-legend {
-        display: flex; flex-direction: column; gap: 4px;
-        font-family: var(--font-mono); font-size: 11px;
-    }
-    .oc-donut-legend-row {
-        display: flex; justify-content: space-between; gap: 12px;
-        align-items: center;
-    }
-    .oc-donut-legend-key {
-        display: inline-flex; align-items: center; gap: 6px;
-        color: var(--text-secondary);
-    }
-    .oc-donut-legend-swatch {
-        width: 10px; height: 10px; border-radius: 2px;
-    }
-    .oc-donut-legend-pct {
-        color: var(--text-primary); font-weight: 600;
-    }
+    /* SPARKLINE and DONUT are defined once in sauron.css and were restated
+       here with a hardcoded #ff5e5e bearish stroke and a fixed 140px donut —
+       so this page's charts kept the dark-mode red in light mode, and the
+       donut held its row open on a narrow card. Deleted rather than edited:
+       one definition is the point. */
 
     /* DAY-OF-WEEK HEATMAP */
     .oc-heatmap {

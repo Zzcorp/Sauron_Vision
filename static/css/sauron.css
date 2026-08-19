@@ -479,6 +479,11 @@
             --accent-glow: rgba(0, 153, 77, 0.08);
             --shadow-card: 0 2px 12px rgba(0,0,0,0.06);
             --shadow-glow: 0 0 20px rgba(0,153,77,0.06);
+            /* The dark theme's gold is a glow against near-black; on white it
+               fails contrast at small sizes. Anything that PRINTS gold (a
+               label, a 9px chip) takes this ink instead — the glow token
+               stays for borders and shadows, where contrast is not the job. */
+            --accent-gold-ink: #8a6a00;
         }
         body.light-mode .sidebar {
             background: linear-gradient(180deg, #e8ece8 0%, #f0f2f0 100%);
@@ -1984,6 +1989,225 @@
         a.nf-pop-item .nfi-label { color: var(--accent); }
         a.nf-pop-item .nfi-label::after { content: " ›"; }
 
+        /* ── Position detail card (static/js/sv-position-card.js) ──────
+           The fourth member of the .nf-pop family, so it inherits the
+           chrome, the --pop-* tokens and — critically — the z-index, which
+           is var(--z-hovercard) on the base rule and restated on the
+           sv-overlay ladder. Nothing here may set a numeric z-index: this
+           card is portalled to <body> precisely because the fixed bands
+           above it carry backdrop-filter, and a stacking context clamps
+           its children no matter what number they claim. */
+        .pos-pop { min-width: 340px; max-width: 400px; }
+        .pos-pop-head {
+            display: flex; justify-content: space-between; align-items: flex-start;
+            gap: 12px; padding-bottom: 10px; margin-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        .pos-pop-id { min-width: 0; }
+        .pos-pop-sym {
+            font-family: var(--font-display); font-size: 17px; font-weight: 700;
+            color: var(--text-primary); line-height: 1.2;
+            overflow-wrap: anywhere;
+        }
+        .pos-pop-sub {
+            display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+            margin-top: 5px;
+            font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .08em;
+        }
+        .pos-pop-side { font-weight: 700; }
+        .pos-pop-side.up { color: var(--accent); }
+        .pos-pop-side.down { color: var(--accent-red); }
+        .pos-pop-qty { color: var(--text-secondary); }
+        .pos-pop-venue {
+            padding: 1px 5px; border-radius: 2px; border: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+        /* LIVE is real money and has to be legible as such before the
+           operator reaches the close button. PAPER stays deliberately
+           unremarkable — a paper position dressed as an alert trains the
+           operator to ignore the colour. */
+        .pos-pop-venue.is-live {
+            color: var(--accent-red); border-color: var(--accent-red);
+            background: color-mix(in srgb, var(--accent-red) 10%, transparent);
+        }
+        /* Gold, and therefore --accent-gold-ink, not --accent-gold: this
+           chip prints on a white card in light mode, where the neon gold
+           has almost no contrast. */
+        .pos-pop-pending {
+            padding: 1px 5px; border-radius: 2px; font-weight: 700;
+            color: var(--accent-gold-ink);
+            border: 1px solid var(--accent-gold-ink);
+            background: color-mix(in srgb, var(--accent-gold-ink) 10%, transparent);
+        }
+        .pos-pop-r { text-align: right; flex: 0 0 auto; }
+        .pos-pop-r-val {
+            font-family: var(--font-display); font-size: 22px; font-weight: 700;
+            line-height: 1; color: var(--text-primary);
+            font-variant-numeric: tabular-nums;
+        }
+        .pos-pop-r.up .pos-pop-r-val { color: var(--accent); }
+        .pos-pop-r.down .pos-pop-r-val { color: var(--accent-red); }
+        .pos-pop-r-cap {
+            font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .12em;
+            text-transform: uppercase; color: var(--text-muted); margin-top: 4px;
+        }
+        .pos-pop-money {
+            display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px;
+            margin-bottom: 10px;
+            font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+        }
+        .pos-pop-pnl { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+        .pos-pop-pnlpct { font-size: 12px; color: var(--text-secondary); }
+        .pos-pop-pnl.up, .pos-pop-pnlpct.up { color: var(--accent); }
+        .pos-pop-pnl.down, .pos-pop-pnlpct.down { color: var(--accent-red); }
+        .pos-pop-money-cap {
+            font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase;
+            color: var(--text-muted); margin-left: auto;
+        }
+
+        /* The price ladder. Three columns, but the middle one is the only
+           one that must never wrap or shrink — it carries the numbers. */
+        .pos-pop-ladder {
+            display: flex; flex-direction: column; gap: 1px;
+            padding: 8px 0; border-top: 1px dashed var(--border);
+            border-bottom: 1px dashed var(--border);
+            font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+        }
+        .pos-pop-rung {
+            display: flex; align-items: baseline; gap: 8px;
+            padding: 3px 6px; border-radius: 3px;
+        }
+        .pos-pop-rung .rl {
+            flex: 0 0 3.6rem; font-size: 9px; letter-spacing: .1em;
+            color: var(--text-muted);
+        }
+        .pos-pop-rung .rp {
+            flex: 1 1 auto; min-width: 0; font-size: 12px; font-weight: 600;
+            color: var(--text-primary); overflow-wrap: anywhere;
+        }
+        .pos-pop-rung .rn {
+            flex: 0 0 auto; font-size: 9.5px; color: var(--text-muted);
+            text-align: right;
+        }
+        .pos-pop-rung.is-mark {
+            background: var(--pop-bg-2, var(--bg-card-hover));
+        }
+        .pos-pop-rung.is-mark .rl, .pos-pop-rung.is-mark .rp { color: var(--accent); }
+        .pos-pop-rung.is-stop .rl, .pos-pop-rung.is-stop .rn { color: var(--accent-red); }
+        .pos-pop-rung.is-target .rl, .pos-pop-rung.is-target .rn { color: var(--accent); }
+
+        /* Where the mark stands between the entry stop and the target.
+           Rendered only when all three are known — see the JS. */
+        .pos-pop-track {
+            position: relative; height: 5px; margin: 10px 0 3px;
+            border-radius: 3px; overflow: hidden;
+            background: linear-gradient(90deg,
+                color-mix(in srgb, var(--accent-red) 30%, transparent),
+                var(--border),
+                color-mix(in srgb, var(--accent) 30%, transparent));
+        }
+        .pos-pop-track-fill {
+            display: block; height: 100%; border-radius: 3px;
+            background: var(--text-muted); opacity: .35;
+            transition: width .25s ease;
+        }
+        .pos-pop-track[data-tone="up"] .pos-pop-track-fill { background: var(--accent); opacity: .5; }
+        .pos-pop-track[data-tone="down"] .pos-pop-track-fill { background: var(--accent-red); opacity: .5; }
+        .pos-pop-track-cap {
+            position: absolute; inset: 0; border-radius: 3px;
+            border: 1px solid var(--border); pointer-events: none;
+        }
+        .pos-pop-track-legend {
+            display: flex; justify-content: space-between;
+            font-family: var(--font-mono); font-size: 8.5px;
+            letter-spacing: .1em; text-transform: uppercase;
+            color: var(--text-muted); margin-bottom: 10px;
+        }
+
+        .pos-pop-grid {
+            display: flex; flex-direction: column; gap: 2px;
+            padding-top: 10px; margin-top: 10px;
+            border-top: 1px dashed var(--border);
+        }
+        .pos-pop-kv {
+            display: flex; justify-content: space-between; align-items: baseline;
+            gap: 12px; font-size: 11px;
+        }
+        .pos-pop-kv .k {
+            flex: 0 0 auto; color: var(--text-muted);
+            font-family: var(--font-mono); font-size: 9.5px;
+            letter-spacing: .06em; text-transform: uppercase;
+        }
+        /* min-width:0 + anywhere: a rule name is one long token, and
+           without this the card's floor width is set by the longest one
+           the operator happens to be holding. */
+        .pos-pop-kv .v {
+            flex: 1 1 auto; min-width: 0; text-align: right;
+            color: var(--text-primary); font-family: var(--font-mono);
+            overflow-wrap: anywhere;
+        }
+        .pos-pop-kv .v.up { color: var(--accent); }
+        .pos-pop-kv .v.down { color: var(--accent-red); }
+
+        .pos-pop-why {
+            margin-top: 10px; padding-top: 10px;
+            border-top: 1px dashed var(--border);
+        }
+        .pos-pop-why-cap {
+            font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .12em;
+            text-transform: uppercase; color: var(--text-muted); margin-bottom: 5px;
+        }
+        .pos-pop-why-body {
+            font-size: 11.5px; line-height: 1.5; color: var(--text-secondary);
+            white-space: pre-line; overflow-wrap: anywhere;
+        }
+
+        .pos-pop-actions {
+            display: flex; flex-wrap: wrap; gap: 6px;
+            margin-top: 12px; padding-top: 10px;
+            border-top: 1px solid var(--border);
+        }
+        /* The close is the destructive one and must not be reached for by
+           accident on the way to the timeline. */
+        .pos-pop-close {
+            background: color-mix(in srgb, var(--accent-red) 10%, transparent);
+            border-color: color-mix(in srgb, var(--accent-red) 40%, transparent);
+            color: var(--accent-red);
+        }
+        .pos-pop-close:hover {
+            background: color-mix(in srgb, var(--accent-red) 20%, transparent);
+            border-color: var(--accent-red); color: var(--accent-red);
+        }
+        .pos-pop-open { display: block; }
+        /* The row's own keyboard path to the timeline the card's click
+           opens. Underlined only on hover so the table still reads as a
+           table, but coloured always — a link the operator cannot see is
+           a link they will never use. */
+        .pos-sym-link { color: var(--accent); text-decoration: none; }
+        .pos-sym-link:hover, .pos-sym-link:focus-visible { text-decoration: underline; }
+
+        /* At 360px the card is nearly the whole screen; .nf-pop's 340px
+           floor would push the body sideways. Nothing inside it may scroll
+           horizontally either, which is what the wrapping above is for. */
+        @media (max-width: 420px) {
+            .pos-pop { min-width: 0; max-width: calc(100vw - 16px); }
+            .pos-pop-rung { flex-wrap: wrap; }
+            .pos-pop-rung .rn { flex-basis: 100%; text-align: left; }
+            .pos-pop-kv { flex-wrap: wrap; }
+            .pos-pop-kv .v { text-align: left; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .pos-pop { animation: none; }
+            .pos-pop-track-fill { transition: none; }
+        }
+        /* Light mode: the card's ground is --pop-bg, which flips with the
+           theme, but the two tints below were mixed against a dark ground
+           and wash out on white. */
+        body.light-mode .pos-pop-rung.is-mark {
+            background: color-mix(in srgb, var(--accent) 8%, transparent);
+        }
+        body.light-mode .pos-pop-track-fill { opacity: .6; }
+
         /* Small chart inside the hover popups (headband + watchlist).
            Same renderer as the rail sparks; dimensions come from data-w/h.
            Deliberately shallow — it is a shape cue, not a chart page. */
@@ -2603,7 +2827,11 @@
             stroke: var(--accent-red);
             filter: drop-shadow(0 0 4px rgba(255,94,94,0.4));
         }
-        .oc-sparkline-fill { fill: url(#oc-spark-grad); opacity: 0.18; }
+        /* No `fill` here. CSS beats an SVG presentation attribute, so naming
+           one shared gradient id in the stylesheet meant every curve on the
+           page resolved against whichever card happened to define that id
+           first. The paint is set per instance by chart_line.html. */
+        .oc-sparkline-fill { opacity: 0.18; }
 
         /* Donut */
         .oc-donut { width: 140px; height: 140px; flex-shrink: 0; }
@@ -3453,6 +3681,13 @@
         animation: seBlink 1s ease-in-out infinite;
     }
     @keyframes seBlink { 0%,100% { opacity: 0.25 } 50% { opacity: 1 } }
+    /* A pending question can now outlive the page that asked it, so this
+       marker may sit on screen for a minute or more — long enough that an
+       unguarded blink is exactly the motion a reader who asked for none did
+       not want. It stays visible, it just stops pulsing. */
+    @media (prefers-reduced-motion: reduce) {
+        .se-bubble.thinking::before { animation: none; opacity: 1; }
+    }
 
     /* Greeting bubble + suggestion chips on first open */
     .se-bubble-greeting { font-family: inherit; font-size: 13px; line-height: 1.55; }
@@ -4317,26 +4552,72 @@ button:focus-visible,
    ═══════════════════════════════════════════════════════════════════════ */
 #svBannerStack {
     position: fixed;
-    right: 18px;
-    bottom: 72px;          /* clear of the ticker headband */
-    z-index: 900;
+    /* Rail- and panel-aware, like the Palantír FAB beside it: --se-right-edge
+       is 60px with the signals rail collapsed and 296px with it open, and
+       --se-bottom-edge clears the info panel when there is one. Hardcoded
+       18px/72px put the stack ON TOP of the open rail — banners covering the
+       very signal cards the operator was watching — and guessed at the
+       bottom chrome on every page that renders it differently. */
+    right: var(--se-right-edge, 18px);
+    bottom: calc(var(--se-bottom-edge, 24px) + var(--se-fab-size, 56px) + 16px);
+    /* The ladder, not a number. sv-overlay.css already pins this with
+       !important; matching it here keeps the two from disagreeing when the
+       retrofit is read on its own. */
+    z-index: var(--z-banner, 2600);
     display: flex;
     flex-direction: column-reverse;   /* newest nearest the eye */
     gap: 9px;
-    max-width: min(370px, calc(100vw - 36px));
+    width: min(370px, calc(100vw - var(--se-right-edge, 18px) - 18px));
     pointer-events: none;             /* the gaps stay click-through */
 }
 #svBannerStack > * { pointer-events: auto; }
 
 .sv-banner {
-    background: var(--bg-card);
+    position: relative;
+    overflow: hidden;                 /* the countdown rides the bottom edge */
+    background: linear-gradient(160deg,
+        var(--bg-card) 0%,
+        color-mix(in srgb, var(--bg-card) 92%, var(--bg-void)) 100%);
+    backdrop-filter: blur(10px);
     border: 1px solid var(--border-glow);
     border-left: 3px solid var(--text-muted);
-    border-radius: 7px;
-    box-shadow: 0 6px 22px -8px rgba(0, 0, 0, .45);
-    padding: 10px 12px;
+    border-radius: var(--radius, 6px);
+    /* Lifted, and tinted by its own kind: the left rule alone had to carry
+       the whole meaning at a glance, across a 4-second read. */
+    box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .55),
+                inset 0 1px 0 rgba(255, 255, 255, .03);
+    padding: 11px 13px 12px;
     font-size: 12.5px;
-    animation: svBannerIn .22s ease-out;
+    animation: svBannerIn .26s cubic-bezier(.2, .8, .2, 1);
+}
+/* A hairline of the kind's own colour across the top, so a stack of three
+   reads as three states before a single word is parsed. */
+.sv-banner::before {
+    content: "";
+    position: absolute; inset: 0 0 auto 0; height: 1px;
+    background: linear-gradient(90deg,
+        currentColor 0%, transparent 70%);
+    opacity: .5;
+}
+/* The clock, made visible. It runs the banner's own TTL, and the JS pauses
+   it on hover/focus exactly where it pauses the dismissal — so "hover to
+   keep it" stops being a thing the operator has to know and becomes a
+   thing they can see. */
+.sv-banner::after {
+    content: "";
+    position: absolute; left: 0; bottom: 0; height: 2px;
+    width: 100%;
+    background: currentColor;
+    opacity: .45;
+    transform-origin: left center;
+    animation: svBannerClock var(--sv-banner-ttl, 4s) linear forwards;
+}
+.sv-banner:hover::after,
+.sv-banner:focus-within::after { animation-play-state: paused; }
+.sv-banner.is-open::after { animation-play-state: paused; }
+@keyframes svBannerClock {
+    from { transform: scaleX(1); }
+    to   { transform: scaleX(0); }
 }
 @keyframes svBannerIn {
     from { opacity: 0; transform: translateX(14px); }
@@ -4353,14 +4634,33 @@ button:focus-visible,
 @media (prefers-reduced-motion: reduce) {
     .sv-banner { animation: none; }
     .sv-banner--leaving { animation: none; }
+    /* The countdown is motion for its own sake to a reader who has asked for
+       none — the banner still dismisses on the same clock, it just does not
+       narrate it. */
+    .sv-banner::after { animation: none; opacity: .25; }
 }
 
-.sv-banner--open   { border-left-color: var(--accent); }
-.sv-banner--close  { border-left-color: var(--text-muted); }
-.sv-banner--win    { border-left-color: var(--success); }
-.sv-banner--loss   { border-left-color: var(--danger); }
-.sv-banner--signal { border-left-color: var(--accent-blue, var(--accent)); }
-.sv-banner--warn   { border-left-color: var(--accent-gold); }
+/* `color` carries the kind so the top hairline and the countdown inherit it;
+   the left rule and the value keep their explicit colours. */
+.sv-banner--open   { border-left-color: var(--accent);      color: var(--accent); }
+.sv-banner--close  { border-left-color: var(--text-muted);  color: var(--text-muted); }
+.sv-banner--win    { border-left-color: var(--success);     color: var(--success); }
+.sv-banner--loss   { border-left-color: var(--danger);      color: var(--danger); }
+.sv-banner--signal { border-left-color: var(--accent-blue, var(--accent));
+                     color: var(--accent-blue, var(--accent)); }
+.sv-banner--warn   { border-left-color: var(--accent-gold); color: var(--accent-gold); }
+/* …but the text must not inherit the kind colour. */
+.sv-banner-sym, .sv-banner-line, .sv-banner-kind, .sv-banner-more { color: inherit; }
+.sv-banner-sym  { color: var(--text-primary); }
+.sv-banner-line { color: var(--text-secondary); }
+.sv-banner-kind { color: var(--text-muted); }
+
+body.light-mode .sv-banner {
+    background: var(--bg-card);
+    box-shadow: 0 10px 28px -14px rgba(23, 30, 44, .35),
+                inset 0 1px 0 rgba(255, 255, 255, .6);
+}
+body.light-mode .sv-banner::before { opacity: .35; }
 
 .sv-banner-head {
     display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
@@ -5167,3 +5467,327 @@ table td.num, table th.num {
 .card .ph-detail-value { overflow-wrap: break-word; }
 .card .ph-kv { gap: 12px; flex-wrap: wrap; }
 .card .ph-kv span:last-child { text-align: right; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SIGNAL ALREADY ACTED ON (sr-acted / sr-taken)
+   ───────────────────────────────────────────────────────────────────────
+   A signal the platform has already entered used to look exactly like an
+   untaken idea, which is how one symbol got booked twice — once by a rule,
+   once by hand. The card is MARKED rather than removed: vanishing is
+   indistinguishable from expiring, and the fact worth showing is precisely
+   that the engine acted while the operator was not looking.
+
+   The colour is deliberately neither green nor red. On this rail green is
+   "bullish / go" and red is "bearish / pass"; a taken state painted in
+   either would read as a direction. Gold is the platform's third signal
+   colour and carries no side. */
+:root {
+    --accent-gold-ink: var(--accent-gold);   /* dark theme: the glow reads fine */
+    --sr-taken: var(--accent-gold);
+    --sr-taken-tint: color-mix(in srgb, var(--accent-gold) 9%, transparent);
+    --sr-taken-edge: color-mix(in srgb, var(--accent-gold) 45%, transparent);
+}
+body.light-mode {
+    /* The gold that PRINTS on white is --accent-gold-ink (defined with the
+       light palette). Deriving the tint and edge from it keeps the three in
+       one family instead of three hand-mixed rgba() triples. */
+    --sr-taken: var(--accent-gold-ink);
+    --sr-taken-tint: color-mix(in srgb, var(--accent-gold-ink) 8%, transparent);
+    --sr-taken-edge: color-mix(in srgb, var(--accent-gold-ink) 38%, transparent);
+}
+
+.sr-signal-wrap.sr-acted .sr-signal {
+    background: var(--sr-taken-tint);
+    box-shadow: inset 3px 0 0 var(--sr-taken-edge);
+}
+.sr-signal-wrap.sr-acted .sr-signal:hover {
+    background: color-mix(in srgb, var(--sr-taken) 14%, var(--bg-card-hover));
+}
+/* The collapsed rail is 44px of dots and nothing else — the mark has to
+   survive there too, or the state is invisible to anyone who works with
+   the rail shut. */
+.signals-rail:not(.open) .sr-acted .sr-dot {
+    box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--sr-taken-edge);
+}
+
+.sr-taken {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    margin-top: 6px; padding-top: 5px;
+    border-top: 1px dashed var(--sr-taken-edge);
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px;
+    color: var(--sr-taken);
+}
+.sr-taken-tag {
+    padding: 1px 5px; border-radius: 2px; font-weight: 700;
+    background: color-mix(in srgb, var(--sr-taken) 18%, transparent);
+    border: 1px solid var(--sr-taken-edge);
+}
+.sr-taken-who { color: var(--text-secondary); }
+.sr-taken-pos { margin-left: auto; font-variant-numeric: tabular-nums; }
+.sr-taken-venue { color: var(--text-muted); }
+
+/* The popup's banner. Above the levels grid AND above the action row, so
+   "already live" is read before the button is reached. */
+.sr-pop-taken {
+    display: flex; flex-direction: column; gap: 2px;
+    margin-bottom: 10px; padding: 7px 9px;
+    border: 1px solid var(--sr-taken-edge); border-radius: 3px;
+    background: var(--sr-taken-tint);
+    font-family: var(--font-mono); font-size: 10px; line-height: 1.5;
+}
+.sr-pop-taken-head {
+    font-size: 9px; font-weight: 700; letter-spacing: 1.5px;
+    color: var(--sr-taken);
+}
+.sr-pop-taken-body { color: var(--text-secondary); }
+/* Adding to a live position is not a fresh entry and must not wear the
+   fresh-entry green. Same button, honest colour. */
+.sr-pop-btn.sr-pop-btn-add {
+    background: color-mix(in srgb, var(--sr-taken) 22%, transparent);
+    border-color: var(--sr-taken-edge);
+    color: var(--sr-taken);
+    box-shadow: none;
+}
+.sr-pop-btn.sr-pop-btn-add:hover {
+    background: color-mix(in srgb, var(--sr-taken) 34%, transparent);
+    border-color: var(--sr-taken);
+    color: var(--text-primary);
+}
+
+/* A card that gains the mark during a live refresh has to be SEEN gaining
+   it — the swap is silent otherwise and the operator's eye never returns
+   to a card that was already on screen. One pulse, then it rests. */
+@keyframes srJustActed {
+    0%   { box-shadow: inset 3px 0 0 var(--sr-taken-edge),
+                       0 0 0 0 color-mix(in srgb, var(--sr-taken) 55%, transparent); }
+    40%  { box-shadow: inset 3px 0 0 var(--sr-taken),
+                       0 0 14px 2px color-mix(in srgb, var(--sr-taken) 45%, transparent); }
+    100% { box-shadow: inset 3px 0 0 var(--sr-taken-edge),
+                       0 0 0 0 transparent; }
+}
+.sr-signal-wrap.sr-just-acted .sr-signal {
+    animation: srJustActed 1.6s ease-out 2 both;
+}
+@media (prefers-reduced-motion: reduce) {
+    .sr-signal-wrap.sr-just-acted .sr-signal { animation: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TAKE TRADE — the size control (sz-)
+   ───────────────────────────────────────────────────────────────────────
+   Rides sv-overlay.css's .sv-dialog chrome; only the sizing block is new.
+   The design rule it follows: the pre-filled risk-derived size IS the
+   answer, so doing nothing is correct and fast. The override is one
+   decision expressed two ways (units and cash, kept in sync), the
+   consequence — R at stake, share of the pool — is on screen before the
+   click, and an impossible number is refused with its arithmetic instead
+   of being quietly clamped to something nobody asked for. */
+.sz-size {
+    margin: 14px 0 0; padding: 11px; border-radius: 6px;
+    border: 1px solid var(--pop-border, var(--border));
+    background: var(--bg-void);
+}
+body.light-mode .sz-size { background: var(--bg-secondary); }
+.sz-size legend {
+    padding: 0 6px; font-family: var(--font-mono); font-size: 9.5px;
+    letter-spacing: 1.4px; text-transform: uppercase; color: var(--text-muted);
+}
+.sz-fields { display: flex; gap: 10px; flex-wrap: wrap; }
+.sz-f { flex: 1 1 130px; min-width: 0; display: block; }
+.sz-f > span {
+    display: block; margin-bottom: 4px;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.2px;
+    text-transform: uppercase; color: var(--text-muted);
+}
+.sz-f input {
+    width: 100%; padding: 8px 10px;
+    font-family: var(--font-mono); font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary); background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 4px;
+}
+.sz-f input:focus { outline: none; border-color: var(--accent); }
+.sz-dialog.is-over .sz-f input { border-color: var(--accent-red); }
+
+/* The pool meter. A percentage in text is a number to decode; a bar
+   against a marked ceiling is a position to see. */
+.sz-meter {
+    position: relative; height: 6px; margin: 11px 0 8px;
+    border-radius: 3px; overflow: hidden;
+    background: color-mix(in srgb, var(--text-muted) 22%, transparent);
+}
+.sz-meter-fill {
+    position: absolute; inset: 0 auto 0 0; width: 0;
+    background: var(--accent); border-radius: 3px;
+    transition: width .16s ease, background .16s ease;
+}
+.sz-dialog.is-over .sz-meter-fill { background: var(--accent-red); }
+.sz-meter-cap {
+    position: absolute; top: -2px; bottom: -2px; width: 2px; left: 100%;
+    background: var(--text-secondary);
+}
+@media (prefers-reduced-motion: reduce) {
+    .sz-meter-fill { transition: none; }
+}
+
+.sz-out {
+    display: flex; flex-wrap: wrap; gap: 4px 14px;
+    font-family: var(--font-mono); font-size: 10.5px;
+    font-variant-numeric: tabular-nums; color: var(--text-secondary);
+}
+.sz-out b { color: var(--text-primary); font-weight: 700; }
+.sz-why {
+    flex-basis: 100%; margin-top: 4px; color: var(--accent-red);
+    line-height: 1.5;
+}
+.sz-reset {
+    margin-top: 9px; padding: 4px 8px; cursor: pointer;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.2px;
+    color: var(--text-muted); background: none;
+    border: 1px solid var(--border); border-radius: 3px;
+}
+.sz-reset:hover { color: var(--accent); border-color: var(--accent-dim); }
+.sz-reset[disabled] { opacity: .35; cursor: default; }
+.sz-reset[disabled]:hover { color: var(--text-muted); border-color: var(--border); }
+
+/* Live exposure in this symbol, from any config. This is the fact whose
+   absence let one symbol be booked twice — it gets the same gold as the
+   rail's TAKEN mark so the two read as one state. */
+.sz-warn {
+    margin: 12px 0 0; padding: 8px 10px; border-radius: 4px;
+    border: 1px solid var(--sr-taken-edge); background: var(--sr-taken-tint);
+    font-family: var(--font-mono); font-size: 10.5px; line-height: 1.55;
+    color: var(--text-secondary);
+}
+.sz-warn b {
+    display: block; margin-bottom: 3px;
+    font-size: 9px; letter-spacing: 1.4px; color: var(--sr-taken);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CHART SURFACES
+   ───────────────────────────────────────────────────────────────────────
+   The platform draws charts four ways (inline SVG bars, the .oc-donut
+   family, the .wl-spark/.pop-spark path renderer, and lightweight-charts
+   for candles). This block is the shared vocabulary for the first two, so
+   a chart cannot pick up a colour that survives a theme swap, and cannot
+   set a floor the card it lives in is unable to shrink under.
+
+   Rules this encodes, each of which was broken somewhere first:
+     · fluid width, fixed height, geometry in a viewBox — never a px width;
+     · tokens only, so light mode moves with everything else;
+     · the tick row may ellipsise, so seven mono labels can no longer stop
+       a card from fitting a 360px phone;
+     · a baseline is always painted, so a measured zero is visible AS zero
+       and is not confused with a missing reading (which draws nothing).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Column chart (_partials/chart_bars.html) ───────────────────────── */
+.sv-bars { display: block; min-width: 0; }
+.sv-bars-svg {
+    display: block; width: 100%; height: 120px;
+    /* preserveAspectRatio="none" in the markup: the marks are axis-aligned
+       rectangles, so non-uniform scale changes only their size, never their
+       meaning. No text lives inside the SVG for the same reason. */
+}
+.sv-bars-svg--short { height: 80px; }
+.sv-bar { fill: var(--accent); opacity: .85; }
+.sv-bar--accent  { fill: var(--accent); }
+.sv-bar--red     { fill: var(--accent-red); }
+.sv-bar--gold    { fill: var(--accent-gold); }
+.sv-bar--blue    { fill: var(--accent-blue); }
+.sv-bar--purple  { fill: var(--accent-purple); }
+.sv-bar--muted   { fill: var(--text-muted); }
+.sv-bars-base {
+    stroke: var(--border); stroke-width: 2; fill: none;
+}
+.sv-bars-axis {
+    display: flex; gap: 2px; margin-top: 6px;
+}
+.sv-bars-axis span {
+    /* flex-basis 0 + min-width 0 is the whole responsiveness fix: without
+       min-width:0 a flex item refuses to shrink below its own text, which
+       is how the old cost-trend card grew a horizontal scrollbar. */
+    flex: 1 1 0; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    text-align: center;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: .3px;
+    color: var(--text-muted);
+}
+.sv-bars-axis--ends { justify-content: space-between; }
+.sv-bars-axis--ends span:first-child { text-align: left; }
+.sv-bars-axis--ends span:last-child  { text-align: right; }
+.sv-bars-cap {
+    margin: 8px 0 0;
+    font-family: var(--font-mono); font-size: 10px; line-height: 1.5;
+    color: var(--text-muted);
+}
+
+/* ── Donut (_partials/chart_donut.html) ─────────────────────────────── */
+.oc-donut-wrap {
+    display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+    min-width: 0;
+}
+.oc-donut-wrap .oc-donut {
+    /* Was a flat 140px. On a narrow card the donut then held the row open
+       at its own width; this lets it give way while keeping its circle. */
+    width: clamp(96px, 34%, 140px); height: auto; aspect-ratio: 1 / 1;
+    flex: 0 1 auto;
+}
+.oc-donut-wrap .oc-donut-legend { flex: 1 1 140px; min-width: 0; }
+.oc-donut-wrap .oc-donut-legend-row { min-width: 0; }
+.oc-donut-wrap .oc-donut-legend-key {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.oc-donut-track {
+    fill: none; stroke: var(--bg-card-hover); stroke-width: 14;
+}
+.oc-donut-seg {
+    fill: none; stroke-width: 14; stroke: var(--accent);
+}
+/* Semantic tones — the ONLY colours a donut may take. Named rather than
+   sequential so "failed" is red on every page that has a failed bucket. */
+.oc-tone-accent  { stroke: var(--accent);        }
+.oc-tone-red     { stroke: var(--accent-red);    }
+.oc-tone-gold    { stroke: var(--accent-gold);   }
+.oc-tone-blue    { stroke: var(--accent-blue);   }
+.oc-tone-purple  { stroke: var(--accent-purple); }
+.oc-tone-muted   { stroke: var(--text-muted);    }
+span.oc-tone-accent  { background: var(--accent);        }
+span.oc-tone-red     { background: var(--accent-red);    }
+span.oc-tone-gold    { background: var(--accent-gold);   }
+span.oc-tone-blue    { background: var(--accent-blue);   }
+span.oc-tone-purple  { background: var(--accent-purple); }
+span.oc-tone-muted   { background: var(--text-muted);    }
+
+/* Light mode: the tokens carry the swap, so only the two surfaces that
+   were tuned for a dark card need restating. */
+body.light-mode .oc-donut-track { stroke: var(--bg-secondary); }
+body.light-mode .sv-bar { opacity: .92; }
+body.light-mode .sv-bars-base { stroke: var(--border-glow); }
+
+@media (max-width: 640px) {
+    .sv-bars-svg { height: 96px; }
+    .sv-bars-svg--short { height: 64px; }
+    .sv-bars-axis span { font-size: 8px; }
+    .oc-donut-wrap { gap: 14px; }
+}
+
+/* ── Sparkline (_partials/chart_line.html) ──────────────────────────── */
+.sv-line { display: block; min-width: 0; }
+/* The fill used to reference a literal #oc-spark-grad; the partial now
+   namespaces the gradient per instance and sets the paint inline, so this
+   only carries the opacity. */
+.oc-sparkline-fill { opacity: 0.18; }
+.oc-sparkline-dot { fill: var(--accent); }
+.oc-sparkline.bearish .oc-sparkline-dot { fill: var(--accent-red); }
+.oc-sparkline-ref {
+    /* Was rgba(255,255,255,0.06) — a white line on a white card. */
+    stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3;
+}
+body.light-mode .oc-sparkline-ref { stroke: var(--border-glow); }
+body.light-mode .oc-sparkline path { filter: none; }
+/* A slot with no reading. Muted and low-opacity so it cannot be mistaken for
+   a small value, and deliberately NOT the same as a measured zero, which
+   shows only the baseline. Its <title> reads "— not measured". */
+.sv-bar--unknown { fill: var(--text-muted); opacity: .3; }

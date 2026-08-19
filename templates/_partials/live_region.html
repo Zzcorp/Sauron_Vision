@@ -1,0 +1,180 @@
+{% comment %}
+Keeps a page's numbers alive without reloading it.
+
+Parameters
+  live_url  the endpoint that re-renders this page's live regions
+
+How it works
+  Every region the page wants kept fresh carries data-sv-live="<name>", and
+  every value inside one carries data-sv-live-key="<stable key>". This fetches
+  live_url (which renders the SAME template through dashboard/_live_shell.html),
+  matches regions by name, swaps the ones whose markup actually changed, and
+  flashes the values whose text differs from what the operator was reading.
+
+Why it is shaped this way
+  - base.html owns the ONE /ws/eye/ socket and re-dispatches every payload as
+    sv:eye-event. A page that opened its own connection to the same endpoint to
+    watch the same events would buy nothing and cost a per-user channel.
+  - fill_open / fill_close / close_pending are the three kinds that move a
+    position book. The headband refreshes on exactly that set, so the two
+    cannot disagree about what just happened.
+  - The socket announces fills. It says nothing about a QUOTE moving, and the
+    P&L on this page is marked to quotes — so a slow sweep is still needed, at
+    one fetch a minute rather than a poll every few seconds.
+  - When the socket is down the shell has already dropped to a 20s catch-up
+    poll and marked the bell offline. This matches that cadence instead of
+    adding a second, faster clock of its own, and the region header says so.
+  - Absolute values from the server, never client-side deltas: one missed
+    message and a delta drifts forever.
+{% endcomment %}
+<style>
+    /* The live/offline chip in a region header. Muted, not red: the socket
+       being down is a degraded mode with a working fallback, not a fault —
+       the numbers are still arriving, just on a timer. */
+    .sv-live-chip {
+        font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px;
+        color: var(--accent); cursor: help; white-space: nowrap;
+    }
+    .sv-live-chip.is-offline { color: var(--text-muted); }
+</style>
+<script>
+(function () {
+    "use strict";
+    var LIVE_URL = "{{ live_url }}";
+    if (!LIVE_URL) return;
+
+    /* The shell's own offline cadence, and one fetch a minute while the
+       socket is up. Never a fast unconditional poll: with the socket up the
+       fills announce themselves and this only catches drifting marks. */
+    var TICK_MS = 20000;
+    var UP_EVERY = 3;
+    var DEBOUNCE_MS = 800;
+
+    var reduce = !!(window.matchMedia &&
+                    window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    var ticks = 0, timer = null, inFlight = false, deferred = false;
+
+    function keyed() { return document.querySelectorAll('[data-sv-live-key]'); }
+
+    function snapshot() {
+        var map = {};
+        Array.prototype.forEach.call(keyed(), function (el) {
+            map[el.getAttribute('data-sv-live-key')] = el.textContent.trim();
+        });
+        return map;
+    }
+
+    /* A value that changed without a page reload has to SAY so, or the
+       operator cannot tell a live number from a stale one. Same pulse the
+       rest of the platform uses, and it only fires on an actual difference —
+       a readout that animates on every sweep teaches the eye to ignore it. */
+    function pulse(before) {
+        if (reduce) return;
+        Array.prototype.forEach.call(keyed(), function (el) {
+            var was = before[el.getAttribute('data-sv-live-key')];
+            if (was === undefined || was === el.textContent.trim()) return;
+            el.classList.remove('sc-changed');
+            void el.offsetWidth;                  /* restart the keyframe */
+            el.classList.add('sc-changed');
+        });
+    }
+
+    function apply(html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var before = snapshot();
+        var swapped = false;
+        Array.prototype.forEach.call(
+            document.querySelectorAll('[data-sv-live]'), function (node) {
+            var fresh = doc.querySelector(
+                '[data-sv-live="' + node.getAttribute('data-sv-live') + '"]');
+            /* A region the payload does not carry (the history tab does not
+               render the open book) is left exactly as it is. */
+            if (!fresh || node.innerHTML === fresh.innerHTML) return;
+            node.innerHTML = fresh.innerHTML;
+            swapped = true;
+            /* The donut partial draws its segments from script, and innerHTML
+               neither executes scripts nor fires htmx:afterSwap — without
+               this the allocation ring comes back as an empty track. */
+            if (window.svRenderDonuts) window.svRenderDonuts(node);
+        });
+        if (!swapped) return;
+        pulse(before);
+        /* One clock on the page. The analytics panels read the same book, so
+           they refresh when the numbers do instead of each running its own
+           unconditional timer. */
+        if (window.htmx) {
+            Array.prototype.forEach.call(
+                document.querySelectorAll('.sv-metrics-wrapper[hx-get]'),
+                function (w) {
+                    window.htmx.ajax('GET', w.getAttribute('hx-get'),
+                                     {target: w, swap: 'innerHTML'});
+                });
+        }
+    }
+
+    function refresh() {
+        if (inFlight) return;
+        /* Never swap a table out from under the cursor: it would yank the row
+           the operator is reading — and the dwell card anchored to it — away
+           mid-read. The sweep is retried the moment they move off. */
+        if (document.querySelector('[data-sv-live]:hover')) {
+            deferred = true;
+            return;
+        }
+        deferred = false;
+        inFlight = true;
+        fetch(LIVE_URL + window.location.search, {credentials: 'same-origin'})
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.text();
+            })
+            .then(apply)
+            .catch(function () { /* keep the last known numbers on screen */ })
+            .then(function () { inFlight = false; });
+    }
+
+    function schedule() {
+        if (timer) return;
+        timer = setTimeout(function () { timer = null; refresh(); }, DEBOUNCE_MS);
+    }
+
+    document.addEventListener('mouseout', function () {
+        if (deferred && !document.querySelector('[data-sv-live]:hover')) refresh();
+    });
+
+    document.addEventListener('sv:eye-event', function (e) {
+        var msg = (e && e.detail) || {};
+        var kind = msg.kind || msg.event_type || msg.type;
+        if (kind === 'fill_open' || kind === 'fill_close'
+            || kind === 'close_pending') schedule();
+    });
+
+    setInterval(function () {
+        /* Nobody is reading a background tab. */
+        if (document.hidden) return;
+        ticks += 1;
+        var up = !!(window.svLive && window.svLive.isUp());
+        if (up && (ticks % UP_EVERY) !== 0) return;
+        refresh();
+    }, TICK_MS);
+
+    /* The region header states which of the two it is doing, from the class
+       base.html already stamps on the body — not from a socket of its own. */
+    function paintChips() {
+        var down = document.body.classList.contains('sv-live-offline');
+        Array.prototype.forEach.call(
+            document.querySelectorAll('[data-sv-live-status]'), function (el) {
+            el.textContent = down ? '⟂ OFFLINE' : '◉ LIVE';
+            el.title = down
+                ? 'Live feed offline — these numbers refresh on a 20s timer instead'
+                : 'Live feed connected — these numbers move on fills, plus a slow sweep for marks';
+            el.classList.toggle('is-offline', down);
+        });
+    }
+    paintChips();
+    try {
+        new MutationObserver(paintChips).observe(
+            document.body, {attributes: true, attributeFilter: ['class']});
+    } catch (e) { /* no observer: the initial paint still stands */ }
+})();
+</script>

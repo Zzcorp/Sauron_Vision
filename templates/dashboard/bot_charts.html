@@ -81,7 +81,12 @@
                   stroke="{% if curve.up %}var(--success){% else %}var(--danger){% endif %}"/>
         </svg>
         <div style="display:flex; justify-content:space-between; color:var(--text-muted); font-size:11px;">
-            <span>low {{ curve.min }}</span><span>high {{ curve.max }}</span>
+            {# A flat curve is drawn through the middle of the box, so the #}
+            {# axis has to say it is flat — otherwise the reader takes the #}
+            {# mid-line for a mid-range value. #}
+            <span>low {{ curve.min }}</span>
+            {% if curve.flat %}<span>flat — no change across this window</span>{% endif %}
+            <span>high {{ curve.max }}</span>
         </div>
         {% else %}
         <p style="color:var(--text-muted);">

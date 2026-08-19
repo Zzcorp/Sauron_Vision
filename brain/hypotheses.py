@@ -8,6 +8,18 @@ Lifecycle:
 Resolved hypotheses feed Phase 6 calibration via the linked AgentPrediction —
 that's how *trust* per agent is measured. An agent that's right wins weight;
 one that's wrong loses weight in downstream context-injection consumers.
+
+Grading contract (a resolver returns one of three things):
+  True / False  — we measured reality and the claim held / didn't
+  None          — we CANNOT grade this claim, ever (→ OUTCOME_UNRESOLVABLE,
+                  excluded from the Brier maths)
+  DEFER         — we cannot grade it YET; leave PENDING and retry next pass
+
+The distinction is the whole point. A measurement failure ("the regime was
+never classified", "the rule has one closed trade", "no report exists for
+that moment") is not a refutation. Collapsing it to False charges the agent
+for the platform's own blind spot and silently drags every downstream trust
+score — and the rule demoter that kills rules on OUTCOME_REFUTED — with it.
 """
 from __future__ import annotations
 
@@ -18,6 +30,37 @@ from typing import Optional
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+
+class _Defer:
+    """Sentinel: not gradeable *yet*, unlike None which means never.
+
+    Without it a resolver pass that fires in the gap between a claim's
+    deadline and the next synthesis would burn a perfectly gradeable claim
+    as UNRESOLVABLE. DEFER keeps the row PENDING so the next pass can try.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "DEFER"
+
+
+DEFER = _Defer()
+
+# BrainReport.REGIME_UNKNOWN is the "we could not classify it" sentinel, not
+# an observed market state. It can only grade a claim that itself predicted
+# "unknown"; against any other claim it is an absence of evidence.
+REGIME_NOT_MEASURED = "unknown"
+
+# How long past a claim's deadline we still accept a BrainReport as the
+# witness of that moment. Synthesis runs every 30min, so this is generous
+# slack for a stalled beat — past it, nothing observed the deadline.
+REPORT_GRACE_HOURS = 12
+
+# An average R over one or two trades is noise, not a measurement of a rule's
+# expectancy. Grading against it scores the sample size, not the agent.
+MIN_TRADES_FOR_RULE_R = 3
 
 
 # ── Posting + voting ──────────────────────────────────────────────────────
@@ -67,57 +110,126 @@ def vote(hypothesis, *, agent: str, stance: str,
 
 # ── Resolvers ─────────────────────────────────────────────────────────────
 
-def _resolve_regime_holds(hyp) -> tuple[Optional[bool], str]:
-    """`resolution_criteria = {"kind": "regime_holds", "regime": "trending"}` —
-    True iff the most recent BrainReport's regime matches."""
+def _report_for_deadline(hyp, *, grace_hours: int = REPORT_GRACE_HOURS):
+    """Return `(report, status)` — the BrainReport that witnessed the claim
+    coming due, not merely the newest row on the table.
+
+    Why the deadline and not `latest`: a claim is written against a horizon
+    ("regime stays trending for the next 12h"). The resolver runs nightly, so
+    the newest report can be a day younger and describe a different market —
+    grading against it scores the agent on a question it never answered. We
+    take the FIRST clean report at or after the deadline: the platform's own
+    reading at the moment the claim came due.
+
+    status ∈ {"ok", "defer", "missing"}:
+      ok      — a witnessing report exists
+      defer   — the grace window is still open, one may yet be synthesised
+      missing — grace elapsed with nothing to grade against
+    """
     from .models import BrainReport
+    clean = BrainReport.objects.filter(error="")
+    deadline = hyp.resolution_deadline
+    if deadline is None:
+        # No horizon was recorded — the latest reading is all we have.
+        report = clean.order_by("-created_at").first()
+        return report, ("ok" if report is not None else "missing")
+    report = (clean.filter(created_at__gte=deadline)
+              .order_by("created_at").first())
+    if report is not None:
+        return report, "ok"
+    if timezone.now() < deadline + timedelta(hours=grace_hours):
+        return None, "defer"
+    return None, "missing"
+
+
+def _resolve_regime_holds(hyp):
+    """`resolution_criteria = {"kind": "regime_holds", "regime": "trending"}` —
+    True iff the regime the platform read at the deadline matches the claim.
+
+    An actual of REGIME_UNKNOWN is the not-measured sentinel: it grades a
+    claim that predicted "unknown" (that claim was about our own blindness
+    and it came true) and NOTHING else. Any other claim comes back None so a
+    failed classification never lands on an agent's record as a wrong call.
+    """
     expected = (hyp.resolution_criteria or {}).get("regime")
     if not expected:
-        return None, "missing_regime_in_criteria"
-    report = (BrainReport.objects
-              .filter(error="").order_by("-created_at").first())
+        return None, "ungradeable: no regime in resolution_criteria"
+    report, status = _report_for_deadline(hyp)
+    if status == "defer":
+        return DEFER, "no brain report at the deadline yet — retrying"
     if report is None:
-        return None, "no_report"
-    return (report.regime_label == expected), f"actual={report.regime_label}"
+        return None, (f"ungradeable: no brain report within "
+                      f"{REPORT_GRACE_HOURS}h of the deadline to grade against")
+    actual = report.regime_label
+    if actual == REGIME_NOT_MEASURED and expected != REGIME_NOT_MEASURED:
+        return None, (f"ungradeable: the regime was never classified at the "
+                      f"deadline (actual={actual}) — a measurement failure "
+                      f"cannot refute a claim of '{expected}'")
+    return (actual == expected), f"actual={actual} expected={expected}"
 
 
-def _resolve_rule_avg_r_threshold(hyp) -> tuple[Optional[bool], str]:
+def _resolve_rule_avg_r_threshold(hyp):
     """`resolution_criteria = {"kind": "rule_avg_r", "rule_name": "X",
-    "comparator": ">=" or "<", "threshold": 0.0, "window_days": 7}`"""
+    "comparator": ">=" or "<", "threshold": 0.0, "window_days": 7,
+    "min_n": 3}`
+
+    Ungradeable (None) when the window holds fewer than `min_n` graded trades:
+    an average over one trade measures that trade, not the rule, and the agent
+    shouldn't be marked wrong because the rule barely fired.
+    """
     from bot_program.bot_grading import bot_performance_summary
     crit = hyp.resolution_criteria or {}
     rule = crit.get("rule_name")
     cmp_ = crit.get("comparator", ">=")
     threshold = float(crit.get("threshold", 0.0))
     window = int(crit.get("window_days", 7))
+    min_n = max(1, int(crit.get("min_n", MIN_TRADES_FOR_RULE_R)))
     if not rule:
-        return None, "missing_rule_name"
+        return None, "ungradeable: no rule_name in resolution_criteria"
     rows = bot_performance_summary(rule_name=rule, days=window, min_n=1)
     if not rows:
-        return None, "no_data"
-    avg_r = float(rows[0].get("avg_r") or 0)
+        return None, (f"ungradeable: no graded trades for '{rule}' in the "
+                      f"last {window}d")
+    # bot_performance_summary buckets per (rule, asset_class); a rule that
+    # trades two classes returns two rows. Pool them n-weighted — grading off
+    # rows[0] would score whichever bucket happened to be built first.
+    n = sum(int(r.get("n") or 0) for r in rows)
+    if n < min_n:
+        return None, (f"ungradeable: only {n} graded trade(s) for '{rule}' in "
+                      f"{window}d, need {min_n} before an average means anything")
+    avg_r = sum(float(r.get("avg_r") or 0) * int(r.get("n") or 0)
+                for r in rows) / n
+    note = f"avg_r={avg_r:.3f} n={n}"
     if cmp_ == ">=":
-        return avg_r >= threshold, f"avg_r={avg_r:.3f}"
+        return avg_r >= threshold, note
     if cmp_ == "<=":
-        return avg_r <= threshold, f"avg_r={avg_r:.3f}"
+        return avg_r <= threshold, note
     if cmp_ == "<":
-        return avg_r < threshold, f"avg_r={avg_r:.3f}"
+        return avg_r < threshold, note
     if cmp_ == ">":
-        return avg_r > threshold, f"avg_r={avg_r:.3f}"
-    return None, f"unknown_comparator={cmp_}"
+        return avg_r > threshold, note
+    return None, f"ungradeable: unknown comparator '{cmp_}'"
 
 
-def _resolve_anomaly_persists(hyp) -> tuple[Optional[bool], str]:
+def _resolve_anomaly_persists(hyp):
     """`resolution_criteria = {"kind": "anomaly_persists", "anomaly_key": "X"}`
     True if the anomaly node is still the current state (not superseded)
-    AND has confidence ≥ 0.4."""
+    AND has confidence ≥ 0.4.
+
+    No node at all means consolidation never promoted this anomaly into the
+    graph, so we never watched it — a hole in the record, not evidence the
+    anomaly faded. `KnowledgeNode.current` only returns None when NO version
+    of the key exists (superseded rows always leave a current one behind), so
+    this test is unambiguous.
+    """
     from .knowledge_models import KnowledgeNode
     key = (hyp.resolution_criteria or {}).get("anomaly_key")
     if not key:
-        return None, "missing_anomaly_key"
+        return None, "ungradeable: no anomaly_key in resolution_criteria"
     node = KnowledgeNode.current(KnowledgeNode.KIND_ANOMALY, key)
     if node is None:
-        return False, "no_node"
+        return None, (f"ungradeable: anomaly '{key}' was never recorded in the "
+                      f"knowledge graph — nothing was watching it")
     return node.confidence >= 0.4, f"confidence={node.confidence:.2f}"
 
 
@@ -130,16 +242,19 @@ RESOLVERS = {
 
 def resolve_due() -> dict:
     """Walk pending hypotheses past deadline; grade those whose criteria
-    map to a known resolver."""
+    map to a known resolver.
+
+    Counts returned: confirmed / refuted / unresolvable / deferred / skipped.
+    `deferred` rows stay PENDING — the evidence hasn't landed yet.
+    """
     from .knowledge_models import Hypothesis
-    from ai_agents.models import AgentPrediction
 
     now = timezone.now()
     qs = Hypothesis.objects.filter(
         outcome=Hypothesis.OUTCOME_PENDING,
         resolution_deadline__lte=now,
     )
-    confirmed = refuted = unresolvable = skipped = 0
+    confirmed = refuted = unresolvable = skipped = deferred = 0
     for hyp in qs:
         kind = (hyp.resolution_criteria or {}).get("kind")
         resolver = RESOLVERS.get(kind)
@@ -151,6 +266,12 @@ def resolve_due() -> dict:
         except Exception as e:  # pragma: no cover
             logger.warning("[hypothesis] resolver %s raised: %s", kind, e)
             skipped += 1
+            continue
+
+        if result is DEFER:
+            # Gradeable evidence may still arrive — leave the row PENDING
+            # rather than burning the claim as unresolvable.
+            deferred += 1
             continue
 
         if result is None:
@@ -178,12 +299,24 @@ def resolve_due() -> dict:
             pass
 
         # Mirror into Phase-6 AgentPrediction if linked.
+        #
+        # An UNRESOLVABLE outcome MUST leave `was_correct` NULL. Both Brier
+        # consumers — ai_agents.calibration.brier_score and
+        # brain.context._brain_trust_score — select on
+        # `was_correct__isnull=False` and score False as a miss, so stamping
+        # an ungraded claim False charges the agent for our measurement
+        # failure. That is the same bug as marking the hypothesis refuted,
+        # just one table over.
         if hyp.agent_prediction_id:
             try:
                 pred = hyp.agent_prediction
-                pred.was_correct = (hyp.outcome == Hypothesis.OUTCOME_CONFIRMED)
+                graded = hyp.outcome in (Hypothesis.OUTCOME_CONFIRMED,
+                                         Hypothesis.OUTCOME_REFUTED)
+                pred.was_correct = (
+                    (hyp.outcome == Hypothesis.OUTCOME_CONFIRMED)
+                    if graded else None)
                 pred.actual_value = note[:100]
-                pred.evaluated_at = now
+                pred.evaluated_at = now if graded else None
                 pred.save(update_fields=[
                     "was_correct", "actual_value", "evaluated_at",
                 ])
@@ -192,7 +325,8 @@ def resolve_due() -> dict:
 
     return {
         "confirmed": confirmed, "refuted": refuted,
-        "unresolvable": unresolvable, "skipped": skipped,
+        "unresolvable": unresolvable, "deferred": deferred,
+        "skipped": skipped,
     }
 
 
@@ -203,7 +337,12 @@ def agent_trust_score(agent: str, *, lookback_n: int = 50) -> Optional[float]:
     None if no resolved data.
 
     This is the OBJECTIVE trust signal — pure calibration. For the blended
-    score (objective + operator override), use `agent_combined_trust`."""
+    score (objective + operator override), use `agent_combined_trust`.
+
+    UNRESOLVABLE is excluded, not scored as a miss: those are claims the
+    platform failed to measure, and an agent's trust must not move on our
+    blind spots. Same reason PENDING is excluded.
+    """
     from .knowledge_models import Hypothesis
     qs = (Hypothesis.objects
           .filter(source_agent=agent)

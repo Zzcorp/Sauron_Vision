@@ -7,27 +7,56 @@ Use once per page; later includes detect the loaded flag and skip.
         integrity="sha384-rHwkN4ZQrQezJlqaepbhhyNvk9PqaH7GqvO5Hjfrxol0w63cKx2OqAVCXjuVUFLJ"
         crossorigin="anonymous"></script>
 <script>
-  // Common dark theme defaults that match Sauron's --accent / --text vars
-  if (typeof Chart !== "undefined") {
-    Chart.defaults.color = "#5a8a6a";
-    Chart.defaults.borderColor = "#133020";
-    Chart.defaults.font.family = "'Share Tech Mono', monospace";
-    Chart.defaults.font.size = 11;
-  }
-  window.SAURON_CHART_COLORS = {
-    accent: "#00e868",
-    accentDim: "rgba(0, 232, 104, 0.18)",
-    red: "#e83030",
-    redDim: "rgba(232, 48, 48, 0.18)",
-    gold: "#d8b020",
-    blue: "#30a0e8",
-    purple: "#8840d0",
-    text: "#c8e8d8",
-    border: "#133020",
-  };
+  // These were a fixed dark palette ("defaults that match --accent"), which
+  // stopped matching the moment the operator switched to light mode: axis
+  // text stayed #5a8a6a and the grid stayed #133020 — a near-black green —
+  // on a white card. Read from the tokens instead, once, at load.
+  (function () {
+    var css = getComputedStyle(document.body || document.documentElement);
+    function token(name, fallback) {
+      var v = css.getPropertyValue(name);
+      return (v && v.trim()) || fallback;
+    }
+    // Chart.js paints to a canvas, which cannot resolve var(); a translucent
+    // wash therefore has to be built from the resolved hex.
+    function alpha(color, a) {
+      var m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec((color || "").trim());
+      if (!m) return color;
+      var h = m[1];
+      if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+      return "rgba(" + parseInt(h.slice(0,2),16) + "," +
+             parseInt(h.slice(2,4),16) + "," +
+             parseInt(h.slice(4,6),16) + "," + a + ")";
+    }
+    var accent = token("--accent", "#00e868");
+    var red    = token("--accent-red", "#e83030");
+    var border = token("--border", "#133020");
+
+    if (typeof Chart !== "undefined") {
+      Chart.defaults.color = token("--text-secondary", "#7aaa8a");
+      Chart.defaults.borderColor = border;
+      Chart.defaults.font.family = "'Share Tech Mono', monospace";
+      Chart.defaults.font.size = 11;
+    }
+    window.SAURON_CHART_COLORS = {
+      accent: accent,
+      accentDim: alpha(accent, 0.18),
+      red: red,
+      redDim: alpha(red, 0.18),
+      gold: token("--accent-gold", "#d8b020"),
+      blue: token("--accent-blue", "#30a0e8"),
+      purple: token("--accent-purple", "#8840d0"),
+      text: token("--text-primary", "#daf0e6"),
+      border: border,
+    };
+  })();
 </script>
 <style>
-  .sv-chart-container { position: relative; height: 280px; margin: 16px 0; }
+  /* Chart.js canvases only. The candlestick widget used to declare this same
+     class name for a completely different box, so whichever of the two loaded
+     second reshaped the other's charts. Its container is .sv-candle-container. */
+  .sv-chart-container { position: relative; height: 280px; margin: 16px 0;
+                        min-width: 0; }
   .sv-chart-container.tall { height: 380px; }
   .sv-chart-container.short { height: 180px; }
   .sv-metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

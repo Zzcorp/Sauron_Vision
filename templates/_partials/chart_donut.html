@@ -1,0 +1,118 @@
+{% comment %}
+Donut + legend — one implementation for the thirteen .oc-donut cards.
+
+Every one of those cards carried its own ~30-line copy of the same renderer
+and its own hardcoded hex palette. Three failures came out of that:
+
+  1. The palettes were dark-theme hex ('#00e868'), so in light mode a donut
+     painted the DARK accent green next to a card whose --accent had already
+     become #00994d. Segments are now CSS classes over the tokens, so a theme
+     swap moves the chart with everything else.
+  2. Each copy re-coloured `document.querySelectorAll('.oc-donut-legend-swatch')`
+     — the whole document, not its own card. Two donuts on one page and the
+     second one repainted the first one's legend with its own palette. The
+     renderer here is scoped to the wrap it is drawing.
+  3. Thirteen copies meant thirteen places to fix anything. This one runs on
+     any `.oc-donut[data-donut]`, present at load or swapped in by HTMX.
+
+Parameters
+  rows   list of dicts: .key (category), .n (count), .pct (0-100 share)
+  tones  optional "key=tone,key=tone" mapping, tone in
+         accent|red|gold|blue|purple|muted. Unmapped rows take the sequential
+         default order, so a mix of named and unnamed keys still reads.
+  label  what the donut divides up, e.g. "Share of agent calls by provider"
+  empty  message when there is nothing to divide
+{% endcomment %}
+{% if rows %}
+<div class="oc-donut-wrap">
+    <svg class="oc-donut" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"
+         role="img" aria-label="{{ label|default:'Share of total' }}"
+         data-donut="{% for d in rows %}{{ d.key }}:{{ d.pct }}{% if not forloop.last %};{% endif %}{% endfor %}"
+         data-tones="{{ tones|default:'' }}">
+        <title>{{ label|default:"Share of total" }}</title>
+        <circle class="oc-donut-track" cx="50" cy="50" r="35"/>
+    </svg>
+    <div class="oc-donut-legend">
+        {% for d in rows %}
+            <div class="oc-donut-legend-row">
+                <span class="oc-donut-legend-key">
+                    <span class="oc-donut-legend-swatch" data-key="{{ d.key }}"></span>
+                    {{ d.key|upper }}
+                </span>
+                {# Some series are shares of a value, not of a count, and #}
+                {# carry no n — printing " · 42%" with a dangling separator #}
+                {# was how the allocation legend read before. #}
+                <span class="oc-donut-legend-pct">{% if d.n %}{{ d.n }} · {% endif %}{{ d.pct }}%</span>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+{% else %}
+<p class="oc-empty">{{ empty|default:"Nothing to break down yet." }}</p>
+{% endif %}
+<script>
+(function () {
+    if (!window.svRenderDonuts) {
+        /* Sequential order for keys the caller did not name. Deliberately
+           starts on the accent so a single-category donut looks like the
+           rest of the platform. */
+        var ORDER = ['accent', 'blue', 'gold', 'purple', 'red', 'muted'];
+
+        window.svRenderDonuts = function (root) {
+            var scope = root && root.querySelectorAll ? root : document;
+            var nodes = scope.querySelectorAll('svg.oc-donut[data-donut]');
+            Array.prototype.forEach.call(nodes, function (svg) {
+                /* An HTMX swap re-runs this script for content already on the
+                   page; without the flag every re-run stacks another set of
+                   segments on top of the old ones. */
+                if (svg.getAttribute('data-rendered') === '1') return;
+                svg.setAttribute('data-rendered', '1');
+
+                var rows = (svg.getAttribute('data-donut') || '').split(';')
+                    .map(function (r) {
+                        var p = r.split(':');
+                        return { k: p[0], pct: parseFloat(p[1]) };
+                    })
+                    .filter(function (r) { return !isNaN(r.pct) && r.pct > 0; });
+                if (!rows.length) return;
+
+                var tones = {};
+                (svg.getAttribute('data-tones') || '').split(',').forEach(function (pair) {
+                    var kv = pair.split('=');
+                    if (kv.length === 2) tones[kv[0].trim()] = kv[1].trim();
+                });
+
+                var wrap = svg.parentNode;
+                var swatches = wrap ? wrap.querySelectorAll('.oc-donut-legend-swatch') : [];
+                var ns = 'http://www.w3.org/2000/svg';
+                var r = 35, c = 2 * Math.PI * r;
+                /* -c/4 starts the first segment at twelve o'clock. */
+                var offset = -c / 4;
+
+                rows.forEach(function (row, i) {
+                    var tone = tones[row.k] || ORDER[i % ORDER.length];
+                    var seg = document.createElementNS(ns, 'circle');
+                    var len = (row.pct / 100) * c;
+                    seg.setAttribute('class', 'oc-donut-seg oc-tone-' + tone);
+                    seg.setAttribute('cx', 50);
+                    seg.setAttribute('cy', 50);
+                    seg.setAttribute('r', r);
+                    seg.setAttribute('stroke-dasharray', len.toFixed(2) + ' ' + (c - len).toFixed(2));
+                    seg.setAttribute('stroke-dashoffset', offset.toFixed(2));
+                    svg.appendChild(seg);
+                    offset -= len;
+                    /* Legend order matches row order, so index is enough and
+                       no key needs escaping into a selector. */
+                    if (swatches[i]) swatches[i].setAttribute('class',
+                        'oc-donut-legend-swatch oc-tone-' + tone);
+                });
+            });
+        };
+
+        document.addEventListener('htmx:afterSwap', function (e) {
+            window.svRenderDonuts(e.target);
+        });
+    }
+    window.svRenderDonuts();
+})();
+</script>

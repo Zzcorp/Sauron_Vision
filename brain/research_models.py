@@ -43,11 +43,35 @@ class ResearchMessage(models.Model):
     ROLE_ASSISTANT = "assistant"
     ROLE_CHOICES = [(ROLE_USER, "User"), (ROLE_ASSISTANT, "Assistant")]
 
+    # An answer is produced by a Celery worker AFTER the request that asked
+    # has ended, so "still being answered" has to be a FACT IN THE DATABASE:
+    # it is the only thing a second tab — or the same tab on the next page —
+    # can read. Keeping it in the asking page's memory is exactly what threw
+    # the answer away the moment the operator navigated.
+    STATUS_DONE = "done"
+    STATUS_PENDING = "pending"
+    STATUS_CHOICES = [(STATUS_DONE, "Done"), (STATUS_PENDING, "Pending")]
+
     conversation = models.ForeignKey(
         ResearchConversation, on_delete=models.CASCADE, related_name="messages",
     )
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     content = models.TextField()
+
+    status = models.CharField(
+        max_length=12, choices=STATUS_CHOICES, default=STATUS_DONE,
+        db_index=True,
+        help_text="Assistant rows are born PENDING and filled in place by "
+                   "the worker that answers them.")
+
+    # The question this row answers. Ordering alone cannot pair them: two
+    # tabs asking at the same moment interleave their rows inside one
+    # conversation, and "the user message just before this one" would then
+    # hand tab A's answer to tab B's question.
+    replies_to = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.CASCADE,
+        related_name="replies",
+        help_text="For an assistant row: the user message it answers.")
 
     # Assistant-only metadata.
     model_used = models.CharField(max_length=80, blank=True)
@@ -63,6 +87,10 @@ class ResearchMessage(models.Model):
         indexes = [
             models.Index(fields=["conversation", "created_at"]),
         ]
+
+    @property
+    def is_pending(self) -> bool:
+        return self.status == self.STATUS_PENDING
 
     def __str__(self) -> str:
         # ▸ the operator speaking, ◉ the Eye answering.

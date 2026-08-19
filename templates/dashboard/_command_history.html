@@ -36,55 +36,7 @@
                 {% if cum_r_points %}low {{ cum_r_min|floatformat:2 }} · high {{ cum_r_max|floatformat:2 }}{% endif %}
             </span>
         </div>
-        {% if cum_r_points %}
-            <svg class="oc-sparkline" viewBox="0 0 600 60" preserveAspectRatio="none" id="ocCumRSvg">
-                <defs>
-                    <linearGradient id="oc-spark-grad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.4"/>
-                        <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
-                    </linearGradient>
-                </defs>
-                <path d=""/>
-            </svg>
-            <div id="ocCumRData" style="display:none;"
-                 data-points="{% for v in cum_r_points %}{{ v|floatformat:6 }}{% if not forloop.last %},{% endif %}{% endfor %}"
-                 data-min="{{ cum_r_min|floatformat:6 }}"
-                 data-max="{{ cum_r_max|floatformat:6 }}"></div>
-            <script>
-                (function() {
-                    var el = document.getElementById('ocCumRData');
-                    if (!el) return;
-                    var pts = (el.dataset.points || '').split(',').map(parseFloat).filter(function(v){return !isNaN(v);});
-                    if (pts.length < 2) return;
-                    var min = parseFloat(el.dataset.min);
-                    var max = parseFloat(el.dataset.max);
-                    var span = (max - min) || 1;
-                    var W = 600, H = 60, pad = 4;
-                    var lineCmds = [];
-                    for (var i = 0; i < pts.length; i++) {
-                        var x = (i / (pts.length - 1)) * (W - 2 * pad) + pad;
-                        var y = H - pad - ((pts[i] - min) / span) * (H - 2 * pad);
-                        lineCmds.push((i === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2));
-                    }
-                    var fillCmds = lineCmds.slice();
-                    fillCmds.push('L ' + (W - pad) + ' ' + (H - pad));
-                    fillCmds.push('L ' + pad + ' ' + (H - pad));
-                    fillCmds.push('Z');
-                    var svg = document.getElementById('ocCumRSvg');
-                    if (!svg) return;
-                    var path = svg.querySelector('path');
-                    if (path) path.setAttribute('d', lineCmds.join(' '));
-                    var ns = 'http://www.w3.org/2000/svg';
-                    var fill = document.createElementNS(ns, 'path');
-                    fill.setAttribute('d', fillCmds.join(' '));
-                    fill.setAttribute('class', 'oc-sparkline-fill');
-                    svg.insertBefore(fill, path);
-                    if (pts[pts.length-1] < pts[0]) svg.classList.add('bearish');
-                })();
-            </script>
-        {% else %}
-            <p class="oc-empty">No closed bot trades yet.</p>
-        {% endif %}
+        {% include "_partials/chart_line.html" with points=cum_r_points min=cum_r_min max=cum_r_max chart_id="ocCumR" fill=1 unit="cumulative R" when="last 90 days" empty="No closed bot trades yet." %}
     </div>
 
     <div class="card">
@@ -94,44 +46,10 @@
                 {% if win_rate_points %}{{ win_rate_points|length }} days · current {{ win_rate_points|last }}%{% endif %}
             </span>
         </div>
-        {% if win_rate_points %}
-            <svg class="oc-sparkline" viewBox="0 0 600 60" preserveAspectRatio="none" id="ocWrSvg">
-                <path d=""/>
-            </svg>
-            <div id="ocWrData" style="display:none;"
-                 data-points="{% for v in win_rate_points %}{{ v|floatformat:2 }}{% if not forloop.last %},{% endif %}{% endfor %}"></div>
-            <script>
-                (function() {
-                    var el = document.getElementById('ocWrData');
-                    if (!el) return;
-                    var pts = (el.dataset.points || '').split(',').map(parseFloat).filter(function(v){return !isNaN(v);});
-                    if (pts.length < 2) return;
-                    var min = 0, max = 100, span = 100;
-                    var W = 600, H = 60, pad = 4;
-                    var lineCmds = [];
-                    for (var i = 0; i < pts.length; i++) {
-                        var x = (i / (pts.length - 1)) * (W - 2 * pad) + pad;
-                        var y = H - pad - ((pts[i] - min) / span) * (H - 2 * pad);
-                        lineCmds.push((i === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2));
-                    }
-                    var svg = document.getElementById('ocWrSvg');
-                    if (!svg) return;
-                    var path = svg.querySelector('path');
-                    if (path) path.setAttribute('d', lineCmds.join(' '));
-                    /* Reference line at 50%. */
-                    var ns = 'http://www.w3.org/2000/svg';
-                    var ref = document.createElementNS(ns, 'line');
-                    ref.setAttribute('x1', pad); ref.setAttribute('x2', W - pad);
-                    var refY = H - pad - 0.5 * (H - 2 * pad);
-                    ref.setAttribute('y1', refY); ref.setAttribute('y2', refY);
-                    ref.setAttribute('stroke', 'rgba(255,255,255,0.06)');
-                    ref.setAttribute('stroke-dasharray', '3 3');
-                    svg.insertBefore(ref, path);
-                })();
-            </script>
-        {% else %}
-            <p class="oc-empty">Rolling win-rate fills as more days accumulate.</p>
-        {% endif %}
+        {# The 50% marker was stroked rgba(255,255,255,0.06) — invisible on a #}
+        {# white card, so in light mode the curve had no reference at all. #}
+        {# The partial strokes it from --border and names it in the caption. #}
+        {% include "_partials/chart_line.html" with points=win_rate_points min=0 max=100 chart_id="ocWr" ref=50 ref_label="50% — break-even" unit="rolling 30-day win rate, %" when="one point per day" empty="Rolling win-rate fills as more days accumulate." %}
     </div>
 </div>
 
@@ -142,11 +60,15 @@
         {% if dow_max_n > 0 %}
             <div class="oc-heatmap">
                 {% for d in dow_stats %}
+                    {# The tint was a literal rgba(0,232,104,…) / rgba(255,94,94,…): #}
+                    {# the dark-mode green and red, unchanged by a theme swap. #}
+                    {# color-mix keeps the same "darkness = trade count" ramp #}
+                    {# while taking its hue from the tokens. #}
                     <div class="oc-heatmap-cell"
-                         style="background: {% if d.avg_r > 0 %}rgba(0,232,104,{% widthratio d.n dow_max_n 35 %}%){% elif d.avg_r < 0 %}rgba(255,94,94,{% widthratio d.n dow_max_n 35 %}%){% else %}var(--bg-card){% endif %};">
+                         style="background: {% if d.avg_r > 0 %}color-mix(in srgb, var(--accent) {% widthratio d.n dow_max_n 35 %}%, var(--bg-card)){% elif d.avg_r < 0 %}color-mix(in srgb, var(--accent-red) {% widthratio d.n dow_max_n 35 %}%, var(--bg-card)){% else %}var(--bg-card){% endif %};">
                         <div class="dow-label">{{ d.label }}</div>
                         <div class="dow-n">{{ d.n }}</div>
-                        <div class="dow-r" style="color: {% if d.avg_r > 0 %}var(--accent){% elif d.avg_r < 0 %}#ff5e5e{% else %}var(--text-muted){% endif %};">{% if d.n %}{{ d.avg_r }}R{% else %}—{% endif %}</div>
+                        <div class="dow-r" style="color: {% if d.avg_r > 0 %}var(--accent){% elif d.avg_r < 0 %}var(--accent-red){% else %}var(--text-muted){% endif %};">{% if d.n %}{{ d.avg_r }}R{% else %}—{% endif %}</div>
                     </div>
                 {% endfor %}
             </div>

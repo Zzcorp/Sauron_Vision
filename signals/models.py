@@ -54,6 +54,11 @@ class Signal(models.Model):
     mae = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
     time_to_outcome_seconds = models.IntegerField(null=True, blank=True)
 
+    # Live exposure, in the two statuses the rest of the platform counts as
+    # exposure (AssetBotTrade.STATUS_CHOICES: CLOSE_PENDING is still open at
+    # the broker while the bot wants it flat).
+    ACTED_STATUSES = ("OPEN", "CLOSE_PENDING")
+
     class Meta:
         ordering = ["-created_at"]
         indexes = [
@@ -65,6 +70,86 @@ class Signal(models.Model):
 
     def __str__(self):
         return f"[{self.direction.upper()}] {self.title} (score: {self.score:.2f})"
+
+    # ── Has anything already acted on this signal? ──────────────────────
+    #
+    # The report that produced this: the engine entered EURGBP on a rule,
+    # the rail card sat there looking like an untaken idea, and the same
+    # symbol was then booked a second time by hand. A signal something has
+    # already acted on has to SAY so, or the rail is inviting the operator
+    # to double-stack the engine's own exposure.
+    #
+    # There is no signal FK on a trade to read. Adding one would only fix
+    # trades opened after the migration, and the join has to work on the
+    # book as it stands — so it is derived from what both entry paths
+    # already write:
+    #
+    #   manual  bot_program.manual_trade stamps metadata["signal_id"] with
+    #           this row's pk. Exact, one trade to one signal.
+    #   bot     asset_engine.base._open copies BotDecision.rule_name onto
+    #           AssetBotTrade.rule_name, and decide() lifts that name off
+    #           the winning Signal. So the honest join is the STRING
+    #           rule_name — the same join RuleControl, the graders and the
+    #           track-record lanes already use — narrowed by symbol and by
+    #           time: a position opened BEFORE this signal fired cannot
+    #           have been opened because of it.
+    #
+    # What the string join cannot claim: a bot decision whose winning rule
+    # came back empty is tagged "asset_bot_signal_consensus" /
+    # "asset_bot_weighted_consensus", which matches no Signal.rule_name.
+    # Those trades stay unjoined rather than being guessed at — an unmarked
+    # card is a card that says nothing, a wrongly-marked one is a lie.
+    #
+    # Only LIVE exposure counts. A rule that entered and has already exited
+    # leaves the idea open again, and a permanent TAKEN badge over a flat
+    # book would be the same failure pointing the other way.
+    @property
+    def acted(self):
+        """The live position this signal is already answerable for, or None.
+
+        Cached per instance: the rail template reads it three times per
+        card (wrapper class, badge, popup) and one render must not cost
+        three queries.
+        """
+        if not hasattr(self, "_acted_cache"):
+            self._acted_cache = self._resolve_acted()
+        return self._acted_cache
+
+    def _resolve_acted(self):
+        if not self.pk or not self.created_at:
+            return None
+        try:
+            from django.db.models import Q
+            from bot_program.models import AssetBotTrade
+
+            match = Q(metadata__signal_id=self.pk)
+            if self.rule_name:
+                match |= Q(rule_name=self.rule_name)
+            trade = (AssetBotTrade.objects
+                     .filter(symbol=self.instrument.symbol,
+                             status__in=self.ACTED_STATUSES,
+                             opened_at__gte=self.created_at)
+                     .filter(match)
+                     .order_by("-opened_at")
+                     .first())
+        except Exception:  # noqa: BLE001 — the rail renders regardless
+            return None
+        if trade is None:
+            return None
+        meta = trade.metadata or {}
+        exact = meta.get("signal_id") == self.pk
+        return {
+            # "manual" only on the exact metadata join or the manual flag —
+            # never inferred from the rule string, which is what a bot wrote.
+            "by": "manual" if (exact or meta.get("manual")) else "bot",
+            "exact": bool(exact),
+            "side": trade.side,
+            "qty": float(trade.qty),
+            "venue": "PAPER" if trade.paper else "LIVE",
+            "rule": trade.rule_name or "",
+            "trade_id": trade.pk,
+            "opened_at": trade.opened_at,
+        }
 from .models_smc import SmcSignal  # noqa: F401
 from .models_control import (  # noqa: F401
     RuleControl, RuleAction, MetaAllocation, PromotionEvent, RuleMutation,

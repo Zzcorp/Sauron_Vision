@@ -20,7 +20,11 @@
     {% endif %}
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+  {# A bare `1fr` track takes its minimum from its content, and a Chart.js #}
+  {# canvas reports 300px — so two of them held a 600px floor open and the #}
+  {# card scrolled sideways on a phone. auto-fit + minmax(0,…) collapses to #}
+  {# one column instead. #}
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:20px;">
     <div>
       <div class="sv-section-title">Volume per day</div>
       <div class="sv-chart-container"><canvas id="news-volume-chart"></canvas></div>

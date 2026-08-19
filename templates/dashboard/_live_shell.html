@@ -1,0 +1,18 @@
+{% comment %}
+The wrapper a page renders through when only its LIVE REGIONS are wanted.
+
+/portfolio/live/ and /positions/live/ re-enter the very same view body and the
+very same page template as /portfolio/ and /positions/ — they just extend this
+instead of base.html, so the response is the content block and nothing else:
+no shell, no ticker, no signals rail, no second WebSocket.
+
+That is the whole point. A refresh endpoint that renders its own markup is how
+a page starts disagreeing with itself — an em-dash on the first read becoming a
+confident 0.00 on the second, because two templates had two ideas about what an
+unpriced position looks like. Here there is one template and one formatter, so
+a refreshed cell can only ever say what the first render would have said.
+
+The page template puts its slow half behind a "not live_only" branch, so this
+response carries the regions that move and not the closed-trade history
+underneath them.
+{% endcomment %}{% block content %}{% endblock %}

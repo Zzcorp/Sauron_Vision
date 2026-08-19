@@ -47,16 +47,23 @@ def _sparkline_path(points, width=720, height=200, pad=8) -> dict:
         return {"path": "", "min": 0, "max": 0, "last": 0, "first": 0}
     values = [p["equity"] for p in points]
     lo, hi = min(values), max(values)
-    span = (hi - lo) or 1.0
+    # A flat curve has NO span. Substituting 1.0 mapped every point to
+    # (v - lo)/1 = 0, i.e. the floor of the box — so an account that never
+    # moved was drawn sitting at its low. A flat series is drawn through the
+    # middle, which is the only honest place for a line with no range.
+    span = hi - lo
+    flat = span <= 0
     step = (width - 2 * pad) / (len(values) - 1)
 
     coords = []
     for i, v in enumerate(values):
         x = pad + i * step
-        y = pad + (height - 2 * pad) * (1 - (v - lo) / span)
+        frac = 0.5 if flat else (v - lo) / span
+        y = pad + (height - 2 * pad) * (1 - frac)
         coords.append(f"{x:.1f},{y:.1f}")
     return {"path": "M " + " L ".join(coords),
             "min": round(lo, 2), "max": round(hi, 2),
+            "flat": flat,
             "first": round(values[0], 2), "last": round(values[-1], 2),
             "up": values[-1] >= values[0]}
 

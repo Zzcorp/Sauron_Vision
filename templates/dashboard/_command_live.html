@@ -61,33 +61,10 @@ Layered rendering:
                 </span>
             {% endif %}
         </div>
-        {% if live_24h_spark %}
-            <div style="display:flex;align-items:center;gap:3px;height:60px;padding:6px 4px 0;">
-                {% for r in live_24h_spark %}
-                    <div title="{{ r|floatformat:2 }}R"
-                         style="flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;">
-                        {% if r > 0 %}
-                            <div style="width:100%;flex:1;display:flex;align-items:flex-end;">
-                                <div style="width:100%;background:var(--accent);opacity:0.85;border-radius:2px 2px 0 0;height:{% if live_24h_spark_max %}{% widthratio r live_24h_spark_max 100 %}{% else %}0{% endif %}%;min-height:3px;"></div>
-                            </div>
-                            <div style="width:100%;flex:1;"></div>
-                        {% elif r < 0 %}
-                            <div style="width:100%;flex:1;"></div>
-                            <div style="width:100%;flex:1;display:flex;align-items:flex-start;">
-                                <div style="width:100%;background:var(--accent-red);opacity:0.85;border-radius:0 0 2px 2px;height:{% if live_24h_spark_min %}{% widthratio r live_24h_spark_min 100 %}{% else %}0{% endif %}%;min-height:3px;"></div>
-                            </div>
-                        {% else %}
-                            <div style="width:100%;height:1px;background:var(--text-muted);opacity:0.4;"></div>
-                        {% endif %}
-                    </div>
-                {% endfor %}
-            </div>
-            <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:6px;">
-                <span>oldest</span><span>{{ live_24h_n }} total in 24h</span><span>newest</span>
-            </div>
-        {% else %}
-            <p class="oc-empty">No graded closes in last 24h.</p>
-        {% endif %}
+        {# Wins scaled against the max and losses against the MIN, so a −3R #}
+        {# loss and a +3R win drew the same length in opposite directions — #}
+        {# two different rulers on one axis. One peak now scales both sides. #}
+        {% include "_partials/chart_bars.html" with bars=live_24h_bars max=live_24h_spark_peak signed=1 short=1 ends=1 axis_start="oldest" axis_mid=live_24h_n axis_end="newest" unit="realized R per close" when="last 24 hours" empty="No graded closes in last 24h." %}
     </div>
 
     <div class="card" style="border-left:2px solid var(--accent);">

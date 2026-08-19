@@ -1,0 +1,160 @@
+{% comment %}
+Sparkline / equity curve — one implementation for the .oc-sparkline family.
+
+Four cards each carried their own copy of this renderer (portfolio equity,
+command-centre equity, cumulative R, rolling win rate). The copies had drifted
+into three separate defects:
+
+  1. `if (pts.length < 2) return;` — a series with ONE point left the path
+     empty, so the card showed a blank frame with no explanation. One reading
+     is a fact; it now draws as a point and the caption says a line needs two.
+  2. `var span = (max - min) || 1;` — a FLAT series divided by 1 and every
+     point landed at `H - pad`, pinning the line to the floor of the box. A
+     steady equity curve read as "at the low". A flat series is now centred,
+     and the caption states the constant value.
+  3. Two of the copies defined `<linearGradient id="oc-spark-grad">`. Both
+     partials render into the Command Centre, so the id collided and the
+     second curve's wash resolved against the first one's gradient. The
+     gradient id is derived from chart_id here.
+
+Parameters
+  points     list of numbers, oldest → newest
+  min / max  series bounds (optional; the renderer falls back to the data)
+  chart_id   unique id for this instance — also namespaces the gradient
+  unit       what the value axis measures, e.g. "account equity, USD"
+  when       what the time axis covers, e.g. "last 30 days"
+  fill       truthy → area wash under the line
+  ref        optional reference value to draw as a dashed line
+  ref_label  what that reference means, e.g. "50% — break-even"
+  empty      message when there is nothing to draw
+{% endcomment %}
+{% if points %}
+{% with chart_id=chart_id|default:"svSpark" %}
+<div class="sv-line" data-chart="{{ chart_id }}">
+    <svg class="oc-sparkline" id="{{ chart_id }}Svg" viewBox="0 0 600 60"
+         preserveAspectRatio="none" role="img"
+         aria-label="{{ unit|default:'value' }} — {{ when|default:'over time' }}">
+        <title>{{ unit|default:"value" }} — {{ when|default:"over time" }}</title>
+        <defs>
+            <linearGradient id="{{ chart_id }}Grad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.4"/>
+                <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+            </linearGradient>
+        </defs>
+        <path d=""/>
+    </svg>
+    <div class="sv-line-data" hidden
+         data-points="{% for v in points %}{{ v|floatformat:6 }}{% if not forloop.last %},{% endif %}{% endfor %}"
+         data-min="{{ min|default_if_none:'' }}"
+         data-max="{{ max|default_if_none:'' }}"
+         data-fill="{% if fill %}1{% else %}0{% endif %}"
+         data-ref="{{ ref|default_if_none:'' }}"></div>
+    <p class="sv-bars-cap" data-role="cap">
+        {{ unit|default:"value" }} · {{ when|default:"over time" }}{% if ref_label %} · dashed line: {{ ref_label }}{% endif %}
+    </p>
+</div>
+{% endwith %}
+{% else %}
+<p class="oc-empty">{{ empty|default:"Nothing to plot yet." }}</p>
+{% endif %}
+<script>
+(function () {
+    if (!window.svRenderLines) {
+        window.svRenderLines = function (root) {
+            var scope = root && root.querySelectorAll ? root : document;
+            var nodes = scope.querySelectorAll('.sv-line[data-chart]');
+            Array.prototype.forEach.call(nodes, function (wrap) {
+                if (wrap.getAttribute('data-rendered') === '1') return;
+                wrap.setAttribute('data-rendered', '1');
+
+                var id = wrap.getAttribute('data-chart');
+                var svg = document.getElementById(id + 'Svg');
+                var data = wrap.querySelector('.sv-line-data');
+                var cap = wrap.querySelector('[data-role="cap"]');
+                if (!svg || !data) return;
+
+                var pts = (data.getAttribute('data-points') || '').split(',')
+                    .map(parseFloat)
+                    .filter(function (v) { return !isNaN(v) && isFinite(v); });
+                if (!pts.length) return;
+
+                var lo = parseFloat(data.getAttribute('data-min'));
+                var hi = parseFloat(data.getAttribute('data-max'));
+                if (isNaN(lo)) lo = Math.min.apply(null, pts);
+                if (isNaN(hi)) hi = Math.max.apply(null, pts);
+
+                var W = 600, H = 60, pad = 4;
+                var span = hi - lo;
+                /* A zero span is a FLAT series, not a scale of 1. Dividing by
+                   1 put every point at the bottom of the box, which reads as
+                   "at the low" for a series that never moved. */
+                var flat = !(span > 0);
+                function yOf(v) {
+                    if (flat) return H / 2;
+                    return H - pad - ((v - lo) / span) * (H - 2 * pad);
+                }
+                function xOf(i) {
+                    if (pts.length < 2) return W / 2;
+                    return (i / (pts.length - 1)) * (W - 2 * pad) + pad;
+                }
+
+                var path = svg.querySelector('path');
+                var ns = 'http://www.w3.org/2000/svg';
+
+                if (pts.length === 1) {
+                    /* One reading is a fact worth showing — as a point, with
+                       the caption saying why there is no line. */
+                    var dot = document.createElementNS(ns, 'circle');
+                    dot.setAttribute('cx', (W / 2).toFixed(2));
+                    dot.setAttribute('cy', yOf(pts[0]).toFixed(2));
+                    dot.setAttribute('r', 3);
+                    dot.setAttribute('class', 'oc-sparkline-dot');
+                    svg.appendChild(dot);
+                    if (cap) cap.textContent = cap.textContent +
+                        ' · one reading so far — a line needs two';
+                    return;
+                }
+
+                var cmds = [];
+                for (var i = 0; i < pts.length; i++) {
+                    cmds.push((i === 0 ? 'M' : 'L') +
+                              xOf(i).toFixed(2) + ' ' + yOf(pts[i]).toFixed(2));
+                }
+                if (path) path.setAttribute('d', cmds.join(' '));
+
+                if (data.getAttribute('data-fill') === '1') {
+                    var fill = document.createElementNS(ns, 'path');
+                    fill.setAttribute('d', cmds.join(' ') +
+                        ' L ' + (W - pad) + ' ' + (H - pad) +
+                        ' L ' + pad + ' ' + (H - pad) + ' Z');
+                    fill.setAttribute('class', 'oc-sparkline-fill');
+                    fill.setAttribute('fill', 'url(#' + id + 'Grad)');
+                    svg.insertBefore(fill, path);
+                }
+
+                var ref = parseFloat(data.getAttribute('data-ref'));
+                if (!isNaN(ref)) {
+                    var line = document.createElementNS(ns, 'line');
+                    line.setAttribute('x1', pad);
+                    line.setAttribute('x2', W - pad);
+                    line.setAttribute('y1', yOf(ref).toFixed(2));
+                    line.setAttribute('y2', yOf(ref).toFixed(2));
+                    line.setAttribute('class', 'oc-sparkline-ref');
+                    svg.insertBefore(line, path);
+                }
+
+                if (flat && cap) {
+                    cap.textContent = cap.textContent +
+                        ' · flat at ' + pts[0];
+                } else if (pts[pts.length - 1] < pts[0]) {
+                    svg.classList.add('bearish');
+                }
+            });
+        };
+        document.addEventListener('htmx:afterSwap', function (e) {
+            window.svRenderLines(e.target);
+        });
+    }
+    window.svRenderLines();
+})();
+</script>

@@ -62,10 +62,15 @@
         <div class="nd-impact-label">{{ impact.label }}</div>
         <div class="nd-ring-wrap">
           <div class="nd-ring" style="--pct:{{ impact.percent }};">
-            <svg viewBox="0 0 100 100">
+            {# The dash array is in USER UNITS, not percent: r=42 gives a #}
+            {# 264-unit circumference, so writing the percentage straight in #}
+            {# drew 60% as a 60/264 = 23% arc. The ring said a quarter while #}
+            {# the number in its middle said two thirds. #}
+            <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"
+                 role="img" aria-label="Relevance {{ impact.percent }} percent">
               <circle cx="50" cy="50" r="42" class="ring-bg"/>
               <circle cx="50" cy="50" r="42" class="ring-fg"
-                      style="stroke-dasharray:{{ impact.percent }} 264;"/>
+                      style="stroke-dasharray:{% widthratio impact.percent 100 264 %} 264;"/>
             </svg>
             <div class="nd-ring-val">{{ impact.percent }}%</div>
             <div class="nd-ring-lbl">RELEVANCE</div>

@@ -14,8 +14,9 @@ Parameters:
 
 <style>
 /* ── Chart Widget Styles (scoped) ─────────────────────────────────────── */
-.sv-chart-container {
+.sv-candle-container {
     position: relative;
+    isolation: isolate;
     width: 100%;
     background: var(--bg-void, #0a0f0a);
     border: 1px solid var(--border, #1a2e1a);
@@ -95,7 +96,12 @@ Parameters:
     pointer-events: none;
     z-index: 5;
     line-height: 1.8;
-    background: rgba(10, 15, 10, 0.6);
+    /* Was a fixed rgba(10,15,10,.6) plate: in light mode that put a dark
+       smear inside a white chart. The container isolates its stacking
+       context, so the 5/10 below are local to this card and never enter the
+       page's z ladder. */
+    background: var(--bg-card, #111a11);
+    border: 1px solid var(--border, #1a2e1a);
     border-radius: 3px;
     padding: 2px 6px;
 }
@@ -122,9 +128,13 @@ Parameters:
     0%, 80%, 100% { opacity: 0.2; }
     40% { opacity: 1; }
 }
+/* The loading dots are decoration; the word LOADING carries the state. */
+@media (prefers-reduced-motion: reduce) {
+    .sv-chart-loading-overlay span { animation: none; opacity: 0.6; }
+}
 </style>
 
-<div class="sv-chart-container" id="{{ chart_id }}-container" style="height: {{ height }}px;">
+<div class="sv-candle-container" id="{{ chart_id }}-container" style="height: {{ height }}px;">
     <!-- Toolbar -->
     <div class="sv-chart-toolbar">
         <div class="sv-chart-symbol-badge">{{ symbol }}</div>
@@ -233,15 +243,49 @@ Parameters:
 
     // ── Theme colours ────────────────────────────────────────────────────
     function getThemeColors() {
-        var isDark = !document.body.classList.contains('theme-light');
+        /* The platform's light theme is body.light-mode — set by the theme
+           tag in base.html. This read 'theme-light', a class nothing ever
+           sets, so the candles kept painting a #0a0f0a background inside a
+           white card no matter which theme the operator chose. */
+        var isDark = !document.body.classList.contains('light-mode');
+        /* Canvas cannot resolve var(--accent), so the tokens are read once
+           here rather than restated as hex. Two palettes written by hand is
+           how the candles came to be a different green from the rest of the
+           page after --accent moved. */
+        var css = getComputedStyle(document.body);
+        function token(name, fallback) {
+            var v = css.getPropertyValue(name);
+            return (v && v.trim()) || fallback;
+        }
+        /* Volume bars and the area wash need the accent at low alpha, and a
+           canvas has no colour-mix(). Derived from the token so the washes
+           follow the theme instead of staying dark-mode green on white. */
+        function alpha(color, a) {
+            var hex = (color || '').trim();
+            var m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex);
+            if (!m) return hex;
+            var h = m[1];
+            if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+            return 'rgba(' + parseInt(h.slice(0, 2), 16) + ',' +
+                   parseInt(h.slice(2, 4), 16) + ',' +
+                   parseInt(h.slice(4, 6), 16) + ',' + a + ')';
+        }
+        var accent = token('--accent', isDark ? '#00e868' : '#00994d');
+        var red = token('--accent-red', '#e83030');
         return {
             isDark:       isDark,
-            accent:       isDark ? '#00e868' : '#16a34a',
-            red:          isDark ? '#dc3232' : '#dc2626',
-            bg:           isDark ? '#0a0f0a' : '#ffffff',
-            grid:         isDark ? 'rgba(0,232,104,0.05)' : 'rgba(0,0,0,0.06)',
-            border:       isDark ? '#1a2e1a' : '#e5e7eb',
-            text:         isDark ? '#5a7a5a' : '#6b7280',
+            alpha:        alpha,
+            accentDim:    alpha(accent, 0.22),
+            accentWash:   alpha(accent, 0.3),
+            accentGhost:  alpha(accent, 0.02),
+            redDim:       alpha(red, 0.25),
+            accent:       accent,
+            red:          red,
+            bg:           token('--bg-void', isDark ? '#030806' : '#f0f2f0'),
+            grid:         alpha(token('--border', isDark ? '#133020' : '#c0d0c0'),
+                                isDark ? 0.9 : 0.7),
+            border:       token('--border', isDark ? '#133020' : '#c0d0c0'),
+            text:         token('--text-muted', isDark ? '#3a6850' : '#8aaa8a'),
         };
     }
 
@@ -288,7 +332,7 @@ Parameters:
 
         // Volume histogram
         volumeSeries = chart.addHistogramSeries({
-            color: 'rgba(0,232,104,0.18)',
+            color: c.accentDim,
             priceFormat: { type: 'volume' },
             priceScaleId: 'volume',
             scaleMargins: { top: 0.8, bottom: 0 },
@@ -329,8 +373,8 @@ Parameters:
         } else if (type === 'area') {
             mainSeries = chart.addAreaSeries({
                 lineColor:   c.accent,
-                topColor:    'rgba(0,232,104,0.3)',
-                bottomColor: 'rgba(0,232,104,0.02)',
+                topColor:    c.accentWash,
+                bottomColor: c.accentGhost,
                 lineWidth:   2,
             });
         }
@@ -460,13 +504,12 @@ Parameters:
                         return { time: b.time, value: b.close };
                     }));
                 }
+                var vc = getThemeColors();
                 volumeSeries.setData(bars.map(function(b) {
                     return {
                         time:  b.time,
                         value: b.volume || 0,
-                        color: (b.close >= b.open)
-                            ? 'rgba(0,232,104,0.25)'
-                            : 'rgba(220,50,50,0.25)',
+                        color: (b.close >= b.open) ? vc.accentDim : vc.redDim,
                     };
                 }));
                 chart.timeScale().fitContent();

@@ -12,7 +12,9 @@ connectors); ours reads our own DB so the operator can ask:
 Architecture:
   _build_research_snapshot()  → aggregates 6h-7d of brain/graph/hypotheses
   ResearchAgent               → BaseAgent subclass, deep tier (Opus 4.7)
-  ask(conversation, question) → top-level: persists user msg + assistant reply
+  begin_ask(conv, question)   → persists the question + a PENDING answer
+  complete_ask(pending_id)    → fills that pending row in place (worker)
+  ask(conversation, question) → both halves, synchronously (fallback path)
 
 Safety:
   - Read-only — agent has NO tools to mutate state. Pure question/answer.
@@ -31,6 +33,7 @@ from typing import Optional
 from django.utils import timezone
 
 from ai_agents.base_agent import BaseAgent
+from ai_agents.spend import can_spend
 
 logger = logging.getLogger(__name__)
 
@@ -179,9 +182,17 @@ MAX_HISTORY_MESSAGES = 8
 
 def _conversation_history_for_prompt(conversation) -> list[dict]:
     """Last N messages of the conversation, oldest-first. Used so the agent
-    can answer follow-ups without losing context."""
+    can answer follow-ups without losing context.
+
+    Pending rows are excluded: an unanswered placeholder has empty content,
+    and feeding an empty ASSISTANT turn into the prompt teaches the model
+    that saying nothing is an acceptable answer.
+    """
+    from .research_models import ResearchMessage
     msgs = list(
-        conversation.messages.order_by("-created_at")[:MAX_HISTORY_MESSAGES]
+        conversation.messages
+        .exclude(status=ResearchMessage.STATUS_PENDING)
+        .order_by("-created_at")[:MAX_HISTORY_MESSAGES]
         .values("role", "content")
     )
     msgs.reverse()
@@ -343,27 +354,130 @@ def archive_active_conversation(user) -> None:
         is_active=False)
 
 
-def ask(conversation, question: str) -> dict:
-    """Run one Q&A turn. Persists user message + assistant reply. Always
-    returns a result dict; on agent failure, persists an error-stamped
-    assistant message so the UI can show what went wrong.
+UNAVAILABLE_TEXT = ("(Sauron's research agent is temporarily unavailable. "
+                     "Try again in a few minutes.)")
+
+
+def begin_ask(conversation, question: str):
+    """Persist the question AND an empty pending answer, and return both.
+
+    Split out of ask() so the durable record of the exchange exists before
+    anything slow happens. One LLM turn takes tens of seconds; while that
+    ran inside the web request, navigating away aborted the fetch and the
+    answer existed nowhere the UI could ever find it again. Now the
+    exchange is two rows from the first millisecond, and whoever produces
+    the answer fills the second one IN PLACE.
+
+    Returns (user_message, pending_assistant_message), or (None, None) for
+    an empty question.
     """
+    from django.db import transaction
     from .research_models import ResearchMessage
+
     question = (question or "").strip()
     if not question:
-        return {"ok": False, "error": "empty question"}
+        return None, None
 
-    # Persist user message first so it's visible even if the agent fails.
-    user_msg = ResearchMessage.objects.create(
-        conversation=conversation,
-        role=ResearchMessage.ROLE_USER,
-        content=question[:8000],
-    )
+    # One transaction: a question with no placeholder would render as a
+    # turn Sauron simply ignored, with nothing for a worker to fill.
+    with transaction.atomic():
+        user_msg = ResearchMessage.objects.create(
+            conversation=conversation,
+            role=ResearchMessage.ROLE_USER,
+            content=question[:8000],
+        )
+        pending = ResearchMessage.objects.create(
+            conversation=conversation,
+            role=ResearchMessage.ROLE_ASSISTANT,
+            content="",
+            status=ResearchMessage.STATUS_PENDING,
+            replies_to=user_msg,
+        )
+        # Auto-title the conversation from the first message.
+        if not conversation.title:
+            conversation.title = question[:120]
+            conversation.save(update_fields=["title"])
+    return user_msg, pending
 
-    # Auto-title the conversation from the first message.
-    if not conversation.title:
-        conversation.title = question[:120]
-        conversation.save(update_fields=["title"])
+
+def _settle(pending, *, content: str, error: str = "", model_used: str = "",
+            tokens_in: int = 0, tokens_out: int = 0, cost_usd: float = 0.0):
+    """Fill a pending row in place and mark it settled.
+
+    Every exit from the answering path goes through here. A placeholder
+    left PENDING is worse than an error message: the panel would spin on
+    it forever, on every page, in every tab.
+    """
+    from .research_models import ResearchMessage
+    pending.content = content
+    pending.error = (error or "")[:1000]
+    pending.model_used = model_used
+    pending.tokens_in = tokens_in
+    pending.tokens_out = tokens_out
+    pending.cost_usd = Decimal(str(round(float(cost_usd or 0), 6)))
+    pending.status = ResearchMessage.STATUS_DONE
+    pending.save(update_fields=[
+        "content", "error", "model_used", "tokens_in", "tokens_out",
+        "cost_usd", "status"])
+    return pending
+
+
+def fail_pending(pending_message_id: int, reason: str) -> dict:
+    """Settle a pending row the worker never finished (hard task failure).
+
+    Celery's link_error lands here. Without it a worker that dies between
+    picking the job up and writing the answer leaves the operator watching
+    a bubble that will never resolve.
+    """
+    from .research_models import ResearchMessage
+    pending = ResearchMessage.objects.filter(
+        pk=pending_message_id, status=ResearchMessage.STATUS_PENDING).first()
+    if pending is None:
+        return {"ok": False, "error": "not pending"}
+    _settle(pending, content=UNAVAILABLE_TEXT, error=str(reason)[:1000])
+    return {"ok": False, "error": str(reason),
+            "assistant_message_id": pending.pk,
+            "user_message_id": pending.replies_to_id}
+
+
+def complete_ask(pending_message_id: int) -> dict:
+    """Produce the answer for one pending row and fill it in place.
+
+    Runs on the Celery worker, or inline in the request when the broker is
+    down. Safe to call twice: an already-settled row is left alone, so a
+    task retry cannot bill a second LLM call or overwrite a good answer.
+    """
+    from .research_models import ResearchMessage
+
+    pending = (ResearchMessage.objects
+               .select_related("conversation", "replies_to")
+               .filter(pk=pending_message_id).first())
+    if pending is None:
+        return {"ok": False, "error": "message not found"}
+    if pending.status != ResearchMessage.STATUS_PENDING:
+        return {"ok": True, "already_settled": True,
+                "assistant_message_id": pending.pk,
+                "user_message_id": pending.replies_to_id}
+
+    conversation = pending.conversation
+    question = pending.replies_to.content if pending.replies_to else ""
+
+    # The daily AI ceiling now covers chat. It never did before: the panel
+    # called the agent straight from the view, so every question was
+    # un-budgeted spend while every scheduled agent was capped. Checked here
+    # rather than with @spend_guard because that decorator's skip path
+    # returns a dict without running the body — which would leave this row
+    # PENDING forever. Here the refusal lands in the bubble instead.
+    allowed, reason = can_spend(tier="deep", estimated_usd=0.3)
+    if not allowed:
+        logger.warning("[research-agent] refused — %s", reason)
+        _settle(pending,
+                content=f"(Not answered — the daily AI budget is spent: "
+                        f"{reason}.)",
+                error=f"budget: {reason}")
+        return {"ok": False, "error": reason,
+                "assistant_message_id": pending.pk,
+                "user_message_id": pending.replies_to_id}
 
     history = _conversation_history_for_prompt(conversation)
     snapshot = _build_research_snapshot()
@@ -381,30 +495,33 @@ def ask(conversation, question: str) -> dict:
         answer = parsed.get("answer_md", "")
     except Exception as e:
         logger.warning("[research-agent] failed: %s", e)
-        ResearchMessage.objects.create(
-            conversation=conversation,
-            role=ResearchMessage.ROLE_ASSISTANT,
-            content="(Sauron's research agent is temporarily unavailable. "
-                     "Try again in a few minutes.)",
-            error=str(e)[:1000],
-        )
+        _settle(pending, content=UNAVAILABLE_TEXT, error=str(e))
         return {"ok": False, "error": str(e),
-                 "user_message_id": user_msg.id}
+                "assistant_message_id": pending.pk,
+                "user_message_id": pending.replies_to_id}
 
-    asst_msg = ResearchMessage.objects.create(
-        conversation=conversation,
-        role=ResearchMessage.ROLE_ASSISTANT,
-        content=answer,
-        model_used=agent.model,
-        tokens_in=usage.get("input_tokens", 0),
-        tokens_out=usage.get("output_tokens", 0),
-        cost_usd=Decimal(str(round(float(usage.get("cost_usd", 0)), 6))),
-    )
+    _settle(pending, content=answer, model_used=agent.model,
+            tokens_in=usage.get("input_tokens", 0),
+            tokens_out=usage.get("output_tokens", 0),
+            cost_usd=usage.get("cost_usd", 0))
     return {
         "ok": True,
-        "user_message_id": user_msg.id,
-        "assistant_message_id": asst_msg.id,
-        "tokens_in": asst_msg.tokens_in,
-        "tokens_out": asst_msg.tokens_out,
-        "cost_usd": float(asst_msg.cost_usd),
+        "user_message_id": pending.replies_to_id,
+        "assistant_message_id": pending.pk,
+        "tokens_in": pending.tokens_in,
+        "tokens_out": pending.tokens_out,
+        "cost_usd": float(pending.cost_usd),
     }
+
+
+def ask(conversation, question: str) -> dict:
+    """Run one Q&A turn start to finish, synchronously.
+
+    Kept as the whole turn for the plain-form endpoint and for the
+    fallback the view takes when the broker is down — a dead worker must
+    degrade to the old behaviour, not lose the question.
+    """
+    user_msg, pending = begin_ask(conversation, question)
+    if pending is None:
+        return {"ok": False, "error": "empty question"}
+    return complete_ask(pending.pk)

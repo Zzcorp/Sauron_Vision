@@ -49,9 +49,12 @@ Public API
     unknown_param_keys(kind, params) -> list[str]
     invalid_param_values(kind, params) -> list[str]
     unknown_sizing_keys(sizing) -> list[str]
+    condition_fingerprint(condition) -> str
+    setup_fingerprints(setup) -> frozenset[str]
+    setup_overlap(setup_a, setup_b) -> dict
     cot_sign(instrument) -> int
     cot_net_speculative(report, instrument) -> int
-    scan_setup(setup, instrument, *, now=None, as_of=None) -> dict
+    scan_setup(setup, instrument, *, now=None, as_of=None, emit=True) -> dict
     scan_all_setups(*, now=None, as_of=None) -> dict
     resolve_pending_flags(*, now=None, as_of=None) -> dict
 """
@@ -175,6 +178,86 @@ def invalid_param_values(kind: str, params: dict) -> list:
 def unknown_sizing_keys(sizing: dict) -> list:
     """Keys in an OpportunitySetup's `sizing` that `_suggested_levels` ignores."""
     return sorted(set(sizing or {}) - SIZING_KEYS)
+
+
+# ── Are two setups the same detector twice? ────────────────────────────────
+
+def condition_fingerprint(condition: dict) -> str:
+    """A condition's identity INCLUDING the params that decide which way it
+    points: `liquidity_sweep[direction=bullish_sweep]`, not `liquidity_sweep`.
+
+    Comparing setups on `kind` alone reports advanced_smc_long and
+    advanced_smc_short as the same rule twice — three shared kinds, Jaccard
+    1.0 — when they are mirror images: the same three detectors, each on the
+    opposite branch. Acting on that number would retire one half of a
+    long/short pair as a duplicate of the other.
+
+    `PARAM_CHOICES` already names exactly the params an evaluator BRANCHES
+    on, and a branch param is precisely the one whose value changes what the
+    condition MEANS, so kind + those params is the honest identity.
+    Thresholds, lookbacks and periods are deliberately excluded: they are
+    tuning, and folding them in would make every pair look distinct — which
+    is the opposite failure and just as useless to an operator.
+    """
+    kind = (condition or {}).get("kind", "")
+    params = (condition or {}).get("params") or {}
+    declared = PARAM_CHOICES.get(kind) or {}
+    tags = [f"{k}={params[k]}" for k in sorted(declared) if k in params]
+    return f"{kind}[{','.join(tags)}]" if tags else kind
+
+
+def setup_fingerprints(setup) -> frozenset:
+    """`setup`'s SCORING conditions as fingerprints.
+
+    Gates are left out: a gate says where a setup applies, not what it looks
+    for, so two setups sharing only `quote_currency: USD` have nothing in
+    common but a universe.
+    """
+    return frozenset(
+        condition_fingerprint(c)
+        for c in (getattr(setup, "conditions", None) or [])
+        if not (c or {}).get("gate")
+    )
+
+
+def setup_overlap(setup_a, setup_b) -> dict:
+    """How much two setups actually look for the same thing.
+
+    `jaccard` is over direction-aware fingerprints; `kind_jaccard` is over
+    bare kinds — the number a naive audit produces. The GAP between them is
+    the finding: on the advanced_smc long/short pair it is 0.20 vs 1.00, and
+    on starter_commodity_vol_compression vs starter_stock_mean_reversion it
+    is 0.00 vs 1.00. `shares_universe` completes the picture, because two
+    setups whose asset_classes are disjoint are never scored against the same
+    instrument however much their conditions rhyme.
+
+    Both Jaccards are None — not 0.0 — when there is nothing to compare, so a
+    setup with no scoring conditions reads as unknown rather than as
+    "measured, and they share nothing".
+    """
+    fp_a, fp_b = setup_fingerprints(setup_a), setup_fingerprints(setup_b)
+    kinds_a = frozenset(f.split("[", 1)[0] for f in fp_a)
+    kinds_b = frozenset(f.split("[", 1)[0] for f in fp_b)
+
+    def _jaccard(a, b):
+        union = a | b
+        return round(len(a & b) / len(union), 4) if union else None
+
+    classes_a = set(getattr(setup_a, "asset_classes", None) or [])
+    classes_b = set(getattr(setup_b, "asset_classes", None) or [])
+    directions = {getattr(setup_a, "direction", ""),
+                  getattr(setup_b, "direction", "")}
+    return {
+        "jaccard": _jaccard(fp_a, fp_b),
+        "kind_jaccard": _jaccard(kinds_a, kinds_b),
+        "shared": sorted(fp_a & fp_b),
+        "only_a": sorted(fp_a - fp_b),
+        "only_b": sorted(fp_b - fp_a),
+        # Empty asset_classes means "every class", so it overlaps everything.
+        "shares_universe": (not classes_a) or (not classes_b)
+                           or bool(classes_a & classes_b),
+        "opposite_direction": directions == {"bullish", "bearish"},
+    }
 
 
 def _is_replay(now: datetime) -> bool:
@@ -1044,8 +1127,58 @@ def _last_price(instrument, now: datetime, *, as_of: bool = False) -> Optional[f
         return None
 
 
+def _emit_match(setup, instrument, composite: float, conditions_out: list,
+                last_price: float) -> dict:
+    """Write the Signal + OpportunityFlag for a match that has cleared every
+    check, and return the pair's result dict.
+
+    Split out of `scan_setup` so a pass can hold a match back. Whether two
+    setups contradict each other is a property of the PAIR, and it is only
+    knowable once both have been scored — a function that scores and writes in
+    one breath can never suppress more than whichever one it reached second.
+    """
+    from signals.models import OpportunityFlag, Signal
+
+    entry, stop, target = _suggested_levels(setup.direction, last_price,
+                                            setup.sizing or {})
+    risk_per = abs(entry - stop)
+    rr = abs((target - entry) / risk_per) if risk_per > 0 else None
+
+    signal = Signal.objects.create(
+        instrument=instrument,
+        signal_type="composite",
+        direction=setup.direction,
+        urgency="medium",
+        title=f"{setup.name} matched on {instrument.symbol}",
+        description=setup.description or f"Setup '{setup.name}' triggered with score {composite:.2f}.",
+        rule_name=setup.name,
+        score=round(composite, 4),
+        sub_scores={"opportunity_setup": setup.name},
+        price_at_signal=Decimal(str(last_price)),
+        suggested_entry=Decimal(str(round(entry, 8))),
+        suggested_stop=Decimal(str(round(stop, 8))),
+        suggested_target=Decimal(str(round(target, 8))),
+        risk_reward_ratio=rr,
+    )
+
+    flag = OpportunityFlag.objects.create(
+        setup=setup, instrument=instrument, signal=signal,
+        direction=setup.direction, score=round(composite, 4),
+        conditions_evaluated=conditions_out,
+        price_at_flag=Decimal(str(last_price)),
+        suggested_entry=Decimal(str(round(entry, 8))),
+        suggested_stop=Decimal(str(round(stop, 8))),
+        suggested_target=Decimal(str(round(target, 8))),
+        horizon_days=setup.suggested_horizon_days,
+    )
+    logger.info("[opportunity] flag %s created for %s × %s (score=%.2f)",
+                flag.id, setup.name, instrument.symbol, composite)
+    return {"matched": True, "score": round(composite, 4), "flag_id": flag.id,
+            "signal_id": signal.id, "conditions": conditions_out}
+
+
 def scan_setup(setup, instrument, *, now: Optional[datetime] = None,
-               as_of: Optional[bool] = None) -> dict:
+               as_of: Optional[bool] = None, emit: bool = True) -> dict:
     """Run one setup against one instrument. Returns a dict and creates an
     OpportunityFlag (+ linked Signal) if the composite score meets `min_match_score`.
 
@@ -1053,9 +1186,12 @@ def scan_setup(setup, instrument, *, now: Optional[datetime] = None,
     present-day state. Left at None it defaults to `now is not None`, which is
     the honest reading of a caller that named its own instant — batch callers
     that pin one `now` for a whole live pass pass `as_of=False` explicitly.
-    """
-    from signals.models import OpportunityFlag, Signal
 
+    `emit=False` scores the pair and writes nothing, returning the match with
+    `pending: True` plus the `last_price` the rows would have been built from.
+    `scan_all_setups` uses it to see a whole instrument's matches before any
+    of them is published; a direct caller wanting the flag keeps the default.
+    """
     if as_of is None:
         as_of = now is not None
     now = now or timezone.now()
@@ -1119,41 +1255,11 @@ def scan_setup(setup, instrument, *, now: Optional[datetime] = None,
         return {"matched": False, "skipped": True, "reason": "no_price_data",
                 "score": round(composite, 4), "conditions": conditions_out}
 
-    entry, stop, target = _suggested_levels(setup.direction, last_price, setup.sizing or {})
-    risk_per = abs(entry - stop)
-    rr = abs((target - entry) / risk_per) if risk_per > 0 else None
+    if not emit:
+        return {"matched": True, "pending": True, "score": round(composite, 4),
+                "last_price": last_price, "conditions": conditions_out}
 
-    signal = Signal.objects.create(
-        instrument=instrument,
-        signal_type="composite",
-        direction=setup.direction,
-        urgency="medium",
-        title=f"{setup.name} matched on {instrument.symbol}",
-        description=setup.description or f"Setup '{setup.name}' triggered with score {composite:.2f}.",
-        rule_name=setup.name,
-        score=round(composite, 4),
-        sub_scores={"opportunity_setup": setup.name},
-        price_at_signal=Decimal(str(last_price)),
-        suggested_entry=Decimal(str(round(entry, 8))),
-        suggested_stop=Decimal(str(round(stop, 8))),
-        suggested_target=Decimal(str(round(target, 8))),
-        risk_reward_ratio=rr,
-    )
-
-    flag = OpportunityFlag.objects.create(
-        setup=setup, instrument=instrument, signal=signal,
-        direction=setup.direction, score=round(composite, 4),
-        conditions_evaluated=conditions_out,
-        price_at_flag=Decimal(str(last_price)),
-        suggested_entry=Decimal(str(round(entry, 8))),
-        suggested_stop=Decimal(str(round(stop, 8))),
-        suggested_target=Decimal(str(round(target, 8))),
-        horizon_days=setup.suggested_horizon_days,
-    )
-    logger.info("[opportunity] flag %s created for %s × %s (score=%.2f)",
-                flag.id, setup.name, instrument.symbol, composite)
-    return {"matched": True, "score": round(composite, 4), "flag_id": flag.id,
-            "signal_id": signal.id, "conditions": conditions_out}
+    return _emit_match(setup, instrument, composite, conditions_out, last_price)
 
 
 def scan_all_setups(*, now: Optional[datetime] = None,
@@ -1176,17 +1282,38 @@ def scan_all_setups(*, now: Optional[datetime] = None,
         asset_class_skipped  pair outside the setup's asset_classes
         gate_skipped         a gate condition said the setup does not apply here
         no_price_data        scored a match but had no price to build levels from
+        contradiction_skipped  matched, but another setup matched the SAME
+                             instrument this pass pointing the other way
+        emit_errors          cleared everything and then failed to write the rows
         scored               reached the composite (the honest denominator for
                              `matches`)
         evaluator_errors     conditions whose evaluator raised — already logged
                              per occurrence, now countable
         errors               the pair itself raised out of `scan_setup`
 
+    Only the first three of those and `errors` partition `evaluations`:
+    `no_price_data`, `contradiction_skipped` and `emit_errors` all describe
+    pairs that reached the composite, so they are sub-counts of `scored` and
+    the identity stays
+        scored + asset_class_skipped + gate_skipped + errors == evaluations
+
     Deliberately none of these keys is named `skipped`, `attempted`, `parsed`,
     `stored` or `fetched`: `core.task_gate.judge_result` reads a top-level
     `skipped` as "not configured" and treats the other four as work/done counts,
     so either would restate a healthy scan that legitimately matched nothing as
     a warning on the component's health record.
+
+    Publication is deferred to the end of the pass. Two setups can point
+    opposite ways at the same instrument on the same bar — advanced_smc_long
+    and advanced_smc_short both fire on one outside bar that sweeps both sides
+    of a coil and closes back inside it — and each is individually correct by
+    its own conditions. Published, that pair is a bullish and a bearish Signal
+    on one instrument at one instant: two rules both graded on a coin flip,
+    feeding expectancy back into the very weights that decide the next entry.
+    Nothing downstream can reconstruct which bar caused it. So the pass
+    publishes NEITHER side, which is the fail-towards-not-trading answer and
+    the only symmetric one — suppressing whichever arrived second would just
+    hand the trade to the setup that sorted first.
     """
     from signals.models import OpportunitySetup
     from instruments.models import Instrument
@@ -1202,12 +1329,18 @@ def scan_all_setups(*, now: Optional[datetime] = None,
     n_scored = 0
     n_errors = 0
     n_evaluator_errors = 0
+    n_emit_errors = 0
+    n_contradiction = 0
     skips = {"asset_class_filter": 0, "gate_failed": 0, "no_price_data": 0}
+    # instrument.id -> [(setup, instrument, result), ...] held back until the
+    # whole pass has been scored. Only matches land here, so this stays tiny.
+    pending: dict = {}
     for setup in setups:
         for inst in instruments:
             n_evaluations += 1
             try:
-                result = scan_setup(setup, inst, now=now, as_of=as_of)
+                result = scan_setup(setup, inst, now=now, as_of=as_of,
+                                    emit=False)
             except Exception as e:
                 n_errors += 1
                 logger.warning("[opportunity] scan failed setup=%s inst=%s: %s",
@@ -1233,7 +1366,32 @@ def scan_all_setups(*, now: Optional[datetime] = None,
                 # Cleared the bar and then had nothing to price the levels from.
                 skips[reason] += 1
             elif result.get("matched"):
-                n_matches += 1
+                pending.setdefault(inst.id, []).append((setup, inst, result))
+
+    # ── Publish, one instrument at a time ────────────────────────────────
+    for matches in pending.values():
+        directions = {m[0].direction for m in matches}
+        if "bullish" in directions and "bearish" in directions:
+            n_contradiction += len(matches)
+            logger.warning(
+                "[opportunity] %s: %d setups disagree on direction this pass "
+                "(%s) — publishing none of them",
+                matches[0][1].symbol, len(matches),
+                ", ".join(f"{s.name}={s.direction}" for s, _, _ in matches))
+            continue
+        for setup, inst, result in matches:
+            try:
+                _emit_match(setup, inst, result["score"], result["conditions"],
+                            result["last_price"])
+            except Exception as e:
+                # Counted separately from `errors`: the pair already reached
+                # the composite and is already inside `scored`, so folding it
+                # into `errors` would break the partition of `evaluations`.
+                n_emit_errors += 1
+                logger.warning("[opportunity] could not publish %s × %s: %s",
+                               setup.name, inst.symbol, e)
+                continue
+            n_matches += 1
 
     return {
         "setups_scanned": len(setups),
@@ -1244,7 +1402,9 @@ def scan_all_setups(*, now: Optional[datetime] = None,
         "asset_class_skipped": skips["asset_class_filter"],
         "gate_skipped": skips["gate_failed"],
         "no_price_data": skips["no_price_data"],
+        "contradiction_skipped": n_contradiction,
         "evaluator_errors": n_evaluator_errors,
+        "emit_errors": n_emit_errors,
         "errors": n_errors,
     }
 

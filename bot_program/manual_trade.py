@@ -28,10 +28,20 @@ Safety posture (each learned from adversarial review of the first cut):
     levered notional).
   * Execution is serialized per pool and deduped per signal, so a
     double-click cannot open two positions.
+
+Sizing is risk-derived by default and the default is the right answer:
+qty such that a stop-out costs exactly the config's risk budget. The
+operator may override it at the confirm step, in units or in cash, and
+the override is re-derived and re-judged HERE — never taken on the
+browser's word — against the same three rules the automatic path obeys:
+the risk ceiling that keeps 1R comparable, the per-class notional cap
+(4.0 for FX because the leverage lives at the broker), and the free
+capital in that class's pool (FX commits margin, not levered notional).
 """
 from __future__ import annotations
 
 import logging
+import math
 from decimal import Decimal
 
 logger = logging.getLogger(__name__)
@@ -143,6 +153,125 @@ def _open_manual_trades(cfg):
         config=cfg, status="OPEN").order_by("opened_at"))
 
 
+def _symbol_exposure(user, symbol):
+    """Live positions this user already holds in this symbol, ANY config.
+
+    _open_manual_trades deliberately looks at one config, because that is
+    what the capital pool is. Market exposure is not: a rule's entry lands
+    on the bot's own AssetBotConfig row, so the manual path could not see
+    it and the confirm popup said nothing. That blind spot IS the double
+    booking the operator reported — EURGBP entered once by a rule and once
+    by hand, with nothing on the screen admitting the first one existed.
+
+    Reported, never enforced: adding to a position the engine opened is a
+    legitimate decision. Taking it without being told is not.
+    """
+    from bot_program.models import AssetBotTrade
+
+    return [{"trade_id": t.id, "side": t.side, "qty": float(t.qty),
+             "rule": t.rule_name or "", "venue": "PAPER" if t.paper else "LIVE",
+             "manual": bool((t.metadata or {}).get("manual")),
+             "entry": float(t.entry_price)}
+            for t in AssetBotTrade.objects.filter(
+                config__user=user, symbol=symbol,
+                status__in=("OPEN", "CLOSE_PENDING")).order_by("opened_at")]
+
+
+def _qty_step(bot, price: float) -> float:
+    """The smallest size increment this venue actually keeps.
+
+    Probed through the bot's own _round_qty rather than hardcoded, because
+    the granularity is per class AND per mode: crypto keeps 8 decimals,
+    paper stock 4, LIVE stock whole shares, forex 100-unit boundaries. A
+    hardcoded step would offer the operator a size the venue silently
+    rounds to zero.
+    """
+    for step in (1e-8, 1e-6, 1e-4, 1e-2, 0.1, 1.0, 10.0, 100.0, 1000.0):
+        try:
+            if bot._round_qty(step, price) == step:
+                return step
+        except Exception:  # noqa: BLE001 — a class that refuses tiny sizes
+            continue
+    return 1.0
+
+
+def _floor_to_step(qty: float, step: float) -> float:
+    """Round DOWN to the step. A ceiling that rounds up is not a ceiling."""
+    if step <= 0:
+        return max(qty, 0.0)
+    return math.floor(max(qty, 0.0) / step + 1e-9) * step
+
+
+def validate_qty_override(cfg, *, asset_class, raw, entry, stop,
+                          value_per_unit, available, round_qty):
+    """The operator's size, re-derived and re-judged server-side.
+
+    Returns (qty, None) or (None, reason). Never trust the number in the
+    request: the browser computed its preview from a payload it can edit,
+    and the rules being checked are the ones that keep the book solvent
+    and 1R comparable. Same three gates the automatic path obeys —
+
+      risk      MAX_RISK_FRACTION is documented in sizing.py as "a hard
+                cap, not a target". The default budget is 0.25%; an
+                override may reach the 1.0% ceiling and not a cent past
+                it, or realized_r stops being one unit across the book.
+      notional  max_notional_fraction — 20% for most classes, 4.0 for FX
+                because that cap presumes the broker's leverage.
+      pool      the free capital in THIS class's pool, margin-aware, so
+                an FX override is charged its margin and a stock override
+                its full settlement.
+
+    — and an impossible number is refused WITH the arithmetic, never
+    silently clamped to something the operator did not ask for.
+    """
+    from bot_program.asset_engine.sizing import (MAX_RISK_FRACTION,
+                                                 max_notional_fraction)
+
+    # bool is an int in Python: JSON `true` would otherwise size to 1 unit.
+    if isinstance(raw, bool):
+        return None, "The size must be a number"
+    try:
+        qty = float(raw)
+    except (TypeError, ValueError):
+        return None, "The size must be a number"
+    if not math.isfinite(qty) or qty <= 0:
+        return None, "The size must be a positive number"
+
+    qty = float(round_qty(qty, entry))
+    if qty <= 0:
+        return None, ("That size rounds to zero at this venue's minimum "
+                      "increment — nothing would have been sent")
+
+    capital = float(getattr(cfg, "capital", 0) or 0)
+    per_unit_risk = abs(float(entry) - float(stop)) * float(value_per_unit)
+    notional = qty * float(entry) * float(value_per_unit)
+    capital_use = _capital_use(asset_class, notional)
+
+    risk = qty * per_unit_risk
+    risk_cap = capital * MAX_RISK_FRACTION
+    # The 1e-9 slack is for float noise on an exactly-at-the-cap size, not
+    # tolerance: a size one cent over still fails.
+    if per_unit_risk > 0 and risk > risk_cap + 1e-9:
+        return None, (
+            f"{qty:g} units risks ${risk:,.2f} to the stop — past the "
+            f"${risk_cap:,.2f} ceiling ({MAX_RISK_FRACTION * 100:.1f}% of "
+            f"the ${capital:,.2f} {asset_class} pool). Size down, or raise "
+            f"the pool's capital.")
+
+    notional_cap = capital * max_notional_fraction(cfg, asset_class)
+    if notional > notional_cap + 1e-9:
+        return None, (
+            f"{qty:g} units is ${notional:,.2f} of notional — past the "
+            f"${notional_cap:,.2f} this class allows against a "
+            f"${capital:,.2f} pool.")
+
+    if capital_use > float(available) + 1e-9:
+        return None, (
+            f"{qty:g} units ties up ${capital_use:,.2f} of capital but only "
+            f"${float(available):,.2f} is free in the {asset_class} pool.")
+    return qty, None
+
+
 def _funding_proposal(open_trades, deficit):
     """The least disturbance that frees the deficit, or None if even
     closing everything falls short.
@@ -226,9 +355,9 @@ def _preview(user, inst, side, signal=None) -> dict:
                          f"{target:g}) — this move has likely already "
                          f"played out"}
 
+    vpu = float(bot._value_per_unit(inst.symbol))
     sizing = size_position(cfg, asset_class=cls, entry=price, stop=stop,
-                           direction=side,
-                           value_per_unit=bot._value_per_unit(inst.symbol))
+                           direction=side, value_per_unit=vpu)
     qty = bot._round_qty(sizing["qty"], price)
     if qty <= 0:
         return {"error": "Sized to zero — the risk budget does not cover "
@@ -257,10 +386,37 @@ def _preview(user, inst, side, signal=None) -> dict:
                              f"would free ${freeable:,.2f} against the "
                              f"${deficit:,.2f} short"}
 
+    # ── What an override is allowed to be ───────────────────────────────
+    # Per-unit costs so the confirm step can show the consequence of a size
+    # LIVE, without a round trip per keystroke, and in the same arithmetic
+    # validate_qty_override will re-run on execute. The browser is given
+    # the rules; it is never given the verdict.
+    from bot_program.asset_engine.sizing import (MAX_RISK_FRACTION,
+                                                 max_notional_fraction)
+    stop_used = float(sizing["stop"])
+    risk_per_unit = abs(price - stop_used) * vpu
+    notional_per_unit = price * vpu
+    capital_use_per_unit = _capital_use(cls, notional_per_unit)
+    step = _qty_step(bot, price)
+    # The pool line moves with the funding closes: what an override may use
+    # is what is free AFTER whatever the operator agrees to close.
+    freed = sum(c["freed"] for c in proposal) if proposal else 0.0
+    pool_free = round(available + freed, 2)
+
+    caps = []
+    if risk_per_unit > 0:
+        caps.append(capital * MAX_RISK_FRACTION / risk_per_unit)
+    if notional_per_unit > 0:
+        caps.append(capital * max_notional_fraction(cfg, cls)
+                    / notional_per_unit)
+    if capital_use_per_unit > 0:
+        caps.append(pool_free / capital_use_per_unit)
+    max_qty = _floor_to_step(min(caps), step) if caps else 0.0
+
     return {
         "symbol": inst.symbol, "side": side, "qty": qty,
         "entry": round(price, 8),
-        "stop": round(float(sizing["stop"]), 8),
+        "stop": round(stop_used, 8),
         "target": round(float(target), 8),
         "stop_widened": bool(sizing["stop_widened"]),
         "risk_dollars": sizing["risk_dollars"],
@@ -271,6 +427,20 @@ def _preview(user, inst, side, signal=None) -> dict:
         "close_proposal": proposal,
         "managed": _tick_manages(),
         "venue": "paper",
+        # Sizing bounds — the override control's whole vocabulary.
+        "asset_class": cls,
+        "value_per_unit": vpu,
+        "qty_step": step,
+        "risk_per_unit": risk_per_unit,
+        "notional_per_unit": notional_per_unit,
+        "capital_use_per_unit": capital_use_per_unit,
+        "pool_free": pool_free,
+        "max_qty": max_qty,
+        "max_risk_dollars": round(capital * MAX_RISK_FRACTION, 2),
+        "max_notional": round(capital * max_notional_fraction(cfg, cls), 2),
+        # Live exposure in this symbol, from ANY of this user's configs —
+        # the fact whose absence let one symbol be booked twice.
+        "existing_exposure": _symbol_exposure(user, inst.symbol),
     }
 
 
@@ -294,9 +464,14 @@ def preview_asset_trade(user, inst, side) -> dict:
     return _preview(user, inst, side)
 
 
-def _execute(user, inst, side, close_ids=None, signal=None) -> dict:
+def _execute(user, inst, side, close_ids=None, signal=None,
+             qty_override=None) -> dict:
     """Close the funding positions (if any), then open the trade. Paper is
     synchronous, so the whole chain settles before this returns.
+
+    `qty_override` is the operator's size from the confirm step. None means
+    "use the risk budget", which is the path that existed before it and is
+    reproduced here untouched, down to the metadata it writes.
 
     The structure is transactional hygiene, learned the hard way:
       * Funding closes run OUTSIDE the open-side transaction. _close_trade
@@ -385,7 +560,13 @@ def _execute(user, inst, side, close_ids=None, signal=None) -> dict:
             preview.setdefault("closed", closed)
             return preview
 
-        if not preview["sufficient"]:
+        # Only the AUTOMATIC size is gated on the preview's own sufficiency
+        # flag, which is computed for that size. An override is judged
+        # against the pool on its own terms below — a smaller one legitimately
+        # fits where the risk-derived size did not, and refusing it here
+        # would tell the operator to close positions to make room for a
+        # trade that already fits.
+        if qty_override is None and not preview["sufficient"]:
             return {"error": "Insufficient capital — the funding closes did "
                              "not cover the required amount",
                     "closed": closed}
@@ -404,11 +585,50 @@ def _execute(user, inst, side, close_ids=None, signal=None) -> dict:
         # refusal below, exactly matching the preview path's behaviour.
         vpu = float(bot._value_per_unit(inst.symbol))
         dist = abs(fill - stop) * vpu
-        qty = bot._round_qty(preview["risk_dollars"] / dist, fill) \
-            if dist > 0 else 0
-        if qty <= 0:
+        overridden = qty_override is not None
+        if not overridden:
+            qty = bot._round_qty(preview["risk_dollars"] / dist, fill) \
+                if dist > 0 else 0
+            if qty <= 0:
+                return {"error": "Sized to zero at the adjusted fill price",
+                        "closed": closed}
+        elif dist <= 0:
+            # Same sentinel as above: no usable rate, so no size is legal —
+            # including one the operator typed.
             return {"error": "Sized to zero at the adjusted fill price",
                     "closed": closed}
+        else:
+            # Re-derived against the ACTUAL fill and the post-close pool,
+            # not against whatever the preview the browser saw contained.
+            qty, why = validate_qty_override(
+                cfg, asset_class=cls, raw=qty_override, entry=fill, stop=stop,
+                value_per_unit=vpu, available=preview["available"],
+                round_qty=bot._round_qty)
+            if why:
+                return {"error": why, "closed": closed}
+            logger.info("[take-trade] %s sized %s %s by hand: %s units "
+                        "(automatic size was %s)", user.username, side,
+                        inst.symbol, qty,
+                        bot._round_qty(preview["risk_dollars"] / dist, fill))
+
+        # An operator-sized trade carries the R it actually carries — qty x
+        # the stop distance — not the config's risk budget. Writing the
+        # budget would denominate this trade's realized_r against money that
+        # was never at risk, which is the one thing sizing.py exists to
+        # prevent. The automatic branch keeps the preview's own numbers
+        # verbatim, so an un-overridden trade is byte-for-byte what it was
+        # before this option existed.
+        if overridden:
+            notional = qty * fill * vpu
+            capital = float(preview["capital"])
+            risk_dollars = round(qty * dist, 6)
+            notional_fraction = round(notional / capital, 6) if capital else 0.0
+            capital_use = round(_capital_use(cls, notional), 2)
+        else:
+            risk_dollars = preview["risk_dollars"]
+            notional_fraction = (preview["notional"] / preview["capital"]
+                                 if preview["capital"] else 0.0)
+            capital_use = preview["capital_use"]
 
         trade = AssetBotTrade.objects.create(
             config=cfg, asset_class=cfg.asset_class, symbol=inst.symbol,
@@ -426,12 +646,14 @@ def _execute(user, inst, side, close_ids=None, signal=None) -> dict:
                 "signal_id": signal.id if signal is not None else None,
                 "initial_stop_loss": stop,
                 "value_per_unit": vpu,
-                "risk_dollars": preview["risk_dollars"],
-                "notional_fraction": (preview["notional"] / preview["capital"]
-                                      if preview["capital"] else 0.0),
-                "capital_use": preview["capital_use"],
+                "risk_dollars": risk_dollars,
+                "notional_fraction": notional_fraction,
+                "capital_use": capital_use,
                 "paper_fill": True, "market_price": preview["entry"],
                 "funding_closes": closed,
+                # Which size this was, so the ledger can tell an operator's
+                # judgement apart from the engine's arithmetic later.
+                "size_source": "operator" if overridden else "risk_budget",
             },
         )
 
@@ -487,23 +709,25 @@ def _execute(user, inst, side, close_ids=None, signal=None) -> dict:
     return {"ok": True, "trade_id": trade.id, "symbol": inst.symbol,
             "side": side, "qty": float(qty),
             "entry": float(trade.entry_price),
+            "risk_dollars": risk_dollars,
+            "sized_by": "operator" if overridden else "risk_budget",
             "managed": preview.get("managed", False),
             "closed": closed}
 
 
-def execute_take_trade(user, signal, close_ids=None) -> dict:
-    """Execute a signal's TAKE TRADE."""
+def execute_take_trade(user, signal, close_ids=None, qty=None) -> dict:
+    """Execute a signal's TAKE TRADE. `qty` None keeps the risk-derived size."""
     if signal.direction not in ("bullish", "bearish"):
         return {"error": f"'{signal.direction}' signals carry no trade "
                          f"direction — only bullish and bearish signals "
                          f"are executable"}
     side = "BUY" if signal.direction == "bullish" else "SELL"
     return _execute(user, signal.instrument, side, close_ids=close_ids,
-                    signal=signal)
+                    signal=signal, qty_override=qty)
 
 
-def execute_asset_trade(user, inst, side, close_ids=None) -> dict:
+def execute_asset_trade(user, inst, side, close_ids=None, qty=None) -> dict:
     """Execute a signal-less LONG/SHORT from an instrument popup."""
     if side not in ("BUY", "SELL"):
         return {"error": f"Unknown side {side!r}"}
-    return _execute(user, inst, side, close_ids=close_ids)
+    return _execute(user, inst, side, close_ids=close_ids, qty_override=qty)

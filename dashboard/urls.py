@@ -29,7 +29,7 @@ from .views_brain_phase38 import (
     intelligence_hub,
     earnings_reviews_dashboard, earnings_reviewer_run_now,
     research_view, research_ask, research_new_conversation,
-    research_save_as_draft, research_ask_ajax,
+    research_save_as_draft, research_ask_ajax, research_thread,
     research_delete_message, research_delete_conversation,
     research_open_conversation,
 )
@@ -134,6 +134,12 @@ urlpatterns = [
     path("api/liquidations/", __import__("dashboard.liquidations_view", fromlist=["liquidations_json"]).liquidations_json, name="liquidations_json"),
     path("portfolio/", views.portfolio_overview, name="portfolio_overview"),
     path("positions/", views.positions_list, name="positions_list"),
+    # The live regions of the two pages above, re-rendered from the same view
+    # bodies and the same templates. Both pages sat frozen at whatever they
+    # said when they were opened; these are what the page fetches on a fill
+    # and on its slow sweep. Additive — the page URLs are unchanged.
+    path("portfolio/live/", views.portfolio_live, name="portfolio_live"),
+    path("positions/live/", views.positions_live, name="positions_live"),
     path("ai/", views.ai_insights, name="ai_insights"),
     path("ai/tasks/", views.ai_tasks_list, name="ai_tasks_list"),
     path("ai/chat/", views.ai_chat_page, name="ai_chat"),
@@ -424,6 +430,9 @@ urlpatterns = [
          name="research_save_as_draft"),
     # Phase 64 — JSON ask endpoint for the global floating chat widget.
     path("research/ask-ajax/", research_ask_ajax, name="research_ask_ajax"),
+    # The panel's load path: it had none, so every navigation emptied it
+    # while the conversation carried on existing in the database.
+    path("research/thread/", research_thread, name="research_thread"),
     # Chat housekeeping: a thread you cannot prune accumulates every mistyped
     # question and every failed answer forever.
     path("research/message/<int:message_id>/delete/", research_delete_message,

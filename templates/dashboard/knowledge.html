@@ -40,54 +40,7 @@
     {% if kind_donut %}
     <div class="card" style="margin-bottom:18px;">
         <div class="card-header"><span class="card-title">Nodes by kind</span></div>
-        <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:6px 0;">
-            <svg class="oc-donut" viewBox="0 0 100 100" id="kgDonut">
-                <circle cx="50" cy="50" r="35" fill="none" stroke="var(--bg-card-hover)" stroke-width="14"/>
-            </svg>
-            <div class="oc-donut-legend" style="flex:1;min-width:200px;">
-                {% for d in kind_donut %}
-                    <div class="oc-donut-legend-row">
-                        <span class="oc-donut-legend-key">
-                            <span class="oc-donut-legend-swatch" data-class="{{ d.key }}"></span>
-                            {{ d.key|upper }}
-                        </span>
-                        <span class="oc-donut-legend-pct">{{ d.n }} · {{ d.pct }}%</span>
-                    </div>
-                {% endfor %}
-            </div>
-        </div>
-        <div id="kgDonutData" style="display:none;"
-             data-rows="{% for d in kind_donut %}{{ d.key }}:{{ d.pct }}{% if not forloop.last %};{% endif %}{% endfor %}"></div>
-        <script>
-            (function() {
-                var rows = (document.getElementById('kgDonutData').dataset.rows || '')
-                    .split(';').map(function(r){var p=r.split(':');return {k:p[0], pct:parseFloat(p[1])};})
-                    .filter(function(r){return !isNaN(r.pct);});
-                var palette = ['#00e868','#5b9eff','#c084fc','#ffb000','#22d3ee','#ff5e5e','#94a3b8'];
-                var colorOf = {};
-                rows.forEach(function(r,i){colorOf[r.k] = palette[i % palette.length];});
-                document.querySelectorAll('.oc-donut-legend-swatch').forEach(function(el){
-                    if (colorOf[el.dataset.class]) el.style.background = colorOf[el.dataset.class];
-                });
-                var svg = document.getElementById('kgDonut');
-                if (!svg || rows.length === 0) return;
-                var ns = 'http://www.w3.org/2000/svg';
-                var cx=50, cy=50, r=35, c=2*Math.PI*r;
-                var offset = -c/4;
-                rows.forEach(function(row){
-                    var seg = document.createElementNS(ns, 'circle');
-                    var len = (row.pct/100) * c;
-                    seg.setAttribute('cx', cx); seg.setAttribute('cy', cy); seg.setAttribute('r', r);
-                    seg.setAttribute('fill','none');
-                    seg.setAttribute('stroke', colorOf[row.k] || '#5b9eff');
-                    seg.setAttribute('stroke-width', 14);
-                    seg.setAttribute('stroke-dasharray', len.toFixed(2) + ' ' + (c - len).toFixed(2));
-                    seg.setAttribute('stroke-dashoffset', offset.toFixed(2));
-                    svg.appendChild(seg);
-                    offset -= len;
-                });
-            })();
-        </script>
+        {% include "_partials/chart_donut.html" with rows=kind_donut label="Share of knowledge-graph nodes by kind" %}
     </div>
     {% endif %}
 

@@ -532,6 +532,16 @@ def command_tab_live(request):
         context["live_24h_spark"] = last_12_r
         context["live_24h_spark_min"] = (min(last_12_r) if last_12_r else 0)
         context["live_24h_spark_max"] = (max(last_12_r) if last_12_r else 0)
+        # chart_bars contract. A diverging series scales against ONE peak —
+        # the largest absolute R — or a −3R loss next to a +0.5R win draws
+        # the two at the same length in opposite directions.
+        context["live_24h_bars"] = [
+            {"label": "#{}".format(i + 1), "value": r,
+             "display": "{:+.2f}R".format(r)}
+            for i, r in enumerate(last_12_r)
+        ]
+        context["live_24h_spark_peak"] = max(
+            [abs(r) for r in last_12_r], default=0)
     except Exception as e:
         logger.warning("Op Center LIVE session pulse unavailable: %s", e,
                        exc_info=True)
@@ -548,6 +558,8 @@ def command_tab_live(request):
         context["live_24h_spark"] = []
         context["live_24h_spark_min"] = 0
         context["live_24h_spark_max"] = 0
+        context["live_24h_bars"] = []
+        context["live_24h_spark_peak"] = 0
 
     # Active rules counter (Phase 5 RuleControl) — operator awareness.
     try:
@@ -679,7 +691,10 @@ def command_tab_portfolio(request):
     alloc_by_class["cash"] = float(portfolio.cash_available or 0)
     alloc_total = sum(alloc_by_class.values()) or 1.0
     allocation = sorted(
-        ({"asset_class": k, "value": v, "pct": round(v / alloc_total * 100, 1)}
+        # "key" is the donut partial's contract; asset_class stays for the
+        # table that reads the same rows.
+        ({"asset_class": k, "key": k, "value": v,
+          "pct": round(v / alloc_total * 100, 1)}
          for k, v in alloc_by_class.items() if v > 0),
         key=lambda r: r["value"], reverse=True,
     )

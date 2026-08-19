@@ -1352,6 +1352,258 @@
     });
   }
   var inflight = false;   /* double-click / two-tab guard, client half */
+
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function money(n) {
+    var v = Number(n);
+    if (!isFinite(v)) return '—';
+    return '$' + v.toLocaleString(undefined,
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  /* Sizes run from 8 decimals (crypto) to whole shares (live equities).
+     Never fix the precision: 0.0128 BTC rendered at 2dp is 0.01, a number
+     the server would never send and the operator would still believe. */
+  function units(n) {
+    var v = Number(n);
+    if (!isFinite(v)) return '—';
+    return String(Math.round(v * 1e8) / 1e8);
+  }
+  function pct(a, b) {
+    if (!(b > 0)) return '—';
+    return (a / b * 100).toFixed(a / b < 0.1 ? 2 : 1) + '%';
+  }
+
+  /* ── The confirm step, with the size in it ──────────────────────────
+     Built here rather than through SV.overlay.confirm because that dialog
+     takes facts and a yes/no, and this decision has a number in the
+     middle of it. Everything else — the chrome, the stack, the focus
+     trap, the scroll lock — is still the one overlay controller's.
+
+     Resolves to {qty: <number>|null} on confirm (null = "the automatic
+     size", which sends no qty at all and reproduces the old request byte
+     for byte), or null on cancel. */
+  function sizeDialog(p, closeIds) {
+    return new Promise(function (resolve) {
+      var step = Number(p.qty_step) || 0;
+      var cupu = Number(p.capital_use_per_unit) || 0;    /* pool $ per unit */
+      var npu = Number(p.notional_per_unit) || 0;
+      var rpu = Number(p.risk_per_unit) || 0;
+      var poolFree = Number(p.pool_free);
+      if (!isFinite(poolFree)) poolFree = Number(p.available) || 0;
+      /* An older preview (a cached tab meeting a new server, or the
+         reverse) has none of the per-unit numbers. Rather than render a
+         control that cannot compute a consequence, fall back to the fixed
+         risk-derived size — the behaviour that existed before this. */
+      var sizable = step > 0 && cupu > 0;
+      var def = Number(p.qty);
+
+      var facts = [
+        ['Trade', p.side + ' ' + units(def) + ' ' + p.symbol],
+        ['Entry ~', p.entry],
+        ['Stop', p.stop + (p.stop_widened ? '  (widened by the stop floor)' : '')],
+        ['Target', p.target],
+        ['Capital free', money(p.available) + ' of ' + money(p.capital)],
+        ['Venue', String(p.venue || 'paper').toUpperCase()]
+      ];
+      (closeIds.length ? (p.close_proposal || []) : []).forEach(function (c) {
+        facts.push(['Close first', c.side + ' ' + units(c.qty) + ' ' + c.symbol +
+                    '  (frees ~' + money(c.freed) + ')']);
+      });
+      if (p.managed === false) {
+        facts.push(['⚠ UNMANAGED', 'The bot tick is OFF — the stop and target will NOT be enforced until Multi-Asset Bots is enabled']);
+      }
+      var factsHtml = facts.map(function (f) {
+        return '<div class="sv-dialog-fact"><span class="lbl">' + esc(f[0]) +
+               '</span><span>' + esc(f[1]) + '</span></div>';
+      }).join('');
+
+      /* The position that is already live in this symbol, from ANY config.
+         Its absence is what let one symbol be booked twice. */
+      var held = p.existing_exposure || [];
+      var warnHtml = '';
+      if (held.length) {
+        warnHtml = '<div class="sz-warn"><b>ALREADY HOLDING ' + esc(p.symbol) +
+          '</b>' + held.map(function (h) {
+            return esc(h.side + ' ' + units(h.qty) + ' @ ' + h.entry + ' · ' +
+                       (h.manual ? 'by hand' : ('rule ' + (h.rule || '—'))) +
+                       ' · ' + h.venue + ' · #' + h.trade_id);
+          }).join('<br>') + '</div>';
+      }
+
+      var sizeHtml = sizable
+        ? '<fieldset class="sz-size"><legend>Size</legend>' +
+            '<div class="sz-fields">' +
+              '<label class="sz-f"><span>Units</span>' +
+                '<input type="number" inputmode="decimal" min="0" step="any" ' +
+                'data-role="qty" value="' + esc(units(def)) + '"></label>' +
+              '<label class="sz-f"><span>Cash committed</span>' +
+                '<input type="number" inputmode="decimal" min="0" step="any" ' +
+                'data-role="cash" value="' + esc((def * cupu).toFixed(2)) + '"></label>' +
+            '</div>' +
+            '<div class="sz-meter"><span class="sz-meter-fill" data-role="fill"></span>' +
+              '<span class="sz-meter-cap" data-role="cap"></span></div>' +
+            '<div class="sz-out" data-role="out" aria-live="polite"></div>' +
+            '<button type="button" class="sz-reset" data-role="reset">' +
+              'RESET TO RISK SIZE</button>' +
+          '</fieldset>'
+        : '';
+
+      var title = held.length ? 'Add to this position?' : 'Take this trade?';
+      var goLabel = closeIds.length ? 'CLOSE + TAKE'
+                                    : (held.length ? 'ADD' : 'TAKE TRADE');
+      var host = document.createElement('div');
+      host.className = 'sv-dialog sz-dialog' + (closeIds.length ? ' sv-dialog--danger' : '');
+      host.setAttribute('data-sv-overlay', 'dialog');
+      host.setAttribute('aria-labelledby', 'svSizeTitle');
+      host.innerHTML =
+        '<div class="sv-dialog-head">' +
+          '<span class="sv-dialog-title" id="svSizeTitle">' + esc(title) + '</span>' +
+          '<button type="button" class="sv-dialog-x" data-sv-close aria-label="Cancel">&times;</button>' +
+        '</div>' +
+        '<div class="sv-dialog-body">' +
+          '<p class="sv-dialog-msg">' + esc(
+            (closeIds.length
+              ? 'Capital is short — the listed positions close first, then the trade opens. One chain, paper venue.'
+              : 'Executes immediately on the paper venue.') +
+            (p.managed === false ? ''
+              : ' The 5-minute tick manages the stop and target from here.')) + '</p>' +
+          warnHtml +
+          '<div class="sv-dialog-facts">' + factsHtml + '</div>' +
+          sizeHtml +
+        '</div>' +
+        '<div class="sv-dialog-foot">' +
+          '<button type="button" class="sv-dialog-btn" data-role="cancel">Cancel</button>' +
+          '<button type="button" class="sv-dialog-btn sv-dialog-btn--go' +
+            (closeIds.length ? ' is-danger' : '') + '" data-role="ok">' +
+            esc(goLabel) + '</button>' +
+        '</div>';
+      document.body.appendChild(host);
+
+      var okBtn = host.querySelector('[data-role="ok"]');
+      var qtyIn = host.querySelector('[data-role="qty"]');
+      var cashIn = host.querySelector('[data-role="cash"]');
+      var out = host.querySelector('[data-role="out"]');
+      var fill = host.querySelector('[data-role="fill"]');
+      var cap = host.querySelector('[data-role="cap"]');
+      var reset = host.querySelector('[data-role="reset"]');
+      var settled = false;
+      var chosen = def;
+
+      /* The client's checks are the server's checks in the same order, so
+         the reason shown before the click is the reason that would come
+         back after it. The server still re-runs every one of them against
+         the real fill — this is a preview of the verdict, not the verdict. */
+      function judge(q) {
+        if (!(q > 0)) return 'Enter a size greater than zero.';
+        if (step > 0 && Math.round(q / step) < 1) {
+          return 'Below one ' + units(step) + '-unit increment — this venue ' +
+                 'would round it to zero.';
+        }
+        if (rpu > 0 && q * rpu > Number(p.max_risk_dollars) + 1e-9) {
+          return units(q) + ' units risks ' + money(q * rpu) + ' to the stop — ' +
+                 'past the ' + money(p.max_risk_dollars) + ' ceiling for this pool.';
+        }
+        if (npu > 0 && q * npu > Number(p.max_notional) + 1e-9) {
+          return units(q) + ' units is ' + money(q * npu) + ' of notional — ' +
+                 'past the ' + money(p.max_notional) + ' this class allows.';
+        }
+        if (q * cupu > poolFree + 1e-9) {
+          return units(q) + ' units ties up ' + money(q * cupu) + ' but only ' +
+                 money(poolFree) + ' is free' +
+                 (closeIds.length ? ' after the closes above' : '') + '.';
+        }
+        return '';
+      }
+
+      function paint(q) {
+        var use = q * cupu;
+        var why = judge(q);
+        var sent = step > 0 ? Math.round(q / step) * step : q;
+        sent = Math.round(sent * 1e8) / 1e8;
+        var bits = [
+          '<span>R AT STAKE <b>' + esc(money(q * rpu)) + '</b> · ' +
+            esc(pct(q * rpu, Number(p.capital))) + ' of pool</span>',
+          '<span>POOL <b>' + esc(money(use)) + '</b> of ' + esc(money(poolFree)) +
+            ' · ' + esc(pct(use, poolFree)) + '</span>'
+        ];
+        /* Forex commits margin, not the levered notional — say both, or the
+           number in the cash box looks like it is missing a zero. */
+        if (npu > 0 && Math.abs(q * npu - use) > 0.01) {
+          bits.push('<span>NOTIONAL <b>' + esc(money(q * npu)) + '</b> (margin ' +
+                    esc(money(use)) + ')</span>');
+        }
+        if (Math.abs(sent - q) > 1e-9) {
+          bits.push('<span>SENDS <b>' + esc(units(sent)) + '</b> units</span>');
+        }
+        if (why) bits.push('<span class="sz-why">' + esc(why) + '</span>');
+        out.innerHTML = bits.join('');
+
+        var span = Math.max(poolFree, use, 1e-9);
+        fill.style.width = Math.min(100, use / span * 100) + '%';
+        cap.style.left = Math.min(100, poolFree / span * 100) + '%';
+        host.classList.toggle('is-over', !!why);
+        okBtn.disabled = !!why;
+        reset.disabled = Math.abs(q - def) < 1e-9;
+        chosen = q;
+      }
+
+      if (sizable) {
+        qtyIn.addEventListener('input', function () {
+          var q = parseFloat(qtyIn.value);
+          if (!isFinite(q)) q = 0;
+          cashIn.value = (q * cupu).toFixed(2);
+          paint(q);
+        });
+        cashIn.addEventListener('input', function () {
+          var c = parseFloat(cashIn.value);
+          if (!isFinite(c)) c = 0;
+          var q = cupu > 0 ? c / cupu : 0;
+          qtyIn.value = units(q);
+          paint(q);
+        });
+        reset.addEventListener('click', function () {
+          qtyIn.value = units(def);
+          cashIn.value = (def * cupu).toFixed(2);
+          paint(def);
+          qtyIn.focus();
+        });
+        paint(def);
+      }
+
+      function finish(v) {
+        if (settled) return;
+        settled = true;
+        SV.overlay.close(host);
+        resolve(v);
+      }
+      host.addEventListener('sv:close', function () {
+        if (!settled) { settled = true; resolve(null); }
+        setTimeout(function () {
+          if (host.parentNode) host.parentNode.removeChild(host);
+        }, 200);
+      });
+      okBtn.addEventListener('click', function () {
+        /* Untouched default → send no qty at all. The automatic path then
+           runs exactly as it did before the override existed, rather than
+           through a validator with the same number in it. */
+        finish({ qty: (!sizable || Math.abs(chosen - def) < 1e-9) ? null : chosen });
+      });
+      host.querySelector('[data-role="cancel"]')
+          .addEventListener('click', function () { finish(null); });
+
+      /* Focus the size, not the go button: the number is the decision, and
+         a stray Enter on a pre-focused OK is how a default gets taken by
+         accident. */
+      host.setAttribute('data-sv-focus',
+                        sizable ? '[data-role="qty"]' : '[data-role="cancel"]');
+      SV.overlay.open(host, null);
+    });
+  }
+
   function tradeFlow(previewUrl, executeUrl, extraBody, onSuccess) {
     if (inflight) return;
     inflight = true;
@@ -1366,41 +1618,14 @@
         SV.overlay.alert({ title: 'Cannot take this trade', message: p.error });
         return;
       }
-      var facts = [
-        ['Trade', p.side + ' ' + p.qty + ' ' + p.symbol],
-        ['Entry ~', p.entry],
-        ['Stop', p.stop + (p.stop_widened ? '  (widened by the stop floor)' : '')],
-        ['Target', p.target],
-        ['Risk', '$' + p.risk_dollars],
-        ['Notional', '$' + p.notional +
-          (p.capital_use != null && p.capital_use !== p.notional
-            ? '  (ties up $' + p.capital_use + ' margin)' : '')],
-        ['Capital free', '$' + p.available + ' of $' + p.capital],
-        ['Venue', String(p.venue || 'paper').toUpperCase()]
-      ];
       var closeIds = [];
       if (!p.sufficient) {
-        (p.close_proposal || []).forEach(function (c) {
-          closeIds.push(c.trade_id);
-          facts.push(['Close first', c.side + ' ' + c.qty + ' ' + c.symbol +
-                      '  (frees ~$' + c.freed + ')']);
-        });
+        (p.close_proposal || []).forEach(function (c) { closeIds.push(c.trade_id); });
       }
-      if (p.managed === false) {
-        facts.push(['⚠ UNMANAGED', 'The bot tick is OFF — the stop and target will NOT be enforced until Multi-Asset Bots is enabled']);
-      }
-      SV.overlay.confirm({
-        title: 'Take this trade?',
-        message: (p.sufficient
-          ? 'Executes immediately on the paper venue.'
-          : 'Capital is short — the listed positions close first, then the trade opens. One chain, paper venue.') +
-          (p.managed === false ? '' : ' The 5-minute tick manages the stop and target from here.'),
-        facts: facts,
-        confirmLabel: p.sufficient ? 'TAKE TRADE' : 'CLOSE + TAKE',
-        danger: !p.sufficient
-      }).then(function (ok) {
-        if (!ok) { done(); return; }
+      sizeDialog(p, closeIds).then(function (choice) {
+        if (!choice) { done(); return; }
         var body = Object.assign({ close_ids: closeIds }, extraBody || {});
+        if (choice.qty !== null) body.qty = choice.qty;
         fetch(executeUrl, {
           method: 'POST', credentials: 'same-origin',
           headers: { 'X-CSRFToken': csrf(), 'Content-Type': 'application/json' },
@@ -1423,7 +1648,8 @@
           if (onSuccess) { try { onSuccess(res); } catch (e) { /* UI only */ } }
           SV.overlay.alert({
             title: 'Position open',
-            message: res.side + ' ' + res.qty + ' ' + res.symbol + ' @ ' + res.entry +
+            message: res.side + ' ' + units(res.qty) + ' ' + res.symbol + ' @ ' + res.entry +
+              (res.sized_by === 'operator' ? '  (your size — ' + money(res.risk_dollars) + ' at risk)' : '') +
               (res.closed && res.closed.length
                 ? ' — closed first: ' + res.closed.join(', ') : '')
           });
@@ -2323,27 +2549,50 @@ function toggleSidebar() {
   /* New signal announced over the socket: refetch the rail's cards and
      let the fresh ones slide in. The swap re-dispatches htmx:afterSwap so
      the existing popup binder and dismissal filter re-run — both already
-     listen for it. */
+     listen for it.
+
+     A card's TAKEN state is server-rendered (signals/models.py resolves the
+     signal→trade join), so it rides this swap for free — there is no client
+     state to reapply. Two arrivals get marked here, not two states:
+     a card whose id is NEW slides in; a card that was already on screen and
+     has just GAINED the mark pulses once, because a silent repaint of a
+     card the eye has already passed over is a change nobody sees. */
   let railRefreshing = false;
   function refreshSignalRail() {
     const body = document.getElementById('railSignalsBody');
     if (!body || railRefreshing) return;
     railRefreshing = true;
-    const before = new Set(
+    const before = new Map(
       Array.from(body.querySelectorAll('.sr-signal-wrap[data-signal-id]'))
-        .map(w => w.dataset.signalId));
+        .map(w => [w.dataset.signalId, w.dataset.acted || '']));
     fetch('/partials/signal-rail/', { credentials: 'same-origin' })
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
       .then(html => {
         body.innerHTML = html;
         body.querySelectorAll('.sr-signal-wrap[data-signal-id]').forEach(w => {
-          if (!before.has(w.dataset.signalId)) w.classList.add('sr-slide-in');
+          const was = before.get(w.dataset.signalId);
+          if (was === undefined) w.classList.add('sr-slide-in');
+          else if (!was && w.dataset.acted) w.classList.add('sr-just-acted');
         });
         document.dispatchEvent(new CustomEvent('htmx:afterSwap'));
       })
       .catch(() => {})
       .finally(() => { railRefreshing = false; });
   }
+
+  /* Exposed for the /ws/eye/ listener. A fill is the ONLY announcement a
+     bot-taken signal ever produces — no new Signal row is written, so the
+     'signal' message above never fires and the rail sat there showing an
+     untaken idea until the next full page load. Debounced: a funding chain
+     closes several positions and opens one in a single burst. */
+  let railFillTimer = null;
+  window.refreshSignalRail = function () {
+    if (railFillTimer) clearTimeout(railFillTimer);
+    railFillTimer = setTimeout(() => {
+      railFillTimer = null;
+      refreshSignalRail();
+    }, 900);
+  };
 
   /* Fresh news announced: refetch the ticker's marquee. Debounced —
      scrapers store articles in bursts and one swap covers the batch. The
@@ -3401,6 +3650,9 @@ if ('serviceWorker' in navigator) {
 
     function openPanel() {
         panel.classList.add('open'); fab.classList.add('open');
+        /* Opening it anywhere shows the live thread, not just what this
+           page happened to type. */
+        loadThread();
         setTimeout(function() { input && input.focus(); }, 60);
     }
     function closePanel() {
@@ -3654,14 +3906,145 @@ if ('serviceWorker' in navigator) {
         sendQuestion(q);
     }
 
+    /* ── The thread lives on the SERVER ────────────────────────────────
+       Asking used to hold the request open for the whole LLM turn and paint
+       the answer from the response. Change page mid-answer and the fetch was
+       aborted: the answer was produced, paid for, persisted — and never
+       shown to anyone. The panel had no load path either, so navigating
+       emptied it while the conversation carried on existing in the database.
+
+       Now: asking persists the exchange and returns at once, the answer is
+       announced from the server on /ws/eye/ when it lands, and this panel
+       paints whatever the server says the thread currently is. That makes
+       the same conversation appear on every page and in every tab, with a
+       question still being answered shown as pending rather than missing. */
+    var threadInFlight = false, threadAgain = false;
+    var pendingTimer = null;
+
+    function escHtml(s) {
+        return String(s === undefined || s === null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    /* Citation markers arrive as markdown pointing at same-origin paths —
+       every one of those URLs is built server-side from a fixed table. The
+       rest is model output and is escaped: assigning model output straight
+       to innerHTML is how a chat panel becomes an XSS hole. */
+    function linkify(text) {
+        return escHtml(text).replace(
+            /\[([^\]\n]{1,120})\]\((\/[A-Za-z0-9_\-./#?=]{0,200})\)/g,
+            function (_m, label, href) {
+                return '<a href="' + href + '">' + label + '</a>';
+            });
+    }
+
+    function toolsHtml(role, msgId) {
+        return '<div class="se-bubble-tools">' +
+            '<button type="button" class="se-bubble-tool" data-se-copy>copy</button>' +
+            (role === 'assistant'
+                ? '<button type="button" class="se-bubble-tool" data-se-regen>retry</button>'
+                : '<button type="button" class="se-bubble-tool" data-se-edit>edit</button>') +
+            '<button type="button" class="se-bubble-tool se-bubble-tool--danger" ' +
+            'data-se-del="' + msgId + '" data-se-role="' + role + '">delete</button>' +
+            '</div>';
+    }
+
+    /* Paint one server message into one bubble. The signature check means a
+       bubble is rebuilt ONLY when its state actually changed — so a pending
+       question becomes its answer in the same DOM node, in place, instead of
+       the whole thread flashing on every refresh. */
+    function applyMessage(b, m) {
+        var cls = m.pending ? 'se-bubble thinking'
+                : 'se-bubble ' + m.role + (m.error ? ' error' : '');
+        var sig = cls + '|' + (m.text || '');
+        if (b._seSig === sig) return;
+        b._seSig = sig;
+        b.className = cls;
+        b.innerHTML = '';
+        /* A pending bubble gets no tools: there is nothing yet to copy,
+           retry or delete. */
+        if (!m.pending) b.insertAdjacentHTML('beforeend', toolsHtml(m.role, m.id));
+        var body = document.createElement('div');
+        body.className = 'se-bubble-body';
+        if (m.pending) body.textContent = 'Sauron is thinking';
+        else if (m.role === 'assistant') body.innerHTML = linkify(m.text);
+        else body.textContent = m.text || '';
+        b.appendChild(body);
+    }
+
+    function renderThread(data) {
+        var list = (data && data.messages) || [];
+        var atBottom = (msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight) < 60;
+        var seen = {};
+        list.forEach(function (m) {
+            seen[m.id] = true;
+            var node = msgs.querySelector('[data-se-msg-id="' + m.id + '"]');
+            if (!node) {
+                node = document.createElement('div');
+                node.dataset.seMsgId = m.id;
+            }
+            applyMessage(node, m);
+            /* Appending an existing child MOVES it — server order wins
+               without rebuilding anything. */
+            msgs.appendChild(node);
+            if (m.role === 'user' && !m.pending) lastQuestion = m.text;
+        });
+        /* Anything left over is an optimistic bubble this page drew, or a
+           turn deleted from another tab. */
+        Array.prototype.slice.call(msgs.querySelectorAll('.se-bubble'))
+            .forEach(function (el) {
+                if (el.classList.contains('se-bubble-greeting')) return;
+                var id = el.dataset.seMsgId;
+                if (!id || !seen[id]) el.remove();
+            });
+        var greeting = msgs.querySelector('.se-bubble-greeting');
+        if (greeting) greeting.hidden = list.length > 0;
+
+        /* The orb is honest about work in flight on ANY page now, not only
+           the one that asked. */
+        fab.classList.toggle('working', !!(data && data.pending));
+        if (atBottom) msgs.scrollTop = msgs.scrollHeight;
+        schedulePendingCheck(!!(data && data.pending));
+    }
+
+    /* A safety net under the socket push: when the live pipe is down the
+       push never arrives, and a pending answer would sit there looking stuck
+       forever. Slow when the socket is up (the push does the work), brisk
+       when it is not. */
+    function schedulePendingCheck(isPending) {
+        if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
+        if (!isPending) return;
+        var live = window.svLive && window.svLive.isUp();
+        pendingTimer = setTimeout(loadThread, live ? 30000 : 8000);
+    }
+
+    function loadThread() {
+        if (threadInFlight) { threadAgain = true; return; }
+        threadInFlight = true;
+        fetch('{% url "research_thread" %}', {
+            credentials: 'same-origin',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (d && d.ok) renderThread(d); })
+        .catch(function () { /* offline — the bubbles on screen stand */ })
+        .finally(function () {
+            threadInFlight = false;
+            if (threadAgain) { threadAgain = false; loadThread(); }
+        });
+    }
+
     function sendQuestion(q) {
         lastQuestion = q;
         /* The subject travels with the question. Without it a follow-up like
            "why is it firing?" arrives with no idea what "it" is. */
         var asked = askContext ? q + '\n\n(About: ' + askContext.subject + ')' : q;
         if (sendBtn) { sendBtn.disabled = true; sendBtn.classList.add('working'); }
-        var userBubble = appendBubble('user', q);
-        var thinking = appendBubble('thinking', 'Sauron is thinking');
+        /* Optimistic bubbles bridge the moment before the server answers with
+           the real rows; renderThread replaces them. */
+        appendBubble('user', q);
+        appendBubble('thinking', 'Sauron is thinking');
         fab.classList.add('working');
 
         var fd = new FormData();
@@ -3673,53 +4056,70 @@ if ('serviceWorker' in navigator) {
         })
         .then(function(r){ return r.json().catch(function(){return {ok:false, error:'bad json'};}); })
         .then(function(j) {
-            thinking && thinking.remove();
-            /* Stamp the question with its id now it has one, so it can be
-               deleted like any other turn. */
-            if (userBubble && j.user_message_id) {
-                userBubble.dataset.seMsgId = j.user_message_id;
-                var ut = userBubble.querySelector('.se-bubble-tools');
-                if (ut) {
-                    ut.insertAdjacentHTML('beforeend',
-                        '<button type="button" class="se-bubble-tool se-bubble-tool--danger" ' +
-                        'data-se-del="' + j.user_message_id + '" data-se-role="user">delete</button>');
-                }
-            }
-            if (j.ok && j.assistant_html) {
-                appendBubble('assistant', j.assistant_html, {html: true, msgId: j.assistant_message_id});
-                /* Answered while the operator was elsewhere. The FAB keeps
-                   thinking on its own, but a pulsing orb does not say WHAT
-                   came back — so show the opening of it and a way in. */
-                if (!panel.classList.contains('open')) notifyAnswer(j.assistant_html);
-            } else if (j.assistant_html) {
-                appendBubble('assistant', j.assistant_html, {html: true, error: true, msgId: j.assistant_message_id});
-            } else {
-                appendBubble('assistant', j.error || 'No response.', {error: true, msgId: j.assistant_message_id});
+            /* Either way the exchange is now rows in the database — the
+               thread is the single source of truth for what to paint.
+               202 + pending: a worker has it. 200: the broker was down and
+               the view answered inside the request, exactly as it used to. */
+            loadThread();
+            if (!j.pending && !panel.classList.contains('open')) {
+                /* No server push follows the fallback path, so this page
+                   raises the banner itself — as it always did. */
+                notifyAnswer(j.assistant_html || j.error || 'Answer ready.');
             }
         })
         .catch(function(e) {
-            thinking && thinking.remove();
             appendBubble('assistant', 'Network error: ' + e, {error: true});
         })
         .finally(function() {
             if (sendBtn) { sendBtn.disabled = false; sendBtn.classList.remove('working'); }
-            fab.classList.remove('working');
             /* Only steal focus if the operator is still here. Focusing a
                textarea inside a closed panel silently swallows every global
                keyboard shortcut. */
             if (panel.classList.contains('open')) input.focus();
         });
     }
-    /* sendBtn === fab here, so we don't double-bind a click — the FAB
-       click handler above already routes to send() when appropriate. */
+
+    /* ── The answer announces itself ───────────────────────────────────
+       Pushed by the server on the operator's own socket when the worker
+       settles the row, so it arrives on whatever page they are on by then.
+       The banner is raised by the live-event listener further down; this
+       handler resolves the pending bubble in place. */
+    document.addEventListener('sv:eye-event', function (ev) {
+        var msg = (ev && ev.detail) || {};
+        if (msg.kind !== 'sauron_answer') return;
+        if (!panel.classList.contains('open')) {
+            fab.classList.add('answered');
+        } else {
+            /* The answer just resolved in front of the operator; a banner
+               announcing it as well is noise. The live listener appends its
+               card immediately before dispatching this event, so the last
+               card in the stack is the one to drop. */
+            var stack = document.getElementById('svBannerStack');
+            var last = stack && stack.lastElementChild;
+            var kindEl = last && last.querySelector('.sv-banner-kind');
+            if (kindEl && kindEl.textContent === 'Sauron answered') last.remove();
+        }
+        loadThread();
+    });
+
+    /* Restore on EVERY page, deferred so it never competes with the page's
+       own load. This is what makes a question asked on one screen visible —
+       pending or answered — on the next one. */
+    function restoreSoon() { setTimeout(loadThread, 400); }
+    if (document.readyState === 'complete') restoreSoon();
+    else window.addEventListener('load', restoreSoon);
+    /* Enter sends, Shift+Enter breaks the line — the convention every chat
+       uses. The send button and the FAB are bound separately above. */
     input.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     });
 
-    function notifyAnswer(html) {
-        var tmp = document.createElement('div');
-        tmp.innerHTML = html;
-        var text = (tmp.textContent || '').trim().replace(/\s+/g, ' ');
+    /* Only the broker-down fallback needs this — on the normal path the
+       server raises the banner, so it reaches pages this script never ran
+       on. Takes plain text: the body is model output and must not be
+       parsed as markup just to read a preview out of it. */
+    function notifyAnswer(answerText) {
+        var text = String(answerText || '').trim().replace(/\s+/g, ' ');
         fab.classList.add('answered');
         if (window.svBanner) {
             window.svBanner('sauron_answer', {
@@ -3751,6 +4151,10 @@ if ('serviceWorker' in navigator) {
             headers: { 'X-CSRFToken': csrf(), 'X-Requested-With': 'XMLHttpRequest' },
         }).finally(function() {
             msgs.innerHTML = greetingBubble();
+            /* The old thread is archived server-side; re-reading it is what
+               keeps this panel and every other open tab agreeing on which
+               conversation is the live one. */
+            loadThread();
         });
     });
 
@@ -4352,9 +4756,16 @@ if ('serviceWorker' in navigator) {
                     if (el._leaving) el.remove();
                 }, { once: true });
             }
+            /* The countdown rule along the bottom edge runs this same ttl,
+               and CSS pauses it on hover/focus exactly where disarm() pauses
+               the dismissal — so "hover to keep it" is visible rather than
+               folklore. Set once; re-arming after a hover restarts the
+               animation by name so the bar and the clock stay in step. */
+            el.style.setProperty("--sv-banner-ttl", (ttl / 1000) + "s");
             function arm() {
                 if (timer) clearTimeout(timer);
                 timer = setTimeout(dismiss, ttl);
+                el.style.animationName = "";
             }
             function disarm() {
                 if (timer) { clearTimeout(timer); timer = null; }
@@ -4407,6 +4818,16 @@ if ('serviceWorker' in navigator) {
                      || msg.kind === "close_pending")
                     && window.refreshPanelCounts) {
                     window.refreshPanelCounts();
+                }
+                /* A fill also changes whether a rail signal is TAKEN — the
+                   engine opening a position writes no Signal row, so this
+                   is the only announcement the rail can hear. Without it
+                   the operator learns the platform acted on their next
+                   full page load, which is exactly how the same symbol got
+                   booked twice. */
+                if ((msg.kind === "fill_open" || msg.kind === "fill_close")
+                    && window.refreshSignalRail) {
+                    window.refreshSignalRail();
                 }
                 /* Every notification — silent ones included — moves the
                    bell badge; the count comes from the server, never ++. */

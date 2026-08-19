@@ -586,7 +586,14 @@ def research_view(request):
     messages_list = []
     is_staff = bool(request.user.is_staff)
     for m in raw_messages:
-        if m.role == "assistant":
+        if m.is_pending:
+            # A question a worker is still answering. Rendered as a sentence
+            # rather than an empty bubble: this page is reached by opening
+            # /research/ mid-answer, and a blank assistant turn reads as
+            # Sauron having ignored the question.
+            cleaned = rendered = PENDING_BODY_TEXT
+            actions = []
+        elif m.role == "assistant":
             cleaned, actions = extract_action_markers(m.content)
             rendered = render_markers(cleaned)
         else:
@@ -596,9 +603,10 @@ def research_view(request):
         messages_list.append({
             "id": m.id,
             "role": m.role,
-            "content": m.content,
+            "content": rendered if m.is_pending else m.content,
             "rendered_content": rendered,
-            "has_draft": (m.role == "assistant"
+            "pending": m.is_pending,
+            "has_draft": (m.role == "assistant" and not m.is_pending
                            and has_strategy_draft(m.content)),
             # Action buttons only visible to staff who can actually click.
             "actions": actions if is_staff else [],
@@ -674,13 +682,21 @@ def research_delete_message(request, message_id: int):
     # A question and the answer it produced are one exchange; deleting the
     # question and leaving the reply orphaned reads as the assistant talking
     # to itself.
+    #
+    # Paired by the explicit `replies_to` link, falling back to "the next
+    # assistant row" only for exchanges written before that link existed:
+    # two tabs asking at the same moment interleave their rows, and the
+    # positional guess would then delete the OTHER tab's answer.
     removed = [msg.pk]
     if msg.role == ResearchMessage.ROLE_USER:
-        reply = (ResearchMessage.objects
-                 .filter(conversation=msg.conversation,
-                         role=ResearchMessage.ROLE_ASSISTANT,
-                         created_at__gt=msg.created_at)
-                 .order_by("created_at").first())
+        reply = msg.replies.first()
+        if reply is None:
+            reply = (ResearchMessage.objects
+                     .filter(conversation=msg.conversation,
+                             role=ResearchMessage.ROLE_ASSISTANT,
+                             replies_to__isnull=True,
+                             created_at__gt=msg.created_at)
+                     .order_by("created_at").first())
         if reply is not None:
             removed.append(reply.pk)
             reply.delete()
@@ -787,17 +803,80 @@ def research_save_as_draft(request, message_id: int):
 
 # ── Phase 64: floating chat shortcut (JSON) ──────────────────────────────
 
+# What the panel and the /research/ page show where the answer will go
+# while a worker is still producing it.
+PENDING_BODY_TEXT = "Sauron is still answering — the reply lands here."
+
+# How much of the thread the panel restores. The panel is a shortcut, not
+# the archive; /research/ holds the whole conversation.
+THREAD_LIMIT = 40
+
+
+def _dispatch_answer(request, pending):
+    """Hand one pending answer to a worker, following the run-now precedent.
+
+    Returns a 202 JsonResponse when the work was enqueued; None means
+    "answer inside this request instead" — either because the caller is a
+    plain form POST with no way to hear a later announcement, or because
+    the broker is down. A dead worker must degrade to the old synchronous
+    behaviour, never to a lost question.
+
+    Deliberately WITHOUT run_async's one-in-flight-per-job cache lock: that
+    lock stops a second click launching a duplicate of the same expensive
+    beat job, but every question is its own job, and two tabs (or two
+    operators) asking at the same moment is ordinary use — a shared lock
+    here would 409 the second question.
+    """
+    from django.http import JsonResponse
+    wants_json = (
+        request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        or "application/json" in (request.headers.get("Accept") or ""))
+    if not wants_json:
+        return None
+    from brain.tasks import (answer_research_question,
+                             announce_research_answer,
+                             announce_research_failed)
+    try:
+        async_result = answer_research_question.apply_async(
+            kwargs={"message_id": pending.pk},
+            link=announce_research_answer.s(request.user.pk, pending.pk),
+            link_error=announce_research_failed.s(request.user.pk,
+                                                  pending.pk),
+        )
+    except Exception as e:  # noqa: BLE001 — broker down: answer here instead
+        import logging
+        logging.getLogger(__name__).warning(
+            "[ask-sauron] async dispatch failed for message %s: %s — "
+            "answering inside the request", pending.pk, e)
+        return None
+    return JsonResponse({
+        "ok": True,
+        "pending": True,
+        "user_message_id": pending.replies_to_id,
+        "pending_message_id": pending.pk,
+        "task_id": async_result.id,
+    }, status=202)
+
+
 @login_required
 @require_POST
 def research_ask_ajax(request):
     """JSON twin of `research_ask` for the global floating chat widget.
 
-    Returns rendered (citation-link substituted) HTML for the new exchange so
-    the widget can paint without a full page reload.
+    An XHR ask persists the exchange, hands the answer to a worker and
+    returns 202 at once with the pending message's id. The answer announces
+    itself later on the operator's own socket, so it reaches whatever page
+    they are on by then — before this, the agent ran inside the request and
+    changing page aborted the fetch, discarding an answer that had already
+    been paid for.
+
+    A caller that does not identify as XHR (the /research/ page's own form)
+    keeps the synchronous contract: it has no socket handler to hear a later
+    announcement, so it must be answered in the response.
     """
     from django.http import JsonResponse
     from brain.research_agent import (
-        get_or_create_active_conversation, ask,
+        get_or_create_active_conversation, begin_ask, complete_ask,
     )
     from brain.research_renderer import (
         render_markers, extract_action_markers, has_strategy_draft,
@@ -809,7 +888,13 @@ def research_ask_ajax(request):
                              status=400)
 
     conv = get_or_create_active_conversation(request.user)
-    result = ask(conv, question)
+    _user_msg, pending = begin_ask(conv, question)
+
+    resp = _dispatch_answer(request, pending)
+    if resp is not None:
+        return resp
+
+    result = complete_ask(pending.pk)
 
     asst_id = result.get("assistant_message_id")
     asst_html = ""
@@ -824,6 +909,7 @@ def research_ask_ajax(request):
 
     return JsonResponse({
         "ok": bool(result.get("ok")),
+        "pending": False,
         "error": result.get("error"),
         "user_message_id": result.get("user_message_id"),
         "assistant_message_id": asst_id,
@@ -832,6 +918,67 @@ def research_ask_ajax(request):
         "tokens_in": result.get("tokens_in"),
         "tokens_out": result.get("tokens_out"),
         "cost_usd": result.get("cost_usd"),
+    })
+
+
+@login_required
+def research_thread(request):
+    """The operator's live conversation, as JSON — the panel's load path.
+
+    The floating panel had no load path at all: it painted only what the
+    page in front of you had itself typed, so every navigation emptied it
+    while the conversation carried on existing in the database. This serves
+    that thread to any page, including a question still being answered,
+    which is what lets a pending bubble resolve in place after a page
+    change.
+
+    Read-only on purpose — it is called on every page load, so it must not
+    create an empty conversation row for a user who has never chatted.
+    """
+    from django.http import JsonResponse
+    from brain.research_models import ResearchConversation
+    from brain.research_renderer import (
+        render_markers, extract_action_markers, has_strategy_draft,
+    )
+
+    conv = (ResearchConversation.objects
+            .filter(user=request.user, is_active=True)
+            .order_by("-last_message_at").first())
+    if conv is None:
+        return JsonResponse({"ok": True, "conversation_id": None,
+                             "pending": False, "messages": []})
+
+    rows = list(conv.messages.order_by("-created_at")[:THREAD_LIMIT])
+    rows.reverse()
+
+    messages = []
+    n_pending = 0
+    for m in rows:
+        if m.is_pending:
+            n_pending += 1
+            text = PENDING_BODY_TEXT
+            draft = False
+        elif m.role == "assistant":
+            cleaned, _actions = extract_action_markers(m.content)
+            text = render_markers(cleaned)
+            draft = has_strategy_draft(m.content)
+        else:
+            text = m.content
+            draft = False
+        messages.append({
+            "id": m.id,
+            "role": m.role,
+            "text": text,
+            "pending": m.is_pending,
+            "error": bool(m.error),
+            "has_draft": draft,
+        })
+
+    return JsonResponse({
+        "ok": True,
+        "conversation_id": conv.id,
+        "pending": n_pending > 0,
+        "messages": messages,
     })
 
 

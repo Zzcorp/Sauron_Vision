@@ -1,49 +1,63 @@
-{% extends "base.html" %}
+{% extends base_template|default:"base.html" %}
+{% load static %}
 {% block title %}Positions — Sauron Vision{% endblock %}
 {% block page_title %}POSITIONS{% endblock %}
 
 {% block content %}
+{% comment %}
+LIVE REGIONS. Anything inside a data-sv-live wrapper is re-rendered by
+/positions/live/, which re-enters this very template through
+dashboard/_live_shell.html — the refreshed markup is this markup, so an
+unpriced position renders the same em-dash on the tenth sweep as on the first
+paint. data-sv-live-key names a value so the refresher can flash only the ones
+that changed; a row's key is the position's identity, never its index, or the
+flashes would land on the wrong rows the moment a fill reorders the book.
+
+The strip's numbers are formatted in the view (dashboard.views): the em-dash
+rule for an unmeasured value then lives in one place instead of in eight
+template branches, each a fresh chance to print a confident zero.
+{% endcomment %}
 {# ── 1. Top stat strip — 8 cells ────────────────────────────────── #}
-<div class="oc-strip" style="margin-bottom:18px;">
-    <div class="oc-strip-cell">
+<div class="oc-strip" style="margin-bottom:18px;" data-sv-live="pos-strip">
+    <div class="oc-strip-cell" title="{{ strip.open.title }}">
         <span class="oc-strip-label">OPEN</span>
-        <span class="oc-strip-value">{{ positions|length }}</span>
-        <span class="oc-strip-sub">currently active</span>
+        <span class="oc-strip-value {{ strip.open.tone }}" data-sv-live-key="pos.open">{{ strip.open.text }}</span>
+        <span class="oc-strip-sub">{{ strip.open.sub }}</span>
     </div>
-    <div class="oc-strip-cell">
+    <div class="oc-strip-cell" title="{{ strip.unrealized.title }}">
         <span class="oc-strip-label">OPEN UNREAL P&amp;L</span>
-        <span class="oc-strip-value {% if open_unrealized > 0 %}up{% elif open_unrealized < 0 %}down{% endif %}">{{ open_unrealized }}</span>
-        <span class="oc-strip-sub">mark-to-market</span>
+        <span class="oc-strip-value {{ strip.unrealized.tone }}" data-sv-live-key="pos.unrealized">{{ strip.unrealized.text }}</span>
+        <span class="oc-strip-sub">{{ strip.unrealized.sub }}</span>
     </div>
-    <div class="oc-strip-cell">
+    <div class="oc-strip-cell" title="{{ strip.exposure.title }}">
         <span class="oc-strip-label">EXPOSURE</span>
-        <span class="oc-strip-value">{{ open_exposure }}</span>
-        <span class="oc-strip-sub">notional capital deployed</span>
+        <span class="oc-strip-value {{ strip.exposure.tone }}" data-sv-live-key="pos.exposure">{{ strip.exposure.text }}</span>
+        <span class="oc-strip-sub">{{ strip.exposure.sub }}</span>
     </div>
-    <div class="oc-strip-cell">
+    <div class="oc-strip-cell" title="{{ strip.closed.title }}">
         <span class="oc-strip-label">CLOSED TRADES</span>
-        <span class="oc-strip-value">{{ total_closed }}</span>
-        <span class="oc-strip-sub">{{ n_winning }}W / {{ n_losing }}L</span>
+        <span class="oc-strip-value {{ strip.closed.tone }}" data-sv-live-key="pos.closed">{{ strip.closed.text }}</span>
+        <span class="oc-strip-sub" data-sv-live-key="pos.closed.sub">{{ strip.closed.sub }}</span>
     </div>
-    <div class="oc-strip-cell">
+    <div class="oc-strip-cell" title="{{ strip.win_rate.title }}">
         <span class="oc-strip-label">WIN RATE</span>
-        <span class="oc-strip-value {% if win_rate >= 50 %}up{% elif win_rate < 40 %}down{% endif %}">{{ win_rate }}%</span>
-        <span class="oc-strip-sub">closed history</span>
+        <span class="oc-strip-value {{ strip.win_rate.tone }}" data-sv-live-key="pos.win_rate">{{ strip.win_rate.text }}</span>
+        <span class="oc-strip-sub">{{ strip.win_rate.sub }}</span>
     </div>
-    <div class="oc-strip-cell">
+    <div class="oc-strip-cell" title="{{ strip.realized.title }}">
         <span class="oc-strip-label">REALIZED P&amp;L</span>
-        <span class="oc-strip-value {% if total_realized > 0 %}up{% elif total_realized < 0 %}down{% endif %}">{{ total_realized }}</span>
-        <span class="oc-strip-sub">all-time</span>
+        <span class="oc-strip-value {{ strip.realized.tone }}" data-sv-live-key="pos.realized">{{ strip.realized.text }}</span>
+        <span class="oc-strip-sub">{{ strip.realized.sub }}</span>
     </div>
-    <div class="oc-strip-cell">
+    <div class="oc-strip-cell" title="{{ strip.profit_factor.title }}">
         <span class="oc-strip-label">PROFIT FACTOR</span>
-        <span class="oc-strip-value {% if profit_factor >= 1 %}up{% elif profit_factor > 0 %}down{% endif %}">{{ profit_factor }}</span>
-        <span class="oc-strip-sub">gross win / gross loss</span>
+        <span class="oc-strip-value {{ strip.profit_factor.tone }}" data-sv-live-key="pos.profit_factor">{{ strip.profit_factor.text }}</span>
+        <span class="oc-strip-sub">{{ strip.profit_factor.sub }}</span>
     </div>
-    <div class="oc-strip-cell">
+    <div class="oc-strip-cell" title="{{ strip.avg_wl.title }}">
         <span class="oc-strip-label">AVG W / L</span>
-        <span class="oc-strip-value"><span class="up">+{{ avg_win }}</span> / <span class="down">{{ avg_loss }}</span></span>
-        <span class="oc-strip-sub">per closed trade</span>
+        <span class="oc-strip-value" data-sv-live-key="pos.avg_wl">{{ strip.avg_wl.text }}</span>
+        <span class="oc-strip-sub">{{ strip.avg_wl.sub }}</span>
     </div>
 </div>
 
@@ -51,60 +65,18 @@
 <div class="grid grid-3" style="gap:14px;margin-bottom:18px;">
     <div class="card">
         <div class="card-header"><span class="card-title">Direction · open</span></div>
+        <div data-sv-live="pos-dir">
         {% if direction_donut %}
-            <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;">
-                <svg class="oc-donut" viewBox="0 0 100 100" id="posDirDonut">
-                    <circle cx="50" cy="50" r="35" fill="none" stroke="var(--bg-card-hover)" stroke-width="14"/>
-                </svg>
-                <div class="oc-donut-legend" style="flex:1;min-width:120px;">
-                    {% for d in direction_donut %}
-                        <div class="oc-donut-legend-row">
-                            <span class="oc-donut-legend-key">
-                                <span class="oc-donut-legend-swatch" data-class="{{ d.key }}"></span>
-                                {{ d.key|upper }}
-                            </span>
-                            <span class="oc-donut-legend-pct">{{ d.n }} · {{ d.pct }}%</span>
-                        </div>
-                    {% endfor %}
-                </div>
-            </div>
-            <div id="posDirData" style="display:none;"
-                 data-rows="{% for d in direction_donut %}{{ d.key }}:{{ d.pct }}{% if not forloop.last %};{% endif %}{% endfor %}"></div>
-            <script>
-                (function() {
-                    var rows = (document.getElementById('posDirData').dataset.rows || '')
-                        .split(';').map(function(r){var p=r.split(':');return {k:p[0], pct:parseFloat(p[1])};})
-                        .filter(function(r){return !isNaN(r.pct);});
-                    var colorOf = {long:'#00e868', short:'#ff5e5e'};
-                    document.querySelectorAll('.oc-donut-legend-swatch').forEach(function(el){
-                        if (colorOf[el.dataset.class]) el.style.background = colorOf[el.dataset.class];
-                    });
-                    var svg = document.getElementById('posDirDonut');
-                    if (!svg || rows.length === 0) return;
-                    var ns = 'http://www.w3.org/2000/svg';
-                    var cx=50, cy=50, r=35, c=2*Math.PI*r;
-                    var offset = -c/4;
-                    rows.forEach(function(row){
-                        var seg = document.createElementNS(ns, 'circle');
-                        var len = (row.pct/100) * c;
-                        seg.setAttribute('cx', cx); seg.setAttribute('cy', cy); seg.setAttribute('r', r);
-                        seg.setAttribute('fill','none');
-                        seg.setAttribute('stroke', colorOf[row.k] || '#5b9eff');
-                        seg.setAttribute('stroke-width', 14);
-                        seg.setAttribute('stroke-dasharray', len.toFixed(2) + ' ' + (c - len).toFixed(2));
-                        seg.setAttribute('stroke-dashoffset', offset.toFixed(2));
-                        svg.appendChild(seg);
-                        offset -= len;
-                    });
-                })();
-            </script>
+            {% include "_partials/chart_donut.html" with rows=direction_donut tones="long=accent,short=red" label="Share of open positions by direction" %}
         {% else %}
             <p class="oc-empty">No open positions.</p>
         {% endif %}
+        </div>
     </div>
 
     <div class="card">
         <div class="card-header"><span class="card-title">By asset class · open</span></div>
+        <div data-sv-live="pos-class">
         {% if asset_breakdown %}
             <div class="table-wrapper">
             <table class="sv-perf-table">
@@ -114,8 +86,11 @@
                         <tr>
                             <td><strong>{{ a.asset_class|upper }}</strong></td>
                             <td>{{ a.n }}</td>
-                            <td style="font-family:var(--font-mono);font-size:11px;">{{ a.exposure|floatformat:0 }} <span style="color:var(--text-muted);">({{ a.exposure_pct }}%)</span></td>
-                            <td class="{% if a.unrealized > 0 %}up{% elif a.unrealized < 0 %}down{% endif %}" style="font-family:var(--font-mono);">{{ a.unrealized|floatformat:2 }}</td>
+                            {# Exposure is marked where a quote exists and sized #}
+                            {# at entry cost otherwise; a share of an unpriced #}
+                            {# book is a share of nothing, so it dashes. #}
+                            <td style="font-family:var(--font-mono);font-size:11px;">{{ a.exposure|floatformat:0 }} <span style="color:var(--text-muted);">({% if a.exposure_pct is not None %}{{ a.exposure_pct }}%{% else %}&mdash;{% endif %})</span></td>
+                            <td class="{{ a.unrealized_tone }}" style="font-family:var(--font-mono);" data-sv-live-key="pos.class.{{ a.asset_class }}">{% if a.unrealized is not None %}{{ a.unrealized_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -124,38 +99,16 @@
         {% else %}
             <p class="oc-empty">No open positions to break down.</p>
         {% endif %}
+        </div>
     </div>
 
+    {% if not live_only %}
     <div class="card">
         <div class="card-header"><span class="card-title">Monthly realized P&amp;L · 12m</span></div>
-        {% if monthly_rows %}
-            <div style="display:flex;align-items:center;gap:3px;height:90px;padding:6px 4px 0;">
-                {% for m in monthly_rows %}
-                    <div title="{{ m.month }}: {{ m.pnl }}"
-                         style="flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;">
-                        {% if m.pnl > 0 %}
-                            <div style="width:100%;flex:1;display:flex;align-items:flex-end;">
-                                <div style="width:100%;background:var(--accent);opacity:0.85;border-radius:2px 2px 0 0;height:{% if monthly_max %}{% widthratio m.pnl monthly_max 100 %}{% else %}0{% endif %}%;min-height:3px;"></div>
-                            </div>
-                            <div style="width:100%;flex:1;"></div>
-                        {% elif m.pnl < 0 %}
-                            <div style="width:100%;flex:1;"></div>
-                            <div style="width:100%;flex:1;display:flex;align-items:flex-start;">
-                                <div style="width:100%;background:var(--accent-red);opacity:0.85;border-radius:0 0 2px 2px;height:{% if monthly_max %}{% widthratio m.pnl monthly_max -100 %}{% else %}0{% endif %}%;min-height:3px;"></div>
-                            </div>
-                        {% else %}
-                            <div style="width:100%;height:1px;background:var(--text-muted);opacity:0.4;"></div>
-                        {% endif %}
-                    </div>
-                {% endfor %}
-            </div>
-            <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:9px;color:var(--text-muted);margin-top:6px;">
-                {% for m in monthly_rows %}<span>{{ m.month }}</span>{% endfor %}
-            </div>
-        {% else %}
-            <p class="oc-empty">No closed trades yet.</p>
-        {% endif %}
+        {# Signed: the zero line is the story here, so it is drawn, not implied. #}
+        {% include "_partials/chart_bars.html" with bars=monthly_rows max=monthly_max peak=monthly_max_display signed=1 short=1 unit="realized P&L per month" when="last 12 months" empty="No closed trades yet." %}
     </div>
+    {% endif %}
 </div>
 
 <!-- Tab Navigation -->
@@ -167,28 +120,74 @@
 {% if tab == 'open' %}
 <!-- ── Open Positions Tab ──────────────────────────── -->
 <div class="card fade-in-up">
-    <div class="card-header">
+    {# flex-wrap, or the title and the chip set a floor wider than a 360px #}
+    {# card and take the whole body sideways with them. #}
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
         <span class="card-title">Current Positions</span>
+        {# Says which way the numbers below are arriving: pushed on fills, or #}
+        {# swept on a timer because the feed is down. It reads the class #}
+        {# base.html stamps on the body — this page opens no socket of its own. #}
+        <span class="sv-live-chip" data-sv-live-status>◉ LIVE</span>
     </div>
+    <div data-sv-live="pos-open">
     {% if positions %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
+        <thead><tr><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th class="num">R</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
         <tbody>
-        {% for p in positions %}
-        <tr data-sv-position-row>
-            <td class="nowrap" style="font-family: var(--font-display); font-size: 13px;">{{ p.instrument.symbol }}</td>
+        {# ── The row's own numbers are unchanged; the data-pos-* set feeds the ── #}
+        {# ── dwell card (static/js/sv-position-card.js), which answers what   ── #}
+        {# ── the twelve columns cannot: distance to each level, live R, the   ── #}
+        {# ── rule's score, the reason the engine wrote, the signal behind it. ── #}
+        {# ── An empty value is a value the platform does not have and renders ── #}
+        {# ── on the card as an em-dash — never as 0, which reads as measured. ── #}
+        {% for p, d in positions_detailed %}
+        <tr data-sv-position-row
+            data-pos-symbol="{{ d.symbol }}" data-pos-side="{{ d.side }}"
+            data-pos-qty="{{ d.qty }}" data-pos-status="{{ d.status }}"
+            data-pos-venue="{{ d.venue }}"
+            data-pos-entry="{{ d.entry }}" data-pos-mark="{{ d.mark }}"
+            data-pos-stop="{{ d.stop }}" data-pos-target="{{ d.target }}"
+            data-pos-initial-stop="{{ d.initial_stop }}"
+            data-pos-stop-pct="{{ d.stop_pct }}" data-pos-stop-through="{{ d.stop_through }}"
+            data-pos-target-pct="{{ d.target_pct }}" data-pos-target-through="{{ d.target_through }}"
+            data-pos-progress="{{ d.progress }}"
+            {# R comes off the ROW's own live cell, never from a second #}
+            {# calculation: the card floats directly over the column that #}
+            {# prints it, and two R's on one row is the one disagreement #}
+            {# an operator cannot resolve. The card only formats it. #}
+            data-pos-r="{{ p.r_multiple|default_if_none:'' }}" data-pos-pnl="{{ d.pnl }}"
+            data-pos-pnl-pct="{{ d.pnl_pct }}" data-pos-risk="{{ d.risk }}"
+            data-pos-age="{{ d.age }}" data-pos-opened="{{ d.opened }}"
+            data-pos-rule="{{ d.rule }}" data-pos-score="{{ d.score }}"
+            data-pos-reason="{{ d.reason }}" data-pos-order="{{ d.order }}"
+            data-pos-basis="{{ d.basis }}" data-pos-lot-left="{{ d.lot_left }}"
+            data-pos-signal="{{ d.signal }}" data-pos-signal-dir="{{ d.signal_dir }}"
+            data-pos-signal-score="{{ d.signal_score }}" data-pos-signal-sub="{{ d.signal_sub }}"
+            data-pos-spark="{{ d.spark }}" data-pos-spark-min="{{ d.spark_min }}"
+            data-pos-spark-max="{{ d.spark_max }}" data-pos-spark-up="{{ d.spark_up }}"
+            data-pos-href="{{ d.href }}">
+            {# The keyboard path to the same page the card's click opens: the #}
+            {# card is aria-hidden and pointer-only, so without this link the #}
+            {# timeline would be unreachable without a mouse. #}
+            <td class="nowrap" style="font-family: var(--font-display); font-size: 13px;">{% if d.href %}<a href="{{ d.href }}" class="pos-sym-link">{{ p.instrument.symbol }}</a>{% else %}{{ p.instrument.symbol }}{% endif %}</td>
             <td><span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ p.direction }}</span></td>
             <td class="num" style="font-family: var(--font-mono);">{{ p.quantity }}</td>
             <td class="num" style="font-family: var(--font-mono);">{{ p.entry_price }}</td>
             {# None is a real state here (no quote for the symbol, or an #}
             {# options row with no premium feed) — render the muted em-dash, #}
             {# never the string "None" painted loss-red. #}
-            <td class="num" style="font-family: var(--font-mono); font-weight: 600;">{% if p.current_price is not None %}{{ p.current_price }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            <td class="num" style="font-family: var(--font-mono); font-weight: 600;" data-sv-live-key="{{ p.key }}.last">{% if p.current_price is not None %}{{ p.last_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
             <td class="num" style="font-family: var(--font-mono); color: var(--accent-red);">{{ p.stop_loss|default:"-" }}</td>
             <td class="num" style="font-family: var(--font-mono); color: var(--accent-green);">{{ p.take_profit|default:"-" }}</td>
-            <td class="num">{% if p.unrealized_pnl is not None %}<span style="color: {% if p.unrealized_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ p.unrealized_pnl }}</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
-            <td class="num">{% if p.unrealized_pnl_pct is not None %}<span style="color: {% if p.unrealized_pnl_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}; font-family: var(--font-mono);">{{ p.unrealized_pnl_pct|floatformat:2 }}%</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            <td class="num {{ p.pnl_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pnl">{% if p.unrealized_pnl is not None %}{{ p.pnl_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            <td class="num {{ p.pct_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pct">{% if p.unrealized_pnl_pct is not None %}{{ p.pct_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            {# R against the stop the position OPENED with, not the current #}
+            {# one: a trailing stop rewrites that column, and grading against #}
+            {# it scores every trailed winner at ~1.0R. No stop recorded and #}
+            {# no mark both mean no R — an em-dash, never 0.0R, which would #}
+            {# read as a trade sitting exactly at entry. #}
+            <td class="num {{ p.r_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.r" title="{{ p.r_title }}">{% if p.r_multiple is not None %}{{ p.r_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
             {# sv-ident is the sheet's opt-in for identifier columns: a rule name is one long token whose min-content width would otherwise set the table's floor. #}
             <td class="sv-ident" style="font-size: 12px;">{{ p.strategy.name|default:"-"|truncatechars:20 }}</td>
             <td class="nowrap" style="font-size: 11px; color: var(--text-muted);">{{ p.opened_at|date:"M d H:i" }}</td>
@@ -211,14 +210,20 @@
         <p>NO OPEN POSITIONS</p>
     </div>
     {% endif %}
+    </div>
 </div>
 
+{% if not live_only %}
 <div class="card" style="margin-top:24px;">
   <div class="card-header"><div class="card-title">Position Analytics</div></div>
-  <div class="sv-metrics-wrapper" hx-get="/htmx/metrics/positions/" hx-trigger="load, every 30s"></div>
+  {# hx-trigger is "load" and no longer "load, every 30s": this panel reads the #}
+  {# same book as the table above it, so it refreshes when those numbers do — #}
+  {# one clock on the page instead of a second unconditional one. #}
+  <div class="sv-metrics-wrapper" hx-get="/htmx/metrics/positions/" hx-trigger="load"></div>
 </div>
+{% endif %}
 
-{% else %}
+{% elif not live_only %}
 <!-- ── Position History Tab ────────────────────────── -->
 
 {% if best_trade %}
@@ -340,6 +345,7 @@
 </div>
 {% endif %}
 
+{% if not live_only %}
 <style>
 /* Tab navigation */
 .pos-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
@@ -444,4 +450,15 @@
     .ph-trade-row { flex-direction: column; align-items: flex-start; gap: 6px; }
 }
 </style>
+
+{% url 'positions_live' as live_url %}
+{% include "_partials/live_region.html" %}
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{# Deferred, and later in the document than base.html's own deferred #}
+{# scripts, so SV.dwell (static/js/sv-notif-card.js) is already defined #}
+{# when this runs — deferred scripts execute in document order. #}
+<script src="{% static 'js/sv-position-card.js' %}" defer></script>
 {% endblock %}

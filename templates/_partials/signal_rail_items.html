@@ -4,9 +4,18 @@ signal_rail_partial view re-renders it when the dashboard WebSocket
 announces a new signal, so a fresh card can slide into the rail
 without a page reload. base.html includes it for the initial render;
 both consumers get identical markup by construction.
+
+s.acted (signals/models.py) is the join back to a live position — the
+manual path's exact metadata signal_id, or the bot path's rule_name
+string. A signal something has ALREADY acted on is marked here rather
+than removed: a card that vanishes is indistinguishable from one that
+expired or was dismissed, and the whole point is that the operator
+learns the engine acted. It ages out on its own lifecycle like any
+other card. Because the state is server-rendered it survives the WS
+partial swap for free — there is no client-side state to reapply.
 {% endcomment %}
 {% for s in panel_recent_signals %}
-            <div class="sr-signal-wrap" data-signal-id="{{ s.id }}">
+            <div class="sr-signal-wrap{% if s.acted %} sr-acted sr-acted-{{ s.acted.by }}{% endif %}" data-signal-id="{{ s.id }}"{% if s.acted %} data-acted="{{ s.acted.by }}"{% endif %}>
                 <button type="button" class="sr-x"
                         title="Dismiss — hides this signal for you; the engine still sees it"
                         aria-label="Dismiss {{ s.instrument.symbol }} signal"
@@ -36,6 +45,15 @@ both consumers get identical markup by construction.
                         {% if s.rule_name %}
                         <div class="sr-row3">{{ s.rule_name|truncatechars:34 }}</div>
                         {% endif %}
+                        {% if s.acted %}
+                        {# The state that used to be missing: something already acted on this. #}
+                        <div class="sr-taken" title="Position #{{ s.acted.trade_id }} is live on this signal — {{ s.acted.side }} {{ s.acted.qty|floatformat:"-4" }} {{ s.instrument.symbol }} on the {{ s.acted.venue }} venue{% if s.acted.rule %} via {{ s.acted.rule }}{% endif %}">
+                            <span class="sr-taken-tag">TAKEN</span>
+                            <span class="sr-taken-who">{% if s.acted.by == "manual" %}BY HAND{% else %}BY BOT{% endif %}</span>
+                            <span class="sr-taken-pos">{{ s.acted.side }} {{ s.acted.qty|floatformat:"-4" }}</span>
+                            <span class="sr-taken-venue">{{ s.acted.venue }}</span>
+                        </div>
+                        {% endif %}
                     </div>
                 </a>
                 {# ── Hover popup — rich detail + action links ─────────── #}
@@ -45,6 +63,18 @@ both consumers get identical markup by construction.
                         <span class="sr-pop-dir sr-pop-dir-{{ s.direction }}">{{ s.direction|upper }}</span>
                         {% if s.urgency %}<span class="sr-urg sr-urg-{{ s.urgency }}" style="margin-left:auto;">{{ s.urgency|upper }}</span>{% endif %}
                     </div>
+                    {% if s.acted %}
+                    {% comment %}The banner exists so the operator reads
+                    "already live" BEFORE the TAKE TRADE button underneath
+                    it, not after the second position exists. The button
+                    stays — adding to a position is a real decision — but it
+                    stops calling itself a fresh entry.{% endcomment %}
+                    <div class="sr-pop-taken">
+                        <span class="sr-pop-taken-head">ALREADY TAKEN{% if s.acted.by == "manual" %} · BY HAND{% else %} · BY THE ENGINE{% endif %}</span>
+                        <span class="sr-pop-taken-body">{{ s.acted.side }} {{ s.acted.qty|floatformat:"-4" }} {{ s.instrument.symbol }} · {{ s.acted.venue }} · position #{{ s.acted.trade_id }}</span>
+                        <span class="sr-pop-taken-body">rule {{ s.acted.rule|default:"—" }} · opened {{ s.acted.opened_at|timesince|default:"—" }} ago</span>
+                    </div>
+                    {% endif %}
                     {% if s.title %}
                     <div class="sr-pop-title">{{ s.title|truncatechars:140 }}</div>
                     {% endif %}
@@ -65,9 +95,9 @@ both consumers get identical markup by construction.
                     <div class="sr-pop-actions sr-pop-actions-react">
                         {% if s.direction == "bullish" or s.direction == "bearish" %}
                         <button type="button"
-                                class="sr-pop-btn sr-pop-btn-act"
+                                class="sr-pop-btn sr-pop-btn-act{% if s.acted %} sr-pop-btn-add{% endif %}"
                                 data-signal-id="{{ s.id }}"
-                                onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ s.id }});">▶ TAKE TRADE</button>
+                                onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ s.id }});">{% if s.acted %}▶ ADD TO POSITION{% else %}▶ TAKE TRADE{% endif %}</button>
                         {% endif %}
                         <button type="button"
                                 class="sr-pop-btn sr-pop-btn-pass"

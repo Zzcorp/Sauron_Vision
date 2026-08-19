@@ -42,24 +42,11 @@
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
         <span class="card-title">Cost trend · last 7 days</span>
         <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
-            {% if max_day_cost %}peak ${{ max_day_cost }}{% endif %}
+            {% if max_day_cost %}peak {{ max_day_cost_display }}{% else %}—{% endif %}
         </span>
     </div>
-    {% if cost_trend %}
-        <div style="display:flex;align-items:flex-end;gap:6px;height:120px;padding:8px 4px 0;">
-            {% for d in cost_trend %}
-                <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;">
-                    <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-bottom:3px;">${{ d.cost }}</span>
-                    <div style="width:100%;background:var(--accent);opacity:0.85;border-radius:2px 2px 0 0;
-                                height:{% if max_day_cost %}{% widthratio d.cost max_day_cost 100 %}{% else %}0{% endif %}%;min-height:{% if d.cost %}3px{% else %}0{% endif %};"></div>
-                    <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);margin-top:4px;">{{ d.date }}</span>
-                    <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);">{{ d.n }} task{{ d.n|pluralize }}</span>
-                </div>
-            {% endfor %}
-        </div>
-    {% else %}
-        <p class="oc-empty">No cost data yet.</p>
-    {% endif %}
+    {# Same card as /ai/ — one partial so the two can never drift apart. #}
+    {% include "_partials/chart_bars.html" with bars=cost_trend max=max_day_cost peak=max_day_cost_display unit="USD of API spend per day" when="last 7 days" empty="No agent calls in the last 7 days — the trend fills as tasks run." %}
 </div>
 
 {# ── 3. By-agent breakdown · top failures · longest tasks ────────── #}
