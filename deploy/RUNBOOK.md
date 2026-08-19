@@ -15,6 +15,11 @@ and Redis.
 > command aborts with `DB_PASSWORD must be set in .env` while `DB_PASSWORD` is
 > plainly set in `.env`. Every subcommand re-interpolates, so `ps`, `logs` and
 > `exec` need it too.
+>
+> Because a flag needed on *every* command is exactly what a hand-typed alias
+> drops, `deploy/dc` wraps it: `./deploy/dc up -d --build`,
+> `./deploy/dc logs -f web`, `./deploy/dc exec web python manage.py migrate`.
+> Same arguments as `docker compose`, minus the trap.
 
 ---
 

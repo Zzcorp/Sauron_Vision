@@ -1,0 +1,29 @@
+#!/usr/bin/env sh
+# The compose wrapper — use this instead of typing `docker compose`.
+#
+#   ./deploy/dc up -d --build
+#   ./deploy/dc logs -f web
+#   ./deploy/dc exec web python manage.py seed_strategies
+#
+# WHY it exists: compose interpolates ${VAR} from the PROJECT directory,
+# which with `-f deploy/docker-compose.yml` is deploy/ — not the repo root
+# where .env lives. Omit --env-file and the very first command aborts with
+#
+#   required variable DB_PASSWORD is missing a value: DB_PASSWORD must be
+#   set in .env
+#
+# while DB_PASSWORD is plainly set in .env. The flag is required on EVERY
+# subcommand, which makes it exactly the kind of thing a hand-typed alias
+# drops. Do NOT "fix" the same error with --project-directory . instead:
+# that rebases `context: ..` and the ./Caddyfile mount and breaks the build.
+set -e
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+root=$(CDPATH= cd -- "$here/.." && pwd)
+
+if [ ! -f "$root/.env" ]; then
+    echo "No .env at $root/.env — copy .env.example and fill it in first." >&2
+    exit 1
+fi
+
+exec docker compose --env-file "$root/.env" -f "$here/docker-compose.yml" "$@"
