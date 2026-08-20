@@ -171,7 +171,7 @@ DEFAULT_COMPONENTS = [
     # Without this row the @guarded_task on brain.tasks.run_position_review
     # short-circuits on every beat and the watcher silently never runs.
     {"key": "agent_position_review", "name": "Open-Position Reviewer",
-     "description": "Watches OPEN positions between entry and exit. A free deterministic pass every 30 min measures R at risk, excursion, distance to stop/target, age vs the setup's horizon, regime flip, vol expansion, imminent events, rule decay and theme concentration; only flagged positions reach a budgeted model pass that answers hold / tighten / take part / exit. PROPOSES ONLY — it never closes anything.",
+     "description": "Watches OPEN positions between entry and exit. A free pass every 30 min scores R at risk, excursion, distance to stop/target, age, regime flip, vol expansion, events and concentration; only flagged positions reach a budgeted model pass answering hold / tighten / trim / exit. PROPOSES ONLY.",
      "category": "agent"},
 
     # ── Phase 13 — multi-asset bot framework ──────────────────

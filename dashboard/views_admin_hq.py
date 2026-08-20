@@ -391,6 +391,86 @@ def save_alpaca_credentials(request):
     return redirect("admin_dashboard")
 
 
+
+@_admin_only
+def test_ibkr_connection(request):
+    """POST {target_username} — is TWS answering, right now?
+
+    Saving already pings, but that made verification a side effect of
+    WRITING: the only way to re-check a connection was to re-submit the
+    whole form, which rewrites the routing overrides from whatever the
+    checkboxes happen to hold. An operator who starts TWS after saving had
+    no way to confirm it worked without risking their configuration.
+
+    This changes nothing. It builds a client from the STORED row, pings,
+    records the outcome on `connected`/`last_sync`, and says what it found —
+    including which account the socket points at, because "reachable" and
+    "reachable, and it is the funded one" are different answers.
+    """
+    from django.contrib.auth.models import User
+    from bot_program.models import IBKRAccount
+
+    target_username = request.POST.get("target_username", "").strip()
+    try:
+        user = User.objects.get(username=target_username)
+    except User.DoesNotExist:
+        messages.error(request, f"IBKR: user '{target_username}' not found.")
+        return redirect("admin_dashboard")
+
+    acct = getattr(user, "ibkr_account", None)
+    if acct is None:
+        messages.error(request, f"IBKR: no connection saved for {target_username}.")
+        return redirect("admin_dashboard")
+
+    account_id = acct.get_account_id() or ""
+    if not account_id:
+        # The disconnected state. Say so rather than reporting a socket
+        # result, because the router refuses to trade this row either way.
+        messages.warning(
+            request,
+            f"IBKR: {target_username} has no account id stored — the "
+            f"connection is disconnected and nothing will route to it. "
+            f"Re-save the credentials to reconnect.")
+        return redirect("admin_dashboard")
+
+    from bot_program.engine.ibkr_client import IBKRTrader
+    reachable = _broker_ping(
+        lambda: IBKRTrader(host=acct.host, port=acct.port,
+                           client_id=acct.client_id, account_id=account_id,
+                           paper=acct.paper), "IBKR")
+
+    acct.connected = reachable
+    fields = ["connected"]
+    if reachable:
+        from django.utils import timezone
+        acct.last_sync = timezone.now()
+        fields.append("last_sync")
+    acct.save(update_fields=fields)
+
+    where = f"{acct.host}:{acct.port}"
+    if not reachable:
+        messages.error(
+            request,
+            f"IBKR: nothing answered at {where} for {target_username}. TWS or "
+            f"IB Gateway must be running on that host with API connections "
+            f"enabled, and the client id ({acct.client_id}) must not already "
+            f"be in use by another session.")
+    elif acct.env_is_certain:
+        messages.success(
+            request,
+            f"IBKR: {where} answered — {acct.env_label}, account {account_id}, "
+            f"client_id={acct.client_id}. "
+            + ("Orders routed here would move REAL funds."
+               if acct.is_live else
+               "This socket is simulated; no real funds can move through it."))
+    else:
+        messages.warning(
+            request,
+            f"IBKR: {where} answered, but port {acct.port} is not one of "
+            f"IBKR's four, so this platform cannot tell whether it is a paper "
+            f"or a funded account. Check it in TWS before arming any bot.")
+    return redirect("admin_dashboard")
+
 @_admin_only
 def save_ibkr_credentials(request):
     """Create or update IBKRAccount for a target user — Phase-14.

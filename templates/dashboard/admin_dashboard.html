@@ -292,6 +292,10 @@ the broker, and the bot that would have honoured their stops switched off.
                     {% if row.oanda.connected %}<form method="post" action="{% url 'hq_disconnect_broker' %}">{% csrf_token %}<input type="hidden" name="target_username" value="{{ row.username }}"><input type="hidden" name="broker" value="oanda"><button class="btn btn-sm btn-danger" type="submit">× OANDA</button></form>{% endif %}
                     {% if row.alpaca.connected %}<form method="post" action="{% url 'hq_disconnect_broker' %}">{% csrf_token %}<input type="hidden" name="target_username" value="{{ row.username }}"><input type="hidden" name="broker" value="alpaca"><button class="btn btn-sm btn-danger" type="submit">× Alpaca</button></form>{% endif %}
                     {% if row.ibkr.connected %}<form method="post" action="{% url 'hq_disconnect_broker' %}">{% csrf_token %}<input type="hidden" name="target_username" value="{{ row.username }}"><input type="hidden" name="broker" value="ibkr"><button class="btn btn-sm btn-danger" type="submit">× IBKR</button></form>{% endif %}
+                    {# Verify without writing: re-saving the form to re-check a #}
+                    {# socket also rewrites the routing overrides from whatever #}
+                    {# the checkboxes happen to hold. #}
+                    {% if row.ibkr %}<form method="post" action="{% url 'hq_test_ibkr' %}">{% csrf_token %}<input type="hidden" name="target_username" value="{{ row.username }}"><button class="btn btn-sm" type="submit" title="Ping TWS at this host and port. Changes nothing.">Test IBKR</button></form>{% endif %}
                 </td>
             </tr>
             {% endfor %}
@@ -533,7 +537,7 @@ the broker, and the bot that would have honoured their stops switched off.
     </div>
     <div style="padding:16px;">
         <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;">Create / update asset bot</div>
-        <form method="post" action="{% url 'hq_create_asset_bot' %}" style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;">
+        <form method="post" action="{% url 'hq_create_asset_bot' %}" id="assetBotForm" style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;">
             {% csrf_token %}
             <select name="asset_class" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
                 <option value="stock">Stocks (Alpaca)</option>
@@ -541,9 +545,9 @@ the broker, and the bot that would have honoured their stops switched off.
                 <option value="commodity">Commodities (paper-only)</option>
             </select>
             <input type="text" name="name" placeholder="Bot name" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
-            <select name="mode" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
-                <option value="paper">Paper</option>
-                <option value="live">Live</option>
+            <select name="mode" id="assetBotMode" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+                <option value="paper">Paper (simulated money)</option>
+                <option value="live">Live (your real funds)</option>
             </select>
             <input type="password" name="pin" placeholder="PIN (required for Live)" autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
 
@@ -566,6 +570,67 @@ the broker, and the bot that would have honoured their stops switched off.
 
             <button type="submit" class="btn btn-primary btn-sm" style="grid-column:1/4;">Create / Update</button>
         </form>
+
+<script>
+/* Arming a bot LIVE is the moment this platform starts spending real money
+   on its own initiative, and it was one select and a PIN away. The PIN is
+   the right gate and it is not the whole job: it proves WHO is asking, not
+   that they meant THIS. So the same friction the live IBKR socket gets —
+   the facts, and a word typed out — applies here.
+
+   Deliberately not a second copy of the PIN rule: the server owns that
+   (views_admin_hq enforces it on every live save, whatever the browser
+   did). This dialog exists to make sure the operator knows which bot, on
+   which market, with how much, is about to be allowed to trade by itself. */
+(function () {
+    var form = document.getElementById("assetBotForm");
+    var mode = document.getElementById("assetBotMode");
+    if (!form || !mode) return;
+
+    function val(name) {
+        var el = form.querySelector('[name="' + name + '"]');
+        return el && el.value ? el.value : "—";
+    }
+
+    var armed = false;
+    form.addEventListener("submit", function (e) {
+        if (armed) return;
+        if (mode.value !== "live") return;      /* paper needs no ceremony */
+        e.preventDefault();
+        var cls = val("asset_class");
+        SV.overlay.confirm({
+            title: "Arm this bot with REAL money?",
+            message: "A live bot opens and closes positions on its own, on "
+                   + "every beat, without asking again.",
+            facts: [
+                ["Bot", val("name") + " · " + cls],
+                ["Capital", val("capital") + " " + val("base_currency")],
+                ["Universe", val("symbols")],
+                ["Per position", val("position_size_pct") + "% · max " +
+                                 val("max_concurrent_positions") + " open"],
+                /* Named, because "live" does not say WHERE — and for
+                   commodities the answer is that it stays simulated unless
+                   an IBKR account is routed for that class. */
+                ["Routes to", cls === "stock" ? "Alpaca, or IBKR if routed"
+                            : cls === "forex" ? "OANDA, or IBKR if routed"
+                            : "paper venue unless IBKR is primary for " + cls],
+                ["Still required", "correct trading PIN"]
+            ],
+            detail: "It will not trade until it is also ENABLED and the "
+                  + "platform master switch is on. A live config whose broker "
+                  + "credentials are missing refuses to trade rather than "
+                  + "booking a paper fill as real.",
+            danger: true,
+            requireText: "LIVE",
+            confirmLabel: "Arm live bot"
+        }).then(function (ok) {
+            if (!ok) return;
+            armed = true;
+            form.submit();
+        });
+    });
+})();
+</script>
     </div>
 </div>
 

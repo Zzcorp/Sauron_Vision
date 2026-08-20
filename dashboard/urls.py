@@ -48,6 +48,7 @@ from .views_admin_hq import (
     run_nightly_cleanup, run_full_universe_scan, run_seed_components,
     run_seed_strategies,
     save_oanda_credentials, save_alpaca_credentials, save_ibkr_credentials,
+    test_ibkr_connection,
     disconnect_broker,
     hq_apply_rule_action, hq_reject_rule_action, hq_rollback_rule_action,
     hq_propose_allocation, hq_apply_allocation, hq_rollback_allocation,
@@ -184,6 +185,10 @@ urlpatterns = [
     path("admin-dashboard/brokers/oanda/save/", save_oanda_credentials, name="hq_save_oanda"),
     path("admin-dashboard/brokers/alpaca/save/", save_alpaca_credentials, name="hq_save_alpaca"),
     path("admin-dashboard/brokers/ibkr/save/", save_ibkr_credentials, name="hq_save_ibkr"),
+    # Verification without writing: re-saving the form to re-check a
+    # socket also rewrites the routing overrides from the checkboxes.
+    path("admin-dashboard/brokers/ibkr/test/", test_ibkr_connection,
+         name="hq_test_ibkr"),
     path("admin-dashboard/brokers/disconnect/", disconnect_broker, name="hq_disconnect_broker"),
 
     # ── Phase 5: Rule Actuator (closed-loop) ─────────────────

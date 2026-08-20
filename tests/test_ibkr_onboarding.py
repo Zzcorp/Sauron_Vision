@@ -275,3 +275,115 @@ class TheStatusTableTests(TestCase):
         acct.refresh_from_db()
         self.assertEqual(acct.account_id_enc, "")
         self.assertFalse(acct.connected)
+
+
+class ConnectionTestTests(TestCase):
+    """Saving already pings, but that made verification a side effect of
+    WRITING: the only way to re-check a socket was to re-submit the whole
+    form, which rewrites the routing overrides from whatever the checkboxes
+    happen to hold. An operator who starts TWS after saving had no way to
+    confirm it without risking their configuration."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_superuser(
+            "ib_t", "a@b.c", "x")
+        self.client.force_login(self.admin)
+
+    def _account(self, port=7497, account_id="DU1"):
+        from bot_program.models import IBKRAccount
+        acct = IBKRAccount.objects.create(
+            user=self.admin, host="127.0.0.1", port=port, client_id=1,
+            paper=port in IBKRAccount.PAPER_PORTS,
+            is_primary_for_commodity=True)
+        if account_id:
+            acct.set_credentials(account_id)
+        acct.save()
+        return acct
+
+    def _test_it(self, username="ib_t"):
+        resp = self.client.post("/admin-dashboard/brokers/ibkr/test/",
+                                {"target_username": username},
+                                HTTP_HOST="127.0.0.1", follow=True)
+        return [m.message for m in resp.context["messages"]]
+
+    def test_the_button_is_offered(self):
+        self._account()
+        resp = self.client.get("/admin-dashboard/", HTTP_HOST="127.0.0.1")
+        self.assertIn("Test IBKR", resp.content.decode("utf-8", "replace"))
+
+    def test_an_unreachable_socket_says_what_to_check(self):
+        self._account()
+        msg = " ".join(self._test_it())
+        self.assertIn("nothing answered", msg)
+        self.assertIn("must be running", msg)
+
+    def test_it_does_not_rewrite_the_routing_overrides(self):
+        """The whole reason this exists rather than re-saving the form."""
+        acct = self._account()
+        self._test_it()
+        acct.refresh_from_db()
+        self.assertTrue(acct.is_primary_for_commodity)
+
+    def test_a_disconnected_account_says_so_instead_of_pinging(self):
+        """No account id means the router refuses the row either way, so a
+        socket result would answer a question nobody asked."""
+        self._account(account_id=None)
+        msg = " ".join(self._test_it())
+        self.assertIn("disconnected", msg)
+        self.assertNotIn("nothing answered", msg)
+
+    def test_an_unknown_user_is_refused(self):
+        self.assertIn("not found", " ".join(self._test_it("nobody")))
+
+    def test_a_user_with_no_ibkr_row_is_refused(self):
+        self.assertIn("no connection saved", " ".join(self._test_it()))
+
+    def test_it_is_post_only_and_admin_only(self):
+        resp = self.client.get("/admin-dashboard/brokers/ibkr/test/",
+                               HTTP_HOST="127.0.0.1")
+        self.assertEqual(resp.status_code, 405)
+        plain = get_user_model().objects.create_user("ib_plain", password="x")
+        self.client.force_login(plain)
+        resp = self.client.post("/admin-dashboard/brokers/ibkr/test/",
+                                {"target_username": "ib_t"},
+                                HTTP_HOST="127.0.0.1")
+        self.assertEqual(resp.status_code, 403)
+
+
+class ArmingABotLiveIsConfirmedTests(SimpleTestCase):
+    """The PIN proves WHO is asking, not that they meant THIS. A live bot
+    opens and closes positions on its own, on every beat, without asking
+    again — the same friction the live IBKR socket gets applies here."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.html = _template()
+
+    def test_the_mode_options_say_which_money_they_spend(self):
+        block = self.html.split('id="assetBotMode"', 1)[1].split("</select>", 1)[0]
+        self.assertIn("simulated", block)
+        self.assertIn("real funds", block)
+
+    def test_choosing_live_requires_typing_it(self):
+        script = self.html.split('id="assetBotForm"', 1)[1]
+        self.assertIn('requireText: "LIVE"', script)
+
+    def test_paper_is_not_gated(self):
+        """Friction on the safe path teaches operators to click through."""
+        script = self.html.split('id="assetBotForm"', 1)[1]
+        self.assertIn('mode.value !== "live"', script)
+
+    def test_the_dialog_names_where_the_orders_would_go(self):
+        """"Live" does not say WHERE — and a commodity bot stays simulated
+        unless an IBKR account is primary for that class."""
+        script = self.html.split('id="assetBotForm"', 1)[1]
+        dialog = script[script.find("SV.overlay.confirm"):][:1800]
+        self.assertIn("Routes to", dialog)
+        self.assertIn("paper venue unless IBKR", dialog)
+
+    def test_the_dialog_does_not_claim_the_bot_starts_trading_immediately(self):
+        script = self.html.split('id="assetBotForm"', 1)[1]
+        dialog = script[script.find("SV.overlay.confirm"):][:2200]
+        self.assertIn("ENABLED", dialog)
+        self.assertIn("master switch", dialog)
