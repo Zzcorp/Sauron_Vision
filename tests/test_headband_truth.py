@@ -210,8 +210,12 @@ class BookValueTests(TestCase):
 
         cash = float(_book(self.user).cash_available)
         ctx = _ctx(self.user)
-        # 2 x 120 deployed on the legacy half, 3 x 110 on the bot half.
-        self.assertEqual(ctx["panel_portfolio_value"], f"{cash + 570:,.0f}")
+        # Both books reach the cell, each contributing what it actually put
+        # into the book: the legacy row is funded from the cash column and
+        # contributes its 2 x 120 marked; the bot row is paper, so it
+        # contributes its P&L of (110 - 100) x 3 and not its 330 of notional.
+        self.assertEqual(ctx["panel_portfolio_value"],
+                         f"{cash + 240 + 30:,.0f}")
         self.assertEqual(ctx["panel_positions"], 2)
         self.assertEqual(ctx["panel_positions_priced"], 2)
 
@@ -224,9 +228,11 @@ class BookValueTests(TestCase):
         _trade(self.user, "BTCUSD", qty="4", entry="100")
         after = _ctx(self.user)["panel_portfolio_value"]
         self.assertNotEqual(before, after)
+        # By the trade's P&L. It used to move by the trade's SIZE, so
+        # opening a flat position booked a gain for placing it.
         self.assertEqual(
             float(after.replace(",", "")) - float(before.replace(",", "")),
-            440.0)
+            40.0)
 
     def test_the_headband_and_the_op_center_count_one_book(self):
         """Both read dashboard.views_command._open_book. Two implementations

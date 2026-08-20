@@ -120,6 +120,16 @@ def _open_book(user, portfolio):
         quote = quotes.get(getattr(r, "instrument_id", None))
         mark = (float(quote.last)
                 if quote is not None and quote.last is not None else None)
+        r.mark_source = "quote" if mark is not None else None
+        # NO FALLBACK to the row's stored `current_price`, tempting as it is.
+        # It has two writers with two different meanings: the eToro sync puts
+        # the broker's real `currentRate` there, but the /setup/ form writes
+        # entry_price into it verbatim. A blanket fallback would therefore
+        # launder entry cost into a figure labelled "current value" for every
+        # hand-entered row — the exact claim this book refuses to make.
+        # The broker's marks are fixed where they are made instead: the eToro
+        # adapter now writes a LiveQuote beside the Position, so a real mark
+        # reaches this table the same way every other real mark does.
         if mark is None:
             # Never saved: this is a display re-price, and writing it back
             # would put an unmarked guess into the book the snapshot task
@@ -194,10 +204,19 @@ def _tab_bar_metrics(user) -> dict:
 
     # ── PORTFOLIO: book value + TODAY's snapshot delta ───────────────
     try:
-        from portfolio.services import get_or_create_default_portfolio
+        from portfolio.services import (get_or_create_default_portfolio,
+                                        live_book_value)
         from portfolio.models import PortfolioSnapshot
         portfolio = get_or_create_default_portfolio(user=user)
-        out["portfolio"]["primary"] = f"${float(portfolio.current_value):,.0f}"
+        # Cash plus BOTH books at live marks, never `Portfolio.current_value`.
+        # That column's only writers are hourly tasks, so this head sat at the
+        # seeded capital on an account whose positions are bot trades — the
+        # tab bar's own LIVE head, one cell to the left, was already counting
+        # those same trades.
+        book = live_book_value(user, portfolio)
+        out["portfolio"]["primary"] = (
+            DASH if book.value is None
+            else f"{book.currency_symbol}{book.value:,.0f}")
         # A snapshot from last week does not describe today's P&L. The old
         # code took the newest snapshot whatever its date and printed it as
         # "24h", so a stale book reported a day it never had.
@@ -209,12 +228,13 @@ def _tab_bar_metrics(user) -> dict:
             out["portfolio"]["secondary"] = f"{pct:+.2f}%"
             out["portfolio"]["tone"] = _tone(pct)
             out["portfolio"]["title"] = (
-                f"{portfolio.name} book value; day change from today's "
-                f"snapshot.")
+                f"{portfolio.name}: cash plus both books at live marks. "
+                f"{book.coverage} Day change from today's snapshot.")
         else:
             out["portfolio"]["title"] = (
-                f"{portfolio.name} book value. No snapshot for {today} yet, "
-                f"so the day change is not measured.")
+                f"{portfolio.name}: cash plus both books at live marks. "
+                f"{book.coverage} No snapshot for {today} yet, so the day "
+                f"change is not measured.")
     except Exception as e:
         logger.warning("Op Center PORTFOLIO metric unavailable: %s", e,
                        exc_info=True)
@@ -300,14 +320,20 @@ def _hero_metrics(user) -> dict:
     }
 
     try:
-        from portfolio.services import get_or_create_default_portfolio
+        from portfolio.services import (get_or_create_default_portfolio,
+                                        live_book_value)
         from portfolio.models import PortfolioSnapshot
         portfolio = get_or_create_default_portfolio(user=user)
-        out["value"] = f"{float(portfolio.current_value):,.2f}"
+        # The hero's headline number. It read `Portfolio.current_value` — the
+        # stored column — and "last written {updated_at}" was the tooltip's
+        # honest admission that the figure was a record of an hourly task
+        # rather than of the operator's book. It is now measured on the read.
+        book = live_book_value(user, portfolio)
+        out["value"] = DASH if book.value is None else f"{book.value:,.2f}"
         out["currency"] = portfolio.currency
         out["value_title"] = (
-            f"Book value of {portfolio.name}, last written "
-            f"{portfolio.updated_at:%Y-%m-%d %H:%M} UTC.")
+            f"{portfolio.name}: cash plus everything open across both books, "
+            f"marked to live quotes. {book.coverage}")
         # "+0.00" was the hardcoded default here, printed under a "· 24h"
         # label on every install that has never taken a snapshot.
         today = timezone.localdate()
@@ -632,6 +658,7 @@ def command_tab_live(request):
 def command_tab_portfolio(request):
     """PORTFOLIO tab — strategic snapshot with sparkline + allocation."""
     from portfolio.services import (get_or_create_default_portfolio,
+                                     live_book_value,
                                      unified_closed_positions)
     from portfolio.models import PortfolioSnapshot
 
@@ -642,8 +669,12 @@ def command_tab_portfolio(request):
     # operator with a full track record. `unified_*` is the read-side union
     # the positions pages already use; _open_book re-prices its legacy half
     # so this table and the LIVE tab head cannot quote different P&Ls.
-    open_positions, _n_priced, total_unrealized, _deployed = _open_book(
-        request.user, portfolio)
+    union = _open_book(request.user, portfolio)
+    open_positions, _n_priced, total_unrealized, _deployed = union
+    # One union, two answers: the rows for the table and the total for the
+    # strip above it. Passing the tuple through is what stops this page
+    # paying for the same re-pricing twice and — worse — quoting two of them.
+    book = live_book_value(request.user, portfolio, book=union)
     closed_positions = unified_closed_positions(request.user, portfolio)
 
     # A closed row's P&L is unknown when nothing could price it (an option
@@ -661,7 +692,15 @@ def command_tab_portfolio(request):
     profit_factor = (abs(avg_win / avg_loss)
                      if avg_win is not None and avg_loss else None)
 
-    cash_pct = round(float(portfolio.cash_available) / max(float(portfolio.current_value), 1) * 100)
+    # Against the LIVE book value, not the stored column: dividing cash by a
+    # figure that never counted the open positions reported "100% cash" to an
+    # operator whose whole book was deployed. DASH and not None where it
+    # cannot be measured — floatformat renders None as an empty span but
+    # passes an unparseable string straight through, which is the same idiom
+    # the LIVE tab uses for its exposure split.
+    cash_pct = DASH if book.cash_pct is None else round(book.cash_pct)
+    exposure_pct = (DASH if book.exposure_pct is None
+                    else round(book.exposure_pct))
 
     latest_snapshot = (PortfolioSnapshot.objects.filter(portfolio=portfolio)
                         .order_by("-date").first())
@@ -725,7 +764,14 @@ def command_tab_portfolio(request):
         "open_positions_total": len(open_positions),
         "total_unrealized": total_unrealized,
         "cash_pct": cash_pct,
-        "exposure_pct": 100 - cash_pct,
+        "exposure_pct": exposure_pct,
+        # The PORTFOLIO VALUE strip cell. Pre-formatted with its currency sign
+        # and its em-dash, because the template still renders the stored
+        # `portfolio.current_value` — the frozen column — and swapping it is a
+        # one-line change in a file this slice does not own.
+        "book_value_text": book.value_text or DASH,
+        "book_coverage": book.coverage,
+        "book_value_partial": book.partial and book.value is not None,
         # None all the way down where there is nothing to measure. These were
         # all zeros before: a 0.0% win rate over zero trades is a claim that
         # every trade lost, and a 0.00 profit factor reads as a broken system

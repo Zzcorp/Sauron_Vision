@@ -1,5 +1,5 @@
 {% extends base_template|default:"base.html" %}
-{% load static %}
+{% load static sauron_tags %}
 {% block title %}Positions — Sauron Vision{% endblock %}
 {% block page_title %}POSITIONS{% endblock %}
 
@@ -272,9 +272,9 @@ template branches, each a fresh chance to print a confident zero.
             </div>
             {# Sign and colour follow the number. The best of a losing book is #}
             {# still a loss, and printing it green with a + is a lie. #}
-            <div class="ph-kv"><span>P&L</span><span class="{% if best_trade.unrealized_pnl > 0 %}up{% elif best_trade.unrealized_pnl < 0 %}down{% endif %}" style="font-weight:700;">{% if best_trade.unrealized_pnl > 0 %}+{% endif %}{{ best_trade.unrealized_pnl }} ({{ best_trade.unrealized_pnl_pct|floatformat:1 }}%)</span></div>
-            <div class="ph-kv"><span>Entry → Exit</span><span>{{ best_trade.entry_price|floatformat:2 }} → {{ best_trade.current_price|floatformat:2 }}</span></div>
-            <div class="ph-kv"><span>Period</span><span>{{ best_trade.opened_at|date:"M d" }} → {{ best_trade.closed_at|date:"M d" }}</span></div>
+            <div class="ph-kv"><span>P&L</span><span class="{% if best_trade.unrealized_pnl > 0 %}up{% elif best_trade.unrealized_pnl < 0 %}down{% endif %}" style="font-weight:700;">{% if best_trade.unrealized_pnl > 0 %}+{% endif %}{{ best_trade.unrealized_pnl|measured:2 }} ({{ best_trade.unrealized_pnl_pct|measured_pct:1 }})</span></div>
+            <div class="ph-kv"><span>Entry → Exit</span><span>{{ best_trade.entry_price|measured:2 }} → {{ best_trade.current_price|measured:2 }}</span></div>
+            <div class="ph-kv"><span>Period</span><span>{{ best_trade.opened_at|date:"M d"|default:"—" }} → {{ best_trade.closed_at|date:"M d"|default:"—" }}</span></div>
         </div>
     </div>
     <div class="card fade-in-up delay-2" style="border-left:3px solid var(--accent-red);">
@@ -285,9 +285,9 @@ template branches, each a fresh chance to print a confident zero.
                 {% if worst_url %}<a href="{{ worst_url }}" class="ph-sym is-lg is-loss">{{ worst_trade.instrument.symbol }}</a>{% else %}<span class="ph-sym is-lg is-loss">{{ worst_trade.instrument.symbol }}</span>{% endif %}
                 <span class="badge badge-{% if worst_trade.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ worst_trade.direction }}</span>
             </div>
-            <div class="ph-kv"><span>P&L</span><span class="{% if worst_trade.unrealized_pnl > 0 %}up{% elif worst_trade.unrealized_pnl < 0 %}down{% endif %}" style="font-weight:700;">{% if worst_trade.unrealized_pnl > 0 %}+{% endif %}{{ worst_trade.unrealized_pnl }} ({{ worst_trade.unrealized_pnl_pct|floatformat:1 }}%)</span></div>
-            <div class="ph-kv"><span>Entry → Exit</span><span>{{ worst_trade.entry_price|floatformat:2 }} → {{ worst_trade.current_price|floatformat:2 }}</span></div>
-            <div class="ph-kv"><span>Period</span><span>{{ worst_trade.opened_at|date:"M d" }} → {{ worst_trade.closed_at|date:"M d" }}</span></div>
+            <div class="ph-kv"><span>P&L</span><span class="{% if worst_trade.unrealized_pnl > 0 %}up{% elif worst_trade.unrealized_pnl < 0 %}down{% endif %}" style="font-weight:700;">{% if worst_trade.unrealized_pnl > 0 %}+{% endif %}{{ worst_trade.unrealized_pnl|measured:2 }} ({{ worst_trade.unrealized_pnl_pct|measured_pct:1 }})</span></div>
+            <div class="ph-kv"><span>Entry → Exit</span><span>{{ worst_trade.entry_price|measured:2 }} → {{ worst_trade.current_price|measured:2 }}</span></div>
+            <div class="ph-kv"><span>Period</span><span>{{ worst_trade.opened_at|date:"M d"|default:"—" }} → {{ worst_trade.closed_at|date:"M d"|default:"—" }}</span></div>
         </div>
     </div>
 </div>
@@ -306,9 +306,9 @@ template branches, each a fresh chance to print a confident zero.
         {% if only_url %}<a href="{{ only_url }}" class="ph-sym is-lg is-neutral">{{ best_trade.instrument.symbol }}</a>{% else %}<span class="ph-sym is-lg is-neutral">{{ best_trade.instrument.symbol }}</span>{% endif %}
             <span class="badge badge-{% if best_trade.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ best_trade.direction }}</span>
         </div>
-        <div class="ph-kv"><span>P&L</span><span class="{% if best_trade.unrealized_pnl > 0 %}up{% elif best_trade.unrealized_pnl < 0 %}down{% endif %}" style="font-weight:700;">{% if best_trade.unrealized_pnl > 0 %}+{% endif %}{{ best_trade.unrealized_pnl }} ({{ best_trade.unrealized_pnl_pct|floatformat:1 }}%)</span></div>
-        <div class="ph-kv"><span>Entry → Exit</span><span>{{ best_trade.entry_price|floatformat:2 }} → {{ best_trade.current_price|floatformat:2 }}</span></div>
-        <div class="ph-kv"><span>Period</span><span>{{ best_trade.opened_at|date:"M d" }} → {{ best_trade.closed_at|date:"M d" }}</span></div>
+        <div class="ph-kv"><span>P&L</span><span class="{% if best_trade.unrealized_pnl > 0 %}up{% elif best_trade.unrealized_pnl < 0 %}down{% endif %}" style="font-weight:700;">{% if best_trade.unrealized_pnl > 0 %}+{% endif %}{{ best_trade.unrealized_pnl|measured:2 }} ({{ best_trade.unrealized_pnl_pct|measured_pct:1 }})</span></div>
+        <div class="ph-kv"><span>Entry → Exit</span><span>{{ best_trade.entry_price|measured:2 }} → {{ best_trade.current_price|measured:2 }}</span></div>
+        <div class="ph-kv"><span>Period</span><span>{{ best_trade.opened_at|date:"M d"|default:"—" }} → {{ best_trade.closed_at|date:"M d"|default:"—" }}</span></div>
         <div style="margin-top:8px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
             {% if n_graded > 1 %}All {{ n_graded }} graded closes booked the
             same P&amp;L, so there is no best and no worst to name yet.
@@ -338,49 +338,58 @@ template branches, each a fresh chance to print a confident zero.
                     {% if p.strategy %}<span style="font-size:10px;color:var(--text-muted);">via {{ p.strategy.name|truncatechars:20 }}</span>{% endif %}
                 </div>
                 <div style="display:flex;align-items:center;gap:16px;">
-                    <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">{{ p.opened_at|date:"M d H:i" }} → {{ p.closed_at|date:"M d H:i" }}</span>
-                    <span style="font-family:var(--font-mono);font-weight:700;font-size:13px;min-width:80px;text-align:right;color:{% if p.unrealized_pnl >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
-                        {% if p.unrealized_pnl >= 0 %}+{% endif %}{{ p.unrealized_pnl }}
+                    <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">{{ p.opened_at|date:"M d H:i"|default:"—" }} → {{ p.closed_at|date:"M d H:i"|default:"—" }}</span>
+                    {# sign_class, not an inline "if pnl >= 0": smart-if swallows #}
+                    {# the TypeError from comparing None and evaluates it False, #}
+                    {# so an UNGRADED close was painted in the loss colour — the #}
+                    {# platform stating a loss it had never measured. #}
+                    <span class="ph-num sign-{{ p.unrealized_pnl|sign_class }}" style="min-width:80px;">
+                        {% if p.unrealized_pnl > 0 %}+{% endif %}{{ p.unrealized_pnl|measured:2 }}
                     </span>
-                    <span style="font-family:var(--font-mono);font-size:11px;min-width:55px;text-align:right;color:{% if p.unrealized_pnl_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
-                        {% if p.unrealized_pnl_pct >= 0 %}+{% endif %}{{ p.unrealized_pnl_pct|floatformat:2 }}%
+                    <span class="ph-num is-sm sign-{{ p.unrealized_pnl_pct|sign_class }}" style="min-width:55px;">
+                        {% if p.unrealized_pnl_pct > 0 %}+{% endif %}{{ p.unrealized_pnl_pct|measured_pct:2 }}
                     </span>
                     <span class="ph-expand-icon">&#9662;</span>
                 </div>
             </div>
             <div class="ph-trade-detail">
                 <div class="ph-detail-grid">
+                    {# Every cell here dashes what it could not measure. #}
+                    {# floatformat renders None as the empty string, so an #}
+                    {# unbooked exit price used to leave a labelled blank — #}
+                    {# indistinguishable from the panel being broken. #}
                     <div class="ph-detail-item">
                         <div class="ph-detail-label">Entry Price</div>
-                        <div class="ph-detail-value">{{ p.entry_price|floatformat:4 }}</div>
+                        <div class="ph-detail-value">{{ p.entry_price|measured:"-8" }}</div>
                     </div>
                     <div class="ph-detail-item">
                         <div class="ph-detail-label">Exit Price</div>
-                        <div class="ph-detail-value">{{ p.current_price|floatformat:4 }}</div>
+                        <div class="ph-detail-value">{{ p.current_price|measured:"-8" }}</div>
                     </div>
                     <div class="ph-detail-item">
                         <div class="ph-detail-label">Quantity</div>
-                        <div class="ph-detail-value">{{ p.quantity }}</div>
+                        <div class="ph-detail-value">{{ p.quantity|measured:"-8" }}</div>
                     </div>
                     <div class="ph-detail-item">
                         <div class="ph-detail-label">ROI</div>
-                        <div class="ph-detail-value" style="color:{% if p.unrealized_pnl_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">{{ p.unrealized_pnl_pct|floatformat:2 }}%</div>
+                        <div class="ph-detail-value sign-{{ p.unrealized_pnl_pct|sign_class }}">{{ p.unrealized_pnl_pct|measured_pct:2 }}</div>
                     </div>
                     <div class="ph-detail-item">
                         <div class="ph-detail-label">Stop Loss</div>
-                        <div class="ph-detail-value">{{ p.stop_loss|default:"—" }}</div>
+                        <div class="ph-detail-value">{{ p.stop_loss|measured:"-8" }}</div>
                     </div>
                     <div class="ph-detail-item">
                         <div class="ph-detail-label">Take Profit</div>
-                        <div class="ph-detail-value">{{ p.take_profit|default:"—" }}</div>
+                        <div class="ph-detail-value">{{ p.take_profit|measured:"-8" }}</div>
                     </div>
                     <div class="ph-detail-item">
                         <div class="ph-detail-label">Exposure</div>
-                        <div class="ph-detail-value">{{ p.quantity }} × {{ p.entry_price|floatformat:2 }}</div>
+                        <div class="ph-detail-value">{% if p.quantity is not None and p.entry_price is not None %}{{ p.quantity|measured:"-8" }} × {{ p.entry_price|measured:2 }}{% else %}—{% endif %}</div>
                     </div>
                     <div class="ph-detail-item">
                         <div class="ph-detail-label">Duration</div>
-                        <div class="ph-detail-value">{{ p.opened_at|timesince:p.closed_at }}</div>
+                        {# timesince against a null closed_at returns "" too. #}
+                        <div class="ph-detail-value">{% if p.opened_at and p.closed_at %}{{ p.opened_at|timesince:p.closed_at }}{% else %}—{% endif %}</div>
                     </div>
                 </div>
                 {% comment %}
@@ -394,19 +403,19 @@ template branches, each a fresh chance to print a confident zero.
                 the colour, direction is the marker. No number, no bar.
                 {% endcomment %}
                 <div class="ph-chart-bar">
-                    <div class="ph-chart-label" style="left:0;">Entry: {{ p.entry_price|floatformat:2 }}</div>
+                    <div class="ph-chart-label" style="left:0;">Entry: {{ p.entry_price|measured:2 }}</div>
                     <div class="ph-chart-track">
                         {% if p.bar_pct is not None %}
-                        <div class="ph-chart-fill {% if p.unrealized_pnl >= 0 %}up{% else %}down{% endif %}"
+                        <div class="ph-chart-fill {{ p.unrealized_pnl|sign_class }}"
                              style="width:{{ p.bar_pct }}%;max-width:100%;min-width:4px;"
-                             title="{{ p.unrealized_pnl_pct|floatformat:2 }}% — bar scaled against the largest move in this history">
+                             title="{{ p.unrealized_pnl_pct|measured_pct:2 }} — bar scaled against the largest move in this history">
                             <span class="ph-chart-marker">{% if p.direction == 'long' %}&#9654;{% else %}&#9664;{% endif %}</span>
                         </div>
                         {% else %}
                         <div class="ph-chart-empty">no return to scale</div>
                         {% endif %}
                     </div>
-                    <div class="ph-chart-label" style="right:0;">Exit: {{ p.current_price|floatformat:2 }}</div>
+                    <div class="ph-chart-label" style="right:0;">Exit: {{ p.current_price|measured:2 }}</div>
                 </div>
             </div>
         </div>
@@ -498,6 +507,21 @@ template branches, each a fresh chance to print a confident zero.
     font-family: var(--font-mono); font-size: 13px; font-weight: 600;
     color: var(--text-primary);
 }
+/* `.sign-*` lives in sauron.css and ties with `.ph-detail-value` on
+   specificity — and this block is loaded AFTER it, so the plain colour won
+   and the ROI cell lost its win/loss colour entirely. Two classes beat one. */
+.ph-detail-value.sign-up   { color: var(--accent); }
+.ph-detail-value.sign-down { color: var(--accent-red); }
+.ph-detail-value.sign-flat { color: var(--text-muted); }
+
+/* `.sign-up` / `.sign-down` / `.sign-flat` are in sauron.css: the
+   `sign_class` filter is available to every template, so its classes
+   cannot live in one page's inline style. */
+.ph-num {
+    font-family: var(--font-mono); font-weight: 700; font-size: 13px;
+    text-align: right;
+}
+.ph-num.is-sm { font-weight: 400; font-size: 11px; }
 
 /* Mini chart bar */
 .ph-chart-bar {
@@ -517,6 +541,10 @@ template branches, each a fresh chance to print a confident zero.
 }
 .ph-chart-fill.up { background: linear-gradient(90deg, var(--accent), rgba(0,232,104,0.4)); }
 .ph-chart-fill.down { background: linear-gradient(90deg, var(--accent-red), rgba(220,50,50,0.4)); }
+/* `sign_class` has a third answer. Without a rule for it the bar keeps its
+   width and paints nothing — an invisible bar reads as no bar at all, which
+   is the one thing an unmeasured value must not look like. */
+.ph-chart-fill.flat { background: var(--text-muted); opacity: 0.55; }
 .ph-chart-marker {
     position: absolute; right: -4px; top: -5px; font-size: 10px;
     color: var(--text-primary);

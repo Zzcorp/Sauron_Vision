@@ -178,28 +178,32 @@ def _initial_stops(user):
 def _book_truth(user, portfolio):
     """What the headband says about the position book — BOTH books, marked.
 
-    The PORTFOLIO cell rendered `portfolio.current_value`, a stored column
-    whose only writer is `portfolio.tasks.recalculate_exposure`. That task
-    values the LEGACY book alone (portfolio.Position) and marks the SHARED
-    "Main" portfolio, while this headband reads the per-user book and the
-    operator's trades are AssetBotTrade rows. So the column could never move
-    off its seeded initial capital, and the cell sat at 10,000 forever with a
-    dropdown underneath it listing live trades.
+    The PORTFOLIO cell used to render `portfolio.current_value`, a stored
+    column written only by `portfolio.tasks`, which valued the LEGACY book
+    alone (portfolio.Position) and touched only the SHARED "Main" portfolio —
+    while this headband reads the PER-USER book and the operator's trades are
+    AssetBotTrade rows. So the column could never move off its seeded initial
+    capital, and the cell sat at 10,000 forever with a dropdown underneath it
+    listing live trades. The tasks now value both books on every portfolio,
+    but the cell no longer waits on them: an hourly column cannot answer a
+    question the operator asks the moment a fill lands.
 
-    Everything here comes from `dashboard.views_command._open_book`, which is
-    the platform's re-pricing union of the two books (it re-marks legacy rows
-    in memory against the same LiveQuote table the bot rows used, and returns
-    None rather than 0 where nothing could be priced). One implementation for
-    the Operations Center and the headband, so the two cannot disagree about
-    how many positions are open or what they are worth.
+    Everything here comes from `portfolio.services.live_book_value`, the one
+    function that answers "what is this book worth right now" — cash plus the
+    marked value of everything open across BOTH books, over the platform's
+    single re-pricing union (`dashboard.views_command._open_book`). One
+    implementation for the Operations Center, the portfolio page, the PDF
+    report and this band, so none of them can disagree about how many
+    positions are open or what they are worth.
     """
-    from dashboard.views_command import _open_book
+    from portfolio.services import live_book_value
 
     out = {}
     day_ago = timezone.now() - timedelta(hours=24)
 
-    rows, n_priced, unrealized, deployed = _open_book(user, portfolio)
-    n_open = len(rows)
+    book = live_book_value(user, portfolio)
+    rows, n_priced, unrealized = book.rows, book.n_priced, book.unrealized
+    n_open = book.n_open
     stops = _initial_stops(user) if n_open else {}
 
     detail, r_sum, r_n, bot_r_sum, bot_r_n = [], 0.0, 0, 0.0, 0
@@ -244,25 +248,27 @@ def _book_truth(user, portfolio):
             "opened_at": getattr(row, "opened_at", None),
         })
 
-    cash = _f(portfolio.cash_available) or 0.0
-    if n_open == 0:
-        # Nothing open is a MEASUREMENT (zero deployed), not an unknown.
-        deployed = 0.0
-    value = None if deployed is None else cash + deployed
+    # Each of the three can be None, and each None means NOT MEASURED: a cash
+    # column that could not be read at all, and a deployed/value pair over an
+    # open book nothing could price. The cells below print an em-dash for
+    # every one of them rather than a 0 that reads as an emptied account.
+    cash, deployed, value = book.cash, book.marked, book.value
 
     # The band hardcoded a € in front of every figure. The portfolio carries
     # its own currency and the bot configs carry theirs, so the sign is read
     # from the book rather than assumed — an unknown code prints as the code.
-    code = (portfolio.currency or "").upper()
-    out["panel_currency"] = code
-    out["panel_currency_symbol"] = {"EUR": "€", "USD": "$", "GBP": "£",
-                                    "JPY": "¥", "CHF": "CHF "}.get(
-        code, f"{code} " if code else "")
-    out["panel_cash"] = f"{cash:,.0f}"
+    out["panel_currency"] = book.currency
+    out["panel_currency_symbol"] = book.currency_symbol
+    out["panel_cash"] = None if cash is None else f"{cash:,.0f}"
     out["panel_deployed"] = None if deployed is None else f"{deployed:,.0f}"
     out["panel_portfolio_value"] = None if value is None else f"{value:,.0f}"
     out["panel_positions"] = n_open
     out["panel_positions_priced"] = n_priced
+    # How much of the VALUE cell the marked half actually covers. The figure
+    # is a partial sum whenever a position has no quote, and a cell that says
+    # nothing about it looks exactly like a complete one.
+    out["panel_positions_unpriced"] = book.n_unpriced
+    out["panel_value_partial"] = book.partial and value is not None
     out["panel_max_dd"] = f"{portfolio.max_daily_loss_pct}"
 
     if value is None or value <= 0:
@@ -276,18 +282,7 @@ def _book_truth(user, portfolio):
         out["panel_exposure"] = exposure
         out["panel_cash_pct"] = max(0, 100 - exposure)
 
-    if n_open == 0:
-        coverage = "Nothing open in either book."
-    elif n_priced == n_open:
-        coverage = f"All {n_open} open positions marked to live quotes."
-    elif n_priced:
-        coverage = (f"{n_priced} of {n_open} open positions have a live "
-                    f"quote; the other {n_open - n_priced} are not in these "
-                    f"figures.")
-    else:
-        coverage = (f"{n_open} open, none with a live quote — value, "
-                    f"exposure and P&L cannot be measured.")
-    out["panel_book_coverage"] = coverage
+    out["panel_book_coverage"] = book.coverage
 
     out["panel_open_pnl"] = unrealized
     out["panel_open_pnl_display"] = _signed(unrealized)
@@ -938,6 +933,11 @@ def sauron_context(request):
         "panel_cash_pct": None,
         "panel_positions": 0,
         "panel_positions_priced": 0,
+        # False and not None: before a book has been read there is no partial
+        # total to warn about, and a warning that fires on "not measured yet"
+        # is one an operator learns to ignore.
+        "panel_positions_unpriced": 0,
+        "panel_value_partial": False,
         "panel_exposure": None,
         "panel_book_coverage": "",
         "panel_open_pnl": None,

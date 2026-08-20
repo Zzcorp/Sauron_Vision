@@ -4,6 +4,14 @@ from django.utils import timezone
 
 
 class SmcSignal(models.Model):
+    # Every value here must be one some detector can actually emit, and the
+    # pairing is checked by tests/test_ict_cards.py. "SFP" sat in this list for
+    # months with nothing able to produce it — a card the feed advertised, the
+    # performance summary grouped by and the filters offered, and that no scan
+    # could ever store. `smc_rules.detect_sfp_setups` closed that hole; the five
+    # ICT setups below arrived the same way round, built and tested as
+    # primitives before this field could hold their names, and wired into
+    # `scan_symbol` at the same time as this list grew.
     SETUP_CHOICES = [
         ("RP_BREAKER",       "RP Breaker"),
         ("THREE_TAP",        "Three Tap"),
@@ -13,6 +21,11 @@ class SmcSignal(models.Model):
         ("FVG_TAP",          "FVG Tap"),
         ("OB_RETEST",        "Order Block Retest"),
         ("SFP",              "Swing Failure Pattern"),
+        ("MITIGATION_BLOCK", "Mitigation Block Retest"),
+        ("OTE",              "Optimal Trade Entry"),
+        ("JUDAS_SWING",      "Judas Swing"),
+        ("SILVER_BULLET",    "Silver Bullet"),
+        ("SMT_DIVERGENCE",   "SMT Divergence"),
     ]
     DIRECTION_CHOICES = [("LONG", "Long"), ("SHORT", "Short")]
     STATUS_CHOICES = [

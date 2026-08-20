@@ -759,27 +759,45 @@
                         per-user book, so it would render +0.00 forever.
                         {% endcomment %}
                         <div data-sv-live="hb-pos-detail">
+                        {% comment %}
+                        TWO LINES, not one. This was a single flex row holding
+                        eight things — symbol, side, size, R, %, two chips and
+                        a close button — inside a 320px panel. Everything
+                        fought for the same line, the numbers never landed in
+                        the same column twice, and the close button was
+                        whatever width was left over.
+
+                        Identity reads on the top line, size and state on the
+                        bottom, and the two numbers stack into one right-hand
+                        column so R sits directly above %. Tabular figures, so
+                        a column of positions scans down rather than jitters.
+                        {% endcomment %}
                         {% for t in panel_open_rows %}
-                        <div class="ip-dd-row">
-                            <span class="ipr-sym">{{ t.symbol }}</span>
-                            <span class="ipr-side ipr-side--{{ t.side|lower }}">{{ t.side }}</span>
-                            <span class="ipr-qty">{{ t.qty|floatformat:"-4" }}</span>
+                        <div class="ip-pos ip-pos--{{ t.side|lower }}{% if t.status == 'CLOSE_PENDING' %} is-closing{% endif %}">
+                            <div class="ip-pos-id">
+                                <span class="ipr-sym">{{ t.symbol }}</span>
+                                <span class="ipr-side ipr-side--{{ t.side|lower }}">{{ t.side }}</span>
+                            </div>
                             {% if t.r is not None %}
                               <span class="ipr-r {% if t.r >= 0 %}up{% else %}down{% endif %}">{{ t.r|floatformat:2 }}R</span>
                             {% else %}
                               <span class="ipr-r sv-unknown" title="Needs a live quote and the stop this position opened with">&mdash;</span>
                             {% endif %}
+                            <div class="ip-pos-meta">
+                                <span class="ipr-qty">{{ t.qty|floatformat:"-4" }}</span>
+                                {% if t.status == "CLOSE_PENDING" %}<span class="sv-chip sv-chip--warn" title="The broker refused the close — this is still open there">closing</span>{% endif %}
+                                {% if t.paper %}<span class="sv-chip sv-chip--muted">paper</span>{% endif %}
+                                {% if not t.id %}
+                                {# Legacy book row: no trade id, and no close path exists for one. #}
+                                <span class="sv-chip sv-chip--muted" title="Manual book — the platform has no close control for these">manual</span>
+                                {% endif %}
+                            </div>
                             {% if t.pct is not None %}
                               <span class="ipr-pct {% if t.pct >= 0 %}up{% else %}down{% endif %}">{{ t.pct|floatformat:2 }}%</span>
                             {% else %}<span class="ipr-pct sv-unknown" title="No live quote for this symbol">&mdash;</span>{% endif %}
-                            {% if t.status == "CLOSE_PENDING" %}<span class="sv-chip sv-chip--warn" title="The broker refused the close — this is still open there">closing</span>{% endif %}
-                            {% if t.paper %}<span class="sv-chip sv-chip--muted">paper</span>{% endif %}
                             {% if t.id %}
                             {# The row's own way out — the click handler cancels this anchor's navigation. #}
-                            <button type="button" class="sv-chip sv-chip--bearish" data-sv-close-trade="{{ t.id }}" title="Close this position">close</button>
-                            {% else %}
-                            {# Legacy book row: no trade id, and no close path exists for one. #}
-                            <span class="sv-chip sv-chip--muted" title="Manual book — the platform has no close control for these">manual</span>
+                            <button type="button" class="ip-pos-close" data-sv-close-trade="{{ t.id }}" title="Close this position">Close</button>
                             {% endif %}
                         </div>
                         {% empty %}
@@ -4631,22 +4649,431 @@ if ('serviceWorker' in navigator) {
     var threadInFlight = false, threadAgain = false;
     var pendingTimer = null;
 
-    function escHtml(s) {
-        return String(s === undefined || s === null ? '' : s)
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    /* ── Sauron's answer, rendered ─────────────────────────────────────
+       What lands here is markdown. The agent writes it, and the server has
+       already turned its citation markers into markdown links whose targets
+       come from the fixed table in brain/research_renderer. Painting all of
+       that as one undifferentiated block was the failure state: this is read
+       mid-decision, so headings, lists, tables and figures have to be
+       separable at a glance, and the figures have to be in the same face
+       every other number on the platform is set in.
+
+       SECURITY — why a script tag or an onclick= attribute cannot survive
+       this path. Nothing below ever touches innerHTML. Every node is made
+       with createElement and every leaf takes its text through textContent,
+       so markup the model emits arrives as the characters it typed and is
+       never handed to the parser. The one attribute read out of the text is
+       a link's href, and it is set only after a whitelist matches. An href
+       that fails the match is dropped and the link is left as the literal
+       text it was written as, so nothing is lost silently either. */
+
+    /* Two href shapes pass. A path rooted at this origin, whose second
+       character may NOT be another slash — `//host/x` looks like a path and
+       is a jump off the platform. And an absolute http(s) URL, for a source
+       the agent quotes from outside. Neither shape can spell `javascript:`
+       or `data:`, which is why this matches before setting rather than
+       sanitising after. */
+    var SAFE_PATH = /^\/(?!\/)[A-Za-z0-9_\-./#?=&%+~]{0,300}$/;
+    var SAFE_URL  = /^https?:\/\/[^\s<>"'`]{4,300}$/;
+
+    function setHref(a, href) {
+        if (SAFE_PATH.test(href)) { a.setAttribute('href', href); return true; }
+        if (SAFE_URL.test(href)) {
+            a.setAttribute('href', href);
+            /* Off-platform, so it opens away from the terminal and cannot
+               reach back through window.opener. */
+            a.setAttribute('target', '_blank');
+            a.setAttribute('rel', 'noopener noreferrer');
+            return true;
+        }
+        return false;
     }
 
-    /* Citation markers arrive as markdown pointing at same-origin paths —
-       every one of those URLs is built server-side from a fixed table. The
-       rest is model output and is escaped: assigning model output straight
-       to innerHTML is how a chat panel becomes an XSS hole. */
-    function linkify(text) {
-        return escHtml(text).replace(
-            /\[([^\]\n]{1,120})\]\((\/[A-Za-z0-9_\-./#?=]{0,200})\)/g,
-            function (_m, label, href) {
-                return '<a href="' + href + '">' + label + '</a>';
-            });
+    /* Figures. A price, an R multiple, a percentage, a date or a ticker is
+       the thing the operator came for, so each is set in the platform's
+       figure face with tabular digits — the same treatment every number on
+       every other screen gets, which is what lets a column of them be
+       compared down the page. The leading group is one character that is
+       re-emitted as text: it stops a match starting mid-token, so `bot_7`
+       stays a name and nothing is lifted out of `golden_cross`. The
+       trailing guard refuses a match that would leave a word character or
+       a decimal behind it, so `2.4Rs` stays whole rather than rendering as
+       a lone 2 followed by loose prose. */
+    var FIG_NUM =
+        '(?:\\d{4}-\\d{2}-\\d{2}(?:[T ]\\d{2}:\\d{2}(?::\\d{2})?)?)' +
+        '|(?:\\d{1,2}:\\d{2}(?::\\d{2})?)' +
+        '|(?:[+-]?\\$?\\d[\\d,]*(?:\\.\\d+)?(?:%|R|x|d|bps)?)';
+    var FIG_SYM = '(?:[A-Z][A-Z0-9]{1,5}(?:[./][A-Z0-9]{1,5})?)';
+
+    function figRe(withSymbols) {
+        return new RegExp('(^|[^\\w$.,])((?:' + FIG_NUM + ')' +
+                          (withSymbols ? '|' + FIG_SYM : '') +
+                          ')(?![\\w]|\\.\\d)', 'g');
+    }
+    var FIG_ALL = figRe(true), FIG_NUM_ONLY = figRe(false);
+
+    /* An all-caps run of two to six letters is a ticker here far more often
+       than it is a word — but not always, and a mono'd "WHY" in the middle
+       of a sentence reads as a broken glyph rather than as emphasis. These
+       are the short words a model actually capitalises. Anything not on the
+       list is treated as a symbol, because the cost of that being wrong is
+       one word in the terminal face and the cost of missing a real ticker
+       is a column that no longer lines up. */
+    var SYM_STOP = {
+        AN: 1, AS: 1, AT: 1, BE: 1, BY: 1, DO: 1, GO: 1, IF: 1, IN: 1, IS: 1,
+        IT: 1, MY: 1, NO: 1, OF: 1, ON: 1, OR: 1, SO: 1, TO: 1, UP: 1, US: 1,
+        WE: 1, ALL: 1, AND: 1, ANY: 1, ARE: 1, BUT: 1, CAN: 1, DID: 1,
+        FOR: 1, HAS: 1, HAD: 1, HOW: 1, ITS: 1, NEW: 1, NOT: 1, NOW: 1,
+        ONE: 1, OUT: 1, OWN: 1, SEE: 1, THE: 1, TOO: 1, TWO: 1, USE: 1,
+        WAS: 1, WHO: 1, WHY: 1, YES: 1, YET: 1, YOU: 1, ALSO: 1, FROM: 1,
+        HAVE: 1, INTO: 1, JUST: 1, LESS: 1, MORE: 1, MOST: 1, NONE: 1,
+        ONLY: 1, OVER: 1, SAME: 1, THAN: 1, THAT: 1, THEM: 1, THEN: 1,
+        THIS: 1, WHAT: 1, WHEN: 1, WITH: 1, YOUR: 1, ABOUT: 1, AFTER: 1,
+        BELOW: 1, EVERY: 1, SINCE: 1, THERE: 1, THESE: 1, UNDER: 1,
+        WHICH: 1, WHILE: 1, WOULD: 1, BEFORE: 1, SAURON: 1, SHOULD: 1
+    };
+
+    function figuresInto(parent, text, symbols) {
+        if (!text) return;
+        var re = (symbols === false) ? FIG_NUM_ONLY : FIG_ALL;
+        re.lastIndex = 0;
+        var at = 0, m;
+        while ((m = re.exec(text)) !== null) {
+            var token = m[2];
+            var start = m.index + m[1].length;
+            /* Skipped, not consumed: lastIndex has already moved past it, so
+               the word falls into the next plain run instead of looping. */
+            if (SYM_STOP[token] === 1) continue;
+            if (start > at) {
+                parent.appendChild(document.createTextNode(text.slice(at, start)));
+            }
+            var span = document.createElement('span');
+            /* A signed figure is directional in a trading answer — a -1.1R
+               is a loss whichever sentence it sits in. Colour only, so it
+               still reads as prose rather than as a badge. */
+            span.className = 'se-fig' +
+                (token.charAt(0) === '+' ? ' se-fig--up' :
+                 token.charAt(0) === '-' ? ' se-fig--down' : '');
+            span.textContent = token;
+            parent.appendChild(span);
+            at = start + token.length;
+        }
+        if (at < text.length) {
+            parent.appendChild(document.createTextNode(text.slice(at)));
+        }
+    }
+
+    /* Inline structure, in the order a tie at the same offset is broken.
+       Underscore emphasis is deliberately absent: rule names on this
+       platform are snake_case, and `_` italics eat them alive. */
+    var INLINE = [
+        { kind: 'code',   re: /`([^`\n]{1,400})`/ },
+        { kind: 'link',   re: /\[([^\]\n]{1,200})\]\(\s*([^)\s]{1,400})\s*\)/ },
+        { kind: 'strong', re: /\*\*([^*\n]{1,400})\*\*/ },
+        { kind: 'em',     re: /\*([^\s*](?:[^*\n]{0,398}[^\s*])?)\*/ },
+        { kind: 'url',    re: /https?:\/\/[^\s)\]<>"'`]{4,400}/ }
+    ];
+
+    function emitInline(parent, kind, m, symbols) {
+        if (kind === 'code') {
+            var code = document.createElement('code');
+            code.className = 'se-md-code';
+            code.textContent = m[1];
+            parent.appendChild(code);
+            return;
+        }
+        if (kind === 'link' || kind === 'url') {
+            var a = document.createElement('a');
+            a.className = 'se-md-a';
+            if (!setHref(a, kind === 'link' ? m[2] : m[0])) {
+                /* Unroutable target: show what the model wrote rather than a
+                   link that goes somewhere it was never allowed to go. */
+                parent.appendChild(document.createTextNode(m[0]));
+                return;
+            }
+            /* A URL is one token — breaking pieces of it into the figure
+               face would make a long link unreadable. */
+            if (kind === 'url') a.textContent = m[0];
+            else figuresInto(a, m[1], symbols);
+            parent.appendChild(a);
+            return;
+        }
+        var el = document.createElement(kind === 'strong' ? 'strong' : 'em');
+        el.className = kind === 'strong' ? 'se-md-b' : 'se-md-i';
+        figuresInto(el, m[1], symbols);
+        parent.appendChild(el);
+    }
+
+    function inlineInto(parent, text, symbols) {
+        /* Terminates because every inline match is at least two characters
+           long, so each pass strictly shortens what is left. */
+        while (text) {
+            var best = null, bestRule = null;
+            for (var i = 0; i < INLINE.length; i++) {
+                var m = INLINE[i].re.exec(text);
+                if (m && (best === null || m.index < best.index)) {
+                    best = m; bestRule = INLINE[i];
+                }
+            }
+            if (best === null) break;
+            if (best.index > 0) {
+                figuresInto(parent, text.slice(0, best.index), symbols);
+            }
+            emitInline(parent, bestRule.kind, best, symbols);
+            text = text.slice(best.index + best[0].length);
+        }
+        figuresInto(parent, text, symbols);
+    }
+
+    var FENCE_RE = /^\s{0,3}```/;
+    var HEAD_RE  = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/;
+    var HR_RE    = /^\s{0,3}(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$/;
+    var QUOTE_RE = /^\s{0,3}>\s?(.*)$/;
+    var LIST_RE  = /^(\s*)(?:([-*•])|(\d{1,3})[.)])\s+(.*)$/;
+    var TABLE_SEP_RE = /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/;
+    /* A cell holding a figure, or the em-dash that means NOT MEASURED —
+       which belongs in the numeric column, right-aligned with the readings
+       it stands in for rather than adrift in the text column. */
+    var CELL_NUM_RE = /^(?:[+-]?\$?\d[\d,]*(?:\.\d+)?(?:%|R|x|d|bps)?|[—–-])$/;
+
+    function isBlockStart(lines, i) {
+        var line = lines[i];
+        return FENCE_RE.test(line) || HEAD_RE.test(line) || HR_RE.test(line)
+            || QUOTE_RE.test(line) || LIST_RE.test(line)
+            || (line.indexOf('|') !== -1 && i + 1 < lines.length
+                && TABLE_SEP_RE.test(lines[i + 1]));
+    }
+
+    function takeFence(lines, start, root) {
+        var lang = lines[start].replace(/^\s{0,3}```/, '').trim().slice(0, 24);
+        var i = start + 1, buf = [];
+        while (i < lines.length && !FENCE_RE.test(lines[i])) {
+            buf.push(lines[i]);
+            i++;
+        }
+        var wrap = document.createElement('div');
+        wrap.className = 'se-md-codeblock';
+        if (lang) {
+            var tag = document.createElement('span');
+            tag.className = 'se-md-lang';
+            tag.textContent = lang;
+            wrap.appendChild(tag);
+        }
+        var pre = document.createElement('pre');
+        pre.className = 'se-md-pre';
+        var code = document.createElement('code');
+        code.textContent = buf.join('\n');
+        pre.appendChild(code);
+        wrap.appendChild(pre);
+        root.appendChild(wrap);
+        return i < lines.length ? i + 1 : i;
+    }
+
+    function takeHeading(m, root) {
+        var depth = Math.min(m[1].length, 3);
+        var el = document.createElement(depth === 1 ? 'h4'
+                                      : depth === 2 ? 'h5' : 'h6');
+        el.className = 'se-md-h se-md-h' + depth;
+        /* Symbols off: a heading is often written in caps already, and
+           mono'ing every word of it turns a section marker into noise. */
+        inlineInto(el, m[2], false);
+        root.appendChild(el);
+    }
+
+    function takeQuote(lines, start, root) {
+        var el = document.createElement('blockquote');
+        el.className = 'se-md-quote';
+        var i = start, first = true, m;
+        while (i < lines.length && (m = QUOTE_RE.exec(lines[i])) !== null) {
+            if (!first) el.appendChild(document.createElement('br'));
+            inlineInto(el, m[1].trim(), false);
+            first = false;
+            i++;
+        }
+        root.appendChild(el);
+        return i;
+    }
+
+    function splitRow(line) {
+        var s = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+        return s.split('|').map(function (c) { return c.trim(); });
+    }
+
+    function takeTable(lines, start, root) {
+        var head = splitRow(lines[start]);
+        var rows = [], i = start + 2;
+        while (i < lines.length && lines[i].trim()
+               && lines[i].indexOf('|') !== -1) {
+            rows.push(splitRow(lines[i]));
+            i++;
+        }
+        /* Which columns hold figures is read off the body, not the header:
+           a column is numeric only if every reading in it is one. Magnitude
+           down a column is not comparable until they are right-aligned. */
+        var numeric = head.map(function (_c, col) {
+            var seen = 0;
+            for (var r = 0; r < rows.length; r++) {
+                var cell = rows[r][col];
+                if (cell === undefined || cell === '') continue;
+                seen++;
+                if (!CELL_NUM_RE.test(cell)) return false;
+            }
+            return seen > 0;
+        });
+
+        var scroll = document.createElement('div');
+        scroll.className = 'se-md-scroll';
+        var table = document.createElement('table');
+        table.className = 'se-md-table';
+        var thead = document.createElement('thead');
+        var htr = document.createElement('tr');
+        head.forEach(function (cell, col) {
+            var th = document.createElement('th');
+            if (numeric[col]) th.className = 'se-md-num';
+            th.textContent = cell;
+            htr.appendChild(th);
+        });
+        thead.appendChild(htr);
+        table.appendChild(thead);
+        var tbody = document.createElement('tbody');
+        rows.forEach(function (row) {
+            var tr = document.createElement('tr');
+            for (var col = 0; col < head.length; col++) {
+                var td = document.createElement('td');
+                if (numeric[col]) td.className = 'se-md-num';
+                inlineInto(td, row[col] === undefined ? '' : row[col], true);
+                tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        scroll.appendChild(table);
+        root.appendChild(scroll);
+        return i;
+    }
+
+    /* Three levels is deeper than a readable answer goes: past that the
+       indentation costs more width than the structure returns, and the cap
+       bounds the tree a malformed answer can build. */
+    var MAX_LIST_DEPTH = 3;
+
+    function makeList(ordered, host, firstNumber) {
+        var el = document.createElement(ordered ? 'ol' : 'ul');
+        el.className = ordered ? 'se-md-ol' : 'se-md-ul';
+        if (ordered && firstNumber > 1) {
+            /* A list that starts at 3 is the third step of something, and
+               renumbering it from 1 would state an order nobody wrote. The
+               value came out of a \d{1,3} capture, so it is an integer. */
+            el.setAttribute('start', String(firstNumber));
+            el.style.counterReset = 'se-md-n ' + (firstNumber - 1);
+        }
+        host.appendChild(el);
+        return el;
+    }
+
+    function takeList(lines, start, root) {
+        var stack = [], item = null, i = start;
+        while (i < lines.length) {
+            var m = LIST_RE.exec(lines[i]);
+            if (m === null) {
+                /* An unmarked, non-blank line that opens no other block
+                   continues the item above it — that is how a model wraps a
+                   long bullet. */
+                if (item && lines[i].trim() && !isBlockStart(lines, i)) {
+                    item.appendChild(document.createTextNode(' '));
+                    inlineInto(item, lines[i].trim(), true);
+                    i++;
+                    continue;
+                }
+                break;
+            }
+            var indent = m[1].replace(/\t/g, '    ').length;
+            var ordered = m[3] !== undefined;
+            var number = ordered ? parseInt(m[3], 10) : 0;
+            while (stack.length > 1
+                   && indent < stack[stack.length - 1].indent) {
+                stack.pop();
+            }
+            var top = stack.length ? stack[stack.length - 1] : null;
+            if (top === null) {
+                stack.push({ indent: indent, host: root,
+                             list: makeList(ordered, root, number) });
+            } else if (indent >= top.indent + 2 && item
+                       && stack.length < MAX_LIST_DEPTH) {
+                stack.push({ indent: indent, host: item,
+                             list: makeList(ordered, item, number) });
+            } else if ((top.list.tagName === 'OL') !== ordered) {
+                /* Same level, different marker: a numbered run inside a
+                   bulleted one is a sequence, and flattening it into bullets
+                   would drop the order the model meant to state. */
+                stack.pop();
+                stack.push({ indent: indent, host: top.host,
+                             list: makeList(ordered, top.host, number) });
+            }
+            item = document.createElement('li');
+            item.className = 'se-md-li';
+            inlineInto(item, m[4], true);
+            stack[stack.length - 1].list.appendChild(item);
+            i++;
+        }
+        return i;
+    }
+
+    function takeParagraph(lines, start, root) {
+        var p = document.createElement('p');
+        p.className = 'se-md-p';
+        var i = start, first = true;
+        while (i < lines.length && lines[i].trim()
+               && !isBlockStart(lines, i)) {
+            /* A single newline is kept as a break rather than collapsed to a
+               space. The model uses one line per statement here, and running
+               those together is exactly the wall of text this replaced. */
+            if (!first) p.appendChild(document.createElement('br'));
+            inlineInto(p, lines[i].trim(), true);
+            first = false;
+            i++;
+        }
+        root.appendChild(p);
+        return i;
+    }
+
+    function renderAnswer(host, text) {
+        var frag = document.createDocumentFragment();
+        var lines = String(text === undefined || text === null ? '' : text)
+            .replace(/\r\n?/g, '\n').split('\n');
+        var i = 0;
+        while (i < lines.length) {
+            var before = i;
+            var line = lines[i];
+            var head = HEAD_RE.exec(line);
+            if (!line.trim()) {
+                i++;
+            } else if (FENCE_RE.test(line)) {
+                i = takeFence(lines, i, frag);
+            } else if (head !== null) {
+                takeHeading(head, frag);
+                i++;
+            } else if (HR_RE.test(line)) {
+                var hr = document.createElement('hr');
+                hr.className = 'se-md-hr';
+                frag.appendChild(hr);
+                i++;
+            } else if (QUOTE_RE.test(line)) {
+                i = takeQuote(lines, i, frag);
+            } else if (line.indexOf('|') !== -1 && i + 1 < lines.length
+                       && TABLE_SEP_RE.test(lines[i + 1])) {
+                i = takeTable(lines, i, frag);
+            } else if (LIST_RE.test(line)) {
+                i = takeList(lines, i, frag);
+            } else {
+                i = takeParagraph(lines, i, frag);
+            }
+            /* Backstop: every branch above is meant to consume at least one
+               line, and a malformed table or fence is not worth spinning
+               here over. */
+            if (i <= before) i = before + 1;
+        }
+        host.appendChild(frag);
     }
 
     function toolsHtml(role, msgId) {
@@ -4677,9 +5104,17 @@ if ('serviceWorker' in navigator) {
         if (!m.pending) b.insertAdjacentHTML('beforeend', toolsHtml(m.role, m.id));
         var body = document.createElement('div');
         body.className = 'se-bubble-body';
-        if (m.pending) body.textContent = 'Sauron is thinking';
-        else if (m.role === 'assistant') body.innerHTML = linkify(m.text);
-        else body.textContent = m.text || '';
+        if (m.pending) {
+            body.textContent = 'Sauron is thinking';
+        } else if (m.role === 'assistant') {
+            /* The answer, and only the answer, gets the structured render —
+               the question is the operator's own words and is shown exactly
+               as they typed them. */
+            body.className = 'se-bubble-body se-answer';
+            renderAnswer(body, m.text);
+        } else {
+            body.textContent = m.text || '';
+        }
         b.appendChild(body);
     }
 

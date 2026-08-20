@@ -153,9 +153,28 @@
         d.body.appendChild(el);
         el.style.position = "fixed";
         anchor(el, trigger);
-        el._svAnchor = function () { anchor(el, trigger); };
+        /* Re-anchor when the PAGE moves under this overlay — never when the
+         * operator is scrolling INSIDE it.
+         *
+         * The listener is on window in the capture phase, because the trigger
+         * may sit in its own scrolling region and a bubbling listener would
+         * never hear it. The cost of capture is that it also hears every
+         * scroll inside the overlay itself, and re-anchoring on those
+         * recomputes `top` from the trigger and snaps the panel back mid-
+         * scroll. To the operator that is a popup that refuses to scroll —
+         * and when the snap moves it out from under the pointer, whatever
+         * closes on pointer-leave then closes it, which is the "it shuts
+         * before I can read it" half of the same bug.
+         *
+         * document and window are NOT inside anything: a scroll on either is
+         * the page moving, which is exactly when re-anchoring is required. */
+        el._svAnchor = function (e) {
+            var origin = e && e.target;
+            if (origin && origin !== d && origin !== window
+                && el.contains && el.contains(origin)) return;
+            anchor(el, trigger);
+        };
         window.addEventListener("resize", el._svAnchor);
-        /* Capture phase: the trigger may sit inside a scrolling region. */
         window.addEventListener("scroll", el._svAnchor, true);
     }
 

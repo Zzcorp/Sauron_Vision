@@ -69,6 +69,12 @@ def detect_mitigation_blocks(df, swings, breaks, sweeps=None,
     — and that is computed from the frame itself so the answer does not depend
     on the caller having run `detect_sweeps` with the same lookback. When a
     sweep list *is* supplied it is used as a second, stricter veto.
+
+    `mitigated` and `invalidated` are independent facts, not two halves of one:
+    a block can be tagged and then closed through, and such a block carries both
+    a `mitigated_idx` and an `invalidated_idx`. Both are read over the whole
+    frame, so a caller answering as of some earlier bar must compare the indices
+    against it — `detect_mitigation_retest_setups` does.
     """
     blocks = []
     if not breaks or not swings or len(df) == 0:
@@ -120,18 +126,26 @@ def detect_mitigation_blocks(df, swings, breaks, sweeps=None,
         if zone_high <= zone_low:
             continue
 
+        # Both questions are asked over the WHOLE remainder of the frame, and
+        # the touch does not end the walk. It used to: the loop stopped at the
+        # first bar that tagged the zone, so a block price tapped and then
+        # closed straight through came back with `invalidated` False forever,
+        # and `detect_mitigation_retest_setups` went on offering it as a live
+        # retest of a zone that no longer existed. A close beyond the far edge
+        # is the one event that ends a mitigation block — the offside orders it
+        # was drawn for have been run over rather than filled — so the walk only
+        # stops there.
+        #
+        # Within a single bar the close wins over the wick: a bar that reaches
+        # into the zone and still closes through it is that bar, not a retest.
         mitigated_idx = None
         invalidated_idx = None
         for j in range(b["idx"] + 1, len(df)):
-            if bullish and closes[j] < zone_low:
+            if closes[j] < zone_low if bullish else closes[j] > zone_high:
                 invalidated_idx = j
                 break
-            if not bullish and closes[j] > zone_high:
-                invalidated_idx = j
-                break
-            if lows[j] <= zone_high and highs[j] >= zone_low:
+            if mitigated_idx is None and lows[j] <= zone_high and highs[j] >= zone_low:
                 mitigated_idx = j
-                break
 
         blocks.append({
             "type": "MB_BULL" if bullish else "MB_BEAR",
@@ -238,5 +252,20 @@ def detect_mitigation_retest_setups(df, mitigation_blocks, swings, current_idx=N
             "trigger_ts": df.index[current_idx],
             "invalidation": invalidation,
             "components": ["unswept_origin", "msb", "mitigation_retest"],
+            # Written here rather than in `explain.templates` because the
+            # sentence quotes numbers only this function measured. See
+            # `smc_rules._apply_detector_language` for which one a card shows.
+            "thesis": (
+                "Structure shifted from the %.4f swing without the market ever "
+                "sweeping it, so the traders offside from it are waiting to get "
+                "out flat rather than trapped. Entry %.4f is the block that exit "
+                "flows through."
+                % (block["origin_swing_price"], entry)
+            ),
+            "why_now": (
+                "Mitigation block %.4f-%.4f tagged; its %.4f origin swing was "
+                "never swept."
+                % (block["low"], block["high"], block["origin_swing_price"])
+            ),
         })
     return setups

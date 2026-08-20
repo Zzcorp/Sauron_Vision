@@ -8,8 +8,15 @@
 <div class="oc-strip">
     <div class="oc-strip-cell">
         <span class="oc-strip-label">PORTFOLIO VALUE</span>
-        <span class="oc-strip-value">{{ portfolio.current_value|floatformat:2 }}</span>
-        <span class="oc-strip-sub">{{ portfolio.currency }} · cash {{ cash_pct }}%</span>
+        {# `book_value_text` — the LIVE union, which the view has always #}
+        {# computed for this cell. It rendered `portfolio.current_value`, #}
+        {# the stored column an hourly task writes, while the cash share #}
+        {# directly beneath it was live: one cell quoting two different #}
+        {# books, disagreeing with itself the moment a fill landed. #}
+        <span class="oc-strip-value" title="{{ book_coverage }}">{{ book_value_text }}</span>
+        {# The share is an em-dash when it could not be measured, and an #}
+        {# em-dash does not take a percent sign. #}
+        <span class="oc-strip-sub">{{ portfolio.currency }} · cash {% if cash_pct == "—" %}&mdash;{% else %}{{ cash_pct }}%{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">UNREALIZED P&amp;L</span>

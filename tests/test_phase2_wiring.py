@@ -88,6 +88,7 @@ class DailySnapshotCorrelationTests(TestCase):
         from portfolio.tasks import create_daily_snapshot
         from portfolio.services import get_or_create_default_portfolio
         from portfolio.models import Position, PortfolioSnapshot
+        from market_data.models import LiveQuote
 
         rng = np.random.RandomState(11)
         rs = list(rng.normal(0, 0.01, 60))
@@ -104,6 +105,15 @@ class DailySnapshotCorrelationTests(TestCase):
                 entry_price=Decimal("100"), current_price=Decimal("100"),
                 opened_at=timezone.now(),
             )
+            # A snapshot needs a book it can VALUE, and a book is valued
+            # from LiveQuote alone — `Position.current_price` is not a mark
+            # the platform trusts, because the Setup form writes entry_price
+            # into it verbatim. Without a quote these two rows are honestly
+            # unpriced, the book is unmeasurable, and no snapshot is written
+            # for it to carry a correlation matrix.
+            LiveQuote.objects.update_or_create(
+                instrument=inst,
+                defaults={"last": Decimal("100"), "source": "test"})
 
         result = create_daily_snapshot()
         self.assertEqual(result["status"], "ok")

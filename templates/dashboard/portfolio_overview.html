@@ -65,6 +65,19 @@ than in nine template branches.
         <span class="oc-strip-value {{ strip.max_dd.tone }}" data-sv-live-key="pf.max_dd">{{ strip.max_dd.text }}</span>
         <span class="oc-strip-sub">{{ strip.max_dd.sub }}</span>
     </div>
+    {% comment %}
+    TOTAL VALUE, CASH and EXPOSURE above are cash plus both position books at
+    live marks. A position with no quote is left OUT of that total rather than
+    valued at its entry price, so whenever one is missing the headline is a
+    partial sum — and a partial sum that says nothing about itself looks
+    exactly like a complete one. This line is inside the live region, so it
+    appears and disappears with the quotes it describes.
+    {% endcomment %}
+    {% if book_partial %}
+    {# grid-column spans the whole strip: .oc-strip is a grid, so without it #}
+    {# the sentence is squeezed into one 11rem cell beside the numbers. #}
+    <p class="oc-strip-sub sv-unknown" style="grid-column:1/-1;white-space:normal;margin:0;" data-sv-live-key="pf.coverage">{{ book_coverage }}</p>
+    {% endif %}
 </div>
 
 {% if not live_only %}

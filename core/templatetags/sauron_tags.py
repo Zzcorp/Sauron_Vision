@@ -1,6 +1,58 @@
 from django import template
 register = template.Library()
 
+#: What an unmeasured value looks like, everywhere on this platform.
+DASH = "—"
+
+
+@register.filter
+def measured(value, places=2):
+    """A number, or an em-dash when there was never a number.
+
+    `{{ price|floatformat:4 }}` renders None as the EMPTY STRING. Not a
+    zero, not a dash — nothing at all. So a closed position whose exit
+    price was never booked drew a detail grid of labels with blank space
+    under them, and it read as the panel being broken rather than as the
+    price being unknown. The operator reported it as "no prices on closed
+    positions", which is exactly what it looked like.
+
+    This is the same rule the rest of the platform already follows in
+    longhand (`{% if x is not None %}{{ x }}{% else %}&mdash;{% endif %}`).
+    A price cell earns its dash the same way a P&L cell does: None means
+    NOT MEASURED, and it must never be shown as blank or as a confident 0.
+    """
+    from django.template.defaultfilters import floatformat
+
+    if value is None or value == "":
+        return DASH
+    out = floatformat(value, places)
+    # floatformat itself returns "" for anything non-numeric.
+    return out if out != "" else DASH
+
+
+@register.filter
+def measured_pct(value, places=2):
+    """`measured`, wearing its percent sign — and dropping it when there
+    is nothing to qualify. A bare "%" is not a reading."""
+    out = measured(value, places)
+    return out if out == DASH else f"{out}%"
+
+
+@register.filter
+def sign_class(value):
+    """"up", "down", or "flat" for a value nobody measured.
+
+    Django's smart-if swallows the TypeError from `{% if None >= 0 %}` and
+    evaluates it False, so every unmeasured number was silently painted in
+    the loss colour — the platform stating a loss it had not measured.
+    """
+    if value is None:
+        return "flat"
+    try:
+        return "up" if float(value) >= 0 else "down"
+    except (TypeError, ValueError):
+        return "flat"
+
 
 @register.simple_tag(takes_context=True)
 def static_abs(context, path):

@@ -201,6 +201,22 @@ def detect_judas_swings(df, swings, session="london", atr_period=DEFAULT_ATR_PER
             "trigger_ts": df.index[positions[-1]],
             "invalidation": invalidation,
             "components": ["session_open", "false_move", "reversal_through_open"],
+            # Written here rather than in `explain.templates` because the
+            # sentence quotes numbers only this function measured. See
+            # `smc_rules._apply_detector_language` for which one a card shows.
+            "thesis": (
+                "The %s session opened at %.4f, ran to %.4f against the eventual "
+                "direction to take the stops resting there, then traded back "
+                "through its own open. Entry %.4f is the middle of that false leg."
+                % (window["session"].replace("_", " "), reference, trap_price,
+                   entry)
+            ),
+            "why_now": (
+                "%s opened %.4f, faked to %.4f early in the window, reversed "
+                "back through the open."
+                % (window["session"].replace("_", " ").capitalize(), reference,
+                   trap_price)
+            ),
         })
     return setups
 
@@ -297,8 +313,17 @@ def detect_silver_bullet_setups(df, swings, session=SILVER_BULLET_DEFAULT,
                                          require_displacement=require_displacement,
                                          atr_period=atr_period,
                                          current_idx=current_idx):
+        # `gap["idx"]` is b, the MIDDLE bar of (a, b, c) — the gap is not
+        # complete until c = b + 1. So age 1 is not a retest, it is the gap's
+        # own closing bar, and the touch test passes there by definition: for
+        # a bull gap the zone is [highs[a], lows[c]] and bar_low IS lows[c],
+        # which the inequality highs[a] < lows[c] already guaranteed. Every
+        # qualifying gap therefore emitted a setup on its creation bar, one
+        # bar before any retracement could exist — and because persistence
+        # dedupes, that premature card then blocked the real retest when it
+        # came. The current bar must be strictly past the gap to retest it.
         age = current_idx - gap["idx"]
-        if age <= 0 or age > max_age_bars:
+        if age <= 1 or age > max_age_bars:
             continue
         side = "LONG" if gap["type"] == "FVG_BULL" else "SHORT"
         if bias in ("long", "short") and bias.upper() != side:
@@ -355,5 +380,22 @@ def detect_silver_bullet_setups(df, swings, session=SILVER_BULLET_DEFAULT,
             "trigger_ts": df.index[current_idx],
             "invalidation": invalidation,
             "components": ["silver_bullet_window", "displacement", "fvg_entry"],
+            # Written here rather than in `explain.templates` because the
+            # sentence quotes numbers only this function measured. See
+            # `smc_rules._apply_detector_language` for which one a card shows.
+            "thesis": (
+                "Displacement inside the %s window left the %.4f-%.4f gap "
+                "unfilled. Entry %.4f is its consequent encroachment, aiming at "
+                "%.4f — where the leg that opened it ran to."
+                % (gap["session"].replace("_", " "), gap["low"], gap["high"],
+                   entry, float(target))
+            ),
+            # The gap's own range is left out: `explain.formatter.build_why_now`
+            # already prints it off the `fvg` key, and the fact it cannot read
+            # is which window opened the gap.
+            "why_now": (
+                "Opened inside the %s window %d bar(s) ago."
+                % (gap["session"].replace("_", " "), age)
+            ),
         })
     return setups

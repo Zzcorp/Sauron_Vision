@@ -44,7 +44,8 @@ def legacy_dashboard(request):
     from scraping.models import NewsArticle
     from ai_agents.models import AgentTask
     from market_data.models import EconomicEvent
-    from portfolio.services import get_or_create_default_portfolio
+    from portfolio.services import (get_or_create_default_portfolio,
+                                    live_book_value)
     from portfolio.models import Position, PortfolioSnapshot
     from core.market_calendar import is_forex_open, is_us_market_open, is_eu_market_open, is_weekend
 
@@ -56,7 +57,17 @@ def legacy_dashboard(request):
     # Portfolio metrics
     open_positions = Position.objects.filter(portfolio=portfolio, closed_at__isnull=True)
     total_unrealized = sum(float(p.unrealized_pnl) for p in open_positions)
-    cash_pct = round(float(portfolio.cash_available) / max(float(portfolio.current_value), 1) * 100)
+    # The denominator for every share below is the LIVE book — cash plus both
+    # position books at their marks — and no longer `Portfolio.current_value`.
+    # That column is written by an hourly task that valued the legacy half
+    # alone, so dividing by it reported "100% cash · 0% deployed" on an
+    # account carrying bot trades, and a delta of 0.00 next to it.
+    book = live_book_value(request.user, portfolio)
+    # LIVE_DASH and not None: this template guards its shares with
+    # `|default:"100"`, and Django's `default` fires on ANY falsy value — so a
+    # None here would print "100% of portfolio" over a fully deployed book,
+    # which is the exact fiction the em-dash exists to prevent.
+    cash_pct = (LIVE_DASH if book.cash_pct is None else round(book.cash_pct))
 
     latest_snapshot = PortfolioSnapshot.objects.filter(portfolio=portfolio).first()
 
@@ -71,10 +82,12 @@ def legacy_dashboard(request):
     all_returns = [float(p.unrealized_pnl_pct) for p in closed_positions]
     avg_return = sum(all_returns) / len(all_returns) if all_returns else 0
     portfolio_alpha = round(avg_return, 2)
-    portfolio_delta = round(
-        sum(float(p.quantity) * float(p.current_price) for p in open_positions)
-        / max(float(portfolio.current_value), 1), 2
-    )
+    # Deployed notional over book value — both from the live union, so the
+    # ratio divides two figures that counted the same positions. It used to
+    # put the legacy book's notional over the stored column, which counts a
+    # different set of rows in the numerator than in the denominator.
+    portfolio_delta = (LIVE_DASH if book.exposure_pct is None
+                       else round(book.exposure_pct / 100, 2))
     best_trades = sorted(closed_positions, key=lambda p: float(p.unrealized_pnl), reverse=True)[:5]
     avg_win = round(sum(float(p.unrealized_pnl) for p in winning_trades) / len(winning_trades), 2) if winning_trades else 0
     avg_loss = round(sum(float(p.unrealized_pnl) for p in losing_trades) / len(losing_trades), 2) if losing_trades else 0
@@ -109,11 +122,27 @@ def legacy_dashboard(request):
         "portfolio": portfolio,
 
         # Portfolio
-        "daily_pnl_pct": "+{:.2f}".format(latest_snapshot.daily_pnl_pct) if latest_snapshot else "+0.00",
+        # The raw number, not a pre-signed string. "+{:.2f}" glued a plus in
+        # front of whatever came back, so a down day rendered "+-2.34%" — and
+        # the fallback "+0.00" reported a flat day on a book that had simply
+        # never been snapshotted. The template signs it and colours it from
+        # `sign_class`, and prints an em-dash when there is nothing to sign.
+        "daily_pnl_pct": (latest_snapshot.daily_pnl_pct
+                          if latest_snapshot is not None else None),
         "cash_pct": cash_pct,
+        # The LIVE union, already computed above. The Command Center printed
+        # `portfolio.current_value` behind a hardcoded "10,000" default — the
+        # stored column AND a literal, which is why that cell read 10,000 on
+        # an account that had been trading for days.
+        "book_value_text": book.value_text or LIVE_DASH,
+        "book_coverage": book.coverage,
         "total_unrealized_pnl": "{:.2f}".format(total_unrealized),
         "open_positions_count": open_positions.count(),
-        "total_exposure_pct": 100 - cash_pct,
+        # Measured, not 100 minus the cash share: with positions open and none
+        # of them priced the complement reads 0% deployed, which is a claim of
+        # no exposure on a book that is carrying some.
+        "total_exposure_pct": (LIVE_DASH if book.exposure_pct is None
+                               else round(book.exposure_pct)),
         "max_drawdown": "{:.2f}".format(latest_snapshot.max_drawdown) if latest_snapshot else "0.00",
         "sharpe_ratio": "{:.2f}".format(latest_snapshot.sharpe_ratio) if latest_snapshot and latest_snapshot.sharpe_ratio else "—",
 
@@ -1577,6 +1606,7 @@ def _render_portfolio(request, live_only):
     from datetime import timedelta
     from django.utils import timezone as _tz
     from portfolio.services import (get_or_create_default_portfolio,
+                                    live_book_value,
                                     unified_closed_positions)
     from portfolio.models import PortfolioSnapshot
     # The SHARED "Main" book, deliberately: it is the only Position book
@@ -1599,6 +1629,11 @@ def _render_portfolio(request, live_only):
     cash = float(portfolio.cash_available or 0)
     deployed_value, cash_pct, exposure_pct = _exposure_split(
         deployed, cash, n_open)
+    # TOTAL VALUE, measured on this read. The union `_live_open_book` already
+    # performed is handed straight over, so the strip's headline and the table
+    # under it are two readings of ONE re-pricing rather than two of their own.
+    book = live_book_value(request.user, portfolio,
+                           book=(_objects, n_priced, unrealized, deployed))
 
     # 30d Sharpe / Sortino approximation, from the snapshot series.
     cutoff_30d = _tz.now().date() - timedelta(days=30)
@@ -1631,11 +1666,16 @@ def _render_portfolio(request, live_only):
                    if n_open else "No open positions in either book.")
     strip = {
         "value": _live_cell(
-            _live_num(portfolio.current_value, "{:,.2f}"),
-            sub=portfolio.currency,
-            title=(f"Book value of {portfolio.name} as last written "
-                   f"{portfolio.updated_at:%Y-%m-%d %H:%M} UTC. Open "
-                   f"positions are marked live separately, below.")),
+            _live_num(book.value, "{:,.2f}"),
+            # The sub-label carries the currency AND, when the total left rows
+            # out, that it is short of the whole book — the one place on this
+            # page where a partial sum could otherwise pass for a complete one.
+            sub=(f"{portfolio.currency} · partial" if book.partial
+                 else portfolio.currency),
+            title=(f"Cash plus everything open across both books, marked to "
+                   f"live quotes on this read — not the stored "
+                   f"current_value column, which only an hourly task on the "
+                   f"legacy book ever wrote. {book.coverage}")),
         "cash": _live_cell(
             _live_num(portfolio.cash_available, "{:,.2f}"),
             sub=(f"{cash_pct:.1f}% of the book" if cash_pct is not None
@@ -1710,6 +1750,12 @@ def _render_portfolio(request, live_only):
         "open_positions_count": n_open,
         "open_positions": open_rows[:8],
         "n_priced": n_priced,
+        # What the strip's TOTAL VALUE actually covered. The number itself is
+        # in strip.value; these two say whether it is the whole book, so the
+        # page can print the shortfall instead of leaving it in a tooltip.
+        "book_coverage": book.coverage,
+        "book_partial": book.partial,
+        "book_unpriced": book.n_unpriced,
         "allocation": allocation,
         # Some rows could not be priced, so the donut is drawn from entry
         # cost for those slices — the card says so rather than implying the

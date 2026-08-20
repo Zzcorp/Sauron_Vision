@@ -72,6 +72,20 @@ class SingleGradedCloseTests(TestCase):
     def _history(self):
         return self.client.get("/positions/?tab=history")
 
+    def _visible_text(self):
+        """The page with its <script> and <style> blocks removed.
+
+        `assertNotIn("+-", body)` over the whole document is not a test of
+        what the operator SEES: the page ships JavaScript, and a number
+        regex in it contains the character class `[+-]?`. That is script
+        source, not a rendered figure, and matching it made a passing page
+        look like it was printing "+-12.00" again.
+        """
+        import re
+        body = self._history().content.decode("utf-8", "replace")
+        return re.sub(r"<(script|style)\b.*?</\1>", " ", body,
+                      flags=re.S | re.I)
+
     def test_one_losing_close_is_not_crowned_best(self):
         _closed_short(self.user, symbol="ONLY1", entry=100, exit_price=112)
         body = self._history().content.decode("utf-8", "replace")
@@ -82,8 +96,22 @@ class SingleGradedCloseTests(TestCase):
     def test_the_sign_is_never_forced_onto_a_loss(self):
         """`+{{ pnl }}` printed a plus in front of a negative number."""
         _closed_short(self.user, symbol="ONLY2", entry=100, exit_price=112)
-        body = self._history().content.decode("utf-8", "replace")
-        self.assertNotIn("+-", body)
+        text = self._visible_text()
+        self.assertNotIn("+-", text)
+        # The loss is still ON the page — a version that rendered nothing
+        # at all would also contain no "+-".
+        self.assertIn("ONLY2", text)
+
+    def test_a_plus_is_never_printed_in_front_of_an_unmeasured_value(self):
+        """The em-dash case. `{% if pct > 0 %}+{% endif %}` is correct where
+        `>= 0` would not be: smart-if swallows the TypeError from comparing
+        None and evaluates it False, which is right for the sign and wrong
+        for the colour — so the sign is guarded here and the colour comes
+        from `sign_class`."""
+        _closed_short(self.user, symbol="ONLY3", entry=100, exit_price=112)
+        text = self._visible_text()
+        self.assertNotIn("+—", text)
+        self.assertNotIn("+&mdash;", text)
 
     def test_two_graded_closes_bring_the_pair_back(self):
         _closed_short(self.user, symbol="WINNER", entry=100, exit_price=80)

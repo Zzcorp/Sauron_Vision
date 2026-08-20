@@ -3015,6 +3015,18 @@
             font-family: var(--font-mono);
         }
         .pnl-pct.sv-unknown { opacity: 0.5; }
+
+        /* The `sign_class` filter's three outputs. It exists because an
+           "if pnl >= 0" in a template is a trap: Django's smart-if swallows
+           the TypeError from comparing None with 0 and evaluates it False,
+           so every value the platform had NOT measured was painted in the
+           loss colour — a loss asserted rather than observed. The third
+           class is the whole point: an unmeasured number takes a neutral
+           colour, the same way its em-dash does. */
+        .sign-up   { color: var(--accent); }
+        .sign-down { color: var(--accent-red); }
+        .sign-flat { color: var(--text-muted); }
+
         .oc-mini-pnl  { font-weight: 700; }
         .oc-mini-pnl.up   { color: var(--accent); }
         .oc-mini-pnl.down { color: var(--accent-red); }
@@ -6009,3 +6021,288 @@ body.light-mode .oc-sparkline path { filter: none; }
    a small value, and deliberately NOT the same as a measured zero, which
    shows only the baseline. Its <title> reads "— not measured". */
 .sv-bar--unknown { fill: var(--text-muted); opacity: .3; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ASK SAURON — THE ANSWER  (2026-08-20)
+   ───────────────────────────────────────────────────────────────────────
+   The answer used to be one escaped string dropped into the bubble, so a
+   heading, a table and four bullets all arrived as the same undifferentiated
+   paragraph — with the newlines collapsed, because nothing turned them into
+   anything. That is a wall of text in a panel read mid-decision.
+
+   The renderer in base.html now builds real nodes for the structure the
+   model emits; this is the type for them. Three rules run through the whole
+   block:
+
+     · figures are set in the platform's mono face with tabular digits, the
+       same treatment a price gets on every other screen, so a column of R
+       multiples can be compared straight down;
+     · nothing here paints a colour that is not a token or mixed from one,
+       which is what makes the panel legible in light mode as well;
+     · anything intrinsically wide — a table, a fenced block — scrolls
+       inside its own container. The panel itself never scrolls sideways.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* The scroll guarantee, made at the container rather than per-block: the
+   messages column already owns the vertical scroll, so pinning the other
+   axis here means no child can ever hand the panel a horizontal bar. */
+.se-chat-messages { overflow-x: hidden; }
+.se-bubble { min-width: 0; }
+
+.se-answer {
+    min-width: 0;
+    font-family: var(--font-body);
+    font-size: 13px;
+    line-height: 1.62;
+    color: var(--text-primary);
+    /* break-word, NOT anywhere: the bubble sets `anywhere`, which counts
+       its break points in min-content sizing and would let a wide table
+       compress to fit instead of scrolling — and split a price mid-digit
+       on the way. Prose still wraps; intrinsic widths stay honest. */
+    overflow-wrap: break-word;
+}
+.se-answer > * { max-width: 100%; }
+/* One rhythm for the whole answer, so the gaps between a heading, a list
+   and a paragraph are the same gap and the eye can use them as separators. */
+.se-answer > * + * { margin-top: 10px; }
+.se-answer > .se-md-h + * { margin-top: 6px; }
+
+/* ── Headings: three tiers, and no more ──────────────────────────────────
+   Deeper than three and a chat answer is pretending to be a document. The
+   levels are told apart by ink and size rather than by weight, because the
+   display face ships one weight. */
+.se-answer .se-md-h {
+    font-family: var(--font-display);
+    font-weight: 700;
+    line-height: 1.35;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+.se-answer .se-md-h1 {
+    font-size: 11.5px; letter-spacing: 1.6px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.se-answer .se-md-h2 {
+    font-size: 10.5px; letter-spacing: 1.8px;
+    color: var(--text-secondary);
+}
+.se-answer .se-md-h3 {
+    font-size: 9.5px; letter-spacing: 2px;
+    color: var(--text-muted);
+}
+
+.se-answer .se-md-p { margin: 0; }
+
+/* ── Lists ───────────────────────────────────────────────────────────────
+   The marker is drawn rather than inherited so it can take the accent and
+   sit on the text's first line at any font size. */
+.se-answer .se-md-ul,
+.se-answer .se-md-ol {
+    margin: 0; padding: 0; list-style: none;
+}
+.se-answer .se-md-li {
+    position: relative;
+    padding-left: 15px;
+    margin-top: 4px;
+}
+.se-answer .se-md-li:first-child { margin-top: 0; }
+.se-answer .se-md-li > .se-md-ul,
+.se-answer .se-md-li > .se-md-ol { margin-top: 4px; }
+.se-answer .se-md-ul > .se-md-li::before {
+    content: '▸';
+    position: absolute; left: 1px; top: 0;
+    font-size: 9px; line-height: 1.95;
+    color: var(--accent);
+}
+.se-answer .se-md-ol {
+    counter-reset: se-md-n;
+}
+.se-answer .se-md-ol > .se-md-li {
+    counter-increment: se-md-n;
+    padding-left: 22px;
+}
+.se-answer .se-md-ol > .se-md-li::before {
+    content: counter(se-md-n) '.';
+    position: absolute; left: 0; top: 0;
+    width: 17px; text-align: right;
+    font-family: var(--font-mono);
+    font-size: 10.5px; line-height: 1.75;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+}
+
+/* ── Figures ─────────────────────────────────────────────────────────────
+   The point of the whole panel. Mono + tabular digits fixes the advance
+   width, which is the only reason two numbers on separate lines can be
+   compared by eye. Colour is INHERITED — a figure inside a link has to stay
+   the link's colour — and the mix only nudges it toward the accent. */
+.se-answer .se-fig {
+    font-family: var(--font-mono);
+    font-size: 0.96em;
+    letter-spacing: 0.2px;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "zero" 1;
+    color: color-mix(in srgb, var(--accent) 20%, currentColor);
+}
+/* A signed figure is directional here: -1.1R is a loss in any sentence it
+   appears in, and +0.8R is not. */
+.se-answer .se-fig--up   { color: var(--accent); }
+.se-answer .se-fig--down { color: var(--accent-red); }
+
+/* ── Inline marks ────────────────────────────────────────────────────────
+   `anywhere` is correct on exactly these two: a 60-character rule name and
+   a long URL are single tokens that would otherwise set the bubble's width. */
+.se-answer .se-md-code {
+    font-family: var(--font-mono);
+    font-size: 0.94em;
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+    overflow-wrap: anywhere;
+}
+.se-answer .se-md-b { font-weight: 700; color: var(--text-primary); }
+.se-answer .se-md-i { font-style: italic; color: var(--text-secondary); }
+/* Carries the bubble in the selector on purpose. `.se-bubble.assistant a`
+   already claims the link colour at a higher specificity than a two-class
+   rule can reach, and its hover reaches for --accent-bright — which the
+   light palette never redefines, so a citation lit up in the dark theme's
+   neon on a white card. */
+.se-bubble .se-answer .se-md-a {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+    overflow-wrap: anywhere;
+}
+.se-bubble .se-answer .se-md-a:hover {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+/* A failed turn is persisted as an error-stamped assistant message, and the
+   answer body would otherwise repaint its text out of the red the bubble
+   uses to say so. */
+.se-bubble.error .se-answer,
+.se-bubble.error .se-answer .se-md-b { color: var(--accent-red); }
+
+/* ── Quote and rule ──────────────────────────────────────────────────────
+   A quoted line is the agent restating a fact from the platform's own data;
+   the left edge marks it as reported rather than argued. */
+.se-answer .se-md-quote {
+    margin: 0;
+    padding: 7px 10px;
+    border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: 0 3px 3px 0;
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    color: var(--text-secondary);
+    font-size: 12.5px;
+}
+.se-answer .se-md-hr {
+    border: 0; height: 1px;
+    background: linear-gradient(90deg,
+        color-mix(in srgb, var(--accent) 35%, transparent), transparent);
+}
+
+/* ── Fenced blocks ───────────────────────────────────────────────────────
+   Code keeps its own line breaks, so it is the one thing in the answer that
+   is allowed to be wider than the bubble — inside its own scroll. */
+.se-answer .se-md-codeblock {
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--bg-secondary) 70%, transparent);
+    overflow: hidden;
+}
+.se-answer .se-md-lang {
+    display: block;
+    padding: 3px 9px;
+    font-family: var(--font-mono);
+    font-size: 9px; letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+}
+.se-answer .se-md-pre {
+    margin: 0;
+    padding: 8px 10px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-glow) transparent;
+}
+.se-answer .se-md-pre code {
+    font-family: var(--font-mono);
+    font-size: 11.5px; line-height: 1.55;
+    white-space: pre;
+    color: var(--text-secondary);
+}
+
+/* ── Tables ──────────────────────────────────────────────────────────────
+   The wrapper scrolls; the table does not compress. Columns the renderer
+   found to hold only figures are right-aligned, because magnitude down a
+   column is not readable until the digits line up. */
+.se-answer .se-md-scroll {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-glow) transparent;
+}
+.se-answer .se-md-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+}
+.se-answer .se-md-table th {
+    padding: 5px 9px;
+    text-align: left;
+    font-size: 9px; letter-spacing: 1.2px;
+    text-transform: uppercase;
+    font-weight: 400;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+.se-answer .se-md-table td {
+    padding: 5px 9px;
+    vertical-align: top;
+    color: var(--text-primary);
+    border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+    white-space: normal;
+}
+.se-answer .se-md-table .se-md-num {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Arrival ─────────────────────────────────────────────────────────────
+   Four steps of 40ms is 160ms end to end. Past roughly 200ms a stagger
+   stops reading as one answer landing and starts reading as lag, so the
+   fifth block and everything after it share the last step. */
+@keyframes seAnswerIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: none; }
+}
+.se-answer > * {
+    animation: seAnswerIn 240ms cubic-bezier(.2, .8, .2, 1) both;
+}
+.se-answer > :nth-child(2)     { animation-delay: 40ms; }
+.se-answer > :nth-child(3)     { animation-delay: 80ms; }
+.se-answer > :nth-child(4)     { animation-delay: 120ms; }
+.se-answer > :nth-child(n + 5) { animation-delay: 160ms; }
+@media (prefers-reduced-motion: reduce) {
+    .se-answer > * { animation: none; }
+}
+
+/* Light mode. The tokens carry most of it; these are the three surfaces
+   that were mixed against a near-black card and come out invisible when the
+   card is white. */
+body.light-mode .se-answer .se-md-codeblock,
+body.light-mode .se-answer .se-md-quote,
+body.light-mode .se-answer .se-md-table th {
+    background: var(--bg-secondary);
+}
+body.light-mode .se-answer .se-md-pre code { color: var(--text-primary); }

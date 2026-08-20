@@ -360,6 +360,99 @@ body.sv-scroll-locked { overflow: hidden; }
 .ipr-qty   { color: var(--text-secondary, #9aa4b2); }
 .ipr-r     { font-weight: 700; margin-left: auto; }
 .ipr-pct   { min-width: 56px; text-align: right; }
+/* ── 5d. OPEN-POSITION ROW ──────────────────────────────────────────────
+   The POSITIONS cell's dropdown. A position carries more than a signal or
+   a watchlist tick does — an identity, a size, a state, two numbers and a
+   way out — and all of it used to be one flex line inside a 320px panel.
+
+   The grid gives it two lines and three columns:
+
+       ┌─────────────────────────────────────┐
+       │▎XAUUSD BUY            +1.24R        │
+       │ 1.0000  paper         +3.40%  Close │
+       └─────────────────────────────────────┘
+
+   R above %, both right-aligned in a fixed column so a stack of positions
+   reads down the page instead of stepping in and out. The close button
+   spans both lines: it belongs to the position, not to one of its numbers,
+   and giving it its own column stops it being sized by whatever space the
+   percentage left behind. */
+.ip-dropdown .ip-pos {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+        "id   r   act"
+        "meta pct act";
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 2px;
+    padding: 8px 14px 8px 12px;
+    border-left: 2px solid transparent;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    border-bottom: 1px solid color-mix(in srgb, var(--pop-border) 55%, transparent);
+    transition: background .12s ease, border-left-color .12s ease;
+}
+.ip-dropdown .ip-pos:last-of-type { border-bottom: 0; }
+.ip-dropdown .ip-pos:hover { background: color-mix(in srgb, var(--pop-border) 22%, transparent); }
+/* The side is stated by the badge; the stripe just makes a long book
+   scannable at a glance without reading a word of it.
+
+   Both vocabularies, because both reach this template: the bot book says
+   BUY/SELL and the legacy book says LONG/SHORT. The `.ipr-side--*` rules
+   above already carry the same pairing, and a stripe that matched only
+   half of them would colour half the book. */
+.ip-dropdown .ip-pos--buy:hover,
+.ip-dropdown .ip-pos--long:hover  { border-left-color: var(--accent-green, #00e868); }
+.ip-dropdown .ip-pos--sell:hover,
+.ip-dropdown .ip-pos--short:hover { border-left-color: var(--accent-red, #ff4d4d); }
+/* A close the broker has not honoured yet is the one state in this panel
+   worth catching before the numbers are read. */
+.ip-dropdown .ip-pos.is-closing { border-left-color: var(--accent-gold, #f0b429); }
+
+.ip-dropdown .ip-pos-id {
+    grid-area: id; display: flex; align-items: center; gap: 6px; min-width: 0;
+}
+.ip-dropdown .ip-pos-id .ipr-sym {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ip-dropdown .ip-pos-meta {
+    grid-area: meta; display: flex; align-items: center; gap: 6px;
+    min-width: 0; flex-wrap: wrap;
+}
+/* `.ipr-r` carries `margin-left:auto` for the single-line rows in the other
+   panels. Here the grid does the placing, and that margin would shove the
+   number out of its column. */
+.ip-dropdown .ip-pos .ipr-r {
+    grid-area: r; margin-left: 0; text-align: right; min-width: 58px; font-size: 11.5px;
+}
+.ip-dropdown .ip-pos .ipr-pct {
+    grid-area: pct; margin-left: 0; text-align: right; min-width: 58px;
+    font-size: 10.5px; color: var(--text-secondary, #9aa4b2);
+}
+.ip-dropdown .ip-pos .ipr-qty { font-size: 10.5px; }
+
+.ip-dropdown .ip-pos-close {
+    grid-area: act; align-self: center;
+    font-family: inherit; font-size: 9px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 5px 9px; border-radius: 4px; cursor: pointer;
+    color: var(--text-secondary, #9aa4b2);
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--pop-border) 80%, transparent);
+    transition: color .12s ease, border-color .12s ease, background .12s ease;
+}
+/* Muted until wanted, red once reached for. A permanently red button in a
+   panel the operator opens to READ their book invites the one click here
+   that cannot be taken back. */
+.ip-dropdown .ip-pos-close:hover,
+.ip-dropdown .ip-pos-close:focus-visible {
+    color: var(--accent-red, #ff4d4d);
+    border-color: color-mix(in srgb, var(--accent-red, #ff4d4d) 55%, transparent);
+    background: color-mix(in srgb, var(--accent-red, #ff4d4d) 12%, transparent);
+}
+
 .ipr-score { font-weight: 700; color: var(--text-primary, #e6edf3); min-width: 22px; text-align: right; }
 .ipr-age   { margin-left: auto; }
 .ipr-kind  { font-size: 8.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent, #00e868); }

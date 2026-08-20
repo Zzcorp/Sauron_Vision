@@ -275,5 +275,27 @@ def detect_ote_entries(df, swings, current_idx=None, require_displacement=True,
             "invalidation": invalidation,
             "components": ["impulse_leg", "displacement", "ote_62_79"]
             if leg["displacement"] else ["impulse_leg", "ote_62_79"],
+            # Written here rather than in `explain.templates` because the
+            # sentence quotes numbers only this function measured. See
+            # `smc_rules._apply_detector_language` for which one a card shows.
+            "thesis": (
+                "The %.4f-%.4f impulse is being retraced into its %d-%d%% band. "
+                "Entry %.4f is the %.1f%% sweet spot, aiming back at the %.4f "
+                "extreme the leg already made."
+                % (leg["low"], leg["high"], OTE_MIN_RATIO * 100,
+                   OTE_MAX_RATIO * 100, entry, OTE_SWEET_SPOT * 100,
+                   leg["extreme"])
+            ),
+            # The depth clause is dropped rather than defaulted when the
+            # retracement could not be measured: 0% is a bar sitting on the
+            # impulse extreme, which is the opposite of what a missing
+            # measurement means.
+            "why_now": (
+                "Bar is trading inside the %d-%d%% band of the %.4f-%.4f leg%s."
+                % (OTE_MIN_RATIO * 100, OTE_MAX_RATIO * 100, leg["low"],
+                   leg["high"],
+                   "" if deepest is None
+                   else ", %.0f%% retraced so far" % (deepest * 100))
+            ),
         })
     return setups

@@ -57,7 +57,10 @@ class EtoroClient:
 
 def sync_etoro_positions():
     """Sync eToro positions into Sauron Vision portfolio."""
+    from decimal import Decimal, InvalidOperation
+
     from instruments.models import Instrument
+    from market_data.models import LiveQuote
     from portfolio.models import Position
     from portfolio.services import get_or_create_default_portfolio
     from django.utils import timezone
@@ -85,6 +88,27 @@ def sync_etoro_positions():
                 "is_active": True,
             }
         )
+
+        # The broker's mark goes into the platform's ONE mark table, not just
+        # into the position row. Everything that values a book reads LiveQuote
+        # — and these instruments are created with is_watchlist=False and no
+        # bot config, which signals.universe excludes from the quote sweep, so
+        # nothing else will ever quote them. Without this the broker's own
+        # positions counted as UNPRICED: the book value went unmeasured, the
+        # nightly snapshot was skipped, the equity curve stopped and the risk
+        # denominator froze — on the real-money book, silently.
+        current_rate = pos.get("currentRate")
+        if current_rate not in (None, ""):
+            try:
+                LiveQuote.objects.update_or_create(
+                    instrument=instrument,
+                    defaults={"last": Decimal(str(current_rate)),
+                              "source": "etoro"})
+            except (InvalidOperation, TypeError, ValueError):
+                logger.warning(
+                    "eToro sent an unusable currentRate for %s (%r); the "
+                    "position is recorded but stays unpriced.",
+                    instrument.symbol, current_rate)
 
         Position.objects.update_or_create(
             portfolio=portfolio,

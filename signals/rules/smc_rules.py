@@ -35,6 +35,17 @@ Two things this module is deliberately strict about:
     them, and reads a direction for the frame from `smc.bias` so the scan
     stops offering a long and a short on the same chart at the same moment.
     See `scan_symbol`.
+
+  * A detector nothing calls produces nothing. Mitigation blocks, optimal
+    trade entry, the Judas swing, the Silver Bullet and SMT divergence were
+    each built and tested as primitives and each returned a `setup` string
+    `SmcSignal.SETUP_CHOICES` could not store, so the scan could find them and
+    the platform could not keep them. All five are wired into `scan_symbol`
+    now, through the same displacement qualification, daily-bias filter,
+    inducement scoring and conviction trail as the seven that were already
+    there. Two of them are session-scoped and are silent on a 4h frame by
+    construction — see `scan_symbol` — and the fifth needs a second
+    instrument, see `smt_partner_for`.
 """
 import logging
 
@@ -194,6 +205,42 @@ SFP_STOP_BUFFER_PCT = 0.003
 SFP_FALLBACK_TARGET_PCT = 0.02
 
 
+# ── Session-scoped setups ───────────────────────────────────────────────────
+
+# Which sessions the scan hunts a Judas swing in. The two killzones the pattern
+# is actually taught in: London, whose fake-out sets up the day, and the New
+# York AM, whose sets up the second half. `asia` is deliberately absent — the
+# Asian range is the liquidity these two sessions are engineered to take, not a
+# window that traps anyone — and so is `ny_pm`, which opens into a day whose
+# direction is already established, so an early extreme there is the trend
+# rather than a trap.
+JUDAS_SESSIONS = ("london", "ny_am")
+
+
+# ── SMT divergence ──────────────────────────────────────────────────────────
+
+# Which second instrument is worth loading a frame for, by symbol. CANDIDATES,
+# not claims: what makes two instruments comparable is that their returns
+# actually moved together, and `smt.detect_smt_setups` measures exactly that
+# over the shared history and refuses the read below `smt.SMT_MIN_CORRELATION`.
+# So an entry here costs a wrong pairing nothing but one wasted frame load —
+# it can never put a divergence between unrelated charts on the feed.
+#
+# The pairs are ICT's own: the index triad, the two majors that share a dollar
+# leg, the metals pair, and the two crypto majors this deployment scans.
+# Symmetric, because either side can be the one that fails to confirm. A symbol
+# absent from the table is free: no partner, no second load, no SMT cards.
+# Override per-deployment with `SMC_SMT_PARTNERS = {...}` in settings.
+SMT_CANDIDATE_PARTNERS = {
+    "ES": "NQ", "NQ": "ES", "YM": "ES", "RTY": "ES",
+    "SPY": "QQQ", "QQQ": "SPY",
+    "EURUSD": "GBPUSD", "GBPUSD": "EURUSD",
+    "XAUUSD": "XAGUSD", "XAGUSD": "XAUUSD",
+    "BTCUSD": "ETHUSD", "ETHUSD": "BTCUSD",
+    "BTCUSDT": "ETHUSDT", "ETHUSDT": "BTCUSDT",
+}
+
+
 # Statuses that mean "this card is still someone's open idea". Mirrors the
 # feed query in `dashboard.views_signals_htmx.signal_cards_htmx`.
 OPEN_STATUSES = ("ACTIVE", "TRIGGERED")
@@ -203,6 +250,30 @@ def ict_filters_enabled():
     """Whether the ICT context filters are on for this deployment."""
     from django.conf import settings
     return bool(getattr(settings, "SMC_ICT_FILTERS", ICT_FILTERS_DEFAULT))
+
+
+def smt_partner_for(symbol):
+    """The symbol worth loading a second frame for, or None.
+
+    Deployment settings win over `SMT_CANDIDATE_PARTNERS`, and a symbol mapped
+    to None in the setting is how a deployment switches one pairing off without
+    replacing the whole table.
+
+    None is the common answer and it is a cheap one: the scan only pays for a
+    second OHLCV read when there is a partner named here, so most symbols never
+    load one at all. That is the whole reason this is a lookup rather than a
+    correlation sweep of the universe — measuring which instrument correlates
+    best with this one would mean reading 90 days of daily bars for every
+    instrument on every 900-second pass, to answer a question whose answer
+    barely moves. The correlation that decides whether the pairing is real is
+    still measured, but only for the one pair, and only on the bars the two
+    frames already share; see `smt.detect_smt_setups`.
+    """
+    from django.conf import settings
+    configured = getattr(settings, "SMC_SMT_PARTNERS", None)
+    if isinstance(configured, dict) and symbol in configured:
+        return configured[symbol]
+    return SMT_CANDIDATE_PARTNERS.get(symbol)
 
 
 def measured_hit_rates(days=HIT_RATE_WINDOW_DAYS):
@@ -367,26 +438,33 @@ def structure_break_for(setup_dict, breaks_by_bar):
     `scan_symbol` passes the qualified copies into them, that dict already
     carries the displacement fields. The zone setups name it indirectly, by the
     break that created the order block — for a breaker, the block it was
-    flipped from — so those are looked up.
+    flipped from, and for a mitigation block the shift away from the unswept
+    swing — so those are looked up.
 
     Keyed by (bar, break type), never by bar alone: a single wide bar can close
     above a swing high and below a swing low, producing two breaks on one
     index, and the zone's own polarity says which of the two made it.
 
-    None is the honest answer for an FVG tap, an SFP or a PO3: they are not
-    built on a break at all, and there is no displacement to ask about.
+    None is the honest answer for an FVG tap, an SFP, a PO3, an OTE, a Judas
+    swing, a Silver Bullet or an SMT read: none of them is built on a structure
+    break, so there is no displacement behind one to ask about. The OTE and the
+    Silver Bullet do stand on a measured displacement LEG, but a leg is not a
+    break and `_displacement_term` would have to be handed a break-shaped dict
+    that no break produced to score it.
     """
     bos = setup_dict.get("bos")
     if bos is not None:
         return bos
-    ob = setup_dict.get("order_block")
-    if ob is None:
+    zone = setup_dict.get("order_block")
+    if zone is None:
         breaker = setup_dict.get("breaker")
-        ob = breaker.get("origin_ob") if breaker else None
-    if ob is None:
+        zone = breaker.get("origin_ob") if breaker else None
+    if zone is None:
+        zone = setup_dict.get("mitigation_block")
+    if zone is None:
         return None
-    kind = "BOS_UP" if ob.get("type") == "OB_BULL" else "BOS_DOWN"
-    return breaks_by_bar.get((ob.get("created_by_break_idx"), kind))
+    kind = "BOS_UP" if zone.get("type") in ("OB_BULL", "MB_BULL") else "BOS_DOWN"
+    return breaks_by_bar.get((zone.get("created_by_break_idx"), kind))
 
 
 def inducement_for(setup_dict, guards):
@@ -396,6 +474,18 @@ def inducement_for(setup_dict, guards):
     liquidity was already taken and whose polarity has flipped, so the pool
     that once guarded its approach is not the pool standing in front of the
     entry any more — asking the question there would answer a different one.
+
+    A MITIGATION BLOCK is not asked either, and the reason is structural rather
+    than a judgement call: `detect_mitigation_blocks` draws the zone on the LAST
+    swing of its type before the break, and `find_inducement` looks for a swing
+    of that same type between the zone and the break. There is never one — any
+    such swing would have been picked as the origin instead — and the origin
+    swing itself sits on the far side of the zone, where the separation test
+    refuses it. The question is therefore unanswerable by construction, not
+    unanswered, and a "+0, no pool in front of the zone" line printed on every
+    mitigation card would be a measurement nobody took. Confirmed on 351 blocks
+    across 400 synthetic frames and pinned by
+    `tests/test_ict_cards.MitigationBlocksCannotHaveAnInducement`.
 
     Keyed by (zone bar, break bar), because two breaks can pick the same
     opposing candle as their order block and those are two zones with two
@@ -784,9 +874,53 @@ def detect_sfp_setups(df, swings, sfps, current_idx=None):
     return setups
 
 
+# ── Card language for setups the shared templates do not name ───────────────
+
+def _apply_detector_language(card, setup_dict):
+    """Let a detector's own sentence stand in where `explain.templates` is mute.
+
+    `THESIS_TEMPLATES` has a line for the seven original setups and none for the
+    five ICT ones, so `build_card` falls through to "OTE setup at 1.2345" — a
+    sentence that repeats the setup name and the entry and says nothing about
+    why the setup exists. Each of the five builds its own from the numbers it
+    measured, next to the geometry that produced them.
+
+    The shared table still wins wherever it has a line, so this never becomes a
+    second place card language is edited: adding an OTE entry to
+    `explain.templates` retires this branch for OTE without touching anything
+    here.
+    """
+    from signals.explain.templates import THESIS_TEMPLATES
+
+    thesis = setup_dict.get("thesis")
+    if thesis and card["setup"] not in THESIS_TEMPLATES:
+        card["thesis"] = thesis
+    why_now = setup_dict.get("why_now")
+    if why_now:
+        # Prepended, not replacing: `build_why_now` writes the facts it can read
+        # off the shared keys (a sweep, a gap, an order block) and this adds the
+        # one it cannot.
+        card["why_now"] = "%s %s" % (why_now, card["why_now"])
+    return card
+
+
+def _on_this_bar(setups, current_idx):
+    """Only the setups whose trigger bar is the one the scan is standing on.
+
+    `detect_judas_swings` reports every qualifying session in the frame, which
+    is what a backtest wants and not what a live scan may publish: a card for a
+    London session three weeks ago is an idea nobody can take, and
+    `persist_cards` would store the oldest of them and drop the rest as
+    duplicates of a setup already open. The other four already evaluate the last
+    bar; this holds all five to the rule rather than trusting each to keep it.
+    """
+    return [s for s in setups if s.get("trigger_idx") == current_idx]
+
+
 # ── Entry points ────────────────────────────────────────────────────────────
 
-def scan_symbol(symbol, timeframe="4h", bars=500, df=None, ict_filters=None):
+def scan_symbol(symbol, timeframe="4h", bars=500, df=None, ict_filters=None,
+                smt_partner=None, partner_df=None):
     """Run all SMC detectors on a symbol/timeframe and return list of cards.
 
     If `df` is provided, uses it directly (for tests). Otherwise loads
@@ -795,7 +929,20 @@ def scan_symbol(symbol, timeframe="4h", bars=500, df=None, ict_filters=None):
     `ict_filters` defaults to the deployment setting (see
     `ict_filters_enabled`); pass False to get the raw detector output with no
     killzone/liquidity/premium-discount scoring, no displacement or bias
-    filtering, and no refusals.
+    filtering, and no refusals. It does not switch detectors off — the ICT
+    setups are detectors, not filters, and they run either way.
+
+    `smt_partner` / `partner_df` are the second instrument SMT divergence needs.
+    Left unset, the partner is looked up with `smt_partner_for` and its frame
+    loaded only if there is one; a symbol with no partner is scanned with the
+    other twelve detectors and no SMT read, which is the honest outcome rather
+    than a missing one. Pass `partner_df` directly to skip the load.
+
+    Thirteen setups come out of here, and two of them are session-scoped: the
+    Judas swing needs three bars inside a session window and the Silver Bullet
+    needs three consecutive bars inside a one-hour window, so on the 4h series
+    this scan usually runs, both are correctly and permanently silent. They earn
+    their keep on the intraday frames `mtf.scan_symbol_mtf` also scans.
 
     With the filters on, the detectors run between two extra steps:
 
@@ -824,6 +971,15 @@ def scan_symbol(symbol, timeframe="4h", bars=500, df=None, ict_filters=None):
     from signals.smc.bias import daily_bias, filter_setups_to_bias
     from signals.smc.displacement import qualify_breaks_with_displacement
     from signals.smc.inducement import detect_inducements
+    from signals.smc.fibonacci import detect_ote_entries
+    from signals.smc.mitigation import (
+        detect_mitigation_blocks, detect_mitigation_retest_setups,
+    )
+    from signals.smc.sessions import SILVER_BULLET_SESSIONS
+    from signals.smc.session_setups import (
+        detect_judas_swings, detect_silver_bullet_setups,
+    )
+    from signals.smc.smt import detect_smt_setups
     from signals.smc.detectors import (
         detect_rp_breaker_setups,
         detect_three_tap_setups,
@@ -842,6 +998,15 @@ def scan_symbol(symbol, timeframe="4h", bars=500, df=None, ict_filters=None):
         df = load_ohlcv(symbol, timeframe, bars)
     if df is None or len(df) < 50:
         return []
+
+    # Resolved before the detectors so a caller-supplied frame and a looked-up
+    # one take the same path. No partner means no second read at all: most
+    # symbols have none, and the ones that do pay for exactly one extra load.
+    if partner_df is None:
+        if smt_partner is None:
+            smt_partner = smt_partner_for(symbol)
+        if smt_partner:
+            partner_df = load_ohlcv(smt_partner, timeframe, bars)
 
     swings = classify_swings(get_swings(df, left=3, right=3))
     detected_breaks = detect_market_structure_breaks(df, swings)
@@ -867,6 +1032,8 @@ def scan_symbol(symbol, timeframe="4h", bars=500, df=None, ict_filters=None):
     breakers = find_breakers(obs)
     ranges = detect_ranges(swings)
 
+    current_idx = len(df) - 1
+
     setups = []
     setups.extend(detect_rp_breaker_setups(df, swings, sweeps, breaks, breakers))
     setups.extend(detect_three_tap_setups(df, swings, sweeps))
@@ -876,6 +1043,37 @@ def scan_symbol(symbol, timeframe="4h", bars=500, df=None, ict_filters=None):
     setups.extend(detect_ob_retest_setups(df, obs, swings))
     setups.extend(detect_po3_setups(df, swings))
     setups.extend(detect_sfp_setups(df, swings, detect_sfp(df, swings)))
+
+    # The five ICT setups. `breaks` is the qualified list, so a mitigation block
+    # is drawn from a shift for the same reason an order block is, and the
+    # drifts never reach it.
+    mitigation_blocks = detect_mitigation_blocks(df, swings, breaks, sweeps=sweeps)
+    setups.extend(_on_this_bar(
+        detect_mitigation_retest_setups(df, mitigation_blocks, swings),
+        current_idx))
+    setups.extend(_on_this_bar(detect_ote_entries(df, swings), current_idx))
+    for session in JUDAS_SESSIONS:
+        setups.extend(_on_this_bar(
+            detect_judas_swings(df, swings, session=session), current_idx))
+    # All three of ICT's Silver Bullet windows, not just the AM one. A gap stays
+    # live for `SILVER_BULLET_MAX_AGE_BARS`, three hours on a 15m frame, so
+    # scanning the AM window alone would leave the setup unreachable for most of
+    # the trading day rather than merely absent from it.
+    #
+    # No bias is passed even though the detector accepts one: the scan reads its
+    # bias below, after the detectors, because `daily_bias` is the most expensive
+    # read here and there is nothing to filter when nothing fired.
+    # `filter_setups_to_bias` then applies that one read to every setup on the
+    # list, these included.
+    for session in SILVER_BULLET_SESSIONS:
+        setups.extend(_on_this_bar(
+            detect_silver_bullet_setups(df, swings, session=session),
+            current_idx))
+    if partner_df is not None:
+        setups.extend(_on_this_bar(
+            detect_smt_setups(df, swings, partner_df, label=symbol,
+                              partner_label=smt_partner or "partner"),
+            current_idx))
 
     bias = None
     guards = {}
@@ -931,6 +1129,7 @@ def scan_symbol(symbol, timeframe="4h", bars=500, df=None, ict_filters=None):
 
         card = build_card(s, symbol, timeframe, hit_rate=hit_rate,
                           hit_rate_n=n_closed, ict=ict)
+        _apply_detector_language(card, s)
         if ict:
             for delta, why in ict["terms"]:
                 apply_conviction_term(card, delta, why)
