@@ -7,10 +7,16 @@ checks the user's preferences, and fans out to:
     degrades when credentials missing
 
 Hook points:
-  - `gate_new_entry` reject  → "orchestrator_reject"
-  - bot opens a position     → "bot_fill_open"
-  - bot closes a position    → "bot_fill_close"
-  - daily-loss limit reached → "drawdown_warning"
+  - `gate_new_entry` reject   → "orchestrator_reject"
+  - bot opens a position      → "bot_fill_open"
+  - bot closes a position     → "bot_fill_close"
+  - daily-loss limit reached  → "drawdown_warning"
+  - operator presses TAKE TRADE → "manual_fill_open"
+
+The last one is not a bot event and the dispatcher treats it as its own
+population — see OPERATOR_KINDS, which exists because routing it through
+the bot path told the operator that the trade they had just taken by hand
+was automation, and then silenced it for anyone who had muted the bots.
 
 All hooks are wrapped in try/except so a notification failure never breaks
 trading logic.
@@ -23,9 +29,10 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-# All bot-event kinds. Adding new ones requires no schema change — they all
-# map to the in-app `Notification.notification_type="bot"` and are gated by
-# the single `UserNotificationPrefs.receive_bot_alerts` flag.
+# All bot-event kinds — things the PROGRAM did on its own. Adding new ones
+# requires no schema change: they map to `Notification.notification_type="bot"`
+# and are gated by the single `UserNotificationPrefs.receive_bot_alerts` flag
+# (the briefing is the one exception, with its own opt-in toggle below).
 BOT_KINDS = {
     "orchestrator_reject",
     "bot_fill_open",
@@ -40,28 +47,66 @@ BOT_KINDS = {
 }
 
 
+# Kinds the OPERATOR caused with their own hands. They ride this same
+# dispatcher — one bell, one set of channels, one quiet-hours rule — but they
+# are not bot events, and the two differences that follow from that are the
+# whole reason the set is separate:
+#
+#   * `receive_bot_alerts` does NOT gate them. That switch answers "tell me
+#     when the program acts on its own"; an operator who turns it off is
+#     silencing the bots, not asking to stop hearing about the trades they
+#     take themselves. Gating these on it meant the fills an operator most
+#     wants confirmed were the first ones to go quiet.
+#   * the in-app row is not typed "bot" (see _ROW_TYPE), so the bell stops
+#     filing a deliberate click under "Bot Event".
+OPERATOR_KINDS = {"manual_fill_open"}
+
+# The in-app row's type, per kind — "bot" for everything not listed, because
+# every BOT_KINDS row IS the program acting.
+#
+# `alerts.Notification.TYPES` carries no "manual" member and adding one is a
+# migration in another app, so a hand-taken fill files under "portfolio": the
+# existing type for "something happened on your book". It is true of the
+# event, it already has an inbox tab and a colour in the bell, and it is not
+# the word "bot" — which is the claim that was wrong.
+_ROW_TYPE = {kind: "portfolio" for kind in OPERATOR_KINDS}
+
+# Rows whose event already drew a richer live banner straight from its
+# producer (fill_open/fill_close on /ws/eye/). The row is still pushed so the
+# bell badge moves live; the client just draws no second card. manual_trade
+# pushes the same fill_open the engine does, so a hand-taken open belongs
+# here for the same reason a bot's does.
+_BANNER_SILENT_KINDS = {"bot_fill_open", "bot_fill_close", "manual_fill_open"}
+
+
 def dispatch_notification(user, kind: str, *, title: str, body: str = "",
                           url: str = "", payload=None) -> bool:
-    """Send a bot-event notification to `user`.
+    """Send a bot-event or operator-event notification to `user`.
 
     Returns True if at least one delivery channel succeeded (including in-app).
-    Returns False if the user has bot alerts disabled OR all channels failed.
+    Returns False if the user has the relevant alerts disabled OR all channels
+    failed.
 
     Phase-45: `payload` is an optional kind-specific object (e.g. a
     `StrategistBriefing` row) used by channels that render structured
     templates (HTML email). Plain channels fall back to the title+body
     pair so callers don't need to know which channel is in use.
     """
-    if kind not in BOT_KINDS:
+    if kind not in BOT_KINDS and kind not in OPERATOR_KINDS:
         logger.warning("dispatch_notification: unknown kind=%r", kind)
         return False
 
-    # Phase-43 — briefings have their own pref toggle (opt-in, default OFF).
-    if kind == "strategist_briefing":
-        if not _user_wants_briefing(user):
+    # Only the bot's own events answer to the bot preferences. An operator
+    # kind passes untouched — there is no preference for "stop telling me
+    # what I did", and reading the bot switch here is what made a muted
+    # fleet also mute the operator's own fills.
+    if kind in BOT_KINDS:
+        # Phase-43 — briefings have their own pref toggle (opt-in, default OFF).
+        wanted = (_user_wants_briefing(user)
+                  if kind == "strategist_briefing"
+                  else _user_wants_bot_alerts(user))
+        if not wanted:
             return False
-    elif not _user_wants_bot_alerts(user):
-        return False
 
     delivered = False
 
@@ -71,14 +116,10 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
     try:
         from alerts.models import Notification
         n = Notification(
-            user=user, notification_type="bot",
+            user=user, notification_type=_ROW_TYPE.get(kind, "bot"),
             title=title[:200], body=body, url=url[:200],
         )
-        # Fills already raise their own richer live banner straight from
-        # the engine (fill_open/fill_close on /ws/eye/). Mark this row
-        # banner-silent so the bell badge still updates live but the same
-        # event never shows two cards.
-        n._banner_silent = kind in ("bot_fill_open", "bot_fill_close")
+        n._banner_silent = kind in _BANNER_SILENT_KINDS
         n.save()
         delivered = True
     except Exception as e:
@@ -181,7 +222,11 @@ def _user_channel(user) -> str:
 # is a coin-flip between the glyph and a tofu box on someone's phone. Every
 # title already states its event in words ("Close refused: BTCUSDT"), so the
 # mark is dropped on the way out rather than gambling on a foreign font stack.
-_PLATFORM_MARKS = "✕▲⊠⊟⟳◉⊕◯◌●"
+# ▸ is the platform's mark for the operator speaking rather than the Eye
+# answering (brain.research_models draws the two apart the same way), so it
+# leads a hand-taken fill — and it is stripped on the way out with all the
+# others.
+_PLATFORM_MARKS = "✕▲⊠⊟⟳◉⊕◯◌●▸"
 
 
 def _plain_title(title: str) -> str:
@@ -289,6 +334,32 @@ def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
         # "why did it just buy that?", which is the question the banner
         # provokes. /asset-bots/ is the config list and answers none of it.
         url=page_url("forensics_detail", trade_id) or "/asset-bots/",
+    )
+
+
+def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
+                             qty, entry_price, trade_id=None) -> bool:
+    """The OPERATOR opened this position by hand — TAKE TRADE, not a bot.
+
+    Same shape as `notify_bot_fill_open` minus `rule_name`, and the omission
+    is the point: every hand-taken trade carries rule_name="manual_take", and
+    printing it in the body where a bot fill prints "· rsi_reversal" makes
+    the operator's own click look like a rule that fired. The title says "by
+    hand" in words instead, so the attribution survives the external channels
+    that strip the mark (see _plain_title).
+    """
+    from alerts.links import page_url
+    return dispatch_notification(
+        user, "manual_fill_open",
+        title=f"▸ {symbol} {side} opened by hand",
+        body=f"{asset_class.upper()} · qty {qty} @ {entry_price} · TAKE TRADE",
+        # Forensics renders any of this user's trades, and a hand-taken one
+        # has a story too: the levels it opened with, the signal it was taken
+        # from, its audit trail and lifecycle. The FALLBACK differs from the
+        # bot's, though — /asset-bots/ is the fleet's config list, which is
+        # not where a trade the operator took themselves lives. /positions/
+        # is their own book, which is.
+        url=page_url("forensics_detail", trade_id) or "/positions/",
     )
 
 

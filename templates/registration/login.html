@@ -1,15 +1,20 @@
 {% load static %}
+{% load sauron_tags %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <link rel="icon" type="image/png" href="{% static 'logo/logo_SV.png' %}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sauron Vision — Access</title>
-    <link rel="apple-touch-icon" href="{% static 'logo/logo_SV.png' %}">
+    <link rel="icon" href="{% static 'logo/favicon.ico' %}" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="{% static 'logo/sauron_eye.svg' %}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'logo/favicon-32.png' %}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{% static 'logo/favicon-16.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'logo/apple-touch-icon.png' %}">
     <meta property="og:title" content="Sauron Vision — Trading Intelligence">
-    <meta property="og:image" content="{% static 'logo/logo_SV.png' %}">
-    <meta name="theme-color" content="#00e868">
+    {# Absolute — a relative og:image is dropped by every scraper. #}
+    <meta property="og:image" content="{% static_abs 'logo/og-card.png' %}">
+    <meta name="theme-color" content="#030806">
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
         :root {

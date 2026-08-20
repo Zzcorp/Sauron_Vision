@@ -108,7 +108,7 @@ than in nine template branches.
                 <span class="oc-mini-sym">{{ p.instrument.symbol }}</span>
                 <span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span>
                 <span class="oc-mini-meta">{% if p.strategy %}{{ p.strategy.name|truncatechars:18 }}{% else %}—{% endif %}</span>
-                <span class="oc-mini-pnl up">+{{ p.unrealized_pnl|floatformat:2 }}</span>
+                <span class="oc-mini-pnl up">+{{ p.unrealized_pnl|floatformat:2 }}{% if p.unrealized_pnl_pct is not None %} <span class="pnl-pct">({% if p.unrealized_pnl_pct > 0 %}+{% endif %}{{ p.unrealized_pnl_pct|floatformat:2 }}%)</span>{% else %} <span class="pnl-pct sv-unknown">(&mdash;)</span>{% endif %}</span>
             </div>
             {% endfor %}
         {% endif %}
@@ -119,7 +119,7 @@ than in nine template branches.
                 <span class="oc-mini-sym">{{ p.instrument.symbol }}</span>
                 <span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span>
                 <span class="oc-mini-meta">{% if p.strategy %}{{ p.strategy.name|truncatechars:18 }}{% else %}—{% endif %}</span>
-                <span class="oc-mini-pnl down">{{ p.unrealized_pnl|floatformat:2 }}</span>
+                <span class="oc-mini-pnl down">{{ p.unrealized_pnl|floatformat:2 }}{% if p.unrealized_pnl_pct is not None %} <span class="pnl-pct">({% if p.unrealized_pnl_pct > 0 %}+{% endif %}{{ p.unrealized_pnl_pct|floatformat:2 }}%)</span>{% else %} <span class="pnl-pct sv-unknown">(&mdash;)</span>{% endif %}</span>
             </div>
             {% endfor %}
         {% endif %}

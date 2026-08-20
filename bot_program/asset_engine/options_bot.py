@@ -12,6 +12,12 @@ signal, the OptionsBot picks an AAPL call (or put for bearish) by:
      contract multiplier, and enforces a max premium per contract.
   4. Expiry-close gate — refuses to open inside `min_dte`, and when an
      OPEN trade is within `close_before_dte`, force-closes it.
+  5. The book's own /setup/ limits — the correlation size taper on the
+     underlying and the MAX SINGLE POSITION ceiling on the premium being
+     paid. `scan_symbol` below overrides the base implementation wholesale,
+     so both had to be repeated here or options was the one live entry path
+     the Risk Limits card did not reach. (MAX DAILY LOSS and MAX TOTAL
+     EXPOSURE arrive with the inherited `can_open_new`.)
 
 Routing always goes through IBKR via broker_router (Alpaca/OANDA don't trade
 options at scale). When IBKR is unavailable, broker_router falls back to
@@ -393,20 +399,50 @@ class OptionsBot(AssetBot):
         if not stage["force_paper"]:
             raw *= float(stage["live_size_factor"])
 
+        # CORRELATION SIZE TAPER — the book's max_correlation_threshold from
+        # /setup/, measured on the UNDERLYING because that is what the bet is:
+        # a call on a name the book is already long is most of the same
+        # exposure however the payoff is shaped, and this lane overrides
+        # scan_symbol wholesale, so the taper the other four asset classes
+        # apply reached options through nothing at all.
+        #
+        # A failed read costs the taper, not the trade — the same posture as
+        # base.scan_symbol. It is a 90-day correlation over PriceData, the most
+        # fragile input on this path, and refusing an entry because a price
+        # history is thin would make the taper a gate, which is what it is not.
+        try:
+            from instruments.models import Instrument
+            from portfolio.risk_gate import correlation_state
+            corr = correlation_state(
+                self.user, Instrument.objects.filter(symbol=symbol).first())
+        except Exception as e:  # noqa: BLE001 — see above
+            logger.warning("[options_bot] correlation taper unavailable for "
+                           "%s: %s — sizing untapered", symbol, e)
+            corr = {"scale": 1.0, "reason": ""}
+        if corr["scale"] < 1.0:
+            raw *= float(corr["scale"])
+            logger.info("[options_bot] %s correlation taper: %s",
+                        symbol, corr["reason"])
+
         n_contracts = int(raw)
         if n_contracts <= 0:
             # Not a bug — arithmetic. One contract risks
             # |premium - stop| x multiplier; if that already exceeds the risk
             # budget, the honest answer is that this account cannot trade
-            # this contract at this risk level.
+            # this contract at this risk level. The taper is named whenever it
+            # applied, or the operator reads "fund more capital" about a size
+            # the correlation reading, not the account, cut to nothing.
             per_contract = abs(premium - sl) * multiplier
+            taper_note = (f" after a {corr['scale']:.0%} correlation taper"
+                          if corr["scale"] < 1.0 else "")
             logger.info(
                 "[options_bot] %s strike %s skipped: one contract risks "
-                "$%.2f (%.2f%% of $%s) but the budget is $%.2f (%.2f%%). "
+                "$%.2f (%.2f%% of $%s) but the budget is $%.2f (%.2f%%)%s. "
                 "Raise extras['risk_per_trade_pct'], pick cheaper premium, "
                 "or fund more capital.",
                 symbol, contract.strike, per_contract,
-                (per_contract / cap * 100) if cap else 0, cap, cap * f, f * 100)
+                (per_contract / cap * 100) if cap else 0, cap, cap * f,
+                f * 100, taper_note)
             return None
 
         dollars = n_contracts * premium * multiplier
@@ -426,6 +462,33 @@ class OptionsBot(AssetBot):
                             symbol, contract.strike,
                             delta_per_contract * premium, share_equiv_budget)
                 return None
+
+        # MAX SINGLE POSITION from /setup/, on the premium actually about to be
+        # paid. Long premium settles in full — this bot buys premium only — so
+        # the contracts' cost IS the capital they tie up, which is why
+        # `capital_at_work` charges the options class at 1.0 and why `dollars`
+        # is the right basis here. Judged after every multiplier and after the
+        # truncation to whole contracts, because a ceiling that bites on a
+        # fractional size is a ceiling on a position nobody sends. A refusal
+        # rather than a clamp: quietly shrinking to the ceiling would change
+        # the risk this entry was sized for, and the bot cannot ask the
+        # operator which of the two they meant.
+        #
+        # Left unguarded, like the same check in base.scan_symbol. An exception
+        # here reaches tick()'s handler and costs ONE symbol one pass, where
+        # `preflight` in can_open_new fails open because its blast radius is
+        # the whole fleet every pass.
+        from portfolio.risk_gate import limits_book, single_position_state
+        # Against the POOL that sized it — see AssetBot.scan_symbol.
+        book_cap = single_position_state(
+            limits_book(), asset_class=self.asset_class, notional=dollars,
+            capital_base=float(self.cfg.capital or 0),
+            base_label="bot pool")
+        if not book_cap["ok"]:
+            logger.info("[options_bot] %s strike %s refused by the book's "
+                        "single-position limit: %s",
+                        symbol, contract.strike, book_cap["reason"])
+            return None
 
         client = client_for_symbol(self.user, symbol, self.cfg)
 
@@ -540,7 +603,17 @@ class OptionsBot(AssetBot):
         return super()._trade_pnl(trade, price) * option_pnl_multiplier(trade)
 
     def _submit_close_order(self, trade, client, client_order_id: str):
-        submit_option_close(client, trade, client_order_id=client_order_id)
+        """Flatten the OPTION at the broker and hand the response BACK.
+
+        Returning it is the whole hook contract: the caller books the exit at
+        the fill that response reports and reads `executedQty` off it to spot
+        a partial close. Dropping it made options the one asset class whose
+        live exits were still booked at the mark read before the order — so
+        every options stop-out showed zero exit slippage — and whose partly
+        filled flattens were marked CLOSED over a live remainder.
+        """
+        return submit_option_close(client, trade,
+                                   client_order_id=client_order_id)
 
     # ── manage_positions: add expiry-close gate on top of base SL/TP ────
 

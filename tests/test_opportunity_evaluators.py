@@ -7,7 +7,7 @@ Run with:  python manage.py test tests.test_opportunity_evaluators
 """
 import math
 import statistics
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 from django.test import TestCase
@@ -38,6 +38,21 @@ def _seed_prices(instrument, closes, end=None):
 
 # ── macro_regime ────────────────────────────────────────────────────────────
 
+# Every fixture date below is UTC, via timezone.localdate(), NEVER date.today().
+#
+# The evaluators compare against `now.date()` where `now` is `timezone.now()` —
+# UTC, because the project runs USE_TZ with TIME_ZONE "UTC". `date.today()` is
+# the machine's LOCAL date, and on any developer machine east of UTC the two
+# disagree for the hours between local midnight and UTC midnight. A fixture
+# seeded "today" locally then lands one day in the FUTURE as far as a
+# `date__lte=now.date()` filter is concerned, the row is excluded, and the
+# evaluator correctly reports no data — so the test fails for seven hours a
+# day on that machine and never on CI, which runs in UTC.
+#
+# This is why these tests passed alone and failed in a suite that happened to
+# straddle the boundary.
+
+
 def _seed_macro(series_id, value, name="x", category="x", when=None):
     """An indicator plus the observation the FRED ingest writes alongside it.
 
@@ -48,7 +63,7 @@ def _seed_macro(series_id, value, name="x", category="x", when=None):
     tests/test_seed_param_integrity.py for that case.
     """
     from market_data.models import MacroIndicator, MacroObservation
-    when = when or date.today()
+    when = when or timezone.localdate()
     indicator = MacroIndicator.objects.create(
         series_id=series_id, name=name, category=category, frequency="d",
         last_value=Decimal(str(value)), last_date=when,
@@ -158,7 +173,7 @@ class CotReportTests(TestCase):
         from scraping.models import COTReport
         inst = _instrument("XAUUSD", asset_class="commodity")
         COTReport.objects.create(
-            instrument=inst, report_date=date.today(),
+            instrument=inst, report_date=timezone.localdate(),
             commercial_long=10000, commercial_short=10000,
             non_commercial_long=8000, non_commercial_short=2000,
             open_interest=20000, net_speculative=6000,  # ratio = 6000/10000 = 0.6
@@ -175,7 +190,7 @@ class CotReportTests(TestCase):
         from scraping.models import COTReport
         inst = _instrument("XAGUSD", asset_class="commodity")
         COTReport.objects.create(
-            instrument=inst, report_date=date.today(),
+            instrument=inst, report_date=timezone.localdate(),
             commercial_long=5000, commercial_short=5000,
             non_commercial_long=5500, non_commercial_short=4500,
             open_interest=10000, net_speculative=1000,  # ratio = 0.1
@@ -208,7 +223,7 @@ class OptionsFlowTests(TestCase):
                 instrument=inst,
                 timestamp=timezone.now() - timedelta(hours=i),
                 contract_type="call", strike=Decimal("100"),
-                expiry=date.today() + timedelta(days=30),
+                expiry=timezone.localdate() + timedelta(days=30),
                 volume=10000, open_interest=2000,
                 premium=Decimal("5.00"),
                 sentiment="bullish", is_unusual=True, source="test",
@@ -230,14 +245,14 @@ class OptionsFlowTests(TestCase):
             OptionsFlow.objects.create(
                 instrument=inst, timestamp=timezone.now() - timedelta(hours=i),
                 contract_type="call", strike=Decimal("100"),
-                expiry=date.today() + timedelta(days=30),
+                expiry=timezone.localdate() + timedelta(days=30),
                 volume=100, open_interest=2000, premium=Decimal("5"),
                 sentiment="bullish", is_unusual=False, source="test",
             )
         OptionsFlow.objects.create(
             instrument=inst, timestamp=timezone.now(),
             contract_type="call", strike=Decimal("100"),
-            expiry=date.today() + timedelta(days=30),
+            expiry=timezone.localdate() + timedelta(days=30),
             volume=10000, open_interest=2000, premium=Decimal("5"),
             sentiment="bullish", is_unusual=True, source="test",
         )

@@ -108,6 +108,7 @@ urlpatterns = [
     path("instruments/<str:symbol>/take-trade/", views.asset_trade_execute, name="asset_trade_execute"),
     path("partials/signal-rail/", views.signal_rail_partial, name="signal_rail_partial"),
     path("partials/ticker/", views.ticker_partial, name="ticker_partial"),
+    path("partials/notif-items/", views.notif_items_partial, name="notif_items_partial"),
     path("partials/panel-counts/", views.panel_counts_json, name="panel_counts_json"),
     path("signals/<int:signal_id>/take-trade/preview/", views.take_trade_preview, name="take_trade_preview"),
     path("signals/<int:signal_id>/take-trade/", views.take_trade_execute, name="take_trade_execute"),

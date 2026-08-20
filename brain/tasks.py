@@ -5,6 +5,7 @@ import logging
 from celery import shared_task
 
 from ai_agents.spend import guard as spend_guard
+from core.task_gate import guarded_task
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,34 @@ def run_earnings_reviewer() -> dict:
     AI review per (instrument, event)."""
     from .earnings_reviewer import scan_due_earnings_now
     return scan_due_earnings_now()
+
+
+@shared_task(name="brain.tasks.run_position_review")
+@guarded_task("agent_position_review")
+def run_position_review() -> dict:
+    """Beat task — every 30 min. Watches OPEN positions between entry and exit.
+
+    Deliberately NOT wrapped in @spend_guard, for the same reason
+    answer_research_question is not: that decorator returns without running
+    the body, and the body's FIRST half is the free deterministic pass — the
+    one that measures R at risk, excursion, distance to the stop, regime flip
+    and rule decay for every open position. Silencing that because the day's
+    AI budget is gone would remove the cheap half of the watcher exactly when
+    the expensive half is already unavailable. The same ceiling is enforced
+    inside `review_open_positions_now` via can_spend(), where the refusal is
+    written onto the position's own row as `skipped_reason`.
+
+    Also grades the recommendations whose positions have since closed, so the
+    reviewer accumulates a track record rather than an opinion column.
+    """
+    from .position_review_agent import grade_due_reviews, review_open_positions_now
+    result = review_open_positions_now()
+    try:
+        result["grading"] = grade_due_reviews()
+    except Exception as e:  # noqa: BLE001 — grading must not fail the pass
+        logger.warning("[position-review] grading pass failed: %s", e)
+        result["grading"] = {"ok": False, "error": str(e)[:200]}
+    return result
 
 
 @shared_task(name="brain.tasks.run_anomaly_scanner")

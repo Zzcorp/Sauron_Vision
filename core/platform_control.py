@@ -167,6 +167,13 @@ DEFAULT_COMPONENTS = [
      "description": "Real-time fast-rule dispatcher. When OFF, the Celery wrapper task short-circuits — direct synchronous calls to `dispatch_event()` still work. Sub-second latency from streamer event to Signal row.",
      "category": "pipeline"},
 
+    # ── Phase 61 — open-position watcher ──────────────────────
+    # Without this row the @guarded_task on brain.tasks.run_position_review
+    # short-circuits on every beat and the watcher silently never runs.
+    {"key": "agent_position_review", "name": "Open-Position Reviewer",
+     "description": "Watches OPEN positions between entry and exit. A free deterministic pass every 30 min measures R at risk, excursion, distance to stop/target, age vs the setup's horizon, regime flip, vol expansion, imminent events, rule decay and theme concentration; only flagged positions reach a budgeted model pass that answers hold / tighten / take part / exit. PROPOSES ONLY — it never closes anything.",
+     "category": "agent"},
+
     # ── Phase 13 — multi-asset bot framework ──────────────────
     {"key": "pipeline_asset_bots", "name": "Multi-Asset Bots (stocks/forex/commodities)",
      "description": "Phase-13 framework: per-(user, asset_class) bot configs that consume Phase-1 Signals and route trades through Phase-4 broker_router (Alpaca for stocks, OANDA for forex, paper-only for commodities). Crypto bot is unchanged.",

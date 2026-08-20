@@ -1138,11 +1138,38 @@ class SeedPreservesOperatorStateTests(TestCase):
                     msg="a re-run without --activate disarmed an armed setup")
 
     def test_both_packs_still_create_their_rows_on_a_fresh_install(self):
+        """One row per definition, in both tables, and nothing else.
+
+        The expected count is READ from the two packs rather than written down.
+        A literal here goes stale the day a setup is added — it did, when the
+        advanced pack went from six to eight — and the failure it then produces
+        says nothing about seeding, so the number gets bumped without anyone
+        checking what it is counting. Naming the definitions keeps the
+        assertion about the thing it cares about: every seeded spec reaches a
+        RuleControl AND an OpportunitySetup, and neither pack silently drops
+        or duplicates one.
+        """
+        from signals.management.commands import (
+            seed_strategies, seed_advanced_strategies,
+        )
         from signals.models_control import RuleControl
         from signals.models_opportunity import OpportunitySetup
         self._reseed()
-        self.assertEqual(RuleControl.objects.count(), 12)
-        self.assertEqual(OpportunitySetup.objects.count(), 12)
+        seeded = {s["name"] for s in seed_strategies._setup_definitions()}
+        seeded |= {s["name"] for s in seed_advanced_strategies._setup_definitions()}
+        # Both packs are non-empty and their names do not collide, so the union
+        # is a count of specs rather than of whichever pack overwrote the other.
+        self.assertGreater(len(seeded), 6)
+        self.assertEqual(
+            len(seeded),
+            len(seed_strategies._setup_definitions())
+            + len(seed_advanced_strategies._setup_definitions()))
+        self.assertEqual(
+            set(RuleControl.objects.values_list("rule_name", flat=True)), seeded)
+        self.assertEqual(
+            set(OpportunitySetup.objects.values_list("name", flat=True)), seeded)
+        self.assertEqual(RuleControl.objects.count(), len(seeded))
+        self.assertEqual(OpportunitySetup.objects.count(), len(seeded))
         for rule in RuleControl.objects.all():
             with self.subTest(rule=rule.rule_name):
                 self.assertEqual(rule.promotion_stage, "research")

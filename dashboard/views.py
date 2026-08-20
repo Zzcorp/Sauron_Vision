@@ -538,6 +538,124 @@ _STAGE_VENUE = {
 _NO_RECORD = {"n": 0, "hits": 0, "expectancy": None, "hit_rate": None}
 
 
+# ── Why a freshly seeded strategy does nothing ──────────────────────────────
+#
+# Two switches decide whether anything at all happens, and BOTH seed off:
+# `OpportunitySetup.is_active` at False, `RuleControl.promotion_stage` at
+# "research". That is the right default — nothing should reach an order because
+# somebody ran a seeder — but it appeared on no page, so the sequence was:
+# seed the pack, arm a strategy, watch nothing happen, and have no way to learn
+# which of the two was holding it. `_trade_gates` below is what puts both on
+# the card, with what each one stops and what clears it.
+
+
+def _stage_verdict(stage):
+    """`rule_actuator.stage_policy`, for a stage whose row this page already holds.
+
+    Restated rather than called, and the restatement is deliberate:
+    `stage_policy` takes a rule NAME and re-reads RuleControl, so calling it
+    per card would add a query per rule to a function whose whole design is a
+    fixed query budget. It is asserted equal to `stage_policy` for every stage
+    — the unrecognised one included — in tests/test_pead_and_promotion.py, the
+    same contract `RuleControl.running_q` keeps with the method it mirrors.
+
+    The last branch is the one worth reading twice. A row carrying a stage the
+    pipeline does not recognise is NOT blocked: `stage_policy` falls back to
+    paper — may_trade True, forced to the paper venue — because failing all the
+    way closed would wall off the paper evidence the ladder needs to promote
+    anything. A page that drew it as "unrecognised, so nothing happens" would
+    describe the opposite of what runs.
+    """
+    from signals.promotion_pipeline import STAGE_ORDER
+
+    if stage not in STAGE_ORDER:
+        return {"stage": stage, "known": False, "may_trade": True,
+                "force_paper": True}
+    if stage == "research":
+        return {"stage": stage, "known": True, "may_trade": False,
+                "force_paper": True}
+    return {"stage": stage, "known": True, "may_trade": True,
+            "force_paper": stage == "paper"}
+
+
+def _trade_gates(ctrl, setup, now):
+    """Can this rule place an order right now — and if not, what has to change.
+
+    Returns {can_trade, venue, blockers, caveats, armed, stage_known}. Each
+    blocker names the FIELD, what it stops, and the action that clears it;
+    every blocker is listed rather than just the first, because clearing one
+    switch on a rule the other also blocks changes nothing an operator can see.
+    """
+    verdict = _stage_verdict(ctrl.promotion_stage)
+    # `setup is None` is not `is_active=False`. A rule whose conditions live in
+    # engine code has no arming flag at all, and printing DISARMED for it would
+    # invent a switch its operator cannot go and find.
+    armed = None if setup is None else bool(setup.is_active)
+    running = ctrl.is_effectively_active(now)
+
+    # The chips name the CONSEQUENCE, not the flag, and deliberately so: the
+    # card already carries a state chip reading PAUSED for a disarmed setup and
+    # another reading Paused for an actuator pause, which are different things.
+    # A third chip repeating either word would make the vocabulary worse; what
+    # an operator needs from a glance is what STOPS, not which column holds it.
+    blockers, caveats = [], []
+    if armed is False:
+        blockers.append({
+            "chip": "NOT SCANNED",
+            "field": "OpportunitySetup.is_active = False",
+            "what": ("the scanner never evaluates this setup — scan_all_setups "
+                     "reads is_active=True and consults nothing else — so it "
+                     "writes no signal, and with no signal the gate above can "
+                     "never fill either"),
+            "fix": ("arm it on the opportunity setups page, or re-seed the "
+                    "pack with --activate"),
+        })
+    if not verdict["may_trade"]:
+        blockers.append({
+            "chip": "NO ORDERS",
+            "field": "RuleControl.promotion_stage = research",
+            "what": ("stage_policy resolves research to may_trade=False and "
+                     "the bot honours it twice: the entry is skipped as "
+                     "stage-blocked, and this rule's signals are dropped from "
+                     "the consensus before any headcount is taken"),
+            "fix": ("clear the gate above and it promotes on the next ladder "
+                    "pass, or promote it by hand from the promotion pipeline"),
+        })
+    if not running:
+        if setup is None:
+            blockers.append({
+                "chip": "SIGNALS DROPPED",
+                "field": "RuleControl.status = paused",
+                "what": ("is_rule_active() is False, so the rule-engine lanes "
+                         "drop every new signal this rule produces"),
+                "fix": ("roll the pause back from rule controls, or wait for "
+                        "paused_until to elapse"),
+            })
+        else:
+            # A pause is NOT a blocker on a setup-backed rule, and the
+            # asymmetry is real rather than an oversight: `is_rule_active` is
+            # read where the rule engine writes signals and nowhere else.
+            # `scan_all_setups` never consults it, `stage_policy` never
+            # consults it, and `admin_allocator_multiplier` honours
+            # weight_multiplier only when status == "reduced" — so this setup
+            # keeps scanning, keeps publishing, and is sized at full. Drawing
+            # the pause as a stop would be the page lying in the one direction
+            # an operator cannot check.
+            caveats.append(
+                "paused by the actuator, which stops the rule-engine lanes — "
+                "not this setup: the opportunity scanner does not read that "
+                "flag, so it keeps scanning and publishing")
+    if verdict["force_paper"] and verdict["may_trade"]:
+        caveats.append("orders are forced onto the paper venue whatever the "
+                       "bot config's own mode says")
+
+    # No `venue` key here on purpose: the card already carries one, and two
+    # places computing the same sentence is how they come to disagree.
+    return {"can_trade": not blockers, "armed": armed,
+            "stage_known": verdict["known"],
+            "blockers": blockers, "caveats": caveats}
+
+
 # Evolution forks the RuleControl row ONLY — the OpportunitySetup holding the
 # conditions still belongs to the parent — so this page resolves a fork's name
 # to that parent with `core.fork_names.fork_parent`, the same parser
@@ -745,7 +863,7 @@ def _promotion_ladder(now=None):
 
     now = now or timezone.now()
     empty = {"stage_groups": [], "n_rules": 0, "n_running": 0, "n_by_stage": {},
-             "n_live_venue": 0,
+             "n_live_venue": 0, "n_can_trade": 0,
              "n_setups": 0, "n_armed": 0, "unbacked_setups": [], "ladder_n": 0,
              "ladder_hit_rate": None, "ladder_expectancy": None,
              "stage_venues": [{"key": s, "label": s.replace("_", " "),
@@ -839,7 +957,7 @@ def _promotion_ladder(now=None):
             forks_applied[parent].append(row)
 
     by_stage = defaultdict(list)
-    ladder_n = ladder_hits = 0
+    ladder_n = ladder_hits = n_can_trade = 0
     ladder_r_sum = 0.0
     for ctrl in rules:
         name = ctrl.rule_name
@@ -918,11 +1036,24 @@ def _promotion_ladder(now=None):
 
         trade = trades.get(name)
         seen = recency.get(name)
+        # `setup`, not `setup_ctx`: the arming flag belongs to the row, and a
+        # fork reading its parent's definition is armed by the parent's switch
+        # — which is the switch an operator would have to go and flip.
+        gates = _trade_gates(ctrl, setup, now)
+        if gates["can_trade"]:
+            n_can_trade += 1
         by_stage[ctrl.promotion_stage].append({
             "rule": name,
             "stage": ctrl.promotion_stage,
             "stage_display": ctrl.get_promotion_stage_display(),
-            "venue": _STAGE_VENUE.get(ctrl.promotion_stage, ""),
+            # The fallback used to be "", which drew an empty line on the one
+            # card that most needs a sentence. `stage_policy` reads a stage it
+            # does not recognise as PAPER — may_trade, forced to the paper
+            # venue — so the honest fallback says that rather than nothing.
+            "venue": _STAGE_VENUE.get(
+                ctrl.promotion_stage,
+                "unrecognised stage — stage_policy falls back to the paper "
+                "venue, so it trades on paper at full nominal size"),
             "status": ctrl.status,
             "status_display": ctrl.get_status_display(),
             "paused_until": ctrl.paused_until,
@@ -949,6 +1080,9 @@ def _promotion_ladder(now=None):
             "forks_open": forks_open.get(name, []),
             "forks_applied": forks_applied.get(name, []),
             "gate": _next_gate(ctrl, record, stage_record, days_in_stage),
+            # Both seeded-off switches, resolved the way the engine resolves
+            # them, with the action that clears each — see `_trade_gates`.
+            "trade": gates,
         })
 
     # STAGE_ORDER, not the dict's insertion order: the page reads bottom of
@@ -988,6 +1122,11 @@ def _promotion_ladder(now=None):
         # where a 0 belongs.
         "n_live_venue": (n_by_stage.get("live_small", 0)
                          + n_by_stage.get("live_full", 0)),
+        # Ladder rules only, and the strip cell says so. The unbacked setups
+        # below can also trade — `stage_policy` reads a missing row as paper —
+        # but they are not on the ladder, and folding them in would make this
+        # number irreconcilable with the stage counts beside it.
+        "n_can_trade": n_can_trade,
         # The unbacked ones are armed by construction (an inactive setup never
         # enters `unbacked`), so they raise numerator and denominator alike —
         # the counter stops hiding them without claiming they are on the ladder.
@@ -1673,6 +1812,70 @@ def _pos_fmt(value, digits=None):
     return text or "0"
 
 
+def _pos_money(value):
+    """A currency amount as the card prints it, or "" for one we do not have.
+
+    Separate from _pos_fmt because money is not a price: it is always two
+    places and always grouped. _pos_fmt strips trailing zeros — right for a
+    stop at 0.00001, wrong for a committed capital of "1540" where the eye
+    needs "1,540.00" to read it as money rather than as a quantity.
+    """
+    f = _pos_num(value)
+    return "" if f is None else "{:,.2f}".format(f)
+
+
+# Asset classes whose qty x entry is a LEVERED notional rather than capital
+# the account actually put up. sizing.MAX_NOTIONAL_FRACTION allows forex to
+# run to 400% of equity precisely because the leverage sits at the broker,
+# so printing qty x entry as "committed" would overstate what this position
+# cost by up to 4x. What was actually committed is margin, and margin is a
+# broker-side number this platform never records — so it renders as the
+# em-dash and the levered notional is labelled as the exposure it is.
+_POS_LEVERED_CLASSES = {"forex"}
+
+
+def _pos_value_per_unit(trade):
+    """Base-currency money per price point per unit, for one trade.
+
+    The SAME derivation portfolio.services uses to mark the row — by calling
+    it, not by reproducing it. The two copies drifted within a day: the
+    correction that taught the options test to match the platform's plural
+    spelling landed in one of them, so a multiplier-less options row would
+    have been denominated 100x apart in two numbers printed on the same
+    card. The card's percentage has to divide the card's own currency
+    figures, which it can only do if one function answers this.
+    """
+    from portfolio.services import value_per_unit
+    return value_per_unit(trade)
+
+
+def _pos_exit_cost(trade, mark, qty_abs, vpu):
+    """The paper round trip this close is already modelled to pay, in money.
+
+    bot_program.manual_close._exit_fill is the one place that decides the
+    price a close actually books at — a paper exit is charged half the round
+    trip adversely by _close_trade, so the confirm dialog quotes the P&L at
+    that FILL and not at the raw mark. The card has to charge the operator
+    the same number or "what will this make me" gets a third answer: the
+    table's, the card's, and the dialog's.
+
+    None for a live trade: the cost there is the broker's and is not
+    modelled anywhere, which is a gap and renders as one.
+    """
+    if trade is None or not trade.paper or not mark or not qty_abs:
+        return None
+    try:
+        from bot_program.manual_close import _exit_fill
+        fill = _exit_fill(trade, float(mark))
+    except Exception as e:  # noqa: BLE001
+        # A hand-edited extras['cost_bps'] must cost one line on one card,
+        # not the positions page.
+        logger.warning("Paper exit cost unavailable for trade #%s: %s",
+                       getattr(trade, "id", "?"), e)
+        return None
+    return abs(float(mark) - float(fill)) * qty_abs * vpu
+
+
 def _position_card_details(user, positions):
     """One dict per position with everything the hover card shows that the
     ROW cannot carry — aligned with `positions`, same order.
@@ -1830,6 +2033,37 @@ def _position_card_details(user, positions):
         paper = getattr(p, "paper", None)
         opened = p.opened_at
 
+        # ── The money ────────────────────────────────────────────────────
+        # The card had the R multiple and the P&L but never the two figures
+        # every operator actually asks first: what did this cost me, and
+        # what is it worth now. Both are denominated with the SAME
+        # value_per_unit the row's P&L was marked with, so the percentage
+        # the card prints divides the currency figures it prints.
+        vpu = _pos_value_per_unit(trade)
+        qty_abs = abs(_pos_num(p.quantity) or 0.0)
+        asset_class = (getattr(trade, "asset_class", "") if trade else
+                       getattr(getattr(p, "instrument", None), "asset_class", "")) or ""
+        notional = qty_abs * entry * vpu if (entry and qty_abs) else None
+        value_now = qty_abs * mark * vpu if (mark and qty_abs) else None
+        # On a levered class qty x entry is exposure, not capital committed
+        # — see _POS_LEVERED_CLASSES. The margin is the broker's number and
+        # nothing here records it, so the card dashes it and names the
+        # notional separately rather than passing one off as the other.
+        levered = asset_class in _POS_LEVERED_CLASSES
+        committed = None if levered else notional
+        exit_cost = _pos_exit_cost(trade, mark, qty_abs, vpu)
+        if pnl is None:
+            net_now = None
+        elif exit_cost is not None:
+            net_now = pnl - exit_cost
+        elif trade is not None and not trade.paper:
+            # A live close books at the mark; the broker's costs are the
+            # broker's and are modelled nowhere, so this is the same number
+            # the confirm dialog will quote.
+            net_now = pnl
+        else:
+            net_now = None
+
         details.append({
             "symbol": sym,
             "side": "LONG" if is_long else "SHORT",
@@ -1849,6 +2083,28 @@ def _position_card_details(user, positions):
             "pnl": _pos_fmt(pnl, 2),
             "pnl_pct": _pos_fmt(p.unrealized_pnl_pct, 2),
             "risk": _pos_fmt(risk, 2) if risk else "",
+            # ── The money block. Every one of these is "" when the platform
+            # does not have it — the card renders "" as an em-dash, and a
+            # fabricated 0 on a committed capital reads as a free position.
+            "asset_class": asset_class,
+            "committed": _pos_money(committed),
+            # Which of the two questions the line above answers. "margin"
+            # means the card must NOT print the notional as the cost.
+            "committed_kind": "margin" if levered else "cost",
+            # Only carried when it is a different quantity from the committed
+            # capital — otherwise the card would print the same number twice
+            # under two names, which is how a notional becomes a cost.
+            "notional": _pos_money(notional) if levered else "",
+            "value_now": _pos_money(value_now),
+            "exit_cost": _pos_money(exit_cost),
+            "net_now": _pos_money(net_now),
+            "ccy": (trade.config.base_currency if trade and trade.config
+                    else ""),
+            # The BOOKED R off the ledger, not the live one the row computes
+            # from the mark. Present only on a graded close; while the trade
+            # is open the card shows live R and says so.
+            "realized_r": ("{:+.2f}".format(trade.realized_r)
+                           if trade and trade.realized_r is not None else ""),
             "age": timesince(opened).split(",")[0] if opened else "",
             "opened": (timezone.localtime(opened).strftime("%b %d %H:%M")
                        if opened else ""),
@@ -1911,6 +2167,16 @@ def _render_positions(request, live_only):
                   if stats["graded"] else None)
     worst_trade = (min(stats["graded"], key=lambda p: float(p.unrealized_pnl))
                    if stats["graded"] else None)
+    # Whether the pair says anything is not a question about HOW MANY closes
+    # were graded — it is whether these two are the same row. Counting was
+    # the first fix and it was not enough: max() and min() both return the
+    # FIRST extremum, so any tie hands back one object twice, and ties are
+    # ordinary here because portfolio.Position.unrealized_pnl defaults to
+    # 0.00 and nothing marks a closed legacy row. Two unmarked closes and
+    # the page crowned one trade as both the best and the worst again, from
+    # a different direction.
+    have_pair = (best_trade is not None and worst_trade is not None
+                 and best_trade is not worst_trade)
 
     priced_note = (f"{n_priced} of {n_open} open positions carry a live quote."
                    if n_open else "No open positions in either book.")
@@ -2035,11 +2301,34 @@ def _render_positions(request, live_only):
                 "display": "{}{:.2f}".format("+" if pnl > 0 else "", pnl),
             })
         monthly_max = max((abs(r["pnl"]) for r in monthly_rows), default=0)
+
+        # The mini bar in each history row. It used to be two lies side by
+        # side: a LONG drew `width: {{ pct }}%`, so a losing long produced a
+        # negative width that CSS discards — every loss, from -0.4% to -40%,
+        # collapsed to the same 4px stub — while a SHORT was hardcoded to
+        # `width: 50%` and said nothing at all about the trade it belonged
+        # to. Magnitude scaled against the biggest move on the page, sign
+        # carried by the colour, direction by the marker; None where there
+        # is nothing to draw, which renders as no bar rather than a full one.
+        pcts = [abs(float(p.unrealized_pnl_pct)) for p in closed_positions
+                if p.unrealized_pnl_pct is not None]
+        peak = max(pcts) if pcts else 0.0
+        for p in closed_positions:
+            pct = p.unrealized_pnl_pct
+            p.bar_pct = (round(abs(float(pct)) / peak * 100, 1)
+                         if pct is not None and peak > 0 else None)
+
         context.update({
             "closed_positions": closed_positions,
             "total_closed": stats["n_closed"],
             "best_trade": best_trade,
             "worst_trade": worst_trade,
+            # With ONE graded close, best and worst are the same row, and the
+            # page showed it twice — once in a green "Best Trade" card that
+            # hardcoded a + in front of the number. A single losing short read
+            # as the platform's best trade AND its worst.
+            "n_graded": stats["n_graded"],
+            "have_pair": have_pair,
             "monthly_rows": monthly_rows,
             "monthly_max": monthly_max,
             "monthly_max_display": "{:.2f}".format(monthly_max),
@@ -2418,6 +2707,98 @@ def profile(request):
     })
 
 
+# What the /setup/ Risk Limits card may write, and why each bound is there.
+#
+# These four numbers stopped being decorative: `portfolio.risk_gate.preflight`
+# reads them before every bot entry and every manual trade. They also live on
+# the SHARED "Main" portfolio, which has no user column, so anyone who can
+# reach this page moves them for everyone — which makes an out-of-range value
+# a fleet-wide outage rather than one operator's mistake.
+#
+#   field: (minimum, maximum, label)
+#
+# The minimums are the point, and they are there for two opposite reasons.
+#
+# In three of the four fields a 0 — accepted without complaint until this
+# existed — now means "halt": 0% daily loss stops the fleet at the first cent
+# lost, and 0% exposure or 0% single position refuses every entry there will
+# ever be. Those floors are the smallest values that still describe a book
+# someone could trade — 0.1% of a €10,000 book is €10, below which the limit is
+# indistinguishable from off.
+#
+# The correlation threshold fails the other way, which is why it carries its
+# own floor. `risk_gate.correlation_state` reads a 0 exactly as it reads an
+# unset value — the taper is OFF — so a 0 typed into the tightest-looking field
+# on the card would bind nothing whatsoever. 0.01 is the tightest setting that
+# is still a setting; switching the taper off is 1.00, which is what the card
+# tells the operator to use.
+#
+# The maximums are looser on purpose, because a high limit is a decision and a
+# legible one: 1000% exposure is what a margined FX book genuinely runs at, and
+# 100% single position is "one trade may be the whole book", which is
+# reckless but honest. Correlation caps at 1.0 because nothing correlates
+# higher than perfectly.
+RISK_LIMIT_BOUNDS = {
+    "max_total_exposure_pct": (0.1, 1000.0, "Max total exposure"),
+    "max_single_position_pct": (0.1, 100.0, "Max single position"),
+    "max_daily_loss_pct": (0.1, 100.0, "Max daily loss"),
+    "max_correlation_threshold": (0.01, 1.0, "Max correlation threshold"),
+}
+
+# POST field -> Portfolio field. The form names are short and the model names
+# are not; the mapping is here so a renamed input fails loudly at the one place
+# that knows both.
+RISK_LIMIT_FIELDS = {
+    "max_exposure": "max_total_exposure_pct",
+    "max_position": "max_single_position_pct",
+    "max_daily_loss": "max_daily_loss_pct",
+    "max_correlation": "max_correlation_threshold",
+}
+
+
+def _apply_risk_limits(portfolio, post) -> tuple[bool, list[str]]:
+    """Validate and save the four risk limits. Returns (saved, rejections).
+
+    ALL FOUR OR NONE. A partial save is the worst outcome available here: the
+    operator asked for one policy and would get a mixture of the new one and
+    the old, with a green message on top. Nothing is written until every field
+    parses and sits inside its bound.
+
+    The old handler was `float(request.POST.get(...))` four times over. A blank
+    field or a typo raised ValueError straight out of the view — a 500 on a
+    settings page — and any number at all was accepted, including the zeros
+    that now mean "stop trading".
+    """
+    rejected: list[str] = []
+    pending: dict[str, float] = {}
+
+    for form_name, field in RISK_LIMIT_FIELDS.items():
+        low, high, label = RISK_LIMIT_BOUNDS[field]
+        raw = post.get(form_name)
+        if raw is None or str(raw).strip() == "":
+            rejected.append(f"{label} was left blank")
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            rejected.append(f"{label} must be a number, got {raw!r}")
+            continue
+        if not (low <= value <= high):
+            rejected.append(
+                f"{label} must be between {low:g} and {high:g} — {value:g} "
+                f"would gate every trade on this platform")
+            continue
+        pending[field] = value
+
+    if rejected:
+        return False, rejected
+
+    for field, value in pending.items():
+        setattr(portfolio, field, value)
+    portfolio.save(update_fields=[*pending, "updated_at"])
+    return True, []
+
+
 @login_required
 def setup(request):
     """Account setup: capital, risk, eToro, manual positions."""
@@ -2445,12 +2826,15 @@ def setup(request):
             messages.success(request, "Portfolio capital updated successfully.")
 
         elif action == "update_risk":
-            portfolio.max_total_exposure_pct = float(request.POST.get("max_exposure", 100))
-            portfolio.max_single_position_pct = float(request.POST.get("max_position", 10))
-            portfolio.max_daily_loss_pct = float(request.POST.get("max_daily_loss", 3))
-            portfolio.max_correlation_threshold = float(request.POST.get("max_correlation", 0.7))
-            portfolio.save()
-            messages.success(request, "Risk limits updated successfully.")
+            saved, rejected = _apply_risk_limits(portfolio, request.POST)
+            if rejected:
+                messages.error(request, "Risk limits NOT saved: "
+                                        + "; ".join(rejected))
+            elif saved:
+                messages.success(
+                    request,
+                    "Risk limits updated — these now gate every bot entry "
+                    "and every manual trade on the shared book.")
 
         elif action == "connect_etoro":
             etoro_key = request.POST.get("etoro_api_key", "").strip()
@@ -2515,12 +2899,36 @@ def setup(request):
     etoro_key = os.getenv("ETORO_API_KEY", "")
     etoro_masked = ("●" * 20 + etoro_key[-4:]) if len(etoro_key) > 4 else ""
 
+    # Where the book stands against the limits right now. The card used to
+    # show four inputs and no consequence, which is how a limit that enforced
+    # nothing went unnoticed for so long — there was never a number next to it
+    # that would have moved. `preflight` is the same read the entry gates make,
+    # so what the card shows is what a bot would decide this second.
+    from portfolio.risk_gate import (
+        DAILY_LOSS_WINDOW_HOURS, book_value, preflight, single_position_state,
+    )
+    risk_state = preflight(request.user, portfolio=portfolio)
+    # The single-position ceiling in money, so the operator can compare it with
+    # the pool capital they armed a bot with. The two are configured on
+    # different pages and nothing reconciles them: a 10% ceiling on a 10,000
+    # book refuses a position a 10,000 pool is entitled to open at 20% of
+    # itself, and before this the collision only ever surfaced as a refusal at
+    # the moment of trading. Notional 0 asks for the ceiling alone.
+    risk_single = single_position_state(portfolio, asset_class="stock",
+                                        notional=0.0)
+
     return render(request, "dashboard/setup.html", {
         "page_id": "setup",
         "portfolio": portfolio,
         "api_keys": api_keys,
         "etoro_connected": bool(etoro_key),
         "etoro_key_masked": etoro_masked,
+        "risk_state": risk_state,
+        "risk_daily_loss": risk_state["checks"].get("daily_loss"),
+        "risk_exposure": risk_state["checks"].get("exposure"),
+        "risk_single": risk_single,
+        "risk_book_value": book_value(portfolio),
+        "risk_window_hours": DAILY_LOSS_WINDOW_HOURS,
     })
 
 
@@ -2875,15 +3283,18 @@ def take_trade_preview(request, signal_id):
 
 @login_required
 def take_trade_execute(request, signal_id):
-    """POST — execute the trade previewed above, optionally closing the
-    listed manual positions first to free capital, and optionally at a size
-    the operator chose instead of the risk-derived one. Paper venue only in
-    this wave; the live path adds the PIN and the pending-close machinery.
+    """POST — execute the trade previewed above, at the operator's terms:
+    the positions THEY chose to close for capital (close_ids), the size,
+    the stop and the target they chose instead of the platform's. Paper
+    venue only in this wave; the live path adds the PIN and the
+    pending-close machinery.
 
-    The size arrives as a number in a request body — so it is a claim, not
-    a fact. manual_trade.validate_qty_override re-derives it against the
-    fill, the pool and the sizing caps; this view only proves it is a
-    finite number before handing it over.
+    Every one of those arrives as a number in a request body, so every one
+    of them is a claim rather than a fact. manual_trade re-derives the size
+    against the real fill and the post-close pool, re-judges the levels
+    against the same fill and the same caps the bots obey, and re-reads the
+    pool after the closes; this view only proves the numbers are finite
+    before handing them over.
     """
     from django.http import HttpResponseNotAllowed, JsonResponse
     from bot_program.manual_trade import execute_take_trade
@@ -2897,22 +3308,33 @@ def take_trade_execute(request, signal_id):
         return JsonResponse({"error": err}, status=400)
     return JsonResponse(execute_take_trade(request.user, signal,
                                            body["close_ids"],
-                                           qty=body["qty"]))
+                                           qty=body["qty"],
+                                           stop=body["stop"],
+                                           target=body["target"]))
 
 
 def _parse_trade_body(request):
-    """Parse an execute body into {"close_ids": [...], "side": ..., "qty": ...}.
+    """Parse an execute body into
+    {"close_ids": [...], "side": ..., "qty": ..., "stop": ..., "target": ...}.
 
     Strict on shape: a non-object body 500'd (AttributeError on .get), and
     a string close_ids like "12" iterated per character into [1, 2] —
     closing trades nobody named.
 
-    `qty` is the operator's size override, or None for "use the risk
-    budget". Only its SHAPE is settled here — a finite number, and not a
-    bool, because float(True) is 1.0 and a JSON `true` would otherwise
-    become a one-unit position. Whether the number is permissible is a
-    money question, answered under the execution lock against the real
-    fill, not here against a stale preview.
+    `close_ids` is the operator's chosen funding closes. It is a SELECTION,
+    not an acknowledgement of what the preview proposed: the popup used to
+    copy close_proposal into it wholesale, so the list arriving here was
+    always the server's own recommendation coming home. Which positions are
+    liquidated is the operator's decision, and this is the field that
+    carries it.
+
+    `qty`, `stop` and `target` are the operator's overrides, each None for
+    "use the platform's answer". Only their SHAPE is settled here — a
+    finite number, and not a bool, because float(True) is 1.0 and a JSON
+    `true` would otherwise become a one-unit position or a stop at $1.
+    Whether any of them is permissible is a money question, answered under
+    the execution lock against the real fill, the real pool and the real
+    caps — never here against a preview the browser could have edited.
     """
     import json as _json
     import math as _math
@@ -2927,20 +3349,32 @@ def _parse_trade_body(request):
         return None, "close_ids must be a list"
     close_ids = [int(i) for i in raw_ids if str(i).isdigit()]
 
-    raw_qty = body.get("qty")
-    qty = None
-    if raw_qty is not None and raw_qty != "":
-        if isinstance(raw_qty, bool):
-            return None, "qty must be a number"
+    def _number(field):
+        """(value, None) or (None, reason) — absent and empty both mean
+        'the platform's answer', which is not the same as zero."""
+        raw = body.get(field)
+        if raw is None or raw == "":
+            return None, None
+        if isinstance(raw, bool):
+            return None, f"{field} must be a number"
         try:
-            qty = float(raw_qty)
+            val = float(raw)
         except (TypeError, ValueError):
-            return None, "qty must be a number"
-        if not _math.isfinite(qty):
-            return None, "qty must be a finite number"
+            return None, f"{field} must be a number"
+        if not _math.isfinite(val):
+            return None, f"{field} must be a finite number"
+        return val, None
+
+    parsed = {}
+    for field in ("qty", "stop", "target"):
+        val, err = _number(field)
+        if err:
+            return None, err
+        parsed[field] = val
+
     return {"close_ids": close_ids,
             "side": str(body.get("side", "")).upper(),
-            "qty": qty}, None
+            **parsed}, None
 
 
 @login_required
@@ -2997,6 +3431,23 @@ def ticker_partial(request):
 
 
 @login_required
+def notif_items_partial(request):
+    """The bell panel's rows alone.
+
+    The badge and the banner were already live; the LIST behind the bell was
+    not, because it was rendered once with the page and never again. Opening
+    the bell after an alert showed the rows as they were at page load — the
+    operator saw the red count, clicked, and the alert it counted was not
+    there. Fetched on a notification event and again whenever the panel is
+    opened, so the click always lands on current rows.
+
+    Context processors supply recent_notifications, so this and the first
+    paint read the same source.
+    """
+    return render(request, "_partials/notif_items.html")
+
+
+@login_required
 def panel_counts_json(request):
     """The bottom headband's live numbers, as JSON. Fetched (debounced) by
     the /ws/eye/ listener on fill events, so the POSITIONS and BOT cells
@@ -3007,9 +3458,27 @@ def panel_counts_json(request):
     from instruments.models import Instrument
     from portfolio.services import get_or_create_default_portfolio
 
-    bot_open = AssetBotTrade.objects.filter(
+    # The BOT cell counts the FLEET, and a hand-taken position is not the
+    # fleet. TAKE TRADE books against a per-user config named "manual" with
+    # an empty symbol list — it can never open anything on its own — so
+    # counting it reported the operator's own click back to them as
+    # automation. `core.context_processors._is_manual_config` is the one
+    # definition of that carve-out; the server-rendered cell already used
+    # it, and this live path did not, so pressing TAKE TRADE flipped the
+    # sub-line to "1 open" within a second while the dropdown underneath it
+    # still said zero. Two surfaces, one book, opposite answers.
+    #
+    # POSITIONS still counts every open row, hand-taken included: that cell
+    # is about exposure, and exposure does not care who opened it.
+    from core.context_processors import _is_manual_config
+
+    open_trades = list(AssetBotTrade.objects.filter(
         config__user=request.user,
-        status__in=("OPEN", "CLOSE_PENDING")).count()
+        status__in=("OPEN", "CLOSE_PENDING")).select_related("config"))
+    all_open = len(open_trades)
+    bot_open = sum(1 for t in open_trades
+                   if not _is_manual_config(t.config))
+    manual_open = all_open - bot_open
     try:
         pf = get_or_create_default_portfolio(user=request.user)
         pos_open = pf.positions.filter(closed_at__isnull=True).count()
@@ -3023,8 +3492,11 @@ def panel_counts_json(request):
     except Exception:  # noqa: BLE001 — counts must never 500 the panel
         unread = 0
     return JsonResponse({
-        "positions": pos_open + bot_open,
+        "positions": pos_open + all_open,
         "bot_open": bot_open,
+        # Published so the hand-taken book stays visible rather than merely
+        # uncounted — the carve-out above must not become a hiding place.
+        "manual_open": manual_open,
         "watchlist": watchlist,
         "notifications": unread,
     })
@@ -3050,8 +3522,10 @@ def asset_trade_preview(request, symbol):
 
 @login_required
 def asset_trade_execute(request, symbol):
-    """POST {side, close_ids} — execute the signal-less trade previewed
-    above. Same paper venue, same funding-close chain."""
+    """POST {side, close_ids, qty, stop, target} — execute the signal-less
+    trade previewed above. Same paper venue, same funding-close chain, same
+    pre-trade controls and the same server-side re-derivation of all of
+    them."""
     from django.http import HttpResponseNotAllowed, JsonResponse
     from bot_program.manual_trade import execute_asset_trade
     from instruments.models import Instrument
@@ -3064,7 +3538,9 @@ def asset_trade_execute(request, symbol):
         return JsonResponse({"error": err}, status=400)
     return JsonResponse(execute_asset_trade(request.user, inst, body["side"],
                                             body["close_ids"],
-                                            qty=body["qty"]))
+                                            qty=body["qty"],
+                                            stop=body["stop"],
+                                            target=body["target"]))
 
 
 @login_required

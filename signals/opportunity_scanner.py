@@ -24,10 +24,39 @@ in `EVALUATOR_REGISTRY`. Built-in kinds (this module ships with):
   - `news_sentiment`    — average AI sentiment of relevant news ≥/≤ threshold
   - `calendar_event`    — economic event matching filter occurred in lookback
   - `quote_currency`    — the symbol's quote currency, for universe gating
+  - `cross_sectional_rank` — where the instrument sits in its FIELD, not on
+                        its own chart: top/bottom slice of the asset class or
+                        the whole universe, by momentum, risk-adjusted
+                        momentum, acceleration or volatility
 
 Adding a new kind: define an evaluator function and call `register_kind()`,
 declaring every param key the function consumes and — where the evaluator
 branches on a closed set of strings — the values it accepts.
+
+Universe context
+----------------
+
+Every evaluator but the last one above answers an ABSOLUTE question about a
+single instrument: is IT above ITS moving average, is ITS vol above 2%. A rank
+cannot be asked that way, because "strongest name in its class" is not a
+property of an instrument at all — it is a property of an instrument inside a
+FIELD, and the three-argument contract has no field in it.
+
+So the contract widens by one optional keyword rather than changing shape.
+An evaluator that needs the universe declares a `field` parameter; the kinds
+that came before it keep the signature they had and are called exactly as
+before. `register_kind` resolves who wants what once, at registration, the
+same way it already resolves `as_of` — so the scan loop never introspects a
+function per call and no existing kind had to be touched.
+
+`scan_all_setups` is where the field comes from, because that is where the
+whole universe is already in hand: the pass materialises the active
+instruments once and pins one `now` before it starts, so the field it builds
+is exactly the set of instruments the pass evaluated, measured at exactly the
+instant it evaluated them. Every rank in the pass is therefore taken against
+the same numbers, and the universe cannot move under a long pass. A caller
+scanning one pair on its own still gets a field — built lazily, and only if a
+condition actually asks for one.
 
 Gates vs. scoring conditions
 ----------------------------
@@ -38,6 +67,13 @@ and a passed one contributes nothing to the composite score. Weighting a
 universe check instead would make "does this setup even apply here" tradeable
 against evidence — and would leave the exclusion resting on an arithmetic
 balance that the next weight edit silently breaks.
+
+A third answer exists alongside "fired" and "did not fire": an evaluator may
+return `measured: False` to say it never got to look. `scan_setup` leaves such
+a leg out of the weighted average on both sides, because counting it as a
+scored zero puts `weight` into the denominator for a question nobody answered
+and drags every other leg's evidence down with it. Only the kinds that mean it
+set the key; everything else keeps the arithmetic it always had.
 
 Public API
 ----------
@@ -54,7 +90,10 @@ Public API
     setup_overlap(setup_a, setup_b) -> dict
     cot_sign(instrument) -> int
     cot_net_speculative(report, instrument) -> int
-    scan_setup(setup, instrument, *, now=None, as_of=None, emit=True) -> dict
+    window_return(closes) -> float | None
+    CrossSectionalField(instruments=None, *, now)
+    scan_setup(setup, instrument, *, now=None, as_of=None, emit=True,
+               field=None) -> dict
     scan_all_setups(*, now=None, as_of=None) -> dict
     resolve_pending_flags(*, now=None, as_of=None) -> dict
 """
@@ -87,6 +126,58 @@ ATR_FALLBACK_PCT = 2.0  # default 2% stop when ATR can't be computed
 # were graded against a level the seed never asked for.
 SIZING_KEYS = frozenset({"stop_pct", "target_rr"})
 
+# ── Cross-sectional ranking tunables ───────────────────────────────────────
+
+# Bar counts, like every other `lookback` and `period` in this file — never
+# calendar days. A rank compares instruments to each other, and two instruments
+# given the same number of CALENDAR days hold different numbers of bars (forex
+# trades five days a week, crypto seven), so a calendar window would rank a
+# 43-bar measurement against a 60-bar one and call the difference momentum.
+DEFAULT_RANK_LOOKBACK = 60
+DEFAULT_RANK_SHORT_LOOKBACK = 10
+
+# A decile. The fraction of the field a "top slice" strategy takes.
+DEFAULT_SELECT_PCT = 0.10
+
+# The smallest field a percentile cut may be taken in. `instruments.services`
+# seeds 177 symbols and its SMALLEST asset class holds 13, so a field that
+# falls under ten is instruments dropping out for want of bars — a data
+# outage — not a genuinely small class, and ranking whatever survived would
+# publish the survivors' ordering as the market's. Ten is also exactly where
+# the default decile stops naming a whole instrument.
+MIN_RANK_FIELD = 10
+
+# A slice that is not a minority of the field is not a selection. Half is the
+# generous end of that line: at 0.5 the setup is splitting the universe in two,
+# and anything past it would be calling a majority a "top slice".
+MAX_SELECT_PCT = 0.5
+
+# How old a member's LAST bar may be and still belong in a field measured at
+# `now`, in calendar days. A rank compares instruments to each other at one
+# instant, so a member whose feed died three weeks ago is measured over a
+# window that ENDS three weeks ago: its number is not wrong, it is about a
+# different day, and an ordering that mixes it with instruments measured to
+# today is not a cross-section of anything. The window's lower bound does not
+# catch this on its own — a member can hold a full window of bars entirely
+# inside the OLD half of `need * 2` calendar days and still qualify.
+#
+# Seven days, because the longest silence a live daily feed produces is a
+# weekend flanked by holidays — Wednesday's close to Monday's is five calendar
+# days — and a pass pinned before the current day's bar has been written adds
+# one more. Anything quieter than that is not a market closure.
+MAX_FIELD_STALENESS_DAYS = 7
+
+# The quietest tape that still counts as a measurement, as a daily standard
+# deviation in percent. 0.01% a day is 0.16% annualised — quieter than any
+# instrument in this universe, pegged pairs included — so a window reading
+# under it is a stale feed repeating an interpolated ramp, or float noise off a
+# series that never actually varied. Both matter: such a window sorts to the
+# bottom of a volatility rank as though it were the calmest real market, and
+# dividing a return by it hands risk-adjusted momentum a value near 1e15,
+# which tops every table it appears in. Below the floor the window is NOT
+# MEASURED and the instrument leaves the field.
+MIN_MEASURABLE_VOL_PCT = 0.01
+
 
 # ── Evaluator registry ──────────────────────────────────────────────────────
 
@@ -116,6 +207,14 @@ PARAM_CHOICES: dict[str, dict[str, frozenset[str]]] = {}
 # registration so the scan loop never introspects per call.
 ACCEPTS_AS_OF: dict[str, bool] = {}
 
+# The same opt-in, for the universe a cross-sectional condition ranks inside.
+# Widening the contract by a keyword nobody has to name is what let the rank
+# kind land without editing a single one of the kinds that predate it: a
+# function that does not declare `field` is still called with three arguments,
+# so there is no shim, no **kwargs sink swallowing typos, and no default field
+# quietly constructed for evaluators that would ignore it anyway.
+ACCEPTS_FIELD: dict[str, bool] = {}
+
 
 def register_kind(kind: str, fn: EvaluatorFn, *, params=(), choices=None) -> None:
     if not callable(fn):
@@ -125,9 +224,14 @@ def register_kind(kind: str, fn: EvaluatorFn, *, params=(), choices=None) -> Non
     PARAM_KEYS[kind] = frozenset(params)
     PARAM_CHOICES[kind] = {k: frozenset(v) for k, v in (choices or {}).items()}
     try:
-        ACCEPTS_AS_OF[kind] = "as_of" in inspect.signature(fn).parameters
+        accepted = inspect.signature(fn).parameters
     except (TypeError, ValueError):
-        ACCEPTS_AS_OF[kind] = False
+        # A callable whose signature cannot be read gets the narrow contract:
+        # calling it with a keyword it may not accept would turn an
+        # introspection failure into a TypeError on every scan.
+        accepted = ()
+    ACCEPTS_AS_OF[kind] = "as_of" in accepted
+    ACCEPTS_FIELD[kind] = "field" in accepted
 
 
 def has_kind(kind: str) -> bool:
@@ -258,6 +362,28 @@ def setup_overlap(setup_a, setup_b) -> dict:
                            or bool(classes_a & classes_b),
         "opposite_direction": directions == {"bullish", "bearish"},
     }
+
+
+# How much of a setup's authored scoring weight must actually answer before
+# its composite is treated as a reading of that setup.
+#
+# An evaluator that reports `measured: False` is dropped from BOTH sides of
+# the average, which is correct — an unmeasured leg is not a zero, and
+# weighting it as one would dilute every leg that did answer. But the same
+# drop renormalises the composite over the survivors, so a two-leg setup
+# whose second leg cannot answer silently becomes a one-leg setup scoring the
+# first at full confidence.
+#
+# A MAJORITY of the authored weight, which is strictly more than half — the
+# comparison below is `>`, not `>=`, and the difference is the whole point.
+# The motivating case is a two-leg setup whose second leg cannot answer: at
+# `>=` that lands exactly on the line and passes, which is the renormalisation
+# this constant exists to stop. One of two legs is not a majority of the case.
+#
+# It is deliberately not "all": a setup that needs every leg every time goes
+# dark on the first quiet data source, and refusing to publish is its own kind
+# of wrong.
+MEASURED_WEIGHT_QUORUM = 0.5
 
 
 def _is_replay(now: datetime) -> bool:
@@ -1072,6 +1198,459 @@ def _eval_quote_currency(params: dict, instrument, now: datetime) -> dict:
 register_kind("quote_currency", _eval_quote_currency, params=("currency",))
 
 
+# ── Cross-sectional ranking ────────────────────────────────────────────────
+#
+# The measurements a rank is taken on, and the field they are taken across.
+# Everything here obeys one rule the absolute evaluators never had to state:
+# an instrument that cannot be measured is ABSENT from the field, never zero.
+# A zero-filled member would land mid-table on a momentum rank and at the calm
+# end of a volatility one, in both cases asserting something about a market
+# nobody looked at — and worse, it would keep the field's size up, which is the
+# number the thin-field refusal below is watching.
+
+def window_return(closes) -> Optional[float]:
+    """Simple return from the first close in the window to the last.
+
+    None means NOT MEASURED: a window holding fewer than two bars, or opening
+    at a non-positive price, has no return to report. Shared with
+    `signals.sector_rotation` so a sector's return and an instrument's are the
+    same arithmetic over the same rule about missing data.
+    """
+    if len(closes) < 2 or closes[0] <= 0:
+        return None
+    return closes[-1] / closes[0] - 1.0
+
+
+def _rank_vol_pct(closes) -> Optional[float]:
+    """Daily standard deviation of log returns across the window, in percent.
+
+    None below `MIN_MEASURABLE_VOL_PCT`, where the number stops describing a
+    market. A series compounding at a fixed rate every bar has a log-return
+    variance of exactly zero, and `pstdev` returns not 0 but ~1e-16 of float
+    residue — enough to pass a `> 0` test and produce a risk-adjusted momentum
+    of 7e15, which would sit at the top of every ranking it entered.
+    """
+    import math
+    import statistics
+    rets = [math.log(closes[i] / closes[i - 1])
+            for i in range(1, len(closes))
+            if closes[i - 1] > 0 and closes[i] > 0]
+    if len(rets) < 2:
+        return None
+    vol_pct = statistics.pstdev(rets) * 100.0
+    return vol_pct if vol_pct >= MIN_MEASURABLE_VOL_PCT else None
+
+
+def _measure_momentum(closes, short_lookback: int) -> Optional[float]:
+    """Trailing return over the whole window — the classic ranking metric."""
+    return window_return(closes)
+
+
+def _measure_volatility(closes, short_lookback: int) -> Optional[float]:
+    """Realized daily volatility. `side` decides which end of it is wanted."""
+    return _rank_vol_pct(closes)
+
+
+def _measure_risk_adjusted_momentum(closes, short_lookback: int) -> Optional[float]:
+    """The window's return expressed in units of one day's volatility.
+
+    A decile taken on raw return is mostly a high-beta decile wearing a
+    momentum label: +40% on a name that moves 6% a day is a quieter event than
+    +15% on one that moves 1%, and a raw rank puts the first above the second
+    every time. Dividing by the same window's realized vol is what separates
+    "moved furthest" from "moved furthest for its risk".
+    """
+    ret = window_return(closes)
+    # `_rank_vol_pct` already refuses a window with no measurable risk in it,
+    # which is what keeps this division away from a denominator of float noise.
+    vol_pct = _rank_vol_pct(closes)
+    if ret is None or vol_pct is None:
+        return None
+    return (ret * 100.0) / vol_pct
+
+
+def _measure_acceleration(closes, short_lookback: int) -> Optional[float]:
+    """Recent per-bar drift minus whole-window per-bar drift.
+
+    Comparing the two windows' TOTAL returns is the trap, and it is the one
+    `sector_rotation._momentum_analysis` fell into: a longer window wins on
+    total return by construction in any trend, so a name running +0.4% a day
+    for ten bars read as slowing against its own +0.3%-a-day sixty-bar figure.
+
+    Dividing each total by its own bar count is not quite the fix either.
+    Simple returns compound, so `((1+r)**n - 1) / n` grows with `n` — a tape
+    advancing by exactly the same percentage every single bar still scores as
+    decelerating, and the size of that artefact depends on how far the
+    instrument moved, so it does not even cancel across the field. Log returns
+    are additive across bars, so dividing one by its bar count is a true pace
+    and a steady tape scores exactly zero.
+    """
+    import math
+    if short_lookback < 2 or short_lookback >= len(closes):
+        return None
+    recent_start = closes[-(short_lookback + 1)]
+    if closes[0] <= 0 or recent_start <= 0 or closes[-1] <= 0:
+        return None
+    recent = math.log(closes[-1] / recent_start) / short_lookback
+    whole = math.log(closes[-1] / closes[0]) / (len(closes) - 1)
+    return recent - whole
+
+
+_RANK_MEASURES = {
+    "momentum": _measure_momentum,
+    "risk_adjusted_momentum": _measure_risk_adjusted_momentum,
+    "acceleration": _measure_acceleration,
+    "volatility": _measure_volatility,
+}
+
+
+def _field_closes(instruments, lookback: int, now: datetime,
+                  timeframe: str = "1d") -> tuple:
+    """({instrument_id: [closes]}, {instrument_id: last bar}) at `now`.
+
+    The first map holds every member with a FULL and CURRENT window. The second
+    names the members dropped because their last bar is too old to belong in a
+    field measured at `now`, so the rank can say WHY one of them is unranked
+    instead of reporting it the same way as a symbol that has no history at all.
+
+    One query for the entire field rather than one per member: the field is
+    priced once per scan pass, and a per-instrument fetch would put 177 round
+    trips behind every (setup, instrument) pair that carries a rank condition.
+
+    `timestamp__lte=now` is the universe-wide form of this file's cardinal
+    rule. A per-instrument evaluator that reads one bar too far corrupts one
+    score; a field that does it corrupts an ORDERING, so every instrument the
+    winner was chosen over is wrong too, and the flag still looks perfectly
+    well-formed afterwards.
+
+    LiveQuote is deliberately not consulted, on either the live or the replay
+    path. A field where some members are marked at their last close and others
+    at a live tick is not a cross-section at one instant, and the members that
+    happen to carry a quote would be ranked on newer information than the rest.
+
+    Members with fewer than `lookback + 1` closes inside the window are
+    dropped rather than measured short — a sixty-bar return computed from four
+    bars is a different measurement, not a noisier version of the same one.
+
+    The window is bounded at BOTH ends. Its lower bound keeps a member whose
+    sixty bars are spread across two years out of a field of three-month
+    windows; `MAX_FIELD_STALENESS_DAYS` keeps out the member whose sixty bars
+    are dense and complete and simply stop weeks before `now`. Only the second
+    bound catches that one, because it is a full window by every count — it is
+    just a window ending on a different day from everybody else's, and a rank
+    taken across two different days is not a rank.
+    """
+    from market_data.models import PriceData
+    ids = [i.id for i in instruments]
+    if not ids:
+        return {}, {}
+    need = lookback + 1
+    # The same widening `_recent_closes` uses to turn a bar count into a date
+    # range for daily bars: twice the bars, in calendar days, comfortably spans
+    # weekends and holidays without admitting a series from another era.
+    cutoff = now - timedelta(days=need * 2)
+    freshest_allowed = now - timedelta(days=MAX_FIELD_STALENESS_DAYS)
+    # The order_by is load-bearing, not tidiness: PriceData.Meta.ordering is
+    # "-timestamp", so inheriting it would hand every measurement its window
+    # backwards — `closes[-need:]` would keep the OLDEST bars and every return
+    # in the field would come out with its sign flipped. Ascending order is
+    # also what makes the last row seen per instrument its newest bar.
+    rows = (PriceData.objects
+            .filter(instrument_id__in=ids, timeframe=timeframe,
+                    timestamp__lte=now, timestamp__gte=cutoff)
+            .order_by("instrument_id", "timestamp")
+            .values_list("instrument_id", "timestamp", "close"))
+    series: dict = {}
+    newest: dict = {}
+    for instrument_id, timestamp, close in rows.iterator():
+        series.setdefault(instrument_id, []).append(float(close))
+        newest[instrument_id] = timestamp
+
+    closes_out: dict = {}
+    stale_out: dict = {}
+    for instrument_id, closes in series.items():
+        last_bar = newest[instrument_id]
+        if last_bar < freshest_allowed:
+            # Reported rather than merely absent: a feed that stopped is an
+            # operator's problem, and an instrument that quietly leaves a field
+            # looks exactly like one that was never in it.
+            stale_out[instrument_id] = last_bar
+            continue
+        if len(closes) < need:
+            continue
+        closes_out[instrument_id] = closes[-need:]
+    if stale_out:
+        logger.info("[opportunity] %d of %d field members dropped as stale "
+                    "(last bar older than %dd before %s)",
+                    len(stale_out), len(ids), MAX_FIELD_STALENESS_DAYS, now)
+    return closes_out, stale_out
+
+
+class CrossSectionalField:
+    """The universe a rank is taken inside, priced once at one pinned instant.
+
+    Construct it with the instrument list a pass has already materialised, so
+    the field is the pass's own universe rather than a second query that could
+    answer differently. Left empty it resolves the active instruments itself,
+    lazily, for a caller scanning a single pair.
+
+    It takes no `as_of`, and that is not an oversight: the field reads bars and
+    nothing else, and a bar carries its own vintage in its timestamp. The
+    `as_of` flag exists for the sources that have a mutable present-day column
+    with no history behind it — MacroIndicator.last_value, LiveQuote — and this
+    class touches neither.
+
+    Measurements are memoised per (metric, lookback, short_lookback), so a pass
+    in which eight setups all rank sixty-bar momentum prices the universe once.
+    """
+
+    def __init__(self, instruments=None, *, now: datetime):
+        self._instruments = None if instruments is None else list(instruments)
+        self.now = now
+        self._closes: dict = {}
+        self._values: dict = {}
+
+    @property
+    def instruments(self) -> list:
+        if self._instruments is None:
+            from instruments.models import Instrument
+            self._instruments = list(Instrument.objects.filter(is_active=True))
+        return self._instruments
+
+    def _priced(self, lookback: int) -> tuple:
+        key = int(lookback)
+        cached = self._closes.get(key)
+        # `is None`, not falsiness: an empty field is a measured answer and
+        # must not be re-queried once per condition for the rest of the pass.
+        if cached is None:
+            cached = self._closes[key] = _field_closes(
+                self.instruments, key, self.now)
+        return cached
+
+    def stale(self, lookback: int) -> dict:
+        """{instrument_id: last bar} for the members dropped as too old to be
+        ranked at `self.now`. Read by the evaluator so an unranked instrument
+        can be told why, rather than sharing one reason with every other kind
+        of absence."""
+        return self._priced(lookback)[1]
+
+    def values(self, metric: str, *, lookback: int,
+               short_lookback: int = DEFAULT_RANK_SHORT_LOOKBACK) -> dict:
+        """{instrument_id: metric value} over the members it could be measured
+        for. Members it could not are absent — the caller counts what is here,
+        and that count is the field size the thin-field refusal tests."""
+        key = (metric, int(lookback), int(short_lookback))
+        cached = self._values.get(key)
+        if cached is None:
+            measure = _RANK_MEASURES[metric]
+            measured = {}
+            for instrument_id, closes in self._priced(lookback)[0].items():
+                value = measure(closes, int(short_lookback))
+                if value is not None:
+                    measured[instrument_id] = value
+            cached = self._values[key] = measured
+        return cached
+
+
+def _rank_refusal(details: dict, reason: str, *, authoring: bool = False,
+                  **extra) -> dict:
+    """A rank that was not taken, in the shape `scan_setup` can act on.
+
+    `measured: False` is the whole point of the helper. Every path through the
+    evaluator that produces no ordering goes through here, so none of them can
+    be mistaken for a measured zero by the scan loop, and none can be added
+    later without carrying the flag.
+
+    `authoring=True` marks the OTHER kind of refusal: a parameter this setup
+    was written with is not one the evaluator understands — an unknown metric,
+    an unknown side, a select_pct outside its range. Those are not markets
+    declining to answer, they are typos, and the scan loop treats the two
+    oppositely for good reason. A market that could not answer is dropped
+    from the average so it cannot dilute the legs that did; a typo is KEPT in
+    the denominator, exactly as an unknown `kind` already is, so a broken
+    condition holds its setup back instead of being carried over the line by
+    the legs that still work. Silently excusing an authoring mistake is how a
+    setup ends up firing on half the case its author wrote.
+    """
+    # `measured` is the scan loop's DROP flag, so the mapping reads backwards
+    # at a glance and is worth stating: a data refusal is measured=False and
+    # leaves the average, an authoring error is measured=True and stays in the
+    # denominator to hold its setup back.
+    return {"matched": False, "score": 0.0, "measured": bool(authoring),
+            "authoring_error": bool(authoring),
+            "details": {**details, "reason": reason, **extra}}
+
+
+def _eval_cross_sectional_rank(params: dict, instrument, now: datetime, *,
+                               field: Optional[CrossSectionalField] = None) -> dict:
+    """Is this instrument inside the selected slice of its field on `metric`?
+
+    Params:
+      metric         — "momentum" | "risk_adjusted_momentum" | "acceleration"
+                       | "volatility"
+      lookback       — bars in the ranking window (default 60)
+      short_lookback — bars in the recent window, "acceleration" only (default 10)
+      side           — "top" (highest metric) | "bottom" (lowest)
+      scope          — "asset_class" (rank against the same class only) or
+                       "universe" (rank against every active instrument)
+      select_pct     — fraction of the field the slice takes (default 0.10)
+      min_field      — a floor on field size ABOVE the platform's own
+
+    `scope` defaults to the asset class because a mixed field does not rank
+    momentum, it ranks volatility: a sixty-bar return puts crypto above every
+    equity and every equity above every major pair, so a "top decile of the
+    universe" would be a list of whatever asset class moves most, restated
+    daily. There is deliberately no "sector" scope — `Instrument.sector` is
+    written by nothing in this codebase, so a sector-scoped condition would be
+    a rule that can never fire.
+
+    Refusing a thin field is the point of half this function. A "top decile" of
+    four instruments is not a decile — the fraction rounds up to one name, and
+    the cut that was supposed to exclude nine tenths of the field excludes
+    three symbols. The setup gets no flag and a reason, because a rank that
+    cannot be taken honestly is not a weaker signal, it is no signal.
+
+    Every path out of here that produces no ordering — a thin field, a fraction
+    naming nobody, an instrument outside the field or without a window of its
+    own, a param outside its vocabulary — carries `measured: False`, and that
+    key is what keeps the refusal out of `scan_setup`'s weighted average
+    entirely. Returned as a plain zero it was indistinguishable from "the rank
+    was taken and this instrument missed the cut", so the composite gained
+    `0.0 * weight` in its numerator and `weight` in its denominator: a leg that
+    declined to answer halved a two-leg setup's evidence. An instrument the
+    rank actually placed below the cut is a real measurement and keeps both its
+    zero and its weight — the distinction is between "we looked and the answer
+    is no" and "we could not look", which is the same distinction this file
+    already draws for a field member with no window.
+    """
+    metric = (params or {}).get("metric", "momentum")
+    side = (params or {}).get("side", "top")
+    scope = (params or {}).get("scope", "asset_class")
+    try:
+        lookback = int((params or {}).get("lookback", DEFAULT_RANK_LOOKBACK))
+        short_lookback = int((params or {}).get(
+            "short_lookback", DEFAULT_RANK_SHORT_LOOKBACK))
+        select_pct = float((params or {}).get("select_pct", DEFAULT_SELECT_PCT))
+        # A setup may demand a DEEPER field than the platform floor; it may not
+        # ask for a shallower one. The floor is the whole defence against a
+        # rank published over a handful of survivors, and a defence a caller
+        # can dial down is not one.
+        min_field = max(MIN_RANK_FIELD,
+                        int((params or {}).get("min_field", MIN_RANK_FIELD)))
+    except (TypeError, ValueError):
+        return _rank_refusal({}, "non-numeric lookback/select_pct/min_field",
+                             authoring=True)
+
+    # Each vocabulary is checked before it is used, because the failure mode of
+    # an unrecognised value here is not silence. Fall through to a default and
+    # a typo'd `side` would rank the WEAKEST names as the strongest, and the
+    # flag it published would look exactly like a correct one.
+    if metric not in ("momentum", "risk_adjusted_momentum", "acceleration",
+                      "volatility"):
+        return _rank_refusal({}, f"unknown metric '{metric}'", authoring=True)
+    if side not in ("top", "bottom"):
+        return _rank_refusal({}, f"unknown side '{side}'", authoring=True)
+    if scope not in ("asset_class", "universe"):
+        return _rank_refusal({}, f"unknown scope '{scope}'", authoring=True)
+    if not 0.0 < select_pct <= MAX_SELECT_PCT:
+        return _rank_refusal(
+            {}, f"select_pct must be in (0, {MAX_SELECT_PCT}]",
+            authoring=True)
+    if lookback < 2:
+        return _rank_refusal({}, "lookback must cover at least 2 bars",
+                             authoring=True)
+
+    if field is None:
+        field = CrossSectionalField(now=now)
+    measured = field.values(metric, lookback=lookback,
+                            short_lookback=short_lookback)
+
+    if scope == "asset_class":
+        wanted = getattr(instrument, "asset_class", "")
+        members = [i for i in field.instruments
+                   if getattr(i, "asset_class", "") == wanted]
+    else:
+        members = field.instruments
+    values = {i.id: measured[i.id] for i in members if i.id in measured}
+
+    n = len(values)
+    # Floor, never round up. Rounding is exactly how a four-name field produces
+    # a "decile" of one, and `n_select < 1` below is the refusal that catches
+    # the fields too thin for the fraction to name anybody at all.
+    n_select = int(n * select_pct)
+    details = {"metric": metric, "lookback": lookback, "scope": scope,
+               "side": side, "select_pct": select_pct, "field_size": n,
+               "selected": n_select, "min_field": min_field}
+    if metric == "acceleration":
+        details["short_lookback"] = short_lookback
+
+    if not any(i.id == instrument.id for i in members):
+        # Not in the field being ranked at all — an inactive instrument, or one
+        # a caller passed that the pass never walked. Unranked is a different
+        # answer from ranked last, and this is the one that is true.
+        return _rank_refusal(details, "outside the ranked field")
+    if n < min_field:
+        return _rank_refusal(
+            details, f"field of {n} is under the {min_field}-instrument floor")
+    if n_select < 1:
+        return _rank_refusal(
+            details,
+            f"{select_pct:.1%} of {n} does not name a whole instrument")
+
+    mine = values.get(instrument.id)
+    if mine is None:
+        # In the field, but NOT MEASURED at `now`. It is unranked, not worst: a
+        # zero here would have put a symbol whose feed went quiet into the
+        # middle of a momentum table. A dead feed and a short history are told
+        # apart, because they are different problems for whoever reads the
+        # flag — one is an ingest to restart, the other is a symbol that has
+        # not traded long enough to rank yet.
+        stale_at = field.stale(lookback).get(instrument.id)
+        if stale_at is not None:
+            return _rank_refusal(
+                details,
+                f"last bar {(now - stale_at).days}d before the field's instant,"
+                f" past the {MAX_FIELD_STALENESS_DAYS}d staleness cut",
+                last_bar=str(stale_at))
+        return _rank_refusal(details, "no full window for this instrument")
+
+    if side == "top":
+        better = sum(1 for v in values.values() if v > mine)
+        worse = sum(1 for v in values.values() if v < mine)
+    else:
+        better = sum(1 for v in values.values() if v < mine)
+        worse = sum(1 for v in values.values() if v > mine)
+
+    # Ranked by how many of the field beat it, so tied instruments SHARE a rank
+    # and either both clear the cut or neither does. Sorting and slicing would
+    # have handed the last place in the slice to whichever of two identical
+    # numbers the database returned first — a flag decided by row order.
+    rank = better + 1
+    matched = rank <= n_select
+    # The score is the fraction of the field this instrument beats, which is
+    # precisely the claim the condition makes: at a decile cut the marginal
+    # name scores ~0.9 and the extreme scores 1.0. Depth WITHIN the slice was
+    # the alternative and collapses as the slice widens — the marginal name of
+    # a forty-name quintile would score 0.125 for being in exactly the group it
+    # was selected into. Zero when unmatched, like every other evaluator here,
+    # because `scan_setup` weights `score` whether or not `matched` is set —
+    # and it should, on this path: the rank WAS taken and this instrument came
+    # out below the cut, which is evidence, not an absence of it.
+    score = (worse / (n - 1)) if matched and n > 1 else 0.0
+    return {"matched": matched, "score": round(min(1.0, max(0.0, score)), 4),
+            "measured": True,
+            "details": {**details, "value": round(mine, 6), "rank": rank}}
+
+
+register_kind("cross_sectional_rank", _eval_cross_sectional_rank,
+                params=("metric", "lookback", "short_lookback", "side",
+                        "select_pct", "min_field", "scope"),
+                choices={"metric": ("momentum", "risk_adjusted_momentum",
+                                    "acceleration", "volatility"),
+                         "side": ("top", "bottom"),
+                         "scope": ("asset_class", "universe")})
+
+
 # ── Scoring + flagging ─────────────────────────────────────────────────────
 
 def _suggested_levels(direction: str, last_price: float, sizing: dict) -> tuple:
@@ -1178,7 +1757,8 @@ def _emit_match(setup, instrument, composite: float, conditions_out: list,
 
 
 def scan_setup(setup, instrument, *, now: Optional[datetime] = None,
-               as_of: Optional[bool] = None, emit: bool = True) -> dict:
+               as_of: Optional[bool] = None, emit: bool = True,
+               field: Optional[CrossSectionalField] = None) -> dict:
     """Run one setup against one instrument. Returns a dict and creates an
     OpportunityFlag (+ linked Signal) if the composite score meets `min_match_score`.
 
@@ -1191,6 +1771,17 @@ def scan_setup(setup, instrument, *, now: Optional[datetime] = None,
     `pending: True` plus the `last_price` the rows would have been built from.
     `scan_all_setups` uses it to see a whole instrument's matches before any
     of them is published; a direct caller wanting the flag keeps the default.
+
+    `field` is the universe a cross-sectional condition ranks this instrument
+    inside. A pass hands the SAME field to every pair, so every rank it
+    publishes was taken against one set of measurements at one instant; a
+    caller scanning a single pair leaves it unset and gets a field built here,
+    lazily, and only if one of the setup's conditions actually asks for one.
+
+    An evaluator may answer `measured: False` to say it did not measure at all.
+    Such a leg is left out of the weighted average entirely — numerator AND
+    denominator — because a zero in the denominator is an assertion about the
+    market, and the composite would fall by half for a leg that never looked.
     """
     if as_of is None:
         as_of = now is not None
@@ -1204,6 +1795,9 @@ def scan_setup(setup, instrument, *, now: Optional[datetime] = None,
     conditions_out = []
     weighted_score_sum = 0.0
     weight_sum = 0.0
+    weight_authored = 0.0
+    scoring_legs = 0
+    measured_legs = 0
     for cond in (setup.conditions or []):
         kind = cond.get("kind", "")
         params = cond.get("params") or {}
@@ -1219,14 +1813,30 @@ def scan_setup(setup, instrument, *, now: Optional[datetime] = None,
             if is_gate:
                 return {"matched": False, "skipped": True, "reason": "gate_failed",
                         "conditions": conditions_out}
+            # Kept in the denominator on purpose. An unknown kind is an
+            # authoring mistake, not a market that would not answer, and
+            # dropping it would let a typo'd condition be carried over the line
+            # by the legs that still work instead of holding the setup back.
+            scoring_legs += 1
+            measured_legs += 1
             weight_sum += weight
+            weight_authored += weight
             continue
         try:
+            # Both keywords are opt-in and were resolved at registration, so a
+            # kind that declares neither is still called with exactly the three
+            # arguments it was written for.
+            extra = {}
             if ACCEPTS_AS_OF.get(kind):
-                res = EVALUATOR_REGISTRY[kind](params, instrument, now,
-                                               as_of=as_of)
-            else:
-                res = EVALUATOR_REGISTRY[kind](params, instrument, now)
+                extra["as_of"] = as_of
+            if ACCEPTS_FIELD.get(kind):
+                # Built on first demand and reused for the rest of this pair's
+                # conditions, so a setup with no rank condition never queries
+                # the universe and one with three ranks queries it once.
+                if field is None:
+                    field = CrossSectionalField(now=now)
+                extra["field"] = field
+            res = EVALUATOR_REGISTRY[kind](params, instrument, now, **extra)
         except Exception as e:
             logger.warning("[opportunity] evaluator %s raised: %s", kind, e)
             res = {"matched": False, "score": 0.0, "details": {"error": str(e)}}
@@ -1239,15 +1849,54 @@ def scan_setup(setup, instrument, *, now: Optional[datetime] = None,
                 return {"matched": False, "skipped": True, "reason": "gate_failed",
                         "conditions": conditions_out}
             continue
+        scoring_legs += 1
+        # A top-level `measured: False` on the result is the evaluator saying it
+        # never answered the question it was asked — no field to rank in, no
+        # window to rank on. Weighted at zero it would be indistinguishable from
+        # an evaluator that looked and found nothing, and it would take `weight`
+        # into the denominator with it, so a refusal to measure one leg would
+        # quietly dilute every other leg's evidence. Strictly opt-in: a kind
+        # that never sets the key keeps exactly the arithmetic it had, and an
+        # evaluator that RAISES is still scored zero and still weighted, because
+        # one broken data source must not void a whole composite.
+        weight_authored += weight
+        if res.get("measured") is False:
+            continue
+        measured_legs += 1
         weighted_score_sum += float(res.get("score", 0.0)) * weight
         weight_sum += weight
 
     composite = (weighted_score_sum / weight_sum) if weight_sum > 0 else 0.0
-    matched = composite >= float(setup.min_match_score or 0.0)
+    # A setup that carries scoring conditions and measured none of them has no
+    # composite — not a composite of zero. Reading the hole as a score would
+    # publish a flag on nothing at all for any setup whose `min_match_score`
+    # sits at zero. A setup built entirely out of gates is untouched: it has no
+    # scoring conditions to have failed to measure, and its threshold decides
+    # as it always did.
+    #
+    # And a QUORUM, because dropping an unmeasured leg renormalises the
+    # composite over the survivors: a two-leg setup whose second leg could not
+    # answer becomes a one-leg setup scoring the first leg at full confidence,
+    # and fires on evidence its author never authorised alone. A MAJORITY of
+    # the authored weight has to answer — strictly more than half, so one of
+    # two equal legs does not clear it, which is the case this exists for. The
+    # counts ride out on the result so a reader can see the composite rests on
+    # less than the whole setup.
+    enough = (weight_authored <= 0
+              or weight_sum > weight_authored * MEASURED_WEIGHT_QUORUM)
+    matched = ((scoring_legs == 0 or measured_legs > 0)
+               and enough
+               and composite >= float(setup.min_match_score or 0.0))
 
     if not matched:
-        return {"matched": False, "score": round(composite, 4),
-                "conditions": conditions_out}
+        out = {"matched": False, "score": round(composite, 4),
+               "conditions": conditions_out,
+               "measured_weight": round(weight_sum, 4),
+               "authored_weight": round(weight_authored, 4)}
+        if not enough:
+            out["skipped"] = True
+            out["reason"] = "not_enough_measured"
+        return out
 
     # Build the levels + Signal + Flag.
     last_price = _last_price(instrument, now, as_of=as_of)
@@ -1314,6 +1963,15 @@ def scan_all_setups(*, now: Optional[datetime] = None,
     publishes NEITHER side, which is the fail-towards-not-trading answer and
     the only symmetric one — suppressing whichever arrived second would just
     hand the trade to the setup that sorted first.
+
+    The pass also owns the FIELD that cross-sectional conditions rank inside,
+    for the same reason it owns `now`: it is the only place that holds the
+    whole universe at one instant. Building the field from the very list this
+    loop walks means a rank is taken against exactly the instruments this pass
+    evaluated — a second query could return a different universe — and sharing
+    one field across every pair means the universe is priced once instead of
+    once per (setup, instrument) pair, and that two setups ranking the same
+    window can never be handed two different orderings of it.
     """
     from signals.models import OpportunitySetup
     from instruments.models import Instrument
@@ -1323,6 +1981,7 @@ def scan_all_setups(*, now: Optional[datetime] = None,
     now = now or timezone.now()
     setups = list(OpportunitySetup.objects.filter(is_active=True))
     instruments = list(Instrument.objects.filter(is_active=True))
+    field = CrossSectionalField(instruments, now=now)
 
     n_matches = 0
     n_evaluations = 0
@@ -1340,7 +1999,7 @@ def scan_all_setups(*, now: Optional[datetime] = None,
             n_evaluations += 1
             try:
                 result = scan_setup(setup, inst, now=now, as_of=as_of,
-                                    emit=False)
+                                    emit=False, field=field)
             except Exception as e:
                 n_errors += 1
                 logger.warning("[opportunity] scan failed setup=%s inst=%s: %s",

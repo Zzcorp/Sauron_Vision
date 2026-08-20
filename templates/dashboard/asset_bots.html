@@ -41,7 +41,7 @@
     {% if rows %}
     <div class="table-wrapper">
     <table class="sv-perf-table sv-stack">
-      <thead><tr><th>Asset class</th><th>Name</th><th>Mode</th><th>Symbols</th><th class="num">Capital</th><th class="num">Open</th><th class="num">P&amp;L 24h</th><th>Enabled</th><th>Action</th></tr></thead>
+      <thead><tr><th>Asset class</th><th>Name</th><th>Mode</th><th>Symbols</th><th class="num">Capital</th><th class="num">Max hold</th><th class="num">Open</th><th class="num">P&amp;L 24h</th><th>Enabled</th><th>Action</th></tr></thead>
       <tbody>
         {% for r in rows %}
           <tr>
@@ -50,6 +50,8 @@
             <td data-label="Mode"><span class="badge badge-{% if r.config.mode == 'live' %}bearish{% else %}bullish{% endif %}">{{ r.config.mode }}</span></td>
             <td data-label="Symbols" style="font-size: 11px; color: var(--text-muted);">{{ r.config.symbols|join:", "|truncatechars:40 }}</td>
             <td class="num" data-label="Capital">{{ r.config.capital }} {{ r.config.base_currency }}</td>
+            {# "OFF" is a chosen state, not an unknown one, so it prints as a word rather than 0 or an em-dash. #}
+            <td class="num" data-label="Max hold" title="Time stop · source: {{ r.time_stop.source }}">{% if r.time_stop.enabled %}{{ r.time_stop.hours|floatformat:0 }}h{% else %}<span style="color:var(--accent-gold-ink);">OFF</span>{% endif %}<span style="display:block;font-size:10px;color:var(--text-muted);">{{ r.time_stop.source }}</span></td>
             <td class="num" data-label="Open">{{ r.open_positions }}</td>
             <td class="num {% if r.pnl_24h > 0 %}up{% elif r.pnl_24h < 0 %}down{% endif %}" data-label="P&amp;L 24h">{{ r.pnl_24h|floatformat:2 }}</td>
             <td data-label="Enabled">{% if r.config.enabled %}<span style="color: var(--accent);">ON</span>{% else %}<span style="color: var(--text-muted);">OFF</span>{% endif %}</td>
@@ -73,7 +75,7 @@
     {% if open_trades %}
     <div class="table-wrapper">
     <table class="sv-perf-table sv-stack">
-      <thead><tr><th>Asset</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Stop</th><th class="num">Target</th><th class="num">Score</th><th>Rule</th><th>Opened</th></tr></thead>
+      <thead><tr><th>Asset</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Stop</th><th class="num">Target</th><th class="num">Score</th><th>Rule</th><th>Opened</th><th class="num">Time left</th></tr></thead>
       <tbody>
         {% for t in open_trades %}
           <tr>
@@ -87,6 +89,8 @@
             <td class="num" data-label="Score">{{ t.composite_score|floatformat:2 }}</td>
             <td class="sv-ident" data-label="Rule" style="font-size: 11px; color: var(--text-muted);">{{ t.rule_name|truncatechars:30 }}</td>
             <td class="nowrap" data-label="Opened" style="font-size: 11px;">{{ t.opened_at|timesince }} ago</td>
+            {# Not applicable (no ceiling, or a row from the other position book) renders as an em-dash, never as 0h. #}
+            <td class="num nowrap" data-label="Time left" style="font-size: 11px;" title="Time stop · {{ t.time_stop.hours_held|floatformat:0 }}h held of {{ t.time_stop.max_hold_hours|floatformat:0 }}h">{% if t.time_stop.enabled %}{% if t.time_stop.approaching %}<span style="color:var(--accent-gold-ink);">⧗ {{ t.time_stop.hours_left|floatformat:0 }}h</span>{% else %}{{ t.time_stop.hours_left|floatformat:0 }}h{% endif %}{% else %}—{% endif %}</td>
           </tr>
         {% endfor %}
       </tbody>

@@ -51,30 +51,115 @@
     </div>
 
     <!-- Risk Limits -->
+    {# Each field says what it DOES, not what it is called. This card wrote #}
+    {# four numbers nothing on the execution path read for most of its life, #}
+    {# so the sub-lines are load-bearing: they are the difference between a #}
+    {# limit and a decoration, and every one of them names the gate that #}
+    {# enforces it. The live reading under each input is the same read the #}
+    {# entry gates make, so a limit that has stopped mattering shows here. #}
     <div class="card fade-in-up delay-2">
-        <div class="card-header"><span class="card-title">⚠ Risk Limits</span></div>
+        <div class="card-header">
+            <span class="card-title">⚠ Risk Limits</span>
+            {# Three states, not two. `preflight` FAILS OPEN when it cannot #}
+            {# read the book: ok stays True, entries go through ungated, and #}
+            {# a green badge there would be at its most reassuring exactly #}
+            {# when nothing is being applied. `failed_open` is the flag that #}
+            {# separates "read and clear" from "not read at all". #}
+            {% if not risk_state.ok %}
+            <span class="badge badge-high">BLOCKING ENTRIES</span>
+            {% elif risk_state.failed_open %}
+            <span class="badge badge-critical">NOT ENFORCING</span>
+            {% else %}
+            <span class="badge badge-active">ENFORCED</span>
+            {% endif %}
+        </div>
+        <p style="color:var(--text-secondary);margin-bottom:16px;font-size:13px;">
+            {# The present tense is a claim, and it stops being true the #}
+            {# moment the gate cannot read the book — the banner below says #}
+            {# so, and this sentence must not argue with it. #}
+            {% if risk_state.failed_open %}Normally checked before every bot entry{% else %}Checked before every bot entry{% endif %} and every manual trade, across both
+            position books. These live on the shared <strong>{{ portfolio.name }}</strong>
+            book — changing them changes them for every operator.
+        </p>
+        {% if not risk_state.ok %}
+        <div class="card" style="border-color:var(--accent-red);padding:10px 14px;margin-bottom:16px;">
+            <span style="font-family:var(--font-mono);font-size:12px;">⚠ {{ risk_state.reason }}</span>
+        </div>
+        {% elif risk_state.failed_open %}
+        <div class="card" style="border-color:var(--accent-red);padding:10px 14px;margin-bottom:16px;">
+            <span style="font-family:var(--font-mono);font-size:12px;">⚠ The four limits below are not being applied to entries right now: {{ risk_state.reason }}</span>
+        </div>
+        {% endif %}
         <form method="post" action="{% url 'setup' %}">
             {% csrf_token %}
             <input type="hidden" name="action" value="update_risk">
+            {% comment %}
+            step="any" on all four, deliberately.
+
+            HTML5 measures `step` from the STEP BASE, and the step base is
+            `min` when one is present — so `min="0.1" step="1"` admits 0.1,
+            1.1, 2.1 and nothing else. Three of these four fields rendered
+            their own shipped default as an invalid value: 100 and 20 against
+            a 0.1 base stepping by 1, and 0.7 against a 0.01 base stepping by
+            0.05. The browser refused to submit the form at all, silently, on
+            a page whose entire purpose is setting these numbers.
+
+            Fractional steps would technically fit but reintroduce the same
+            class of bug the moment a default moves, and floating-point step
+            validation is where browsers disagree with each other. The range
+            is still enforced by min/max here and re-validated server-side,
+            which is where it has to hold anyway.
+            {% endcomment %}
             <div style="margin-bottom: 16px;">
                 <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX TOTAL EXPOSURE (%)</label>
-                <input type="number" step="1" name="max_exposure" value="{{ portfolio.max_total_exposure_pct }}"
+                <input type="number" step="any" min="0.1" max="1000" required name="max_exposure" value="{{ portfolio.max_total_exposure_pct }}"
                     style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
+                    No new position opens while the open book already ties up this
+                    share of book value. Margin-aware: an FX position counts its
+                    broker margin, not its levered notional.
+                    {# An em-dash where nothing was measured — never a 0, which #}
+                    {# would read as a book with no exposure at all. #}
+                    <br>Now: {% if risk_exposure and risk_exposure.committed is not None %}{{ risk_exposure.committed|floatformat:2 }} of {{ risk_exposure.cap_money|floatformat:2 }} committed across {{ risk_exposure.n_open }} position{{ risk_exposure.n_open|pluralize }}{% else %}— {{ risk_exposure.reason }}{% endif %}
+                </div>
             </div>
             <div style="margin-bottom: 16px;">
                 <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX SINGLE POSITION (%)</label>
-                <input type="number" step="1" name="max_position" value="{{ portfolio.max_single_position_pct }}"
+                <input type="number" step="any" min="0.1" max="100" required name="max_position" value="{{ portfolio.max_single_position_pct }}"
                     style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
+                    One position may not tie up more than this share of the
+                    capital BACKING it — the bot pool that opens it, or the
+                    manual pool for a hand-taken trade. Not of the book value
+                    below: a bot sizes from the capital you armed it with, and
+                    judging it against a number it never consulted refused
+                    entries that were correctly sized all along. Refused with
+                    the arithmetic, never silently shrunk.
+                    <br>Ceiling: {% if risk_single.cap_money is not None %}{{ risk_single.cap_money|floatformat:2 }} on a {{ risk_book_value|floatformat:2 }} book — compare it with the capital you armed each bot pool with, since a pool larger than this ceiling will have entries refused{% else %}— {{ risk_single.reason }}{% endif %}
+                </div>
             </div>
             <div style="margin-bottom: 16px;">
                 <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX DAILY LOSS (%)</label>
-                <input type="number" step="0.1" name="max_daily_loss" value="{{ portfolio.max_daily_loss_pct }}"
+                <input type="number" step="any" min="0.1" max="100" required name="max_daily_loss" value="{{ portfolio.max_daily_loss_pct }}"
                     style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
+                    Realized P&amp;L over a trailing {{ risk_window_hours }}h — the same
+                    window each bot's own drawdown halt uses. Past this floor no
+                    entry opens anywhere; positions already on are left alone.
+                    <br>Now: {% if risk_daily_loss and risk_daily_loss.measured %}{{ risk_daily_loss.realized|floatformat:2 }} against a floor of {{ risk_daily_loss.limit_money|floatformat:2 }}{% if risk_daily_loss.unmeasured %} ({{ risk_daily_loss.unmeasured }} close{{ risk_daily_loss.unmeasured|pluralize }} unpriced and not counted){% endif %}{% else %}— {{ risk_daily_loss.reason }}{% endif %}
+                </div>
             </div>
             <div style="margin-bottom: 16px;">
-                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX CORRELATION THRESHOLD</label>
-                <input type="number" step="0.05" name="max_correlation" value="{{ portfolio.max_correlation_threshold }}"
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">CORRELATION SIZE TAPER</label>
+                <input type="number" step="any" min="0.01" max="1" required name="max_correlation" value="{{ portfolio.max_correlation_threshold }}"
                     style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
+                    A taper, not a block. Above this 90-day return correlation to
+                    something already open, bots size a new position down —
+                    linearly, to 25% at a perfect 1.00. Manual trades are told
+                    the reading on the confirm popup and left to decide.
+                    Set 1.00 to switch the taper off.
+                </div>
             </div>
             <button type="submit" class="btn btn-primary" style="width:100%;">Save Risk Limits</button>
         </form>

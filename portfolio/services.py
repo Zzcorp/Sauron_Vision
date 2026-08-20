@@ -61,12 +61,31 @@ def get_or_create_default_portfolio(user=None):
 # two books for its counts — a mirror would double-count there.
 
 class _InstrumentShim:
-    """Just enough Instrument for the templates when no row matches."""
-    __slots__ = ("symbol", "asset_class")
+    """Just enough Instrument for the templates when no row matches.
+
+    `has_page` is False here and True on a real Instrument (Django models
+    answer False for a missing attribute in a template, so the flag has to
+    be positive on the row that HAS the page, not negative on the one that
+    does not — see `instrument_has_page` below).
+
+    It exists because `{% url 'instrument_detail' symbol %}` proves only
+    that the ROUTE can hold the string, never that the row exists: a bot can
+    hold BTCUSDT while the instruments table holds BTCUSD, and the symbol
+    then rendered as a live link straight to a 404. This shim is precisely
+    the "no row matched" case, so it is the honest place to say so.
+    """
+    __slots__ = ("symbol", "asset_class", "has_page")
 
     def __init__(self, symbol, asset_class=""):
         self.symbol = symbol
         self.asset_class = asset_class
+        self.has_page = False
+
+
+def instrument_has_page(instrument) -> bool:
+    """True when this instrument has a detail page that will actually load."""
+    return bool(instrument is not None
+                and getattr(instrument, "pk", None) is not None)
 
 
 class _StrategyShim:
@@ -85,11 +104,63 @@ class UnifiedPosition:
     # the normalised row carried no way to name the trade behind it.
     # portfolio.Position rows have neither, and the templates render no close
     # control for them — nothing in the platform can flatten one.
+    # bar_pct is display-only, filled by the positions view: the history
+    # row's mini bar, scaled against the biggest move on the page. It lives
+    # here because a slotted class refuses attributes it did not declare,
+    # and the alternative — a parallel list zipped against this one — is how
+    # a row's own numbers end up disagreeing with the bar next to them.
     __slots__ = ("instrument", "direction", "quantity", "entry_price",
                  "current_price", "stop_loss", "take_profit",
                  "unrealized_pnl", "unrealized_pnl_pct", "opened_at",
                  "closed_at", "strategy", "source", "paper",
-                 "trade_id", "status")
+                 "trade_id", "status", "bar_pct")
+
+
+def is_option_row(trade) -> bool:
+    """Is this trade premium-denominated with a contract multiplier?
+
+    Options rows store the UNDERLYING in `symbol` and the PREMIUM in
+    `entry_price`, with the contract multiplier in metadata — the options
+    bot's own close path multiplies by it.
+
+    The platform's token for this class is "options", PLURAL, in all twenty-odd
+    places that branch on it. The singular used to be the only spelling here
+    and matched none of them, which left the metadata key as the only working
+    test — so an options row that reached the book without one (an adopted
+    broker position, a hand-repaired row) was priced against the UNDERLYING's
+    quote, the exact fiction the caller refuses to print.
+    """
+    if trade is None:
+        return False
+    meta = trade.metadata or {}
+    return (getattr(trade, "asset_class", "") in ("options", "option")
+            or meta.get("multiplier") is not None)
+
+
+def value_per_unit(trade) -> float:
+    """Base-currency money per price point per unit, for one trade.
+
+    ONE derivation, because there are two consumers: the row this module
+    marks, and the money block on the positions hover card. They were written
+    separately and immediately drifted — the card's copy kept a spelling of
+    the options test that this one had corrected, so a multiplier-less options
+    row would have been denominated 100x apart in two numbers printed on the
+    same screen. A percentage that does not divide its own currency figures is
+    the visible symptom.
+    """
+    if trade is None:
+        return 1.0
+    meta = trade.metadata or {}
+    try:
+        vpu = float(meta.get("value_per_unit") or 1.0)
+    except (TypeError, ValueError):
+        vpu = 1.0
+    if is_option_row(trade):
+        try:
+            vpu *= float(meta.get("multiplier") or 100)
+        except (TypeError, ValueError):
+            vpu *= 100
+    return vpu
 
 
 def _trade_to_position(trade, instruments, quotes):
@@ -119,22 +190,8 @@ def _trade_to_position(trade, instruments, quotes):
 
     entry = float(trade.entry_price or 0)
     qty = float(trade.qty or 0)
-    meta = trade.metadata or {}
-    try:
-        vpu = float(meta.get("value_per_unit") or 1.0)
-    except (TypeError, ValueError):
-        vpu = 1.0
-    # Options rows store the UNDERLYING in symbol and the PREMIUM in
-    # entry_price, with the contract multiplier in metadata — the options
-    # bot's own close path multiplies by it. Fold it into vpu so notional
-    # and pct are premium-denominated dollars, not raw contract units.
-    is_option = (trade.asset_class == "option"
-                 or meta.get("multiplier") is not None)
-    if is_option:
-        try:
-            vpu *= float(meta.get("multiplier") or 100)
-        except (TypeError, ValueError):
-            vpu *= 100
+    vpu = value_per_unit(trade)
+    is_option = is_option_row(trade)
 
     if trade.status == "CLOSED":
         up.current_price = trade.exit_price

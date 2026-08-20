@@ -97,6 +97,16 @@ app.conf.beat_schedule = {
         "task": "brain.tasks.run_anomaly_scanner",
         "schedule": 1800.0,
     },
+    # ── PHASE 61: open-position watcher ───────────────────────
+    # Half-hourly because a position can travel from +2R to its stop inside
+    # one hour and the whole point is to speak BEFORE the mechanical exit
+    # does. The cadence is affordable because the pass that runs every time
+    # is pure Python; the model half is gated on a trigger firing and capped
+    # per pass and per day inside position_review_agent.
+    "sauron-position-review": {
+        "task": "brain.tasks.run_position_review",
+        "schedule": 1800.0,
+    },
 
     # ── UPGRADE-5: Funding alerts + retention ─────────────────
     "scan-funding-signals": {

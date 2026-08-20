@@ -18,6 +18,15 @@ have promoted a starter config to live through the PIN-gated HQ flow, and a
 seed command silently demoting it would strand its open live trades behind
 the paper-client refusal guard). Seeded configs are namespaced by the
 "starter_" name prefix, so --reset never touches a config a human named.
+
+`max_hold_hours` is left BLANK on purpose, which is not the same as leaving
+it unset: blank inherits `AssetBotConfig.DEFAULT_MAX_HOLD_HOURS` for the
+class, so every seeded bot has a real time stop from its first tick and
+picks up any later correction to that table. Writing a number here instead
+would freeze today's belief into the fleet and, on a re-run, would overwrite
+whatever the operator had since tuned. The command prints the ceiling each
+config ends up enforcing, because "the fleet has a time stop" is a claim
+that should be checkable from the console rather than inferred.
 """
 from __future__ import annotations
 
@@ -69,6 +78,7 @@ def seed_bots(user, *, activate: bool = False) -> dict:
 
     created = updated = 0
     missing: set[str] = set()
+    time_stops: list[str] = []
     for asset_class, name, symbols in FLEET:
         present = [s for s in symbols if s in known]
         missing.update(s for s in symbols if s not in known)
@@ -92,8 +102,18 @@ def seed_bots(user, *, activate: bool = False) -> dict:
         if activate and not cfg.enabled:
             cfg.enabled = True
             cfg.save(update_fields=["enabled", "updated_at"])
+
+        # Reported, never written. A seeded config with no time stop is the
+        # one state this command must not create silently, so the number it
+        # will actually enforce is surfaced rather than assumed.
+        ts = cfg.time_stop_setting()
+        time_stops.append(
+            f"{cfg.name}: {ts['hours']:.0f}h ({ts['source']})"
+            if ts["enabled"] else
+            f"{cfg.name}: NO time stop ({ts['source']}) — unbounded in time")
     return {"created": created, "updated": updated,
-            "missing_symbols": sorted(missing)}
+            "missing_symbols": sorted(missing),
+            "time_stops": time_stops}
 
 
 def reset_bots(user) -> dict:
@@ -172,6 +192,13 @@ class Command(BaseCommand):
             f"Seeded {out['created'] + out['updated']} paper bot config(s) "
             f"for {user.username} — {out['created']} created / "
             f"{out['updated']} updated · enabled={options['activate']}"))
+        if out["time_stops"]:
+            self.stdout.write(
+                "  Time stops (max hold before a stale position is closed "
+                "with reason TIME — blank on the config means the "
+                "asset-class default):")
+            for line in out["time_stops"]:
+                self.stdout.write(f"    {line}")
         if not options["activate"]:
             self.stdout.write(
                 "  Nothing trades yet: enable the bots with --activate or "

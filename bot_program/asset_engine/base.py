@@ -31,12 +31,127 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+# How far into its own ceiling a position gets before the operator is told.
+# A fraction rather than a fixed lead time, because the ceilings in
+# DEFAULT_MAX_HOLD_HOURS span 192h to 720h and one lead time cannot be both
+# "enough notice" on a forex macro trade and "not the whole trade" on a
+# tightened intraday config. At 0.8 there is always a fifth of the window
+# left to act in — at least a session and a half for every shipped default.
+TIME_STOP_WARN_FRACTION = 0.8
+
+# Written on the trade the first time it is warned about. The dedupe has to
+# be per TRADE and permanent: the bot ticks every five minutes, so an
+# hour-window dedupe on the title would still fire twelve alerts a day for
+# the last fifth of a thirty-day ceiling, and a symbol re-entered next week
+# is a different position that deserves its own warning.
+TIME_STOP_WARNED_META_KEY = "time_stop_warned"
+
+# What one SMC/ICT composite vote may contribute to a consensus at full
+# conviction.
+#
+# 0.25 is exactly `aggregation.MIN_WEIGHT` — the floor this platform already
+# assigns to a rule it has MEASURED as its worst. A lane with no record at all
+# has not earned more than the weight a demonstrated loser carries, and this
+# lane has no record for a precise reason: `smc_score_for_symbol` returned 0.0
+# through a dead import for its entire life, so no ICT setup has ever once
+# reached an order. At full conviction (|score| = 1.0) it therefore contributes
+# 0.25 against the default entry bar of min_signals_for_entry x entry_score_min
+# = 0.60 — enough to tip a close call, never enough to make one.
+SMC_VOTE_WEIGHT = 0.25
+
+# The rule name the vote carries. Real, not cosmetic: `rule_weight` looks the
+# lane's own closed trades up under it, so the moment this lane has outcomes it
+# starts being weighed by them like every other rule, and a trade it topped is
+# attributable in the ledger rather than filed under the consensus.
+SMC_RULE_NAME = "smc_composite"
+
+
+def time_stop_status(position, *, config=None, now=None) -> dict:
+    """How much of its time-stop ceiling `position` has spent.
+
+    The read side of the time stop, exposed for whatever renders a position
+    — the position card, a table, a WebSocket payload. Returns:
+
+        {"applies": bool,      # False when nothing here governs this row
+         "enabled": bool,      # False when the ceiling is 0 (time stop off)
+         "max_hold_hours": float | None,
+         "hours_held": float,
+         "hours_left": float | None,
+         "fraction": float | None,   # 0..1+, share of the ceiling spent
+         "approaching": bool,  # past TIME_STOP_WARN_FRACTION, not yet hit
+         "hit": bool,
+         "source": str}       # "extras" | "config" | "class-default" | ""
+
+    `applies` is the important one. This platform keeps TWO position books —
+    `portfolio.Position` and `bot_program.AssetBotTrade` — and a caller that
+    unions them will hand rows from both here. A Position has an `opened_at`
+    too, so a duck-typed reading of it would produce a confident countdown
+    for a manually held position that no bot manages and no time stop will
+    ever close. Those get applies=False, which a card must render as an
+    em-dash rather than a number.
+    """
+    blank = {"applies": False, "enabled": False, "max_hold_hours": None,
+             "hours_held": 0.0, "hours_left": None, "fraction": None,
+             "approaching": False, "hit": False, "source": ""}
+
+    from bot_program.models import AssetBotTrade
+    if not isinstance(position, AssetBotTrade):
+        return blank
+    if position.opened_at is None:
+        # Only reachable on an unsaved row; auto_now_add fills it otherwise.
+        return blank
+
+    cfg = config if config is not None else position.config
+    if cfg is None:
+        return blank
+
+    setting = cfg.time_stop_setting()
+    now = now or timezone.now()
+    end = position.closed_at or now
+    hours_held = max(0.0, (end - position.opened_at).total_seconds() / 3600.0)
+
+    max_hold = float(setting["hours"])
+    if not setting["enabled"]:
+        # The ceiling is off, deliberately. The age is still true and still
+        # worth showing — "unbounded" is a fact an operator should be able
+        # to read off the row.
+        return {**blank, "applies": True, "max_hold_hours": 0.0,
+                "hours_held": round(hours_held, 2),
+                "source": setting["source"]}
+
+    fraction = hours_held / max_hold
+    hit = fraction >= 1.0
+    return {
+        "applies": True, "enabled": True, "max_hold_hours": max_hold,
+        "hours_held": round(hours_held, 2),
+        "hours_left": round(max(0.0, max_hold - hours_held), 2),
+        "fraction": round(fraction, 4),
+        "approaching": (not hit) and fraction >= TIME_STOP_WARN_FRACTION,
+        "hit": hit, "source": setting["source"],
+    }
+
+
 @dataclass
 class BotDecision:
     direction: str  # "BUY" | "SELL" | "HOLD"
     score: float = 0.0
     reasons: list[str] = field(default_factory=list)
     rule_name: str = ""
+
+
+@dataclass
+class SmcVote:
+    """The SMC/ICT composite score, shaped the way the consensus reads votes.
+
+    `weighted_consensus` and `decide()` between them read exactly three
+    attributes off a vote — `score`, `rule_name`, `title` — so this is the
+    whole contract. It is not a Signal row and is deliberately not persisted:
+    the SmcSignal rows behind it already exist, and writing a second row per
+    tick would double-count the same evidence anywhere that reads Signals.
+    """
+    score: float
+    title: str
+    rule_name: str = SMC_RULE_NAME
 
 
 class AssetBot(ABC):
@@ -83,7 +198,8 @@ class AssetBot(ABC):
     # ── position management ──────────────────────────────────────────────
 
     def manage_positions(self) -> int:
-        """Walk OPEN trades, close any that hit stop_loss or take_profit.
+        """Walk OPEN trades, close any that hit stop_loss, take_profit, or
+        the config's time-stop ceiling; warn once on the ones approaching it.
         Returns number of trades closed this tick.
         """
         from bot_program.models import AssetBotTrade
@@ -122,6 +238,14 @@ class AssetBot(ABC):
                     if self._close_trade(trade, price, client, reason="TIME"):
                         closed += 1
                     continue
+
+                # Warned only when the ceiling has NOT been reached. A bot
+                # that was stopped for a week comes back to positions already
+                # past their ceiling, and "this will close soon" arriving in
+                # the same tick as "this closed" is noise, not a warning.
+                ts = self._time_stop_status(trade)
+                if ts["approaching"]:
+                    self._warn_time_stop_near(trade, ts)
 
                 # Past here the broker owns SL/TP for protected trades
                 # (bracket or on-fill orders). Managing those here too would
@@ -214,20 +338,81 @@ class AssetBot(ABC):
                            self.asset_class, trade.symbol, e)
             return False
 
+    def _time_stop_status(self, trade) -> dict:
+        """This config's time-stop reading for `trade`. See `time_stop_status`.
+
+        Passes `self.cfg` explicitly so managing N positions does not fetch
+        the same config N times.
+        """
+        return time_stop_status(trade, config=self.cfg)
+
     def _time_stop_hit(self, trade) -> bool:
-        """True when a trade has been open longer than extras['max_hold_hours'].
+        """True when a trade has been open longer than its config's ceiling.
 
         Capital tied up in a thesis that never resolved is capital not
-        available to the next setup.
+        available to the next setup. The ceiling comes from
+        `AssetBotConfig.time_stop_setting()` — the visible `max_hold_hours`
+        field, the legacy `extras["max_hold_hours"]` key when an install
+        already set one, or the asset-class default. It was previously read
+        only out of extras, which nothing ever wrote, so this exit could
+        never fire.
         """
-        max_hold = self._extras_float("max_hold_hours")
-        if max_hold <= 0 or trade.opened_at is None:
+        status = self._time_stop_status(trade)
+        if not status["hit"]:
             return False
-        age_hours = (timezone.now() - trade.opened_at).total_seconds() / 3600.0
-        if age_hours < max_hold:
+        logger.info("[%s_bot] time stop on %s after %.1fh (max %.1fh, %s)",
+                    self.asset_class, trade.symbol, status["hours_held"],
+                    status["max_hold_hours"], status["source"])
+        return True
+
+    def _warn_time_stop_near(self, trade, status: dict) -> bool:
+        """Tell the operator once, before the engine flattens the position.
+
+        A time stop that only announces itself by closing the trade is a
+        surprise: the operator finds a position gone and a TIME exit in the
+        ledger, with no window in which they could have added to it, cut it
+        early, or raised the ceiling because the thesis is still alive.
+
+        Built inline rather than through `notifications.dispatch_notification`
+        for the same reason as the two alerts below it: this is a
+        position-safety event, and it should not be muted by the preference
+        that silences routine fill chatter.
+        """
+        if (trade.metadata or {}).get(TIME_STOP_WARNED_META_KEY):
             return False
-        logger.info("[%s_bot] time stop on %s after %.1fh (max %.1fh)",
-                    self.asset_class, trade.symbol, age_hours, max_hold)
+        try:
+            from alerts.links import page_url
+            from alerts.models import Notification as _N
+            hours_left = status["hours_left"]
+            _N.objects.create(
+                user=self.user, notification_type="bot",
+                title=f"⧗ Time stop nearing: {trade.symbol}",
+                body=(f"{self.asset_class.upper()} {trade.side} {trade.symbol} "
+                      f"has been open {status['hours_held']:.0f}h of a "
+                      f"{status['max_hold_hours']:.0f}h ceiling "
+                      f"({status['source']}). In about {hours_left:.0f}h the "
+                      f"bot will flatten it with reason TIME — the thesis has "
+                      f"not resolved. Close it, add to it, or raise the "
+                      f"config's max hold."),
+                # The trade's own page: the rule that fired, the signals that
+                # voted and the levels. "Should this run longer?" is answered
+                # there and nowhere on a list page.
+                url=page_url("forensics_detail", trade.id) or "/asset-bots/",
+            )
+        except Exception as e:
+            logger.warning("[%s_bot] time-stop warning failed for %s: %s",
+                           self.asset_class, trade.symbol, e)
+            # Not marking it warned: a failed alert should be retried on the
+            # next tick, not swallowed for the rest of the position's life.
+            return False
+
+        # Marked only after the row exists, and on the trade rather than in a
+        # dedupe query, so the warning survives a notification purge and can
+        # never fire twice for the same position.
+        meta = dict(trade.metadata or {})
+        meta[TIME_STOP_WARNED_META_KEY] = True
+        trade.metadata = meta
+        trade.save(update_fields=["metadata"])
         return True
 
     # ── overridable marking / pnl / close-order hooks ────────────────────
@@ -248,10 +433,18 @@ class AssetBot(ABC):
         return (trade.entry_price - price) * trade.qty
 
     def _submit_close_order(self, trade, client, client_order_id: str):
-        """Submit the broker order that flattens `trade`. Raise on failure."""
+        """Submit the broker order that flattens `trade`. Raise on failure.
+
+        RETURNS the broker's response. The caller books the exit at the fill
+        that response reports, exactly as the entry path books its own fill:
+        an exit recorded at the mark we read BEFORE the order hides all the
+        exit slippage, and stop-outs — where most of it lives — fire into
+        fast one-sided markets. Overrides must return it too; one that
+        returns None degrades to a mark-priced exit, flagged as such.
+        """
         close_side = "SELL" if trade.side == "BUY" else "BUY"
-        client.market_order(trade.symbol, close_side, float(trade.qty),
-                            client_order_id=client_order_id)
+        return client.market_order(trade.symbol, close_side, float(trade.qty),
+                                   client_order_id=client_order_id)
 
     def _cancel_protective_orders(self, trade, client):
         """Best-effort cancel of resting broker-side SL/TP orders before a
@@ -278,7 +471,25 @@ class AssetBot(ABC):
         the trade ended CLOSED.
         """
         stripped = False
+        close_result = None
         if not trade.paper:
+            # A row that already recorded a partly filled close belongs to
+            # the retry loop, which knows the residual and submits THAT size.
+            # Sending trade.qty from here would sell units the account no
+            # longer holds — that does not close anything, it opens a
+            # position the other way. Reachable because the options expiry
+            # sweep re-closes CLOSE_PENDING rows.
+            from bot_program.pending_closes import residual_qty
+            outstanding = residual_qty(trade)
+            if outstanding < trade.qty:
+                logger.error(
+                    "[%s_bot] %s already filled %s of %s on an earlier close "
+                    "— leaving the %s residual to the retry loop rather than "
+                    "resubmitting the full size",
+                    self.asset_class, trade.symbol,
+                    trade.qty - outstanding, trade.qty, outstanding)
+                return False
+
             try:
                 # Phase-33 idempotency on close — id derived from trade.id so
                 # a retry of the same close uses the same id.
@@ -293,7 +504,8 @@ class AssetBot(ABC):
                 # Cancelling up-front would leave a live, unprotected position
                 # whenever the close then fails.
                 try:
-                    self._submit_close_order(trade, client, client_order_id)
+                    close_result = self._submit_close_order(
+                        trade, client, client_order_id)
                 except Exception:
                     if not (trade.metadata or {}).get("protective_order_ids"):
                         raise
@@ -308,7 +520,8 @@ class AssetBot(ABC):
                     # state than an ordinary pending close, and the retry task
                     # and the operator both need to know which one it is.
                     stripped = True
-                    self._submit_close_order(trade, client, client_order_id)
+                    close_result = self._submit_close_order(
+                        trade, client, client_order_id)
                     stripped = False
                 else:
                     # The close went through, so the bracket's resting legs
@@ -344,15 +557,27 @@ class AssetBot(ABC):
                         "trade_id": trade.id, "asset_class": self.asset_class,
                         "symbol": trade.symbol,
                     })
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("[%s_bot] WS push (close_pending) failed: %s",
+                                   self.asset_class, e)
                 return False
 
-        # The exit half of the round trip. Without this a paper trade books
-        # a free entry and a free exit, and its expectancy is overstated by
-        # the full round trip — the exact quantity the cost filter rejects
-        # trades for being unable to cover.
+        # ── Book the exit ────────────────────────────────────────────────
+        # The two venues differ here, deliberately. A LIVE exit is read back
+        # off the broker (avgPrice / executedQty), the same way the entry
+        # path reads its fill, so real slippage lands in pnl and realized_r.
+        # A PAPER exit has no broker fill to read: paper_fill_price charges
+        # the adverse half of the modelled round trip, and that IS the paper
+        # venue's slippage model. "Reading a fill" on paper would just mean
+        # reading back the number we invented, so paper keeps booking exactly
+        # what it always booked.
+        from bot_program.pending_closes import paper_exit_fill, resolve_exit_fill
         if trade.paper:
+            # The exit half of the round trip. Without this a paper trade
+            # books a free entry and a free exit, and its expectancy is
+            # overstated by the full round trip — the exact quantity the cost
+            # filter rejects trades for being unable to cover.
+            #
             # Charged on every exit, including take-profits. A take-profit
             # is a limit order and would not cross the spread, so this is
             # deliberately CONSERVATIVE rather than precise — the cost model
@@ -363,9 +588,16 @@ class AssetBot(ABC):
             # the recorded close reason, not the post-cost fill price.
             from bot_program.asset_engine.risk_levels import paper_fill_price
             exit_side = "SELL" if trade.side == "BUY" else "BUY"
-            price = Decimal(str(paper_fill_price(
-                self.cfg, trade.symbol, float(price), exit_side)))
+            fill = paper_exit_fill(trade, Decimal(str(paper_fill_price(
+                self.cfg, trade.symbol, float(price), exit_side))))
+        else:
+            fill = resolve_exit_fill(trade, close_result, mark=price)
 
+        if not fill["complete"]:
+            return self._book_partial_close(trade, fill, reason)
+
+        price = fill["price"]
+        trade.metadata = {**(trade.metadata or {}), **fill["metadata"]}
         pnl = self._trade_pnl(trade, price)
         trade.exit_price = price
         trade.pnl = pnl
@@ -425,6 +657,80 @@ class AssetBot(ABC):
                            self.asset_class, e)
         return True
 
+    def _book_partial_close(self, trade, fill: dict, reason: str) -> bool:
+        """The broker filled only PART of the close. Keep the row live.
+
+        Marking it CLOSED would be the worst outcome in this file: the
+        residual stays open at the broker, `reconcile_asset` only ever scans
+        OPEN/CLOSE_PENDING rows, and the retry beat task only drains
+        CLOSE_PENDING — so a CLOSED row with a live remainder behind it is
+        watched by nothing, permanently. In CLOSE_PENDING with the residual
+        recorded, the retry loop, reconciliation and the concurrency gate all
+        see it. Returns False: this close did not finish.
+        """
+        trade.status = "CLOSE_PENDING"
+        trade.metadata = {**(trade.metadata or {}), **fill["metadata"]}
+        if "partial-close" not in (trade.reason or ""):
+            trade.reason = ((trade.reason or "")
+                            + f" | partial-close:{reason}").strip()[:1000]
+        trade.save(update_fields=["status", "metadata", "reason"])
+        logger.error(
+            "[%s_bot] close for %s filled %s of %s — %s is STILL OPEN at the "
+            "broker; row left CLOSE_PENDING for the retry task",
+            self.asset_class, trade.symbol, fill["filled_qty"], trade.qty,
+            fill["residual_qty"])
+
+        self._notify_partial_close(trade, fill)
+        try:
+            from dashboard.consumers import push_eye_event
+            push_eye_event(self.user, "close_pending", {
+                "trade_id": trade.id, "asset_class": self.asset_class,
+                "symbol": trade.symbol, "partial": True,
+                "residual_qty": str(fill["residual_qty"]),
+            })
+        except Exception as e:
+            logger.warning("[%s_bot] WS push (partial close) failed: %s",
+                           self.asset_class, e)
+        return False
+
+    def _notify_partial_close(self, trade, fill: dict):
+        """Alert the operator that a close only partly filled.
+
+        Separate from `_notify_close_pending` because the two situations ask
+        for different things. A rejected close means nothing moved and the
+        retry will handle it. A PARTIAL means the order was accepted, some of
+        the position is gone, and what is left is a smaller live position
+        than the row's qty shows — so a human reading their broker screen
+        against this platform will see two different numbers until it drains.
+        """
+        try:
+            from datetime import timedelta as _td
+            from alerts.links import page_url
+            from alerts.models import Notification as _N
+            title = f"◧ Partial close: {trade.symbol}"
+            recent = _N.objects.filter(
+                user=self.user, notification_type="bot", title=title,
+                created_at__gte=timezone.now() - _td(hours=1),
+            ).exists()
+            if recent:
+                return
+            n = _N(
+                user=self.user, notification_type="bot", title=title,
+                body=(f"The broker filled only {fill['filled_qty']} of "
+                      f"{trade.qty} on the close of {self.asset_class} trade "
+                      f"#{trade.id}. {fill['residual_qty']} is still open at "
+                      f"the broker; the row stays CLOSE_PENDING and the "
+                      f"residual is retried every 5 min."),
+                url=page_url("forensics_detail", trade.id) or "/eye/fills/",
+            )
+            # Same rule as _notify_close_pending: the caller pushes the sticky
+            # close_pending banner, so this must not also draw a transient card.
+            n._banner_silent = True
+            n.save()
+        except Exception as e:
+            logger.warning("[%s_bot] partial-close notification failed: %s",
+                           self.asset_class, e)
+
     def _notify_close_pending(self, trade, reason: str):
         """Best-effort alert for a failed live close, deduped per trade/hour."""
         try:
@@ -471,6 +777,22 @@ class AssetBot(ABC):
         if not allowed:
             notify_circuit_breaker(self.cfg, reasons)
             return (False, "circuit breaker: " + "; ".join(reasons))
+
+        # The operator's own numbers from /setup/ — MAX DAILY LOSS and MAX
+        # TOTAL EXPOSURE — measured across BOTH position books. Reported ahead
+        # of the per-config limits below because it is the answer to "why is
+        # nothing trading": a book-level halt stops every config at once, and
+        # an operator staring at one bot's heartbeat should read the reason
+        # that actually applies rather than that bot's own concurrency count.
+        #
+        # These are a SECOND ceiling, not a replacement for the per-config
+        # ones underneath. `halt_on_drawdown` governs this config's own
+        # drawdown limit and deliberately does not reach here — turning off one
+        # bot's drawdown halt is not consent to trade through the book's.
+        from portfolio.risk_gate import preflight
+        book = preflight(self.user)
+        if not book["ok"]:
+            return (False, book["reason"])
 
         # CLOSE_PENDING still holds capital/exposure at the broker.
         open_count = AssetBotTrade.objects.filter(
@@ -688,6 +1010,33 @@ class AssetBot(ABC):
         if not stage["force_paper"]:
             qty *= float(stage["live_size_factor"])
 
+        # CORRELATION SIZE TAPER — the book's max_correlation_threshold from
+        # /setup/. It sits with the other multipliers because that is what it
+        # is: a second position 0.9-correlated to one already on is most of
+        # the same bet, and the honest response is to take less of it rather
+        # than to pretend the first position is not there. Unmeasured
+        # correlation returns 1.0 and says why; a size is never scaled on an
+        # absent measurement.
+        #
+        # A failed read costs the taper, not the trade. It is a 90-day
+        # correlation over PriceData — the most fragile input on this path —
+        # and refusing an entry the rest of the platform has approved because
+        # a price history is thin would be the taper acting as a gate, which
+        # is exactly what it is not.
+        try:
+            from instruments.models import Instrument
+            from portfolio.risk_gate import correlation_state
+            corr = correlation_state(
+                self.user, Instrument.objects.filter(symbol=symbol).first())
+        except Exception as e:  # noqa: BLE001 — see above
+            logger.warning("[%s_bot] correlation taper unavailable for %s: "
+                           "%s — sizing untapered", self.asset_class, symbol, e)
+            corr = {"scale": 1.0, "reason": ""}
+        if corr["scale"] < 1.0:
+            qty *= float(corr["scale"])
+            logger.info("[%s_bot] %s correlation taper: %s",
+                        self.asset_class, symbol, corr["reason"])
+
         qty = self._round_qty(qty, price)
         if qty <= 0:
             logger.info("[%s_bot] %s sized to zero (risk budget %.2f%% of "
@@ -698,6 +1047,34 @@ class AssetBot(ABC):
                 symbol, skips.SIZED_TO_ZERO,
                 f"risk budget {sizing['risk_fraction'] * 100:.2f}% of "
                 f"{self.cfg.capital} is below one tradeable unit")
+
+        # MAX SINGLE POSITION from /setup/, judged on the size actually about
+        # to be sent — after every multiplier and after rounding, because a
+        # cap that bites on the pre-multiplier number is a cap on a quantity
+        # nobody trades. A refusal rather than a clamp: silently shrinking to
+        # the ceiling would change the risk this entry was sized for, and the
+        # bot cannot ask the operator which of the two they meant.
+        #
+        # Left unguarded on purpose, unlike `preflight` above, which fails
+        # open. An exception here reaches tick()'s handler and costs ONE
+        # symbol one pass; preflight's would cost the whole fleet every pass,
+        # and that difference in blast radius is the whole reason the two
+        # gates answer a failed read differently.
+        from portfolio.risk_gate import limits_book, single_position_state
+            # The pool this position is sized FROM is the pool it must fit
+            # inside. `AssetBotConfig.capital` is what `_size_position`
+            # divided the risk budget by; the portfolio book is a separate
+            # number no bot consults, so measuring against it refused every
+            # entry on any account whose pool exceeds its recorded book.
+        cap = single_position_state(
+            limits_book(), asset_class=self.asset_class,
+            notional=qty * price * self._value_per_unit(symbol),
+            capital_base=float(self.cfg.capital or 0),
+            base_label="bot pool")
+        if not cap["ok"]:
+            logger.info("[%s_bot] %s refused by the book's single-position "
+                        "limit: %s", self.asset_class, symbol, cap["reason"])
+            return self._skip(symbol, skips.GATE_BLOCKED, cap["reason"])
 
         # Shadow mode: everything is computed, nothing is submitted and no
         # row is written. The way to validate a change against live data
@@ -909,9 +1286,12 @@ class AssetBot(ABC):
     def _value_per_unit(self, symbol: str) -> float:
         """Account-currency loss per point of price, per unit held.
 
-        1.0 for anything quoted directly in the account currency. OptionsBot
-        overrides it with the contract multiplier, because its entry and stop
-        are premium-per-share while its P&L is premium x shares.
+        1.0 for anything quoted directly in the account currency; ForexBot is
+        the one override, converting the quote currency. OptionsBot is not:
+        its entry and stop are premium-per-share while its P&L is premium x
+        shares, but the multiplier that bridges the two belongs to the
+        CONTRACT and cannot be answered from a symbol, so its own scan_symbol
+        passes `contract.multiplier` into sizing directly.
         """
         return 1.0
 
@@ -1010,21 +1390,44 @@ class AssetBot(ABC):
         extras = getattr(self.cfg, "extras", None) or {}
         if extras.get("use_weighted_consensus", True):
             from bot_program.asset_engine.aggregation import weighted_consensus
+            from bot_program.bot_grading import VENUE_LIVE, VENUE_PAPER
             # Default threshold mirrors what the headcount rule demanded
             # (min_signals_for_entry × entry_score_min), so weighting is a
             # strict generalisation of the config rather than a new bar.
             default_threshold = (self.cfg.min_signals_for_entry
                                  * self.cfg.entry_score_min)
+            # The venue this config trades on: `mode` is what `_enter` writes
+            # into `paper` on the resulting AssetBotTrade, so it is the venue
+            # the ledger will file this entry under and therefore the venue
+            # whose closes may vouch for the rule. It has to be passed —
+            # `rule_weight` SKIPS the bot-trade lane entirely when the venue is
+            # unstated, so omitting it here left weighted consensus running on
+            # signal evidence alone, including on the paper-only and live-only
+            # configs where the bot-trade lane was always right.
+            # A paper-stage rule can still be forced onto the paper venue
+            # after the vote, so a live config's entry occasionally lands on
+            # paper having been weighed with live evidence. That error only
+            # runs one way — toward the venue where the rule's record is
+            # empty and its weight neutral — and under-using evidence is the
+            # side to be wrong on when the other side spends money.
+            venue = VENUE_PAPER if self.cfg.mode == "paper" else VENUE_LIVE
+            # The ICT lane joins the vote here and only here. The headcount
+            # path below counts heads, and a fractional vote has no meaning in
+            # a headcount — it would either be a whole confirmation it has not
+            # earned or nothing at all.
+            bullish, bearish = self._with_smc_vote(symbol, bullish, bearish)
             verdict = weighted_consensus(
                 bullish, bearish, asset_class=self.asset_class,
                 min_net_weight=float(
                     extras.get("min_net_weight", default_threshold)),
-                min_signals=self.cfg.min_signals_for_entry)
+                min_signals=self.cfg.min_signals_for_entry,
+                venue=venue)
             if verdict["direction"] == "HOLD":
                 return BotDecision("HOLD", 0, [verdict["detail"]])
             side = bullish if verdict["direction"] == "BUY" else bearish
             return BotDecision(
-                verdict["direction"], verdict["score"],
+                verdict["direction"],
+                self._conviction_score(verdict, side, venue=venue),
                 reasons=([verdict["detail"]]
                           + [f"{s.rule_name}: {s.title}" for s in side[:3]]),
                 rule_name=verdict["rule_name"] or "asset_bot_weighted_consensus",
@@ -1052,13 +1455,139 @@ class AssetBot(ABC):
         return BotDecision("HOLD", 0,
                            [f"{len(bullish)}↑ {len(bearish)}↓ — no consensus"])
 
+    # ── the ICT/SMC lane's vote ──────────────────────────────────────────
+
+    def _with_smc_vote(self, symbol: str, bullish: list, bearish: list):
+        """Return (bullish, bearish) with the SMC composite added as one vote.
+
+        `signals.bot_bridge.smc_score_for_symbol` returns a directional score
+        in [-1, +1], weighted by each setup's own measured hit rate. Its only
+        consumer until now was `bot_program/engine/strategy.py`, on the legacy
+        crypto path that no beat runs — so the ICT setups have produced
+        evidence for months without a single one of them ever reaching a
+        position. This is the wire.
+
+        Two rules keep an unproven lane from behaving like a proven one:
+
+          size    The vote enters at SMC_VOTE_WEIGHT x its conviction, which
+                  caps it at the weight this platform gives a rule it has
+                  measured as its worst. See that constant for the arithmetic.
+
+          quorum  It is added ONLY to a side that already carries
+                  `min_signals_for_entry` distinct rule votes. So it can
+                  neither satisfy the headcount nor be the lone voter on a
+                  winning side: it confirms a case other rules already made,
+                  and when it points somewhere nobody else does it is dropped
+                  rather than allowed to veto. An unproven lane that could
+                  block trades would be exactly as unearned as one that could
+                  open them, and this way the asymmetry runs the safe way —
+                  the lane's first live positions are ones the rest of the
+                  book already wanted.
+
+          score   It gets no seat in the conviction recorded on the trade.
+                  A vote capped below every rule it joins can only drag an
+                  average of them, so confirming a setup would have made the
+                  setup look weaker. See `_conviction_score`.
+
+        A broken bridge degrades to no vote, loudly. `smc_score_for_symbol`
+        RAISES on a missing `get_hit_rate` on purpose — a lane that cannot
+        weight its own evidence is broken, not degrading — but letting that
+        propagate here would take every entry decision on the platform down
+        with one lane. The ERROR line with the traceback is what keeps it from
+        being the silent zero it spent its life as.
+        """
+        try:
+            from signals.bot_bridge import smc_score_for_symbol
+            score, _reasons = smc_score_for_symbol(symbol)
+        except Exception as e:  # noqa: BLE001 — see the docstring
+            logger.error("[%s_bot] SMC lane unavailable for %s: %s — voting "
+                         "without it", self.asset_class, symbol, e,
+                         exc_info=True)
+            return bullish, bearish
+
+        score = float(score or 0.0)
+        if score == 0.0:
+            # No recent SMC cards, or they cancelled out. Both are "this lane
+            # has nothing to say", which is not a vote for HOLD.
+            return bullish, bearish
+
+        side = bullish if score > 0 else bearish
+        quorum = max(1, int(self.cfg.min_signals_for_entry or 1))
+        if len({getattr(s, "rule_name", "") for s in side}) < quorum:
+            logger.debug("[%s_bot] SMC %+.2f on %s dropped — that side has "
+                         "fewer than %d rule votes of its own",
+                         self.asset_class, score, symbol, quorum)
+            return bullish, bearish
+
+        vote = SmcVote(
+            score=round(abs(score) * SMC_VOTE_WEIGHT, 4),
+            title=(f"ICT/SMC composite {score:+.2f} "
+                   f"(entering at {SMC_VOTE_WEIGHT:.2f} weight — this lane "
+                   f"has no closed trades yet)"),
+        )
+        if score > 0:
+            return bullish + [vote], bearish
+        return bullish, bearish + [vote]
+
+    def _conviction_score(self, verdict: dict, side: list, *,
+                          venue: str) -> float:
+        """The winning side's conviction, with the SMC seat taken back out.
+
+        `weighted_consensus` scores a side as its total evidence divided by
+        the number of votes in it, so every member pulls that average toward
+        its own contribution. The SMC vote's is capped at SMC_VOTE_WEIGHT
+        while every real vote beside it had to clear `entry_score_min` first,
+        which puts the lane structurally BELOW the average of the rules it is
+        there to confirm — arming it wrote a WORSE composite_score onto
+        exactly the entries it agreed with. A confirmation that makes the
+        ledger read an entry as less convinced is not a confirmation.
+
+        So: the vote keeps its seat in the NET weight, which is the gate it
+        exists to tip and the only place a quarter-weight opinion belongs, and
+        gives up its seat in the average. The number recorded on the trade is
+        then the one the real rules earned — identical to what it would have
+        been with the lane switched off, in either direction.
+
+        The re-weigh asks the same function the same question with the gate
+        opened rather than re-deriving its arithmetic here, where the two
+        would drift apart. It costs one more pass over the evidence, and only
+        on an entry the lane actually joined.
+        """
+        # By identity, not by rule name. The name is a real one — the signal
+        # engine loads an SMC composite rule of its own — and a Signal row
+        # that happened to carry it is a genuine vote that has earned its seat
+        # here. Only the object this file built is the one being taken out.
+        real = [s for s in side if not isinstance(s, SmcVote)]
+        if not real or len(real) == len(side):
+            return verdict["score"]
+
+        from bot_program.asset_engine.aggregation import weighted_consensus
+        # The winning side alone, against an opened gate. Nothing is being
+        # decided a second time here — the direction is already settled — so
+        # the empty opposing side and the 0.0 bar are simply how that function
+        # is asked for a side's average and answers with a number instead of
+        # a HOLD.
+        buy = verdict["direction"] == "BUY"
+        rules_only = weighted_consensus(
+            real if buy else [], [] if buy else real,
+            asset_class=self.asset_class, min_net_weight=0.0, min_signals=1,
+            venue=venue)
+        return rules_only["score"]
+
     # ── Phase-17: optional bot-trade track-record feedback ──────────────
 
     def _apply_track_record(self, raw_score: float, rule_name: str) -> float:
         """If the config opts in via extras['use_bot_track_record']=True,
         multiply the consensus score by the rule's bot-trade confidence
-        multiplier on this asset class. Returns the (possibly unchanged)
-        score, capped at 1.0 so high-confidence rules don't exceed 100%.
+        multiplier on this asset class AND on the venue this config trades.
+        Returns the (possibly unchanged) score, capped at 1.0 so
+        high-confidence rules don't exceed 100%.
+
+        This is the headcount path's half of the venue split — reached when a
+        config sets use_weighted_consensus False and use_bot_track_record
+        True. It asked for the pooled record, so paper fills went on scaling a
+        live config's entry score here long after the weighted path stopped
+        letting them.
         """
         extras = getattr(self.cfg, "extras", None) or {}
         if not extras.get("use_bot_track_record"):
@@ -1066,9 +1595,22 @@ class AssetBot(ABC):
         if not rule_name:
             return raw_score
         try:
-            from bot_program.bot_grading import bot_trade_track_record
-            mult = bot_trade_track_record(rule_name, self.asset_class)
-        except Exception:
+            from bot_program.bot_grading import (
+                VENUE_LIVE, VENUE_PAPER, bot_trade_track_record,
+            )
+            # Same rule as the weighted path: the venue follows the config's
+            # mode, because that is what decides `paper` on the row this
+            # decision will write.
+            venue = VENUE_PAPER if self.cfg.mode == "paper" else VENUE_LIVE
+            mult = bot_trade_track_record(rule_name, self.asset_class,
+                                          venue=venue)
+        except Exception as e:
+            # Unscaled is the safe direction — the multiplier only ever
+            # shrinks or grows a score that already cleared the entry bar —
+            # but a ledger that cannot answer is worth a line, or the feedback
+            # loop can be dead for weeks without anyone noticing.
+            logger.warning("[%s_bot] track record lookup failed for %s: %s — "
+                           "scoring unweighted", self.asset_class, rule_name, e)
             return raw_score
         return min(1.0, raw_score * mult)
 

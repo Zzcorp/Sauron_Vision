@@ -285,14 +285,23 @@ class DrawdownThrottleTests(TestCase):
 
 class RiskGateTests(TestCase):
     def test_oversize_intended_capped_to_position_max(self):
+        """The ceiling is derived, not typed.
+
+        This asserted a literal 1,000 — 10% of a 10,000 book — and broke the
+        day the shipped `max_single_position_pct` moved to agree with the
+        sizing engine. What the gate promises is "cap to the configured
+        percentage", so that is what the test states; the number follows the
+        field.
+        """
         from portfolio.risk_gate import evaluate_proposed_trade
-        pf = _portfolio()  # 10000 capital, max_single_position_pct = 10 by default
+        pf = _portfolio()
         cand = _instrument("GATE_CAND")
-        # Intended $5,000 = 50% of book → cap to 10% = $1,000
-        result = evaluate_proposed_trade(pf, cand, intended_size_usd=5000)
+        ceiling = float(pf.current_value) * float(pf.max_single_position_pct) / 100.0
+        intended = ceiling * 5
+        result = evaluate_proposed_trade(pf, cand, intended_size_usd=intended)
         self.assertTrue(result["checks"]["position_cap"]["over_cap"])
         # approved = capped × scale (scale=1 with no positions/correlation)
-        self.assertLessEqual(result["approved_size_usd"], 1000.0)
+        self.assertLessEqual(result["approved_size_usd"], ceiling)
 
     def test_decay_halves_size_when_rule_decaying(self):
         """Bridge to Phase 1: a decaying rule scales the gate down."""

@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="svEyeTitle" fill="none" stroke-linecap="square" stroke-linejoin="miter">
+  <title id="svEyeTitle">Sauron Vision</title>
+  <!--
+    THE MARK. One vector, rasterized by `manage.py build_icons` into every
+    icon the platform serves, and inlined at 24px in the sidebar brand.
+
+    It is the wall's globe-eye reduced, not a new drawing: the lens keeps
+    the homepage aspect (420x256 = 1.64 against the wall's rx390/ry240 =
+    1.625), it spans the frame tip to tip exactly as the wall's brow and
+    cheek run the full width of their 800 box, and the hexagon is the
+    existing Sauron sigil's frame rather than an invented container.
+
+    THE RULE THAT GOVERNS EVERY EDIT HERE: value steps, never stacked
+    hairlines. ground -> sclera -> lid band -> iris -> pupil, each a
+    distinct FILL. The homepage can afford thirteen overlapping curves at
+    stroke-width 3.5 because it renders at 90vmin; at 16 CSS pixels every
+    one of those is a quarter of a pixel and averages to green haze. The
+    lid band here is 34 units against a 420-unit eye — seventeen times
+    heavier in relative terms than the wall's, and that weight is the whole
+    reason the mark survives a browser tab. Rival candidates that kept the
+    wall's delicacy were measured into mud at 16px.
+
+    So: adding a hairline to this file is not a small change, it is the
+    change that breaks it.
+  -->
+
+  <!-- 1. GROUND. Opaque, and the silhouette itself — the canvas outside
+       the hexagon stays transparent, so this is a badge on white and
+       disappears into the app on dark, leaving the eye apparently
+       floating. That asymmetry is deliberate, not an oversight. -->
+  <polygon points="256,26 472,142 472,370 256,486 40,370 40,142" fill="#060e0a"/>
+
+  <!-- 2. The wall's brow and cheek, arcing outside the lens. Large-size
+       detail; at 16px they average into the ground and cost nothing. -->
+  <g stroke="#00e868" stroke-width="8" opacity="0.4">
+    <path d="M 58,256 Q 256,-104 454,256"/>
+    <path d="M 58,256 Q 256,616 454,256"/>
+  </g>
+
+  <!-- 3. SCLERA. The dark gap between the lid band and the iris is what
+       stops the mark collapsing into a green blob — 45 units, 1.4px at
+       favicon size. It is load-bearing. -->
+  <path d="M 96,256 Q 256,34 416,256 Q 256,478 96,256 Z" fill="#0a1a14"/>
+
+  <!-- 4. THE LID BAND. The one element that must hold at 16px, and it
+       does: an unbroken closed vesica of solid accent, 34 units at the
+       apex. Drawn as evenodd between two vesicas rather than as a stroke,
+       so its thickness is geometry and cannot be thinned by a renderer.
+       The tips stop at x=58, clear of the frame's inner rim at 46 — the
+       original sat exactly tangent to it, and exact tangency reads as an
+       accident rather than a decision. -->
+  <path fill="#00e868" fill-rule="evenodd" d="M 58,256 Q 256,-34 454,256 Q 256,546 58,256 Z M 96,256 Q 256,34 416,256 Q 256,478 96,256 Z"/>
+
+  <!-- 5. IRIS, with the globe inside it. These three ellipses are the
+       wall's meridians and parallels, knocked through the disc in the
+       ground colour rather than drawn over it in accent — subtractive, so
+       they can never add a bright hairline that muds the centre. -->
+  <circle cx="256" cy="256" r="66" fill="#00e868"/>
+  <g stroke="#061109">
+    <ellipse cx="256" cy="256" rx="19" ry="53" stroke-width="4.5" opacity="0.42"/>
+    <ellipse cx="256" cy="256" rx="38" ry="53" stroke-width="3.5" opacity="0.26"/>
+    <ellipse cx="256" cy="256" rx="53" ry="19" stroke-width="4" opacity="0.38"/>
+  </g>
+
+  <!-- 6. PUPIL — a HOLE, not a dot. Knocking the ground colour through
+       the iris is what makes the disc read as an eye; a dark dot painted
+       on top reads as a target. -->
+  <circle cx="256" cy="256" r="27" fill="#030806"/>
+  <!-- The catchlight: the only non-green pixel in the mark, and the first
+       stop of the homepage's own cornea gradient. Off-centre because a
+       centred highlight reads as a button. Free at small sizes — 0.2px. -->
+  <circle cx="247" cy="247" r="7" fill="#d8ffe9" opacity="0.9"/>
+
+  <!-- 7. Frame rim, drawn LAST so it trims anything reaching the edge.
+       Dark rather than lit: a green bezel would be the brightest thing on
+       a white share card and pull the eye off the eye. -->
+  <polygon points="256,26 472,142 472,370 256,486 40,370 40,142" fill="none" stroke="#1a4030" stroke-width="12"/>
+
+  <!-- 8. Cardinal ticks. linecap butt, not the inherited square: square
+       extended them to y=29.5 and fused them into the top vertex, turning
+       two deliberate marks into a thickened corner. -->
+  <g stroke="#00e868" stroke-width="9" opacity="0.45" stroke-linecap="butt">
+    <line x1="256" y1="40" x2="256" y2="64"/>
+    <line x1="256" y1="472" x2="256" y2="448"/>
+  </g>
+</svg>

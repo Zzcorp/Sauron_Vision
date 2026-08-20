@@ -180,9 +180,16 @@
             0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.7; }
             50%      { transform: translate(-50%, -50%) scale(1.25); opacity: 1; }
         }
+        /* The mark is inline SVG now, not an <img> of a flat green eye.
+           `color` is what it draws with — every stroke and the iris fill
+           inherit it through currentColor — so the accent follows the
+           theme instead of being baked into a raster that stayed the same
+           green when the sidebar went light. object-fit is kept for the
+           transition period; it is inert on an svg element. */
         .sidebar-brand .brand-eye {
             position: relative; z-index: 1;
             width: 36px; height: 36px; flex-shrink: 0;
+            color: var(--accent);
             object-fit: contain;
             filter: drop-shadow(0 0 8px rgba(0,232,104,0.55)) drop-shadow(0 0 16px rgba(0,232,104,0.25));
             animation: brandEyeFloat 6s ease-in-out infinite;
@@ -961,6 +968,11 @@
             border: 1px solid var(--border-glow);
             border-radius: var(--radius-lg); padding: 14px; z-index: 1000;
             box-shadow: 0 12px 40px rgba(0,0,0,0.7); font-size: 11px;
+            /* Same as .dh-pop: reachable content rather than content that
+               runs off the bottom, and a scroll that stops at the card's
+               own ends instead of moving the page it is anchored to. */
+            max-height: calc(100vh - 24px); overflow-y: auto;
+            overscroll-behavior: contain;
             white-space: normal; pointer-events: none;
         }
         .ticker-item .ticker-popup { /* shown via JS portal */ }
@@ -1036,9 +1048,22 @@
             font-family: var(--font-display); line-height: 1.1;
         }
         .ip-cat .ip-sub { font-size: 9px; color: var(--text-secondary); }
-        .ip-cat .ip-count.red { color: var(--accent-red); }
+        /* The tone class sits on .ip-count on some cells and on a span
+           INSIDE it on the live ones — the refresher swaps innerHTML, not
+           attributes, so a cell that repaints has to carry its colour on a
+           child. Both are matched, because matching only the first is what
+           turned the VOLATILITY cell's >=60% alarm state back into the
+           default green: red and calm rendered identically, in the colour
+           this platform uses for "good".
+
+           Gold is deliberately NOT given an inner selector here: the
+           `.ip-cat .gold` rule further down already catches the child, and
+           it resolves to --accent-gold-ink, the gold that survives on white.
+           A more specific rule at this line would win and put the glow token
+           back on the light theme, undoing that contrast fix. */
+        .ip-cat .ip-count.red,  .ip-cat .ip-count .red  { color: var(--accent-red); }
         .ip-cat .ip-count.gold { color: var(--accent-gold); }
-        .ip-cat .ip-count.blue { color: var(--accent-blue); }
+        .ip-cat .ip-count.blue, .ip-cat .ip-count .blue { color: var(--accent-blue); }
         .ip-dropdown {
             display: none; position: fixed;
             min-width: 320px; max-width: 360px; max-height: 380px; overflow-y: auto;
@@ -1069,6 +1094,44 @@
         .ip-cat-link:hover { background: var(--bg-card-hover); }
         .ip-cat-ai { cursor: pointer; }
         .ip-cat-ai:hover .ip-count { color: var(--accent); }
+
+        /* ── Headband truth: direction, bot state, live chip ──────────────
+           The band's rows and cells have carried .up / .down since the
+           dropdowns were first given content, and NOTHING in any stylesheet
+           matched them there — a +2.4R and a −2.4R printed in the same
+           colour, which is the one distinction those rows exist to make.
+           The selectors below are deliberately specific enough to beat
+           `.ip-dd-cell .dv`, which paints every value accent-green. */
+        .ip-dropdown .dv.up, .ip-dropdown .ipr-r.up,
+        .ip-dropdown .ipr-pct.up, .ip-cat .up { color: var(--accent); }
+        .ip-dropdown .dv.down, .ip-dropdown .ipr-r.down,
+        .ip-dropdown .ipr-pct.down, .ip-cat .down { color: var(--accent-red); }
+        /* Gold that PRINTS a value takes the ink token: the glow token is
+           tuned against near-black and fails contrast on the light theme.
+           In dark mode the ink token resolves to the glow, so nothing moves. */
+        .ip-cat .ip-count.gold, .ip-dropdown .dv.gold,
+        .ip-cat .gold, .ip-dropdown .gold { color: var(--accent-gold-ink); }
+
+        /* The BOT cell's state word. Colour lives on this inner element and
+           not on the .ip-count region: the live refresh swaps innerHTML and
+           never attributes, so a class on the region would freeze at the
+           colour of the first render while the word underneath it changed. */
+        .hb-state { font: inherit; letter-spacing: .5px; }
+        .hb-state--red { color: var(--accent-red); }
+        .hb-state--gold { color: var(--accent-gold-ink); }
+        .hb-state--muted { color: var(--text-muted); }
+        .hb-state--ok { color: var(--accent); }
+        /* A halted automation is the one state worth catching from across
+           the room, and it is the only thing in this band that moves.
+           Reduced motion turns it into a plain colour, never into silence. */
+        .ip-cat .hb-state--red { animation: hbHaltPulse 2.4s ease-in-out infinite; }
+        @keyframes hbHaltPulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+        @media (prefers-reduced-motion: reduce) {
+            .ip-cat .hb-state--red { animation: none; }
+        }
+        /* The live/offline chip the refresher paints, sized for a dropdown
+           header rather than for a card title. */
+        .ip-dd-head .sv-live-chip { float: right; font-size: 8px; letter-spacing: 1px; }
 
         /* ── Notification Bell ───────────────────── */
         .notif-bell {
@@ -1171,6 +1234,18 @@
         .notif-item.ni-system .ni-kind    { color: var(--text-muted); }
         .notif-item.ni-portfolio.unread   { border-left-color: var(--accent-gold); }
         .notif-item.ni-bot.unread         { border-left-color: var(--accent-gold); }
+        /* Arrived while the panel was already on screen. The rows refresh
+           in place now, so without this a new alert would materialise in
+           the middle of a list the eye has already read, indistinguishable
+           from the ones that were there a second ago. */
+        @keyframes niArrive {
+            from { opacity: 0; transform: translateY(-6px); }
+            to   { opacity: 1; transform: none; }
+        }
+        .notif-item.ni-new { animation: niArrive .28s ease both; }
+        @media (prefers-reduced-motion: reduce) {
+            .notif-item.ni-new { animation: none; }
+        }
         .notif-foot {
             display: block; padding: 10px 16px; text-align: center;
             font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px;
@@ -1343,6 +1418,12 @@
             opacity: 0; visibility: hidden;
             transform: translateX(8px);
             transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s;
+            /* The JS caps this card's height between the fixed bands and
+               turns on overflow, so it genuinely scrolls. Containment keeps
+               that scroll off the page underneath: the card is anchored to a
+               rail item in viewport coordinates and the page moving is what
+               makes it point at the wrong signal. */
+            overscroll-behavior: contain;
             z-index: 2147483000; pointer-events: none;
         }
         .sr-popup.show {
@@ -1892,6 +1973,14 @@
             background: var(--bg-card); border: 1px solid var(--border-glow);
             border-radius: var(--radius-lg); padding: 14px 16px; z-index: 1000;
             box-shadow: 0 12px 40px rgba(0,0,0,.7); white-space: normal;
+            /* A popup taller than the gap between the fixed bands used to
+               run off the bottom of the screen with no way to reach the rest
+               of it: the portal helper clamps its TOP to the viewport but
+               never capped its height. Now it scrolls, and the overscroll
+               containment keeps that scroll from chaining to the page the
+               popup is anchored against. */
+            max-height: calc(100vh - 24px); overflow-y: auto;
+            overscroll-behavior: contain;
             pointer-events: none;
         }
         .dh-item .dh-pop { /* shown via JS portal */ }
@@ -1937,6 +2026,12 @@
             padding: 14px 16px;
             box-shadow: var(--pop-shadow, 0 12px 40px rgba(0,0,0,.7));
             white-space: normal; overflow-y: auto;
+            /* Scrolling PAST the end of the card must not chain to the page.
+               The card is anchored in viewport coordinates to a row that
+               scrolls away underneath it, so a page scroll makes it stale and
+               the engine correctly closes it — one flick too many while
+               reading the card should not be what triggers that. */
+            overscroll-behavior: contain;
             pointer-events: auto;
             z-index: var(--z-hovercard, 1200);
             animation: dhPop .18s ease;
@@ -2063,6 +2158,48 @@
         .pos-pop-money-cap {
             font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase;
             color: var(--text-muted); margin-left: auto;
+            /* It now carries what the percentage is a percentage OF, which
+               is longer than "unrealised" and must wrap under the numbers
+               rather than push the card wider. */
+            text-align: right; min-width: 0;
+        }
+
+        /* The capital ledger: committed, at the mark, 1R, the modelled exit
+           cost, and what the confirm dialog will therefore say. Three
+           columns — name, money, provenance — and the money column is the
+           one that must never wrap or shrink. */
+        .pos-pop-ledger {
+            display: flex; flex-direction: column; gap: 2px;
+            padding: 8px 0; margin-bottom: 2px;
+            border-top: 1px dashed var(--border);
+            font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+        }
+        .pos-pop-ledger-cap {
+            font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase;
+            color: var(--text-muted); margin-bottom: 4px;
+        }
+        .pos-pop-mrow {
+            display: flex; align-items: baseline; gap: 8px;
+            padding: 2px 0;
+        }
+        .pos-pop-mrow .ml {
+            flex: 0 0 5.6rem; font-size: 9px; letter-spacing: .08em;
+            text-transform: uppercase; color: var(--text-muted);
+        }
+        .pos-pop-mrow .mv {
+            flex: 1 1 auto; min-width: 0; text-align: right;
+            font-size: 12px; font-weight: 600; color: var(--text-primary);
+            overflow-wrap: anywhere;
+        }
+        .pos-pop-mrow .mv.up { color: var(--accent); }
+        .pos-pop-mrow .mv.down { color: var(--accent-red); }
+        /* The provenance of the number beside it — "qty × entry", "broker-set
+           — not recorded", "what the close dialog says". It is the reason
+           this block can be trusted, so it is always present and never the
+           thing that sets the card's width. */
+        .pos-pop-mrow .mn {
+            flex: 0 1 auto; min-width: 0; font-size: 9px; text-align: right;
+            color: var(--text-muted); overflow-wrap: anywhere;
         }
 
         /* The price ladder. Three columns, but the middle one is the only
@@ -2195,6 +2332,8 @@
             .pos-pop-rung .rn { flex-basis: 100%; text-align: left; }
             .pos-pop-kv { flex-wrap: wrap; }
             .pos-pop-kv .v { text-align: left; }
+            .pos-pop-mrow { flex-wrap: wrap; }
+            .pos-pop-mrow .mn { flex-basis: 100%; text-align: left; }
         }
         @media (prefers-reduced-motion: reduce) {
             .pos-pop { animation: none; }
@@ -2864,6 +3003,18 @@
         .oc-mini-side.bullish, .oc-mini-side.up,   .oc-mini-side.BUY  { color: var(--accent); }
         .oc-mini-side.bearish, .oc-mini-side.down, .oc-mini-side.SELL { color: var(--accent-red); }
         .oc-mini-meta { color: var(--text-muted); font-size: 10px; }
+        /* The percentage that rides beside a money figure. A gain of 250 is a
+           different trade on a 1,000 position than on a 100,000 one, and the
+           currency number alone cannot say which — so wherever this platform
+           prints what a position MADE, it prints what that was as a share of
+           what was put in. Dimmer than the money on purpose: it qualifies the
+           number beside it rather than competing with it, and it inherits the
+           row's up/down colour rather than setting one of its own. */
+        .pnl-pct {
+            font-size: 0.85em; opacity: 0.72; margin-left: 2px;
+            font-family: var(--font-mono);
+        }
+        .pnl-pct.sv-unknown { opacity: 0.5; }
         .oc-mini-pnl  { font-weight: 700; }
         .oc-mini-pnl.up   { color: var(--accent); }
         .oc-mini-pnl.down { color: var(--accent-red); }
@@ -4590,6 +4741,14 @@ button:focus-visible,
     font-size: 12.5px;
     animation: svBannerIn .26s cubic-bezier(.2, .8, .2, 1);
 }
+/* The whole card is the target, not the six characters reading "Open ▸".
+   A banner that appears in front of the operator saying something happened
+   and then does nothing when clicked reads as a dead notification — which
+   is exactly what it was. The buttons inside keep their own cursors. */
+.sv-banner--clickable { cursor: pointer; }
+.sv-banner--clickable:hover {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border-glow));
+}
 /* A hairline of the kind's own colour across the top, so a stack of three
    reads as three states before a single word is parsed. */
 .sv-banner::before {
@@ -5573,25 +5732,39 @@ body.light-mode {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   TAKE TRADE — the size control (sz-)
+   TAKE TRADE — the pre-trade control panel (sz-)
    ───────────────────────────────────────────────────────────────────────
-   Rides sv-overlay.css's .sv-dialog chrome; only the sizing block is new.
-   The design rule it follows: the pre-filled risk-derived size IS the
-   answer, so doing nothing is correct and fast. The override is one
-   decision expressed two ways (units and cash, kept in sync), the
-   consequence — R at stake, share of the pool — is on screen before the
-   click, and an impossible number is refused with its arithmetic instead
-   of being quietly clamped to something nobody asked for. */
-.sz-size {
+   Rides sv-overlay.css's .sv-dialog chrome; only the control blocks are
+   new. The design rule the whole panel follows: the platform's pre-filled
+   answers — the risk-derived size, the planned stop and target, the
+   minimum-disturbance funding proposal — ARE the answer, so doing nothing
+   is correct and fast. Every control is an override of a filled field,
+   never an empty box demanding a number.
+
+   Three blocks, in the order the decision runs: what must be closed to
+   afford the trade, where it gets out, and how big it is. Each carries
+   its consequence live in a .sz-out line — freed capital and the
+   sufficiency verdict, reward:risk gross and net of costs, R at stake and
+   share of the pool — and an impossible value is refused with its
+   arithmetic instead of being quietly clamped to something nobody asked
+   for.
+
+   What is deliberately NOT here: a leverage input. Nothing in the
+   execution path multiplies a manual order, so leverage renders as a fact
+   row and a .sz-note, and size stays the only lever that exists. */
+.sz-block {
     margin: 14px 0 0; padding: 11px; border-radius: 6px;
     border: 1px solid var(--pop-border, var(--border));
     background: var(--bg-void);
 }
-body.light-mode .sz-size { background: var(--bg-secondary); }
-.sz-size legend {
+body.light-mode .sz-block { background: var(--bg-secondary); }
+.sz-block legend {
     padding: 0 6px; font-family: var(--font-mono); font-size: 9.5px;
     letter-spacing: 1.4px; text-transform: uppercase; color: var(--text-muted);
 }
+/* The funding block is the one that spends money before the trade even
+   opens, so it wears the danger edge the CLOSE + TAKE button does. */
+.sz-fund { border-color: color-mix(in srgb, var(--accent-red) 40%, var(--pop-border)); }
 .sz-fields { display: flex; gap: 10px; flex-wrap: wrap; }
 .sz-f { flex: 1 1 130px; min-width: 0; display: block; }
 .sz-f > span {
@@ -5607,7 +5780,11 @@ body.light-mode .sz-size { background: var(--bg-secondary); }
     border: 1px solid var(--border); border-radius: 4px;
 }
 .sz-f input:focus { outline: none; border-color: var(--accent); }
-.sz-dialog.is-over .sz-f input { border-color: var(--accent-red); }
+/* Scoped to the block that is actually wrong. An illegal stop used to
+   redden the size boxes too, which sent the operator to fix a number that
+   was never the problem. */
+.sz-dialog.is-over .sz-size .sz-f input { border-color: var(--accent-red); }
+.sz-dialog.is-lvl-over .sz-lv .sz-f input { border-color: var(--accent-red); }
 
 /* The pool meter. A percentage in text is a number to decode; a bar
    against a marked ceiling is a position to see. */
@@ -5640,6 +5817,47 @@ body.light-mode .sz-size { background: var(--bg-secondary); }
     flex-basis: 100%; margin-top: 4px; color: var(--accent-red);
     line-height: 1.5;
 }
+/* The other half of the funding verdict. A refusal that never has a
+   counterpart reads as the panel's permanent mood; "Covered." is what
+   tells the operator the selection they just made is enough. */
+.sz-ok { flex-basis: 100%; margin-top: 4px; color: var(--accent-green); }
+
+/* One funding candidate. Every open position in the pool is here, not
+   just the ones the server proposed — the proposal is pre-ticked, and
+   declining it is a tick away. */
+.sz-close {
+    display: flex; align-items: center; gap: 9px;
+    padding: 6px 4px; cursor: pointer;
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--text-secondary);
+}
+.sz-close + .sz-close { border-top: 1px solid var(--pop-border, var(--border)); }
+.sz-close:hover { color: var(--text-primary); }
+.sz-close input {
+    flex: none; width: 15px; height: 15px; margin: 0; cursor: pointer;
+    accent-color: var(--accent-red);
+}
+.sz-close-t { flex: 1 1 auto; min-width: 0; }
+.sz-close-t i {
+    display: block; font-style: normal; font-size: 9px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--text-muted);
+}
+.sz-close-f {
+    flex: none; font-variant-numeric: tabular-nums; color: var(--text-primary);
+}
+/* An unticked row is a position the operator is KEEPING — dim it so the
+   book they are about to liquidate is legible at a glance. */
+.sz-close:has(input:not(:checked)) { opacity: .5; }
+.sz-close:has(input:not(:checked)) .sz-close-f { text-decoration: line-through; }
+
+/* Prose inside a control block: the shortfall being funded, and the
+   leverage the platform cannot give. Both are the same kind of statement
+   — a fact the operator needs in order to read the inputs above it. */
+.sz-note {
+    margin: 0 0 8px; font-size: 10.5px; line-height: 1.55;
+    color: var(--text-muted);
+}
+.sz-size .sz-note { margin: 9px 0 0; }
 .sz-reset {
     margin-top: 9px; padding: 4px 8px; cursor: pointer;
     font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.2px;

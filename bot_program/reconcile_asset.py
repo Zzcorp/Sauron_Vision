@@ -151,6 +151,7 @@ def _close_as_orphan(trade) -> None:
     # Best-effort exit price: use the broker's ticker, or fall back to
     # the trade's entry price (zero P&L) so we at least clear the row.
     from .engine.broker_router import client_for_symbol
+    from .pending_closes import EXIT_FILL_SOURCE_KEY, EXIT_SOURCE_MARK
     from market_data.models import LiveQuote
 
     exit_price = trade.entry_price
@@ -211,6 +212,13 @@ def _close_as_orphan(trade) -> None:
     # large share of the track record would silently be estimates.
     meta = dict(trade.metadata or {})
     meta["exit_price_inferred"] = True
+    # A CLOSE_PENDING row arrives here carrying `exit_fill_source: broker`
+    # from the partial close that stranded it. The price booked just above is
+    # NOT that fill — it is a ticker read taken now, for the whole quantity —
+    # so leaving the old value would put two contradictory provenance flags on
+    # one closed row and let a reader treat an estimate as a measurement.
+    # `mark` is what the exit vocabulary calls a price we had to assume.
+    meta[EXIT_FILL_SOURCE_KEY] = EXIT_SOURCE_MARK
     trade.metadata = meta
     trade.save(update_fields=["exit_price", "pnl", "status", "closed_at",
                                 "reason", "metadata"])

@@ -12,7 +12,23 @@ class Portfolio(models.Model):
     currency = models.CharField(max_length=10, default="EUR")
 
     max_total_exposure_pct = models.FloatField(default=100)
-    max_single_position_pct = models.FloatField(default=10)
+    # 20, to agree with sizing.DEFAULT_MAX_NOTIONAL_FRACTION.
+    #
+    # These four fields enforced nothing until the risk gate was wired: their
+    # only reader was a legacy runner with no beat entry. The moment they
+    # became real gates, the shipped 10 refused the platform's OWN default
+    # trade — AssetBotConfig.capital and a fresh book are both seeded at
+    # 10,000, so a 10% single-position ceiling is 1,000 while the sizing
+    # engine allows 20% of the pool, 2,000. Two numbers describing different
+    # pools that happen to seed identically, contradicting each other.
+    #
+    # The sizing fraction is the tuned one — it carries per-class overrides
+    # and is what every position has actually been sized by. The 10 here was
+    # a form default that had never been tested against a real entry, so it
+    # moves. An operator who wants a tighter ceiling than the sizing engine
+    # still sets one; what they no longer get is a first trade refused by
+    # arithmetic between two of our own defaults.
+    max_single_position_pct = models.FloatField(default=20)
     max_sector_exposure_pct = models.FloatField(default=30)
     max_correlation_threshold = models.FloatField(default=0.7)
     max_daily_loss_pct = models.FloatField(default=3.0)

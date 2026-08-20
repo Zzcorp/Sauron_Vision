@@ -324,6 +324,14 @@ def _bot_health(user) -> list:
 # ── 24h aggregate P&L ────────────────────────────────────────────────────
 
 def _pnl_24h(user) -> dict:
+    """Realised P&L over the trailing day, in money AND as a share of the book.
+
+    A gain of 250 is a different day on a 1,000 book than on a 100,000 one,
+    and the currency figure alone cannot say which. `pct` is None — never 0 —
+    when the book value has never been set: a percentage of an unknown base
+    is not a small percentage, it is not a percentage, and the template
+    renders that as an em-dash rather than as a flat zero.
+    """
     since = timezone.now() - timedelta(hours=24)
     total = Decimal("0")
     by_class: dict = {}
@@ -340,4 +348,18 @@ def _pnl_24h(user) -> dict:
             total += v
     except Exception:
         pass
-    return {"total": total, "by_class": by_class}
+
+    base = None
+    try:
+        from portfolio.risk_gate import book_value, limits_book
+        base = book_value(limits_book())
+    except Exception as e:  # noqa: BLE001 — a missing book is not a 500
+        logger.debug("[eye] book value unavailable for the 24h pct: %s", e)
+
+    pct = (round(float(total) / base * 100, 2)
+           if base not in (None, 0) else None)
+    for info in by_class.values():
+        info["pct"] = (round(float(info["pnl"]) / base * 100, 2)
+                       if base not in (None, 0) else None)
+    return {"total": total, "by_class": by_class, "pct": pct,
+            "book_value": base}

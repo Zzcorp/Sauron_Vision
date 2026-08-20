@@ -57,6 +57,25 @@ def _evaluator_signature(conditions) -> frozenset[str]:
     return frozenset(kinds)
 
 
+#: The direction pairs that make two setups each other's mirror rather than
+#: each other's duplicate. Spelled as a set of frozensets so the test is
+#: order-free, and kept narrow: "neutral" opposes nothing, and an unknown or
+#: blank direction is NOT treated as opposition — an unrecognised value must
+#: fall through to the ordinary duplicate check rather than silently excuse a
+#: pair from the audit.
+OPPOSED_DIRECTIONS = frozenset({
+    frozenset({"bullish", "bearish"}),
+    frozenset({"long", "short"}),
+})
+
+
+def _opposed(a, b) -> bool:
+    """True when two setups point opposite ways — a mirror pair, not a clone."""
+    pair = frozenset({str(a or "").strip().lower(),
+                      str(b or "").strip().lower()})
+    return pair in OPPOSED_DIRECTIONS
+
+
 def _jaccard(a: frozenset, b: frozenset) -> float:
     """Standard Jaccard similarity on two sets. 0..1. Empty-vs-empty = 0."""
     if not a and not b:
@@ -199,6 +218,27 @@ def detect_evaluator_signature_overlap(*,
     seen_pairs: set[tuple[str, str]] = set()
     for i, (sa, sig_a) in enumerate(sigs):
         for sb, sig_b in sigs[i + 1:]:
+            # A MIRROR PAIR IS NOT A DUPLICATE.
+            #
+            # The signature is the set of evaluator KINDS and discards every
+            # param, `direction` included — so a long setup and its short
+            # twin, which by construction run the same evaluators pointed the
+            # other way, score a perfect 1.0. advanced_smc_long and
+            # advanced_smc_short did exactly that, and the strategist repeated
+            # it to the operator eleven times in one day: that their arsenal
+            # was narrower than the rule count suggested and that the pair
+            # "will fail together".
+            #
+            # A long and a short are the one pair that cannot fail together.
+            # Telling an operator to merge them would delete half their book's
+            # ability to express a direction — advice that is not merely
+            # useless but backwards, which is worse than silence.
+            #
+            # Two setups pointing the SAME way with the same evaluators are
+            # still the diversification illusion this detector exists to find;
+            # only the opposed case is excused.
+            if _opposed(sa.get("direction"), sb.get("direction")):
+                continue
             sim = _jaccard(sig_a, sig_b)
             if sim < threshold:
                 continue

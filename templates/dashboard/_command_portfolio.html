@@ -76,7 +76,7 @@
                     <tr>
                         <td><strong>{{ p.instrument.symbol }}</strong></td>
                         <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
-                        <td class="up">+{{ p.unrealized_pnl|floatformat:2 }}</td>
+                        <td class="up">+{{ p.unrealized_pnl|floatformat:2 }}{% if p.unrealized_pnl_pct is not None %} <span class="pnl-pct">({% if p.unrealized_pnl_pct > 0 %}+{% endif %}{{ p.unrealized_pnl_pct|floatformat:2 }}%)</span>{% else %} <span class="pnl-pct sv-unknown">(&mdash;)</span>{% endif %}</td>
                     </tr>
                 {% empty %}
                     <tr><td colspan="3" class="oc-empty">No closed trades yet.</td></tr>
@@ -93,7 +93,7 @@
                         <tr>
                             <td><strong>{{ p.instrument.symbol }}</strong></td>
                             <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
-                            <td class="down">{{ p.unrealized_pnl|floatformat:2 }}</td>
+                            <td class="down">{{ p.unrealized_pnl|floatformat:2 }}{% if p.unrealized_pnl_pct is not None %} <span class="pnl-pct">({% if p.unrealized_pnl_pct > 0 %}+{% endif %}{{ p.unrealized_pnl_pct|floatformat:2 }}%)</span>{% else %} <span class="pnl-pct sv-unknown">(&mdash;)</span>{% endif %}</td>
                         </tr>
                     {% empty %}
                         <tr><td colspan="3" class="oc-empty">No losing closed trades.</td></tr>
@@ -125,7 +125,7 @@
                         <td>{{ p.quantity|floatformat:4 }}</td>
                         <td>{{ p.entry_price|floatformat:4 }}</td>
                         <td>{% if p.current_price is not None %}{{ p.current_price|floatformat:4 }}{% else %}—{% endif %}</td>
-                        <td class="oc-mini-pnl {% if p.unrealized_pnl > 0 %}up{% elif p.unrealized_pnl < 0 %}down{% endif %}">{% if p.unrealized_pnl is not None %}{{ p.unrealized_pnl|floatformat:2 }}{% else %}—{% endif %}</td>
+                        <td class="oc-mini-pnl {% if p.unrealized_pnl > 0 %}up{% elif p.unrealized_pnl < 0 %}down{% endif %}">{% if p.unrealized_pnl is not None %}{{ p.unrealized_pnl|floatformat:2 }}{% if p.unrealized_pnl_pct is not None %} <span class="pnl-pct">({% if p.unrealized_pnl_pct > 0 %}+{% endif %}{{ p.unrealized_pnl_pct|floatformat:2 }}%)</span>{% endif %}{% else %}—{% endif %}</td>
                         <td class="{% if p.unrealized_pnl_pct > 0 %}up{% elif p.unrealized_pnl_pct < 0 %}down{% endif %}">{% if p.unrealized_pnl_pct is not None %}{{ p.unrealized_pnl_pct|floatformat:2 }}%{% else %}—{% endif %}</td>
                         <td><span class="badge badge-medium">{% if p.source == 'bot' %}bot{% else %}portfolio{% endif %}</span></td>
                         {# Only the bot book has a close path — a portfolio row has nothing anywhere in the platform that could flatten it. #}

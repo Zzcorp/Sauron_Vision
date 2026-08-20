@@ -648,7 +648,7 @@ body.sv-editing [id^="section-"].sv-hidden-in-edit .sv-edit-x span { display: no
     </a>
     <a href="{% url 'bot_home' %}" class="stat-box fade-in-up delay-2 dash-link">
         <div class="stat-label">Bot 24h P&L</div>
-        <div class="stat-value" style="font-size:18px;">{{ panel_bot_pnl_24h_display|default:"+0.00" }}</div>
+        <div class="stat-value" style="font-size:18px;">{% if panel_bot_pnl_24h_display %}{{ panel_bot_pnl_24h_display }}{% else %}<span class="sv-unknown" title="No bot trade closed in the last 24 hours. Hand-taken closes are counted on the positions page, not here.">&mdash;</span>{% endif %}</div>
         <div class="stat-sub">{{ panel_bot_open|default:"0" }} open trades</div>
     </a>
     <a href="{% url 'ai_insights' %}" class="stat-box fade-in-up delay-3 dash-link">
@@ -816,7 +816,7 @@ body.sv-editing [id^="section-"].sv-hidden-in-edit .sv-edit-x span { display: no
                 </div>
                 <div style="text-align:center;padding:12px 0;">
                     <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--text-muted);margin-bottom:4px;">24H P&L</div>
-                    <div style="font-family:var(--font-display);font-size:16px;font-weight:700;">{{ panel_bot_pnl_24h_display|default:"+0.00" }}</div>
+                    <div style="font-family:var(--font-display);font-size:16px;font-weight:700;">{% if panel_bot_pnl_24h_display %}{{ panel_bot_pnl_24h_display }}{% else %}<span class="sv-unknown" title="No bot trade closed in the last 24 hours. Hand-taken closes are counted on the positions page, not here.">&mdash;</span>{% endif %}</div>
                 </div>
             </div>
         </div>

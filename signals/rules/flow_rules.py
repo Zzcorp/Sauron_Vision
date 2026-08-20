@@ -25,16 +25,29 @@ class FundingExtremeRule:
             from market_data.models import FundingRate
         except Exception:
             return None
+        # NEWEST 1000, then flipped back into time order. This used to slice
+        # `.order_by("timestamp")[:1000]` — the OLDEST thousand rows of the
+        # 30-day window — and then read `rates[-1]` as "the latest print".
+        # The futures stream writes a row every 30 seconds, so on any
+        # actively streamed symbol the thousand oldest rows are the first
+        # eight hours of the month and the "current" funding rate the
+        # z-score was measured against was weeks stale.
         try:
             rows = list(FundingRate.objects.filter(
                 symbol__iexact=symbol,
                 timestamp__gte=timezone.now() - timedelta(days=30),
-            ).order_by("timestamp")[:1000])
+            ).order_by("-timestamp")[:1000])
         except Exception:
             return None
+        rows.reverse()
         if len(rows) < 30:
             return None
-        rates = [float(r.rate) for r in rows]
+        # `.funding_rate`, not `.rate`. There has never been a `rate` field on
+        # this model, so every evaluation that got past the 30-row floor
+        # raised AttributeError into the caller's except and returned None —
+        # this rule has not produced a single signal since it was written,
+        # and it failed silently because the caller swallows the exception.
+        rates = [float(r.funding_rate) for r in rows]
         z = _zscore(rates)
         if abs(z) < 2.5:
             return None

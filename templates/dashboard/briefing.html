@@ -286,7 +286,15 @@
         hide();
         window.location.assign(row.dataset.brfHref);
     });
-    window.addEventListener('scroll', hide, { passive: true, capture: true });
+    // Capture phase, because the table scrolls inside its own wrapper and
+    // that scroll event does not bubble — but capture also catches the CARD
+    // scrolling itself, and hiding there is why every popup on this platform
+    // vanished the moment the operator scrolled the content they hovered two
+    // seconds to read. A scroll from inside the card is the card being read.
+    window.addEventListener('scroll', function (e) {
+        if (e.target && e.target.nodeType === 1 && pop.contains(e.target)) return;
+        hide();
+    }, { passive: true, capture: true });
     window.addEventListener('resize', hide);
 })();
 </script>

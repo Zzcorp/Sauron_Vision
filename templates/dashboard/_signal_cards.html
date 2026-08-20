@@ -39,14 +39,42 @@
               <div class="conviction-bar__fill" style="width: {{ s.conviction }}%"></div>
             </div>
             <span class="conviction-num">{{ s.conviction }}/100</span>
-            {% if s.rule_hit_rate_30d %}
-              <span class="hit-rate">{{ s.rule_hit_rate_30d|floatformat:2 }} 30d hit</span>
+            {% comment %}
+              An em-dash, never a hidden field and never a 0: until enough of
+              this setup's cards have closed there is no 30d hit rate to show,
+              and the gap is the honest reading. The old markup tested
+              truthiness, which also swallowed a genuine measured 0.00.
+            {% endcomment %}
+            {% if s.rule_hit_rate_30d is not None %}
+              <span class="hit-rate"
+                    title="Measured on {{ s.rule_hit_rate_n|default_if_none:'?' }} closed {{ s.setup }} cards in the last 30 days.">
+                {{ s.rule_hit_rate_30d|floatformat:2 }} 30d hit</span>
+            {% else %}
+              <span class="hit-rate hit-rate--unmeasured"
+                    title="Not measured: {% if s.rule_hit_rate_n is None %}the setup performance record could not be read when this card was built{% elif s.rule_hit_rate_n %}only {{ s.rule_hit_rate_n }} {{ s.setup }} card(s) have closed in the last 30 days — too few to be empirical{% else %}no {{ s.setup }} card has closed in the last 30 days yet{% endif %}.">
+                — 30d hit</span>
             {% endif %}
           </div>
           <div class="smc-card__invalidation">
             Fails: {{ s.invalidation }}
           </div>
         </div>
+
+        {% if s.reasons %}
+          <details class="smc-card__why">
+            {% comment %}
+              "How", not "Why {{ s.conviction }} = these terms": the
+              multi-timeframe pass in signals.mtf adds its own HTF boost to
+              conviction after the card is built and records it in components
+              rather than here, so on an MTF scan the trail is the scoring
+              story, not an arithmetic proof of the final number.
+            {% endcomment %}
+            <summary>How this scored {{ s.conviction }}/100</summary>
+            <ul class="smc-card__reasons">
+              {% for reason in s.reasons %}<li>{{ reason }}</li>{% endfor %}
+            </ul>
+          </details>
+        {% endif %}
       </div>
     {% endfor %}
   {% else %}
@@ -55,31 +83,49 @@
 </div>
 
 <style>
+/* Painted from the platform tokens, not from the raw hex this partial
+   shipped with: #0e0e10 cards and #888 labels stayed dark-theme coloured on
+   a white page, so in light mode the feed was grey text on a black block. */
 .smc-signal-feed { display: flex; flex-direction: column; gap: 12px; }
-.smc-card { padding: 12px; border-radius: 6px; background: #0e0e10;
-            border-left: 3px solid #555; font-family: ui-monospace, monospace; }
-.smc-card--long { border-left-color: #2dbb6c; }
-.smc-card--short { border-left-color: #c4384b; }
-.smc-card--triggered { background: #1a1410; }
+.smc-card { padding: 12px; border-radius: var(--radius);
+            background: var(--bg-card);
+            border-left: 3px solid var(--border);
+            font-family: var(--font-mono); color: var(--text-primary); }
+.smc-card--long { border-left-color: var(--accent); }
+.smc-card--short { border-left-color: var(--accent-red); }
+.smc-card--triggered { background: var(--bg-card-hover); }
 .smc-card__headline { font-weight: 600; margin-bottom: 4px; }
-.smc-card__thesis { font-size: 0.85em; color: #b0b0b0; margin-bottom: 8px; }
+.smc-card__thesis { font-size: 0.85em; color: var(--text-secondary);
+                    margin-bottom: 8px; }
 .smc-card__levels { display: flex; gap: 16px; margin: 8px 0;
                     font-variant-numeric: tabular-nums; }
 .lvl { display: flex; flex-direction: column; }
-.lvl__label { font-size: 0.7em; color: #888; text-transform: uppercase; }
+.lvl__label { font-size: 0.7em; color: var(--text-muted); text-transform: uppercase; }
 .lvl__value { font-weight: 600; }
-.lvl--stop .lvl__value { color: #c4384b; }
-.lvl--target .lvl__value { color: #2dbb6c; }
+.lvl--stop .lvl__value { color: var(--accent-red); }
+.lvl--target .lvl__value { color: var(--accent); }
 .smc-card__chips { display: flex; gap: 6px; margin: 8px 0; }
 .chip { padding: 2px 8px; border-radius: 10px; font-size: 0.7em;
-        border: 1px solid #444; color: #777; }
-.chip--on { background: #1c3a26; border-color: #2dbb6c; color: #2dbb6c; }
-.chip--neg { background: #3a1c20; border-color: #c4384b; color: #c4384b;
-             text-decoration: line-through; }
+        border: 1px solid var(--border); color: var(--text-muted); }
+.chip--on { background: var(--accent-dim); border-color: var(--accent);
+            color: var(--accent); }
+.chip--neg { background: var(--accent-red-dim); border-color: var(--accent-red);
+             color: var(--accent-red); text-decoration: line-through; }
 .smc-card__footer { display: flex; justify-content: space-between;
-                    align-items: center; font-size: 0.75em; color: #888; }
+                    align-items: center; font-size: 0.75em;
+                    color: var(--text-muted); }
 .conviction-bar { display: inline-block; width: 80px; height: 4px;
-                  background: #222; border-radius: 2px; vertical-align: middle; }
-.conviction-bar__fill { height: 100%; background: #c4384b; border-radius: 2px; }
-.smc-empty { padding: 24px; text-align: center; color: #666; }
+                  background: var(--bg-secondary); border-radius: 2px;
+                  vertical-align: middle; }
+.conviction-bar__fill { height: 100%; background: var(--accent-red);
+                        border-radius: 2px; }
+/* Unmeasured reads as absent, not as a bad score. */
+.hit-rate--unmeasured { opacity: 0.6; }
+/* Conviction is the feed's sort key, so the terms that produced it are one
+   click away on every card rather than buried in the admin. */
+.smc-card__why { margin-top: 8px; font-size: 0.72em; color: var(--text-muted); }
+.smc-card__why summary { cursor: pointer; }
+.smc-card__reasons { margin: 6px 0 0 16px; padding: 0; }
+.smc-card__reasons li { margin: 2px 0; }
+.smc-empty { padding: 24px; text-align: center; color: var(--text-muted); }
 </style>

@@ -20,6 +20,18 @@
  *     is open the engine watches the row it is anchored to, redraws when the
  *     numbers under it change and closes when the row leaves the document. A
  *     card quoting a mark from before the last refresh is worse than no card.
+ *   · a card the operator has REACHED stays reached. The scroll listener
+ *     below runs in the capture phase on purpose — panels and table wrappers
+ *     scroll internally and their scroll events do not bubble, so an anchor
+ *     going stale underneath an open card arrives no other way — but capture
+ *     also catches the card scrolling ITSELF, and hiding there meant every
+ *     popup on this platform vanished the instant the operator scrolled the
+ *     content they had hovered two seconds to read. The guard is the open-
+ *     popup registry: a scroll from inside an open card is that card being
+ *     read, never a stale anchor. Same reasoning for resize (re-place, do not
+ *     destroy), for a wheel over a card with nothing to scroll (the page must
+ *     not scroll out from under it), and for a pointer that leaves the card
+ *     only because it is dragging the card's own scrollbar.
  *
  * It lives in THIS file rather than a new one because base.html owns the
  * <script> tags and is not ours to edit; sv-notif-card.js is already loaded
@@ -39,6 +51,15 @@
 
     var HOVER_DELAY_MS = 2000, GAP = 8;
 
+    /* The grace between the pointer leaving BOTH the row and the card and the
+     * card closing. It exists for one crossing only — the few pixels of gap
+     * between a row and the card placed beside it, where the pointer is
+     * briefly over neither. It is deliberately NOT a timer that runs while
+     * the pointer is on the card: a card the operator has reached closes when
+     * they genuinely leave it, on Escape, or when its row disappears. Any
+     * countdown against the operator's hand is the bug this replaces. */
+    var LEAVE_GRACE_MS = 240;
+
     /* sv-overlay.css hides every hover card at (hover: none). The dwell can
      * therefore never fire on a touch device, and a consumer that wants a
      * tap to do something says so with its own `tap` handler. */
@@ -46,6 +67,38 @@
 
     var instances = [];
     var wired = false;
+
+    /* ── The open-popup registry ──────────────────────────────────────
+     * Every popup engine on this page — the dwell cards here, the headband
+     * and watchlist portal popups in base.html, the signals-rail card, the
+     * news feed and the briefing history — needs the same answer to the same
+     * question before it hides anything on a scroll: is this scroll coming
+     * from INSIDE the popup the operator is currently reading? A guard kept
+     * private to one engine protects one engine, so the registry is
+     * published on SV and every engine reports its open popup into it.
+     */
+    var openPopups = [];
+
+    function popupOpened(node) {
+        if (node && openPopups.indexOf(node) < 0) openPopups.push(node);
+    }
+    function popupClosed(node) {
+        var i = openPopups.indexOf(node);
+        if (i >= 0) openPopups.splice(i, 1);
+    }
+    /* True only for a node INSIDE an open popup. The document, the root and
+     * <body> all contain every popup and are excluded by name: a scroll
+     * targeting one of those is the PAGE moving, which is exactly the case
+     * that makes an anchor stale and must still close the card. */
+    function insideOpenPopup(node) {
+        if (!node || node === w || node === d
+            || node === d.documentElement || node === d.body) return false;
+        for (var i = 0; i < openPopups.length; i++) {
+            var pop = openPopups[i];
+            if (pop === node || (pop.contains && pop.contains(node))) return true;
+        }
+        return false;
+    }
 
     /* The viewport minus the fixed chrome: a card clamped to the raw
      * viewport top would paint BEHIND the topbar (z-menu beats
@@ -175,7 +228,13 @@
                     if (e.relatedTarget && row.contains(e.relatedTarget)) return;
                     inst.suppressed = null;
                 }
-                if (row === inst.row) return;
+                if (row === inst.row) {
+                    /* Back on the row the card describes — whatever leave
+                     * grace was counting down was the pointer crossing the
+                     * gap, not the operator walking away. */
+                    inst.cancelLeave();
+                    return;
+                }
                 hideAll(null);
                 inst.arm(row);
                 return;
@@ -199,7 +258,11 @@
                  * takes over. */
                 var pop = inst.pop;
                 if (to && (row.contains(to) || pop.contains(to))) return;
-                inst.hide();
+                /* The gap between the row and the card is a few pixels of
+                 * page, and the pointer is over neither while it crosses.
+                 * Closing on the first frame of that crossing is why the
+                 * card could not be reached at all on a slow hand. */
+                inst.scheduleLeave();
                 return;
             }
         });
@@ -240,12 +303,52 @@
          * to one of them would hang over the page pointing at nothing. */
         d.addEventListener("sv:close", function () { hideAll(null); });
 
-        /* Any scroll makes the anchor stale — panels scroll internally, so
-         * this listens in the capture phase where non-bubbling scroll events
-         * from inner containers still arrive. */
-        w.addEventListener("scroll", function () { hideAll(null); },
-                            { passive: true, capture: true });
-        w.addEventListener("resize", function () { hideAll(null); });
+        /* A scroll of the PAGE, or of a panel or table wrapper the anchor
+         * row lives in, makes that anchor stale — panels scroll internally
+         * and their scroll events do not bubble, so this listens in the
+         * capture phase, which is where they arrive.
+         *
+         * Capture also catches the card scrolling ITSELF, and that is the
+         * bug this guard exists for: the operator dwells two seconds, moves
+         * onto the card, scrolls to read the rest of it, and the card
+         * vanishes. Scrolling inside an open popup is that popup being
+         * READ — the anchor has not moved and nothing is stale. */
+        w.addEventListener("scroll", function (e) {
+            if (insideOpenPopup(e.target)) return;
+            hideAll(null);
+        }, { passive: true, capture: true });
+
+        /* Resize used to destroy the card too. It does move the anchor —
+         * a snapped window, a devtools pane, a rotated tablet — but the
+         * answer to "the anchor moved" is to follow it, not to throw away
+         * what the operator was reading. Only a row that has left the
+         * document closes, and that is watched for elsewhere. */
+        w.addEventListener("resize", function () {
+            for (var i = 0; i < instances.length; i++) instances[i].reflow();
+        });
+
+        /* A pointerup anywhere ends a scrollbar drag. While one is in
+         * flight the card ignores its own pointerleave (see below), so this
+         * is where a drag that ended OUTSIDE the card finally lets go. */
+        w.addEventListener("pointerup", function (e) {
+            for (var i = 0; i < instances.length; i++) {
+                var inst = instances[i];
+                if (!inst.held) continue;
+                inst.held = false;
+                var t = e.target;
+                if (t && t.nodeType === 1
+                    && (inst.pop.contains(t)
+                        || (inst.row && inst.row.contains(t)))) continue;
+                inst.scheduleLeave();
+            }
+        }, true);
+
+        /* A drag that never gets its pointerup — the pointer left the
+         * browser window, the OS took the gesture — would otherwise leave
+         * `held` latched and the card unclosable by pointer. */
+        w.addEventListener("pointercancel", function () {
+            for (var i = 0; i < instances.length; i++) instances[i].held = false;
+        }, true);
     }
 
     /* attach({rows, className, build, click, tap, delay}) — `build(row, pop)`
@@ -274,13 +377,24 @@
             suppressed: null,
             detachObs: null,
             rowObs: null,
-            pending: 0
+            pending: 0,
+            /* The leave grace (see LEAVE_GRACE_MS) and the scrollbar-drag
+             * latch. `held` is true from a pointerdown on the card until the
+             * matching pointerup, because dragging the card's own scrollbar
+             * takes the pointer outside the card's box and fires the very
+             * pointerleave that would close it mid-drag. */
+            leaveTimer: null,
+            held: false
         };
 
         function draw() {
             pop.textContent = "";
             inst.build(inst.row, pop);
             place(pop, inst.row);
+            /* place() refuses to paint when nothing fits beside a portalled
+             * panel, so the registry follows what is actually on screen. */
+            if (pop.style.display === "block") popupOpened(pop);
+            else popupClosed(pop);
         }
 
         /* The live-data guard. The other half of this page refreshes the
@@ -340,16 +454,77 @@
              * of a wheel gesture with nothing to hide. */
             if (!inst.timer && !inst.row && pop.style.display !== "block") return;
             if (inst.timer) { clearTimeout(inst.timer); inst.timer = null; }
+            inst.cancelLeave();
+            inst.held = false;
             unwatch();
+            popupClosed(pop);
             inst.row = null;
             pop.style.display = "none";
         };
 
+        /* Follow the anchor instead of destroying the card. Called on
+         * resize; a row that has left the document is the observers' job. */
+        inst.reflow = function () {
+            if (!inst.row || pop.style.display !== "block") return;
+            if (!d.contains(inst.row)) { inst.hide(); return; }
+            place(pop, inst.row);
+            if (pop.style.display !== "block") popupClosed(pop);
+        };
+
+        inst.cancelLeave = function () {
+            if (inst.leaveTimer) {
+                clearTimeout(inst.leaveTimer);
+                inst.leaveTimer = null;
+            }
+        };
+
+        /* The pointer is off both the row and the card. Give it the grace
+         * of one gap-crossing and no more — re-entering either end cancels
+         * this, so nothing is ever counting down while the operator is on
+         * the card reading it. */
+        inst.scheduleLeave = function () {
+            if (!inst.row && pop.style.display !== "block") return;
+            inst.cancelLeave();
+            inst.leaveTimer = setTimeout(function () {
+                inst.leaveTimer = null;
+                if (inst.held) return;
+                inst.hide();
+            }, LEAVE_GRACE_MS);
+        };
+
+        pop.addEventListener("pointerenter", function () {
+            /* Arrived. Whatever grace was counting down was the crossing. */
+            inst.cancelLeave();
+        });
+
+        pop.addEventListener("pointerdown", function () {
+            /* A press that starts on the card — the scrollbar, a selection,
+             * the CLOSE button — owns the pointer until it is released. */
+            inst.held = true;
+            inst.cancelLeave();
+        });
+
         pop.addEventListener("pointerleave", function (e) {
             var to = e.relatedTarget;
             if (to && inst.row && inst.row.contains(to)) return;
-            inst.hide();
+            /* Dragging the card's own scrollbar carries the pointer outside
+             * the card's box; the drag has not ended, so neither has the
+             * reading. The document pointerup finishes it. */
+            if (inst.held) return;
+            inst.scheduleLeave();
         });
+
+        /* A wheel over a card that has NOTHING to scroll used to chain to
+         * the page: the page scrolled, the anchor genuinely went stale and
+         * the card was correctly — and infuriatingly — hidden, one frame
+         * after the operator asked it to show them more. Nothing should
+         * move instead. (.nf-pop also carries overscroll-behavior:contain,
+         * which stops the chaining at the ENDS of a card that does scroll;
+         * this covers the case where there is no scrollport at all.) */
+        pop.addEventListener("wheel", function (e) {
+            if (pop.scrollHeight > pop.clientHeight) return;
+            e.preventDefault();
+        }, { passive: false });
 
         instances.push(inst);
         wire();
@@ -362,6 +537,15 @@
         hideAll: hideAll,
         HOVER_DELAY_MS: HOVER_DELAY_MS,
         hoverable: HOVERABLE
+    };
+    /* Published for the OTHER popup engines on the page — base.html's
+     * portal popups and signals-rail card, the news feed, the briefing
+     * history. Each of them hides on scroll for the same good reason and
+     * broke for the same bad one; `inside` is the one guard they all ask. */
+    w.SV.popup = {
+        opened: popupOpened,
+        closed: popupClosed,
+        inside: insideOpenPopup
     };
 
     /* ── The notification consumer ──────────────────────────────────── */

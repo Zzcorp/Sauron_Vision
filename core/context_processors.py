@@ -1,14 +1,33 @@
 """Global context processors for Sauron Vision."""
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Max, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from .exchange_status import get_exchange_status
 
 logger = logging.getLogger(__name__)
+
+# The bottom headband is ONE measurement, taken once and shared by the cells
+# and the dropdowns they open. It used to be two: the cells read stored
+# columns in sauron_context while the dropdowns recomputed from the live
+# book, so a cell and the popup underneath it could quote different numbers
+# for the same position book on the same screen.
+PANEL_TTL_SECONDS = 20
+
+# Fallback cadence for the multi-asset bot tick, in seconds, if the beat
+# schedule cannot be read. OVERDUE is judged against this: too low and the
+# BOT cell cries wolf between ticks, too high and a dead scheduler reads as
+# healthy — which is the failure the cell exists to catch.
+FALLBACK_BOT_TICK_SECONDS = 300.0
+BOT_TICK_OVERDUE_FACTOR = 2.5
+
+# Rows shown inside a dropdown before it starts scrolling past usefulness.
+PANEL_ROW_LIMIT = 8
+
+_EPOCH = datetime.min.replace(tzinfo=dt_timezone.utc)
 
 
 def running_rules_q(now=None):
@@ -42,19 +61,629 @@ def running_rules_q(now=None):
             | Q(status=RuleControl.STATUS_PAUSED, paused_until__lte=now))
 
 
+# ── Small honesty helpers ────────────────────────────────────────────────
+# Every one of these returns None rather than 0 for "not measured". A
+# confident 0 in this strip is exactly how the platform lost a day: 0.0%
+# drawdown reads as "no downside", 0 open R reads as "flat", and +0.00 reads
+# as "closed even" on a day nothing closed at all.
+
+def _f(value):
+    """float(value), or None when it cannot be read. Never 0.0 as a fallback."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _signed(value, spec="{:+,.2f}"):
+    """A signed money/ratio string, or None so the template can dash it."""
+    return None if value is None else spec.format(value)
+
+
+def _ago(seconds):
+    """'40s' / '4m' / '2h' / '3d' — or None when the age is unknown."""
+    if seconds is None:
+        return None
+    seconds = max(0.0, float(seconds))
+    if seconds < 90:
+        return f"{int(seconds)}s"
+    if seconds < 5400:
+        return f"{int(seconds // 60)}m"
+    if seconds < 172800:
+        return f"{int(seconds // 3600)}h"
+    return f"{int(seconds // 86400)}d"
+
+
+def _r_multiple(entry, stop, mark, sign):
+    """(mark − entry) ÷ the risk the trade OPENED with, signed by direction.
+
+    None whenever a leg is missing. R is the number that says whether a
+    position is working, and "0.00R" reads as a scratch trade — not as
+    "there is no quote for this symbol" or "this row never had a stop".
+    """
+    if entry is None or stop is None or mark is None:
+        return None
+    risk = abs(entry - stop)
+    if risk <= 1e-12:
+        return None
+    return (mark - entry) * sign / risk
+
+
+def _bot_tick_cadence_seconds():
+    """How often the multi-asset bot tick is SCHEDULED to run, in seconds.
+
+    Read from the beat schedule rather than hardcoded here: "overdue" is a
+    claim about the scheduler, and a constant would keep making that claim
+    against a cadence somebody has since retuned. A crontab entry has no
+    seconds to read, so the fallback covers it.
+    """
+    try:
+        from config.celery import app
+        entry = (app.conf.beat_schedule or {}).get("tick-asset-bots") or {}
+        return float(entry.get("schedule"))
+    except Exception:  # noqa: BLE001 — a missing schedule must not blank the cell
+        return FALLBACK_BOT_TICK_SECONDS
+
+
+def _book_fingerprint(user, portfolio):
+    """A cheap stamp that changes exactly when the headband's inputs change.
+
+    The payload below is cached for 20 seconds because its aggregates are not
+    free and it runs on EVERY render. A bare TTL, though, is what made the
+    operator's complaint true a second time: a fill lands, the headband
+    re-fetches 800ms later, and the server hands back the payload it computed
+    before the fill — so the cell and its popup sit there unchanged and the
+    refresh looks broken.
+
+    Three indexed aggregates cost far less than the ~20 queries they gate,
+    and they move the instant a trade opens or closes, or a bot writes its
+    heartbeat (which bumps AssetBotConfig.updated_at every tick). Marks are
+    the one input NOT in here — a quote moving is what the 20s TTL is for.
+    """
+    from bot_program.models import AssetBotConfig, AssetBotTrade
+
+    trades = AssetBotTrade.objects.filter(config__user=user).aggregate(
+        n=Count("id"), opened=Max("opened_at"), closed=Max("closed_at"))
+    positions = portfolio.positions.aggregate(
+        n=Count("id"), opened=Max("opened_at"), closed=Max("closed_at"))
+    configs = AssetBotConfig.objects.filter(user=user).aggregate(
+        n=Count("id"), on=Count("id", filter=Q(enabled=True)),
+        touched=Max("updated_at"))
+    return "|".join(str(block[k]) for block in (trades, positions, configs)
+                    for k in sorted(block))
+
+
+def _initial_stops(user):
+    """{trade_id: the stop the trade OPENED with}.
+
+    `bot_program.manual_close._initial_stop` is the platform's one definition
+    of that number, and bot_grading books R against it. The unified position
+    row cannot carry it — it exposes the CURRENT stop, which a trailing stop
+    rewrites, and grading against that makes P&L and risk the same quantity
+    so every trailed winner scores ~1.0R.
+    """
+    from bot_program.manual_close import _initial_stop
+    from bot_program.models import AssetBotTrade
+
+    return {
+        trade.id: _initial_stop(trade)
+        for trade in AssetBotTrade.objects.filter(
+            config__user=user, status__in=("OPEN", "CLOSE_PENDING")
+        ).only("id", "metadata", "stop_loss")
+    }
+
+
+def _book_truth(user, portfolio):
+    """What the headband says about the position book — BOTH books, marked.
+
+    The PORTFOLIO cell rendered `portfolio.current_value`, a stored column
+    whose only writer is `portfolio.tasks.recalculate_exposure`. That task
+    values the LEGACY book alone (portfolio.Position) and marks the SHARED
+    "Main" portfolio, while this headband reads the per-user book and the
+    operator's trades are AssetBotTrade rows. So the column could never move
+    off its seeded initial capital, and the cell sat at 10,000 forever with a
+    dropdown underneath it listing live trades.
+
+    Everything here comes from `dashboard.views_command._open_book`, which is
+    the platform's re-pricing union of the two books (it re-marks legacy rows
+    in memory against the same LiveQuote table the bot rows used, and returns
+    None rather than 0 where nothing could be priced). One implementation for
+    the Operations Center and the headband, so the two cannot disagree about
+    how many positions are open or what they are worth.
+    """
+    from dashboard.views_command import _open_book
+
+    out = {}
+    day_ago = timezone.now() - timedelta(hours=24)
+
+    rows, n_priced, unrealized, deployed = _open_book(user, portfolio)
+    n_open = len(rows)
+    stops = _initial_stops(user) if n_open else {}
+
+    detail, r_sum, r_n, bot_r_sum, bot_r_n = [], 0.0, 0, 0.0, 0
+    for row in sorted(rows,
+                      key=lambda p: getattr(p, "opened_at", None) or _EPOCH,
+                      reverse=True):
+        source = "bot" if getattr(row, "source", "") == "bot" else "manual"
+        direction = (getattr(row, "direction", "") or "").lower()
+        sign = -1 if direction in ("short", "sell") else 1
+        trade_id = getattr(row, "trade_id", None)
+        entry = _f(row.entry_price)
+        mark = _f(row.current_price)
+        # Legacy Position rows keep their opening stop: nothing on this
+        # platform trails a Position, so its stop_loss IS the entry stop.
+        stop = (stops.get(trade_id) if source == "bot"
+                else _f(getattr(row, "stop_loss", None)))
+        r_mult = _r_multiple(entry, stop, mark, sign)
+        if r_mult is not None:
+            r_sum += r_mult
+            r_n += 1
+            if source == "bot":
+                bot_r_sum += r_mult
+                bot_r_n += 1
+        detail.append({
+            # The trade id is what makes the row actionable: the CLOSE
+            # control on each row posts against it. Legacy Position rows
+            # carry no id and no close path anywhere in the platform.
+            "id": trade_id,
+            "symbol": getattr(getattr(row, "instrument", None), "symbol", "")
+                      or "",
+            "side": "LONG" if sign == 1 else "SHORT",
+            "qty": _f(getattr(row, "quantity", None)),
+            "entry": entry,
+            "stop": stop,
+            "last": mark,
+            "r": None if r_mult is None else round(r_mult, 2),
+            "pct": _f(getattr(row, "unrealized_pnl_pct", None)),
+            "pnl": _f(getattr(row, "unrealized_pnl", None)),
+            "paper": getattr(row, "paper", None),
+            "source": source,
+            "status": getattr(row, "status", "") or "",
+            "opened_at": getattr(row, "opened_at", None),
+        })
+
+    cash = _f(portfolio.cash_available) or 0.0
+    if n_open == 0:
+        # Nothing open is a MEASUREMENT (zero deployed), not an unknown.
+        deployed = 0.0
+    value = None if deployed is None else cash + deployed
+
+    # The band hardcoded a € in front of every figure. The portfolio carries
+    # its own currency and the bot configs carry theirs, so the sign is read
+    # from the book rather than assumed — an unknown code prints as the code.
+    code = (portfolio.currency or "").upper()
+    out["panel_currency"] = code
+    out["panel_currency_symbol"] = {"EUR": "€", "USD": "$", "GBP": "£",
+                                    "JPY": "¥", "CHF": "CHF "}.get(
+        code, f"{code} " if code else "")
+    out["panel_cash"] = f"{cash:,.0f}"
+    out["panel_deployed"] = None if deployed is None else f"{deployed:,.0f}"
+    out["panel_portfolio_value"] = None if value is None else f"{value:,.0f}"
+    out["panel_positions"] = n_open
+    out["panel_positions_priced"] = n_priced
+    out["panel_max_dd"] = f"{portfolio.max_daily_loss_pct}"
+
+    if value is None or value <= 0:
+        # Positions exist and not one could be priced: the split between cash
+        # and exposure is unknown, and "100% cash" would be a claim of no
+        # exposure at all — the opposite of the truth.
+        out["panel_exposure"] = None if value is None else 0
+        out["panel_cash_pct"] = None if value is None else 100
+    else:
+        exposure = int(round(deployed / value * 100))
+        out["panel_exposure"] = exposure
+        out["panel_cash_pct"] = max(0, 100 - exposure)
+
+    if n_open == 0:
+        coverage = "Nothing open in either book."
+    elif n_priced == n_open:
+        coverage = f"All {n_open} open positions marked to live quotes."
+    elif n_priced:
+        coverage = (f"{n_priced} of {n_open} open positions have a live "
+                    f"quote; the other {n_open - n_priced} are not in these "
+                    f"figures.")
+    else:
+        coverage = (f"{n_open} open, none with a live quote — value, "
+                    f"exposure and P&L cannot be measured.")
+    out["panel_book_coverage"] = coverage
+
+    out["panel_open_pnl"] = unrealized
+    out["panel_open_pnl_display"] = _signed(unrealized)
+    out["panel_open_r"] = round(r_sum, 2) if r_n else None
+    out["panel_open_r_display"] = f"{r_sum:+.2f}R" if r_n else None
+    out["panel_open_r_n"] = r_n
+    out["panel_bot_open_r"] = round(bot_r_sum, 2) if bot_r_n else None
+    out["panel_bot_open_r_display"] = f"{bot_r_sum:+.2f}R" if bot_r_n else None
+
+    out["panel_open_rows"] = detail[:PANEL_ROW_LIMIT]
+    out["panel_open_rows_hidden"] = max(0, n_open - PANEL_ROW_LIMIT)
+    # The bot subset keeps its own name: the BOT dropdown and older callers
+    # ask for the trades, not for the union.
+    out["panel_open_trades"] = [d for d in detail if d["source"] == "bot"]
+    out["panel_recent_positions"] = [d for d in detail
+                                     if d["source"] == "manual"][:5]
+
+    # Realised P&L on the legacy half. Position closes have no realised
+    # column — unrealized_pnl is the only P&L that model carries, which is
+    # the same convention portfolio.services.unified_closed_positions uses.
+    legacy_closed = portfolio.positions.filter(
+        closed_at__gte=day_ago).aggregate(n=Count("id"),
+                                          total=Sum("unrealized_pnl"))
+    out["panel_legacy_closed_24h"] = legacy_closed["n"] or 0
+    out["panel_legacy_pnl_24h"] = (_f(legacy_closed["total"])
+                                   if legacy_closed["n"] else None)
+    return out
+
+
+def _is_manual_config(cfg):
+    """True for the config TAKE TRADE books HAND-TAKEN positions against.
+
+    `bot_program.manual_trade` opens every manual position on a per-user,
+    per-class config named "manual", enabled with an EMPTY symbols list: the
+    5-minute tick manages its open positions, and the entry scan has nothing
+    to scan, so the config cannot open a thing on its own.
+
+    Both halves of the test carry weight. `manual_trade._config_error`
+    REFUSES to trade through a config the user themselves named "manual" and
+    gave symbols to — that one is a real bot with a real universe — so the
+    same pair (the reserved name, no symbols) is what separates the two here.
+    """
+    from bot_program.manual_trade import MANUAL_CONFIG_NAME
+
+    return cfg.name == MANUAL_CONFIG_NAME and not cfg.symbols
+
+
+def _bot_truth(user, book):
+    """What the BOT cell says — the state of the bot PROGRAM right now.
+
+    The cell used to print ARMED whenever one config had `enabled=True`.
+    Enabled is not running. `tick_all_asset_bots` is wrapped in
+    @guarded_task, so the platform master switch and the `pipeline_asset_bots`
+    component each veto every tick on their own; a circuit breaker stops a
+    config opening anything; shadow mode decides and submits nothing; and the
+    kill switch disables every config outright. A cell claiming ARMED while
+    any of those holds is the most expensive kind of wrong here, because it
+    is the readout an operator uses to decide whether to intervene.
+
+    The legacy crypto BotConfig is deliberately not counted: `tick_all_bots`
+    has no beat entry, so those configs cannot be running and counting them
+    would claim automation that nothing ticks.
+
+    The "manual" config is not a bot either, and is carved out of every
+    config-level and open-position figure below. TAKE TRADE books hand-taken
+    positions against it (see `_is_manual_config`), and it can never open one
+    on its own — so counting it made this cell report the operator's own
+    click as automation. An account whose only config was that one read
+    "0 live · 1 paper · 1 open", and STALLED in red on top of it, because a
+    config nobody armed had naturally never ticked. Nothing is hidden by the
+    carve-out: the hand-taken book is published under panel_bot["manual"],
+    named in `reason` (which the dropdown prints and the cell shows on
+    hover), and counted by the POSITIONS cell exactly as before. This is
+    attribution, not concealment.
+    """
+    from bot_program.asset_engine.safety import (
+        CircuitBreakers, heartbeat_age_seconds, is_shadow,
+    )
+    from bot_program.manual_trade import MANUAL_RULE
+    from bot_program.models import AssetBotConfig, AssetBotTrade
+    from core.platform_control import get_component
+
+    now = timezone.now()
+    day_ago = now - timedelta(hours=24)
+    out = {}
+
+    all_configs = list(AssetBotConfig.objects.filter(user=user))
+    manual_configs = [c for c in all_configs if _is_manual_config(c)]
+    manual_config_ids = {c.id for c in manual_configs}
+    configs = [c for c in all_configs if c.id not in manual_config_ids]
+    enabled = [c for c in configs if c.enabled]
+    n_live = sum(1 for c in enabled if c.mode == "live")
+    n_paper = len(enabled) - n_live
+
+    # A component row that does not exist is not "on": guarded_task treats a
+    # missing key as OFF and skips, so the honest reading of both states is
+    # "nothing runs" — but the popup names which of the two it is, because
+    # the fix differs (flip the switch vs. seed the components).
+    master = get_component("platform_master")
+    gate = get_component("pipeline_asset_bots")
+    master_on = bool(master and master.is_enabled)
+    gate_on = bool(gate and gate.is_enabled)
+
+    open_by_config = {
+        row["config_id"]: row["n"] for row in AssetBotTrade.objects.filter(
+            config__user=user, status__in=("OPEN", "CLOSE_PENDING")
+        ).values("config_id").annotate(n=Count("id"))
+    }
+    # Split by CONFIG rather than by rule_name, even though every hand-taken
+    # trade also carries rule_name="manual_take": the dropdown lists one row
+    # per config with its own open count, and the OPEN cell above it has to
+    # be the sum of the rows an operator can actually see. Splitting the two
+    # numbers on different keys is how a cell and its popup start disagreeing.
+    bot_open = sum(n for cid, n in open_by_config.items()
+                   if cid not in manual_config_ids)
+    manual_open = sum(n for cid, n in open_by_config.items()
+                      if cid in manual_config_ids)
+
+    bots = []
+    for cfg in configs:
+        extras = cfg.extras or {}
+        reasons = []
+        if cfg.enabled:
+            try:
+                _allowed, reasons = CircuitBreakers(cfg).check_all()
+            except Exception as e:  # noqa: BLE001 — a probe must not blank the cell
+                logger.debug("Bot breaker probe failed for cfg %s: %s",
+                             cfg.pk, e)
+                reasons = []
+        age = heartbeat_age_seconds(cfg)
+        bots.append({
+            "name": cfg.name,
+            "asset_class": cfg.asset_class,
+            "mode": cfg.mode,
+            "enabled": cfg.enabled,
+            "shadow": is_shadow(cfg),
+            "open": open_by_config.get(cfg.id, 0),
+            # None means NEVER TICKED, and the template dashes it. Zero
+            # would read as "ticked just now", which is the opposite.
+            "tick_age": age,
+            "tick_ago": _ago(age),
+            "tick_status": (extras.get("last_tick_status") or ""),
+            "tick_note": (extras.get("last_tick_note") or "")[:90],
+            "halted": reasons,
+        })
+
+    halted = [b for b in bots if b["enabled"] and b["halted"]]
+    shadowed = [b for b in bots if b["enabled"] and b["shadow"]]
+    ages = [b["tick_age"] for b in bots
+            if b["enabled"] and b["tick_age"] is not None]
+    freshest = min(ages) if ages else None
+    cadence = _bot_tick_cadence_seconds()
+    overdue = None if freshest is None else freshest > cadence * BOT_TICK_OVERDUE_FACTOR
+
+    # The kill switch leaves no flag behind — it disables every config and
+    # posts one notification. That notification is the only trace of WHY the
+    # bots are all off, and without it the cell can only say "OFF" to an
+    # operator who is asking exactly that question.
+    kill_at, kill_reason = None, ""
+    try:
+        from alerts.models import Notification
+        kill = (Notification.objects
+                .filter(user=user, title__startswith="KILL SWITCH ACTIVATED",
+                        created_at__gte=now - timedelta(days=7))
+                .order_by("-created_at").first())
+        if kill is not None:
+            kill_at = kill.created_at
+            # "KILL SWITCH ACTIVATED — {reason}". No dash means no reason was
+            # recorded; echoing the whole title back would print the words
+            # "KILL SWITCH ACTIVATED" as if they were the operator's reason.
+            _, _, tail = kill.title.partition("—")
+            kill_reason = tail.strip()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Kill-switch probe unavailable: %s", e)
+
+    if not configs:
+        state, tone, reason = "NONE", "muted", "No bot is configured on this account."
+    elif not enabled:
+        state, tone = "OFF", "muted"
+        reason = f"{len(configs)} bot(s) configured, none enabled."
+        if kill_at is not None:
+            reason = (f"The kill switch disabled every bot "
+                      f"{_ago((now - kill_at).total_seconds())} ago"
+                      + (f" ({kill_reason})." if kill_reason else "."))
+    elif not master_on:
+        state, tone = "HALTED", "red"
+        reason = ("The platform master switch is "
+                  + ("off" if master else "not registered")
+                  + " — every scheduled task returns without running, so no "
+                    "bot ticks whatever its own row says.")
+    elif not gate_on:
+        state, tone = "HALTED", "red"
+        reason = ("The multi-asset bot component (pipeline_asset_bots) is "
+                  + ("off" if gate else "not registered")
+                  + " — the tick task is gated off before it reaches a bot.")
+    elif len(halted) == len(enabled):
+        state, tone = "HALTED", "red"
+        reason = ("Every enabled bot is behind a circuit breaker: "
+                  + "; ".join(r for b in halted for r in b["halted"])[:180])
+    elif len(shadowed) == len(enabled):
+        state, tone = "SHADOW", "gold"
+        reason = ("Every enabled bot is in shadow mode — it decides and "
+                  "submits nothing.")
+    elif freshest is None:
+        state, tone = "STALLED", "red"
+        reason = ("No enabled bot has recorded a tick yet — the scheduler "
+                  "has not reached them.")
+    elif overdue:
+        state, tone = "STALLED", "red"
+        reason = (f"Last tick {_ago(freshest)} ago, against a "
+                  f"{cadence / 60:.0f} min schedule.")
+    elif n_live:
+        state, tone = "LIVE", "gold"
+        reason = f"{n_live} bot(s) armed with real funds."
+    else:
+        state, tone = "PAPER", ""
+        reason = f"{len(enabled)} bot(s) armed on the paper venue."
+
+    if state in ("LIVE", "PAPER"):
+        if halted:
+            reason += (f" {len(halted)} of {len(enabled)} behind a circuit "
+                       f"breaker.")
+        if shadowed:
+            reason += f" {len(shadowed)} in shadow mode."
+
+    # Where the operator's own positions went. `reason` is the one string
+    # this cell shows in full — the dropdown note, and the cell's hover title
+    # — so it is where the separation has to be said out loud. Without it an
+    # operator who has just pressed TAKE TRADE reads "OPEN 0" here and has to
+    # guess whether the platform lost the trade. It did not: it is on the
+    # POSITIONS cell, which is where a position the operator took belongs.
+    if manual_open:
+        reason += (f" {manual_open} position(s) opened by hand are on your "
+                   f"own book, not this program's.")
+
+    # One aggregate, split by rule, rather than three queries over the same
+    # rows. `manual_take` is written on every hand-taken trade and on nothing
+    # else, so the negated half is the fleet's own history exactly.
+    manual_q = Q(rule_name=MANUAL_RULE)
+    closed = AssetBotTrade.objects.filter(
+        config__user=user, status="CLOSED", closed_at__gte=day_ago)
+    agg = closed.aggregate(
+        bot_n=Count("id", filter=~manual_q),
+        bot_wins=Count("id", filter=Q(pnl__gt=0) & ~manual_q),
+        bot_pnl=Sum("pnl", filter=~manual_q),
+        manual_n=Count("id", filter=manual_q),
+        manual_pnl=Sum("pnl", filter=manual_q),
+    )
+    n_closed = agg["bot_n"] or 0
+    wins = agg["bot_wins"] or 0
+    pnl_24h = _f(agg["bot_pnl"])
+    n_closed_manual = agg["manual_n"] or 0
+    pnl_24h_manual = _f(agg["manual_pnl"])
+    # Sum over an empty set is NULL, which is the honest answer here: no
+    # close means no figure, and a confident +0.00 would read as "closed
+    # even" on a day nothing closed at all.
+    pnl_24h_all = (None if pnl_24h is None and pnl_24h_manual is None
+                   else (pnl_24h or 0.0) + (pnl_24h_manual or 0.0))
+
+    opened = AssetBotTrade.objects.filter(
+        config__user=user, opened_at__gte=day_ago).aggregate(
+        bot_n=Count("id", filter=~manual_q),
+        manual_n=Count("id", filter=manual_q))
+    opened_24h = opened["bot_n"] or 0
+    opened_24h_manual = opened["manual_n"] or 0
+
+    # The fleet's own last close. A hand-taken exit belongs in the note under
+    # the POSITIONS book, not under "BOT PROGRAM · IS IT RUNNING?" — and it
+    # would contradict the 24H FILLS count right above it, which is the
+    # fleet's.
+    last_closed = (closed.exclude(rule_name=MANUAL_RULE)
+                   .order_by("-closed_at").first() if n_closed else None)
+
+    # OPEN and OPEN R sit side by side in the dropdown and must therefore
+    # count the same positions. The book's bot-half R includes the hand-taken
+    # rows — every AssetBotTrade reads as source="bot" to `_open_book`, which
+    # knows the two books apart and not the two hands — so it is re-summed
+    # here without them. Only when there is something to remove, though: the
+    # rows carry R already rounded to 2dp, and re-summing them drifts a cent
+    # from the book's full-precision sum. A book with nothing taken by hand
+    # keeps the book's own number, to the digit.
+    open_r_display = book.get("panel_bot_open_r_display")
+    if manual_open:
+        hand_taken = set(AssetBotTrade.objects.filter(
+            config_id__in=manual_config_ids,
+            status__in=("OPEN", "CLOSE_PENDING")).values_list("id", flat=True))
+        fleet_r = [row["r"] for row in (book.get("panel_open_trades") or [])
+                   if row.get("r") is not None
+                   and row.get("id") not in hand_taken]
+        open_r_display = f"{sum(fleet_r):+.2f}R" if fleet_r else None
+
+    out["panel_bot"] = {
+        "state": state,
+        "tone": tone,
+        "reason": reason,
+        "configs": len(configs),
+        "enabled": len(enabled),
+        "live": n_live,
+        "paper": n_paper,
+        "shadow": len(shadowed),
+        "halted": len(halted),
+        "master_on": master_on,
+        "master_known": master is not None,
+        "gate_on": gate_on,
+        "gate_known": gate is not None,
+        "cadence_min": round(cadence / 60, 1),
+        "tick_ago": _ago(freshest),
+        "tick_overdue": overdue,
+        "never_ticked": sum(1 for b in bots
+                            if b["enabled"] and b["tick_age"] is None),
+        "open": bot_open,
+        "open_r_display": open_r_display,
+        "opened_24h": opened_24h,
+        "closed_24h": n_closed,
+        "winrate": round(wins / n_closed * 100) if n_closed else None,
+        # `pnl_24h` and `pnl_24h_display` answer two different questions and
+        # cover two different populations on purpose:
+        #
+        #   pnl_24h          every AssetBotTrade close in the window, the
+        #                    operator's hand-taken ones included, because
+        #                    `_panel_detail` adds this to the legacy book to
+        #                    answer "what did today make" — and money made by
+        #                    hand is money. Narrowing it would make a day on
+        #                    which the operator closed three manual trades
+        #                    report "nothing closed".
+        #   pnl_24h_display  the fleet alone, because this is what the BOT
+        #                    dropdown prints under "IS IT RUNNING?", next to
+        #                    a fill count and a win rate that are the fleet's.
+        #
+        # They differ by exactly manual.pnl_24h, published below so the
+        # arithmetic is checkable instead of mysterious. It is a raw float and
+        # not the string for the older reason: re-parsing a formatted number
+        # back into arithmetic is how a thousands separator becomes an error.
+        "pnl_24h": pnl_24h_all,
+        "pnl_24h_display": _signed(pnl_24h),
+        "kill_at": kill_at,
+        "kill_reason": kill_reason,
+        "bots": bots[:6],
+        "bots_hidden": max(0, len(bots) - 6),
+        # The hand-taken book, kept beside the fleet's numbers rather than
+        # folded into them. Nothing renders it yet — the BOT dropdown says it
+        # in `reason` and the POSITIONS cell counts the trades — but the split
+        # has to exist as numbers for the separation to be auditable, and for
+        # whoever surfaces "+N by hand" in the strip next.
+        "manual": {
+            "configs": len(manual_configs),
+            "open": manual_open,
+            "opened_24h": opened_24h_manual,
+            "closed_24h": n_closed_manual,
+            "pnl_24h": pnl_24h_manual,
+            "pnl_24h_display": _signed(pnl_24h_manual),
+        },
+    }
+
+    # Names older surfaces and tests already read. `panel_bot_armed` stays
+    # the raw config-level fact (something is enabled); the CELL renders
+    # panel_bot.state, which is that fact AND the gates that decide whether
+    # anything actually ticks.
+    out["panel_bot_armed"] = bool(enabled)
+    modes = sorted({c.mode for c in enabled})
+    out["panel_bot_mode"] = (modes[0] if len(modes) == 1
+                             else ("mixed" if modes else "—"))
+    out["panel_bot_open"] = out["panel_bot"]["open"]
+    # The CROSS-BOOK realised line counts closes, not automation, and reads
+    # this name for its count exactly as it reads panel_bot["pnl_24h"] for
+    # its money — so both halves of AssetBotTrade belong in it. The fleet's
+    # own count is panel_bot["closed_24h"].
+    out["panel_bot_trades_24h"] = n_closed + n_closed_manual
+    out["panel_bot_winrate"] = out["panel_bot"]["winrate"]
+    out["panel_bot_pnl_24h_display"] = out["panel_bot"]["pnl_24h_display"]
+    out["panel_bot_last"] = ({
+        "symbol": last_closed.symbol,
+        "outcome": (last_closed.outcome or "closed").replace("_", " "),
+        "r": last_closed.realized_r,
+        "when": last_closed.closed_at,
+    } if last_closed else None)
+    out["panel_bot_currencies"] = sorted({(c.base_currency or "").upper()
+                                          for c in configs if c.base_currency})
+    return out
+
+
 def _panel_detail(user):
-    """The contents of the info-panel dropdowns.
+    """The whole bottom headband — every cell AND every dropdown, one read.
 
-    Several of these cells opened a panel containing a title and a link to the
-    page you were already one click from. ALERTS and WATCHLIST had literally
-    nothing else in them; DRAWDOWN and VOLATILITY had no panel at all. A
-    dropdown that tells you nothing you did not already read on the cell is
-    worse than no dropdown, because it costs a hover to discover that.
+    Two things were wrong with this strip, and they were the same thing. The
+    cells were built from stored columns in `sauron_context` while the
+    dropdowns were built here from the live book, so they could disagree; and
+    the stored column behind the PORTFOLIO cell is written by a task that
+    values only the legacy book on the shared portfolio, so it never moved
+    off the seeded 10,000 no matter what the operator traded. Both cells and
+    popups now come out of this one dict.
 
-    Cached for 20 seconds per user. This runs on EVERY page render, and the
-    aggregate queries below are not free — but the underlying numbers only
-    move when a scan or a fill lands, so a short TTL costs nothing in accuracy
-    and takes the whole block off the critical path for the other 19 seconds.
+    Cached for PANEL_TTL_SECONDS per user AND per book fingerprint. The TTL
+    alone would delay every fill by up to 20 seconds — the refresh would fire
+    on the fill and be served the pre-fill payload — so the key carries a
+    stamp that changes the moment the book does.
     """
     import sys
     from django.core.cache import cache
@@ -66,76 +695,55 @@ def _panel_detail(user):
     # anything in the headband depend on how long the preceding test took.
     testing = "test" in sys.argv or any("pytest" in a for a in sys.argv)
 
+    portfolio = None
+    try:
+        from portfolio.services import get_or_create_default_portfolio
+        portfolio = get_or_create_default_portfolio(user=user)
+    except Exception as e:
+        logger.debug(f"Panel portfolio unavailable: {e}")
+
     key = f"sv:panel_detail:{user.pk}"
+    if portfolio is not None:
+        try:
+            key = f"{key}:{_book_fingerprint(user, portfolio)}"
+        except Exception as e:
+            logger.debug(f"Panel fingerprint unavailable: {e}")
     if not testing:
         cached = cache.get(key)
         if cached is not None:
             return cached
 
     out = {}
-    now = timezone.now()
-    day_ago = now - timedelta(hours=24)
 
-    # ── Open bot trades, with live risk ──────────────────────────────────
-    # The R-multiple is the number that says whether a position is working,
-    # and it is computable here: we hold the entry, the stop it opened with,
-    # and a live quote. Position.unrealized_pnl is deliberately NOT used —
-    # nothing in the codebase ever writes it, so it would render +0.00 on
-    # every row forever.
+    # ── The position book: value, exposure, P&L and R, from both books ───
+    if portfolio is not None:
+        try:
+            out.update(_book_truth(user, portfolio))
+        except Exception as e:
+            logger.debug(f"Panel book detail unavailable: {e}")
+
+    # ── The bot program: what it is actually doing right now ─────────────
     try:
-        from bot_program.models import AssetBotTrade
-        from market_data.models import LiveQuote
-
-        trades = list(AssetBotTrade.objects.filter(
-            config__user=user, status__in=("OPEN", "CLOSE_PENDING")
-        ).order_by("-opened_at")[:6])
-        quotes = {}
-        if trades:
-            symbols = {t.symbol for t in trades}
-            quotes = {q.instrument.symbol: q for q in LiveQuote.objects
-                      .select_related("instrument")
-                      .filter(instrument__symbol__in=symbols)}
-
-        rows = []
-        for t in trades:
-            q = quotes.get(t.symbol)
-            last = float(q.last) if q and q.last is not None else None
-            entry = float(t.entry_price or 0)
-            stop = float(t.stop_loss) if t.stop_loss is not None else None
-            r_mult = pct = None
-            if last is not None and entry:
-                direction = 1 if (t.side or "").upper() in ("BUY", "LONG") else -1
-                pct = (last - entry) / entry * 100 * direction
-                if stop is not None and abs(entry - stop) > 1e-12:
-                    r_mult = (last - entry) * direction / abs(entry - stop)
-            rows.append({
-                # The trade id is what makes the row actionable: the
-                # headband lists open positions, and until the CLOSE
-                # control existed it could only ever be read.
-                "id": t.id,
-                "symbol": t.symbol, "side": (t.side or "").upper(),
-                "qty": t.qty, "entry": entry, "stop": stop, "last": last,
-                "r": None if r_mult is None else round(r_mult, 2),
-                "pct": None if pct is None else round(pct, 2),
-                "paper": t.paper, "opened_at": t.opened_at,
-            })
-        out["panel_open_trades"] = rows
-
-        closed = AssetBotTrade.objects.filter(
-            config__user=user, status="CLOSED", closed_at__gte=day_ago)
-        n_closed = closed.count()
-        wins = closed.filter(pnl__gt=0).count() if n_closed else 0
-        out["panel_bot_trades_24h"] = n_closed
-        out["panel_bot_winrate"] = round(wins / n_closed * 100) if n_closed else None
-        last_closed = closed.order_by("-closed_at").first()
-        out["panel_bot_last"] = ({
-            "symbol": last_closed.symbol,
-            "outcome": (last_closed.outcome or "closed").replace("_", " "),
-            "r": last_closed.realized_r,
-            "when": last_closed.closed_at,
-        } if last_closed else None)
+        out.update(_bot_truth(user, out))
     except Exception as e:
         logger.debug(f"Panel bot detail unavailable: {e}")
+
+    # ── Realised P&L over 24h, across both books ─────────────────────────
+    # Distinguish "nothing closed" (em-dash) from "closed flat" (+0.00).
+    try:
+        bot_pnl = (out.get("panel_bot") or {}).get("pnl_24h")
+        legacy_pnl = out.get("panel_legacy_pnl_24h")
+        closes = (out.get("panel_bot_trades_24h") or 0) + (
+            out.get("panel_legacy_closed_24h") or 0)
+        if closes:
+            total = (bot_pnl or 0.0) + (legacy_pnl or 0.0)
+            out["panel_realised_24h_display"] = _signed(total)
+            out["panel_realised_24h_n"] = closes
+        else:
+            out["panel_realised_24h_display"] = None
+            out["panel_realised_24h_n"] = 0
+    except Exception as e:
+        logger.debug(f"Panel realised P&L unavailable: {e}")
 
     # ── The signals themselves, not just how many ────────────────────────
     try:
@@ -161,13 +769,19 @@ def _panel_detail(user):
     try:
         from instruments.models import Instrument
         from market_data.models import LiveQuote
-        wl = list(Instrument.objects.filter(is_watchlist=True, is_active=True)[:6])
+        # Starred instruments, NOT positions-on-starred-instruments: the old
+        # expression counted open portfolio positions that happened to be
+        # watchlisted, so the cell read 0 forever on a box with seven stars
+        # and no positions — while its own dropdown listed the seven.
+        starred = Instrument.objects.filter(is_watchlist=True, is_active=True)
+        out["panel_watchlist"] = starred.count()
+        wl = list(starred[:6])
         wq = {q.instrument_id: q for q in LiveQuote.objects.filter(
             instrument__in=wl)} if wl else {}
         out["panel_watchlist_rows"] = [{
             "symbol": i.symbol,
             "last": wq[i.id].last if i.id in wq else None,
-            "change": float(wq[i.id].change_pct or 0) if i.id in wq else None,
+            "change": _f(wq[i.id].change_pct) if i.id in wq else None,
         } for i in wl]
     except Exception as e:
         logger.debug(f"Panel watchlist detail unavailable: {e}")
@@ -175,17 +789,27 @@ def _panel_detail(user):
     # ── Drawdown, with the peak it is measured from ──────────────────────
     try:
         from portfolio.models import PortfolioSnapshot
-        from portfolio.services import get_or_create_default_portfolio
-        pf = get_or_create_default_portfolio(user=user)
-        snaps = list(PortfolioSnapshot.objects.filter(portfolio=pf)
-                     .order_by("-date")[:180])
-        if snaps:
-            peak = max(snaps, key=lambda s: s.total_value or 0)
-            cur = snaps[0]
-            out["panel_dd_peak"] = peak.total_value
-            out["panel_dd_peak_date"] = peak.date
-            out["panel_dd_current"] = cur.total_value
-            out["panel_dd_snapshots"] = len(snaps)
+        if portfolio is not None:
+            snaps = list(PortfolioSnapshot.objects.filter(portfolio=portfolio)
+                         .order_by("-date")[:180])
+            if snaps:
+                peak = max(snaps, key=lambda s: s.total_value or 0)
+                cur = snaps[0]
+                out["panel_dd_peak"] = peak.total_value
+                out["panel_dd_peak_date"] = peak.date
+                out["panel_dd_current"] = cur.total_value
+                out["panel_dd_snapshots"] = len(snaps)
+                if cur.max_drawdown is not None:
+                    # Already stored as a negative percentage by
+                    # portfolio.tasks — do not multiply by 100, and show it
+                    # as a magnitude.
+                    out["panel_drawdown"] = f"{abs(float(cur.max_drawdown)):.1f}"
+                # A snapshot from last week does not describe today's P&L.
+                if (cur.date == timezone.localdate()
+                        and cur.daily_pnl_pct is not None):
+                    pct = float(cur.daily_pnl_pct)
+                    out["panel_daily_pnl"] = pct
+                    out["panel_daily_pnl_display"] = f"{pct:+.2f}%"
     except Exception as e:
         logger.debug(f"Panel drawdown detail unavailable: {e}")
 
@@ -226,7 +850,7 @@ def _panel_detail(user):
         logger.debug(f"Panel volatility unavailable: {e}")
 
     if not testing:
-        cache.set(key, out, 20)
+        cache.set(key, out, PANEL_TTL_SECONDS)
     return out
 
 
@@ -290,6 +914,11 @@ def sauron_context(request):
         enabled_markets = ["stock", "forex", "commodity"]
 
     # ── Defaults ──
+    # None, never "0" and never "+0.00%". Every one of these is a
+    # measurement, and until one has been taken the honest answer is an
+    # em-dash. A confident red 0.0% drawdown reads as "no downside", not as
+    # "we could not compute it" — which is the failure mode this platform
+    # already has a whole test module about.
     ctx = {
         "user_timezone": user_tz,
         "pin_locked": pin_locked,
@@ -301,11 +930,25 @@ def sauron_context(request):
         "ticker_items": [],
         "notification_count": 0,
         "recent_notifications": [],
-        "panel_portfolio_value": "0",
-        "panel_cash": "0",
-        "panel_cash_pct": 100,
+        "panel_currency": "",
+        "panel_currency_symbol": "",
+        "panel_portfolio_value": None,
+        "panel_cash": None,
+        "panel_deployed": None,
+        "panel_cash_pct": None,
         "panel_positions": 0,
-        "panel_exposure": 0,
+        "panel_positions_priced": 0,
+        "panel_exposure": None,
+        "panel_book_coverage": "",
+        "panel_open_pnl": None,
+        "panel_open_pnl_display": None,
+        "panel_open_r": None,
+        "panel_open_r_display": None,
+        "panel_open_r_n": 0,
+        "panel_open_rows": [],
+        "panel_open_rows_hidden": 0,
+        "panel_realised_24h_display": None,
+        "panel_realised_24h_n": 0,
         "panel_signals": 0,
         "panel_bullish": 0,
         "panel_bearish": 0,
@@ -314,13 +957,8 @@ def sauron_context(request):
         "panel_sentiment": "—",
         "panel_ai_cost": "0.00",
         "panel_ai_tasks": 0,
-        # None, not "0.0" and not "+0.00%". These are measurements, and until
-        # one has been taken the honest answer is an em-dash. A confident red
-        # 0.0% drawdown reads as "no downside", not as "we could not compute
-        # it" — which is the failure mode this platform already has a whole
-        # test module about.
         "panel_drawdown": None,
-        "panel_max_dd": "3.0",
+        "panel_max_dd": None,
         "panel_daily_pnl": None,
         "panel_daily_pnl_display": None,
         # Fourteen of the thirty panel_* names below were rendered by
@@ -330,9 +968,13 @@ def sauron_context(request):
         # permanently reported OFF / OFFLINE / 0 open even with the bot armed
         # and holding positions.
         "panel_signals_24h": 0,
+        # None, not a fabricated OFF: a bot program whose state we failed to
+        # read must never be drawn as "not running".
+        "panel_bot": None,
         "panel_bot_armed": None,
         "panel_bot_mode": None,
         "panel_bot_open": None,
+        "panel_bot_open_r_display": None,
         "panel_bot_pnl_24h_display": None,
         "panel_funding_display": None,
         "panel_funding_extreme_count": None,
@@ -437,95 +1079,16 @@ def sauron_context(request):
     except Exception as e:
         logger.debug(f"Ticker/panel data unavailable: {e}")
 
-    # Portfolio
-    try:
-        from portfolio.services import get_or_create_default_portfolio
-        portfolio = get_or_create_default_portfolio(user=request.user)
-        open_pos = portfolio.positions.filter(closed_at__isnull=True)
-        cash_pct = round(float(portfolio.cash_available) / max(float(portfolio.current_value), 1) * 100)
-        ctx["panel_portfolio_value"] = f"{portfolio.current_value:,.0f}"
-        ctx["panel_cash"] = f"{portfolio.cash_available:,.0f}"
-        ctx["panel_cash_pct"] = cash_pct
-        # BOTH books, or the cell lies: legacy portfolio Positions (Setup
-        # form, NL trader, eToro sync) PLUS the open AssetBotTrades that
-        # every interactive path — bots, TAKE TRADE, LONG/SHORT — actually
-        # writes. Counting only the former froze this cell forever while
-        # its own dropdown listed the live trades.
-        from bot_program.models import AssetBotTrade as _ABT
-        _bot_open = _ABT.objects.filter(
-            config__user=request.user,
-            status__in=("OPEN", "CLOSE_PENDING")).count()
-        ctx["panel_positions"] = open_pos.count() + _bot_open
-        # Reused by the BOT cell below — this context processor runs on
-        # every page render; the identical COUNT must not run twice.
-        ctx["panel_bot_open"] = _bot_open
-        ctx["panel_exposure"] = 100 - cash_pct
-        ctx["panel_max_dd"] = f"{portfolio.max_daily_loss_pct}"
-        # Starred instruments, NOT positions-on-starred-instruments: the
-        # old expression counted open portfolio positions that happened to
-        # be watchlisted, so the cell read 0 forever on a box with seven
-        # stars and no positions — while its own dropdown listed the seven.
-        from instruments.models import Instrument as _Inst
-        ctx["panel_watchlist"] = _Inst.objects.filter(
-            is_watchlist=True, is_active=True).count()
-        # Expanded panel data
-        ctx["panel_recent_positions"] = list(open_pos.select_related("instrument")[:5])
-
-        # Drawdown and daily P&L come from the most recent snapshot. Both used
-        # to be hardcoded constants — "0.0" and "+0.00%" — sitting in the same
-        # weight and colour as a real reading.
-        from portfolio.models import PortfolioSnapshot
-        snap = PortfolioSnapshot.objects.filter(
-            portfolio=portfolio).order_by("-date").first()
-        if snap:
-            if snap.max_drawdown is not None:
-                # Already stored as a negative percentage by portfolio.tasks —
-                # do not multiply by 100, and show it as a magnitude.
-                ctx["panel_drawdown"] = f"{abs(float(snap.max_drawdown)):.1f}"
-            # A snapshot from last week does not describe today's P&L.
-            if snap.date == timezone.localdate() and snap.daily_pnl_pct is not None:
-                pct = float(snap.daily_pnl_pct)
-                ctx["panel_daily_pnl"] = pct
-                ctx["panel_daily_pnl_display"] = f"{pct:+.2f}%"
-    except Exception as e:
-        logger.debug(f"Portfolio data unavailable: {e}")
-
     # Computed independently of the ticker block above: that one is wrapped in
     # its own try, and if it fails before assigning day_ago every panel below
     # would die on a NameError swallowed as "no data".
     day_ago = timezone.now() - timedelta(hours=24)
 
-    # Everything the info-panel dropdowns show, behind a 20s cache.
+    # The whole headband — cells and dropdowns — behind one cache.
     try:
         ctx.update(_panel_detail(request.user))
     except Exception as e:
         logger.debug(f"Panel detail unavailable: {e}")
-
-    # ── Bot program ──
-    try:
-        from bot_program.models import AssetBotConfig, AssetBotTrade
-
-        configs = AssetBotConfig.objects.filter(user=request.user)
-        enabled = configs.filter(enabled=True)
-        ctx["panel_bot_armed"] = enabled.exists()
-        modes = sorted({c.mode for c in enabled})
-        ctx["panel_bot_mode"] = (modes[0] if len(modes) == 1
-                                 else ("mixed" if modes else "—"))
-        # Usually precomputed by the portfolio block above (one COUNT per
-        # render, not two); this fallback only fires if that block failed.
-        if "panel_bot_open" not in ctx:
-            ctx["panel_bot_open"] = AssetBotTrade.objects.filter(
-                config__user=request.user,
-                status__in=("OPEN", "CLOSE_PENDING")).count()
-
-        closed_24h = AssetBotTrade.objects.filter(
-            config__user=request.user, status="CLOSED", closed_at__gte=day_ago)
-        pnl = closed_24h.aggregate(total=Sum("pnl"))["total"]
-        # Distinguish "no trades closed today" from "closed flat".
-        ctx["panel_bot_pnl_24h_display"] = (
-            f"{float(pnl):+,.2f}" if pnl is not None else None)
-    except Exception as e:
-        logger.debug(f"Bot panel data unavailable: {e}")
 
     # ── Funding and liquidations ──
     try:

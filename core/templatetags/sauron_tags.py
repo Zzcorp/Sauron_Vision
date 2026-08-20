@@ -1,6 +1,37 @@
 from django import template
 register = template.Library()
 
+
+@register.simple_tag(takes_context=True)
+def static_abs(context, path):
+    """An ABSOLUTE URL for a static file — scheme, host and all.
+
+    `{% static %}` returns "/static/logo/og-card.png", and every link
+    preview on the platform shipped that into `og:image`. Facebook,
+    LinkedIn, Slack, X and iMessage all require an absolute URL there and
+    all silently drop a relative one, so every link anybody has ever shared
+    to Sauron Vision has been previewing with no image at all. It fails
+    quietly, on somebody else's server, which is why it survived.
+
+    The host comes from the request, which Django has already validated
+    against ALLOWED_HOSTS by the time a template renders — so a spoofed Host
+    header cannot point the card at another domain. Behind the reverse proxy
+    the scheme comes from SECURE_PROXY_SSL_HEADER, the same way every other
+    absolute URL on the platform is built.
+
+    Falls back to the plain static path when there is no request in context
+    (a management command rendering a template, a test). A relative URL is a
+    worse card, but it is still a working <img> — inventing a hostname would
+    point the card somewhere that may not exist.
+    """
+    from django.templatetags.static import static as static_url
+
+    url = static_url(path)
+    request = context.get("request")
+    if request is None or not hasattr(request, "build_absolute_uri"):
+        return url
+    return request.build_absolute_uri(url)
+
 @register.simple_tag(takes_context=True)
 def get_theme(context):
     request = context.get("request")

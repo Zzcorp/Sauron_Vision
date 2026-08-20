@@ -15,17 +15,22 @@ A rule can grade well at the signal level but poorly at the bot level if:
   - the rule fires on signals that materialise too slowly to hit TP
 
 `grade_bot_trade(trade)` is called from `_close_trade` in AssetBot. It sets:
-  - outcome ∈ {hit_target, stopped_out, manual_close, expired}
+  - outcome ∈ {hit_target, stopped_out, manual_close, expired, time_stop}
   - realized_r (P&L normalised by initial risk = |entry - stop_loss| × qty)
   - duration_minutes
 
-`bot_performance_summary(rule_name=, asset_class=, days=180)` aggregates the
-graded population and returns win_rate / expectancy / count for a rule on
-a given asset class.
+`bot_performance_summary(rule_name=, asset_class=, days=180, venue=)`
+aggregates the graded population and returns win_rate / expectancy / count
+for a rule on a given asset class, optionally restricted to one venue.
 
-`bot_trade_track_record(rule_name, asset_class, min_n=10)` returns a
+`bot_trade_track_record(rule_name, asset_class, min_n=10, venue=)` returns a
 confidence multiplier in [0.5, 1.5] — used by AssetBot.decide() when the
 config opts in via `extras["use_bot_track_record"]=True`.
+`bot_track_record_detail(...)` is the same computation with the reasoning
+attached, so a neutral 1.0 can be told apart from a measured 1.0.
+
+`paper_live_expectancy_gap(...)` reports how much of a rule's measured edge
+survives real execution.
 """
 from __future__ import annotations
 
@@ -40,6 +45,52 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+# ── Venues ───────────────────────────────────────────────────────────────
+# Paper and live are two different measurements of the same rule, not two
+# samples of one measurement. A paper fill is charged a modelled half-spread
+# on both sides (risk_levels.paper_fill_price) and has no resting stop at a
+# broker; a live fill books the raw mark against a real bracket that can be
+# hit intrabar. The two therefore produce different realized_r distributions
+# by construction, and their average describes neither venue — which is fine
+# for a dashboard that wants "everything this rule has ever done" and wrong
+# for anything that sizes or directs real money.
+VENUE_LIVE = "live"
+VENUE_PAPER = "paper"
+VENUE_ALL = "all"      # pooled — the dashboards' question, not the book's
+_VENUES = (VENUE_LIVE, VENUE_PAPER, VENUE_ALL)
+
+# No boost, no penalty. Returned whenever the venue's evidence is absent or
+# too thin to act on — the honest answer there is "I have not measured this",
+# which multiplies to 1.0 and comes with a reason attached rather than
+# silently borrowing the other venue's number.
+NEUTRAL_MULTIPLIER = 1.0
+
+
+def _venue_filter(qs, venue: str):
+    """Narrow `qs` to one execution venue. Raises on an unknown venue.
+
+    Raising rather than defaulting: a typo'd venue that quietly pooled would
+    reinstate exactly the bug this argument exists to prevent, and it would
+    do so invisibly.
+
+    This raise is the ledger's own backstop and it fires for every direct
+    caller — dashboards, the promotion ladder, `bot_track_record_detail`. It
+    is NOT what protects the decision path: `aggregation.rule_weight` decides
+    the venue before it ever gets here and validates it there, because its
+    own guard would skip this query and its own `except` would log the
+    failure away. Two layers, and the one nearest the money is the one that
+    has to be reachable.
+    """
+    if venue not in _VENUES:
+        raise ValueError(
+            f"venue must be one of {_VENUES}, got {venue!r}")
+    if venue == VENUE_LIVE:
+        return qs.filter(paper=False)
+    if venue == VENUE_PAPER:
+        return qs.filter(paper=True)
+    return qs
+
+
 # ── Per-trade grading ────────────────────────────────────────────────────
 
 def grade_bot_trade(trade) -> bool:
@@ -52,6 +103,7 @@ def grade_bot_trade(trade) -> bool:
       - exit_price ≥ take_profit (BUY) or ≤ TP (SELL)        → hit_target
       - exit_price ≤ stop_loss (BUY) or ≥ SL (SELL)          → stopped_out
       - reason contains 'EXPIRY_CLOSE' (options, Phase 14)   → expired
+      - reason contains 'closed:TIME' (the time stop)        → time_stop
       - else                                                  → manual_close
     """
     if trade.status != "CLOSED" or trade.exit_price is None:
@@ -104,6 +156,18 @@ def grade_bot_trade(trade) -> bool:
     # turned take-profit exits into "manual_close".
     if "EXPIRY_CLOSE" in reason:
         outcome = "expired"
+    elif "closed:TIME" in reason:
+        # The time stop, and nothing else. Without this branch the exit fell
+        # through to the price comparisons below and graded `manual_close` —
+        # the engine's own risk decision recorded as an operator's, in the
+        # audit log, the notification icon and every dashboard. It also hid
+        # the one thing the exit is evidence FOR: a rule whose trades keep
+        # timing out fires on moves that never materialise, which is a fault
+        # in the entry or the horizon, not in the stop. `expired` would have
+        # been closer but is already the options expiry gate's answer, and
+        # a contract running out is a different event from a thesis doing
+        # nothing.
+        outcome = "time_stop"
     elif "closed:TP" in reason:
         outcome = "hit_target"
     elif "closed:SL" in reason:
@@ -162,24 +226,40 @@ def bot_performance_summary(*, rule_name: Optional[str] = None,
                              days: int = 180,
                              min_n: int = 1,
                              user=None,
-                             since=None) -> list[dict]:
+                             since=None,
+                             venue: str = VENUE_ALL) -> list[dict]:
     """Return per-(rule_name, asset_class) stats for closed bot trades within
-    the last `days`. Filterable by rule_name, asset_class, user, or an
+    the last `days`. Filterable by rule_name, asset_class, user, venue, or an
     explicit `since` datetime that overrides `days`.
 
     Each row:
-        {rule_name, asset_class, n, n_wins, n_losses, win_rate,
+        {rule_name, asset_class, venue, n, n_wins, n_losses, win_rate,
          avg_r, expectancy, avg_duration_min, last_traded_at}
 
     "n" here is *graded* trades only — open trades and not-yet-graded closes
     are excluded.
+
+    `venue` is one of VENUE_LIVE / VENUE_PAPER / VENUE_ALL and defaults to
+    the pooled row, which is what the dashboards and the promotion ladder
+    ask for. Anything that weights or sizes a real order must name the venue
+    it is about to trade on — see `bot_track_record_detail`. The chosen
+    venue is echoed back in every row so a caller can never mistake a pooled
+    number for a single-venue one; that was the silent half of the bug.
     """
     from .models import AssetBotTrade
     cutoff = since if since is not None else timezone.now() - timedelta(days=days)
+    # `time_stop` belongs in the population, not outside it. An outcome
+    # missing from this list is invisible to expectancy, to the promotion
+    # ladder and to every dashboard that reads this — and a rule that keeps
+    # timing out is precisely the one whose measured expectancy should be
+    # falling. Dropping it would let a rule with a flat record be judged on
+    # only the trades that happened to reach a level.
     qs = (AssetBotTrade.objects
           .filter(status="CLOSED", closed_at__gte=cutoff,
-                   outcome__in=["hit_target", "stopped_out", "manual_close", "expired"])
+                   outcome__in=["hit_target", "stopped_out", "manual_close",
+                                 "expired", "time_stop"])
           .exclude(rule_name=""))
+    qs = _venue_filter(qs, venue)
     if rule_name:
         qs = qs.filter(rule_name=rule_name)
     if asset_class:
@@ -209,6 +289,7 @@ def bot_performance_summary(*, rule_name: Optional[str] = None,
         rows.append({
             "rule_name": rn,
             "asset_class": ac,
+            "venue": venue,
             "n": n,
             "n_wins": wins,
             "n_losses": losses,
@@ -224,11 +305,79 @@ def bot_performance_summary(*, rule_name: Optional[str] = None,
 
 # ── Confidence multiplier (feedback into decide()) ───────────────────────
 
+def bot_track_record_detail(rule_name: str, asset_class: str,
+                             *, days: int = 180, min_n: int = 10,
+                             floor: float = 0.5, ceiling: float = 1.5,
+                             venue: str = VENUE_ALL) -> dict:
+    """The confidence multiplier plus the reasoning that produced it.
+
+    Returns:
+        {multiplier, venue, n, win_rate, expectancy, measured, reason}
+
+    `measured` is True only when the multiplier was computed from `min_n` or
+    more closed trades ON `venue`. When it is False the multiplier is exactly
+    NEUTRAL_MULTIPLIER and `reason` says why — the caller can log it, and a
+    reviewer reading a 1.0 in the ledger can tell "no evidence" apart from
+    "evidence that came out neutral". A bare float cannot carry that, which
+    is why this function exists alongside `bot_trade_track_record`.
+
+    Cold start is the case that matters. A rule newly promoted to live has a
+    fat paper record and zero live closes; asking for VENUE_LIVE returns n=0
+    and a neutral 1.0, NOT the paper multiplier (which would let simulated
+    fills size the first real order) and NOT 0.0 (which would silently veto
+    every rule on its first live day). `win_rate` and `expectancy` are None
+    there because nothing was measured, per the house rule.
+    """
+    # min_n=1 rather than min_n, so a rule that traded four times can be
+    # reported as "4 closes, need 10" instead of collapsing into the same
+    # empty result as a rule that has never traded here at all. Same query
+    # either way; the threshold is applied below.
+    rows = bot_performance_summary(
+        rule_name=rule_name, asset_class=asset_class, days=days, min_n=1,
+        venue=venue,
+    )
+    where = asset_class or "any asset class"
+    if not rows:
+        return {
+            "multiplier": NEUTRAL_MULTIPLIER, "venue": venue, "n": 0,
+            "win_rate": None, "expectancy": None, "measured": False,
+            "reason": (f"no closed {venue} trades for {rule_name!r} on "
+                       f"{where} in {days}d — neutral, not measured"),
+        }
+    # Rows are sorted by descending n; with both rule_name and asset_class
+    # given there is only ever one bucket, and callers that omit asset_class
+    # get the best-evidenced one, which is the pre-existing behaviour.
+    r = rows[0]
+    if r["n"] < min_n:
+        return {
+            "multiplier": NEUTRAL_MULTIPLIER, "venue": venue, "n": r["n"],
+            "win_rate": r["win_rate"], "expectancy": r["expectancy"],
+            "measured": False,
+            "reason": (f"{r['n']} closed {venue} trades for {rule_name!r} on "
+                       f"{where} in {days}d, below min_n={min_n} — neutral"),
+        }
+
+    wr_delta = r["win_rate"] - 0.50
+    r_signal = max(min(r["avg_r"], 1.0), -1.0)
+
+    raw = 1.0 + (wr_delta * 0.6) + (r_signal * 0.4)
+    multiplier = max(floor, min(ceiling, round(raw, 3)))
+    return {
+        "multiplier": multiplier, "venue": venue, "n": r["n"],
+        "win_rate": r["win_rate"], "expectancy": r["expectancy"],
+        "measured": True,
+        "reason": (f"{r['n']} closed {venue} trades for {rule_name!r} on "
+                   f"{where}: win_rate {r['win_rate']:.2f}, "
+                   f"expectancy {r['expectancy']:+.2f}R → ×{multiplier}"),
+    }
+
+
 def bot_trade_track_record(rule_name: str, asset_class: str,
                             *, days: int = 180, min_n: int = 10,
-                            floor: float = 0.5, ceiling: float = 1.5) -> float:
+                            floor: float = 0.5, ceiling: float = 1.5,
+                            venue: str = VENUE_ALL) -> float:
     """Return a confidence multiplier in [floor, ceiling] for a rule's
-    *bot-trade* track record on a given asset class.
+    *bot-trade* track record on a given asset class and venue.
 
     Uses two ingredients:
       - win_rate vs 0.50 baseline
@@ -239,19 +388,94 @@ def bot_trade_track_record(rule_name: str, asset_class: str,
       - 70% win rate AND +0.5 avg_r → ~1.4 (boost)
       - 30% win rate AND -0.5 avg_r → ~0.6 (penalty)
 
-    With fewer than `min_n` graded trades, returns 1.0 (no signal).
+    With fewer than `min_n` graded trades on `venue`, returns 1.0 (no
+    signal). `venue` defaults to the pooled record for backwards
+    compatibility; a caller about to place an order must pass the venue it
+    will actually trade on, or it is weighting one venue's order with the
+    other venue's fills. `bot_track_record_detail` returns the same number
+    with the reason attached.
     """
-    rows = bot_performance_summary(
-        rule_name=rule_name, asset_class=asset_class, days=days, min_n=min_n,
-    )
-    if not rows:
-        return 1.0
-    r = rows[0]
-    if r["n"] < min_n:
-        return 1.0
+    return bot_track_record_detail(
+        rule_name, asset_class, days=days, min_n=min_n,
+        floor=floor, ceiling=ceiling, venue=venue,
+    )["multiplier"]
 
-    wr_delta = r["win_rate"] - 0.50
-    r_signal = max(min(r["avg_r"], 1.0), -1.0)
 
-    raw = 1.0 + (wr_delta * 0.6) + (r_signal * 0.4)
-    return max(floor, min(ceiling, round(raw, 3)))
+# ── Execution drag: what survives the trip from paper to live ────────────
+
+def paper_live_expectancy_gap(*, rule_name: Optional[str] = None,
+                               asset_class: Optional[str] = None,
+                               days: int = 180,
+                               min_n: int = 1,
+                               user=None,
+                               since=None) -> list[dict]:
+    """Per-(rule, asset_class), how much of the paper edge survives live.
+
+    Each row:
+        {rule_name, asset_class, n_paper, n_live,
+         paper_expectancy, live_expectancy, gap}
+
+    `gap` is live_expectancy − paper_expectancy in R-multiples: negative
+    means real execution ate edge the simulator promised, which is the
+    normal direction (the paper fill is charged a modelled half-spread, but
+    it never suffers a queue, a gap through the stop, or a partial). A rule
+    whose gap is large and negative is not a rule that stopped working — it
+    is a rule whose edge is smaller than its costs, and the two call for
+    completely different fixes.
+
+    `gap` is None whenever either side has no closed trades, because a gap
+    against an unmeasured venue is not a small gap, it is no measurement at
+    all.
+
+    `n_paper` / `n_live` count every closed trade on that venue, reported
+    whether or not the venue cleared `min_n`. That distinction is the whole
+    point of the function: 0 means the rule has genuinely never traded there,
+    while a nonzero count beside a None expectancy means the evidence exists
+    and is too thin to state. `min_n` censors the EXPECTANCY, never the
+    count — a rule with nine live closes and min_n=10 previously came back as
+    `n_live: 0`, indistinguishable from one that had never gone live, which
+    is the opposite of what this function is for. A pair where neither venue
+    clears `min_n` is dropped entirely, since it has nothing to report on
+    either side.
+
+    Nothing in the decision path consumes this yet — it is a diagnostic the
+    ledger can already answer, exposed so a dashboard or the promotion
+    ladder can pick it up without re-deriving the split.
+    """
+    # min_n=1 on the query, applied by hand below. Letting the summary drop
+    # thin buckets made a censored venue come back MISSING, and a missing
+    # bucket read as a count of zero — see the docstring.
+    common = dict(rule_name=rule_name, asset_class=asset_class, days=days,
+                  min_n=1, user=user, since=since)
+    paper_by_key = {(r["rule_name"], r["asset_class"]): r
+                    for r in bot_performance_summary(venue=VENUE_PAPER, **common)}
+    live_by_key = {(r["rule_name"], r["asset_class"]): r
+                   for r in bot_performance_summary(venue=VENUE_LIVE, **common)}
+
+    rows = []
+    for key in sorted(set(paper_by_key) | set(live_by_key)):
+        rn, ac = key
+        p = paper_by_key.get(key)
+        live = live_by_key.get(key)
+        n_paper = p["n"] if p else 0
+        n_live = live["n"] if live else 0
+        if n_paper < min_n and n_live < min_n:
+            continue
+        # Below min_n the venue was observed but not measured, so the
+        # expectancy is None rather than a number nobody should read. The
+        # `p and` is not decoration: at min_n=0 a venue with no bucket at all
+        # would otherwise satisfy `0 >= 0` and be dereferenced.
+        p_exp = p["expectancy"] if (p and n_paper >= min_n) else None
+        l_exp = live["expectancy"] if (live and n_live >= min_n) else None
+        rows.append({
+            "rule_name": rn,
+            "asset_class": ac,
+            "n_paper": n_paper,
+            "n_live": n_live,
+            "paper_expectancy": p_exp,
+            "live_expectancy": l_exp,
+            "gap": (round(l_exp - p_exp, 4)
+                    if p_exp is not None and l_exp is not None else None),
+        })
+    rows.sort(key=lambda r: -(r["n_paper"] + r["n_live"]))
+    return rows

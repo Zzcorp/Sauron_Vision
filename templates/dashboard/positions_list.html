@@ -141,8 +141,18 @@ template branches, each a fresh chance to print a confident zero.
         {# ── rule's score, the reason the engine wrote, the signal behind it. ── #}
         {# ── An empty value is a value the platform does not have and renders ── #}
         {# ── on the card as an em-dash — never as 0, which reads as measured. ── #}
+        {# ── Three gestures, three destinations ── #}
+        {# hover the row: the dwell card, a summary. Click the row: this #}
+        {# trade's full detail. Click the SYMBOL: the instrument under it. #}
+        {# The `as` form of the url tag is deliberate — it is the only #}
+        {# one that does not raise: a symbol that never resolved #}
+        {# to an Instrument, or one carrying a character the route cannot #}
+        {# hold, yields "" and renders as plain text instead of 500ing the #}
+        {# whole book over one row. #}
         {% for p, d in positions_detailed %}
+        {% if p.instrument.has_page %}{% url 'instrument_detail' p.instrument.symbol as instrument_url%}{% endif %}
         <tr data-sv-position-row
+            data-pos-instrument-href="{{ instrument_url }}"
             data-pos-symbol="{{ d.symbol }}" data-pos-side="{{ d.side }}"
             data-pos-qty="{{ d.qty }}" data-pos-status="{{ d.status }}"
             data-pos-venue="{{ d.venue }}"
@@ -158,6 +168,17 @@ template branches, each a fresh chance to print a confident zero.
             {# an operator cannot resolve. The card only formats it. #}
             data-pos-r="{{ p.r_multiple|default_if_none:'' }}" data-pos-pnl="{{ d.pnl }}"
             data-pos-pnl-pct="{{ d.pnl_pct }}" data-pos-risk="{{ d.risk }}"
+            {# The money block. committed-kind says whether the figure above #}
+            {# it is cash cost or broker margin: on a levered class qty x #}
+            {# entry is EXPOSURE, so the card dashes the margin it does not #}
+            {# know and prints the notional under its own name instead. #}
+            data-pos-asset-class="{{ d.asset_class }}" data-pos-ccy="{{ d.ccy }}"
+            data-pos-committed="{{ d.committed }}"
+            data-pos-committed-kind="{{ d.committed_kind }}"
+            data-pos-notional="{{ d.notional }}"
+            data-pos-value-now="{{ d.value_now }}"
+            data-pos-exit-cost="{{ d.exit_cost }}" data-pos-net-now="{{ d.net_now }}"
+            data-pos-realized-r="{{ d.realized_r }}"
             data-pos-age="{{ d.age }}" data-pos-opened="{{ d.opened }}"
             data-pos-rule="{{ d.rule }}" data-pos-score="{{ d.score }}"
             data-pos-reason="{{ d.reason }}" data-pos-order="{{ d.order }}"
@@ -167,10 +188,18 @@ template branches, each a fresh chance to print a confident zero.
             data-pos-spark="{{ d.spark }}" data-pos-spark-min="{{ d.spark_min }}"
             data-pos-spark-max="{{ d.spark_max }}" data-pos-spark-up="{{ d.spark_up }}"
             data-pos-href="{{ d.href }}">
-            {# The keyboard path to the same page the card's click opens: the #}
-            {# card is aria-hidden and pointer-only, so without this link the #}
-            {# timeline would be unreachable without a mouse. #}
-            <td class="nowrap" style="font-family: var(--font-display); font-size: 13px;">{% if d.href %}<a href="{{ d.href }}" class="pos-sym-link">{{ p.instrument.symbol }}</a>{% else %}{{ p.instrument.symbol }}{% endif %}</td>
+            {# The symbol is the INSTRUMENT, not the trade, and it now goes #}
+            {# where it says: the underlying's own page. The trade's detail #}
+            {# is the row's click — and DETAIL beside it is that same page #}
+            {# for a keyboard, because the dwell card is aria-hidden and #}
+            {# pointer-only, so without a real anchor here the detail would #}
+            {# be unreachable without a mouse. #}
+            {# aria-label and no title: a native tooltip fires at about one #}
+            {# second and the dwell card at two, so a title here would put #}
+            {# an OS bubble over the row a moment before the card the #}
+            {# operator was actually waiting for. The label is for the #}
+            {# screen reader, which has no such race. #}
+            <td class="nowrap"><span class="pos-sym-cell">{% if instrument_url %}<a href="{{ instrument_url }}" class="pos-sym-link" aria-label="{{ p.instrument.symbol }} — instrument page">{{ p.instrument.symbol }}</a>{% else %}<span class="pos-sym-plain">{{ p.instrument.symbol|default:"—" }}</span>{% endif %}{% if d.href %}<a href="{{ d.href }}" class="pos-row-detail" aria-label="Full detail for this {{ p.instrument.symbol }} trade">detail&nbsp;&rsaquo;</a>{% endif %}</span></td>
             <td><span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ p.direction }}</span></td>
             <td class="num" style="font-family: var(--font-mono);">{{ p.quantity }}</td>
             <td class="num" style="font-family: var(--font-mono);">{{ p.entry_price }}</td>
@@ -226,16 +255,24 @@ template branches, each a fresh chance to print a confident zero.
 {% elif not live_only %}
 <!-- ── Position History Tab ────────────────────────── -->
 
-{% if best_trade %}
+{# Best and worst are the SAME row until two trades have been graded, and the #}
+{# card used to force a + and paint it green whatever the number was — so a #}
+{# single losing short appeared as the platform's best trade and its worst. #}
+{% if have_pair %}
 <div class="grid grid-2" style="margin-bottom:20px;">
     <div class="card fade-in-up delay-1" style="border-left:3px solid var(--accent);">
         <div class="card-header"><span class="card-title" style="color:var(--accent);">Best Trade</span></div>
         <div style="padding:12px;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-family:var(--font-display);font-size:18px;color:var(--accent);font-weight:700;">{{ best_trade.instrument.symbol }}</span>
+                {# Same rule as the open book above: a symbol anywhere on #}
+                {# this page is the instrument and goes to the instrument. #}
+                {% if best_trade.instrument.has_page %}{% url 'instrument_detail' best_trade.instrument.symbol as best_url%}{% endif %}
+                {% if best_url %}<a href="{{ best_url }}" class="ph-sym is-lg">{{ best_trade.instrument.symbol }}</a>{% else %}<span class="ph-sym is-lg">{{ best_trade.instrument.symbol }}</span>{% endif %}
                 <span class="badge badge-{% if best_trade.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ best_trade.direction }}</span>
             </div>
-            <div class="ph-kv"><span>P&L</span><span style="color:var(--accent);font-weight:700;">+{{ best_trade.unrealized_pnl }} ({{ best_trade.unrealized_pnl_pct|floatformat:1 }}%)</span></div>
+            {# Sign and colour follow the number. The best of a losing book is #}
+            {# still a loss, and printing it green with a + is a lie. #}
+            <div class="ph-kv"><span>P&L</span><span class="{% if best_trade.unrealized_pnl > 0 %}up{% elif best_trade.unrealized_pnl < 0 %}down{% endif %}" style="font-weight:700;">{% if best_trade.unrealized_pnl > 0 %}+{% endif %}{{ best_trade.unrealized_pnl }} ({{ best_trade.unrealized_pnl_pct|floatformat:1 }}%)</span></div>
             <div class="ph-kv"><span>Entry → Exit</span><span>{{ best_trade.entry_price|floatformat:2 }} → {{ best_trade.current_price|floatformat:2 }}</span></div>
             <div class="ph-kv"><span>Period</span><span>{{ best_trade.opened_at|date:"M d" }} → {{ best_trade.closed_at|date:"M d" }}</span></div>
         </div>
@@ -244,12 +281,38 @@ template branches, each a fresh chance to print a confident zero.
         <div class="card-header"><span class="card-title" style="color:var(--accent-red);">Worst Trade</span></div>
         <div style="padding:12px;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-family:var(--font-display);font-size:18px;color:var(--accent);font-weight:700;">{{ worst_trade.instrument.symbol }}</span>
+                {% if worst_trade.instrument.has_page %}{% url 'instrument_detail' worst_trade.instrument.symbol as worst_url%}{% endif %}
+                {% if worst_url %}<a href="{{ worst_url }}" class="ph-sym is-lg is-loss">{{ worst_trade.instrument.symbol }}</a>{% else %}<span class="ph-sym is-lg is-loss">{{ worst_trade.instrument.symbol }}</span>{% endif %}
                 <span class="badge badge-{% if worst_trade.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ worst_trade.direction }}</span>
             </div>
-            <div class="ph-kv"><span>P&L</span><span style="color:var(--accent-red);font-weight:700;">{{ worst_trade.unrealized_pnl }} ({{ worst_trade.unrealized_pnl_pct|floatformat:1 }}%)</span></div>
+            <div class="ph-kv"><span>P&L</span><span class="{% if worst_trade.unrealized_pnl > 0 %}up{% elif worst_trade.unrealized_pnl < 0 %}down{% endif %}" style="font-weight:700;">{% if worst_trade.unrealized_pnl > 0 %}+{% endif %}{{ worst_trade.unrealized_pnl }} ({{ worst_trade.unrealized_pnl_pct|floatformat:1 }}%)</span></div>
             <div class="ph-kv"><span>Entry → Exit</span><span>{{ worst_trade.entry_price|floatformat:2 }} → {{ worst_trade.current_price|floatformat:2 }}</span></div>
             <div class="ph-kv"><span>Period</span><span>{{ worst_trade.opened_at|date:"M d" }} → {{ worst_trade.closed_at|date:"M d" }}</span></div>
+        </div>
+    </div>
+</div>
+{% elif best_trade %}
+{# No pair to show — either one graded close, or several that tie on P&L #}
+{# and hand back the same row twice. Name it for what it is rather than #}
+{# crowning it, and let the note below say which of the two happened. #}
+<div class="card fade-in-up delay-1" style="margin-bottom:20px;border-left:3px solid {% if best_trade.unrealized_pnl > 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
+    <div class="card-header"><span class="card-title">{% if n_graded > 1 %}Closed trades, all level{% else %}Only closed trade{% endif %}</span></div>
+    <div style="padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            {# Neutral on purpose: the card's border already carries the #}
+        {# outcome, and painting the only trade's name accent-green when it #}
+        {# lost would be the card contradicting itself. #}
+        {% if best_trade.instrument.has_page %}{% url 'instrument_detail' best_trade.instrument.symbol as only_url%}{% endif %}
+        {% if only_url %}<a href="{{ only_url }}" class="ph-sym is-lg is-neutral">{{ best_trade.instrument.symbol }}</a>{% else %}<span class="ph-sym is-lg is-neutral">{{ best_trade.instrument.symbol }}</span>{% endif %}
+            <span class="badge badge-{% if best_trade.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ best_trade.direction }}</span>
+        </div>
+        <div class="ph-kv"><span>P&L</span><span class="{% if best_trade.unrealized_pnl > 0 %}up{% elif best_trade.unrealized_pnl < 0 %}down{% endif %}" style="font-weight:700;">{% if best_trade.unrealized_pnl > 0 %}+{% endif %}{{ best_trade.unrealized_pnl }} ({{ best_trade.unrealized_pnl_pct|floatformat:1 }}%)</span></div>
+        <div class="ph-kv"><span>Entry → Exit</span><span>{{ best_trade.entry_price|floatformat:2 }} → {{ best_trade.current_price|floatformat:2 }}</span></div>
+        <div class="ph-kv"><span>Period</span><span>{{ best_trade.opened_at|date:"M d" }} → {{ best_trade.closed_at|date:"M d" }}</span></div>
+        <div style="margin-top:8px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">
+            {% if n_graded > 1 %}All {{ n_graded }} graded closes booked the
+            same P&amp;L, so there is no best and no worst to name yet.
+            {% else %}Best and worst need two graded closes to mean anything.{% endif %}
         </div>
     </div>
 </div>
@@ -263,11 +326,15 @@ template branches, each a fresh chance to print a confident zero.
     {% if closed_positions %}
     <div class="ph-list">
         {% for p in closed_positions %}
-        <div class="ph-trade-card" onclick="this.classList.toggle('expanded')">
+        {# The card toggles on click, so the symbol link has to say the #}
+        {# click was for it: without the guard, following the link ALSO #}
+        {# expanded the card the operator was leaving. #}
+        <div class="ph-trade-card" onclick="if (!event.target.closest('a')) { this.classList.toggle('expanded'); }">
             <div class="ph-trade-row">
                 <div style="display:flex;align-items:center;gap:10px;">
                     <span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}" style="font-size:9px;padding:2px 6px;">{{ p.direction }}</span>
-                    <span style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--accent);">{{ p.instrument.symbol }}</span>
+                    {% if p.instrument.has_page %}{% url 'instrument_detail' p.instrument.symbol as closed_url%}{% endif %}
+                    {% if closed_url %}<a href="{{ closed_url }}" class="ph-sym">{{ p.instrument.symbol }}</a>{% else %}<span class="ph-sym">{{ p.instrument.symbol }}</span>{% endif %}
                     {% if p.strategy %}<span style="font-size:10px;color:var(--text-muted);">via {{ p.strategy.name|truncatechars:20 }}</span>{% endif %}
                 </div>
                 <div style="display:flex;align-items:center;gap:16px;">
@@ -316,18 +383,27 @@ template branches, each a fresh chance to print a confident zero.
                         <div class="ph-detail-value">{{ p.opened_at|timesince:p.closed_at }}</div>
                     </div>
                 </div>
-                <!-- Mini chart: entry/exit visualization -->
+                {% comment %}
+                Mini chart: how big this move was, against the biggest one on
+                the page. The width comes from the view (p.bar_pct) — it used
+                to be written here twice, once as `width: {{ pct }}%` for a
+                long, which CSS discards outright when the pct is negative, so
+                every losing long drew the same 4px stub whether it lost 0.4%
+                or 40%; and once as a hardcoded `width: 50%` for a short,
+                which described nothing at all. Magnitude is the bar, sign is
+                the colour, direction is the marker. No number, no bar.
+                {% endcomment %}
                 <div class="ph-chart-bar">
                     <div class="ph-chart-label" style="left:0;">Entry: {{ p.entry_price|floatformat:2 }}</div>
                     <div class="ph-chart-track">
-                        {% if p.direction == 'long' %}
-                        <div class="ph-chart-fill {% if p.unrealized_pnl >= 0 %}up{% else %}down{% endif %}" style="width:{% if p.unrealized_pnl_pct >= 0 %}{{ p.unrealized_pnl_pct|floatformat:0 }}{% else %}{{ p.unrealized_pnl_pct|floatformat:0 }}{% endif %}%;max-width:100%;min-width:4px;">
-                            <span class="ph-chart-marker">&#9654;</span>
+                        {% if p.bar_pct is not None %}
+                        <div class="ph-chart-fill {% if p.unrealized_pnl >= 0 %}up{% else %}down{% endif %}"
+                             style="width:{{ p.bar_pct }}%;max-width:100%;min-width:4px;"
+                             title="{{ p.unrealized_pnl_pct|floatformat:2 }}% — bar scaled against the largest move in this history">
+                            <span class="ph-chart-marker">{% if p.direction == 'long' %}&#9654;{% else %}&#9664;{% endif %}</span>
                         </div>
                         {% else %}
-                        <div class="ph-chart-fill {% if p.unrealized_pnl >= 0 %}up{% else %}down{% endif %}" style="width:50%;min-width:4px;">
-                            <span class="ph-chart-marker">&#9664;</span>
-                        </div>
+                        <div class="ph-chart-empty">no return to scale</div>
                         {% endif %}
                     </div>
                     <div class="ph-chart-label" style="right:0;">Exit: {{ p.current_price|floatformat:2 }}</div>
@@ -445,9 +521,206 @@ template branches, each a fresh chance to print a confident zero.
     position: absolute; right: -4px; top: -5px; font-size: 10px;
     color: var(--text-primary);
 }
+/* A close nothing could price gets an honest blank, not a full track that
+   reads as a complete move. */
+.ph-chart-empty {
+    font-family: var(--font-mono); font-size: 9px; color: var(--text-muted);
+    line-height: 6px;
+}
+
+/* ══ Three gestures, three destinations ═══════════════════════════════
+   Hover a row and the dwell card previews the position. Click the row and
+   the trade's full detail opens. Click the SYMBOL and the instrument
+   underneath it opens — the chart, the indicators, the signals, the news
+   for the thing actually being held. That third one is new, and it only
+   exists as far as it is VISIBLE: a link painted like the cell next to it
+   is a link nobody presses, so the symbol carries the accent, an offset
+   dotted underline that goes solid under the pointer, and a focus ring
+   for the operator who never touches the mouse.
+
+   All of the card CSS below lives here rather than in static/css/
+   sauron.css, which another hand owns. The consequence is real and worth
+   stating: this card is also built on the Op Center, the portfolio
+   overview and the eye panel, and there it gets the shared sheet's
+   chrome without these refinements. Nothing here is load-bearing for
+   legibility — every rule is a refinement over a block that already
+   reads — but the block belongs in the shared sheet the day that file is
+   free to take it.                                                     */
+
+/* The symbol and its detail link, side by side inside one cell. The
+   wrapper is an inline-flex SPAN and not the <td> itself: display:flex
+   on a table cell drops it out of the table's column model and takes the
+   header alignment with it. white-space:normal because tbody td is
+   nowrap globally, and a cell that cannot wrap cannot flex-wrap either —
+   which on a narrow window is exactly how one long symbol sets the floor
+   width of the whole table. */
+.pos-sym-cell {
+    display: inline-flex; align-items: baseline;
+    flex-wrap: wrap; gap: 4px 8px; min-width: 0;
+    white-space: normal;
+    font-family: var(--font-display); font-size: 13px;
+}
+.pos-sym-cell .pos-sym-link {
+    font-weight: 700; letter-spacing: .04em;
+    overflow-wrap: anywhere;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    text-underline-offset: 3px;
+}
+.pos-sym-cell .pos-sym-link:hover,
+.pos-sym-cell .pos-sym-link:focus-visible {
+    color: var(--accent-bright);
+    text-decoration-style: solid;
+    text-decoration-color: currentColor;
+}
+/* A symbol with no instrument page behind it must not look like one. */
+.pos-sym-plain { color: var(--text-secondary); font-weight: 700; }
+
+/* The keyboard's way to the page the row's click opens. Muted until the
+   row is hovered or the link is focused, so the table still reads as a
+   table — but never display:none, because a control that appears only
+   under a pointer is a control a keyboard can never reach. */
+.pos-row-detail {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em;
+    text-transform: uppercase; text-decoration: none;
+    color: var(--text-muted);
+    border-bottom: 1px solid transparent;
+    transition: color .12s ease, border-color .12s ease;
+}
+[data-sv-position-row]:hover .pos-row-detail,
+.pos-row-detail:hover,
+.pos-row-detail:focus-visible {
+    color: var(--accent);
+    border-bottom-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.pos-sym-cell a:focus-visible,
+.ph-sym:focus-visible {
+    outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 1px;
+}
+
+/* Only a row that HAS a destination behaves like one. data-pos-href is
+   empty on a row from the shared portfolio book — nothing on this
+   platform can open, or close, a position with no trade behind it — and
+   a pointer cursor there promises a page that does not exist.
+   The stroke rides the first cell rather than the <tr>: under
+   border-collapse a row's own box-shadow is not painted at all in some
+   engines, and a hover cue that renders in one browser is worse than
+   none. */
+[data-sv-position-row]:not([data-pos-href=""]) { cursor: pointer; }
+[data-sv-position-row] > td:first-child {
+    box-shadow: inset 2px 0 0 0 transparent;
+    transition: box-shadow .12s ease;
+}
+[data-sv-position-row]:not([data-pos-href=""]):hover > td:first-child,
+[data-sv-position-row]:focus-within > td:first-child {
+    box-shadow: inset 2px 0 0 0 var(--accent);
+}
+
+/* ── The dwell card (static/js/sv-position-card.js) ─────────────────
+   Portalled to <body>, so it is not inside this page's markup — but it
+   is this page's card, and these rules reach it from here.            */
+
+/* Four blocks divided by four identical dashed rules read as one long
+   list. A named section with a hairline running off the end of its name
+   is what turns the card into a document: capital, levels, provenance,
+   why. Thin stroke, square cap, no box — the house language. */
+.pos-pop .pos-pop-sec-cap {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 6px;
+}
+.pos-pop .pos-pop-sec-cap::after {
+    content: ""; flex: 1 1 auto; min-width: 0; height: 1px;
+    background: color-mix(in srgb, var(--border) 85%, transparent);
+}
+
+/* The title is the link to the instrument, so it has to read as both:
+   display type for the name, the accent and the house's "goes somewhere"
+   chevron for the destination. */
+.pos-pop a.pos-pop-sym {
+    display: inline-block; text-decoration: none;
+    text-underline-offset: 3px;
+}
+/* The same mark the notification card's linked items carry, so "this goes
+   somewhere" reads the same everywhere on the platform. */
+.pos-pop a.pos-pop-sym::after {
+    content: " ›"; font-family: var(--font-mono); font-size: 13px;
+    opacity: .75;
+}
+.pos-pop a.pos-pop-sym:hover,
+.pos-pop a.pos-pop-sym:focus-visible {
+    color: var(--accent-bright); text-decoration: underline;
+}
+
+/* The bottom line of the ledger — what this position is worth if it is
+   closed right now — sat fifth among five rows of identical weight,
+   which on a card read in two seconds is the same as not being there. */
+.pos-pop .pos-pop-mrow.is-net {
+    margin-top: 5px; padding-top: 6px;
+    border-top: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+}
+.pos-pop .pos-pop-mrow.is-net .ml {
+    color: var(--text-secondary); font-weight: 700;
+}
+.pos-pop .pos-pop-mrow.is-net .mv { font-size: 14px; }
+
+/* Two navigations sharing a line and the close alone beneath them. The
+   auto-fit track has a min() floor so it collapses to one column instead
+   of setting a width the card has to grow to; the close spans the row on
+   purpose — it is the destructive one, and the pointer travels to a page
+   many times for every once it flattens a position. */
+.pos-pop .pos-pop-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(8rem, 100%), 1fr));
+    gap: 6px;
+}
+.pos-pop .pos-pop-close { grid-column: 1 / -1; }
+.pos-pop .pos-pop-inst,
+.pos-pop .pos-pop-open { min-width: 0; overflow-wrap: anywhere; }
+
+/* It now teaches three gestures rather than naming one page, which is a
+   sentence and not a label. */
+.pos-pop .nf-pop-cta { text-align: left; line-height: 1.5; }
+
+/* ── History tab ────────────────────────────────────────────────────
+   Same rule, same page: a symbol is the instrument and goes to the
+   instrument, whether the position is open or graded and gone. */
+.ph-sym {
+    font-family: var(--font-display); font-size: 14px; font-weight: 700;
+    color: var(--accent); overflow-wrap: anywhere;
+}
+.ph-sym.is-lg { font-size: 18px; }
+.ph-sym.is-loss { color: var(--accent-red); }
+/* The only-closed-trade card carries its outcome in its border; painting
+   the name green when that one trade lost would contradict it. */
+.ph-sym.is-neutral { color: var(--text-primary); }
+a.ph-sym {
+    text-decoration: underline; text-decoration-style: dotted;
+    text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+    text-underline-offset: 3px;
+}
+a.ph-sym:hover, a.ph-sym:focus-visible {
+    text-decoration-style: solid;
+    text-decoration-color: currentColor;
+}
+a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
+    color: var(--accent);
+}
 
 @media (max-width: 768px) {
     .ph-trade-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+}
+
+/* The card is nearly the whole screen at this width, and three action
+   buttons across it would each be four characters wide. Nothing on this
+   page may scroll sideways — the table has its own wrapper for that. */
+@media (max-width: 420px) {
+    .pos-pop .pos-pop-actions { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    [data-sv-position-row] > td:first-child,
+    .pos-row-detail { transition: none; }
 }
 </style>
 

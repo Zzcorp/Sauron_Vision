@@ -20,6 +20,11 @@ single source of truth for grading either, exposing:
         callsite — the dashboard widget, lifecycle command, and metrics view all
         import this name.
 
+  get_hit_rate(setup)
+        One setup's measured hit rate, or None when it has not been measured.
+        A thin read over setup_performance_summary; `signals.bot_bridge` weights
+        the bot's SMC composite score by it.
+
   decay_flag(rule_name, recent_days=14, baseline_days=90)
         Cheap rolling-window decay detector: True if recent expectancy is materially
         below the baseline.
@@ -38,6 +43,13 @@ logger = logging.getLogger(__name__)
 
 # Sample size below which a stat is reported as non-empirical (a fallback only).
 MIN_EMPIRICAL_N = 5
+
+# Lookback for a setup's own record. 30 days is the window the card's "30d hit"
+# label names and the one `smc_rules.HIT_RATE_WINDOW_DAYS` scans with, so the
+# two have to stay the same number or the score and the label describe
+# different measurements. It is also the window the lifecycle tracker's TTLs
+# (168h on 4h, 720h on 1d) let a card close inside.
+SETUP_HIT_RATE_WINDOW_DAYS = 30
 
 # Decay flag fires when recent_expectancy < baseline_expectancy * DECAY_RATIO.
 DECAY_RATIO = 0.5
@@ -295,7 +307,7 @@ def calculate_signal_stats(days=None, group_by=None):
 
 # ── SmcSignal: setup_performance_summary (the previously-missing function) ──
 
-def setup_performance_summary(days=30):
+def setup_performance_summary(days=SETUP_HIT_RATE_WINDOW_DAYS):
     """Per-setup expectancy for closed SmcSignals.
 
     Used by:
@@ -342,6 +354,37 @@ def setup_performance_summary(days=30):
             "is_empirical": n >= MIN_EMPIRICAL_N,
         }
     return out
+
+
+def get_hit_rate(setup, days=SETUP_HIT_RATE_WINDOW_DAYS):
+    """One setup's MEASURED hit rate over the window, or None.
+
+    A read over `setup_performance_summary` rather than a second count of the
+    same closed rows: two implementations of one fact is two numbers the
+    platform can publish for it, and the card and the bot would eventually
+    disagree about the same setup.
+
+    None is returned for three different reasons and every one of them means
+    NOT MEASURED — the setup has no closed cards in the window, it has fewer
+    than `MIN_EMPIRICAL_N` of them (a hit rate off two closed signals is noise
+    wearing a percent sign), or the record could not be read at all. A caller
+    that turns any of those into a 0.0 is claiming this setup never wins.
+    """
+    try:
+        summary = setup_performance_summary(days=days)
+    except Exception as e:
+        # An unreachable database is not evidence that a setup loses. Logged
+        # rather than swallowed: this read weights the bot's SMC composite
+        # score, and the last silent failure on this path zeroed that whole
+        # lane for as long as it went unnoticed.
+        logger.warning("hit rate for %s unavailable, reporting not-measured: %s",
+                       setup, e)
+        return None
+
+    stats = summary.get(setup)
+    if not stats or not stats.get("is_empirical"):
+        return None
+    return stats.get("hit_rate")
 
 
 # ── Decay detection ─────────────────────────────────────────────────────────

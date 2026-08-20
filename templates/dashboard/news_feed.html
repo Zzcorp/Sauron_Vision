@@ -333,7 +333,13 @@
     // A scroll makes the anchor stale — hide, then once the scroll
     // settles re-arm the dwell for whatever row now sits under the
     // (possibly stationary) pointer, since no pointerover will fire.
-    window.addEventListener('scroll', function () {
+    // Unless the scroll came from inside the CARD: the capture phase is
+    // here to catch inner containers whose scroll events do not bubble, and
+    // it catches the card scrolling itself too — which is the operator
+    // reading it, not a stale anchor, and hiding there is why every popup
+    // on this platform disappeared the instant it was scrolled.
+    window.addEventListener('scroll', function (e) {
+        if (e.target && e.target.nodeType === 1 && pop.contains(e.target)) return;
         hide();
         if (settleTimer) clearTimeout(settleTimer);
         settleTimer = setTimeout(function () {
@@ -345,7 +351,11 @@
         }, 160);
     }, { passive: true, capture: true });
 
-    document.addEventListener('pointerdown', function () {
+    // A press inside the card is not a dismissal: grabbing the card's own
+    // scrollbar, or starting a selection on its summary, both land here and
+    // both used to close the thing being grabbed.
+    document.addEventListener('pointerdown', function (e) {
+        if (e.target && e.target.nodeType === 1 && pop.contains(e.target)) return;
         if (current) suppressed = current;
         hide();
     });

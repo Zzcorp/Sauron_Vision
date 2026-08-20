@@ -17,6 +17,14 @@
         {# The headband's "STRATEGIES n active" is n_running: the same rows minus the ones an admin has paused. #}
         <span class="oc-strip-sub">{{ n_running }} running · {{ n_armed }} of {{ n_setups }} setups armed</span>
     </div>
+    {% comment %} The question a seeded install actually asks. Both switches seed OFF —
+       OpportunitySetup.is_active False, promotion_stage "research" — so this cell reads
+       0 on a fresh pack, and every card below names what is holding it. {% endcomment %}
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MAY TRADE</span>
+        <span class="oc-strip-value {% if n_can_trade %}up{% endif %}">{{ n_can_trade }}</span>
+        <span class="oc-strip-sub">of {{ n_rules }} on the ladder · the rest name their blocker</span>
+    </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">LIVE VENUE</span>
         <span class="oc-strip-value {% if n_live_venue %}up{% endif %}">{{ n_live_venue }}</span>
@@ -67,6 +75,19 @@
         </li>
         {% endfor %}
     </ul>
+    {% comment %} The venue is only half the answer, and the missing half is what made a
+       seeded install look broken: an operator armed a strategy, watched nothing happen,
+       and nothing anywhere named the second switch. {% endcomment %}
+    <p class="sc-venues-lede sc-arming-lede">
+        A venue is only half of it. <strong>Two switches</strong> decide whether
+        a strategy does anything at all, and a freshly seeded one arrives with
+        both off: the setup's <code>is_active</code> flag is what the scanner
+        reads before it evaluates a single condition, and the rule's stage is
+        what the bot reads before it places an order. A silent new strategy is
+        not a broken one — arming it is what starts the evidence, and only that
+        evidence moves it up a venue. Every card below names the switches still
+        holding it and the action that clears each.
+    </p>
 </div>
 
 {# ── 3. The stable — one card per rule, grouped by stage ─────────── #}
@@ -99,15 +120,50 @@
 
                 <div class="sc-chips">
                     <span class="sv-chip sc-chip--{{ c.stage }}">{{ c.stage_display }}</span>
+                    {% comment %} PAUSED here is the SETUP's is_active flag, not the actuator's
+                       status chip beside it. Two unrelated states wearing one word is the
+                       confusion the title spells out and the block below resolves. {% endcomment %}
                     {% if c.setup %}
-                        {% if c.setup.is_active %}<span class="sv-chip sv-chip--bullish">ARMED</span>
-                        {% else %}<span class="sv-chip sv-chip--muted">PAUSED</span>{% endif %}
+                        {% if c.setup.is_active %}<span class="sv-chip sv-chip--bullish" title="OpportunitySetup.is_active — the scanner evaluates this setup on every pass">ARMED</span>
+                        {% else %}<span class="sv-chip sv-chip--muted" title="OpportunitySetup.is_active is False — not armed, so the scanner skips this setup entirely. Unrelated to the actuator status chip above.">PAUSED</span>{% endif %}
                     {% endif %}
                     {% if c.parent %}<span class="sv-chip sv-chip--warn">FORK OF {{ c.parent }}</span>{% endif %}
                     {% if c.paused_until %}<span class="sv-chip sv-chip--warn">UNTIL {{ c.paused_until|date:"M d" }}</span>{% endif %}
                 </div>
 
                 <p class="sc-venue-line">{{ c.venue }}</p>
+
+                {# ── Can it trade at all, and what has to change ── #}
+                {% comment %} Before the ladder gate, because "what would promote it" is the
+                   wrong first question for a rule that is disarmed: a disarmed setup writes
+                   no signal, so the gate above it can never fill. data-can-trade carries the
+                   verdict into the markup so the distinction survives outside the prose. {% endcomment %}
+                <div class="sc-arming" data-can-trade="{% if c.trade.can_trade %}1{% else %}0{% endif %}">
+                    <div class="sc-chips">
+                        {% if c.trade.can_trade %}
+                        <span class="sv-chip sv-chip--bullish">MAY TRADE</span>
+                        {% else %}
+                        <span class="sv-chip sv-chip--warn">CANNOT TRADE</span>
+                        {% endif %}
+                        {% for b in c.trade.blockers %}
+                        <span class="sv-chip sv-chip--muted">{{ b.chip }}</span>
+                        {% endfor %}
+                    </div>
+                    {% if c.trade.blockers %}
+                    <ul class="sc-venue-list">
+                        {% for b in c.trade.blockers %}
+                        <li class="sc-venue-row" data-blocker="{{ b.chip }}">
+                            <code class="sc-cond-kind">{{ b.field }}</code>
+                            <span class="sc-venue-text">{{ b.what }} &mdash;
+                                <strong>to clear it:</strong> {{ b.fix }}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                    {% for note in c.trade.caveats %}
+                    <p class="sc-setup-foot">{{ note }}</p>
+                    {% endfor %}
+                </div>
 
                 {# ── Progress toward the next venue ── #}
                 <div class="sc-gate">
@@ -256,13 +312,18 @@
         <div class="empty-state sc-empty">
             <div class="empty-icon">⬡</div>
             {# "nothing it governs", not "nothing": an armed setup with no rule row scans anyway — see the section below. #}
+            {% comment %} The pack sizes used to be written here as "six" and "six more"
+               and both packs have grown since. A count that has to be edited by hand
+               every time a setup is added is a count that will be wrong. {% endcomment %}
             <p>NO RULE IS REGISTERED — the promotion ladder is empty, so nothing it
                governs scans and nothing it governs trades. Seed the starter pack with
-               <code>manage.py seed_strategies</code> (six rules) and
-               <code>manage.py seed_advanced_strategies</code> (six more).
-               They arrive at <strong>research</strong>: signals only, no orders, until you
-               promote them from the
-               <a href="{% url 'promotions_dashboard' %}">promotion pipeline</a>.
+               <code>manage.py seed_strategies</code> and the advanced pack with
+               <code>manage.py seed_advanced_strategies</code>.
+               They arrive with both switches off: <strong>disarmed</strong>, so the
+               scanner skips them, and at <strong>research</strong>, so no order is placed
+               even once they are armed. <code>--activate</code> arms them; the
+               <a href="{% url 'promotions_dashboard' %}">promotion pipeline</a> is what
+               moves them off research.
                Mined candidates waiting for review live in
                <a href="{% url 'discoveries_dashboard' %}">discoveries</a>.</p>
         </div>

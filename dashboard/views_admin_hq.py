@@ -506,6 +506,53 @@ def hq_create_asset_bot(request):
         messages.error(request, f"Invalid numeric field: {e}")
         return redirect("admin_dashboard")
 
+    # ── the time-stop ceiling ────────────────────────────────────────────
+    # Three states, and all three have to be expressible or the setting is
+    # not really a setting: blank = inherit the asset-class default,
+    # 0 = no time stop at all, N = N hours. Blank is NOT "off" — an empty
+    # box must never be the way an operator accidentally removes the only
+    # exit that releases capital from a thesis that never moved.
+    raw_hold = (request.POST.get("max_hold_hours", "") or "").strip()
+    max_hold_hours = None
+    if raw_hold:
+        try:
+            max_hold_hours = float(raw_hold)
+        except ValueError:
+            messages.error(request, f"Invalid max hold hours: {raw_hold!r}")
+            return redirect("admin_dashboard")
+        if max_hold_hours < 0:
+            messages.error(request, "Max hold hours cannot be negative — "
+                                     "use 0 to switch the time stop off.")
+            return redirect("admin_dashboard")
+
+    # The pre-field home of this setting still WINS at runtime, so leaving it
+    # in the extras JSON would make the field above decorative: the operator
+    # would type a ceiling, save, and the engine would keep enforcing the old
+    # one. Draining it here means every save through this form leaves exactly
+    # one writer, and the operator is told which value survived.
+    from bot_program.asset_models import LEGACY_MAX_HOLD_EXTRAS_KEY
+    if isinstance(extras, dict) and LEGACY_MAX_HOLD_EXTRAS_KEY in extras:
+        legacy = extras.pop(LEGACY_MAX_HOLD_EXTRAS_KEY)
+        if max_hold_hours is None:
+            try:
+                max_hold_hours = max(0.0, float(legacy))
+            except (TypeError, ValueError):
+                messages.error(
+                    request,
+                    f"extras['{LEGACY_MAX_HOLD_EXTRAS_KEY}']={legacy!r} is not "
+                    f"a number — put the ceiling in the Max hold field.")
+                return redirect("admin_dashboard")
+            messages.warning(
+                request,
+                f"Moved extras['{LEGACY_MAX_HOLD_EXTRAS_KEY}']={legacy} into "
+                f"the Max hold field — that setting has its own box now.")
+        else:
+            messages.warning(
+                request,
+                f"Both the Max hold field ({max_hold_hours}h) and "
+                f"extras['{LEGACY_MAX_HOLD_EXTRAS_KEY}']={legacy} were set; "
+                f"the field wins and the extras key was dropped.")
+
     # Setting LIVE mode requires the trading PIN — otherwise an already-enabled
     # paper config could be flipped to live (and armed) without one.
     mode = request.POST.get("mode", "paper")
@@ -524,13 +571,22 @@ def hq_create_asset_bot(request):
             "max_daily_loss_pct": max_loss_pct,
             "stop_loss_pct": sl_pct, "take_profit_pct": tp_pct,
             "entry_score_min": entry_min,
+            "max_hold_hours": max_hold_hours,
             "extras": extras,
         },
     )
+    # Named on the way out, because the ceiling that is actually enforced can
+    # come from three places and "I left it blank" should not mean "I do not
+    # know what it does".
+    ts = cfg.time_stop_setting()
+    hold_note = (f"time stop {ts['hours']:.0f}h ({ts['source']})"
+                 if ts["enabled"] else
+                 f"NO time stop — positions are unbounded in time "
+                 f"({ts['source']})")
     messages.success(
         request,
         f"{'Created' if created else 'Updated'} AssetBotConfig "
-        f"'{cfg.name}' ({cfg.asset_class}, {cfg.mode})."
+        f"'{cfg.name}' ({cfg.asset_class}, {cfg.mode}) · {hold_note}."
     )
     return redirect("admin_dashboard")
 

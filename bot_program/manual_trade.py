@@ -26,8 +26,19 @@ Safety posture (each learned from adversarial review of the first cut):
   * Capital accounting is per asset class (each class has its own pool)
     and margin-aware (an FX position ties up its broker margin, not its
     levered notional).
-  * Execution is serialized per pool and deduped per signal, so a
-    double-click cannot open two positions.
+  * Execution is serialized per pool and deduped — per signal where there
+    is one, and per (symbol, side) inside a short window where there is
+    not — so a double-click cannot open two positions on either path.
+  * The book's own limits bind here. This path used to enforce per-trade
+    risk, the per-class notional cap and the pool's free capital and
+    nothing else — no daily-loss stop, no exposure ceiling — so an
+    operator who had set MAX DAILY LOSS 3% on /setup/ could go on
+    clicking TAKE TRADE all the way down. `portfolio.risk_gate.preflight`
+    now runs before the preview and again under the lock, and the
+    single-position ceiling is judged on the size actually sent. The
+    under-lock run is asked as of the instant before any funding close,
+    so a close executed to fund a trade can never be the reason that
+    trade is then refused.
 
 Sizing is risk-derived by default and the default is the right answer:
 qty such that a stop-out costs exactly the config's risk budget. The
@@ -37,17 +48,68 @@ browser's word — against the same three rules the automatic path obeys:
 the risk ceiling that keeps 1R comparable, the per-class notional cap
 (4.0 for FX because the leverage lives at the broker), and the free
 capital in that class's pool (FX commits margin, not levered notional).
+
+The same posture now covers the rest of the ticket, because sizing was
+never the only thing the confirm step was deciding on the operator's
+behalf:
+
+  levels    The stop and the target are adjustable. A moved stop moves the
+            SIZE with it — risk sizing is what the stop is for — so the
+            derived quantity faces the same three gates a typed one does,
+            and both levels are re-judged against the fill: the band
+            risk_levels sanctions, and the cost filter every bot entry
+            already passes, because dragging a target in or a stop out can
+            turn a paying setup into one that pays only the spread.
+
+  funding   WHICH positions are liquidated to free capital is now the
+            operator's choice rather than the proposal's. close_ids was
+            always a list on the wire, but the popup filled it in
+            automatically from close_proposal, so pressing the button
+            liquidated whatever the server had picked. It is a selection
+            now: the preview ships every open position in the pool with
+            the proposal pre-picked, and the pool is re-read after the
+            closes, under the lock, so a selection that frees too little
+            is refused with the shortfall instead of opening a position
+            the pool cannot carry.
+
+  leverage  Deliberately NOT a control. Nothing in this platform's
+            execution path multiplies a position: FX ties up broker margin
+            (CAPITAL_USE_FRACTION) and every other class settles in full,
+            and no per-trade number changes either. An input wired to
+            nothing would be worse than no input, so the preview ships
+            leverage as a FACT — what it is, whose it is, and how much
+            notional this pool can carry — and size stays the only lever
+            that exists.
 """
 from __future__ import annotations
 
 import logging
 import math
+from datetime import timedelta
 from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
 MANUAL_CONFIG_NAME = "manual"
 MANUAL_RULE = "manual_take"
+
+# How long an identical manual open is treated as the SAME intent.
+#
+# The signal path has always been deduped on metadata["signal_id"], so a
+# double-click there could only ever produce one position. The signal-LESS
+# path — the instrument view's BUY/SELL, which has no signal id to dedupe on
+# — had no such guard, and it showed: one operator produced four XAUUSD BUY
+# tickets inside eight seconds at identical qty and identical entry, ~42% of
+# the book in one trade wearing four tickets, and every risk reading
+# downstream then counted four independent bets.
+#
+# A WINDOW rather than a ban, because scaling into a position is a real
+# thing an operator does deliberately. Sixty seconds is long enough to cover
+# a double-click, an impatient re-click on a slow confirm, and a browser
+# retry; it is far too short to be in anybody's way when the second entry is
+# meant. The refusal names the position that already exists and says when
+# the window ends, so the deliberate case is a wait, not a mystery.
+MANUAL_REPEAT_WINDOW_SECONDS = 60
 
 # Instrument.asset_class -> AssetBotConfig.asset_class. Indices are absent
 # on purpose: no execution class exists for them (the tradeable proxy would
@@ -68,6 +130,22 @@ CAPITAL_USE_FRACTION = {"forex": 1.0 / 30.0}
 
 def _capital_use(asset_class: str, notional: float) -> float:
     return notional * CAPITAL_USE_FRACTION.get(asset_class, 1.0)
+
+
+def _leverage(asset_class: str) -> float:
+    """Dollars of exposure one dollar of pool capital carries in this class.
+
+    A derived fact, not a setting: it is CAPITAL_USE_FRACTION read the
+    other way up. 30x on FX because the broker margins it, 1x everywhere
+    else because the position settles in full — and no code path anywhere
+    in the platform multiplies a manual order by anything. That is why the
+    confirm popup states the leverage instead of offering it: a control
+    the execution path ignores would have the operator sizing against a
+    number the order never sees, which is a worse failure than the missing
+    control it was meant to fix.
+    """
+    frac = CAPITAL_USE_FRACTION.get(asset_class, 1.0)
+    return (1.0 / frac) if frac > 0 else 1.0
 
 
 def manual_config_for(user, asset_class):
@@ -153,6 +231,79 @@ def _open_manual_trades(cfg):
         config=cfg, status="OPEN").order_by("opened_at"))
 
 
+def _concentration_guard(user, inst, side, cls, cfg, close_ids):
+    """The concentration refusal, or None. Costs one preview and no orders.
+
+    Subtracts the tickets the operator chose to liquidate, because those are
+    exactly the exposure that will be gone by the time this trade opens, and
+    refusing on a number that is about to change would block a trade whose
+    whole purpose is to replace what is being closed.
+    """
+    from bot_program.models import AssetBotTrade
+    from portfolio.risk_gate import capital_at_work, concentration_state
+    from portfolio.services import value_per_unit
+
+    probe = _preview(user, inst, side, signal=None)
+    notional = probe.get("notional")
+    if probe.get("error") or not notional:
+        # Nothing to judge yet — the ordinary preview below will report
+        # whatever is actually wrong, with a better message than this could.
+        return None
+
+    # This guard exists to refuse BEFORE an irreversible liquidation. With
+    # nothing to liquidate there is nothing to protect, so it steps aside and
+    # lets the ordinary path answer — which knows the operator's requested
+    # size and whether the pool can fund it at all, and says so in terms of
+    # the money that is actually missing. "You cannot afford this" is a more
+    # useful sentence than "this would concentrate your book", and it is the
+    # one that should arrive first when both are true.
+    if not close_ids and not probe.get("sufficient", True):
+        return None
+
+    state = concentration_state(
+        user, symbol=inst.symbol, side=side, asset_class=cls,
+        notional=float(notional), capital_base=float(cfg.capital or 0),
+        base_label="manual pool")
+    if state["ok"]:
+        return None
+
+    # Credit back what is about to be closed, on this symbol and side only.
+    freed = 0.0
+    for trade in AssetBotTrade.objects.filter(
+            id__in=list(close_ids or []), config=cfg, status="OPEN",
+            symbol__iexact=inst.symbol):
+        if (str(trade.side or "").upper() in ("BUY", "LONG")) !=                 (str(side or "").upper() in ("BUY", "LONG")):
+            continue
+        freed += capital_at_work(
+            trade.asset_class,
+            float(trade.entry_price or 0) * float(trade.qty or 0)
+            * value_per_unit(trade))
+    if freed and state["cap_money"] is not None             and (state["after"] - freed) <= state["cap_money"] + 1e-9:
+        return None
+    return state["reason"]
+
+
+def _manual_rule_advisory() -> dict:
+    """What the brain currently thinks of hand-taken entries.
+
+    `brain_rule_advisory` is consulted on the BOT path and was never asked
+    here, so the platform could conclude that `manual_take` is the only
+    negative-expectancy rule on the board, raise `pause_recommended`, and
+    the discretionary path would go on firing without ever mentioning it.
+
+    Never raises and never blocks: a control-plane hiccup must not stop a
+    trade, and an advisory is advice.
+    """
+    try:
+        from brain.context import brain_rule_advisory
+        status, why = brain_rule_advisory(MANUAL_RULE)
+    except Exception as e:  # noqa: BLE001 — advice is not a precondition
+        logger.debug("[take-trade] rule advisory unavailable: %s", e)
+        return {"status": "unknown", "reason": "", "flagged": False}
+    return {"status": status, "reason": why,
+            "flagged": status == "pause_recommended"}
+
+
 def _symbol_exposure(user, symbol):
     """Live positions this user already holds in this symbol, ANY config.
 
@@ -175,6 +326,32 @@ def _symbol_exposure(user, symbol):
             for t in AssetBotTrade.objects.filter(
                 config__user=user, symbol=symbol,
                 status__in=("OPEN", "CLOSE_PENDING")).order_by("opened_at")]
+
+
+def _correlation_note(user, inst) -> dict:
+    """What the book's correlation limit says about this candidate.
+
+    A note on the ticket, not a gate. `scale` is what an AUTOMATED entry in
+    this instrument would be sized to right now, so the operator can see the
+    machine's own reading of "you already own most of this bet" before
+    deciding to take it at full size anyway. `measured` False means nothing
+    could be correlated — an empty book, or not enough daily history — and a
+    1.0 scale then means unmeasured, never cleared.
+
+    Never fatal: a correlation read is a diagnostic and a missing one must not
+    cost the operator a trade. It degrades to unmeasured with the reason in
+    place of the number.
+    """
+    try:
+        from portfolio.risk_gate import correlation_state
+        state = correlation_state(user, inst)
+    except Exception as e:  # noqa: BLE001 — a note, not a gate
+        logger.warning("[take-trade] correlation read failed for %s: %s",
+                       getattr(inst, "symbol", "?"), e)
+        return {"scale": 1.0, "max_corr": None, "peer": None,
+                "threshold": None, "measured": False,
+                "reason": f"correlation could not be measured ({e})"}
+    return state
 
 
 def _qty_step(bot, price: float) -> float:
@@ -202,14 +379,11 @@ def _floor_to_step(qty: float, step: float) -> float:
     return math.floor(max(qty, 0.0) / step + 1e-9) * step
 
 
-def validate_qty_override(cfg, *, asset_class, raw, entry, stop,
-                          value_per_unit, available, round_qty):
-    """The operator's size, re-derived and re-judged server-side.
+def judge_qty(cfg, *, asset_class, qty, entry, stop, value_per_unit,
+              available):
+    """Why this size may not be sent, or None.
 
-    Returns (qty, None) or (None, reason). Never trust the number in the
-    request: the browser computed its preview from a payload it can edit,
-    and the rules being checked are the ones that keep the book solvent
-    and 1R comparable. Same three gates the automatic path obeys —
+    The three gates that keep the book solvent and 1R comparable —
 
       risk      MAX_RISK_FRACTION is documented in sizing.py as "a hard
                 cap, not a target". The default budget is 0.25%; an
@@ -221,12 +395,59 @@ def validate_qty_override(cfg, *, asset_class, raw, entry, stop,
                 an FX override is charged its margin and a stock override
                 its full settlement.
 
-    — and an impossible number is refused WITH the arithmetic, never
-    silently clamped to something the operator did not ask for.
+    — refusing WITH the arithmetic, never silently clamping to something
+    the operator did not ask for.
+
+    Lifted out of validate_qty_override so the LEVEL override can reach
+    them too. A tightened stop buys more units per dollar of risk, so an
+    operator who moves the stop and leaves the size on automatic gets a
+    bigger position than the one the preview was judged for — the caps
+    have to bite on the size that is actually sent, not on the one that
+    was typed.
     """
     from bot_program.asset_engine.sizing import (MAX_RISK_FRACTION,
                                                  max_notional_fraction)
 
+    capital = float(getattr(cfg, "capital", 0) or 0)
+    per_unit_risk = abs(float(entry) - float(stop)) * float(value_per_unit)
+    notional = qty * float(entry) * float(value_per_unit)
+    capital_use = _capital_use(asset_class, notional)
+
+    risk = qty * per_unit_risk
+    risk_cap = capital * MAX_RISK_FRACTION
+    # The 1e-9 slack is for float noise on an exactly-at-the-cap size, not
+    # tolerance: a size one cent over still fails.
+    if per_unit_risk > 0 and risk > risk_cap + 1e-9:
+        return (
+            f"{qty:g} units risks ${risk:,.2f} to the stop — past the "
+            f"${risk_cap:,.2f} ceiling ({MAX_RISK_FRACTION * 100:.1f}% of "
+            f"the ${capital:,.2f} {asset_class} pool). Size down, or raise "
+            f"the pool's capital.")
+
+    notional_cap = capital * max_notional_fraction(cfg, asset_class)
+    if notional > notional_cap + 1e-9:
+        return (
+            f"{qty:g} units is ${notional:,.2f} of notional — past the "
+            f"${notional_cap:,.2f} this class allows against a "
+            f"${capital:,.2f} pool.")
+
+    if capital_use > float(available) + 1e-9:
+        return (
+            f"{qty:g} units ties up ${capital_use:,.2f} of capital but only "
+            f"${float(available):,.2f} is free in the {asset_class} pool.")
+    return None
+
+
+def validate_qty_override(cfg, *, asset_class, raw, entry, stop,
+                          value_per_unit, available, round_qty):
+    """The operator's size, re-derived and re-judged server-side.
+
+    Returns (qty, None) or (None, reason). Never trust the number in the
+    request: the browser computed its preview from a payload it can edit,
+    so this settles the SHAPE (a positive, finite, venue-representable
+    number) and hands the money question to judge_qty, which the automatic
+    path's re-derived sizes go through too.
+    """
     # bool is an int in Python: JSON `true` would otherwise size to 1 unit.
     if isinstance(raw, bool):
         return None, "The size must be a number"
@@ -242,34 +463,125 @@ def validate_qty_override(cfg, *, asset_class, raw, entry, stop,
         return None, ("That size rounds to zero at this venue's minimum "
                       "increment — nothing would have been sent")
 
-    capital = float(getattr(cfg, "capital", 0) or 0)
-    per_unit_risk = abs(float(entry) - float(stop)) * float(value_per_unit)
-    notional = qty * float(entry) * float(value_per_unit)
-    capital_use = _capital_use(asset_class, notional)
+    why = judge_qty(cfg, asset_class=asset_class, qty=qty, entry=entry,
+                    stop=stop, value_per_unit=value_per_unit,
+                    available=available)
+    return (None, why) if why else (qty, None)
 
-    risk = qty * per_unit_risk
-    risk_cap = capital * MAX_RISK_FRACTION
-    # The 1e-9 slack is for float noise on an exactly-at-the-cap size, not
-    # tolerance: a size one cent over still fails.
-    if per_unit_risk > 0 and risk > risk_cap + 1e-9:
-        return None, (
-            f"{qty:g} units risks ${risk:,.2f} to the stop — past the "
-            f"${risk_cap:,.2f} ceiling ({MAX_RISK_FRACTION * 100:.1f}% of "
-            f"the ${capital:,.2f} {asset_class} pool). Size down, or raise "
-            f"the pool's capital.")
 
-    notional_cap = capital * max_notional_fraction(cfg, asset_class)
-    if notional > notional_cap + 1e-9:
-        return None, (
-            f"{qty:g} units is ${notional:,.2f} of notional — past the "
-            f"${notional_cap:,.2f} this class allows against a "
-            f"${capital:,.2f} pool.")
+def validate_stop_override(cfg, *, asset_class, raw, entry, side):
+    """The operator's stop, re-judged server-side. (stop, None) | (None, why).
 
-    if capital_use > float(available) + 1e-9:
+    Two gates, both the platform's own rather than invented here:
+
+      side   The stop has to sit on the losing side of the fill. A BUY
+             stopped ABOVE its entry is not a tight stop, it is a position
+             the very next tick closes at a guaranteed loss — the same
+             refusal _preview already makes for a stale signal's levels.
+      band   MIN/MAX_STOP_FRACTION, the window risk_levels sanctions for
+             an ATR stop. Outside it a level is a fat finger or a bad
+             feed, not a regime: 0.05% on a stock is inside the spread,
+             and 60% is not a stop at all.
+
+    Notably NOT applied: sizing.apply_stop_floor, which widens a stop that
+    is too tight for the notional cap. Widening is right when the machine
+    picked the level and only the risk budget matters; silently moving a
+    stop the OPERATOR typed would place a level they did not choose. The
+    consequence lands on the size instead, where judge_qty refuses it with
+    the arithmetic and the operator can decide which of the two to give.
+    """
+    from bot_program.asset_engine.risk_levels import (MAX_STOP_FRACTION,
+                                                      MIN_STOP_FRACTION)
+
+    if isinstance(raw, bool):
+        return None, "The stop must be a number"
+    try:
+        stop = float(raw)
+    except (TypeError, ValueError):
+        return None, "The stop must be a number"
+    if not math.isfinite(stop) or stop <= 0:
+        return None, "The stop must be a positive number"
+
+    entry = float(entry)
+    if entry <= 0:
+        return None, "No usable entry price to place a stop against"
+    if side == "BUY" and stop >= entry:
+        return None, (f"A BUY stop must sit BELOW the entry — {stop:g} is at "
+                      f"or above {entry:g}, so the position would open "
+                      f"already stopped out")
+    if side == "SELL" and stop <= entry:
+        return None, (f"A SELL stop must sit ABOVE the entry — {stop:g} is at "
+                      f"or below {entry:g}, so the position would open "
+                      f"already stopped out")
+
+    fraction = abs(entry - stop) / entry
+    if fraction < MIN_STOP_FRACTION:
         return None, (
-            f"{qty:g} units ties up ${capital_use:,.2f} of capital but only "
-            f"${float(available):,.2f} is free in the {asset_class} pool.")
-    return qty, None
+            f"A {fraction * 100:.3f}% stop is inside the "
+            f"{MIN_STOP_FRACTION * 100:.1f}% floor this platform trades — "
+            f"that distance is spread and noise, not a level.")
+    if fraction > MAX_STOP_FRACTION:
+        return None, (
+            f"A {fraction * 100:.1f}% stop is past the "
+            f"{MAX_STOP_FRACTION * 100:.0f}% ceiling this platform trades — "
+            f"at that distance the level is not doing any work.")
+    return stop, None
+
+
+def validate_target_override(*, raw, entry, side):
+    """The operator's target, re-judged server-side. (target, None) | (None, why).
+
+    Side only: a target on the losing side of the entry is a take-profit
+    that books a loss the moment the tick reaches it. How FAR is a
+    judgement — an operator scalping half the ATR is making a real choice —
+    so the distance is left to the cost filter in validate_levels, which is
+    the gate that knows what the round trip costs.
+    """
+    if isinstance(raw, bool):
+        return None, "The target must be a number"
+    try:
+        target = float(raw)
+    except (TypeError, ValueError):
+        return None, "The target must be a number"
+    if not math.isfinite(target) or target <= 0:
+        return None, "The target must be a positive number"
+
+    entry = float(entry)
+    if entry <= 0:
+        return None, "No usable entry price to place a target against"
+    if side == "BUY" and target <= entry:
+        return None, (f"A BUY target must sit ABOVE the entry — {target:g} is "
+                      f"at or below {entry:g}, so hitting it would book a "
+                      f"loss")
+    if side == "SELL" and target >= entry:
+        return None, (f"A SELL target must sit BELOW the entry — {target:g} "
+                      f"is at or above {entry:g}, so hitting it would book a "
+                      f"loss")
+    return target, None
+
+
+def validate_levels(cfg, symbol, *, entry, stop, target):
+    """Why the operator's levels may not be traded, or None.
+
+    passes_cost_filter — the gate every bot entry goes through — asked of
+    a hand-placed pair. It catches the two ways a moved level quietly
+    stops being worth taking: a target dragged in until the planned move
+    no longer clears the round trip, and a stop pushed out until 1R is
+    wider than the reward net of costs. Both leave a ticket that pays the
+    spread and nothing else.
+
+    Applied ONLY when a level was actually moved. The untouched defaults
+    come from machinery that already respects this band, and re-judging
+    them here could refuse a trade the button takes today — which would
+    change the default, the one thing this control must not do.
+    """
+    from bot_program.asset_engine.risk_levels import passes_cost_filter
+
+    ok, why = passes_cost_filter(cfg, symbol, float(entry), float(target),
+                                 stop=float(stop))
+    if ok:
+        return None
+    return f"Those levels do not clear their own costs — {why}"
 
 
 def _funding_proposal(open_trades, deficit):
@@ -304,16 +616,23 @@ def _funding_proposal(open_trades, deficit):
             for t in chosen]
 
 
-def _preview(user, inst, side, signal=None) -> dict:
+def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     """Everything the confirm popup needs, or {"error": ...}.
 
     The funding proposal ("close these to free enough") considers ONLY
     open manual trades in this class — closing a bot's position from a
     popup would fight the bot that manages it, and closing another
     class's position would raid a pool this trade does not draw from.
+
+    `gate_now` is the instant the book-level limits are judged AS OF, and
+    the live clock when nothing passes one. `_execute` passes the moment
+    before its funding closes ran, for the reason set out there.
     """
     from bot_program.asset_engine.base import make_bot
-    from bot_program.asset_engine.risk_levels import stop_and_target
+    from bot_program.asset_engine.risk_levels import (
+        DEFAULT_MIN_EDGE_RATIO, DEFAULT_MIN_NET_RR, MAX_STOP_FRACTION,
+        MIN_STOP_FRACTION, paper_fill_price, round_trip_cost_fraction,
+        stop_and_target)
     from bot_program.asset_engine.sizing import size_position
 
     cls = EXECUTABLE_CLASS.get(inst.asset_class)
@@ -325,6 +644,21 @@ def _preview(user, inst, side, signal=None) -> dict:
     err = _config_error(cfg)
     if err:
         return {"error": err}
+
+    # The book's own limits from /setup/ — MAX DAILY LOSS and MAX TOTAL
+    # EXPOSURE — before anything is priced or sized. The manual path enforced
+    # per-trade risk, the per-class notional cap and the pool's free capital
+    # and nothing else, so an operator who had set a 3% daily-loss limit could
+    # keep clicking TAKE TRADE all the way down. Checked here so the popup
+    # says why, and again under the lock in `_execute` so the answer cannot go
+    # stale between the two.
+    from portfolio.risk_gate import (limits_book, preflight,
+                                     single_position_state)
+    risk_book = limits_book()
+    book = preflight(user, portfolio=risk_book, now=gate_now)
+    if not book["ok"]:
+        return {"error": book["reason"]}
+
     bot = make_bot(cfg)
 
     price, _client = _mark_for(user, cfg, inst.symbol)
@@ -366,6 +700,33 @@ def _preview(user, inst, side, signal=None) -> dict:
     capital = float(cfg.capital)
     notional = round(sizing["notional_fraction"] * capital, 2)
     capital_use = round(_capital_use(cls, notional), 2)
+
+    # MAX SINGLE POSITION from /setup/ — a percentage of the BOOK, where the
+    # pool caps are percentages of this CLASS's pool. Two different ceilings
+    # and the trade has to clear both.
+    #
+    # Deliberately NOT an error here, even when the proposed size is over it.
+    # The preview IS the popup: erroring closes the one screen on which the
+    # operator could size down to something that fits, so a book ceiling would
+    # have made a takeable trade untakeable. It becomes a bound on the size
+    # control instead (see `caps` below) and a hard refusal in `_execute`,
+    # which is where the size actually being sent is known.
+    # `capital` here is the manual config's pool, the same number the
+    # sizing above divided by — not the portfolio book, which nothing on
+    # this path consults.
+    single = single_position_state(risk_book, asset_class=cls,
+                                   notional=notional,
+                                   capital_base=float(capital or 0),
+                                   base_label="manual pool")
+    # The concentration ceiling, reported here and enforced in `_execute`.
+    # The preview must never raise the operator's own screen out from under
+    # them — it bounds the size control and explains itself instead.
+    from portfolio.risk_gate import concentration_state
+    concentration = concentration_state(
+        user, symbol=inst.symbol, side=side, asset_class=cls,
+        notional=notional, capital_base=float(capital or 0),
+        base_label="manual pool")
+
     open_trades = _open_manual_trades(cfg)
     committed = round(sum(_trade_capital_use(t) for t in open_trades), 2)
     available = round(capital - committed, 2)
@@ -411,7 +772,75 @@ def _preview(user, inst, side, signal=None) -> dict:
                     / notional_per_unit)
     if capital_use_per_unit > 0:
         caps.append(pool_free / capital_use_per_unit)
+    # The book's own single-position ceiling, converted into units, so the
+    # size control stops where `_execute` will refuse rather than one refusal
+    # later. Absent when the book has no usable value to take a percentage of.
+    if capital_use_per_unit > 0 and single["cap_money"] is not None:
+        caps.append(single["cap_money"] / capital_use_per_unit)
     max_qty = _floor_to_step(min(caps), step) if caps else 0.0
+
+    # ── What the funding choice is allowed to be ────────────────────────
+    # EVERY open position in this pool, with the proposal's picks flagged —
+    # not just the picks. The popup used to receive only close_proposal and
+    # send all of it back, so "close first" was a fact the operator was
+    # shown rather than a decision they made. Keeping a position, or
+    # closing a different one that frees as much, are both legitimate
+    # answers, and neither was expressible.
+    proposed_ids = {c["trade_id"] for c in proposal}
+    closable = [{"trade_id": t.id, "symbol": t.symbol, "side": t.side,
+                 "qty": float(t.qty), "entry": float(t.entry_price),
+                 "freed": round(_trade_capital_use(t), 2),
+                 "rule": t.rule_name or "",
+                 "proposed": t.id in proposed_ids}
+                for t in open_trades]
+
+    # ── What the LEVEL controls are allowed to be ───────────────────────
+    # The same shape as the sizing bounds above and for the same reason:
+    # the browser gets the rules so it can show the consequence of a level
+    # per keystroke, and the server keeps the verdict. cost_fraction and
+    # min_net_rr are what passes_cost_filter will judge the moved levels
+    # against, and `fill` is the price it will judge them AT — the preview
+    # showed the free mark, but the position opens at the adverse fill and
+    # a reward:risk quoted off the mark is a reward:risk nobody gets.
+    extras = getattr(cfg, "extras", None) or {}
+
+    def _extra_num(key, default):
+        try:
+            return float(extras.get(key, default))
+        except (TypeError, ValueError):
+            return float(default)
+
+    levels = {
+        "fill": round(paper_fill_price(cfg, inst.symbol, price, side), 8),
+        "min_stop_fraction": MIN_STOP_FRACTION,
+        "max_stop_fraction": MAX_STOP_FRACTION,
+        "cost_fraction": round_trip_cost_fraction(cfg, inst.symbol),
+        "cost_filter": bool(extras.get("use_cost_filter", True)),
+        "min_edge_ratio": _extra_num("min_edge_ratio", DEFAULT_MIN_EDGE_RATIO),
+        "min_net_rr": _extra_num("min_net_rr", DEFAULT_MIN_NET_RR),
+    }
+
+    # ── What the leverage control is NOT ────────────────────────────────
+    # Stated, never offered. See _leverage: no execution path multiplies a
+    # manual order, so the honest control here is the truth about where the
+    # leverage lives plus the notional this pool can carry.
+    lev = _leverage(cls)
+    max_notional = round(capital * max_notional_fraction(cfg, cls), 2)
+    leverage = {
+        "effective": round(lev, 4),
+        "adjustable": False,
+        "margin_fraction": CAPITAL_USE_FRACTION.get(cls, 1.0),
+        "max_notional": max_notional,
+        "note": (
+            f"{lev:.0f}:1 — the leverage is the broker's, not this "
+            f"platform's: {cls} ties up margin and nothing here multiplies "
+            f"it per trade. Size is the lever; this pool carries up to "
+            f"${max_notional:,.0f} of notional."
+            if lev > 1.0 else
+            f"No leverage on {cls} — a position settles in full, so its "
+            f"cash cost IS its notional. Size is the only lever; this pool "
+            f"carries up to ${max_notional:,.0f} of notional."),
+    }
 
     return {
         "symbol": inst.symbol, "side": side, "qty": qty,
@@ -424,7 +853,12 @@ def _preview(user, inst, side, signal=None) -> dict:
         "capital_use": capital_use,
         "capital": capital, "committed": committed, "available": available,
         "sufficient": capital_use <= available,
+        "deficit": max(deficit, 0.0),
         "close_proposal": proposal,
+        # The proposal is a recommendation now; this is the menu it was
+        # chosen from, so the operator can decline one, keep one, or close
+        # something else entirely.
+        "closable": closable,
         "managed": _tick_manages(),
         "venue": "paper",
         # Sizing bounds — the override control's whole vocabulary.
@@ -437,10 +871,36 @@ def _preview(user, inst, side, signal=None) -> dict:
         "pool_free": pool_free,
         "max_qty": max_qty,
         "max_risk_dollars": round(capital * MAX_RISK_FRACTION, 2),
-        "max_notional": round(capital * max_notional_fraction(cfg, cls), 2),
+        "max_notional": max_notional,
+        # The book's ceilings, so the popup can name the one that is binding
+        # instead of the operator meeting it for the first time as a refusal.
+        "book_single_position": single,
+        "book_limits": book["checks"],
+        # Level bounds and the leverage truth — the rest of the pre-trade
+        # control panel's vocabulary.
+        "levels": levels,
+        "leverage": leverage,
         # Live exposure in this symbol, from ANY of this user's configs —
         # the fact whose absence let one symbol be booked twice.
         "existing_exposure": _symbol_exposure(user, inst.symbol),
+        # What this ticket would make of the whole bet, and the ceiling it
+        # is measured against. Enforced in `_execute`; shown here so the
+        # refusal is never a surprise at the moment of pressing the button.
+        "concentration": concentration,
+        # The brain's standing verdict on discretionary entries. Reported,
+        # not enforced: pausing a RULE is the platform's call because nobody
+        # is watching it, but a hand-taken trade has a human on the other
+        # end and taking the decision away from them is the one thing this
+        # path exists not to do. What they must not be is uninformed.
+        "rule_advisory": _manual_rule_advisory(),
+        # How much of this bet the book already holds under other names.
+        # Reported, never applied — the same posture as existing_exposure
+        # above and for the same reason: adding correlated exposure on
+        # purpose is a legitimate decision, and the bots take the taper
+        # because nobody is there to make it. Quietly shrinking a size the
+        # operator is looking at would be the browser and the server
+        # disagreeing about what was ordered.
+        "correlation": _correlation_note(user, inst),
     }
 
 
@@ -465,13 +925,21 @@ def preview_asset_trade(user, inst, side) -> dict:
 
 
 def _execute(user, inst, side, close_ids=None, signal=None,
-             qty_override=None) -> dict:
+             qty_override=None, stop_override=None,
+             target_override=None) -> dict:
     """Close the funding positions (if any), then open the trade. Paper is
     synchronous, so the whole chain settles before this returns.
 
-    `qty_override` is the operator's size from the confirm step. None means
-    "use the risk budget", which is the path that existed before it and is
+    The three overrides are the operator's answers from the confirm step,
+    and None means "the platform's answer" for each independently. All
+    three None is the path that existed before any of them and is
     reproduced here untouched, down to the metadata it writes.
+
+    `close_ids` is the operator's SELECTION of funding closes, not an
+    acknowledgement of the proposal. Whatever is not in it stays open, and
+    the sufficiency check below runs against the pool that selection
+    actually leaves — so declining a close costs the trade, never the
+    position.
 
     The structure is transactional hygiene, learned the hard way:
       * Funding closes run OUTSIDE the open-side transaction. _close_trade
@@ -479,6 +947,10 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         a transaction that later rolls back would announce closes that
         never happened, and would hold the DB write lock across external
         HTTP. Each close commits on its own, exactly like a bot-tick close.
+      * Because those closes are irreversible AND realise P&L, the book's
+        daily-loss gate is asked as of the instant before they ran. A gate
+        that measured them would be able to refuse the trade they were
+        executed to fund — see the note at the capture below.
       * The open runs inside ONE transaction with the config row locked
         (serialized on Postgres; SQLite falls back to its single-writer
         lock), so two clicks racing each other cannot both read
@@ -502,11 +974,39 @@ def _execute(user, inst, side, close_ids=None, signal=None,
     cfg = manual_config_for(user, cls)
 
     def _dup():
-        if signal is None:
-            return None
-        return AssetBotTrade.objects.filter(
-            config=cfg, status="OPEN",
-            metadata__signal_id=signal.id).first()
+        """The open position this request would duplicate, or None.
+
+        Two different questions, because the two entry paths have two
+        different notions of "the same trade":
+          * From a signal — the same SIGNAL, for as long as the position is
+            open. One idea, one position, no expiry.
+          * Without one — the same symbol and side inside
+            MANUAL_REPEAT_WINDOW_SECONDS. There is no id to key on, so
+            recency is the only evidence available that a second identical
+            request is a second click rather than a second decision.
+        """
+        if signal is not None:
+            return AssetBotTrade.objects.filter(
+                config=cfg, status="OPEN",
+                metadata__signal_id=signal.id).first()
+        from django.utils import timezone as _tz
+        since = _tz.now() - timedelta(seconds=MANUAL_REPEAT_WINDOW_SECONDS)
+        return (AssetBotTrade.objects
+                .filter(config=cfg, status="OPEN", symbol=inst.symbol,
+                        side=side, opened_at__gte=since)
+                .order_by("-opened_at").first())
+
+    def _dup_error(dup):
+        if signal is not None:
+            return (f"This signal is already taken — position "
+                    f"#{dup.id} ({dup.side} {dup.symbol}) is open")
+        from django.utils import timezone as _tz
+        age = max(0, int((_tz.now() - dup.opened_at).total_seconds()))
+        wait = max(1, MANUAL_REPEAT_WINDOW_SECONDS - age)
+        return (f"You opened {dup.side} {dup.symbol} {age}s ago "
+                f"(position #{dup.id}, {dup.qty} units). A second identical "
+                f"order this quickly is treated as a double-click. To add to "
+                f"the position deliberately, try again in {wait}s.")
 
     # Cheap guards BEFORE anything is liquidated; all re-checked under the
     # lock below.
@@ -515,16 +1015,60 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         return {"error": err}
     dup = _dup()
     if dup is not None:
-        return {"error": f"This signal is already taken — position "
-                         f"#{dup.id} ({dup.side} {dup.symbol}) is open"}
+        return {"error": _dup_error(dup)}
+
+    # CONCENTRATION — before anything is liquidated, and measured on the book
+    # as it will stand AFTER the closes the operator picked.
+    #
+    # The per-ticket ceiling judges this ticket; this judges the BET. Five
+    # clips each comfortably inside the per-ticket limit summed to 42% of the
+    # book on one instrument, because nothing added them up — the operator was
+    # refused nothing, a clip at a time, until one name carried nearly half
+    # the book and a single adverse print hit it five times at once.
+    #
+    # It runs HERE rather than under the lock for the same reason the
+    # daily-loss gate takes a frozen clock: the funding closes are
+    # irreversible, and a gate that refuses after them costs the operator the
+    # position AND the trade for one click. The closes are deterministic —
+    # the operator named them — so their exposure can be subtracted now
+    # instead of discovered later.
+    _conc_guard = _concentration_guard(user, inst, side, cls, cfg, close_ids)
+    if _conc_guard is not None:
+        return {"error": _conc_guard}
 
     closed = []
+    # The instant the book-level limits are judged as of. None while this
+    # request has done nothing irreversible, and the live clock is then the
+    # right reading; set at the capture below, where that stops being true.
+    gate_now = None
     if close_ids:
         # Nothing may be closed for a trade that was never going to preview
         # clean — full preview first, closes second.
         preview = _preview(user, inst, side, signal=signal)
         if preview.get("error"):
             return preview
+
+        # Frozen BEFORE the first liquidation, and handed to the gate that
+        # runs after them.
+        #
+        # The funding closes REALISE P&L, and realised P&L over the trailing
+        # 24h is the exact quantity MAX DAILY LOSS measures. So a losing
+        # funding close could push the book past the floor, and the preflight
+        # under the lock — the same gate that let this request through a
+        # moment ago — would then refuse the trade those closes were executed
+        # to fund. One click, and the operator loses the position AND does not
+        # get the trade.
+        #
+        # The closes cannot simply move to after the gate: they are what frees
+        # the capital the gate is asked about, and they have to commit outside
+        # the open's transaction (see the docstring). So the gate measures the
+        # day as it stood the instant before this operation touched anything,
+        # which is the only reading under which these closes cannot refuse the
+        # trade they are paying for. Nothing is hidden: the next click reads
+        # the new reality, closes included.
+        from django.utils import timezone as _tz
+        gate_now = _tz.now()
+
         for trade in AssetBotTrade.objects.filter(
                 id__in=list(close_ids), config=cfg, status="OPEN"):
             t_bot = make_bot(trade.config)
@@ -547,32 +1091,44 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             return {"error": err, "closed": closed}
         dup = _dup()
         if dup is not None:
-            return {"error": f"This signal is already taken — position "
-                             f"#{dup.id} ({dup.side} {dup.symbol}) is open",
-                    "closed": closed}
+            return {"error": _dup_error(dup), "closed": closed}
 
         # Fresh preview under the lock — it sees the post-close book, and
         # no competing execute can insert between this read and the create.
-        preview = _preview(user, inst, side, signal=signal)
+        # The one thing it deliberately does NOT see is this request's own
+        # funding closes in the daily-loss window: `gate_now` is the instant
+        # before they ran.
+        preview = _preview(user, inst, side, signal=signal, gate_now=gate_now)
         if preview.get("error"):
             # The closes already happened — the caller must see them even
             # though the open did not follow.
             preview.setdefault("closed", closed)
             return preview
 
-        # Only the AUTOMATIC size is gated on the preview's own sufficiency
-        # flag, which is computed for that size. An override is judged
-        # against the pool on its own terms below — a smaller one legitimately
-        # fits where the risk-derived size did not, and refusing it here
-        # would tell the operator to close positions to make room for a
-        # trade that already fits.
-        if qty_override is None and not preview["sufficient"]:
-            return {"error": "Insufficient capital — the funding closes did "
-                             "not cover the required amount",
+        # Only the wholly AUTOMATIC ticket is gated on the preview's own
+        # sufficiency flag, which is computed for the preview's own size at
+        # the preview's own stop. Anything the operator moved is judged
+        # against the pool on its own terms below — a smaller size, or a
+        # wider stop, legitimately fits where the risk-derived default did
+        # not, and refusing here would tell the operator to close positions
+        # to make room for a trade that already fits.
+        #
+        # The message carries the shortfall now because the closes are a
+        # SELECTION: "the funding closes did not cover it" reads as a
+        # platform failure when what actually happened is that the operator
+        # kept a position open, which is a decision they are entitled to
+        # make and entitled to see the price of.
+        if (qty_override is None and stop_override is None
+                and not preview["sufficient"]):
+            short = round(preview["capital_use"] - preview["available"], 2)
+            return {"error": (f"This trade ties up "
+                              f"${preview['capital_use']:,.2f} but only "
+                              f"${preview['available']:,.2f} is free in the "
+                              f"{cls} pool — ${short:,.2f} short. Close more "
+                              f"of the book, or size down."),
                     "closed": closed}
 
         bot = make_bot(cfg)
-        stop = preview["stop"]
         # Fill FIRST, size from the fill — the bot entry path's ordering.
         # Sizing off the free raw mark and then filling adversely overshoots
         # the risk budget by half the round-trip cost every time.
@@ -584,6 +1140,34 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         # later P&L, grading and capital calculation. vpu 0 → dist 0 → the
         # refusal below, exactly matching the preview path's behaviour.
         vpu = float(bot._value_per_unit(inst.symbol))
+
+        # ── The operator's levels, re-derived against the real fill ──────
+        # Against the FILL, not the mark the browser was shown: the fill is
+        # where the position opens, so it is the price the stop's side, the
+        # stop's distance and the reward:risk have to be true of. A stop
+        # that clears the mark by a tick and not the fill is a stop that was
+        # never really below the entry.
+        stop = preview["stop"]
+        target = float(preview["target"])
+        level_overrides = []
+        if stop_override is not None:
+            stop, why = validate_stop_override(
+                cfg, asset_class=cls, raw=stop_override, entry=fill, side=side)
+            if why:
+                return {"error": why, "closed": closed}
+            level_overrides.append("stop")
+        if target_override is not None:
+            target, why = validate_target_override(
+                raw=target_override, entry=fill, side=side)
+            if why:
+                return {"error": why, "closed": closed}
+            level_overrides.append("target")
+        if level_overrides:
+            why = validate_levels(cfg, inst.symbol, entry=fill, stop=stop,
+                                  target=target)
+            if why:
+                return {"error": why, "closed": closed}
+
         dist = abs(fill - stop) * vpu
         overridden = qty_override is not None
         if not overridden:
@@ -592,6 +1176,16 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             if qty <= 0:
                 return {"error": "Sized to zero at the adjusted fill price",
                         "closed": closed}
+            if stop_override is not None:
+                # A hand-placed stop re-denominates the risk budget, so the
+                # size it derives is not the size the preview was judged
+                # for — a stop half as wide buys twice the position. The
+                # caps have to bite on what is actually sent.
+                why = judge_qty(cfg, asset_class=cls, qty=qty, entry=fill,
+                                stop=stop, value_per_unit=vpu,
+                                available=preview["available"])
+                if why:
+                    return {"error": why, "closed": closed}
         elif dist <= 0:
             # Same sentinel as above: no usable rate, so no size is legal —
             # including one the operator typed.
@@ -615,46 +1209,88 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         # the stop distance — not the config's risk budget. Writing the
         # budget would denominate this trade's realized_r against money that
         # was never at risk, which is the one thing sizing.py exists to
-        # prevent. The automatic branch keeps the preview's own numbers
-        # verbatim, so an un-overridden trade is byte-for-byte what it was
-        # before this option existed.
-        if overridden:
+        # prevent. A hand-placed STOP resizes the position for the same
+        # reason, so the money figures are re-derived there too; the
+        # preview's own numbers are for its own stop and its own size.
+        # With nothing overridden every one of them is the preview's
+        # verbatim, so an untouched trade is byte-for-byte what it was
+        # before any of this existed.
+        resized = overridden or stop_override is not None
+        if resized:
             notional = qty * fill * vpu
             capital = float(preview["capital"])
             risk_dollars = round(qty * dist, 6)
             notional_fraction = round(notional / capital, 6) if capital else 0.0
             capital_use = round(_capital_use(cls, notional), 2)
         else:
+            notional = float(preview["notional"])
             risk_dollars = preview["risk_dollars"]
             notional_fraction = (preview["notional"] / preview["capital"]
                                  if preview["capital"] else 0.0)
             capital_use = preview["capital_use"]
+
+        # MAX SINGLE POSITION from /setup/, on the notional actually being
+        # sent — after any override and at the real fill, because a ceiling
+        # that judges the number the browser was shown is a ceiling on a trade
+        # nobody placed. The preview only bounded the control; this is the
+        # refusal, and it carries the arithmetic so the operator can see
+        # whether to size down or to raise the book's limit.
+        from portfolio.risk_gate import limits_book, single_position_state
+        single = single_position_state(limits_book(), asset_class=cls,
+                                       notional=notional,
+                                       capital_base=float(cfg.capital or 0),
+                                       base_label="manual pool")
+        if not single["ok"]:
+            return {"error": single["reason"], "closed": closed}
+
+
+        meta = {
+            "manual": True,
+            "signal_id": signal.id if signal is not None else None,
+            # The stop the position OPENS with, whoever chose it — R is
+            # denominated by this number for the life of the trade, so it
+            # has to be the level actually placed and not the level the
+            # engine would have placed.
+            "initial_stop_loss": stop,
+            "value_per_unit": vpu,
+            "risk_dollars": risk_dollars,
+            "notional_fraction": notional_fraction,
+            "capital_use": capital_use,
+            "paper_fill": True, "market_price": preview["entry"],
+            "funding_closes": closed,
+            # Which size this was, so the ledger can tell an operator's
+            # judgement apart from the engine's arithmetic later.
+            "size_source": "operator" if overridden else "risk_budget",
+            # Whether the brain was recommending against discretionary
+            # entries when this one was taken. Grading later has to be able
+            # to ask whether the advisory was worth following, and it cannot
+            # ask a question nobody recorded the answer to.
+            "advisory_at_entry": _manual_rule_advisory(),
+        }
+        if level_overrides:
+            # Only when something moved: an untouched ticket keeps the exact
+            # metadata shape it had before the levels became adjustable, so
+            # nothing downstream has to learn a new key to read an ordinary
+            # trade. Grading later wants to know whether a level was the
+            # engine's or a person's — that is a different question from
+            # who chose the size.
+            meta["level_source"] = "operator"
+            meta["operator_overrides"] = level_overrides
+            meta["engine_stop"] = preview["stop"]
+            meta["engine_target"] = float(preview["target"])
 
         trade = AssetBotTrade.objects.create(
             config=cfg, asset_class=cfg.asset_class, symbol=inst.symbol,
             side=side, qty=Decimal(str(qty)),
             entry_price=Decimal(str(round(fill, 8))),
             stop_loss=Decimal(str(stop)),
-            take_profit=Decimal(str(preview["target"])),
+            take_profit=Decimal(str(round(target, 8))),
             status="OPEN", paper=True, rule_name=MANUAL_RULE,
             composite_score=float(getattr(signal, "score", 0) or 0),
             reason=(f"TAKE TRADE · signal #{signal.id} · "
                     f"{signal.rule_name or ''}" if signal is not None
                     else f"TAKE TRADE · manual {side} from instrument view"),
-            metadata={
-                "manual": True,
-                "signal_id": signal.id if signal is not None else None,
-                "initial_stop_loss": stop,
-                "value_per_unit": vpu,
-                "risk_dollars": risk_dollars,
-                "notional_fraction": notional_fraction,
-                "capital_use": capital_use,
-                "paper_fill": True, "market_price": preview["entry"],
-                "funding_closes": closed,
-                # Which size this was, so the ledger can tell an operator's
-                # judgement apart from the engine's arithmetic later.
-                "size_source": "operator" if overridden else "risk_budget",
-            },
+            metadata=meta,
         )
 
         # DB-side bookkeeping lives inside the transaction — the audit
@@ -686,11 +1322,16 @@ def _execute(user, inst, side, close_ids=None, signal=None,
 
     # External side effects AFTER the commit — the row is durable now.
     try:
-        from bot_program.notifications import notify_bot_fill_open
-        notify_bot_fill_open(
+        # The operator's own fill, announced as the operator's own. The bot
+        # helper types its row "Bot Event" and hides it behind the bot-alert
+        # preference, so a deliberate TAKE TRADE arrived in the bell as
+        # automation — and went silent entirely for anyone who had muted the
+        # fleet's chatter, which is the one fill they cannot afford to miss.
+        from bot_program.notifications import notify_manual_fill_open
+        notify_manual_fill_open(
             user, asset_class=cfg.asset_class, symbol=inst.symbol,
             side=side, qty=trade.qty, entry_price=trade.entry_price,
-            rule_name=trade.rule_name, trade_id=trade.id)
+            trade_id=trade.id)
     except Exception as e:  # noqa: BLE001
         logger.warning("[take-trade] open notification failed: %s", e)
     try:
@@ -702,32 +1343,48 @@ def _execute(user, inst, side, close_ids=None, signal=None,
     except Exception as e:  # noqa: BLE001
         logger.warning("[take-trade] WS push (open) failed: %s", e)
 
-    logger.info("[take-trade] %s opened %s %s x%s%s (closed first: %s)",
+    logger.info("[take-trade] %s opened %s %s x%s%s (closed first: %s%s)",
                 user.username, side, inst.symbol, qty,
                 f" from signal {signal.id}" if signal is not None else "",
-                closed or "none")
+                closed or "none",
+                f"; operator levels: {', '.join(level_overrides)}"
+                if level_overrides else "")
     return {"ok": True, "trade_id": trade.id, "symbol": inst.symbol,
             "side": side, "qty": float(qty),
             "entry": float(trade.entry_price),
+            "stop": float(trade.stop_loss),
+            "target": float(trade.take_profit),
             "risk_dollars": risk_dollars,
             "sized_by": "operator" if overridden else "risk_budget",
+            # What the operator moved, so the confirmation can name it back
+            # to them rather than claiming the platform's own defaults.
+            "overrides": (["qty"] if overridden else []) + level_overrides,
             "managed": preview.get("managed", False),
             "closed": closed}
 
 
-def execute_take_trade(user, signal, close_ids=None, qty=None) -> dict:
-    """Execute a signal's TAKE TRADE. `qty` None keeps the risk-derived size."""
+def execute_take_trade(user, signal, close_ids=None, qty=None, stop=None,
+                       target=None) -> dict:
+    """Execute a signal's TAKE TRADE.
+
+    Every keyword None is "the platform's answer": the risk-derived size,
+    the signal's own stop and target. Each is independent — a hand-placed
+    stop with an automatic size is the ordinary case, not an exotic one.
+    """
     if signal.direction not in ("bullish", "bearish"):
         return {"error": f"'{signal.direction}' signals carry no trade "
                          f"direction — only bullish and bearish signals "
                          f"are executable"}
     side = "BUY" if signal.direction == "bullish" else "SELL"
     return _execute(user, signal.instrument, side, close_ids=close_ids,
-                    signal=signal, qty_override=qty)
+                    signal=signal, qty_override=qty, stop_override=stop,
+                    target_override=target)
 
 
-def execute_asset_trade(user, inst, side, close_ids=None, qty=None) -> dict:
+def execute_asset_trade(user, inst, side, close_ids=None, qty=None, stop=None,
+                        target=None) -> dict:
     """Execute a signal-less LONG/SHORT from an instrument popup."""
     if side not in ("BUY", "SELL"):
         return {"error": f"Unknown side {side!r}"}
-    return _execute(user, inst, side, close_ids=close_ids, qty_override=qty)
+    return _execute(user, inst, side, close_ids=close_ids, qty_override=qty,
+                    stop_override=stop, target_override=target)

@@ -4,10 +4,13 @@
     "description": "Trading Intelligence Platform",
     "start_url": "/",
     "display": "standalone",
-    "background_color": "#0a0a0a",
-    "theme_color": "#c0392b",
+    "background_color": "#030806",
+    "theme_color": "#030806",
     "icons": [
-        {"src": "/static/logo/sauron_192.png", "sizes": "192x192", "type": "image/png"},
-        {"src": "/static/logo/sauron_512.png", "sizes": "512x512", "type": "image/png"}
+        {"src": "/static/logo/favicon-32.png", "sizes": "32x32", "type": "image/png"},
+        {"src": "/static/logo/apple-touch-icon.png", "sizes": "180x180", "type": "image/png"},
+        {"src": "/static/logo/sauron_192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+        {"src": "/static/logo/sauron_512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+        {"src": "/static/logo/sauron_eye.svg", "sizes": "any", "type": "image/svg+xml"}
     ]
 }

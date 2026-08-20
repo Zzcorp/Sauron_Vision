@@ -1,0 +1,49 @@
+{% comment %}
+The bell panel's rows, on their own so they can be REFETCHED.
+
+They used to be inlined in base.html, which meant they were rendered once,
+at page load, and never again. A notification arriving after that moved the
+red badge and raised a banner — both live — while the list behind the bell
+stayed exactly as it was. The operator saw "3", opened the bell, and the
+three alerts were not in it. Nothing was broken in delivery; the one part of
+the chain that never re-rendered was the part the click lands on.
+
+Rendered by dashboard.views.notif_items_partial at /partials/notif-items/,
+and included by base.html for the first paint, so the markup the refresh
+swaps in is the markup that was there — one template, not two that drift.
+
+Each row now says what KIND of event it was and how old it is, in a colour
+that matches its severity. A stack of identically-styled titles gave the
+operator no way to pick the one that mattered out of ten.
+
+An empty url falls back to the INBOX (a real list page with the full body) —
+a click must always land somewhere. Rows mark themselves read on the way.
+
+The data-nc-* set is what the dwell card reads: the row shows a
+110-character stub of the body and a rounded age, and the card shows the
+whole thing at its exact timestamp. `data` rides as json_script —
+server-escaped, and the WHOLE dict rather than data.items, because
+`n.data.items` on a payload without an "items" key resolves to dict.items()
+and renders "dict_items([...])" into the page.
+{% endcomment %}
+{% for n in recent_notifications %}
+    <a class="notif-item ni-{{ n.notification_type }} {% if not n.read %}unread{% endif %}"
+       href="{{ n.url|default:'/notifications/' }}" role="menuitem"
+       data-notif-id="{{ n.id }}" data-nc-row
+       data-nc-title="{{ n.title }}"
+       data-nc-body="{{ n.body }}"
+       data-nc-kind="{{ n.get_notification_type_display|default:n.notification_type }}"
+       data-nc-at="{{ n.created_at|date:'Y-m-d H:i:s T' }}"
+       data-nc-href="{{ n.url|default:'/notifications/' }}">
+        <span class="ni-kind">{{ n.get_notification_type_display|default:n.notification_type }}</span>
+        <div class="ni-title">{{ n.title }}</div>
+        {% if n.body %}<div class="ni-body">{{ n.body|truncatechars:110 }}</div>{% endif %}
+        <div class="ni-time"><span class="sv-age" data-sv-at="{{ n.created_at|date:'c' }}">{{ n.created_at|timesince }} ago</span></div>
+        {% if n.data %}{{ n.data|json_script }}{% endif %}
+    </a>
+{% empty %}
+    <div class="sv-empty">
+        <b>Nothing yet</b>
+        Fills, new signals and bot events land here as they happen.
+    </div>
+{% endfor %}

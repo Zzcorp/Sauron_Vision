@@ -11,10 +11,21 @@ Both halves are tested here, and they come out differently.
 
 THE SMC PAIR is reachable. Jaccard 1.0 is measured on condition KINDS, which
 overstates it — the params carry opposite directions and only relative_volume
-is direction-neutral, so the honest overlap is 0.20 — but one bar shape does
-make both setups score 1.00 on the same instrument at the same instant: an
-outside bar that takes out BOTH sides of a tight multi-day coil and closes
-back inside it. A CPI/FOMC whipsaw. `DoubleSweepIsReachableTests` builds it.
+is direction-neutral, so the honest overlap is 0.14 — but one market shape
+does make both setups match on the same instrument at the same instant: a
+whipsaw that sweeps the lows, breaks structure UP, sweeps the highs and breaks
+structure back DOWN inside the five-bar window both setups read. A CPI/FOMC
+session. `DoubleSweepIsReachableTests` builds it.
+
+That shape is a SESSION and not a single bar, which is itself a consequence of
+the setups carrying structure. No bar can be both a BOS_UP and a BOS_DOWN: the
+breaking bar must close ABOVE the swing high and BELOW the swing low, so that
+high has to sit under that low — while every bar between the swings and the
+break must close under the high (or the upside break printed earlier) and over
+the low (or the downside one did), which needs the high above the low. A
+fractal pivot needs three bars to its right, so those in-between bars always
+exist. The old one-outside-bar version of this fixture reached both setups only
+while they were unordered bags of sweeps, gaps and volume.
 
 What follows from that is NOT the trade the briefing feared. Nothing in the
 engine will take both sides: `AssetBot.decide()` returns one BotDecision per
@@ -86,62 +97,93 @@ def _setup(name, pack="advanced"):
     )
 
 
-# The 17 bars of context before the interesting ones. Everything sits inside
-# [100.5, 102.0] so it never becomes the swing level either setup reads.
-_FILLER = (101.0, 102.0, 100.5, 101.5, 1000)
+# The 22 bars of context before the interesting ones: a zigzag that RISES to a
+# peak, sells off through a swing low — that sell-off is the downside break of
+# structure both later CHoCHs are measured against — bottoms at 100.05, and
+# grinds back up into a 102.55 shelf.
+#
+# It is a zigzag rather than filler for a hard reason. `smc.pivots.find_pivots`
+# marks bar i a swing high only when its high is the strict max of the seven-bar
+# window centred on it AND `argmax() == left`, so a repeated bar loses every tie
+# to the earlier copy of itself: a block of identical filler bars produces ZERO
+# swings, and with no swings there are no structure breaks, no sweeps to order
+# against them, and nothing for either smc setup to score. A fixture like that
+# does not test the contradiction guard, it just fails to reach it.
+_COIL = [
+    (103.6, 104.15, 103.45, 104.0, 1000),    # 0
+    (104.0, 104.55, 103.85, 104.4, 1000),    # 1
+    (104.4, 104.95, 104.25, 104.8, 1000),    # 2
+    (104.8, 104.95, 104.05, 104.2, 1000),    # 3
+    (104.2, 104.35, 103.45, 103.6, 1000),    # 4
+    (103.6, 103.75, 102.85, 103.0, 1000),    # 5
+    (103.0, 103.15, 102.45, 102.6, 1000),    # 6  — swing LOW at 102.45
+    (102.6, 103.15, 102.45, 103.0, 1000),    # 7
+    (103.0, 103.55, 102.85, 103.4, 1000),    # 8
+    (103.4, 103.55, 102.85, 103.0, 1000),    # 9
+    (103.0, 103.15, 102.25, 102.4, 1000),    # 10 — closes under it: BOS_DOWN
+    (102.4, 102.55, 101.65, 101.8, 1000),    # 11
+    (101.8, 101.95, 101.05, 101.2, 1000),    # 12
+    (101.2, 101.35, 100.45, 100.6, 1000),    # 13
+    (100.6, 100.75, 100.05, 100.2, 1000),    # 14 — swing LOW at 100.05
+    (100.2, 100.75, 100.05, 100.6, 1000),    # 15
+    (100.6, 101.35, 100.45, 101.2, 1000),    # 16
+    (101.2, 101.95, 101.05, 101.8, 1000),    # 17
+    (101.8, 102.55, 101.65, 102.4, 1000),    # 18 — swing HIGH at 102.55
+    (102.4, 102.55, 101.85, 102.0, 1000),    # 19
+    (102.0, 102.15, 101.45, 101.6, 1000),    # 20
+    (101.6, 101.75, 101.05, 101.2, 1000),    # 21
+]
+
+# Wicks below the 100.05 swing low and closes back above it — the stop-hunt the
+# bullish sequence needs BEFORE its break, not on the same bar as it.
+_SWEEP_LOW_BAR = (101.2, 101.3, 98.0, 101.0, 1000)
+# Closes at 103.6, through the 102.55 shelf. The prior break was to the DOWNSIDE
+# (bar 10), so this one contradicts it and is tagged CHoCH.
+_BOS_UP_BAR = (101.0, 103.75, 100.95, 103.6, 1000)
+# Back through the shelf and rejected: the mirror stop-hunt, one bar before the
+# downside break.
+_SWEEP_HIGH_BAR = (103.6, 104.5, 102.3, 102.4, 1000)
+# The whipsaw bar. Driven down through 98.0 and up through 104.5 — both sides of
+# every level the last twenty bars laid down — closing at 99.0, under the 100.05
+# swing low, which is a bearish CHoCH against the upside break two bars back.
+# Volume is 4x the 20-bar average, which is direction-neutral.
+_WHIPSAW_BAR = (102.4, 110.0, 92.5, 99.0, 4000)
 
 
 def _double_sweep_bars():
-    """The bar shape that makes advanced_smc_long AND advanced_smc_short both
-    score 1.00 on the same instrument at the same instant.
+    """The market shape that makes advanced_smc_long AND advanced_smc_short
+    both match on the same instrument at the same instant.
 
-    Twenty bars coil inside [100.0, 104.0]. The last bar opens at 102, is
-    driven down to 96 — through the 100.0 swing low, harvesting the stops
-    under it — then reversed up to 108, through the 104.0 swing high, and
-    settles back at 102, inside the range it started in. Both wicks are a
-    third of the bar's range, so both sweeps clear the 30% wick_pct floor.
+    It is a SESSION, not a bar, and that is a consequence of the setups
+    carrying structure: one bar cannot be both a BOS_UP and a BOS_DOWN (the
+    module docstring works through why). What is reachable, and what this
+    fixture builds, is a whipsaw across four bars: lows swept, structure broken
+    UP, highs swept, structure broken DOWN, all inside the five-bar freshness
+    window both setups ask for. A CPI print into a coil does exactly this.
 
-    The three-bar imbalances fall out of the same session: bars B3→B5 leave a
-    bullish FVG (102.6 < 103.5) and bars B5→B7 leave a bearish one
-    (103.5 > 102.0). Volume is 4x the 20-bar average, which is
-    direction-neutral and scores 1.0 for both setups.
-
-    This is not a contrived shape. It is what a CPI print does to an
-    instrument that has been range-bound for a month.
+    Both setups clear 0.65 on the last bar — the long on a break two bars back,
+    the short on the break that just printed — so the pass has a genuine
+    bullish-and-bearish disagreement to suppress.
     """
-    window = [
-        (100.6, 101.0, 100.4, 100.8, 1000),   # B0
-        (100.8, 101.2, 100.5, 101.0, 1000),   # B1
-        (100.5, 101.0, 100.0, 100.8, 1000),   # B2 — the 20-bar low
-        (102.0, 102.6, 101.9, 102.5, 1000),   # B3 — bullish FVG floor
-        (102.6, 103.0, 102.5, 102.8, 1000),   # B4
-        (103.6, 104.0, 103.5, 103.7, 1000),   # B5 — the 20-bar high
-        (103.0, 103.3, 102.8, 102.9, 1000),   # B6
-        (102.0, 102.0, 101.5, 101.6, 1000),   # B7 — bearish FVG ceiling
-    ]
-    return [_FILLER] * 17 + window + [(102.0, 108.0, 96.0, 102.0, 4000)]
+    return _COIL + [_SWEEP_LOW_BAR, _BOS_UP_BAR, _SWEEP_HIGH_BAR, _WHIPSAW_BAR]
 
 
 def _bullish_sweep_only_bars():
-    """The same session with only the DOWNSIDE swept: the low side is taken
-    out and reclaimed, the high side is never touched, and the only imbalance
-    left behind is bullish. advanced_smc_long scores 1.00; advanced_smc_short
-    scores 0.24 on the volume leg alone and stays below its 0.65 bar.
+    """The same coil with only the DOWNSIDE swept: the lows are taken out and
+    reclaimed, structure breaks upward, and nothing breaks it back down.
+
+    advanced_smc_long scores 0.93; advanced_smc_short reaches 0.23 — a bearish
+    imbalance left in the coil plus the direction-neutral volume leg, with both
+    structure legs at zero — and stays far below its 0.65 bar.
 
     Used to show the guard suppresses a contradiction where one exists and
     nothing else.
     """
-    window = [
-        (100.8, 101.2, 100.5, 101.0, 1000),   # C0
-        (100.9, 101.2, 100.6, 101.0, 1000),   # C1
-        (100.9, 101.2, 100.6, 101.0, 1000),   # C2
-        (100.8, 101.2, 100.5, 101.0, 1000),   # C3
-        (100.5, 101.0, 100.0, 100.8, 1000),   # C4 — 20-bar low, FVG floor
-        (101.5, 102.6, 101.4, 102.5, 1000),   # C5
-        (102.5, 103.0, 102.5, 102.9, 1000),   # C6 — FVG ceiling
-        (102.6, 103.0, 102.4, 102.7, 1000),   # C7
+    return _COIL + [
+        _SWEEP_LOW_BAR,
+        (101.0, 102.6, 100.95, 102.5, 1000),    # stops under the 102.55 shelf
+        (102.5, 104.0, 102.4, 103.8, 4000),     # and then breaks it, on volume
     ]
-    return [_FILLER] * 17 + window + [(102.0, 102.5, 96.0, 102.0, 4000)]
 
 
 def _user(name="degen_user"):
@@ -175,11 +217,19 @@ def _signal(symbol, direction, score, rule, asset_class="stock"):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 1. The claim, tested: can both smc setups match one bar?
+# 1. The claim, tested: can both smc setups match the same instant?
 # ══════════════════════════════════════════════════════════════════════════
 
 class DoubleSweepIsReachableTests(TestCase):
-    """Yes — and this is the exact market shape that does it."""
+    """Yes — and this is the exact market shape that does it.
+
+    The sweep and imbalance halves are tested on ONE bar, because one bar
+    genuinely can carry both of those; the two setups' own verdicts are tested
+    on the whipsaw session, because since they carry structure they can only
+    disagree across bars. Both halves matter: the first is why the sweep and
+    gap legs never separated the pair, the second is what the guard has to
+    catch.
+    """
 
     def test_one_bar_can_sweep_both_sides_of_the_same_coil(self):
         from signals.evaluators_advanced import _eval_liquidity_sweep
@@ -194,18 +244,21 @@ class DoubleSweepIsReachableTests(TestCase):
                                      inst, now)
         self.assertTrue(up["matched"], up["details"])
         self.assertTrue(down["matched"], down["details"])
-        # Both wicks are a third of the bar, so both clear wick_pct with room.
-        self.assertEqual(up["details"]["swing_low"], 100.0)
-        self.assertEqual(down["details"]["swing_high"], 104.0)
+        # The levels are the extremes of the 20 bars before the whipsaw, which
+        # are the two stop-hunt bars' own wicks: 98.0 below, 104.5 above.
+        self.assertEqual(up["details"]["swing_low"], 98.0)
+        self.assertEqual(down["details"]["swing_high"], 104.5)
+        # Both wicks are ~31% of the bar, so both clear wick_pct with room.
         self.assertGreaterEqual(up["details"]["wick_ratio"], 0.3)
         self.assertGreaterEqual(down["details"]["wick_ratio"], 0.3)
 
     def test_where_the_bar_closes_is_what_decides_how_many_sides_can_claim_it(self):
         """The narrowness of the shape, stated exactly. Both wicks can be
         present on any wide bar; what makes BOTH sweeps claim it is the close
-        landing back inside the coil. Close above the swing high and only the
-        bullish sweep survives (the bearish one needs close < swing_high);
-        close below the swing low and only the bearish one does.
+        landing back inside the range the prior twenty bars laid down. Close
+        above the swing high and only the bullish sweep survives (the bearish
+        one needs close < swing_high); close below the swing low and only the
+        bearish one does.
 
         So the market shape is not "a volatile bar" — it is a full round trip
         through both stop pools that ends where it started.
@@ -222,7 +275,7 @@ class DoubleSweepIsReachableTests(TestCase):
             with self.subTest(close=close):
                 inst = _instrument(f"SWEEPCLOSE{i}")
                 bars = _double_sweep_bars()
-                bars[-1] = (102.0, 108.0, 96.0, close, 4000)
+                bars[-1] = (102.4, 110.0, 92.5, close, 4000)
                 _seed_bars(inst, bars)
                 now = timezone.now()
                 self.assertEqual(
@@ -249,7 +302,16 @@ class DoubleSweepIsReachableTests(TestCase):
         """Scored one at a time — which is what `scan_setup` does for any
         direct caller — both setups clear 0.65 on the same bar. Nothing in
         the per-pair path can see the problem, because the problem is a
-        property of the pair."""
+        property of the pair.
+
+        The two scores are pinned rather than merely compared to the bar,
+        because their SHAPE is the finding. The short is the fresher read: its
+        break printed on the current bar, so both its recency terms are 1.0.
+        The long's break is two bars back, which costs it a third of each
+        recency term (4/6) and lands it at 0.796. Neither can reach 1.00 while
+        the other matches — one bar cannot carry both breaks — so a pair of
+        perfect scores is no longer the thing to look for.
+        """
         from signals.opportunity_scanner import scan_setup
         inst = _instrument("SMCPAIR")
         _seed_bars(inst, _double_sweep_bars())
@@ -259,8 +321,8 @@ class DoubleSweepIsReachableTests(TestCase):
                                now=timezone.now(), as_of=False)
         self.assertTrue(long_res["matched"])
         self.assertTrue(short_res["matched"])
-        self.assertEqual(long_res["score"], 1.0)
-        self.assertEqual(short_res["score"], 1.0)
+        self.assertAlmostEqual(long_res["score"], 0.7961, places=3)
+        self.assertAlmostEqual(short_res["score"], 0.885, places=3)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -420,8 +482,8 @@ class ContradictionGuardTests(TestCase):
                          now=timezone.now(), as_of=False, emit=False)
         self.assertTrue(res["matched"])
         self.assertTrue(res["pending"])
-        self.assertEqual(res["score"], 1.0)
-        self.assertEqual(res["last_price"], 102.0)
+        self.assertAlmostEqual(res["score"], 0.7961, places=3)
+        self.assertEqual(res["last_price"], 99.0)
         self.assertEqual(OpportunityFlag.objects.count(), 0)
         self.assertEqual(Signal.objects.count(), 0)
 
@@ -582,12 +644,17 @@ class ConditionOverlapTests(TestCase):
     between `kind_jaccard` and `jaccard` IS the finding, so both are reported
     rather than the second silently replacing the first."""
 
-    def test_the_smc_pair_reads_1_00_on_kinds_and_0_20_once_direction_counts(self):
+    def test_the_smc_pair_reads_1_00_on_kinds_and_0_14_once_direction_counts(self):
+        """Four kinds each, all four shared, so a kind-only audit still calls
+        them one rule twice. Direction-aware, one of the eight fingerprints is
+        common — the pair grew a structure leg and a sequence leg since this
+        was 0.20, and both of those point a direction, so the honest overlap
+        fell as the setups became more different from each other."""
         from signals.opportunity_scanner import setup_overlap
         ov = setup_overlap(_setup("advanced_smc_long"),
                            _setup("advanced_smc_short"))
         self.assertEqual(ov["kind_jaccard"], 1.0)
-        self.assertEqual(ov["jaccard"], 0.2)
+        self.assertEqual(ov["jaccard"], 0.1429)          # one of seven
         # Only the direction-neutral leg is genuinely shared.
         self.assertEqual(ov["shared"], ["relative_volume"])
         self.assertTrue(ov["opposite_direction"])

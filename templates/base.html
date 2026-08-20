@@ -4,31 +4,58 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <link rel="icon" type="image/png" href="{% static 'logo/logo_SV.png' %}">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
     <title>{% block title %}Sauron Vision{% endblock %}</title>
 
-    <!-- Favicon -->
-    <link rel="icon" type="image/png" href="{% static 'logo/logo_SV.png' %}">
-    <link rel="apple-touch-icon" href="{% static 'logo/logo_SV.png' %}">
+    {% comment %}
+    THE EYE. One declaration per format, in the order browsers resolve
+    them — there used to be two identical <link rel="icon"> tags, one here
+    and one below under a "Favicon" comment, both pointing at a wide
+    non-square PNG that a 16px tab squashed.
+
+    The .ico is first and deliberate: crawlers and older clients request
+    /favicon.ico by name and never read these tags at all.
+    {% endcomment %}
+    <link rel="icon" href="{% static 'logo/favicon.ico' %}" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="{% static 'logo/sauron_eye.svg' %}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'logo/favicon-32.png' %}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{% static 'logo/favicon-16.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'logo/apple-touch-icon.png' %}">
 
     <!-- PWA -->
     <link rel="manifest" href="/static/manifest.json">
-    <meta name="theme-color" content="#c0392b">
+    {# --bg-void. It was #c0392b, a red from another project entirely, #}
+    {# painting the mobile browser chrome a colour that appears nowhere #}
+    {# in this platform. #}
+    <meta name="theme-color" content="#030806">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Sauron">
     <meta name="mobile-web-app-capable" content="yes">
 
-    <!-- Social / OG Meta -->
+    {% comment %}
+    Social. og:image and twitter:image go through `static_abs`, NOT
+    `{% static %}`: the latter yields "/static/logo/..." and Facebook,
+    LinkedIn, Slack, X and iMessage all require an absolute URL and all
+    silently drop a relative one. Every link ever shared to this platform
+    has previewed with no image — a failure that happens on somebody
+    else's server, which is why it survived this long.
+
+    The width/height hints let a scraper reserve the right space before
+    it has fetched the image, which is what stops the card reflowing.
+    {% endcomment %}
     <meta property="og:title" content="Sauron Vision — Trading Intelligence">
     <meta property="og:description" content="AI-powered trading platform monitoring Stocks, Commodities & Forex with real-time signals and strategy engine.">
-    <meta property="og:image" content="{% static 'logo/logo_SV.png' %}">
+    <meta property="og:image" content="{% static_abs 'logo/og-card.png' %}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
     <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Sauron Vision">
+    <meta property="og:url" content="{{ request.build_absolute_uri }}">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Sauron Vision">
     <meta name="twitter:description" content="AI-powered trading intelligence platform.">
-    <meta name="twitter:image" content="{% static 'logo/logo_SV.png' %}">
+    <meta name="twitter:image" content="{% static_abs 'logo/og-card.png' %}">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -341,8 +368,30 @@
     <aside class="sidebar" id="mainSidebar">
         <div class="sidebar-brand">
             <h1>
+                {% comment %}
+                INLINE, not an <img>. This is the same mark the favicon and
+                the share card are cut from, but here it has to take the
+                theme with it — the sidebar recolours in light mode and a
+                raster eye would sit in it as a fixed green stamp. Drawn at
+                the 24-unit scale rather than shrunk from 512: at 30px the
+                large mark's iris meridians turn to noise, so this variant
+                drops them and keeps the shapes that survive.
+
+                stroke="currentColor" is the whole point — every line
+                inherits .brand-eye's colour, so one CSS rule moves it.
+                {% endcomment %}
                 <span class="brand-eye-wrap">
-                    <img class="brand-eye" src="{% static 'logo/logo_SV.png' %}" alt="Sauron Vision">
+                    <svg class="brand-eye" viewBox="0 0 24 24" width="24" height="24"
+                         role="img" aria-label="Sauron Vision" fill="none"
+                         stroke="currentColor" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,1.4 21.2,6.7 21.2,17.3 12,22.6 2.8,17.3 2.8,6.7"
+                                 stroke-width="1"/>
+                        <path d="M4.2 12Q12 3.4 19.8 12Q12 20.6 4.2 12Z"
+                              fill="currentColor" fill-opacity="0.14" stroke-width="1.5"/>
+                        <circle cx="12" cy="12" r="3.1" fill="currentColor" stroke="none"/>
+                        <circle cx="12" cy="12" r="1.25" fill="var(--bg-secondary, #081410)" stroke="none"/>
+                        <path d="M12 1.4V3.2M12 22.6V20.8" stroke-width="0.9"/>
+                    </svg>
                 </span>
                 <span class="brand-text">SAURON</span>
             </h1>
@@ -514,52 +563,16 @@
                             <a href="{% url 'user_notifications' %}" class="nh-link nh-link--accent">Settings</a>
                         </div>
                     </div>
-                    <div class="notif-scroll">
-                    {% for n in recent_notifications %}
-                        {% comment %}
-                        Each row now says what KIND of event it was and how old
-                        it is, in a colour that matches its severity. A stack of
-                        identically-styled titles gave the operator no way to
-                        pick the one that mattered out of ten.
-                        {% endcomment %}
-                        {% comment %}
-                        Empty url falls back to the INBOX (a real list page with
-                        the full body) — a click must always land somewhere.
-                        Rows mark themselves read on the way.
-
-                        The data-nc-* set is what the dwell card reads: the row
-                        shows a 110-character stub of the body and a rounded
-                        age, and the card shows the whole thing at its exact
-                        timestamp. `data` rides as json_script — server-escaped,
-                        and the WHOLE dict rather than data.items, because
-                        `n.data.items` on a payload without an "items" key
-                        resolves to dict.items() and renders "dict_items([...])"
-                        into the page.
-                        {% endcomment %}
-                        <a class="notif-item ni-{{ n.notification_type }} {% if not n.read %}unread{% endif %}"
-                           href="{{ n.url|default:'/notifications/' }}" role="menuitem"
-                           data-notif-id="{{ n.id }}" data-nc-row
-                           data-nc-title="{{ n.title }}"
-                           data-nc-body="{{ n.body }}"
-                           data-nc-kind="{{ n.get_notification_type_display|default:n.notification_type }}"
-                           data-nc-at="{{ n.created_at|date:'Y-m-d H:i:s T' }}"
-                           data-nc-href="{{ n.url|default:'/notifications/' }}">
-                            <span class="ni-kind">{{ n.get_notification_type_display|default:n.notification_type }}</span>
-                            <div class="ni-title">{{ n.title }}</div>
-                            {% if n.body %}<div class="ni-body">{{ n.body|truncatechars:110 }}</div>{% endif %}
-                            <div class="ni-time"><span class="sv-age" data-sv-at="{{ n.created_at|date:'c' }}">{{ n.created_at|timesince }} ago</span></div>
-                            {% if n.data %}{{ n.data|json_script }}{% endif %}
-                        </a>
-                    {% empty %}
-                        <div class="sv-empty">
-                            <b>Nothing yet</b>
-                            Fills, new signals and bot events land here as they happen.
-                        </div>
-                    {% endfor %}
+                    {# id, because the live refresh swaps this element's #}
+                    {# contents — see refreshNotifPanel below. #}
+                    <div class="notif-scroll" id="notifScroll">
+                        {% include "_partials/notif_items.html" %}
                     </div>
-                    {% if recent_notifications %}
+                    {# Always rendered: the footer is a link to the inbox, and #}
+                    {# the inbox is worth offering the moment the first alert #}
+                    {# arrives — which, now that the rows refresh in place, can #}
+                    {# happen without the page reloading to grow a footer. #}
                     <a class="notif-foot" href="{% url 'notifications_inbox' %}">View all notifications &#9656;</a>
-                    {% endif %}
                 </div>
                 {% get_display_name as uname %}
                 <div class="user-menu" id="userMenu">
@@ -659,7 +672,27 @@
 </button>
 
         <!-- Info Bar (fixed, labels always visible, hover for dropdowns) -->
-        <!-- UPGRADE-9: info panel rebuilt -->
+        {% comment %}
+        Every cell here is a MEASUREMENT of the live book, and the dropdown
+        under it is that same measurement spelled out. Both come from one
+        dict (core.context_processors._panel_detail), because they used not
+        to: the cells read stored columns while the dropdowns recomputed from
+        the live book, so a cell and the popup it opened could quote two
+        different numbers for the same position — and the PORTFOLIO cell's
+        column is written by a task that values only the legacy book on the
+        SHARED portfolio, so it sat at the seeded 10,000 forever.
+
+        data-sv-live marks what the band refreshes on a fill (the include at
+        the end of this block does the fetching); data-sv-live-key marks the
+        values that flash when they actually change. The regions are the
+        value spans and the dropdown BODIES — never a whole .ip-cat. The
+        dropdowns are portalled onto <body> at load, so replacing a cell
+        would strand the portalled copy and rebind nothing.
+
+        Tone classes and title tooltips live on elements INSIDE a region:
+        the refresh copies innerHTML and not attributes, so a colour or a
+        tooltip on the region element itself would freeze at its first value.
+        {% endcomment %}
         <div class="info-panel-wrap" id="infoPanelWrap">
             <div class="ip-minimize-tab" id="ipMinTab" title="Minimize panel">
                 <svg viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -670,43 +703,63 @@
             <div class="info-panel-bar">
                 <a href="{% url 'portfolio_overview' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">PORTFOLIO</span>
-                    <span class="ip-count">&euro;{{ panel_portfolio_value|default:"0" }}</span>
-                    <span class="ip-sub">{{ panel_positions|default:"0" }} pos · {{ panel_exposure|default:"0" }}%</span>
+                    <span class="ip-count" data-sv-live="hb-pf-value" data-sv-live-key="hb-pf-value">{% if panel_portfolio_value %}<span title="{{ panel_book_coverage }}">{{ panel_currency_symbol }}{{ panel_portfolio_value }}</span>{% else %}<span class="sv-unknown" title="{{ panel_book_coverage }}">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-pf-sub">{{ panel_positions }} pos · {% if panel_exposure is not None %}{{ panel_exposure }}% in{% else %}<span class="sv-unknown" title="{{ panel_book_coverage }}">&mdash; in</span>{% endif %}</span>
                     <div class="ip-dropdown">
-                        <div class="ip-dd-head">PORTFOLIO OVERVIEW</div>
+                        <div class="ip-dd-head">PORTFOLIO &middot; BOTH BOOKS, LIVE MARKS <span class="sv-live-chip" data-sv-live-status></span></div>
+                        <div data-sv-live="hb-pf-detail">
                         <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">VALUE</span><span class="dv">&euro;{{ panel_portfolio_value|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">CASH</span><span class="dv">&euro;{{ panel_cash|default:"0" }}</span></div>
-                            {% comment %} |default:"+0.00%" was dead code — a non-empty
-                               string is truthy, so the filter never fired and
-                               the fabricated number was simply hardcoded. {% endcomment %}
-                            <div class="ip-dd-cell"><span class="dk">DAILY P&amp;L</span><span class="dv {% if panel_daily_pnl > 0 %}up{% elif panel_daily_pnl < 0 %}down{% endif %}">
-                                {% if panel_daily_pnl_display %}{{ panel_daily_pnl_display }}{% else %}<span class="sv-unknown" title="No snapshot for today yet">&mdash;</span>{% endif %}
-                            </span></div>
-                            <div class="ip-dd-cell"><span class="dk">EXPOSURE</span><span class="dv">{{ panel_exposure|default:"0" }}%</span></div>
-                            <div class="ip-dd-cell"><span class="dk">POSITIONS</span><span class="dv">{{ panel_positions|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">DRAWDOWN</span><span class="dv red">
-                                {% if panel_drawdown %}{{ panel_drawdown }}%{% else %}<span class="sv-unknown" title="No portfolio snapshot has been taken yet">&mdash;</span>{% endif %}
-                            </span></div>
+                            {% comment %}
+                            VALUE is cash plus the marked value of everything open in
+                            BOTH books, computed here. It used to render the stored
+                            `Portfolio.current_value` column, whose only writer values
+                            the legacy book on the shared portfolio — so it never moved
+                            off the seeded capital however much the operator traded.
+                            {% endcomment %}
+                            <div class="ip-dd-cell"><span class="dk">VALUE</span><span class="dv">{% if panel_portfolio_value %}{{ panel_currency_symbol }}{{ panel_portfolio_value }}{% else %}<span class="sv-unknown" title="Nothing open could be priced, so the book value cannot be measured">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">CASH</span><span class="dv">{% if panel_cash %}{{ panel_currency_symbol }}{{ panel_cash }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">DEPLOYED</span><span class="dv">{% if panel_deployed %}{{ panel_currency_symbol }}{{ panel_deployed }}{% else %}<span class="sv-unknown" title="{{ panel_book_coverage }}">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">EXPOSURE</span><span class="dv">{% if panel_exposure is not None %}{{ panel_exposure }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">OPEN P&amp;L</span><span class="dv {% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}">{% if panel_open_pnl_display %}{{ panel_open_pnl_display }}{% else %}<span class="sv-unknown" title="No open position could be marked to a live quote">&mdash;</span>{% endif %}</span></div>
+                            {% comment %}
+                            Open R is denominated by the stop each trade OPENED with
+                            (metadata["initial_stop_loss"]), not by its current stop —
+                            a trailing stop rewrites the latter, which would make risk
+                            and P&L the same quantity and score every trailed winner
+                            at about 1R.
+                            {% endcomment %}
+                            <div class="ip-dd-cell"><span class="dk">OPEN R</span><span class="dv {% if panel_open_r > 0 %}up{% elif panel_open_r < 0 %}down{% endif %}">{% if panel_open_r_display %}{{ panel_open_r_display }}{% else %}<span class="sv-unknown" title="R needs an entry, an opening stop and a live quote">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">REALISED 24H</span><span class="dv">{% if panel_realised_24h_display %}{{ panel_realised_24h_display }}{% else %}<span class="sv-unknown" title="Nothing closed in either book in the last 24 hours">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">POSITIONS</span><span class="dv">{{ panel_positions }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">DRAWDOWN</span><span class="dv red">{% if panel_drawdown %}{{ panel_drawdown }}%{% else %}<span class="sv-unknown" title="Drawdown comes from daily snapshots, and none exist for this book">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">DAY LOSS LIMIT</span><span class="dv">{% if panel_max_dd %}{{ panel_max_dd }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
+                        </div>
+                        <div class="ip-dd-note">{{ panel_book_coverage }}{% if panel_realised_24h_n %} {{ panel_realised_24h_n }} close{{ panel_realised_24h_n|pluralize }} in 24h.{% endif %}</div>
+                        {% if panel_open_trades %}<div class="ip-dd-note">Bot trades are booked in their own base currency; no FX conversion is applied to this total.</div>{% endif %}
                         </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Portfolio</div>
                     </div>
                 </a>
                 <a href="{% url 'positions_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">POSITIONS</span>
-                    <span class="ip-count" id="ipPositionsCount">{{ panel_positions|default:"0" }}</span>
-                    <span class="ip-sub">open now</span>
+                    <span class="ip-count" id="ipPositionsCount" data-sv-live="hb-pos-count" data-sv-live-key="hb-pos-count">{{ panel_positions }}</span>
+                    <span class="ip-sub" data-sv-live="hb-pos-sub">{% if panel_open_pnl_display %}<span class="{% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}">{{ panel_open_pnl_display }}</span> open{% elif panel_positions %}<span class="sv-unknown" title="{{ panel_book_coverage }}">&mdash; no live mark</span>{% else %}none open{% endif %}</span>
                     <div class="ip-dropdown">
-                        <div class="ip-dd-head">OPEN POSITIONS</div>
+                        <div class="ip-dd-head">OPEN POSITIONS &middot; BOTH BOOKS <span class="sv-live-chip" data-sv-live-status></span></div>
                         {% comment %}
-                        The R-multiple is the number that says whether a
-                        position is working, and it is computable here from the
-                        entry, the stop it opened with and a live quote.
-                        Position.unrealized_pnl is deliberately not used:
-                        nothing in the codebase ever writes it, so it would
-                        render +0.00 on every row forever.
+                        ONE list, both books: the bots' AssetBotTrades and the
+                        legacy portfolio Positions the Setup form and the eToro
+                        sync write. This dropdown used to render them as two
+                        separate loops with two different shapes, and the cell
+                        above it counted only one of them.
+
+                        R comes from the entry, the stop the trade OPENED with
+                        and a live quote. Position.unrealized_pnl is never used
+                        for the bot rows: nothing writes that column on the
+                        per-user book, so it would render +0.00 forever.
                         {% endcomment %}
-                        {% for t in panel_open_trades %}
+                        <div data-sv-live="hb-pos-detail">
+                        {% for t in panel_open_rows %}
                         <div class="ip-dd-row">
                             <span class="ipr-sym">{{ t.symbol }}</span>
                             <span class="ipr-side ipr-side--{{ t.side|lower }}">{{ t.side }}</span>
@@ -714,80 +767,126 @@
                             {% if t.r is not None %}
                               <span class="ipr-r {% if t.r >= 0 %}up{% else %}down{% endif %}">{{ t.r|floatformat:2 }}R</span>
                             {% else %}
-                              <span class="ipr-r sv-unknown" title="No live quote for this symbol">&mdash;</span>
+                              <span class="ipr-r sv-unknown" title="Needs a live quote and the stop this position opened with">&mdash;</span>
                             {% endif %}
                             {% if t.pct is not None %}
                               <span class="ipr-pct {% if t.pct >= 0 %}up{% else %}down{% endif %}">{{ t.pct|floatformat:2 }}%</span>
-                            {% else %}<span class="ipr-pct sv-unknown">&mdash;</span>{% endif %}
+                            {% else %}<span class="ipr-pct sv-unknown" title="No live quote for this symbol">&mdash;</span>{% endif %}
+                            {% if t.status == "CLOSE_PENDING" %}<span class="sv-chip sv-chip--warn" title="The broker refused the close — this is still open there">closing</span>{% endif %}
                             {% if t.paper %}<span class="sv-chip sv-chip--muted">paper</span>{% endif %}
+                            {% if t.id %}
                             {# The row's own way out — the click handler cancels this anchor's navigation. #}
                             <button type="button" class="sv-chip sv-chip--bearish" data-sv-close-trade="{{ t.id }}" title="Close this position">close</button>
+                            {% else %}
+                            {# Legacy book row: no trade id, and no close path exists for one. #}
+                            <span class="sv-chip sv-chip--muted" title="Manual book — the platform has no close control for these">manual</span>
+                            {% endif %}
                         </div>
                         {% empty %}
-                        <div class="sv-empty"><b>Nothing open</b>Positions the bot opens appear here with their live R.</div>
+                        <div class="sv-empty"><b>Nothing open</b>Bot trades and manual positions both appear here, with their live R.</div>
                         {% endfor %}
-                        {% for p in panel_recent_positions %}
-                        <div class="ip-dd-row">
-                            <span class="ipr-sym">{{ p.instrument.symbol }}</span>
-                            <span class="ipr-side ipr-side--{{ p.direction|lower }}">{{ p.direction|upper }}</span>
-                            <span class="ipr-qty">{{ p.quantity|floatformat:"-4" }}</span>
-                            <span class="ipr-pct">@ {{ p.entry_price|floatformat:"-4" }}</span>
-                            <span class="sv-chip sv-chip--muted">manual</span>
+                        {% if panel_open_rows_hidden %}<div class="ip-dd-note">+{{ panel_open_rows_hidden }} more open — the positions page lists them all.</div>{% endif %}
+                        <div class="ip-dd-note">{{ panel_book_coverage }}{% if panel_open_r_display %} Open risk {{ panel_open_r_display }} across {{ panel_open_r_n }} graded position{{ panel_open_r_n|pluralize }}.{% endif %}</div>
                         </div>
-                        {% endfor %}
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View All Positions</div>
                     </div>
                 </a>
-                <a href="{% url 'bot_home' %}" class="ip-cat ip-cat-link">
-                    {% comment %} panel_bot_armed was assigned nowhere in the codebase, so
-                       this cell reported OFF / OFFLINE / 0 open on every page
-                       of the platform regardless of what the bot was actually
-                       doing. Unknown is now distinct from off: a bot whose
-                       state we failed to read must not be drawn as disarmed. {% endcomment %}
+                <a href="{% url 'asset_bots_dashboard' %}" class="ip-cat ip-cat-link">
+                    {% comment %}
+                    This cell printed ARMED whenever one config had enabled=True,
+                    and linked to the LEGACY crypto bot page — a different bot
+                    program from the one it was counting. Enabled is not running:
+                    the tick task is @guarded_task, so the platform master switch
+                    and the pipeline_asset_bots component each stop every tick on
+                    their own, a circuit breaker stops a bot opening anything,
+                    shadow mode submits nothing, and the kill switch disables the
+                    lot. The state word below is that whole chain, not one column,
+                    and an unreadable bot program stays an em-dash rather than
+                    being drawn as OFF.
+                    {% endcomment %}
                     <span class="ip-label">BOT</span>
-                    <span class="ip-count {% if panel_bot_armed is None %}sv-unknown{% elif not panel_bot_armed %}red{% endif %}">{% if panel_bot_armed is None %}&mdash;{% elif panel_bot_armed %}ARMED{% else %}OFF{% endif %}</span>
-                    <span class="ip-sub">{{ panel_bot_mode|default:"—" }} · <span id="ipBotOpenCount">{% if panel_bot_open is None %}&mdash;{% else %}{{ panel_bot_open }}{% endif %}</span> open</span>
+                    <span class="ip-count" data-sv-live="hb-bot-state" data-sv-live-key="hb-bot-state">{% if panel_bot %}<span class="hb-state hb-state--{{ panel_bot.tone|default:'ok' }}" title="{{ panel_bot.reason }}">{{ panel_bot.state }}</span>{% else %}<span class="sv-unknown" title="The bot program's state could not be read — this cell claims nothing">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-bot-sub">{% if panel_bot %}{{ panel_bot.live }} live · {{ panel_bot.paper }} paper · <span id="ipBotOpenCount">{{ panel_bot.open }}</span> open{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
                     <div class="ip-dropdown">
-                        <div class="ip-dd-head">BOT PROGRAM</div>
+                        <div class="ip-dd-head">BOT PROGRAM &middot; IS IT RUNNING? <span class="sv-live-chip" data-sv-live-status></span></div>
+                        <div data-sv-live="hb-bot-detail">
+                        {% if panel_bot %}
                         <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">STATUS</span><span class="dv">{% if panel_bot_armed is None %}<span class="sv-unknown">UNKNOWN</span>{% elif panel_bot_armed %}ARMED{% else %}OFFLINE{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">MODE</span><span class="dv">{{ panel_bot_mode|default:"—"|upper }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">OPEN</span><span class="dv">{% if panel_bot_open is None %}<span class="sv-unknown">&mdash;</span>{% else %}{{ panel_bot_open }}{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">24H P&amp;L</span><span class="dv">{% if panel_bot_pnl_24h_display %}{{ panel_bot_pnl_24h_display }}{% else %}<span class="sv-unknown" title="No bot trades closed in the last 24 hours">&mdash;</span>{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">CLOSED 24H</span><span class="dv">{{ panel_bot_trades_24h|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">WIN RATE</span><span class="dv">{% if panel_bot_winrate is not None %}{{ panel_bot_winrate }}%{% else %}<span class="sv-unknown" title="Nothing closed in the last 24 hours">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">STATE</span><span class="dv"><span class="hb-state hb-state--{{ panel_bot.tone|default:'ok' }}">{{ panel_bot.state }}</span></span></div>
+                            <div class="ip-dd-cell"><span class="dk">ENABLED</span><span class="dv">{{ panel_bot.enabled }}/{{ panel_bot.configs }}</span></div>
+                            {% comment %} A platform stopped at the master switch means every
+                               bot is idle no matter what its own row says, so it is
+                               named here first. UNSET is not OFF: guarded_task treats
+                               a missing component row as off, but the fix is to seed
+                               the components rather than to flip a switch. {% endcomment %}
+                            <div class="ip-dd-cell"><span class="dk">MASTER SWITCH</span><span class="dv {% if not panel_bot.master_on %}red{% endif %}">{% if panel_bot.master_on %}ON{% elif panel_bot.master_known %}OFF{% else %}UNSET{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">TICK GATE</span><span class="dv {% if not panel_bot.gate_on %}red{% endif %}">{% if panel_bot.gate_on %}ON{% elif panel_bot.gate_known %}OFF{% else %}UNSET{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">ARMED LIVE</span><span class="dv {% if panel_bot.live %}gold{% endif %}">{{ panel_bot.live }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">ARMED PAPER</span><span class="dv">{{ panel_bot.paper }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">LAST TICK</span><span class="dv {% if panel_bot.tick_overdue %}red{% endif %}">{% if panel_bot.tick_ago %}{{ panel_bot.tick_ago }} ago{% else %}<span class="sv-unknown" title="No enabled bot has written a heartbeat yet">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">CADENCE</span><span class="dv">{{ panel_bot.cadence_min }} min</span></div>
+                            <div class="ip-dd-cell"><span class="dk">HALTED</span><span class="dv {% if panel_bot.halted %}red{% endif %}">{{ panel_bot.halted }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">SHADOW</span><span class="dv {% if panel_bot.shadow %}gold{% endif %}">{{ panel_bot.shadow }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">OPEN</span><span class="dv">{{ panel_bot.open }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">OPEN R</span><span class="dv">{% if panel_bot.open_r_display %}{{ panel_bot.open_r_display }}{% else %}<span class="sv-unknown" title="R needs an entry, an opening stop and a live quote">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">24H FILLS</span><span class="dv">{{ panel_bot.opened_24h }} in &middot; {{ panel_bot.closed_24h }} out</span></div>
+                            <div class="ip-dd-cell"><span class="dk">WIN RATE 24H</span><span class="dv">{% if panel_bot.winrate is not None %}{{ panel_bot.winrate }}%{% else %}<span class="sv-unknown" title="Nothing closed in the last 24 hours">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">24H P&amp;L</span><span class="dv">{% if panel_bot.pnl_24h_display %}{{ panel_bot.pnl_24h_display }}{% else %}<span class="sv-unknown" title="No bot trade closed in the last 24 hours">&mdash;</span>{% endif %}</span></div>
                         </div>
+                        <div class="ip-dd-note">{{ panel_bot.reason }}</div>
+                        {% if panel_bot.kill_at %}
+                        <div class="ip-dd-note"><span class="sv-chip sv-chip--bearish">kill switch</span> fired <span class="sv-age" data-sv-at="{{ panel_bot.kill_at|date:'c' }}">{{ panel_bot.kill_at|timesince }} ago</span>{% if panel_bot.kill_reason %} &middot; {{ panel_bot.kill_reason|truncatechars:60 }}{% endif %}</div>
+                        {% endif %}
+                        {% for b in panel_bot.bots %}
+                        <div class="ip-dd-row">
+                            <span class="ipr-sym">{{ b.name|truncatechars:14 }}</span>
+                            <span class="ipr-kind">{{ b.asset_class }}</span>
+                            {% if b.enabled %}<span class="sv-chip {% if b.mode == 'live' %}sv-chip--warn{% else %}sv-chip--muted{% endif %}">{{ b.mode }}</span>{% else %}<span class="sv-chip sv-chip--muted">off</span>{% endif %}
+                            {% if b.shadow %}<span class="sv-chip sv-chip--warn" title="Shadow mode: decides, submits nothing">shadow</span>{% endif %}
+                            {% if b.halted %}<span class="sv-chip sv-chip--bearish" title="{{ b.halted|join:'; ' }}">breaker</span>{% endif %}
+                            <span class="ipr-qty">{{ b.open }} open</span>
+                            <span class="ipr-age">{% if b.tick_ago %}{{ b.tick_ago }} ago{% else %}<span class="sv-unknown" title="This bot has never recorded a tick">&mdash;</span>{% endif %}</span>
+                        </div>
+                        {% endfor %}
+                        {% if panel_bot.bots_hidden %}<div class="ip-dd-note">+{{ panel_bot.bots_hidden }} more bot{{ panel_bot.bots_hidden|pluralize }} configured.</div>{% endif %}
                         {% if panel_bot_last %}
                         <div class="ip-dd-note">
                             Last close: <strong>{{ panel_bot_last.symbol }}</strong> {{ panel_bot_last.outcome }}{% if panel_bot_last.r is not None %}
                             <span class="{% if panel_bot_last.r >= 0 %}up{% else %}down{% endif %}">{{ panel_bot_last.r|floatformat:2 }}R</span>{% endif %}
-                            <span class="sv-age" data-sv-at="{{ panel_bot_last.when|date:'c' }}"></span>
+                            <span class="sv-age" data-sv-at="{{ panel_bot_last.when|date:'c' }}">{{ panel_bot_last.when|timesince }} ago</span>
                         </div>
                         {% endif %}
-                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Go to Bot Program</div>
+                        {% else %}
+                        <div class="sv-empty"><b>Bot state unknown</b>The bot program could not be read, so this cell claims nothing about it — not even that it is off.</div>
+                        {% endif %}
+                        </div>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Go to the bots</div>
                     </div>
                 </a>
                 <a href="{% url 'strategies_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">STRATEGIES</span>
-                    <span class="ip-count">{{ panel_strategies|default:"0" }}</span>
-                    <span class="ip-sub">active</span>
+                    <span class="ip-count" data-sv-live="hb-strategies" data-sv-live-key="hb-strategies">{{ panel_strategies|default:"0" }}</span>
+                    <span class="ip-sub">running</span>
                     <div class="ip-dropdown">
-                        <div class="ip-dd-head">ACTIVE STRATEGIES</div>
+                        <div class="ip-dd-head">RULES THE ENGINE RUNS</div>
+                        <div data-sv-live="hb-strategies-detail">
                         {% for st in panel_recent_strategies %}
                         <div class="ip-dd-item">
                             <span>{{ st.name|truncatechars:30 }}</span>
                             <span style="font-size:8px;color:var(--accent);">{{ st.status }}</span>
                         </div>
-                        {% empty %}<div class="ip-dd-empty">No active strategies</div>{% endfor %}
+                        {% empty %}<div class="ip-dd-empty">No rule is allowed to emit a signal right now</div>{% endfor %}
+                        </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Strategies</div>
                     </div>
                 </a>
                 <a href="{% url 'signals_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">SIGNALS</span>
-                    <span class="ip-count">{{ panel_signals|default:"0" }}</span>
-                    <span class="ip-sub">{{ panel_bullish|default:"0" }} bull · {{ panel_bearish|default:"0" }} bear</span>
+                    <span class="ip-count" data-sv-live="hb-signals" data-sv-live-key="hb-signals">{{ panel_signals|default:"0" }}</span>
+                    <span class="ip-sub" data-sv-live="hb-signals-sub">{{ panel_bullish|default:"0" }} bull · {{ panel_bearish|default:"0" }} bear</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">ACTIVE SIGNALS</div>
+                        <div data-sv-live="hb-signals-detail">
                         <div class="ip-dd-grid">
                             <div class="ip-dd-cell"><span class="dk">BULLISH</span><span class="dv">{{ panel_bullish|default:"0" }}</span></div>
                             <div class="ip-dd-cell"><span class="dk">BEARISH</span><span class="dv red">{{ panel_bearish|default:"0" }}</span></div>
@@ -801,33 +900,37 @@
                             <span class="ipr-side ipr-side--{{ sig.direction }}">{{ sig.direction|upper|slice:":4" }}</span>
                             <span class="ipr-meter"><span class="ipr-meter-fill" style="width:{{ sig.score_pct }}%;"></span></span>
                             <span class="ipr-score">{{ sig.score_pct }}</span>
-                            <span class="ipr-age sv-age" data-sv-at="{{ sig.created_at|date:'c' }}"></span>
+                            <span class="ipr-age sv-age" data-sv-at="{{ sig.created_at|date:'c' }}">{{ sig.created_at|timesince }} ago</span>
                         </div>
                         {% endfor %}
+                        </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Signals</div>
                     </div>
                 </a>
                 <a href="{% url 'news_feed' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">NEWS</span>
-                    <span class="ip-count blue">{{ panel_news|default:"0" }}</span>
+                    <span class="ip-count blue" data-sv-live="hb-news" data-sv-live-key="hb-news">{{ panel_news|default:"0" }}</span>
                     <span class="ip-sub">last 24h</span>
                     <div class="ip-dropdown" style="min-width:340px;">
                         <div class="ip-dd-head">RECENT NEWS</div>
+                        <div data-sv-live="hb-news-detail">
                         {% for n in panel_recent_news %}
                         <div class="ip-dd-item" style="flex-direction:column;align-items:flex-start;gap:2px;">
                             <span style="font-size:10px;color:var(--text-primary);">{{ n.title|truncatechars:60 }}</span>
                             <span style="font-size:8px;color:var(--text-muted);">{{ n.source }} &middot; {{ n.published_at|timesince }} ago</span>
                         </div>
                         {% empty %}<div class="ip-dd-empty">No news yet</div>{% endfor %}
+                        </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View All News</div>
                     </div>
                 </a>
                 <a href="{% url 'liquidations_page' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">FUNDING</span>
-                    <span class="ip-count">{{ panel_funding_display|default:"—" }}</span>
-                    <span class="ip-sub">24h avg · {% if panel_funding_extreme_count is None %}&mdash;{% else %}{{ panel_funding_extreme_count }}{% endif %} extreme</span>
+                    <span class="ip-count" data-sv-live="hb-funding" data-sv-live-key="hb-funding">{% if panel_funding_display %}{{ panel_funding_display }}{% else %}<span class="sv-unknown" title="No perpetual funding rate recorded in the last 24 hours">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-funding-sub">24h avg · {% if panel_funding_extreme_count is None %}&mdash;{% else %}{{ panel_funding_extreme_count }}{% endif %} extreme</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">FUNDING RATES</div>
+                        <div data-sv-live="hb-funding-detail">
                         {% if panel_funding_samples %}
                         <div class="ip-dd-grid">
                             <div class="ip-dd-cell"><span class="dk">AVG 24H</span><span class="dv">{{ panel_funding_display }}</span></div>
@@ -841,15 +944,17 @@
                            funding stream is not running". {% endcomment %}
                         <div class="sv-empty"><b>No funding data</b>No perpetual funding rates recorded in the last 24 hours.</div>
                         {% endif %}
+                        </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Liquidations page</div>
                     </div>
                 </a>
                 <a href="{% url 'liquidations_page' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">LIQ 24H</span>
-                    <span class="ip-count">{% if panel_liq_24h_display %}${{ panel_liq_24h_display }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
-                    <span class="ip-sub">{% if panel_liq_count is None %}no feed{% else %}{{ panel_liq_count }} events{% endif %}</span>
+                    <span class="ip-count" data-sv-live="hb-liq" data-sv-live-key="hb-liq">{% if panel_liq_24h_display %}${{ panel_liq_24h_display }}{% else %}<span class="sv-unknown" title="Nothing recorded — the liquidation stream may not be running">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-liq-sub">{% if panel_liq_count is None %}no feed{% else %}{{ panel_liq_count }} events{% endif %}</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">LIQUIDATIONS (24H)</div>
+                        <div data-sv-live="hb-liq-detail">
                         {% if panel_liq_count %}
                         <div class="ip-dd-grid">
                             <div class="ip-dd-cell"><span class="dk">TOTAL</span><span class="dv">${{ panel_liq_24h_display }}</span></div>
@@ -863,26 +968,29 @@
                            operator cannot tell those apart from a zero. {% endcomment %}
                         <div class="sv-empty"><b>No liquidation data</b>Nothing recorded in the last 24 hours — the liquidation stream may not be running.</div>
                         {% endif %}
+                        </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View heatmap</div>
                     </div>
                 </a>
                 <a href="{% url 'notifications_inbox' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">ALERTS</span>
-                    <span class="ip-count gold" id="ipAlertsCount">{{ notification_count|default:"0" }}</span>
+                    <span class="ip-count gold" id="ipAlertsCount" data-sv-live="hb-alerts" data-sv-live-key="hb-alerts">{{ notification_count|default:"0" }}</span>
                     <span class="ip-sub">unread</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">UNREAD ALERTS</div>
+                        <div data-sv-live="hb-alerts-detail">
                         {% for na in recent_notifications %}
                             {% if not na.read %}
                             <div class="ip-dd-row ip-dd-row--stack">
                                 <span class="ipr-kind">{{ na.get_notification_type_display|default:na.notification_type }}</span>
                                 <span class="ipr-title">{{ na.title|truncatechars:58 }}</span>
-                                <span class="ipr-age sv-age" data-sv-at="{{ na.created_at|date:'c' }}"></span>
+                                <span class="ipr-age sv-age" data-sv-at="{{ na.created_at|date:'c' }}">{{ na.created_at|timesince }} ago</span>
                             </div>
                             {% endif %}
                         {% empty %}
                         <div class="sv-empty"><b>All clear</b>Fills, new signals and bot events land here.</div>
                         {% endfor %}
+                        </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Notifications</div>
                     </div>
                 </a>
@@ -893,47 +1001,60 @@
                 {% endcomment %}
                 <a href="{% url 'portfolio_overview' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">DRAWDOWN</span>
-                    <span class="ip-count red">{% if panel_drawdown %}{{ panel_drawdown }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+                    <span class="ip-count red" data-sv-live="hb-dd" data-sv-live-key="hb-dd">{% if panel_drawdown %}{{ panel_drawdown }}%{% else %}<span class="sv-unknown" title="No daily snapshot exists for this book">&mdash;</span>{% endif %}</span>
                     <span class="ip-sub">from peak</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">DRAWDOWN FROM PEAK</div>
+                        <div data-sv-live="hb-dd-detail">
                         {% if panel_dd_snapshots %}
                         <div class="ip-dd-grid">
-                            <div class="ip-dd-cell"><span class="dk">CURRENT</span><span class="dv red">{% if panel_drawdown %}{{ panel_drawdown }}%{% else %}&mdash;{% endif %}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">LIMIT</span><span class="dv">{{ panel_max_dd }}%</span></div>
-                            <div class="ip-dd-cell"><span class="dk">PEAK VALUE</span><span class="dv">&euro;{{ panel_dd_peak|floatformat:0 }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">NOW</span><span class="dv">&euro;{{ panel_dd_current|floatformat:0 }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">CURRENT</span><span class="dv red">{% if panel_drawdown %}{{ panel_drawdown }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">LIMIT</span><span class="dv">{% if panel_max_dd %}{{ panel_max_dd }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">PEAK VALUE</span><span class="dv">{{ panel_currency_symbol }}{{ panel_dd_peak|floatformat:0 }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">NOW</span><span class="dv">{{ panel_currency_symbol }}{{ panel_dd_current|floatformat:0 }}</span></div>
                         </div>
                         <div class="ip-dd-note">
                             Peak set {{ panel_dd_peak_date|date:"M j, Y" }} · measured over
                             {{ panel_dd_snapshots }} daily snapshot{{ panel_dd_snapshots|pluralize }}
                         </div>
                         {% else %}
+                        {% comment %}
+                        Snapshots are the only input to this number, and the task that
+                        writes them marks the SHARED "Main" portfolio while this band
+                        reads the per-user book — so on most installs this cell is
+                        honestly unmeasurable rather than briefly empty. Saying which
+                        is the difference between a missing feed and a broken page.
+                        {% endcomment %}
                         <div class="sv-empty">
                             <b>Not measurable yet</b>
-                            Drawdown is computed from daily portfolio snapshots, and none have been taken.
+                            Drawdown comes from daily portfolio snapshots, and none have been taken for this book. Unlike the cells to the left, it does not include bot trades.
                         </div>
                         {% endif %}
+                        </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Portfolio</div>
                     </div>
                 </a>
                 <a href="{% url 'instruments_list' %}?filter=watchlist" class="ip-cat ip-cat-link">
                     <span class="ip-label">WATCHLIST</span>
-                    <span class="ip-count" id="ipWatchlistCount">{{ panel_watchlist|default:"0" }}</span>
+                    <span class="ip-count" id="ipWatchlistCount" data-sv-live="hb-watchlist" data-sv-live-key="hb-watchlist">{{ panel_watchlist|default:"0" }}</span>
                     <span class="ip-sub">tracked</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">WATCHLIST</div>
+                        <div data-sv-live="hb-watchlist-detail">
                         {% for w in panel_watchlist_rows %}
                         <div class="ip-dd-row">
                             <span class="ipr-sym">{{ w.symbol }}</span>
                             <span class="ipr-qty">{% if w.last %}{{ w.last }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
                             {% if w.change is not None %}
                             <span class="ipr-pct {% if w.change >= 0 %}up{% else %}down{% endif %}">{{ w.change|floatformat:2 }}%</span>
-                            {% else %}<span class="ipr-pct sv-unknown">no quote</span>{% endif %}
+                            {% comment %} The quote may exist with no change on it; 0.00% was
+                               printed here before, which is a different claim. {% endcomment %}
+                            {% else %}<span class="ipr-pct sv-unknown" title="No change recorded for this quote">&mdash;</span>{% endif %}
                         </div>
                         {% empty %}
                         <div class="sv-empty"><b>No watchlist</b>Nothing is flagged for tracking yet.</div>
                         {% endfor %}
+                        </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Instruments</div>
                     </div>
                 </a>
@@ -945,10 +1066,14 @@
                 {% endcomment %}
                 <a href="{% url 'instruments_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">VOLATILITY</span>
-                    <span class="ip-count {% if panel_vol_pct >= 60 %}red{% elif panel_vol_pct >= 30 %}gold{% endif %}">{% if panel_vol_pct %}{{ panel_vol_pct }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
-                    <span class="ip-sub">{% if panel_vol_symbol %}{{ panel_vol_symbol }} realised{% else %}no bars{% endif %}</span>
+                    {% comment %} The tone class sits on the INNER span: the refresh swaps
+                       innerHTML and not attributes, so a class on the region
+                       itself would keep the colour of the first render. {% endcomment %}
+                    <span class="ip-count" data-sv-live="hb-vol" data-sv-live-key="hb-vol">{% if panel_vol_pct %}<span class="{% if panel_vol_pct >= 60 %}red{% elif panel_vol_pct >= 30 %}gold{% endif %}">{{ panel_vol_pct }}%</span>{% else %}<span class="sv-unknown" title="Needs at least 21 bars on one instrument">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-vol-sub">{% if panel_vol_symbol %}{{ panel_vol_symbol }} realised{% else %}no bars{% endif %}</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">REALISED VOLATILITY</div>
+                        <div data-sv-live="hb-vol-detail">
                         {% if panel_vol_pct %}
                         <div class="ip-dd-grid">
                             <div class="ip-dd-cell"><span class="dk">ANNUALISED</span><span class="dv">{{ panel_vol_pct }}%</span></div>
@@ -963,9 +1088,10 @@
                         {% else %}
                         <div class="sv-empty">
                             <b>Not enough history</b>
-                            Needs at least 21 daily bars on one instrument.
+                            Needs at least 21 bars on one instrument.
                         </div>
                         {% endif %}
+                        </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ Instruments</div>
                     </div>
                 </a>
@@ -977,6 +1103,26 @@
             </div>
             </div>
         </div>
+        {% comment %}
+        What keeps the band alive. This is the platform's ONE refresher —
+        the same partial /portfolio/ and /positions/ use — so the headband
+        and those pages cannot end up on two different clocks or two
+        different ideas of what a fill is: it swaps on sv:eye-event
+        fill_open / fill_close / close_pending, sweeps slowly behind that
+        (respecting window.svLive.isUp() and prefers-reduced-motion), and
+        defers while the pointer is inside a region so a dropdown is never
+        yanked out from under the operator mid-read.
+
+        The source is /getting-started/ and not the page you are on. Every
+        page renders this band, but re-fetching the current page would re-run
+        a dashboard view's whole query set to update a strip that does not
+        depend on it; that view renders one static template, so the response
+        costs exactly the context processors — which IS the band's own data.
+        Pages carrying their own live_region (portfolio, positions) keep it:
+        each instance only swaps the regions its own payload contains.
+        {% endcomment %}
+        {% url 'getting_started' as live_url %}
+        {% include "_partials/live_region.html" %}
         <div class="ip-restore-pill" id="ipRestorePill">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 10l4-4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             SHOW PANEL
@@ -1211,7 +1357,12 @@
   }
   function hidePopup(wrap) {
     var pop = wrap.querySelector('.sr-popup');
-    if (pop) pop.classList.remove('show');
+    if (!pop) return;
+    pop.classList.remove('show');
+    /* See SV.popup in static/js/sv-notif-card.js: the registry is how the
+       other engines' scroll handlers know a scroll came from inside a card
+       the operator is reading rather than from a stale anchor. */
+    if (window.SV && SV.popup) SV.popup.closed(pop);
   }
   function bind() {
     document.querySelectorAll('.sr-signal-wrap').forEach(function(wrap) {
@@ -1220,30 +1371,63 @@
       var pop = wrap.querySelector('.sr-popup');
       var enterTimer = null;
       var hideTimer  = null;
+      /* One crossing's grace — the gutter between the rail item and the
+         card floated beside it — and nothing more. It never runs while the
+         pointer is on the card: `maybeHide` checks where the pointer went
+         first, and arriving on either end cancels it. A card the operator
+         has REACHED closes when they leave it or press Escape, not on a
+         stopwatch racing their hand to the action buttons. */
       function scheduleHide() {
         if (hideTimer) clearTimeout(hideTimer);
-        hideTimer = setTimeout(function() { hidePopup(wrap); }, 140);
+        hideTimer = setTimeout(function() { hidePopup(wrap); }, 260);
       }
       function cancelHide() {
         if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
       }
+      function maybeHide(e) {
+        var to = e && e.relatedTarget;
+        if (to && to.nodeType === 1
+            && (wrap.contains(to) || (pop && pop.contains(to)))) {
+          cancelHide();
+          return;
+        }
+        scheduleHide();
+      }
       wrap.addEventListener('mouseenter', function() {
         cancelHide();
         if (enterTimer) clearTimeout(enterTimer);
-        enterTimer = setTimeout(function() { showPopup(wrap); }, 90);
+        enterTimer = setTimeout(function() {
+          showPopup(wrap);
+          if (pop && window.SV && SV.popup) SV.popup.opened(pop);
+        }, 90);
       });
-      wrap.addEventListener('mouseleave', function() {
+      wrap.addEventListener('mouseleave', function(e) {
         if (enterTimer) { clearTimeout(enterTimer); enterTimer = null; }
-        scheduleHide();          /* delayed; cancelled if cursor enters popup */
+        maybeHide(e);            /* delayed; cancelled if cursor enters popup */
       });
       /* Same enter/leave on the popup itself so the user can move
          their cursor INTO it to click action buttons. */
       if (pop) {
         pop.addEventListener('mouseenter', cancelHide);
-        pop.addEventListener('mouseleave', scheduleHide);
+        pop.addEventListener('mouseleave', maybeHide);
+        /* This card CAN scroll — showPopup caps its height between the
+           fixed bands and turns on overflowY. Scrolling it is reading it. */
+        pop.addEventListener('wheel', function(e) {
+          if (pop.scrollHeight > pop.clientHeight) return;
+          e.preventDefault();
+        }, {passive: false});
+        wrap._srHide = function() { cancelHide(); hidePopup(wrap); };
       }
     });
   }
+  /* Escape closes whichever rail card is open — the universal way out of
+     anything floating, and previously the one this card did not offer. */
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape' && e.key !== 'Esc') return;
+    document.querySelectorAll('.sr-signal-wrap').forEach(function(wrap) {
+      if (wrap._srHide) wrap._srHide();
+    });
+  });
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', bind);
   } else {
@@ -1376,54 +1560,273 @@
     if (!(b > 0)) return '—';
     return (a / b * 100).toFixed(a / b < 0.1 ? 2 : 1) + '%';
   }
+  /* Prices, under the same rule units() follows and for the same reason:
+     an FX level is 1.09675 and an index level is 61800, so a fixed
+     precision either invents digits or hides the tick the operator is
+     aiming at. Round to the 8dp the server already rounds to, then let
+     the number print itself. */
+  function lvl(n) {
+    var v = Number(n);
+    if (!isFinite(v)) return '—';
+    return String(Math.round(v * 1e8) / 1e8);
+  }
+  /* Distances from the entry read as directions, so the sign is carried
+     rather than implied: "-1.50%" is a stop below and "+3.00%" a target
+     above, and a SELL reads the same sentence with the signs swapped. */
+  function signedPct(f) {
+    if (!isFinite(f)) return '—';
+    return (f > 0 ? '+' : '') + (f * 100).toFixed(2) + '%';
+  }
 
-  /* ── The confirm step, with the size in it ──────────────────────────
+  /* ── The confirm step: a pre-trade control panel ─────────────────────
      Built here rather than through SV.overlay.confirm because that dialog
-     takes facts and a yes/no, and this decision has a number in the
+     takes facts and a yes/no, and this decision has four numbers in the
      middle of it. Everything else — the chrome, the stack, the focus
      trap, the scroll lock — is still the one overlay controller's.
 
-     Resolves to {qty: <number>|null} on confirm (null = "the automatic
-     size", which sends no qty at all and reproduces the old request byte
-     for byte), or null on cancel. */
-  function sizeDialog(p, closeIds) {
+     The rule the whole panel is built on: the platform's answers are the
+     right ones. The risk-derived size, the engine's stop and target and
+     the minimum-disturbance funding proposal are all pre-filled, and
+     pressing the button without touching anything sends exactly the
+     request this dialog sent before any of them was adjustable. What
+     changed is that each answer is now the operator's to change, and the
+     consequence of changing it is on the screen before the click.
+
+     The funding closes are why this exists. They used to be a LIST: the
+     popup copied every proposed close into close_ids, so the button
+     liquidated whatever the server had picked and the operator was shown
+     those positions rather than asked about them. They are ticks now, the
+     freed capital and the sufficiency verdict move with them, and an
+     under-funded selection is refused with the shortfall instead of being
+     opened anyway.
+
+     Resolves to {qty, stop, target, close_ids} on confirm — each number
+     null when it was left alone, so an untouched ticket sends no override
+     field at all — or null on cancel. */
+  function sizeDialog(p) {
     return new Promise(function (resolve) {
       var step = Number(p.qty_step) || 0;
       var cupu = Number(p.capital_use_per_unit) || 0;    /* pool $ per unit */
       var npu = Number(p.notional_per_unit) || 0;
-      var rpu = Number(p.risk_per_unit) || 0;
-      var poolFree = Number(p.pool_free);
-      if (!isFinite(poolFree)) poolFree = Number(p.available) || 0;
+      var vpu = Number(p.value_per_unit) || 0;
+      var entry = Number(p.entry);
+      var capital = Number(p.capital) || 0;
+      var avail = Number(p.available) || 0;
+      var budget = Number(p.risk_dollars) || 0;
+      var def = Number(p.qty);
+      var L = p.levels || {};
+      var lever = p.leverage || {};
+      /* Two reference prices, deliberately. The MONEY runs off the quoted
+         mark, because every per-unit number the server sent was computed
+         there and the pre-filled size reads exactly its risk budget
+         against it. Whether a LEVEL is legal runs off the modelled fill,
+         because that is the price the server judges it at and the price
+         the position actually opens at — a stop that clears the mark by a
+         tick and not the fill was never below the entry. */
+      var fill = Number(L.fill);
+      if (!isFinite(fill) || fill <= 0) fill = entry;
+
       /* An older preview (a cached tab meeting a new server, or the
          reverse) has none of the per-unit numbers. Rather than render a
          control that cannot compute a consequence, fall back to the fixed
          risk-derived size — the behaviour that existed before this. */
       var sizable = step > 0 && cupu > 0;
-      var def = Number(p.qty);
+      var levelable = sizable && vpu > 0 && entry > 0
+        && isFinite(Number(L.min_stop_fraction))
+        && isFinite(Number(L.max_stop_fraction));
 
-      var facts = [
-        ['Trade', p.side + ' ' + units(def) + ' ' + p.symbol],
-        ['Entry ~', p.entry],
-        ['Stop', p.stop + (p.stop_widened ? '  (widened by the stop floor)' : '')],
-        ['Target', p.target],
-        ['Capital free', money(p.available) + ' of ' + money(p.capital)],
-        ['Venue', String(p.venue || 'paper').toUpperCase()]
-      ];
-      (closeIds.length ? (p.close_proposal || []) : []).forEach(function (c) {
-        facts.push(['Close first', c.side + ' ' + units(c.qty) + ' ' + c.symbol +
-                    '  (frees ~' + money(c.freed) + ')']);
+      var defStop = Number(p.stop);
+      var defTarget = Number(p.target);
+      var stopVal = defStop, targetVal = defTarget;
+      var qtyVal = def, qtyTouched = false;
+
+      /* Every open position in this pool, with the server's proposal
+         pre-ticked — not just the proposal, because keeping one and
+         closing a different one that frees as much is a legitimate answer
+         and used to be inexpressible. An older preview carries only the
+         proposal; treat it as a one-item menu rather than dropping the
+         control entirely. */
+      var closable = p.closable || (p.close_proposal || []).map(function (c) {
+        return { trade_id: c.trade_id, symbol: c.symbol, side: c.side,
+                 qty: c.qty, freed: c.freed, proposed: true };
       });
+      /* Only when capital is short: closing positions is not part of this
+         decision otherwise, and offering it would invite an unrelated
+         liquidation from a confirm popup. */
+      var funding = !p.sufficient && closable.length > 0;
+      var sel = {};
+      closable.forEach(function (c) {
+        sel[c.trade_id] = funding ? !!c.proposed : false;
+      });
+
+      /* The position that is already live in this symbol, from ANY config.
+         Its absence is what let one symbol be booked twice. */
+      var held = p.existing_exposure || [];
+
+      function freed() {
+        var s = 0;
+        closable.forEach(function (c) {
+          if (sel[c.trade_id]) s += Number(c.freed) || 0;
+        });
+        return s;
+      }
+      function poolFree() { return avail + freed(); }
+      function chosenCount() {
+        var n = 0;
+        closable.forEach(function (c) { if (sel[c.trade_id]) n++; });
+        return n;
+      }
+      /* Dollars of risk per unit AT THE CURRENT STOP — the number the
+         whole panel turns on. Everything downstream (the size, the R at
+         stake, the risk ceiling) moves when the stop does. */
+      function rpu() { return Math.abs(entry - stopVal) * vpu; }
+      function floorStep(q) {
+        if (!(step > 0)) return q;
+        return Math.round(Math.floor(q / step + 1e-9) * step * 1e8) / 1e8;
+      }
+      function moved(a, b) {
+        return Math.abs(a - b) > Math.abs(b || 1) * 1e-9;
+      }
+      function stopMoved() { return levelable && moved(stopVal, defStop); }
+      function targetMoved() { return levelable && moved(targetVal, defTarget); }
+      /* The size the risk budget implies at the current stop. Untouched,
+         it is the server's own number rather than a re-derivation of it:
+         re-deriving would land a step away from what the server sends and
+         make the default look like an override. Floored, never rounded up,
+         for the reason _floor_to_step carries — a ceiling that rounds up
+         is not a ceiling. */
+      function autoQty() {
+        if (!stopMoved()) return def;
+        var r = rpu();
+        return r > 0 ? floorStep(budget / r) : 0;
+      }
+
+      /* ── The verdict, previewed ───────────────────────────────────────
+         The client's checks are the server's checks in the server's order,
+         so the reason shown before the click is the reason that would come
+         back after it. The server still re-runs every one of them against
+         the real fill and the post-close pool — this is a preview of the
+         verdict, never the verdict. */
+      function judgeLevels() {
+        if (!levelable) return '';
+        var buy = p.side === 'BUY';
+        if (!(stopVal > 0)) return 'The stop must be a positive number.';
+        if (!(targetVal > 0)) return 'The target must be a positive number.';
+        if (buy ? stopVal >= fill : stopVal <= fill) {
+          return 'A ' + p.side + ' stop must sit ' + (buy ? 'BELOW' : 'ABOVE') +
+                 ' the entry (' + lvl(fill) + ') — the position would open ' +
+                 'already stopped out.';
+        }
+        if (buy ? targetVal <= fill : targetVal >= fill) {
+          return 'A ' + p.side + ' target must sit ' + (buy ? 'ABOVE' : 'BELOW') +
+                 ' the entry (' + lvl(fill) + ') — hitting it would book a loss.';
+        }
+        /* The distance band is judged ONLY on a stop the operator moved —
+           the same rule the cost filter below already follows, and for the
+           same reason. A signal's suggested_stop is taken verbatim by
+           `manual_trade._preview`, which checks only that the levels
+           bracket the mark and never bounds their distance; the server
+           would accept it. Judging it here disabled TAKE TRADE on a wholly
+           untouched ticket at the platform's own defaults, and the only
+           escape was to edit a level the operator had no opinion about.
+           Refusing your own proposal is not a safety rail, it is a dead end.
+
+           The two side checks above stay unconditional on purpose: they do
+           not describe a policy, they describe an impossible trade — one
+           that would open already stopped out, or whose target books a
+           loss. Those are worth blocking whoever proposed them. */
+        var f = Math.abs(fill - stopVal) / fill;
+        var minF = Number(L.min_stop_fraction), maxF = Number(L.max_stop_fraction);
+        if (stopMoved() && f < minF) {
+          return 'A ' + (f * 100).toFixed(3) + '% stop is inside the ' +
+                 (minF * 100).toFixed(1) + '% floor this platform trades — ' +
+                 'that distance is spread and noise, not a level.';
+        }
+        if (stopMoved() && f > maxF) {
+          return 'A ' + (f * 100).toFixed(1) + '% stop is past the ' +
+                 (maxF * 100).toFixed(0) + '% ceiling this platform trades.';
+        }
+        /* The cost filter every bot entry passes — asked ONLY of levels
+           the operator moved. The engine's own levels already respect it,
+           and re-judging them here would refuse a trade the untouched
+           button takes, which would change the default. */
+        var cost = Number(L.cost_fraction) || 0;
+        if (!(stopMoved() || targetMoved()) || L.cost_filter === false || !(cost > 0)) {
+          return '';
+        }
+        var move = Math.abs(targetVal - fill) / fill;
+        var risk = Math.abs(fill - stopVal) / fill;
+        var minEdge = Number(L.min_edge_ratio) || 0;
+        if (minEdge > 0 && move / cost < minEdge) {
+          return 'The planned move is ' + (move * 100).toFixed(2) + '% — only ' +
+                 (move / cost).toFixed(1) + 'x the ' + (cost * 100).toFixed(2) +
+                 '% round trip (needs ' + minEdge.toFixed(1) + 'x).';
+        }
+        var minRR = Number(L.min_net_rr) || 0;
+        if (minRR > 0 && risk > 0 && (move - cost) / (risk + cost) < minRR) {
+          return 'Reward:risk falls to ' + ((move - cost) / (risk + cost)).toFixed(2) +
+                 ' once the ' + (cost * 100).toFixed(2) + '% round trip is paid ' +
+                 '(needs ' + minRR.toFixed(2) + ') — these levels pay the spread ' +
+                 'and little else.';
+        }
+        return '';
+      }
+
+      function judgeSize(q) {
+        if (!sizable) return '';
+        if (!(q > 0)) return 'Enter a size greater than zero.';
+        if (step > 0 && Math.round(q / step) < 1) {
+          return 'Below one ' + units(step) + '-unit increment — this venue ' +
+                 'would round it to zero.';
+        }
+        var r = rpu();
+        if (r > 0 && q * r > Number(p.max_risk_dollars) + 1e-9) {
+          return units(q) + ' units risks ' + money(q * r) + ' to the stop — ' +
+                 'past the ' + money(p.max_risk_dollars) + ' ceiling for this pool.';
+        }
+        if (npu > 0 && q * npu > Number(p.max_notional) + 1e-9) {
+          return units(q) + ' units is ' + money(q * npu) + ' of notional — ' +
+                 'past the ' + money(p.max_notional) + ' this class allows.';
+        }
+        if (q * cupu > poolFree() + 1e-9) {
+          var kept = closable.length - chosenCount();
+          return units(q) + ' units ties up ' + money(q * cupu) + ' but only ' +
+                 money(poolFree()) + ' is free' +
+                 (freed() > 0 ? ' after the closes ticked above' : '') + '.' +
+                 (kept > 0 ? ' Tick another position to close, or size down.' : '');
+        }
+        return '';
+      }
+
+      /* ── Markup ───────────────────────────────────────────────────────
+         Order is the order of the decision: what the trade is, what has to
+         happen first to afford it, where it gets out, and only then how
+         big it is — because the size is the one number that follows from
+         all three. */
+      var facts = [
+        ['Trade', '', 'tradeline'],
+        ['Entry ~', p.entry + (moved(fill, entry) ? '   (fills ~ ' + lvl(fill) + ')' : '')]
+      ];
+      if (!levelable) {
+        facts.push(['Stop', p.stop + (p.stop_widened ? '  (widened by the stop floor)' : '')]);
+        facts.push(['Target', String(p.target)]);
+      }
+      facts.push(['Capital free', money(avail) + ' of ' + money(capital)]);
+      if (isFinite(Number(lever.effective))) {
+        facts.push(['Leverage', Number(lever.effective) > 1
+          ? Number(lever.effective).toFixed(0) + ':1 · the broker\'s, fixed'
+          : 'None · settles in full']);
+      }
+      facts.push(['Venue', String(p.venue || 'paper').toUpperCase()]);
       if (p.managed === false) {
         facts.push(['⚠ UNMANAGED', 'The bot tick is OFF — the stop and target will NOT be enforced until Multi-Asset Bots is enabled']);
       }
       var factsHtml = facts.map(function (f) {
         return '<div class="sv-dialog-fact"><span class="lbl">' + esc(f[0]) +
-               '</span><span>' + esc(f[1]) + '</span></div>';
+               '</span><span' + (f[2] ? ' data-role="' + f[2] + '"' : '') + '>' +
+               esc(f[1]) + '</span></div>';
       }).join('');
 
-      /* The position that is already live in this symbol, from ANY config.
-         Its absence is what let one symbol be booked twice. */
-      var held = p.existing_exposure || [];
       var warnHtml = '';
       if (held.length) {
         warnHtml = '<div class="sz-warn"><b>ALREADY HOLDING ' + esc(p.symbol) +
@@ -1434,8 +1837,79 @@
           }).join('<br>') + '</div>';
       }
 
+      /* CONCENTRATION. The per-ticket ceiling is judged on this ticket; this
+         one is judged on the whole bet — everything held in this symbol on
+         this side plus what is about to be added. Five clips each inside the
+         per-ticket limit put 42% of a book into one name, a clip at a time,
+         with nothing on any screen refusing anything, so the number that
+         matters is the one AFTER the add. */
+      var conc = p.concentration || {};
+      if (conc.cap_money !== null && conc.cap_money !== undefined
+          && Number(conc.n_held) > 0) {
+        warnHtml += '<div class="sz-warn' + (conc.ok === false ? ' sz-warn--stop' : '') +
+          '"><b>' + esc(p.symbol) + ' CONCENTRATION</b>' +
+          esc(conc.n_held + ' open ticket(s) already hold ' +
+              money(conc.held) + '; this would make ' + money(conc.after) +
+              ' of a ' + money(conc.cap_money) + ' ceiling') +
+          (conc.ok === false
+            ? '<br>' + esc('Refused at this size — size down or close some of it first.')
+            : '') + '</div>';
+      }
+
+      /* The brain's standing verdict on hand-taken entries. Advice, not a
+         gate: pausing a RULE is the platform's call because nobody is
+         watching it, but there is a human on this end. What they must not
+         be is uninformed. */
+      var adv = p.rule_advisory || {};
+      if (adv.flagged) {
+        warnHtml += '<div class="sz-warn"><b>SAURON RECOMMENDS PAUSING ' +
+          'DISCRETIONARY ENTRIES</b>' + esc(adv.reason || '') +
+          '<br>' + esc('You can still take this trade — it will be recorded ' +
+                       'as taken against the advisory.') + '</div>';
+      }
+
+      var fundHtml = funding
+        ? '<fieldset class="sz-block sz-fund"><legend>Close first</legend>' +
+            '<p class="sz-note">At the risk-derived size this trade is ' +
+              esc(money(Number(p.deficit) || 0)) + ' short. Ticked positions ' +
+              'are liquidated before it opens; unticked ones stay open. The ' +
+              'pre-ticked set is the smallest disturbance that covers the ' +
+              'gap — a suggestion, not a decision. Sizing down closes it too.</p>' +
+            closable.map(function (c) {
+              return '<label class="sz-close">' +
+                '<input type="checkbox" data-role="close" value="' +
+                  esc(c.trade_id) + '"' + (sel[c.trade_id] ? ' checked' : '') + '>' +
+                '<span class="sz-close-t">' +
+                  esc(c.side + ' ' + units(c.qty) + ' ' + c.symbol) +
+                  '<i>#' + esc(c.trade_id) + (c.proposed ? ' · proposed' : '') + '</i>' +
+                '</span>' +
+                '<span class="sz-close-f">frees ' + esc(money(c.freed)) + '</span>' +
+              '</label>';
+            }).join('') +
+            '<div class="sz-out" data-role="fundsum" aria-live="polite"></div>' +
+          '</fieldset>'
+        : '';
+
+      var lvlHtml = levelable
+        ? '<fieldset class="sz-block sz-lv"><legend>Levels</legend>' +
+            '<div class="sz-fields">' +
+              '<label class="sz-f"><span>Stop' +
+                (p.stop_widened ? ' (floor-widened)' : '') + '</span>' +
+                '<input type="number" inputmode="decimal" min="0" step="any" ' +
+                'data-role="stop" value="' + esc(lvl(defStop)) + '"></label>' +
+              '<label class="sz-f"><span>Target</span>' +
+                '<input type="number" inputmode="decimal" min="0" step="any" ' +
+                'data-role="target" value="' + esc(lvl(defTarget)) + '"></label>' +
+            '</div>' +
+            '<div class="sz-out" data-role="lvlout" aria-live="polite"></div>' +
+            '<button type="button" class="sz-reset" data-role="lvlreset">' +
+              'RESET TO THE PLANNED LEVELS</button>' +
+          '</fieldset>'
+        : '';
+
+      var levered = Number(lever.effective) > 1 && npu > 0;
       var sizeHtml = sizable
-        ? '<fieldset class="sz-size"><legend>Size</legend>' +
+        ? '<fieldset class="sz-block sz-size"><legend>Size</legend>' +
             '<div class="sz-fields">' +
               '<label class="sz-f"><span>Units</span>' +
                 '<input type="number" inputmode="decimal" min="0" step="any" ' +
@@ -1443,20 +1917,29 @@
               '<label class="sz-f"><span>Cash committed</span>' +
                 '<input type="number" inputmode="decimal" min="0" step="any" ' +
                 'data-role="cash" value="' + esc((def * cupu).toFixed(2)) + '"></label>' +
+              (levered
+                ? '<label class="sz-f"><span>Notional</span>' +
+                    '<input type="number" inputmode="decimal" min="0" step="any" ' +
+                    'data-role="notional" value="' + esc((def * npu).toFixed(2)) +
+                    '"></label>'
+                : '') +
             '</div>' +
             '<div class="sz-meter"><span class="sz-meter-fill" data-role="fill"></span>' +
               '<span class="sz-meter-cap" data-role="cap"></span></div>' +
             '<div class="sz-out" data-role="out" aria-live="polite"></div>' +
             '<button type="button" class="sz-reset" data-role="reset">' +
               'RESET TO RISK SIZE</button>' +
+            /* Leverage is stated, never offered. Nothing in the execution
+               path multiplies a manual order — FX ties up broker margin,
+               everything else settles in full — so an input here would have
+               the operator sizing against a number the order never sees. */
+            (lever.note ? '<p class="sz-note">' + esc(lever.note) + '</p>' : '') +
           '</fieldset>'
         : '';
 
       var title = held.length ? 'Add to this position?' : 'Take this trade?';
-      var goLabel = closeIds.length ? 'CLOSE + TAKE'
-                                    : (held.length ? 'ADD' : 'TAKE TRADE');
       var host = document.createElement('div');
-      host.className = 'sv-dialog sz-dialog' + (closeIds.length ? ' sv-dialog--danger' : '');
+      host.className = 'sv-dialog sz-dialog' + (funding ? ' sv-dialog--danger' : '');
       host.setAttribute('data-sv-overlay', 'dialog');
       host.setAttribute('aria-labelledby', 'svSizeTitle');
       host.innerHTML =
@@ -1466,113 +1949,173 @@
         '</div>' +
         '<div class="sv-dialog-body">' +
           '<p class="sv-dialog-msg">' + esc(
-            (closeIds.length
-              ? 'Capital is short — the listed positions close first, then the trade opens. One chain, paper venue.'
+            (funding
+              ? 'Capital is short. Choose what may be closed to fund this — one chain, paper venue.'
               : 'Executes immediately on the paper venue.') +
             (p.managed === false ? ''
               : ' The 5-minute tick manages the stop and target from here.')) + '</p>' +
           warnHtml +
           '<div class="sv-dialog-facts">' + factsHtml + '</div>' +
-          sizeHtml +
+          fundHtml + lvlHtml + sizeHtml +
         '</div>' +
         '<div class="sv-dialog-foot">' +
           '<button type="button" class="sv-dialog-btn" data-role="cancel">Cancel</button>' +
           '<button type="button" class="sv-dialog-btn sv-dialog-btn--go' +
-            (closeIds.length ? ' is-danger' : '') + '" data-role="ok">' +
-            esc(goLabel) + '</button>' +
+            (funding ? ' is-danger' : '') + '" data-role="ok"></button>' +
         '</div>';
       document.body.appendChild(host);
 
       var okBtn = host.querySelector('[data-role="ok"]');
+      var tradeLine = host.querySelector('[data-role="tradeline"]');
       var qtyIn = host.querySelector('[data-role="qty"]');
       var cashIn = host.querySelector('[data-role="cash"]');
+      var notIn = host.querySelector('[data-role="notional"]');
+      var stopIn = host.querySelector('[data-role="stop"]');
+      var targetIn = host.querySelector('[data-role="target"]');
       var out = host.querySelector('[data-role="out"]');
-      var fill = host.querySelector('[data-role="fill"]');
+      var lvlOut = host.querySelector('[data-role="lvlout"]');
+      var fundSum = host.querySelector('[data-role="fundsum"]');
+      var fillBar = host.querySelector('[data-role="fill"]');
       var cap = host.querySelector('[data-role="cap"]');
       var reset = host.querySelector('[data-role="reset"]');
+      var lvlReset = host.querySelector('[data-role="lvlreset"]');
       var settled = false;
-      var chosen = def;
 
-      /* The client's checks are the server's checks in the same order, so
-         the reason shown before the click is the reason that would come
-         back after it. The server still re-runs every one of them against
-         the real fill — this is a preview of the verdict, not the verdict. */
-      function judge(q) {
-        if (!(q > 0)) return 'Enter a size greater than zero.';
-        if (step > 0 && Math.round(q / step) < 1) {
-          return 'Below one ' + units(step) + '-unit increment — this venue ' +
-                 'would round it to zero.';
+      function render(q, lvlWhy, sizeWhy) {
+        var use = q * cupu;
+        var pf = poolFree();
+
+        /* Mirror the derived size into the fields the operator is NOT in —
+           writing to the box under the caret would fight their typing. */
+        if (qtyIn && document.activeElement !== qtyIn) qtyIn.value = units(q);
+        if (cashIn && document.activeElement !== cashIn) cashIn.value = use.toFixed(2);
+        if (notIn && document.activeElement !== notIn) notIn.value = (q * npu).toFixed(2);
+        if (tradeLine) tradeLine.textContent = p.side + ' ' + units(q) + ' ' + p.symbol;
+
+        if (lvlOut) {
+          var dist = Math.abs(fill - stopVal);
+          var reward = Math.abs(targetVal - fill);
+          var lb = [
+            '<span>RISK <b>' + esc(money(q * rpu())) + '</b> → REWARD <b>' +
+              esc(money(q * Math.abs(targetVal - entry) * vpu)) + '</b></span>',
+            '<span>R:R <b>' + esc(dist > 0 ? (reward / dist).toFixed(2) : '—') +
+              '</b></span>',
+            '<span>STOP <b>' + esc(signedPct((stopVal - fill) / fill)) +
+              '</b> · TARGET <b>' + esc(signedPct((targetVal - fill) / fill)) +
+              '</b></span>'
+          ];
+          var cost = Number(L.cost_fraction) || 0;
+          if (cost > 0 && dist > 0) {
+            var netRR = (reward / fill - cost) / (dist / fill + cost);
+            lb.push('<span>NET R:R <b>' + esc(netRR.toFixed(2)) + '</b> after the ' +
+                    esc((cost * 100).toFixed(2)) + '% round trip</span>');
+          }
+          if (lvlWhy) lb.push('<span class="sz-why">' + esc(lvlWhy) + '</span>');
+          lvlOut.innerHTML = lb.join('');
         }
-        if (rpu > 0 && q * rpu > Number(p.max_risk_dollars) + 1e-9) {
-          return units(q) + ' units risks ' + money(q * rpu) + ' to the stop — ' +
-                 'past the ' + money(p.max_risk_dollars) + ' ceiling for this pool.';
+
+        if (out) {
+          var bits = [
+            '<span>R AT STAKE <b>' + esc(money(q * rpu())) + '</b> · ' +
+              esc(pct(q * rpu(), capital)) + ' of pool</span>',
+            '<span>POOL <b>' + esc(money(use)) + '</b> of ' + esc(money(pf)) +
+              ' · ' + esc(pct(use, pf)) + '</span>'
+          ];
+          /* Forex commits margin, not the levered notional — say both, or the
+             number in the cash box looks like it is missing a zero. */
+          if (npu > 0 && Math.abs(q * npu - use) > 0.01) {
+            bits.push('<span>NOTIONAL <b>' + esc(money(q * npu)) + '</b> (margin ' +
+                      esc(money(use)) + ')</span>');
+          }
+          if (!qtyTouched && stopMoved()) {
+            bits.push('<span>SIZE FOLLOWS THE STOP — the risk budget is held at <b>' +
+                      esc(money(budget)) + '</b></span>');
+          }
+          if (sizeWhy) bits.push('<span class="sz-why">' + esc(sizeWhy) + '</span>');
+          out.innerHTML = bits.join('');
+
+          var span = Math.max(pf, use, 1e-9);
+          fillBar.style.width = Math.min(100, use / span * 100) + '%';
+          cap.style.left = Math.min(100, pf / span * 100) + '%';
         }
-        if (npu > 0 && q * npu > Number(p.max_notional) + 1e-9) {
-          return units(q) + ' units is ' + money(q * npu) + ' of notional — ' +
-                 'past the ' + money(p.max_notional) + ' this class allows.';
+
+        if (fundSum) {
+          var short = use - pf;
+          fundSum.innerHTML =
+            '<span>FREED <b>' + esc(money(freed())) + '</b> · POOL WOULD BE <b>' +
+              esc(money(pf)) + '</b> against ' + esc(money(use)) + '</span>' +
+            (short > 0.005
+              ? '<span class="sz-why">' + esc(money(short)) + ' short — this ' +
+                'selection does not fund the trade.</span>'
+              : '<span class="sz-ok">Covered.</span>');
         }
-        if (q * cupu > poolFree + 1e-9) {
-          return units(q) + ' units ties up ' + money(q * cupu) + ' but only ' +
-                 money(poolFree) + ' is free' +
-                 (closeIds.length ? ' after the closes above' : '') + '.';
-        }
-        return '';
+
+        var n = chosenCount();
+        okBtn.textContent = n
+          ? ('CLOSE ' + n + ' + TAKE')
+          : (held.length ? 'ADD' : 'TAKE TRADE');
+        okBtn.classList.toggle('is-danger', n > 0);
+        host.classList.toggle('sv-dialog--danger', n > 0);
+        okBtn.disabled = !!(lvlWhy || sizeWhy);
+        host.classList.toggle('is-over', !!sizeWhy);
+        host.classList.toggle('is-lvl-over', !!lvlWhy);
+        if (reset) reset.disabled = !qtyTouched;
+        if (lvlReset) lvlReset.disabled = !stopMoved() && !targetMoved();
       }
 
-      function paint(q) {
-        var use = q * cupu;
-        var why = judge(q);
-        var sent = step > 0 ? Math.round(q / step) * step : q;
-        sent = Math.round(sent * 1e8) / 1e8;
-        var bits = [
-          '<span>R AT STAKE <b>' + esc(money(q * rpu)) + '</b> · ' +
-            esc(pct(q * rpu, Number(p.capital))) + ' of pool</span>',
-          '<span>POOL <b>' + esc(money(use)) + '</b> of ' + esc(money(poolFree)) +
-            ' · ' + esc(pct(use, poolFree)) + '</span>'
-        ];
-        /* Forex commits margin, not the levered notional — say both, or the
-           number in the cash box looks like it is missing a zero. */
-        if (npu > 0 && Math.abs(q * npu - use) > 0.01) {
-          bits.push('<span>NOTIONAL <b>' + esc(money(q * npu)) + '</b> (margin ' +
-                    esc(money(use)) + ')</span>');
-        }
-        if (Math.abs(sent - q) > 1e-9) {
-          bits.push('<span>SENDS <b>' + esc(units(sent)) + '</b> units</span>');
-        }
-        if (why) bits.push('<span class="sz-why">' + esc(why) + '</span>');
-        out.innerHTML = bits.join('');
+      function recompute() {
+        var lvlWhy = judgeLevels();
+        var q = qtyTouched ? qtyVal : autoQty();
+        /* Size is judged against the levels, so an illegal stop makes the
+           size verdict meaningless — report the cause, not the symptom. */
+        render(q, lvlWhy, lvlWhy ? '' : judgeSize(q));
+      }
 
-        var span = Math.max(poolFree, use, 1e-9);
-        fill.style.width = Math.min(100, use / span * 100) + '%';
-        cap.style.left = Math.min(100, poolFree / span * 100) + '%';
-        host.classList.toggle('is-over', !!why);
-        okBtn.disabled = !!why;
-        reset.disabled = Math.abs(q - def) < 1e-9;
-        chosen = q;
+      function num(el) {
+        var v = parseFloat(el.value);
+        return isFinite(v) ? v : 0;
       }
 
       if (sizable) {
         qtyIn.addEventListener('input', function () {
-          var q = parseFloat(qtyIn.value);
-          if (!isFinite(q)) q = 0;
-          cashIn.value = (q * cupu).toFixed(2);
-          paint(q);
+          qtyTouched = true; qtyVal = num(qtyIn); recompute();
         });
         cashIn.addEventListener('input', function () {
-          var c = parseFloat(cashIn.value);
-          if (!isFinite(c)) c = 0;
-          var q = cupu > 0 ? c / cupu : 0;
-          qtyIn.value = units(q);
-          paint(q);
+          qtyTouched = true;
+          qtyVal = cupu > 0 ? num(cashIn) / cupu : 0;
+          recompute();
         });
+        if (notIn) {
+          notIn.addEventListener('input', function () {
+            qtyTouched = true;
+            qtyVal = npu > 0 ? num(notIn) / npu : 0;
+            recompute();
+          });
+        }
         reset.addEventListener('click', function () {
-          qtyIn.value = units(def);
-          cashIn.value = (def * cupu).toFixed(2);
-          paint(def);
-          qtyIn.focus();
+          qtyTouched = false; recompute(); qtyIn.focus();
         });
-        paint(def);
       }
+      if (levelable) {
+        stopIn.addEventListener('input', function () {
+          stopVal = num(stopIn); recompute();
+        });
+        targetIn.addEventListener('input', function () {
+          targetVal = num(targetIn); recompute();
+        });
+        lvlReset.addEventListener('click', function () {
+          stopVal = defStop; targetVal = defTarget;
+          stopIn.value = lvl(defStop); targetIn.value = lvl(defTarget);
+          recompute(); stopIn.focus();
+        });
+      }
+      host.querySelectorAll('[data-role="close"]').forEach(function (box) {
+        box.addEventListener('change', function () {
+          sel[box.value] = box.checked;
+          recompute();
+        });
+      });
+      recompute();
 
       function finish(v) {
         if (settled) return;
@@ -1587,17 +2130,32 @@
         }, 200);
       });
       okBtn.addEventListener('click', function () {
-        /* Untouched default → send no qty at all. The automatic path then
-           runs exactly as it did before the override existed, rather than
-           through a validator with the same number in it. */
-        finish({ qty: (!sizable || Math.abs(chosen - def) < 1e-9) ? null : chosen });
+        var ids = [];
+        closable.forEach(function (c) {
+          if (sel[c.trade_id]) ids.push(c.trade_id);
+        });
+        /* Anything left at the platform's own answer goes back as null and
+           is left OUT of the request entirely — including a number the
+           operator typed and then typed back. The automatic path then runs
+           exactly as it did before these controls existed, rather than
+           through a validator with the platform's own number in it, and a
+           restored default is a default again rather than a trade the
+           ledger records as hand-sized. */
+        var auto = autoQty();
+        var atAuto = !qtyTouched || !moved(qtyVal, auto);
+        finish({
+          qty: (sizable && !atAuto) ? qtyVal : null,
+          stop: stopMoved() ? stopVal : null,
+          target: targetMoved() ? targetVal : null,
+          close_ids: ids
+        });
       });
       host.querySelector('[data-role="cancel"]')
           .addEventListener('click', function () { finish(null); });
 
-      /* Focus the size, not the go button: the number is the decision, and
-         a stray Enter on a pre-focused OK is how a default gets taken by
-         accident. */
+      /* Focus the size, not the go button: the numbers are the decision,
+         and a stray Enter on a pre-focused OK is how a default gets taken
+         by accident. */
       host.setAttribute('data-sv-focus',
                         sizable ? '[data-role="qty"]' : '[data-role="cancel"]');
       SV.overlay.open(host, null);
@@ -1618,14 +2176,17 @@
         SV.overlay.alert({ title: 'Cannot take this trade', message: p.error });
         return;
       }
-      var closeIds = [];
-      if (!p.sufficient) {
-        (p.close_proposal || []).forEach(function (c) { closeIds.push(c.trade_id); });
-      }
-      sizeDialog(p, closeIds).then(function (choice) {
+      /* close_ids is built from the operator's ticks inside the dialog. It
+         used to be built HERE, by copying every proposed close out of the
+         preview — so pressing CLOSE + TAKE liquidated whatever the server
+         had picked, which the operator had been shown and never asked
+         about. Positions leave the book by decision now. */
+      sizeDialog(p).then(function (choice) {
         if (!choice) { done(); return; }
-        var body = Object.assign({ close_ids: closeIds }, extraBody || {});
+        var body = Object.assign({ close_ids: choice.close_ids }, extraBody || {});
         if (choice.qty !== null) body.qty = choice.qty;
+        if (choice.stop !== null) body.stop = choice.stop;
+        if (choice.target !== null) body.target = choice.target;
         fetch(executeUrl, {
           method: 'POST', credentials: 'same-origin',
           headers: { 'X-CSRFToken': csrf(), 'Content-Type': 'application/json' },
@@ -1646,10 +2207,17 @@
           /* The decision is made — retire the card while the alert is
              up, so the rail reflects it the moment the operator looks. */
           if (onSuccess) { try { onSuccess(res); } catch (e) { /* UI only */ } }
+          var yours = (res.overrides || []);
           SV.overlay.alert({
             title: 'Position open',
             message: res.side + ' ' + units(res.qty) + ' ' + res.symbol + ' @ ' + res.entry +
               (res.sized_by === 'operator' ? '  (your size — ' + money(res.risk_dollars) + ' at risk)' : '') +
+              /* Name back exactly what the operator moved. Claiming the
+                 platform's defaults on a ticket they adjusted — or the
+                 reverse — is how a stop nobody chose ends up trusted. */
+              (yours.indexOf('stop') !== -1 || yours.indexOf('target') !== -1
+                ? '  ·  your levels: stop ' + lvl(res.stop) + ' → target ' + lvl(res.target)
+                : '') +
               (res.closed && res.closed.length
                 ? ' — closed first: ' + res.closed.join(', ') : '')
           });
@@ -2574,7 +3142,11 @@ function toggleSidebar() {
           if (was === undefined) w.classList.add('sr-slide-in');
           else if (!was && w.dataset.acted) w.classList.add('sr-just-acted');
         });
-        document.dispatchEvent(new CustomEvent('htmx:afterSwap'));
+        /* Named, for the same reason the bell rows name theirs: a signal
+           landing in the rail is not a reason to close a headband popup
+           three hundred pixels away. */
+        document.dispatchEvent(new CustomEvent('htmx:afterSwap',
+                                               { detail: { svRegion: body } }));
       })
       .catch(() => {})
       .finally(() => { railRefreshing = false; });
@@ -2592,6 +3164,60 @@ function toggleSidebar() {
       railFillTimer = null;
       refreshSignalRail();
     }, 900);
+  };
+
+  /* ── The bell's ROWS, not just its number ─────────────────────────────
+     The badge and the banner were both live; the list behind the bell was
+     not. It rendered once with the page, so an alert that arrived after
+     that turned the count red, raised a banner — and then wasn't in the
+     panel when the operator clicked to see it. Delivery was never the
+     broken part; the part the click lands on was the one thing that never
+     re-rendered.
+
+     Rows are delegated (sv-notif-card binds on document, the read-marker
+     binds on the panel), so a swap needs no rebinding — only the
+     htmx:afterSwap other listeners already watch for. */
+  let notifPanelRefreshing = false;
+  function refreshNotifPanel() {
+    const box = document.getElementById('notifScroll');
+    if (!box || notifPanelRefreshing) return Promise.resolve();
+    notifPanelRefreshing = true;
+    const before = new Set(
+      Array.from(box.querySelectorAll('.notif-item[data-notif-id]'))
+        .map(el => el.dataset.notifId));
+    return fetch('/partials/notif-items/', { credentials: 'same-origin' })
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(html => {
+        box.innerHTML = html;
+        box.querySelectorAll('.notif-item[data-notif-id]').forEach(el => {
+          if (!before.has(el.dataset.notifId)) el.classList.add('ni-new');
+        });
+        /* Named region: only listeners whose subject lives in THESE nodes
+           should react. An unqualified swap event closes every open popup
+           on the page, and an alert arriving must not shut the popup the
+           operator is reading somewhere else. */
+        document.dispatchEvent(new CustomEvent('htmx:afterSwap',
+                                               { detail: { svRegion: box } }));
+      })
+      .catch(() => {})
+      .finally(() => { notifPanelRefreshing = false; });
+  }
+
+  /* Debounced for the event path: an alert burst is one swap. Returns a
+     promise so the open handler can retire the rows it ACTUALLY shows
+     rather than the ones that were there a moment before the swap. */
+  let notifPanelTimer = null;
+  window.refreshNotifPanel = function (opts) {
+    if (opts && opts.now) {
+      if (notifPanelTimer) { clearTimeout(notifPanelTimer); notifPanelTimer = null; }
+      return refreshNotifPanel();
+    }
+    if (notifPanelTimer) clearTimeout(notifPanelTimer);
+    notifPanelTimer = setTimeout(() => {
+      notifPanelTimer = null;
+      refreshNotifPanel();
+    }, 900);
+    return Promise.resolve();
   };
 
   /* Fresh news announced: refetch the ticker's marquee. Debounced —
@@ -2826,6 +3452,22 @@ function toggleSidebar() {
   /* placement: 'below' (default — headband cells hang their popup under
      the band) or 'left' (rail items float theirs beside the rail, exactly
      like the signal cards' popups). */
+  /* The grace for ONE crossing: the few pixels of page between the cell and
+     the card placed under or beside it, where the pointer is over neither.
+     It is not a countdown against the operator's hand — every path that
+     schedules it first checks where the pointer actually went, and arriving
+     on either end cancels it. A popup the pointer has ENTERED is closed by
+     leaving it, by Escape, or by the cell it describes being swapped away. */
+  var POP_LEAVE_MS = 260;
+  /* The open-popup registry lives in sv-notif-card.js (SV.popup) because
+     four engines on this page need the same answer to "is this scroll the
+     operator reading the card?". This script is inline and therefore runs
+     BEFORE that deferred file, so every call is guarded — by the time a
+     pointer can reach a popup, SV.popup exists. */
+  function popRegister(pop, open) {
+    if (!pop || !window.SV || !SV.popup) return;
+    (open ? SV.popup.opened : SV.popup.closed)(pop);
+  }
   function showPortalPopup(item, popSelector, maxW, placement) {
     var pop = item.querySelector(popSelector) || item._portalPop;
     if (!pop) return;
@@ -2864,6 +3506,7 @@ function toggleSidebar() {
     pop.style.left = left + 'px';
     pop.style.animation = 'dhPop .18s ease';
     activePopup = pop;
+    popRegister(pop, true);
     /* Bind mouseenter/leave on the popup itself so it stays open
        while the cursor is on it. Bind once. */
     if (!pop._hoverBound) {
@@ -2871,18 +3514,43 @@ function toggleSidebar() {
       pop.addEventListener('mouseenter', function() {
         if (item._popHideTimer) { clearTimeout(item._popHideTimer); item._popHideTimer = null; }
       });
-      pop.addEventListener('mouseleave', function() {
-        scheduleHidePortalPopup(item, pop);
+      pop.addEventListener('mouseleave', function(e) {
+        maybeHidePortalPopup(item, pop, e.relatedTarget);
       });
+      /* A wheel over a popup with nothing to scroll chained to the page
+         underneath. These popups are anchored in viewport coordinates to a
+         cell that scrolls away, so the page moving out from under one is
+         how it ends up pointing at nothing. */
+      pop.addEventListener('wheel', function(e) {
+        if (pop.scrollHeight > pop.clientHeight) return;
+        e.preventDefault();
+      }, {passive: false});
     }
+  }
+  /* Where the pointer actually WENT decides, not a stopwatch. Reaching for
+     the popup crosses the gap out of the cell; going back to the cell from
+     the popup is not leaving either. Only a destination in NEITHER closes,
+     and even that gets the one crossing's grace in case the destination is
+     the gap itself. */
+  function maybeHidePortalPopup(item, pop, to) {
+    if (!pop) return;
+    if (to && to.nodeType === 1
+        && ((item && item.contains(to)) || pop.contains(to))) {
+      if (item && item._popHideTimer) {
+        clearTimeout(item._popHideTimer); item._popHideTimer = null;
+      }
+      return;
+    }
+    scheduleHidePortalPopup(item, pop);
   }
   function scheduleHidePortalPopup(item, pop) {
     if (!pop) return;
     if (item._popHideTimer) clearTimeout(item._popHideTimer);
-    item._popHideTimer = setTimeout(function() { hidePortalPopup(pop); }, 140);
+    item._popHideTimer = setTimeout(function() { hidePortalPopup(pop); }, POP_LEAVE_MS);
   }
   function hidePortalPopup(pop) {
     if (!pop) return;
+    popRegister(pop, false);
     pop.style.display = '';
     pop.style.position = '';
     pop.style.zIndex = '';
@@ -2897,11 +3565,38 @@ function toggleSidebar() {
     if (activePopup === pop) activePopup = null;
   }
 
+  /* The two exits that are not the pointer. Escape is the universal way out
+     of anything floating on this platform; an htmx swap means the cell the
+     popup describes may no longer exist, and a popup portalled to <body>
+     outlives its own cell — it would hang over the page pointing at
+     nothing. */
+  document.addEventListener('keydown', function(e) {
+    if ((e.key === 'Escape' || e.key === 'Esc') && activePopup) {
+      hidePortalPopup(activePopup);
+    }
+  });
+  document.addEventListener('htmx:afterSwap', function(e) {
+    if (!activePopup) return;
+    /* ...but only a swap that could have taken THIS popup's cell with it.
+       A live refresher that names its region (detail.svRegion) is saying
+       "these nodes were replaced"; if the popup's own anchor is not among
+       them, the cell is still there and the popup is still pointing at it.
+       Without this, every arriving notification closed whatever popup the
+       operator was reading anywhere on the page — the bell rows refresh on
+       an alert, and an unqualified swap event means "everything is gone".
+       A swap that names no region keeps the old blanket behaviour. */
+    var region = e && e.detail && e.detail.svRegion;
+    var anchor = activePopup._origParent;
+    if (region && region.contains && anchor
+        && region !== anchor && !region.contains(anchor)) return;
+    hidePortalPopup(activePopup);
+  });
+
   // Data headband popups (portal to body) — hover-friendly
   document.querySelectorAll('.data-headband .dh-item').forEach(function(item){
     var pop = item.querySelector('.dh-pop');
     item.addEventListener('mouseenter', function(){ showPortalPopup(item, '.dh-pop', 380); });
-    item.addEventListener('mouseleave', function(){ scheduleHidePortalPopup(item, item._portalPop || pop); });
+    item.addEventListener('mouseleave', function(e){ maybeHidePortalPopup(item, item._portalPop || pop, e.relatedTarget); });
   });
 
   // Watchlist rail popups — same portal, same lifecycle, but placed to the
@@ -2910,7 +3605,7 @@ function toggleSidebar() {
     var pop = item.querySelector('.wl-pop');
     if (!pop) return;
     item.addEventListener('mouseenter', function(){ showPortalPopup(item, '.wl-pop', 380, 'left'); });
-    item.addEventListener('mouseleave', function(){ scheduleHidePortalPopup(item, item._portalPop || pop); });
+    item.addEventListener('mouseleave', function(e){ maybeHidePortalPopup(item, item._portalPop || pop, e.relatedTarget); });
   });
 
   // Data headband hover arrows
@@ -2959,7 +3654,7 @@ function toggleSidebar() {
   document.querySelectorAll('.ticker-bar .ticker-item').forEach(function(item){
     var pop = item.querySelector('.ticker-popup');
     item.addEventListener('mouseenter', function(){ showPortalPopup(item, '.ticker-popup', 420); });
-    item.addEventListener('mouseleave', function(){ scheduleHidePortalPopup(item, item._portalPop || pop); });
+    item.addEventListener('mouseleave', function(e){ maybeHidePortalPopup(item, item._portalPop || pop, e.relatedTarget); });
   });
 
   // Ticker bar hover arrows
@@ -3319,6 +4014,21 @@ function toggleSidebar() {
        topbar subtree would already have lost it. Bound to the open event
        and nothing else: a hover over the bell must never clear an inbox. */
     panel.addEventListener('sv:open', function () {
+        /* Rows first, THEN retire them. The socket may have been down, or
+           the alert may have landed a heartbeat ago — either way the point
+           of opening the bell is to see what the badge is counting, and
+           marking a stale list read would retire the wrong ten rows and
+           leave the new one unread under a count that had already dropped.
+           The retire runs whether or not the refetch worked: a failed swap
+           leaves the rows that were already on screen, and those are still
+           rows the operator just looked at. */
+        var refreshed = (window.refreshNotifPanel
+                         ? window.refreshNotifPanel({ now: true })
+                         : Promise.resolve());
+        refreshed.then(retireVisibleRows, retireVisibleRows);
+    });
+
+    function retireVisibleRows() {
         var rows = panel.querySelectorAll('.notif-item.unread[data-notif-id]');
         if (!rows.length) return;
         /* Only the ids this panel actually displays. The bell shows ten of
@@ -3352,7 +4062,7 @@ function toggleSidebar() {
                subtraction drifts the moment one of them acts. */
             if (window.refreshNotifBadge) window.refreshNotifBadge();
         }).catch(function () { /* rows stay unread, badge stays true */ });
-    });
+    }
 })();
 
 // ── Feature 3: Theme Transition Patch ────────────────────────────────────
@@ -4674,6 +5384,13 @@ if ('serviceWorker' in navigator) {
                 if (kindEl) kindEl.textContent = "Alerts";
                 var openLink = existing.querySelector('a.sv-banner-btn');
                 if (openLink) openLink.setAttribute("href", "/notifications/");
+                /* And the CARD's destination with it. The whole-card click
+                   closes over the FIRST alert's href, so a coalesced banner
+                   reading "2 new alerts" sent its Open link to the inbox and
+                   its body to the first alert's page — two controls on one
+                   card resolving two different ways. The href lives on the
+                   element now, so there is one destination to update. */
+                existing.dataset.href = "/notifications/";
                 if (existing._rearm) existing._rearm();
                 return;
             }
@@ -4709,11 +5426,31 @@ if ('serviceWorker' in navigator) {
             }
             if (act === "dismiss") {
                 el.remove();
-            } else if (act === "more") {
+                return;
+            }
+            if (act === "more") {
                 el.classList.toggle("is-open");
                 e.target.textContent = el.classList.contains("is-open") ? "Less" : "Details";
+                return;
             }
+            /* The WHOLE card is the click target, not the six characters
+               reading "Open ▸". A banner is a thing that appeared in front
+               of the operator saying something happened; clicking it and
+               getting nothing reads as a dead notification, which is what
+               it was. Anchors and buttons inside keep their own behaviour —
+               this only fires for a click that hit none of them. */
+            if (e.target.closest && e.target.closest("a,button")) return;
+            /* Read from the element, never from the captured `m`: a
+               coalesced banner retargets itself and the closure would still
+               be holding the first alert's URL. */
+            var dest = el.dataset.href;
+            if (dest && dest.charAt(0) !== "#") window.location.href = dest;
         });
+        /* Say so, rather than making the operator discover it. */
+        if (m.href && m.href.charAt(0) !== "#") {
+            el.dataset.href = m.href;
+            el.classList.add("sv-banner--clickable");
+        }
 
         stack.appendChild(el);
         /* Evict the oldest NON-sticky banner: a sticky close_pending needs
@@ -4830,9 +5567,12 @@ if ('serviceWorker' in navigator) {
                     window.refreshSignalRail();
                 }
                 /* Every notification — silent ones included — moves the
-                   bell badge; the count comes from the server, never ++. */
-                if (msg.kind === "notification" && window.refreshNotifBadge) {
-                    window.refreshNotifBadge();
+                   bell badge; the count comes from the server, never ++.
+                   And the ROWS behind the bell, or the badge counts an
+                   alert the panel cannot show. */
+                if (msg.kind === "notification") {
+                    if (window.refreshNotifBadge) window.refreshNotifBadge();
+                    if (window.refreshNotifPanel) window.refreshNotifPanel();
                 }
                 /* Re-broadcast for page modules (sv-run.js resets its
                    RUNNING buttons and refreshes result regions on

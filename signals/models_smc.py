@@ -64,8 +64,15 @@ class SmcSignal(models.Model):
     closed_at = models.DateTimeField(null=True, blank=True)
     realized_r = models.FloatField(null=True, blank=True)
 
-    # Performance attribution
+    # Performance attribution — MEASURED from closed cards of this setup by
+    # signals.performance.setup_performance_summary, never seeded from the
+    # strategy author's published numbers. None means NOT MEASURED: either
+    # too few closed cards to be empirical, or the record could not be read.
+    # The card renders an em-dash for it and the conviction bonus is skipped.
     rule_hit_rate_30d = models.FloatField(null=True, blank=True)
+    # Sample size behind the rate above. 0 is a measurement ("nothing has
+    # closed yet"); None means nobody looked.
+    rule_hit_rate_n = models.IntegerField(null=True, blank=True)
 
     # Bookkeeping
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
@@ -76,6 +83,25 @@ class SmcSignal(models.Model):
         indexes = [
             models.Index(fields=["symbol", "timeframe", "status"]),
             models.Index(fields=["setup", "status"]),
+        ]
+        constraints = [
+            # One card per setup per direction per BAR. Every detector
+            # evaluates the last bar, so the 900s SignalEngine pass and the
+            # 1800s universe scan between them re-detected a live setup
+            # roughly 18 times per 4h bar and stored all 18 — which fills the
+            # feed with one idea and multiplies the n_closed that decides
+            # whether a hit rate is empirical yet. persist_cards checks for
+            # an open card first; this is the backstop that also covers two
+            # workers racing on the same bar.
+            #
+            # Rows with a NULL trigger_ts are exempt (SQL treats NULLs as
+            # distinct) — nothing the detectors emit lacks one, but a
+            # hand-built card imported without a bar stamp is not something
+            # this constraint can honestly deduplicate.
+            models.UniqueConstraint(
+                fields=["symbol", "timeframe", "setup", "direction", "trigger_ts"],
+                name="uniq_smcsignal_per_bar",
+            ),
         ]
 
     def __str__(self):

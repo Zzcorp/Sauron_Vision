@@ -392,6 +392,12 @@ the broker, and the bot that would have honoured their stops switched off.
                 Each config trades one asset class via Phase-4 broker_router (Alpaca / OANDA / paper).
                 Decisions consume Phase-1 Signals; trades respect Phase-5/7/8 multipliers.
                 Crypto bot is separate and unchanged.
+                <span style="color:var(--accent-gold-ink);">Max hold</span> is the time stop:
+                a bracket holds the stop and the target, but nothing at the broker releases capital
+                from a thesis that never moved. Blank inherits the asset-class ceiling
+                (stock 336h · forex 720h · commodity 720h · crypto 192h · options 240h),
+                each one the longest horizon that class's seeded setups declare, read on the calendar.
+                <strong>0 switches the time stop off</strong> and positions become unbounded in time.
                 <a href="{% url 'asset_bots_dashboard' %}" style="color:var(--accent);">Full view →</a>
             </div>
         </div>
@@ -427,7 +433,10 @@ the broker, and the bot that would have honoured their stops switched off.
 
             <input type="number" step="0.1" name="take_profit_pct" placeholder="Target %" value="3" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="number" step="0.05" min="0" max="1" name="entry_score_min" placeholder="Min entry score" value="0.6" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
-            <input type="text" name="extras" placeholder="Extras JSON" value="{}" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;">
+            {# Deliberately no value= — blank means "inherit the class ceiling", and a prefilled number would hide that. #}
+            <input type="number" step="1" min="0" name="max_hold_hours" placeholder="Max hold h (blank = class default · 0 = off)" title="Hours before the bot flattens an unresolved position with reason TIME. Blank inherits the asset-class default; 0 disables the time stop." style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;">
+
+            <input type="text" name="extras" placeholder="Extras JSON" value="{}" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;grid-column:1/4;">
 
             <button type="submit" class="btn btn-primary btn-sm" style="grid-column:1/4;">Create / Update</button>
         </form>

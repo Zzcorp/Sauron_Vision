@@ -164,7 +164,15 @@ class PanelCountsTests(TestCase):
         resp = self.client.get("/partials/panel-counts/")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertEqual(data["bot_open"], 2)
+        # `_bot_trade` books against a config named "manual" with an empty
+        # symbol list — which is the config TAKE TRADE uses for HAND-TAKEN
+        # positions, not a bot. So these two are the operator's own trades,
+        # and the BOT cell must not count them: it reports the fleet, and
+        # counting a click as automation is what this fixture accidentally
+        # asserted. They are still exposure, so POSITIONS counts them, which
+        # is what this test is actually named for.
+        self.assertEqual(data["bot_open"], 0)
+        self.assertEqual(data["manual_open"], 2)
         self.assertGreaterEqual(data["positions"], 2,
                                 "open AssetBotTrades must count as positions")
         self.assertGreaterEqual(data["watchlist"], 1)

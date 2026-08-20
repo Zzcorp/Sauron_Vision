@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-labelledby="svOgTitle" fill="none" stroke-linecap="square" stroke-linejoin="miter">
+  <title id="svOgTitle">Sauron Vision — Trading Intelligence</title>
+  <!--
+    THE SHARE CARD. 1200x630 because that is the size Facebook, LinkedIn,
+    Slack and X all document, and the ratio `twitter:card=summary_large_image`
+    crops to. The old card was the square logo, which every one of them
+    letterboxed with grey bars.
+
+    Rendered by `manage.py build_icons`, which loads the platform's web
+    fonts into the page before screenshotting — so the wordmark is set in
+    Orbitron, the same face the app uses, rather than in whatever the
+    rasterizing machine happens to have. Offline, the stack falls back to a
+    local geometric sans and the card is still a card.
+
+    Unlike sauron_eye.svg this file may carry text and web fonts: it is
+    only ever rasterized to one PNG at one size, never shrunk to 16px.
+  -->
+  <rect width="1200" height="630" fill="#030806"/>
+
+  <!-- The wall's grid, at the weight it reads at on a phone-sized preview.
+       Any lighter and social compression eats it entirely. -->
+  <g stroke="#133020" stroke-width="1" opacity="0.55">
+    <path d="M0 105h1200M0 210h1200M0 315h1200M0 420h1200M0 525h1200"/>
+    <path d="M105 0v630M210 0v630M315 0v630M420 0v630M525 0v630M630 0v630M735 0v630M840 0v630M945 0v630M1050 0v630M1155 0v630"/>
+  </g>
+  <!-- A horizon line through the mark's centre, so the card has one axis
+       the eye and the wordmark both sit on. -->
+  <path d="M0 315h1200" stroke="#1a4030" stroke-width="2"/>
+
+  <!-- ── The mark, at 300px, vertically centred on that axis ────────── -->
+  <g transform="translate(96,165) scale(0.5859)">
+    <polygon points="256,26 472,142 472,370 256,486 40,370 40,142" fill="#060e0a"/>
+    <g stroke="#00e868" stroke-width="8" opacity="0.4">
+      <path d="M 58,256 Q 256,-104 454,256"/>
+      <path d="M 58,256 Q 256,616 454,256"/>
+    </g>
+    <path d="M 96,256 Q 256,34 416,256 Q 256,478 96,256 Z" fill="#0a1a14"/>
+    <path fill="#00e868" fill-rule="evenodd" d="M 58,256 Q 256,-34 454,256 Q 256,546 58,256 Z M 96,256 Q 256,34 416,256 Q 256,478 96,256 Z"/>
+    <circle cx="256" cy="256" r="66" fill="#00e868"/>
+    <g stroke="#061109">
+      <ellipse cx="256" cy="256" rx="19" ry="53" stroke-width="4.5" opacity="0.42"/>
+      <ellipse cx="256" cy="256" rx="38" ry="53" stroke-width="3.5" opacity="0.26"/>
+      <ellipse cx="256" cy="256" rx="53" ry="19" stroke-width="4" opacity="0.38"/>
+    </g>
+    <circle cx="256" cy="256" r="27" fill="#030806"/>
+    <circle cx="247" cy="247" r="7" fill="#d8ffe9" opacity="0.9"/>
+    <polygon points="256,26 472,142 472,370 256,486 40,370 40,142" fill="none" stroke="#1a4030" stroke-width="12"/>
+    <g stroke="#00e868" stroke-width="9" opacity="0.45" stroke-linecap="butt">
+      <line x1="256" y1="40" x2="256" y2="64"/>
+      <line x1="256" y1="472" x2="256" y2="448"/>
+    </g>
+  </g>
+
+  <!-- ── The words ──────────────────────────────────────────────────── -->
+  <g font-family="Orbitron, Bahnschrift, 'Segoe UI', sans-serif">
+    <text x="452" y="288" font-size="78" font-weight="900" letter-spacing="6"
+          fill="#daf0e6">SAURON</text>
+    <text x="452" y="368" font-size="78" font-weight="900" letter-spacing="6"
+          fill="#00e868">VISION</text>
+  </g>
+  <path d="M452 400h250" stroke="#00e868" stroke-width="3"/>
+  <text x="452" y="446" font-family="Rajdhani, Bahnschrift, 'Segoe UI', sans-serif"
+        font-size="30" font-weight="600" letter-spacing="7" fill="#7aaa8a">TRADING INTELLIGENCE</text>
+
+  <!-- The claim the platform can actually defend: it watches these
+       classes, and it says why. No performance numbers on a share card —
+       they would be the one thing on it nobody could verify. -->
+  <text x="452" y="500" font-family="Rajdhani, Bahnschrift, 'Segoe UI', sans-serif"
+        font-size="24" font-weight="500" letter-spacing="3" fill="#3a6850">STOCKS · FOREX · COMMODITIES · CRYPTO · OPTIONS</text>
+</svg>

@@ -1,65 +1,141 @@
-{% include "_chart_assets.html" %}
-<div class="positions-metrics">
-  <div class="sv-section-title">Open positions PnL</div>
-  <div class="sv-chart-container">
-    <canvas id="positions-pnl-chart"></canvas>
-  </div>
+{% comment %}
+Position Analytics — the fragment /htmx/metrics/positions/ swaps into the
+bottom of /positions/.
 
-  <div class="sv-section-title">Positions ({{ positions|length }})</div>
-  {% if positions %}
-    <div class="table-wrapper">
-    <table class="sv-perf-table">
-      <thead>
-        <tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Current</th>
-            <th>Unrealized</th><th>%</th></tr>
-      </thead>
-      <tbody>
-        {% for p in positions %}
-          <tr>
-            <td>{{ p.instrument.symbol }}</td>
-            <td>{{ p.direction|default:"—" }}</td>
-            <td>{{ p.entry_price|default:"—" }}</td>
-            <td>{{ p.current_price|default:"—" }}</td>
-            <td class="{% if p.unrealized_pnl > 0 %}up{% else %}down{% endif %}">
-              {{ p.unrealized_pnl|default:"0" }}
-            </td>
-            <td>{{ p.unrealized_pnl_pct|default:"—" }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
-  {% else %}
-    <p style="color:var(--text-muted);">No open positions.</p>
-  {% endif %}
-</div>
+It used to be a Chart.js bar of open P&L above a six-column copy of the table
+already on the page, and it had never drawn either: the view's query raised on
+every request and the empty branch was all anyone ever saw. Three things
+changed with the rebuild.
 
+  * A FAILURE IS SHOWN. `error` renders as a sentence at the top of the panel.
+    The old view put its exception in the same context key and nothing read it
+    back out, so a broken query and an empty book produced identical markup —
+    which is exactly how a permanent FieldError went unnoticed.
+  * IT SAYS SOMETHING THE TABLE CANNOT. The table above prints one row per
+    position; this answers where the money is concentrated, how the book is
+    spread across R, which way the exposure leans BY VALUE (the donut at the
+    top of the page divides it by count), and how long it has all been
+    sitting. Every figure is formatted in the view, so the em-dash rule for an
+    unmeasured value lives in one place instead of in a dozen template
+    branches, each a fresh chance to print a confident zero.
+  * THE CHARTS ARE THE HOUSE PARTIALS. They carry the theme tokens, the
+    viewBox geometry, and — unlike a canvas — the distinction between a
+    measured zero and a reading that was never taken.
+
+This fragment lands INSIDE the page's "Position Analytics" card, so it uses
+plain sections rather than cards of its own: a .card here would draw a second
+border, a second accent line and a second 22px of padding inside the first.
+{% endcomment %}
 <style>
-.up { color: var(--accent); } .down { color: var(--accent-red); }
-</style>
+/* The section rule. The sibling metrics fragments inherit this typography
+   from the shared chart-asset include, which is also the Chart.js loader —
+   and this panel no longer loads Chart.js, so it carries the two
+   declarations it actually uses rather than pulling in a charting library
+   for a font size. Tokens only: a raw colour here would not follow
+   body.light-mode.
 
-<script>
-(function() {
-  const data = {{ chart_data|safe }};
-  const ctx = document.getElementById("positions-pnl-chart");
-  if (!ctx || !data.labels || data.labels.length === 0) {
-    if (ctx) ctx.parentElement.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px;">No open positions.</p>';
-    return;
-  }
-  if (window._positionsChart) window._positionsChart.destroy();
-  const colors = data.values.map(v =>
-    v >= 0 ? window.SAURON_CHART_COLORS.accent : window.SAURON_CHART_COLORS.red
-  );
-  window._positionsChart = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels: data.labels,
-      datasets: [{ data: data.values, backgroundColor: colors,
-                   borderWidth: 0 }],
-    },
-    options: { responsive: true, maintainAspectRatio: false,
-               plugins: { legend: { display: false } },
-               scales: { y: { beginAtZero: true } } },
-  });
-})();
-</script>
+   The include's filename is deliberately not written out: a guard test
+   asserts that name appears nowhere in this fragment, and it does not read
+   comments any more than a browser does. Naming it here failed the test
+   that exists to keep Chart.js out — on the strength of a sentence
+   explaining that Chart.js had been removed. */
+.pa-panel .pa-section {
+    margin: 22px 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--text-muted);
+}
+.pa-panel .pa-col > .pa-section:first-child { margin-top: 0; }
+</style>
+{% if error %}
+    <p class="oc-empty sv-error">{{ error }}</p>
+{% elif not n_open %}
+    <p class="oc-empty">
+        No open positions in either book &mdash; nothing to analyse yet.
+    </p>
+{% else %}
+<div class="pa-panel">
+
+    {# ── Five readings the page's own stat strip does not carry ────── #}
+    <div class="oc-strip">
+        {% for c in strip %}
+        <div class="oc-strip-cell" title="{{ c.title }}">
+            <span class="oc-strip-label">{{ c.label }}</span>
+            <span class="oc-strip-value {{ c.tone }}">{{ c.text }}</span>
+            <span class="oc-strip-sub">{{ c.sub }}</span>
+        </div>
+        {% endfor %}
+    </div>
+
+    {# ── Where the money is, and how the book sits against its risk ── #}
+    <div class="grid grid-2" style="gap:18px;">
+        <div class="pa-col">
+            <div class="pa-section">Unrealized P&amp;L by symbol</div>
+            {# Signed: the zero line is the whole point of this chart, so it #}
+            {# is drawn rather than implied, and both sides scale against the #}
+            {# one largest absolute reading — two rulers on one axis would #}
+            {# draw a small win the same length as a large loss. #}
+            {% include "_partials/chart_bars.html" with bars=pnl_bars max=pnl_max peak=pnl_peak signed=1 unit="unrealized P&amp;L per symbol, at live marks" when="the open book, right now" empty="Nothing in the book could be priced, so there is no P&amp;L to attribute." %}
+            <p class="sv-bars-cap">{{ pnl_note }}</p>
+        </div>
+
+        <div class="pa-col">
+            <div class="pa-section">R across the open book</div>
+            {# Counts per bucket, so unsigned. A bucket nobody landed in is a #}
+            {# measured zero and draws as an empty slot on a painted baseline #}
+            {# — which is not the same mark as a reading never taken. #}
+            {% include "_partials/chart_bars.html" with bars=r_bars max=r_max peak=r_peak unit="open positions per R bucket" when="the open book, right now" empty="No open position carries an R yet." %}
+            <p class="sv-bars-cap">{{ r_note }}</p>
+        </div>
+    </div>
+
+    {# ── Exposure, split two ways, by VALUE ───────────────────────── #}
+    <div class="grid grid-2" style="gap:18px;">
+        <div class="pa-col">
+            <div class="pa-section">Exposure by direction</div>
+            {% if dir_rows %}
+                {% include "_partials/chart_donut.html" with rows=dir_rows tones="long=accent,short=red" label="Share of open notional exposure by direction" %}
+            {% else %}
+                <p class="oc-empty">Nothing in the book carries both a size and a price, so there is no exposure to divide.</p>
+            {% endif %}
+            <p class="sv-bars-cap">{{ exposure_note }}</p>
+        </div>
+
+        <div class="pa-col">
+            <div class="pa-section">Exposure by asset class</div>
+            {% if class_rows %}
+                {% include "_partials/chart_donut.html" with rows=class_rows label="Share of open notional exposure by asset class" %}
+            {% else %}
+                <p class="oc-empty">Nothing in the book carries both a size and a price, so there is no exposure to divide.</p>
+            {% endif %}
+            <p class="sv-bars-cap">Shares of the same notional the asset-class table at the top of this page prints in currency.</p>
+        </div>
+    </div>
+
+    {# ── How long it has all been sitting ─────────────────────────── #}
+    <div class="pa-section">Time held</div>
+    {% include "_partials/chart_bars.html" with bars=age_bars max=age_max peak=age_peak unit="hours a position has been open" when="the open book, right now" empty="No open position records when it was opened, so none of them can be aged." %}
+    <p class="sv-bars-cap">{{ age_note }}</p>
+
+    {% if oldest %}
+    <div style="margin-top:12px;">
+        {% for p in oldest %}
+        <div class="oc-mini-row">
+            <span class="oc-mini-sym">{{ p.symbol }}</span>
+            {# `direction` is the field both books normalise onto. The old #}
+            {# copy of this panel bound its side column to a name Position #}
+            {# does not have, so the column was permanently blank. #}
+            <span class="oc-mini-side {% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ p.direction|upper }}</span>
+            <span class="oc-mini-meta">held {{ p.age_text }} &middot; {{ p.asset_class|upper }}</span>
+            {# R against the stop this position OPENED with, and an em-dash #}
+            {# when no stop was ever recorded or nothing could mark it — #}
+            {# never 0.00R, which reads as a trade sitting at entry. #}
+            <span class="oc-mini-pnl {{ p.r_tone }}">{{ p.r_text }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+</div>
+{% endif %}

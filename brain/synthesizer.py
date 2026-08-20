@@ -27,6 +27,62 @@ from ai_agents.base_agent import BaseAgent
 logger = logging.getLogger(__name__)
 
 
+# The window realized-R evidence is measured over. Named because the note
+# below has to quote the same number the query used — a note that says "no
+# closes in 14 days" while the query looked at 30 is worse than no note.
+TRACK_RECORD_WINDOW_DAYS = 14
+
+
+def _no_track_record_reason() -> str:
+    """Why there is no realized-R evidence — in the terms an operator acts on.
+
+    The distinction that matters is between "nothing has closed yet" (wait,
+    or close something) and "things closed but could not be graded" (a real
+    fault, in the stop that was never recorded or the rule tag that was never
+    written). Both produce an empty table; only one is a bug, and a briefing
+    that cannot tell them apart escalates a young book as broken telemetry.
+    """
+    from datetime import timedelta as _td
+    try:
+        from bot_program.models import AssetBotTrade
+    except Exception:  # pragma: no cover - app not installed
+        return "NOT MEASURED — the bot trade book is unavailable."
+
+    since = timezone.now() - _td(days=TRACK_RECORD_WINDOW_DAYS)
+    closed = AssetBotTrade.objects.filter(status="CLOSED", closed_at__gte=since)
+    n_closed = closed.count()
+    if not n_closed:
+        n_open = AssetBotTrade.objects.filter(
+            status__in=("OPEN", "CLOSE_PENDING")).count()
+        return (
+            f"NO REALIZED R YET — nothing has closed in the last "
+            f"{TRACK_RECORD_WINDOW_DAYS} days ({n_open} position(s) still "
+            f"open). The measurement pipeline is not broken; a book that has "
+            f"not closed a trade has produced no evidence to measure. Rules "
+            f"cannot be promoted or paused on evidence until it does, and "
+            f"every status call is inference rather than realized R — but "
+            f"that is the age of the book, not a fault to fix.")
+
+    n_untagged = closed.filter(rule_name="").count()
+    n_ungraded = closed.exclude(rule_name="").filter(
+        realized_r__isnull=True).count()
+    faults = []
+    if n_untagged:
+        faults.append(f"{n_untagged} closed with no rule_name, so there is "
+                      f"nothing to attribute them to")
+    if n_ungraded:
+        faults.append(f"{n_ungraded} closed without a realized R, which "
+                      f"happens when the trade carried no stop to denominate "
+                      f"one")
+    if faults:
+        return (f"GRADING GAP — {n_closed} trade(s) closed in the last "
+                f"{TRACK_RECORD_WINDOW_DAYS} days but none reached this "
+                f"table: {'; '.join(faults)}. This one IS a fault.")
+    return (f"{n_closed} trade(s) closed in the last "
+            f"{TRACK_RECORD_WINDOW_DAYS} days but none carried a gradable "
+            f"outcome. Unexpected — worth looking at directly.")
+
+
 # ── Snapshot builder (no Claude call) ─────────────────────────────────────
 
 def _build_world_snapshot(*, max_obs: int = 80) -> dict:
@@ -111,9 +167,19 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
         snap["open_positions_truncated"] = True
 
     # 3. Per-rule recent track record.
+    #
+    # An empty list is THREE different situations, and the strategist read
+    # them as one. A briefing called this "the highest-leverage fix on the
+    # list" and told the operator the telemetry was broken, when the true
+    # answer was that a young book had simply not closed anything yet:
+    # nothing was broken, there was nothing to measure. So the emptiness now
+    # states its own cause, and states the window it was measured over —
+    # "no closes in 14 days" and "the query failed" are opposite instructions
+    # to whoever reads this next.
+    snap["rule_track_records_window_days"] = TRACK_RECORD_WINDOW_DAYS
     try:
         from bot_program.bot_grading import bot_performance_summary
-        rows = bot_performance_summary(days=14, min_n=1)
+        rows = bot_performance_summary(days=TRACK_RECORD_WINDOW_DAYS, min_n=1)
         snap["rule_track_records"] = [
             {
                 "rule_name": r["rule_name"],
@@ -125,8 +191,13 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
             }
             for r in rows[:30]
         ]
-    except Exception:
+        if not snap["rule_track_records"]:
+            snap["rule_track_records_note"] = _no_track_record_reason()
+    except Exception as e:  # noqa: BLE001
         snap["rule_track_records"] = []
+        snap["rule_track_records_note"] = (
+            f"NOT MEASURED — the track-record query itself failed ({e}). "
+            f"This is a platform fault, not an empty book.")
 
     # 4. Regime probes for top tracked instruments — sample to keep tokens low.
     try:

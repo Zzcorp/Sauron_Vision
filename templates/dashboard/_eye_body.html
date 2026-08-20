@@ -9,7 +9,7 @@
     <div class="stat-box fade-in-up delay-2">
         <div class="stat-label">P&amp;L 24h</div>
         <div class="stat-value {% if pnl_24h.total > 0 %}up{% elif pnl_24h.total < 0 %}down{% endif %}">
-            {{ pnl_24h.total|floatformat:2 }}
+            {{ pnl_24h.total|floatformat:2 }}{% if pnl_24h.pct is not None %} <span class="pnl-pct">({% if pnl_24h.pct > 0 %}+{% endif %}{{ pnl_24h.pct|floatformat:2 }}%)</span>{% else %} <span class="pnl-pct sv-unknown" title="The book value these limits are a percentage of has never been set">(&mdash;)</span>{% endif %}
         </div>
     </div>
     <div class="stat-box fade-in-up delay-3">
@@ -209,7 +209,7 @@
                     <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);">
                         <span>{{ ac }}</span>
                         <span class="{% if info.pnl > 0 %}up{% elif info.pnl < 0 %}down{% endif %}">
-                            {{ info.pnl|floatformat:2 }} <span style="color:var(--text-muted);font-size:10px;">({{ info.count }})</span>
+                            {{ info.pnl|floatformat:2 }}{% if info.pct is not None %} <span class="pnl-pct">({% if info.pct > 0 %}+{% endif %}{{ info.pct|floatformat:2 }}%)</span>{% endif %} <span style="color:var(--text-muted);font-size:10px;">({{ info.count }})</span>
                         </span>
                     </div>
                 {% endfor %}
