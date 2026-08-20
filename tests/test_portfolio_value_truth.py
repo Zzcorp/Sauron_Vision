@@ -552,3 +552,93 @@ class SurfacesAgreeTests(TestCase):
         r = self.client.get("/reports/portfolio/", HTTP_HOST=HOST)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r["Content-Type"], "application/pdf")
+
+
+class RealizedPnlIsInTheBookTests(TestCase):
+    """A closed trade has to move the book, or the book is a snapshot of
+    what is open and nothing else.
+
+    Nothing debits `cash_available` on a simulated fill, and a closed row
+    is no longer open to be marked — so a paper trade that lost 500 and
+    closed moved the value by EXACTLY ZERO. An account that had lost half
+    its money over fifty closed trades still read as its seeded capital,
+    and every risk ceiling stayed a percentage of a number that could only
+    ever go up.
+    """
+
+    def setUp(self):
+        self.user = _user("pv_real")
+        self.pf = _book(self.user)
+        self.cash = float(self.pf.cash_available)
+
+    def _closed(self, pnl, paper=True):
+        from bot_program.models import AssetBotTrade
+        cfg = _config(self.user, name=f"real-{pnl}-{paper}")
+        trade = AssetBotTrade.objects.create(
+            config=cfg, asset_class="crypto", symbol="BTCUSD", side="BUY",
+            qty=Decimal("1"), entry_price=Decimal("100"),
+            exit_price=Decimal("90"), status="CLOSED",
+            pnl=Decimal(str(pnl)), paper=paper)
+        AssetBotTrade.objects.filter(pk=trade.pk).update(
+            closed_at=timezone.now())
+        return trade
+
+    def test_a_closed_loser_takes_it_off_the_book(self):
+        self._closed(-500)
+        self.assertAlmostEqual(_value(self.user, self.pf).value,
+                               self.cash - 500, places=2)
+
+    def test_a_closed_winner_puts_it_on(self):
+        self._closed(900)
+        self.assertAlmostEqual(_value(self.user, self.pf).value,
+                               self.cash + 900, places=2)
+
+    def test_losses_and_wins_accumulate_since_inception(self):
+        """Not a window: the seeded capital is the starting point, and a
+        window would drift the book back toward the seed as trades aged
+        out of it."""
+        for pnl in (-500, -300, 900):
+            self._closed(pnl)
+        self.assertAlmostEqual(_value(self.user, self.pf).value,
+                               self.cash + 100, places=2)
+
+    def test_realized_and_unrealized_both_land(self):
+        self._closed(-500)
+        _quote("BTCUSD", "110")
+        _trade(self.user, "BTCUSD", qty="2", entry="100")   # +20 open
+        book = _value(self.user, self.pf)
+        self.assertAlmostEqual(book.value, self.cash - 500 + 20, places=2)
+        self.assertAlmostEqual(book.unrealized, 20.0, places=2)
+
+    def test_a_still_open_trade_is_not_counted_as_realized(self):
+        from portfolio.services import _simulated_realized_pnl
+        _quote("BTCUSD", "110")
+        _trade(self.user, "BTCUSD", qty="1", entry="100")
+        self.assertEqual(_simulated_realized_pnl(self.user), 0.0)
+
+    def test_a_funded_trade_is_not_counted_here(self):
+        """On a broker-synced book the cash column IS the broker's balance
+        and already holds every realized gain and loss. Counting them here
+        as well would add the whole trading history to the account twice."""
+        from portfolio.services import _simulated_realized_pnl
+        self._closed(-500, paper=False)
+        self.assertEqual(_simulated_realized_pnl(self.user), 0.0)
+
+    def test_another_users_history_is_not_in_this_book(self):
+        from portfolio.services import _simulated_realized_pnl
+        other = _user("pv_real_other")
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        cfg = AssetBotConfig.objects.create(
+            user=other, asset_class="crypto", name="theirs",
+            capital=Decimal("10000"))
+        AssetBotTrade.objects.create(
+            config=cfg, asset_class="crypto", symbol="BTCUSD", side="BUY",
+            qty=Decimal("1"), entry_price=Decimal("100"),
+            status="CLOSED", pnl=Decimal("-9000"), paper=True)
+        self.assertEqual(_simulated_realized_pnl(self.user), 0.0)
+
+    def test_no_history_is_a_measured_zero(self):
+        from portfolio.services import _simulated_realized_pnl
+        self.assertEqual(_simulated_realized_pnl(self.user), 0.0)
+        self.assertAlmostEqual(_value(self.user, self.pf).value, self.cash,
+                               places=2)

@@ -142,7 +142,12 @@ template branches, each a fresh chance to print a confident zero.
     {% if positions %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th class="num">R</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
+        {# Capital sits beside the prices because it is the question the price #}
+{# cells cannot answer: an entry of 2,400 says nothing about whether this #}
+{# position is a rounding error or half the pool. Every price cell carries #}
+{# its own percentage underneath — a distance for the levels, the move #}
+{# since entry for the mark — so no cell asks the operator to divide. #}
+<thead><tr><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Capital</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th class="num">R</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
         <tbody>
         {# ── The row's own numbers are unchanged; the data-pos-* set feeds the ── #}
         {# ── dwell card (static/js/sv-position-card.js), which answers what   ── #}
@@ -171,6 +176,8 @@ template branches, each a fresh chance to print a confident zero.
             data-pos-stop-pct="{{ d.stop_pct }}" data-pos-stop-through="{{ d.stop_through }}"
             data-pos-target-pct="{{ d.target_pct }}" data-pos-target-through="{{ d.target_through }}"
             data-pos-progress="{{ d.progress }}"
+            data-pos-mark-pct="{{ d.mark_pct }}"
+            data-pos-committed-pct="{{ d.committed_pct }}"
             {# R comes off the ROW's own live cell, never from a second #}
             {# calculation: the card floats directly over the column that #}
             {# prints it, and two R's on one row is the one disagreement #}
@@ -211,13 +218,35 @@ template branches, each a fresh chance to print a confident zero.
             <td class="nowrap"><span class="pos-sym-cell">{% if instrument_url %}<a href="{{ instrument_url }}" class="pos-sym-link" aria-label="{{ p.instrument.symbol }} — instrument page">{{ p.instrument.symbol }}</a>{% else %}<span class="pos-sym-plain">{{ p.instrument.symbol|default:"—" }}</span>{% endif %}{% if d.href %}<a href="{{ d.href }}" class="pos-row-detail" aria-label="Full detail for this {{ p.instrument.symbol }} trade">detail&nbsp;&rsaquo;</a>{% endif %}</span></td>
             <td><span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ p.direction }}</span></td>
             <td class="num" style="font-family: var(--font-mono);">{{ p.quantity }}</td>
-            <td class="num" style="font-family: var(--font-mono);">{{ p.entry_price }}</td>
+            {# What it ties up, and out of how much. `committed_kind` matters: #}
+            {# on a levered position the money down is MARGIN, and printing #}
+            {# the notional as the cost overstates what was spent by 30x. #}
+            <td class="num pos-cap-cell" title="{% if d.committed_kind == 'margin' %}Margin posted — the broker sets it; notional exposure is larger{% else %}Cash cost at entry: quantity x entry price{% endif %}">
+                {% if d.committed %}<span class="pos-cap-money">{{ d.committed }}</span>{% if d.committed_pct %}<span class="pos-cap-share">{{ d.committed_pct }}% of pool</span>{% endif %}{% if d.committed_kind == 'margin' %}<span class="pos-cap-kind">margin</span>{% endif %}
+                {% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
+            </td>
+            <td class="num pos-price-cell" style="font-family: var(--font-mono);">
+                <span class="pos-price">{{ p.entry_price }}</span><span class="pos-price-pct is-ref">entry</span>
+            </td>
             {# None is a real state here (no quote for the symbol, or an #}
             {# options row with no premium feed) — render the muted em-dash, #}
             {# never the string "None" painted loss-red. #}
-            <td class="num" style="font-family: var(--font-mono); font-weight: 600;" data-sv-live-key="{{ p.key }}.last">{% if p.current_price is not None %}{{ p.last_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
-            <td class="num" style="font-family: var(--font-mono); color: var(--accent-red);">{{ p.stop_loss|default:"-" }}</td>
-            <td class="num" style="font-family: var(--font-mono); color: var(--accent-green);">{{ p.take_profit|default:"-" }}</td>
+            {# The mark's percentage is the PRICE move since entry, signed by #}
+            {# the price. On a short it is the opposite of the P&L sign — a #}
+            {# mark 4% below entry is a 4% fall that made money — so the two #}
+            {# columns deliberately disagree rather than one of them lying. #}
+            <td class="num pos-price-cell" style="font-family: var(--font-mono); font-weight: 600;" data-sv-live-key="{{ p.key }}.last">
+                {% if p.current_price is not None %}<span class="pos-price">{{ p.last_text }}</span>{% if d.mark_pct %}<span class="pos-price-pct sign-{{ d.mark_pct|sign_class }}">{{ d.mark_pct }}% since entry</span>{% endif %}
+                {% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
+            </td>
+            <td class="num pos-price-cell is-stop" style="font-family: var(--font-mono);">
+                {% if p.stop_loss %}<span class="pos-price">{{ p.stop_loss }}</span>{% if d.stop_pct %}<span class="pos-price-pct">{% if d.stop_through %}THROUGH by {{ d.stop_pct }}%{% else %}{{ d.stop_pct }}% away{% endif %}</span>{% endif %}
+                {% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
+            </td>
+            <td class="num pos-price-cell is-target" style="font-family: var(--font-mono);">
+                {% if p.take_profit %}<span class="pos-price">{{ p.take_profit }}</span>{% if d.target_pct %}<span class="pos-price-pct">{% if d.target_through %}THROUGH by {{ d.target_pct }}%{% else %}{{ d.target_pct }}% away{% endif %}</span>{% endif %}
+                {% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
+            </td>
             <td class="num {{ p.pnl_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pnl">{% if p.unrealized_pnl is not None %}{{ p.pnl_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
             <td class="num {{ p.pct_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pct">{% if p.unrealized_pnl_pct is not None %}{{ p.pct_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
             {# R against the stop the position OPENED with, not the current #}
@@ -516,6 +545,45 @@ template branches, each a fresh chance to print a confident zero.
     font-family: var(--font-mono); font-size: 13px; font-weight: 600;
     color: var(--text-primary);
 }
+/* ── Price and capital cells ──────────────────────────────────────────
+   A price with no percentage under it asks the operator to divide in their
+   head, every row, on every glance — and the answer they most need (how far
+   is my stop, how far is my target, what has this actually done) is exactly
+   the one the raw number withholds.
+
+   Two lines per cell: the figure at full weight, its percentage under it at
+   9px in the muted ink. The percentage never competes with the price; it
+   only stops the price being ambiguous. */
+.pos-price-cell, .pos-cap-cell {
+    line-height: 1.25;
+    /* Column widths were set by four bare numbers; two-line cells need the
+       table to stop distributing space by content alone or the percentage
+       wraps mid-phrase. */
+    white-space: nowrap;
+}
+.pos-price, .pos-cap-money { display: block; }
+.pos-price-pct, .pos-cap-share, .pos-cap-kind {
+    display: block;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: .04em;
+    color: var(--text-muted); font-weight: 400;
+}
+/* The entry is the reference every other percentage is measured from, so it
+   is labelled rather than given a meaningless 0.00%. */
+.pos-price-pct.is-ref { opacity: .55; }
+/* Stop and target keep their colour on the PRICE, where it means "this is
+   the losing end" — not on the distance, which is neutral information. */
+.pos-price-cell.is-stop .pos-price { color: var(--accent-red); }
+.pos-price-cell.is-target .pos-price { color: var(--accent); }
+
+.pos-cap-money { font-family: var(--font-mono); font-weight: 600; }
+/* The share of the pool is the point of this column, so it is the one
+   sub-line that is allowed to be read before the money above it. */
+.pos-cap-share { color: var(--text-secondary); }
+.pos-cap-kind {
+    color: var(--accent-gold-ink); text-transform: uppercase;
+    letter-spacing: .1em; font-size: 8.5px;
+}
+
 /* `.sign-*` lives in sauron.css and ties with `.ph-detail-value` on
    specificity — and this block is loaded AFTER it, so the plain colour won
    and the ROI cell lost its win/loss colour entirely. Two classes beat one. */

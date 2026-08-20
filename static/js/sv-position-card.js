@@ -162,8 +162,14 @@
         var box = el(parent, "div", "pos-pop-ledger");
         cap(box, "capital" + (ccy ? " · " + ccy : ""));
 
+        /* The share of the pool rides with the money, because 4,800 says
+         * nothing about whether this position is a rounding error or half
+         * the book — and "48% of pool" is the sentence an operator sizes
+         * by without dividing anything in their head. */
+        var share = val(row, "committed-pct");
         mrow(box, margin ? "Margin" : "Cost at entry", val(row, "committed"),
-             margin ? "broker-set — not recorded" : "qty × entry");
+             (share ? share + "% of the pool · " : "") +
+             (margin ? "broker-set — not recorded" : "qty × entry"));
         if (margin) {
             /* Named as exposure, never as cost — see the note above. */
             mrow(box, "Notional", val(row, "notional"), "levered exposure");
@@ -277,7 +283,16 @@
             if (r.price === null) priceCell.className += " sv-unknown";
             var note = "";
             if (r.role === "mark") {
-                note = r.price === null ? "no quote" : "now";
+                /* "now" said WHEN the number is from and nothing about what
+                 * it means. The move since entry is the reason an operator
+                 * looks at this rung at all, and it is signed by the PRICE:
+                 * on a short a mark below entry is a fall that made money,
+                 * so this deliberately disagrees with the P&L sign rather
+                 * than one of the two lying about the market. */
+                var mp = num(row, "mark-pct");
+                note = r.price === null ? "no quote"
+                     : (mp === null ? "now"
+                        : (mp > 0 ? "+" : "") + mp.toFixed(2) + "% since entry");
             } else if (r.role === "entry") {
                 var moved = num(row, "initial-stop");
                 var stopNow = num(row, "stop");
@@ -286,7 +301,11 @@
                  * moved it, saying so is the difference between "this is
                  * still a 1R risk" and "this is now locked in". */
                 note = (moved !== null && stopNow !== null && moved !== stopNow)
-                    ? "stop moved from " + val(row, "initial-stop") : "";
+                    ? "stop moved from " + val(row, "initial-stop")
+                    /* Not blank and not 0.00%: the entry is what every other
+                     * percentage on this ladder is measured FROM, and saying
+                     * so is more use than printing a zero. */
+                    : "the reference";
             } else if (r.pct === null) {
                 note = "";
             } else if (r.through) {

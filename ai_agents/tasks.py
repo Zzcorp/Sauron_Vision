@@ -278,7 +278,15 @@ def run_anomaly_detection():
         # LiveQuote table the scan read ("/market-data/" was never a route
         # and 404ed for months). An untracked symbol falls back too: every
         # asset is reachable from the list, none from a 404.
-        deep_link = items[0]["url"] if len(severe) == 1 else ""
+        # Deep-link whenever every severe anomaly points at the SAME asset,
+        # not only when there is exactly one of them. The scan fires
+        # repeatedly on one instrument — nine times on EURGBP in a day is an
+        # ordinary reading — and "several anomalies, all on EURGBP" is the
+        # case where the operator most wants to land on EURGBP. It used to
+        # count rows rather than distinct assets, so that alert dropped them
+        # on the quotes list to find it themselves.
+        urls = {i["url"] for i in items if i.get("url")}
+        deep_link = urls.pop() if len(urls) == 1 else ""
         Notification.create_for_all(
             notification_type="system",
             title=f"Market Anomaly Alert ({len(severe)} severe)",

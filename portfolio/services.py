@@ -414,6 +414,36 @@ class BookValue(NamedTuple):
         return self.cash / self.value * 100
 
 
+
+def _simulated_realized_pnl(user) -> float:
+    """Cumulative realized P&L over this user's CLOSED simulated trades.
+
+    Since inception, because the seeded capital is the starting point and
+    the book value is what that capital has become. A window would make the
+    number drift back toward the seed as old trades aged out of it.
+
+    Only `paper` rows. A funded row's realized P&L is already inside the
+    broker's cash balance, and counting it here as well would add the whole
+    trading history to the account twice.
+
+    0.0 rather than None on an empty history: a book with no closed trades
+    has realized exactly nothing, which is a measurement.
+    """
+    if user is None:
+        return 0.0
+    try:
+        from django.db.models import Sum
+        from bot_program.models import AssetBotTrade
+        total = (AssetBotTrade.objects
+                 .filter(config__user=user, status="CLOSED", paper=True)
+                 .aggregate(total=Sum("pnl"))["total"])
+        return float(total or 0.0)
+    except Exception:  # noqa: BLE001 — a book value must not 500 a page
+        logger.warning("Could not read realized P&L for %s; the book value "
+                       "excludes closed trades this read.", user, exc_info=True)
+        return 0.0
+
+
 def live_book_value(user, portfolio=None, book=None) -> BookValue:
     """Cash plus everything open, marked — the platform's one book value.
 
@@ -499,6 +529,19 @@ def live_book_value(user, portfolio=None, book=None) -> BookValue:
     # never left it contributes only its P&L.
     simulated_pnl = 0.0
     funded_marked = 0.0
+    # REALIZED P&L on closed simulated trades, since inception.
+    #
+    # Without this the book was a snapshot of what is open and nothing else:
+    # a paper trade that lost 500 and closed moved the value by exactly
+    # zero, because nothing debits `cash_available` on a simulated fill and
+    # the row is no longer open to be marked. An account that had lost half
+    # its money over fifty closed trades still read as its seeded capital.
+    #
+    # Funded rows are deliberately NOT summed here: on a broker-synced book
+    # the cash column IS the broker's balance and already has every realized
+    # gain and loss in it, so adding them again would double-count the whole
+    # trading history.
+    simulated_realized = _simulated_realized_pnl(user)
     for row in rows:
         if getattr(row, "current_price", None) is None \
                 or getattr(row, "unrealized_pnl", None) is None:
@@ -510,7 +553,8 @@ def live_book_value(user, portfolio=None, book=None) -> BookValue:
                                  * float(row.quantity or 0))
 
     value = (None if cash is None or marked is None
-             else round(cash + funded_marked + simulated_pnl, 2))
+             else round(cash + funded_marked + simulated_pnl
+                        + simulated_realized, 2))
 
     if n_open == 0:
         coverage = "Nothing open in either book."

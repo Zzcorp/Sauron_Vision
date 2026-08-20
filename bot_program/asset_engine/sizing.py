@@ -48,7 +48,33 @@ logger = logging.getLogger(__name__)
 
 # Fraction of equity risked per trade, and the ceiling nothing may exceed.
 DEFAULT_RISK_FRACTION = 0.0025   # 0.25%
-MAX_RISK_FRACTION = 0.010        # 1.0% — a hard cap, not a target
+
+# 5%, raised from 1% at the operator's request so a SMALL account can put
+# enough at risk for a win to clear its own costs. On $200 the old ceiling
+# allowed $2 a trade, which the IB commission and the spread eat most of;
+# the arithmetic of a small book is what this ceiling has to admit.
+#
+# It is a CEILING and not a target, and the default above is unchanged: an
+# operator who never touches extras['risk_per_trade_pct'] still risks 0.25%.
+# Reaching this number is an explicit act.
+#
+# What 5% means, stated so nobody has to derive it after a bad week. A
+# losing streak of n costs 1 - (1 - f)^n of the book:
+#
+#       5 losses  -> -23%      10 losses -> -40%      20 losses -> -64%
+#
+# Ten losses in a row is an ordinary run for a 45%-win-rate strategy — it
+# happens roughly once in every 500 trades — so 5% is the boundary where a
+# normal bad streak is survivable and a slightly worse one is not. Above it
+# the risk of ruin stops being linear in f, which is why the cap exists at
+# all rather than the field simply being free.
+MAX_RISK_FRACTION = 0.050        # 5.0% — a hard cap, not a target
+
+#: Past this, the preview says out loud that the size is aggressive. Not a
+#: refusal and not a clamp — the operator asked for the room and has it. It
+#: exists so that a number typed once into extras months ago cannot keep
+#: sizing at 5% silently.
+AGGRESSIVE_RISK_FRACTION = 0.02  # 2%
 
 # Risk sizing fixes the denominator and unbounds the numerator:
 # notional = equity * f / stop_fraction. At f=0.25% and the 0.2% stop floor

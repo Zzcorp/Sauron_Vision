@@ -172,17 +172,62 @@ class DiscretionaryPathTests(TestCase):
         book.max_single_position_pct = 20.0
         book.save(update_fields=["current_value", "max_single_position_pct"])
 
-    def test_a_third_clip_is_refused_before_anything_is_liquidated(self):
-        """The refusal must not arrive AFTER an irreversible funding close —
-        that costs the operator the position and the trade for one click."""
-        from bot_program.manual_trade import execute_asset_trade
-        _clip(self.cfg, qty="2")
-        _clip(self.cfg, qty="2")
+    def _aged_clip(self, **kw):
+        """A clip old enough not to trip the 60s duplicate window."""
+        from datetime import timedelta
+        from django.utils import timezone
+        from bot_program.models import AssetBotTrade
+        clip = _clip(self.cfg, **kw)
+        AssetBotTrade.objects.filter(pk=clip.pk).update(
+            opened_at=timezone.now() - timedelta(hours=2))
+        return clip
+
+    def test_a_third_clip_is_REPORTED_and_still_allowed(self):
+        """It used to refuse. A symbol-and-side ceiling is a statement about
+        how much of one idea the operator wants to own, and owning more of
+        an idea on purpose is a decision a human is allowed to make — the
+        bots still cannot. The number is put in front of them first."""
+        from bot_program.manual_trade import (execute_asset_trade,
+                                              preview_asset_trade)
+        self._aged_clip(qty="2")
+        self._aged_clip(qty="2")
+
+        state = preview_asset_trade(self.user, self.inst, "BUY")["concentration"]
+        self.assertFalse(state["ok"])
+        self.assertIn("XAUUSD", state["reason"])
+        self.assertIn("4,000.00", state["reason"], "no arithmetic to judge")
+
         out = execute_asset_trade(self.user, self.inst, "BUY")
-        self.assertIn("error", out)
-        self.assertIn("XAUUSD", out["error"])
-        self.assertEqual(out.get("closed", []), [],
-                         "something was liquidated before the refusal")
+        self.assertNotIn("error", out)
+
+    def test_taking_it_past_the_ceiling_is_recorded(self):
+        """An override nobody recorded cannot be reviewed afterwards."""
+        from bot_program.manual_trade import execute_asset_trade
+        from bot_program.models import AssetBotTrade
+        self._aged_clip(qty="2")
+        self._aged_clip(qty="2")
+        out = execute_asset_trade(self.user, self.inst, "BUY")
+        trade = AssetBotTrade.objects.get(pk=out["trade_id"])
+        recorded = trade.metadata["concentration_at_entry"]
+        self.assertFalse(recorded["ok"])
+        self.assertIn("XAUUSD", recorded["reason"])
+
+    def test_a_clip_inside_the_ceiling_records_that_it_was(self):
+        from bot_program.manual_trade import execute_asset_trade
+        from bot_program.models import AssetBotTrade
+        out = execute_asset_trade(self.user, self.inst, "BUY")
+        trade = AssetBotTrade.objects.get(pk=out["trade_id"])
+        self.assertTrue(trade.metadata["concentration_at_entry"]["ok"])
+
+    def test_nothing_is_liquidated_just_to_measure_it(self):
+        """The state is computed BEFORE any funding close, so the operator
+        reads the number while the book is still the one they were looking
+        at rather than after a close has moved it."""
+        from bot_program.manual_trade import execute_asset_trade
+        self._aged_clip(qty="2")
+        self._aged_clip(qty="2")
+        out = execute_asset_trade(self.user, self.inst, "BUY")
+        self.assertEqual(out.get("closed", []), [])
 
 
 class AdvisoryIsReportedTests(TestCase):
@@ -216,3 +261,73 @@ class AdvisoryIsReportedTests(TestCase):
             out = _manual_rule_advisory()
         self.assertEqual(out["status"], "unknown")
         self.assertFalse(out["flagged"])
+
+
+class RiskCeilingTests(TestCase):
+    """The per-trade risk ceiling, raised from 1% to 5% so a SMALL account
+    can put enough at risk for a win to clear its own costs.
+
+    On $200 the old ceiling allowed $2 a trade, which commission and spread
+    eat most of. It is a CEILING, not a target: the default is still 0.25%,
+    and reaching 5% is an explicit act.
+    """
+
+    def setUp(self):
+        self.user = _user("risk_u")
+        _instrument()
+
+    def _cfg_with(self, pct=None, capital="200"):
+        from bot_program.manual_trade import manual_config_for
+        cfg = manual_config_for(self.user, "commodity")
+        cfg.capital = Decimal(capital)
+        if pct is not None:
+            cfg.extras = {"risk_per_trade_pct": pct}
+        cfg.save(update_fields=["capital", "extras"])
+        return cfg
+
+    def test_the_default_is_unchanged_by_the_raise(self):
+        """An operator who never touches extras must not start swinging
+        harder because somebody else asked for room."""
+        from bot_program.asset_engine.sizing import (DEFAULT_RISK_FRACTION,
+                                                     risk_fraction)
+        self.assertEqual(DEFAULT_RISK_FRACTION, 0.0025)
+        self.assertEqual(risk_fraction(self._cfg_with()), 0.0025)
+
+    def test_the_ceiling_is_five_percent(self):
+        from bot_program.asset_engine.sizing import MAX_RISK_FRACTION
+        self.assertEqual(MAX_RISK_FRACTION, 0.05)
+
+    def test_a_value_under_the_ceiling_is_honoured_exactly(self):
+        from bot_program.asset_engine.sizing import risk_fraction
+        self.assertAlmostEqual(risk_fraction(self._cfg_with(2.0)), 0.02)
+        self.assertAlmostEqual(risk_fraction(self._cfg_with(5.0)), 0.05)
+
+    def test_asking_for_more_than_the_ceiling_is_clamped_not_honoured(self):
+        """The cap is why this is a ceiling and not a free field."""
+        from bot_program.asset_engine.sizing import risk_fraction
+        self.assertAlmostEqual(risk_fraction(self._cfg_with(25.0)), 0.05)
+        self.assertAlmostEqual(risk_fraction(self._cfg_with(100.0)), 0.05)
+
+    def test_a_small_book_can_now_risk_enough_to_clear_its_costs(self):
+        """The reason for the raise, in money: $200 at the old 1% ceiling
+        risked $2 a trade."""
+        from bot_program.asset_engine.sizing import risk_fraction
+        cfg = self._cfg_with(5.0, capital="200")
+        risk_dollars = float(cfg.capital) * risk_fraction(cfg)
+        self.assertAlmostEqual(risk_dollars, 10.0)
+
+    def test_aggressive_sizing_is_flagged_with_the_streak_arithmetic(self):
+        """The number that changes a mind is not the per-trade percentage,
+        which always sounds small — it is what a normal bad run does."""
+        from bot_program.manual_trade import _risk_appetite
+        out = _risk_appetite(self._cfg_with(5.0))
+        self.assertTrue(out["flagged"])
+        self.assertTrue(out["at_cap"])
+        self.assertAlmostEqual(out["ten_loss_drawdown_pct"], 40.1, places=1)
+        self.assertIn("ten losses in a row", out["reason"])
+
+    def test_ordinary_sizing_is_not_flagged(self):
+        """Friction on the safe path teaches operators to ignore it."""
+        from bot_program.manual_trade import _risk_appetite
+        self.assertFalse(_risk_appetite(self._cfg_with())["flagged"])
+        self.assertFalse(_risk_appetite(self._cfg_with(1.0))["flagged"])

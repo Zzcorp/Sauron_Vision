@@ -311,9 +311,10 @@ class SizingBoundsTests(TestCase):
         self.assertGreater(p["risk_per_unit"], 0)
         self.assertGreater(p["max_qty"], p["qty"],
                            "the default size is already at the ceiling")
-        # 1.0% of a $10,000 pool — the hard cap from sizing.py, not the
-        # 0.25% default budget.
-        self.assertAlmostEqual(p["max_risk_dollars"], 100.0, places=2)
+        # 5.0% of a $10,000 pool — the hard cap from sizing.py, raised from
+        # 1% so a SMALL account can risk enough for a win to clear its own
+        # costs. Not the 0.25% default budget, which is unchanged.
+        self.assertAlmostEqual(p["max_risk_dollars"], 500.0, places=2)
         # 20% notional for crypto.
         self.assertAlmostEqual(p["max_notional"], 2000.0, places=2)
 
@@ -463,10 +464,21 @@ class SizeOverrideRefusalTests(TestCase):
     def test_an_override_past_the_risk_ceiling_is_refused(self):
         """MAX_RISK_FRACTION is documented as a hard cap, not a target. An
         override may reach it and not a cent past it, or realized_r stops
-        being one unit across the book. A stop WIDER than 5% makes the risk
-        ceiling the binding one."""
+        being one unit across the book.
+
+        Which of the two ceilings BINDS is set by the stop: sizing solves
+        notional = equity x f / stop_fraction, so the risk ceiling binds
+        only once the stop is wider than f / notional_cap. With f raised to
+        5% and the default 20% cap that boundary is a 25% stop — wider than
+        MAX_STOP_FRACTION allows — so this config lifts the notional cap in
+        order to test the risk one at an ordinary stop distance.
+        """
         from bot_program.manual_trade import (execute_take_trade,
+                                              manual_config_for,
                                               preview_take_trade)
+        cfg = manual_config_for(self.user, "crypto")
+        cfg.extras = {"max_notional_fraction": 2.0}
+        cfg.save(update_fields=["extras"])
         sig = _signal(self.inst, stop=54000, target=66000)
         p = preview_take_trade(self.user, sig)
         self.assertNotIn("error", p)

@@ -283,6 +283,52 @@ def _concentration_guard(user, inst, side, cls, cfg, close_ids):
     return state["reason"]
 
 
+
+def _risk_appetite(cfg) -> dict:
+    """What fraction of the pool one stop-out costs, and how that reads.
+
+    `flagged` past AGGRESSIVE_RISK_FRACTION, with the losing-streak
+    arithmetic attached — the number that matters is not the per-trade
+    percentage, which always sounds small, but what a normal bad run does
+    to the book.
+    """
+    from bot_program.asset_engine.sizing import (AGGRESSIVE_RISK_FRACTION,
+                                                 MAX_RISK_FRACTION,
+                                                 max_notional_fraction,
+                                                 min_stop_fraction,
+                                                 risk_fraction)
+    f = risk_fraction(cfg)
+    ten = 1.0 - (1.0 - f) ** 10
+    cls = getattr(cfg, "asset_class", "") or ""
+    # The two knobs are COUPLED and the coupling is not obvious: sizing
+    # solves notional = equity * f / stop_fraction, so holding notional
+    # under the cap forces a stop no tighter than f / cap. Raise the risk
+    # budget alone and the platform does not risk more — it WIDENS the
+    # stop, silently turning the setup the signal proposed into a
+    # different trade. Said out loud here, with the number.
+    cap = max_notional_fraction(cfg, cls)
+    floor = min_stop_fraction(cfg, cls, f)
+    return {
+        "fraction": round(f, 6),
+        "pct": round(f * 100, 3),
+        "cap_pct": round(MAX_RISK_FRACTION * 100, 1),
+        "at_cap": f >= MAX_RISK_FRACTION - 1e-9,
+        "flagged": f > AGGRESSIVE_RISK_FRACTION,
+        "ten_loss_drawdown_pct": round(ten * 100, 1),
+        "notional_cap_pct": round(cap * 100, 1),
+        "min_stop_pct": round(floor * 100, 2),
+        "reason": (f"{f * 100:.2f}% of the pool per trade — ten losses in a "
+                   f"row, an ordinary run, would cost "
+                   f"{ten * 100:.0f}% of it"),
+        # Only when the coupling is about to change the operator's trade.
+        "stop_floor_note": (
+            f"a {f * 100:.2f}% risk budget against a "
+            f"{cap * 100:.0f}% notional cap forces any stop wider than "
+            f"{floor * 100:.2f}% — tighter stops get WIDENED to it. Raise "
+            f"extras['max_notional_fraction'] to keep your own stops."
+            if floor > 0.03 else ""),
+    }
+
 def _manual_rule_advisory() -> dict:
     """What the brain currently thinks of hand-taken entries.
 
@@ -656,8 +702,25 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
                                      single_position_state)
     risk_book = limits_book()
     book = preflight(user, portfolio=risk_book, now=gate_now)
-    if not book["ok"]:
-        return {"error": book["reason"]}
+    # NOT a refusal on this path. The two book-level limits — daily loss and
+    # total exposure — are statements of RISK APPETITE, and on a hand-taken
+    # trade there is a human on the other end who is entitled to change
+    # their mind about their own appetite with the facts in front of them.
+    # The bots keep them as hard refusals, because nobody is there to make
+    # that call on a beat.
+    #
+    # It is reported, not hidden: it rides the preview into the confirm
+    # dialog as a warning the operator has to read past, and it is recorded
+    # on the trade so a later review can see the limit was live and
+    # overridden. What stays a refusal on this path is everything that is
+    # not appetite — no usable price, levels on the wrong side, not enough
+    # free capital in the pool to fund the position at all.
+    book_advisory = {
+        "ok": bool(book["ok"]),
+        "reason": "" if book["ok"] else book["reason"],
+        "failed_open": bool(book.get("failed_open")),
+        "checks": book.get("checks", {}),
+    }
 
     bot = make_bot(cfg)
 
@@ -893,6 +956,15 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         # end and taking the decision away from them is the one thing this
         # path exists not to do. What they must not be is uninformed.
         "rule_advisory": _manual_rule_advisory(),
+        # How hard this pool is set to swing, and whether that is unusual.
+        # The ceiling is 5% because a small book needs room for a win to
+        # clear its own costs; a number typed into extras months ago must
+        # not go on sizing at 5% without saying so.
+        "risk_appetite": _risk_appetite(cfg),
+        # The book's own limits, as information rather than as a veto. The
+        # dialog renders this as a warning the operator reads past; the
+        # execute path records it on the trade.
+        "book_advisory": book_advisory,
         # How much of this bet the book already holds under other names.
         # Reported, never applied — the same posture as existing_exposure
         # above and for the same reason: adding correlated exposure on
@@ -1032,9 +1104,16 @@ def _execute(user, inst, side, close_ids=None, signal=None,
     # position AND the trade for one click. The closes are deterministic —
     # the operator named them — so their exposure can be subtracted now
     # instead of discovered later.
+    # REPORTED, not refused — the same posture the book-level limits now
+    # take on this path. A symbol-and-side ceiling is a statement about how
+    # much of one idea the operator wants to own, and owning more of an idea
+    # on purpose is a decision a human is allowed to make. The bots keep it
+    # as a hard refusal, because a beat has nobody to make it.
+    #
+    # It is still computed BEFORE any liquidation, which was the point of
+    # putting it here: the operator sees the number while the book is still
+    # the book they were looking at, not after a funding close has moved it.
     _conc_guard = _concentration_guard(user, inst, side, cls, cfg, close_ids)
-    if _conc_guard is not None:
-        return {"error": _conc_guard}
 
     closed = []
     # The instant the book-level limits are judged as of. None while this
@@ -1266,6 +1345,19 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             # to ask whether the advisory was worth following, and it cannot
             # ask a question nobody recorded the answer to.
             "advisory_at_entry": _manual_rule_advisory(),
+            # And whether a BOOK limit was breached at the moment this was
+            # taken. It no longer refuses a hand-taken entry, so the only
+            # record that the operator traded through their own daily-loss
+            # or exposure ceiling is the one written here. A limit that is
+            # overridden without a trace is indistinguishable afterwards
+            # from a limit that was never reached.
+            "book_limit_at_entry": (preview.get("book_advisory")
+                                    or {"ok": True, "reason": ""}),
+            # And whether this ticket took the symbol past its
+            # concentration ceiling. Same reason: an override nobody
+            # recorded cannot be reviewed afterwards.
+            "concentration_at_entry": {"ok": _conc_guard is None,
+                                       "reason": _conc_guard or ""},
         }
         if level_overrides:
             # Only when something moved: an untouched ticket keeps the exact

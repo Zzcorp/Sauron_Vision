@@ -364,26 +364,68 @@ class ManualTradeGateTests(TestCase):
     def setUp(self):
         self.inst = _quote("BTCUSD", 60000)
 
-    def test_the_preview_refuses_once_the_daily_loss_limit_is_hit(self):
+    def test_the_preview_REPORTS_the_daily_loss_limit_rather_than_refusing(self):
+        """These two limits are RISK APPETITE, and on a hand-taken trade
+        there is a human entitled to change their mind about their own
+        appetite with the numbers in front of them. It used to refuse.
+
+        Reported in full, arithmetic included, so overriding it is a
+        decision rather than a shrug."""
         from bot_program.manual_trade import (manual_config_for,
                                               preview_asset_trade)
         _book(current_value=Decimal("10000"), max_daily_loss_pct=3.0)
         _closed_trade(manual_config_for(self.user, "crypto"), -500)
         out = preview_asset_trade(self.user, self.inst, "BUY")
-        self.assertIn("error", out)
-        self.assertIn("daily loss limit hit", out["error"])
+        self.assertNotIn("error", out)
+        advisory = out["book_advisory"]
+        self.assertFalse(advisory["ok"])
+        self.assertIn("daily loss limit hit", advisory["reason"])
+        self.assertIn("-300.00", advisory["reason"], "no arithmetic to judge")
 
-    def test_execute_refuses_too_rather_than_only_the_popup(self):
-        """A refusal the browser can skip past by POSTing straight to execute
-        is not a refusal."""
+    def test_the_operator_can_take_it_anyway(self):
+        """The point of the change. The trade opens."""
         from bot_program.manual_trade import (execute_asset_trade,
                                               manual_config_for)
         from bot_program.models import AssetBotTrade
         _book(current_value=Decimal("10000"), max_daily_loss_pct=3.0)
         _closed_trade(manual_config_for(self.user, "crypto"), -500)
         out = execute_asset_trade(self.user, self.inst, "BUY")
-        self.assertIn("error", out)
-        self.assertFalse(AssetBotTrade.objects.filter(status="OPEN").exists())
+        self.assertNotIn("error", out)
+        self.assertTrue(AssetBotTrade.objects.filter(
+            symbol="BTCUSD", status="OPEN").exists())
+
+    def test_taking_it_anyway_is_recorded_on_the_trade(self):
+        """A limit overridden without a trace is indistinguishable
+        afterwards from a limit that was never reached."""
+        from bot_program.manual_trade import (execute_asset_trade,
+                                              manual_config_for)
+        from bot_program.models import AssetBotTrade
+        _book(current_value=Decimal("10000"), max_daily_loss_pct=3.0)
+        _closed_trade(manual_config_for(self.user, "crypto"), -500)
+        out = execute_asset_trade(self.user, self.inst, "BUY")
+        trade = AssetBotTrade.objects.get(pk=out["trade_id"])
+        recorded = trade.metadata.get("book_limit_at_entry") or {}
+        self.assertFalse(recorded.get("ok"))
+        self.assertIn("daily loss limit hit", recorded.get("reason", ""))
+
+    def test_a_clean_book_records_that_it_was_clean(self):
+        from bot_program.manual_trade import execute_asset_trade
+        from bot_program.models import AssetBotTrade
+        _book(current_value=Decimal("10000"), max_daily_loss_pct=3.0)
+        out = execute_asset_trade(self.user, self.inst, "BUY")
+        trade = AssetBotTrade.objects.get(pk=out["trade_id"])
+        self.assertTrue(trade.metadata["book_limit_at_entry"]["ok"])
+
+    def test_the_bots_are_still_hard_stopped_by_it(self):
+        """The asymmetry is the whole design: a bot has nobody on the other
+        end to weigh the number, so for it the limit stays a refusal."""
+        from portfolio.risk_gate import preflight
+        from bot_program.manual_trade import manual_config_for
+        _book(current_value=Decimal("10000"), max_daily_loss_pct=3.0)
+        _closed_trade(manual_config_for(self.user, "crypto"), -500)
+        state = preflight(self.user)
+        self.assertFalse(state["ok"])
+        self.assertIn("daily loss limit hit", state["reason"])
 
     def test_a_losing_funding_close_cannot_refuse_the_trade_it_paid_for(self):
         """The funding closes are irreversible and they REALISE P&L, which is
@@ -420,11 +462,12 @@ class ManualTradeGateTests(TestCase):
         # because nothing was there to measure.
         held.refresh_from_db()
         self.assertLess(float(held.pnl), -300.0)
-        # And the NEXT click reads the new reality, closes included.
+        # And the NEXT click reads the new reality, closes included — as a
+        # warning now rather than as a refusal, but measured just the same.
         from bot_program.manual_trade import preview_asset_trade
+        nxt = preview_asset_trade(self.user, self.inst, "BUY")
         self.assertIn("daily loss limit hit",
-                      preview_asset_trade(self.user, self.inst,
-                                          "BUY").get("error", ""))
+                      nxt["book_advisory"]["reason"])
 
     def test_the_preview_reports_correlation_rather_than_applying_it(self):
         """Same posture as `existing_exposure`: adding correlated exposure on

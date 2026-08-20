@@ -5120,15 +5120,66 @@ thead th, td.num, td.nowrap { white-space: nowrap; }
     inset: 0;
     z-index: calc(var(--z-dialog) + var(--sv-stack, 0));
     display: none;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     padding: 20px;
-    background: rgba(3, 8, 6, 0.78);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
+    /* OPAQUE. This was rgba(...,0.78) over a 14px backdrop blur, which
+       dims the page rather than hiding it: position sizes and P&L are
+       still legible through 22% transparency, and `backdrop-filter` is
+       ignored outright in some engines and under forced-colors — leaving
+       the account plainly readable behind a screen that says LOCKED.
+       A lock that shows the data it is locking is a screensaver. */
+    background: var(--bg-dark, #030806);
+    background-image:
+        radial-gradient(ellipse 60% 45% at 50% 42%,
+                        color-mix(in srgb, var(--accent) 9%, transparent),
+                        transparent 70%),
+        radial-gradient(ellipse 120% 80% at 50% 120%,
+                        color-mix(in srgb, var(--accent-gold) 6%, transparent),
+                        transparent 60%);
 }
 .il-overlay.is-open { display: flex; }
-body.light-mode .il-overlay { background: rgba(232, 236, 232, 0.78); }
+body.light-mode .il-overlay { background: var(--bg-secondary); }
+
+/* ── The sleeping screen ──────────────────────────────────────────────
+   At rest it is the eye and the hour: no inputs, no buttons, nothing to
+   read. The controls arrive on the first sign of a person — a move, a
+   key, a touch — which is what makes it read as asleep rather than as a
+   dialog that will not go away. */
+.il-eye {
+    width: 92px; height: 92px; margin-bottom: 26px;
+    opacity: .82;
+    animation: ilBreathe 5.5s ease-in-out infinite;
+}
+.il-eye img, .il-eye svg { width: 100%; height: 100%; display: block; }
+@keyframes ilBreathe {
+    0%, 100% { opacity: .55; transform: scale(1); }
+    50%      { opacity: .95; transform: scale(1.04); }
+}
+.il-clock {
+    font-family: var(--font-display); font-size: 46px; font-weight: 200;
+    letter-spacing: .06em; color: var(--text-primary); line-height: 1;
+}
+.il-standby {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: .28em;
+    text-transform: uppercase; color: var(--text-muted); margin-top: 12px;
+}
+/* Everything interactive fades in together once the screen is woken. */
+.il-wake {
+    opacity: 0; visibility: hidden;
+    transform: translateY(6px);
+    transition: opacity .28s ease, transform .28s ease, visibility .28s;
+}
+.il-overlay.is-awake .il-wake {
+    opacity: 1; visibility: visible; transform: none;
+}
+.il-overlay.is-awake .il-clock { font-size: 30px; opacity: .7; }
+.il-overlay.is-awake .il-eye { width: 60px; height: 60px; margin-bottom: 16px; }
+@media (prefers-reduced-motion: reduce) {
+    .il-eye { animation: none; opacity: .85; }
+    .il-wake { transition: none; }
+}
 
 .il-card {
     width: 340px;
@@ -6361,3 +6412,39 @@ body.light-mode .se-answer .se-md-pre code { color: var(--text-primary); }
 .ib-env--paper { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .ib-env--live { color: var(--accent-red); background: color-mix(in srgb, var(--accent-red) 15%, transparent); }
 .ib-env--unknown { color: var(--accent-gold-ink); background: color-mix(in srgb, var(--accent-gold) 14%, transparent); }
+
+/* ── Signal symbol cell ─────────────────────────────────────────────────
+   A ticker and the asset it names. A column of bare tickers asks the reader
+   to already know that HGUSD is copper — and the one signal they do not
+   recognise is the one they most need to read. The name sits under the
+   ticker, quieter, so scanning by ticker is unchanged and reading by name
+   is now possible at all. */
+.sig-sym { font-weight: 700; color: var(--text-primary); text-decoration: none; }
+a.sig-sym:hover { color: var(--accent); text-decoration: underline; }
+.sig-sym-name {
+    display: block; font-family: var(--font-mono); font-size: 9.5px;
+    color: var(--text-muted); letter-spacing: .02em; margin-top: 1px;
+    /* Long instrument names must not set the column width. */
+    max-width: 15ch; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── Lock-now button ────────────────────────────────────────────────────
+   Beside the account menu: that is where "this is my session" already
+   lives, and it is the control an operator reaches for while standing up,
+   so it cannot be two clicks deep in a dropdown. The open padlock (no PIN
+   set) is gold rather than red — nothing is wrong, there is simply a step
+   to take first. */
+.lock-now {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text-secondary); cursor: pointer; font-size: 14px;
+    transition: color .12s ease, border-color .12s ease, background .12s ease;
+}
+.lock-now:hover, .lock-now:focus-visible {
+    color: var(--accent); border-color: var(--border-glow);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.lock-now[data-has-pin="0"] { color: var(--accent-gold-ink); }
+.lock-now[data-has-pin="0"]:hover { color: var(--accent-gold-ink); }

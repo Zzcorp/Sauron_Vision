@@ -75,6 +75,92 @@
         return inp ? inp.value : "";
     }
 
+    /* ── The sleeping screen ─────────────────────────────────────────────
+       At rest the overlay shows the eye and the hour and nothing else. The
+       PIN row and the buttons arrive on the first sign of a person — a
+       move, a key, a touch — which is what makes it read as asleep rather
+       than as a dialog that will not go away.
+
+       It matters for more than looks: a locked screen is often locked
+       BECAUSE somebody walked away from it, and a PIN pad glowing at an
+       empty desk is an invitation. Nothing to press until somebody is
+       there to press it. */
+    var wakeTimer = null;
+
+    function sleep() {
+        if (!overlay) return;
+        overlay.classList.remove("is-awake");
+        var standby = d.getElementById("ilStandby");
+        if (standby) standby.hidden = false;
+    }
+
+    function wake() {
+        if (!overlay || !isLocked) return;
+        if (!overlay.classList.contains("is-awake")) {
+            overlay.classList.add("is-awake");
+            var standby = d.getElementById("ilStandby");
+            if (standby) standby.hidden = true;
+            var first = overlay.querySelector("[data-il-pin]");
+            if (first) { try { first.focus(); } catch (e) {} }
+        }
+        /* Back to sleep if the person left again. Long enough that reading
+           the card is not a race, short enough that the pad does not sit
+           lit on an unattended machine. */
+        if (wakeTimer) clearTimeout(wakeTimer);
+        wakeTimer = setTimeout(function () {
+            if (isLocked) { sleep(); pinClear(); showError(null); }
+        }, 45000);
+    }
+
+    function tickClock() {
+        var el = d.getElementById("ilClock");
+        if (!el) return;
+        var now = new Date();
+        el.textContent =
+            String(now.getHours()).padStart(2, "0") + ":" +
+            String(now.getMinutes()).padStart(2, "0");
+    }
+    tickClock();
+    setInterval(tickClock, 15000);
+
+    ["mousemove", "keydown", "touchstart", "pointerdown"].forEach(function (ev) {
+        d.addEventListener(ev, function () { if (isLocked) wake(); },
+                           { passive: true });
+    });
+
+    /* ── Lock now ────────────────────────────────────────────────────────
+       Without a PIN there is nothing to unlock WITH, so locking would trap
+       the operator in a screen only a logout escapes. The button offers to
+       set one instead of refusing — the PIN modal already exists on the
+       profile page, and that is where a PIN is set everywhere else. */
+    var lockBtn = d.getElementById("lockNowBtn");
+    if (lockBtn) {
+        lockBtn.addEventListener("click", function () {
+            if (lockBtn.getAttribute("data-has-pin") === "1") {
+                engage(true);
+                return;
+            }
+            if (!(w.SV && w.SV.overlay)) {
+                w.location.href = "/profile/?modal=pin&next=lock";
+                return;
+            }
+            w.SV.overlay.confirm({
+                title: "Set a PIN first",
+                message: "Locking hides the account behind a PIN, and this "
+                       + "one has none set yet — without it the only way "
+                       + "back in would be a full logout.",
+                facts: [
+                    ["PIN", "not set"],
+                    ["Takes", "four digits"],
+                    ["Also used by", "arming a bot live, the kill switch"]
+                ],
+                confirmLabel: "Set a PIN now"
+            }).then(function (ok) {
+                if (ok) w.location.href = "/profile/?modal=pin&next=lock";
+            });
+        });
+    }
+
     function engage(tellServer) {
         if (isLocked || !overlay) return;
         isLocked = true;
@@ -93,6 +179,7 @@
         }
         pinClear();
         showError(null);
+        sleep();                      /* asleep until a person shows up */
         if (w.SV && w.SV.overlay) w.SV.overlay.open(overlay);
         /* The live sockets are not HTTP and never meet the middleware, so
            they would keep streaming quotes, fills and signals to a locked

@@ -153,7 +153,12 @@
         <tr>
             <td data-label="Time" style="font-size: 11px; color: var(--text-muted);">{{ s.created_at|date:"M d H:i" }}</td>
             <td data-label="Symbol" style="font-family: var(--font-display); font-size: 12px;">
-                {{ s.instrument.symbol }}
+                {# The ticker AND the asset it names. A row of tickers asks #}
+                {# the reader to already know that HGUSD is copper and MES #}
+                {# is the micro S&P — and the one signal they do not #}
+                {# recognise is exactly the one they most need to read. #}
+                {% if s.instrument.has_page %}<a href="{% url 'instrument_detail' s.instrument.symbol %}" class="sig-sym">{{ s.instrument.symbol }}</a>{% else %}<span class="sig-sym">{{ s.instrument.symbol }}</span>{% endif %}
+                {% if s.instrument.name and s.instrument.name != s.instrument.symbol %}<span class="sig-sym-name">{{ s.instrument.name }}</span>{% endif %}
                 {% comment %} Every signal can be handed to Sauron as a subject. {% endcomment %}
                 <button type="button" class="ask-sauron"
                         data-ask-sauron="{{ s.direction|upper }} {{ s.instrument.symbol }}{% if s.rule_name %} ({{ s.rule_name }}){% endif %}"

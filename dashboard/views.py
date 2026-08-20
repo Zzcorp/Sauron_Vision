@@ -1932,6 +1932,28 @@ def _pos_exit_cost(trade, mark, qty_abs, vpu):
     return abs(float(mark) - float(fill)) * qty_abs * vpu
 
 
+
+def _pos_committed_pct(committed, trade):
+    """This position's capital as a share of the pool it came out of.
+
+    "4,800" means nothing on its own. "48% of the pool" is the sentence an
+    operator sizes by, and it is the one number that says whether a book is
+    concentrated without them having to divide anything in their head.
+
+    "" when there is no pool to divide by — a legacy Position row belongs to
+    no bot config and has no capital pool, and inventing one would put a
+    confident percentage under a number nobody set.
+    """
+    cfg = getattr(trade, "config", None) if trade is not None else None
+    try:
+        capital = float(getattr(cfg, "capital", 0) or 0)
+    except (TypeError, ValueError):
+        return ""
+    if not committed or capital <= 0:
+        return ""
+    return _pos_fmt(float(committed) / capital * 100, 1)
+
+
 def _position_card_details(user, positions):
     """One dict per position with everything the hover card shows that the
     ROW cannot carry — aligned with `positions`, same order.
@@ -2136,6 +2158,18 @@ def _position_card_details(user, positions):
             "target_pct": target_pct,
             "target_through": "1" if target_through else "",
             "progress": progress,
+            # How far the PRICE has travelled since entry, signed by the
+            # price and not by the P&L. On a long the two agree; on a SHORT
+            # they are opposites, and a mark 4% BELOW entry on a short is a
+            # 4% fall that made money. Printing the P&L sign against a price
+            # would have the card claim the market moved up when it moved
+            # down.
+            "mark_pct": (_pos_fmt((mark - entry) / entry * 100, 2)
+                         if mark is not None and entry else ""),
+            # What this one position ties up, as a share of the book it is
+            # tying it up FROM. 4,800 means nothing without the pool it came
+            # out of; "48% of the pool" is the sentence an operator sizes by.
+            "committed_pct": _pos_committed_pct(committed, trade),
             "pnl": _pos_fmt(pnl, 2),
             "pnl_pct": _pos_fmt(p.unrealized_pnl_pct, 2),
             "risk": _pos_fmt(risk, 2) if risk else "",

@@ -574,6 +574,17 @@
                     {# happen without the page reloading to grow a footer. #}
                     <a class="notif-foot" href="{% url 'notifications_inbox' %}">View all notifications &#9656;</a>
                 </div>
+                {# Lock now, rather than waiting out the idle window. It sits #}
+                {# beside the account menu because that is where "this is my #}
+                {# session" already lives — and it is the one control an #}
+                {# operator reaches for while standing up, so it must not be #}
+                {# two clicks inside a dropdown. #}
+                <button type="button" class="lock-now" id="lockNowBtn"
+                        data-has-pin="{{ idle_lock.has_pin|yesno:'1,0' }}"
+                        title="{% if idle_lock.has_pin %}Lock this session — the PIN reopens it{% else %}Set a PIN to lock this session{% endif %}"
+                        aria-label="Lock session">
+                    <span aria-hidden="true">{% if idle_lock.has_pin %}&#128274;{% else %}&#128275;{% endif %}</span>
+                </button>
                 {% get_display_name as uname %}
                 <div class="user-menu" id="userMenu">
                     <button type="button" class="user-menu-trigger" id="userMenuTrigger" aria-haspopup="true" aria-expanded="false">
@@ -1884,6 +1895,54 @@
           'DISCRETIONARY ENTRIES</b>' + esc(adv.reason || '') +
           '<br>' + esc('You can still take this trade — it will be recorded ' +
                        'as taken against the advisory.') + '</div>';
+      }
+
+      /* The BOOK's own limits — daily loss and total exposure. These used to
+         refuse a hand-taken trade outright. They are appetite, not
+         arithmetic, and on this path there is a human who is entitled to
+         change their mind about their own appetite with the numbers in front
+         of them. The bots still treat them as hard refusals, because nobody
+         is there to make that call on a beat.
+
+         Stated in full, including the arithmetic, so overriding it is a
+         decision rather than a shrug. */
+      var bookAdv = p.book_advisory || {};
+      if (bookAdv.ok === false && bookAdv.reason) {
+        warnHtml += '<div class="sz-warn sz-warn--book"><b>BOOK LIMIT ' +
+          'REACHED</b>' + esc(bookAdv.reason) +
+          '<br>' + esc('This no longer blocks a hand-taken trade — you have ' +
+                       'the final say. Your bots ARE still stopped by it. ' +
+                       'Taking this is recorded as taken against the limit.') +
+          '</div>';
+      }
+
+      /* How much of ONE idea this book would own. Same posture again: the
+         bots refuse it, a human is told and decides. The arithmetic is in
+         the reason, because "42% of the book in one symbol" is the sentence
+         that changes a mind, not the word "concentration". */
+      var conc = p.concentration || {};
+      if (conc.ok === false && conc.reason) {
+        warnHtml += '<div class="sz-warn sz-warn--book"><b>CONCENTRATION ' +
+          'CEILING REACHED</b>' + esc(conc.reason) +
+          '<br>' + esc('One adverse gap would hit every one of these at ' +
+                       'once. You can still take it; your bots cannot.') +
+          '</div>';
+      }
+
+      /* And how hard this pool is set to swing. Not a warning about THIS
+         trade — a reminder that a number typed into extras once is still
+         sizing every trade since. */
+      var appetite = p.risk_appetite || {};
+      if (appetite.flagged) {
+        warnHtml += '<div class="sz-warn"><b>AGGRESSIVE SIZING' +
+          (appetite.at_cap ? ' — AT THE CEILING' : '') + '</b>' +
+          esc(appetite.reason || '') +
+          /* The coupling nobody guesses: a bigger risk budget does not buy
+             more risk on the same setup, it widens the stop until the
+             notional fits under its cap. */
+          (appetite.stop_floor_note
+            ? '<br>' + esc(appetite.stop_floor_note) : '') +
+          '</div>';
       }
 
       var fundHtml = funding
@@ -5609,7 +5668,14 @@ if ('serviceWorker' in navigator) {
 {# Idle PIN lock gate. A direct child of body ON PURPOSE: any fixed/filtered ancestor would clamp it in its own stacking context and something could paint over a "locked" screen. #}
 {# The overlay is paint over a SERVER flag (core/idle_lock.py answers 423 everywhere while pin_locked) — deleting this div from devtools unlocks nothing. #}
 <div id="idleLockOverlay" class="il-overlay" data-sv-overlay="dialog" data-sv-persist data-sv-backdrop="none" aria-labelledby="ilTitle" hidden>
-    <div class="il-card">
+    {# Asleep: the eye and the hour, nothing to read and nothing to press. #}
+    <div class="il-eye" aria-hidden="true">
+        <img src="{% static 'logo/sauron_eye.svg' %}" alt="">
+    </div>
+    <div class="il-clock" id="ilClock" aria-hidden="true">--:--</div>
+    <div class="il-standby" id="ilStandby">Locked · move to wake</div>
+
+    <div class="il-card il-wake">
         <h2 class="il-title" id="ilTitle">SECOND GATE</h2>
         <p class="il-sub">Session locked — enter PIN</p>
         <div class="il-err" id="ilError" hidden></div>
@@ -5621,7 +5687,7 @@ if ('serviceWorker' in navigator) {
         </div>
         <button type="button" class="il-unlock" id="ilUnlockBtn">Unlock</button>
         <form method="post" action="{% url 'logout' %}" id="ilLogoutForm" style="display:none;">{% csrf_token %}</form>
-        <div class="il-actions">
+        <div class="il-actions il-wake">
             <button type="submit" form="ilLogoutForm" class="il-disconnect">⏻ Disconnect</button>
             {# Recovery happens at LOGIN (password re-entry → forced PIN reset), so forgetting the PIN here simply ends the session. #}
             <button type="submit" form="ilLogoutForm" class="il-forgot">PIN forgotten?</button>
