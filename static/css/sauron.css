@@ -6306,3 +6306,58 @@ body.light-mode .se-answer .se-md-table th {
     background: var(--bg-secondary);
 }
 body.light-mode .se-answer .se-md-pre code { color: var(--text-primary); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   INTERACTIVE BROKERS CONNECTION CARD
+   IBKR is the broker meant to carry the real book, and until now it had a
+   save view, a URL and no way to reach either — this page offered OANDA and
+   Alpaca and stopped. The styling here does one job the other two forms do
+   not have to do: make the paper/live distinction impossible to misread,
+   because with IBKR that choice is a PORT NUMBER and one digit separates a
+   simulated fill from a real one.
+   ═══════════════════════════════════════════════════════════════════════ */
+.ib-note {
+    font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+    color: var(--text-muted); margin: 0 0 4px;
+}
+.ib-field-label {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--text-muted);
+}
+.ib-hint { color: var(--text-muted); font-size: 10px; }
+
+/* The select carries the consequence, so it is sized like a decision
+   rather than like one more text input in the stack. */
+.ib-port-select { font-weight: 700; }
+
+/* Shown only when a LIVE port is selected. Gold rather than red: this is
+   not an error and not a refusal — it is the operator correctly choosing
+   the real account, and it should read as gravity, not as a mistake. */
+.ib-live-warning {
+    margin: 0; padding: 9px 11px; border-radius: var(--radius-sm, 4px);
+    font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+    color: var(--accent-gold-ink);
+    background: color-mix(in srgb, var(--accent-gold) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-gold) 45%, transparent);
+}
+.ib-card:has(.ib-live-warning:not([hidden])) {
+    border-color: color-mix(in srgb, var(--accent-gold) 55%, transparent);
+}
+
+.ib-routing { display: grid; gap: 5px; }
+.ib-routing label {
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary);
+    display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+}
+
+/* The env chip beside a saved connection, in the broker table. An
+   unrecognised port is NOT drawn as paper — it takes the muted treatment
+   and says so, because "we could not tell" and "it is safe" are different
+   answers and only one of them is true. */
+.ib-env {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+    letter-spacing: .08em; padding: 1px 5px; border-radius: 3px;
+}
+.ib-env--paper { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ib-env--live { color: var(--accent-red); background: color-mix(in srgb, var(--accent-red) 15%, transparent); }
+.ib-env--unknown { color: var(--accent-gold-ink); background: color-mix(in srgb, var(--accent-gold) 14%, transparent); }

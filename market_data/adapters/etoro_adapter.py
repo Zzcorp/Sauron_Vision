@@ -74,6 +74,17 @@ def sync_etoro_positions():
     if not positions_data:
         return {"status": "fetch_failed"}
 
+    # The shared "Main" book, because this sync has no user to attribute to:
+    # it authenticates with ONE global ETORO_API_KEY, so it describes the
+    # platform's broker account rather than any operator's own book.
+    #
+    # KNOWN CONSEQUENCE, recorded rather than hidden: the position pages and
+    # /portfolio/ read each USER's book, so positions imported here are not
+    # displayed on them. That is the honest state of a single-key sync on a
+    # multi-user install — the alternative was showing every operator the
+    # same broker account and calling it theirs. Attributing the sync to a
+    # user needs per-user eToro credentials, which is a bigger change than
+    # a book swap and should not be faked by guessing an owner.
     portfolio = get_or_create_default_portfolio()
     synced = 0
 

@@ -178,8 +178,59 @@ class IBKRAccount(models.Model):
             "cfd": self.is_primary_for_cfd,
         }.get(asset_class, False))
 
+    #: The four ports IBKR ships. The socket you connect to IS the account
+    #: you trade — there is no second switch inside the API — so these are
+    #: the only fact on this model that decides whose money moves.
+    PAPER_PORTS = {7497: "TWS", 4002: "IB Gateway"}
+    LIVE_PORTS = {7496: "TWS", 4001: "IB Gateway"}
+
+    @property
+    def env(self) -> "str | None":
+        """"paper", "live", or None when the port is not one IBKR ships.
+
+        None is the important answer and it is NOT paper. An operator who
+        has remapped the socket, or typed 7946 for 7496, is in a state this
+        platform cannot classify — and a mistake in this direction sends a
+        real order to a real account. Everything that renders this must show
+        the unknown as an unknown and refuse to call it safe.
+        """
+        if self.port in self.PAPER_PORTS:
+            return "paper"
+        if self.port in self.LIVE_PORTS:
+            return "live"
+        return None
+
+    @property
+    def is_live(self) -> bool:
+        """True ONLY for a port known to be live. An unknown port is not
+        live for the purposes of a label — but see `env_is_certain`: it is
+        not safe either, and the two questions have different answers."""
+        return self.env == "live"
+
+    @property
+    def env_is_certain(self) -> bool:
+        return self.env is not None
+
+    @property
+    def env_label(self) -> str:
+        """What to print beside this connection, for humans."""
+        if self.env is None:
+            return f"UNKNOWN PORT {self.port}"
+        return f"{self.env.upper()} · {(self.PAPER_PORTS | self.LIVE_PORTS)[self.port]}"
+
+    @property
+    def paper_flag_disagrees(self) -> bool:
+        """The stored `paper` checkbox says one thing and the port another.
+
+        The checkbox is documented as informational, so the port wins — but
+        a disagreement means somebody believes something false about which
+        account they are pointed at, and that is worth saying out loud
+        rather than silently resolving.
+        """
+        return self.env is not None and self.paper != (self.env == "paper")
+
     def __str__(self):
-        return f"{self.user.username} · IBKR @ {self.host}:{self.port} ({'paper' if self.paper else 'live'})"
+        return f"{self.user.username} · IBKR @ {self.host}:{self.port} ({self.env or 'unknown port'})"
 
 
 class AlpacaAccount(models.Model):

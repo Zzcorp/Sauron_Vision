@@ -63,6 +63,19 @@ def _ibkr_client_for(user, cfg):
             log.info("[router] ib_insync not installed — paper")
             return _paper_client(cfg)
         account_id = acct.get_account_id() or ""
+        if not account_id:
+            # No credential — the same refusal the Binance and OANDA
+            # branches make above, and the one that makes the HQ
+            # "disconnect" button mean something. Clearing account_id_enc
+            # was NOT enough on its own: this function went on returning a
+            # live IBKRTrader aimed at the same host:port, the routing
+            # overrides survived the disconnect, and options and CFDs reach
+            # here unconditionally whatever those overrides say. An empty
+            # account id does not stop an order either — TWS falls back to
+            # whichever account the session is logged into, which on a live
+            # socket is the funded one.
+            log.info("[router] IBKR account has no id (disconnected?) — paper")
+            return _paper_client(cfg)
         return IBKRTrader(
             host=acct.host, port=acct.port, client_id=acct.client_id,
             account_id=account_id, paper=acct.paper,

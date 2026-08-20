@@ -448,8 +448,11 @@ class MoneyBlockTests(TestCase):
         from portfolio.services import get_or_create_default_portfolio
         inst = _instrument()
         _quote(inst, 61000)
+        # The user's own book: the positions page reads that one now, not
+        # the shared "Main" row a single global eToro key writes to.
         Position.objects.create(
-            portfolio=get_or_create_default_portfolio(), instrument=inst,
+            portfolio=get_or_create_default_portfolio(user=self.user),
+            instrument=inst,
             direction="long", quantity=Decimal("1"),
             entry_price=Decimal("60000"), current_price=Decimal("61000"),
             opened_at=timezone.now())

@@ -90,13 +90,19 @@ def _trade(user, *, symbol="BTCUSD", entry=60000, stop=59000, target=62000,
         metadata={"value_per_unit": 1.0, "initial_stop_loss": float(stop)})
 
 
-def _book_position(inst, *, closed=False):
-    """A row from the SHARED portfolio book: no user, no trade, no timeline
-    — and, until now, no way at all to reach the instrument it names."""
+def _book_position(inst, *, closed=False, user=None):
+    """A legacy portfolio.Position: no config, no trade, no timeline — and,
+    until now, no way at all to reach the instrument it names.
+
+    It goes on the USER'S book, because that is the one the positions pages
+    read. They used to read the shared "Main" row, which is fed by a single
+    global eToro key with no user attached and is therefore nobody's
+    portfolio; a row parked there is now invisible to the page under test.
+    """
     from portfolio.models import Position
     from portfolio.services import get_or_create_default_portfolio
     return Position.objects.create(
-        portfolio=get_or_create_default_portfolio(), instrument=inst,
+        portfolio=get_or_create_default_portfolio(user=user), instrument=inst,
         direction="long", quantity=Decimal("1"),
         entry_price=Decimal("100"), current_price=Decimal("110"),
         unrealized_pnl=Decimal("10"), unrealized_pnl_pct=10.0,
@@ -173,7 +179,7 @@ class SymbolLeadsToTheInstrumentTests(TestCase):
         on every page of this platform, so a headband name would make the
         assertion pass whether this row linked anywhere or not.
         """
-        _book_position(_instrument("ZBOOKUSD"))
+        _book_position(_instrument("ZBOOKUSD"), user=self.user)
         html = self.client.get(POSITIONS).content.decode("utf-8", "replace")
         self.assertIn('data-pos-instrument-href="/instruments/ZBOOKUSD/"', html)
         self.assertIn('href="/instruments/ZBOOKUSD/"', html)
@@ -185,7 +191,7 @@ class SymbolLeadsToTheInstrumentTests(TestCase):
         quoted as EUR/USD raises NoReverseMatch. The plain url tag would take
         the entire book down with it over one row; the `as` form yields an
         empty string, and the cell renders the symbol as text."""
-        _book_position(_instrument("EUR/USD", asset_class="forex"))
+        _book_position(_instrument("EUR/USD", asset_class="forex"), user=self.user)
         resp = self.client.get(POSITIONS)
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8", "replace")
@@ -396,7 +402,7 @@ class HistoryTabFollowsTheSameRuleTests(TestCase):
 
     def test_a_closed_positions_symbol_links_to_its_instrument(self):
         """Off the headband list, or base.html would answer for it."""
-        _book_position(_instrument("ZHISTUSD"), closed=True)
+        _book_position(_instrument("ZHISTUSD"), closed=True, user=self.user)
         html = self.client.get(HISTORY).content.decode("utf-8", "replace")
         self.assertIn('href="/instruments/ZHISTUSD/"', html)
         self.assertIn("ph-sym", html)

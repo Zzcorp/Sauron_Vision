@@ -52,21 +52,30 @@ def _quote(symbol, last, asset_class="crypto"):
     return quote
 
 
-def _book():
-    """The SHARED "Main" portfolio — the book both pages read."""
+def _book(user=None):
+    """The book both pages read — which is now the USER'S OWN.
+
+    It used to be the shared "Main" one. That book is fed by a single
+    global eToro API key with no user attached, so on an install with more
+    than one operator it was showing each of them the same account and
+    calling it theirs — and the /portfolio/ headline folded in the user's
+    bot trades while the equity curve underneath came from Main's bot-free
+    snapshot series. `user=None` still reaches Main, which is now only the
+    platform's broker book.
+    """
     from portfolio.services import get_or_create_default_portfolio
-    return get_or_create_default_portfolio()
+    return get_or_create_default_portfolio(user=user)
 
 
 def _position(symbol="AAPL", qty="1", entry="100", current="100",
               direction="long", stored_pnl="0", asset_class="stock",
-              stop=None, closed=False):
+              stop=None, closed=False, user=None):
     """A legacy portfolio.Position. `stored_pnl` writes the dead column on
     purpose, so a test can prove the page ignores it."""
     from portfolio.models import Position
     now = timezone.now()
     return Position.objects.create(
-        portfolio=_book(), instrument=_instrument(symbol, asset_class),
+        portfolio=_book(user), instrument=_instrument(symbol, asset_class),
         direction=direction, quantity=Decimal(qty),
         entry_price=Decimal(entry), current_price=Decimal(current),
         stop_loss=Decimal(stop) if stop is not None else None,
@@ -126,11 +135,12 @@ class MarkedNotStoredTests(TestCase):
 
     def _book_now(self):
         from dashboard.views import _live_open_book
-        return _live_open_book(self.user, _book())
+        return _live_open_book(self.user, _book(self.user))
 
     def test_legacy_row_is_repriced_and_the_stored_column_ignored(self):
         _quote("AAPL", "105", asset_class="stock")
-        _position("AAPL", qty="1", entry="100", stored_pnl="999")
+        _position("AAPL", qty="1", entry="100", stored_pnl="999",
+                  user=self.user)
         _objs, rows, n_priced, unrealized, _dep = self._book_now()
         self.assertEqual(n_priced, 1)
         self.assertEqual(unrealized, 5.0)
@@ -151,7 +161,8 @@ class MarkedNotStoredTests(TestCase):
     def test_an_unpriced_book_is_unknown_not_flat(self):
         """Reporting +0.00 for a position nothing could price is a claim that
         the position is break-even."""
-        _position("NOQUOTE", qty="1", entry="100", stored_pnl="999")
+        _position("NOQUOTE", qty="1", entry="100", stored_pnl="999",
+                  user=self.user)
         _objs, rows, n_priced, unrealized, deployed = self._book_now()
         self.assertEqual(len(rows), 1)
         self.assertEqual(n_priced, 0)
@@ -173,20 +184,20 @@ class BothBooksTests(TestCase):
 
     def test_the_open_book_unions_both(self):
         from dashboard.views import _live_open_book
-        _position("AAPL")
+        _position("AAPL", user=self.user)
         _trade(self.user, "BTCUSD")
-        _objs, rows, _n, _u, _d = _live_open_book(self.user, _book())
+        _objs, rows, _n, _u, _d = _live_open_book(self.user, _book(self.user))
         self.assertEqual(len(rows), 2)
         self.assertEqual({r["symbol"] for r in rows}, {"AAPL", "BTCUSD"})
 
     def test_close_pending_still_counts_as_exposure(self):
         from dashboard.views import _live_open_book
         _trade(self.user, "BTCUSD", status="CLOSE_PENDING")
-        _objs, rows, _n, _u, _d = _live_open_book(self.user, _book())
+        _objs, rows, _n, _u, _d = _live_open_book(self.user, _book(self.user))
         self.assertEqual(len(rows), 1)
 
     def test_both_pages_count_the_union(self):
-        _position("AAPL")
+        _position("AAPL", user=self.user)
         _trade(self.user, "BTCUSD")
         pf = self.client.get("/portfolio/", HTTP_HOST="127.0.0.1")
         pos = self.client.get("/positions/", HTTP_HOST="127.0.0.1")
@@ -216,7 +227,7 @@ class RMultipleTests(TestCase):
 
     def _row(self):
         from dashboard.views import _live_open_book
-        _objs, rows, _n, _u, _d = _live_open_book(self.user, _book())
+        _objs, rows, _n, _u, _d = _live_open_book(self.user, _book(self.user))
         return rows[0]
 
     def test_r_uses_the_entry_stop_not_the_trailed_one(self):
@@ -253,7 +264,7 @@ class RMultipleTests(TestCase):
 
     def test_a_legacy_row_grades_against_its_own_stop(self):
         _quote("AAPL", "110", asset_class="stock")
-        _position("AAPL", qty="1", entry="100", stop="90")
+        _position("AAPL", qty="1", entry="100", stop="90", user=self.user)
         self.assertEqual(self._row()["r_multiple"], 1.0)
 
     def test_a_failing_stop_lookup_is_logged_and_dashes_the_column(self):
@@ -268,7 +279,7 @@ class RMultipleTests(TestCase):
                    side_effect=RuntimeError("stop store down")):
             with self.assertLogs("dashboard.views", level="WARNING") as log:
                 _objs, rows, _n, unrealized, _d = _live_open_book(
-                    self.user, _book())
+                    self.user, _book(self.user))
         self.assertTrue(any("stop store down" in line for line in log.output))
         self.assertIsNone(rows[0]["r_multiple"])
         self.assertEqual(rows[0]["r_text"], DASH)

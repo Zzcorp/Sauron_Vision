@@ -418,7 +418,15 @@ def save_ibkr_credentials(request):
         messages.error(request, "IBKR: port and client_id must be integers.")
         return redirect("admin_dashboard")
 
-    paper = request.POST.get("paper") == "on"
+    # DERIVED from the port, not posted. The form has no paper checkbox —
+    # the port select replaced it, because the port is what actually
+    # selects the account. Reading a checkbox that is never submitted
+    # stored paper=False on every save, which made the disagreement alarm
+    # fire on ORDINARY paper saves and stay silent on the one case it
+    # exists for. Storing the port's own answer keeps the column
+    # meaningful for rows edited elsewhere (Django admin), which is now
+    # the only way the two can diverge.
+    paper = port in IBKRAccount.PAPER_PORTS
     primary_stocks = request.POST.get("primary_for_stocks") == "on"
     primary_forex = request.POST.get("primary_for_forex") == "on"
     primary_options = request.POST.get("primary_for_options") == "on"
@@ -458,7 +466,30 @@ def save_ibkr_credentials(request):
         acct.last_sync = timezone.now()
     acct.save()
 
-    env = "paper" if paper else "live"
+    # The PORT decides, not the checkbox. The checkbox is documented on the
+    # model as informational and the socket is what actually selects the
+    # account, so a message built from the checkbox could confirm "paper"
+    # while pointing at a funded account. An unrecognised port is reported
+    # as unknown rather than assumed safe — that is the direction of this
+    # mistake that costs real money.
+    env = acct.env or "UNRECOGNISED PORT"
+    if not acct.env_is_certain:
+        messages.warning(
+            request,
+            f"IBKR: port {port} is not one of IBKR's four "
+            f"({', '.join(str(p) for p in sorted(IBKRAccount.PAPER_PORTS))} paper, "
+            f"{', '.join(str(p) for p in sorted(IBKRAccount.LIVE_PORTS))} live), so "
+            f"this platform cannot tell whether it points at a paper or a "
+            f"funded account. Verify it in TWS before arming any bot.",
+        )
+    elif acct.paper_flag_disagrees:
+        messages.warning(
+            request,
+            f"IBKR: the 'paper' box was {'ticked' if paper else 'unticked'} "
+            f"but port {port} is the {acct.env.upper()} socket, and the port "
+            f"is what selects the account. Treating this connection as "
+            f"{acct.env.upper()}.",
+        )
     if acct.connected:
         messages.success(
             request,

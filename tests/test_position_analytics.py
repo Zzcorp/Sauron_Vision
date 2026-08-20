@@ -63,10 +63,21 @@ def _main_book():
 
 
 def _position(symbol="AAPL", qty="1", entry="100", direction="long",
-              asset_class="stock", portfolio=None, days_old=1):
+              asset_class="stock", portfolio=None, days_old=1, user=None):
+    """A legacy portfolio.Position.
+
+    It lands on the USER'S book by default, because that is the one this
+    panel reads now — the same book as the positions table it sits under.
+    Pass `portfolio=_main_book()` explicitly to park a row on the shared
+    book and prove it does NOT leak into a user's panel.
+    """
     from portfolio.models import Position
+    from portfolio.services import get_or_create_default_portfolio
+    if portfolio is None:
+        portfolio = (get_or_create_default_portfolio(user=user)
+                     if user is not None else _main_book())
     return Position.objects.create(
-        portfolio=portfolio or _main_book(),
+        portfolio=portfolio,
         instrument=_instrument(symbol, asset_class),
         direction=direction, quantity=Decimal(qty),
         entry_price=Decimal(entry), current_price=Decimal(entry),
@@ -156,7 +167,7 @@ class BothBooksTests(PanelTestCase):
     """Exposure lives in two places, and the panel used to look in a third."""
 
     def test_the_panel_counts_the_legacy_book_and_the_bot_book(self):
-        _position(symbol="AAPL", entry="100")
+        _position(symbol="AAPL", entry="100", user=self.user)
         _quote("AAPL", 110, asset_class="stock")
         _trade(self.user, symbol="BTCUSD", entry="100")
         _quote("BTCUSD", 90)
@@ -172,20 +183,30 @@ class BothBooksTests(PanelTestCase):
         self.assertIn("BTCUSD: -10.00 · 1 position", titles)
         self.assertNotIn("999", body)
 
-    def test_a_per_user_portfolio_is_not_the_book_it_reads(self):
-        """`Portfolio.objects.filter(user=...)` was the third defect: the
-        pipeline never marks that book and no trade path writes to it."""
+    def test_it_reads_the_same_book_as_the_table_it_sits_under(self):
+        """This panel is rendered directly beneath the positions table, and
+        the two must count one book.
+
+        It used to read the SHARED "Main" row deliberately, because that was
+        once the only book the pipeline marked and snapshotted. Both of those
+        stopped being true — `recalculate_exposure` and
+        `create_daily_snapshot` now walk every portfolio, and /setup/ writes
+        a hand-added position to the operator's own book — so reading Main
+        here left two panels on one screen counting two different books.
+        """
         from portfolio.services import get_or_create_default_portfolio
         mine = get_or_create_default_portfolio(user=self.user)
         self.assertNotEqual(mine.pk, _main_book().pk)
 
-        _position(symbol="GHOST", entry="100", portfolio=mine)
-        _position(symbol="REAL", entry="100")
+        _position(symbol="REAL", entry="100", portfolio=mine)
+        _position(symbol="GHOST", entry="100")          # the shared book
         _quote("REAL", 100, asset_class="stock")
+        _quote("GHOST", 100, asset_class="stock")
 
         body = self.body()
         self.assertIn("REAL", body)
-        self.assertNotIn("GHOST", body)
+        self.assertNotIn("GHOST", body,
+                         "the panel is showing another book's position")
 
 
 # ── 2. The query that raised on every single request ─────────────────────
@@ -201,8 +222,8 @@ class TheQueryThatNeverRanTests(PanelTestCase):
 
     def test_a_closed_position_stays_out_of_the_open_book(self):
         from portfolio.models import Position
-        _position(symbol="OPENP", entry="100")
-        closed = _position(symbol="SHUTP", entry="100")
+        _position(symbol="OPENP", entry="100", user=self.user)
+        closed = _position(symbol="SHUTP", entry="100", user=self.user)
         Position.objects.filter(pk=closed.pk).update(closed_at=timezone.now())
         _quote("OPENP", 100, asset_class="stock")
         _quote("SHUTP", 100, asset_class="stock")
@@ -212,7 +233,7 @@ class TheQueryThatNeverRanTests(PanelTestCase):
         self.assertNotIn("SHUTP", body)
 
     def test_the_panel_renders_analytics_instead_of_the_empty_state(self):
-        _position(symbol="AAPL", entry="100")
+        _position(symbol="AAPL", entry="100", user=self.user)
         _quote("AAPL", 120, asset_class="stock")
         body = self.body()
         self.assertNotIn("nothing to analyse", body)
@@ -225,7 +246,7 @@ class FailureIsShownTests(PanelTestCase):
     """The swallowing `except` is what made the bug survive."""
 
     def test_a_broken_read_says_so_instead_of_showing_an_empty_book(self):
-        _position(symbol="AAPL", entry="100")
+        _position(symbol="AAPL", entry="100", user=self.user)
         with mock.patch("dashboard.views._live_open_book",
                         side_effect=RuntimeError("no such column")):
             body = self.body()
@@ -329,7 +350,7 @@ class ExposureIsByValueTests(PanelTestCase):
         self.assertEqual(_strip(body)["NET BIAS"], "83% long")
 
     def test_asset_classes_are_summed_across_both_books(self):
-        _position(symbol="AAPL", entry="100", asset_class="stock")
+        _position(symbol="AAPL", entry="100", asset_class="stock", user=self.user)
         _trade(self.user, symbol="BTCUSD", entry="100", asset_class="crypto")
         _quote("AAPL", 100, asset_class="stock")
         _quote("BTCUSD", 100)

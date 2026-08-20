@@ -34,7 +34,8 @@ from .views_brain_phase38 import (
     research_open_conversation,
 )
 
-from .views_close import close_position_preview, close_position_execute
+from .views_close import (close_position_preview, close_position_execute,
+                          close_all_preview, close_all_execute)
 from .views_signals_htmx import signal_cards_htmx, signal_performance_htmx
 from .views_performance import performance_dashboard
 from .views_risk import risk_dashboard
@@ -116,6 +117,11 @@ urlpatterns = [
     # leave by stop, target, or the kill switch flattening everything.
     path("positions/<int:trade_id>/close/preview/", close_position_preview, name="close_position_preview"),
     path("positions/<int:trade_id>/close/", close_position_execute, name="close_position_execute"),
+    # Close-ALL sits on its own pair rather than looping the single-close
+    # endpoint from the browser: one PIN prompt for one decision, and a
+    # server-side loop that cannot be half-abandoned by a closed tab.
+    path("positions/close-all/preview/", close_all_preview, name="close_all_preview"),
+    path("positions/close-all/", close_all_execute, name="close_all_execute"),
     path("api/instrument-preview/<str:symbol>/", views.instrument_preview_api, name="instrument_preview_api"),
     path("quotes/", views.market_quotes, name="market_quotes"),
     path("calendar/", views.economic_calendar, name="economic_calendar"),

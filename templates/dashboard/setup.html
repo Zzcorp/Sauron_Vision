@@ -78,8 +78,12 @@
             {# moment the gate cannot read the book — the banner below says #}
             {# so, and this sentence must not argue with it. #}
             {% if risk_state.failed_open %}Normally checked before every bot entry{% else %}Checked before every bot entry{% endif %} and every manual trade, across both
-            position books. These live on the shared <strong>{{ portfolio.name }}</strong>
+            position books. These live on the shared <strong>{{ limits.name }}</strong>
             book — changing them changes them for every operator.
+            {# `limits`, not `portfolio`: this sentence names the book the #}
+            {# four percentages actually live on, and `portfolio` is now #}
+            {# the operator's own book. Naming that one here would have the #}
+            {# card call a per-user row "the shared book". #}
         </p>
         {% if not risk_state.ok %}
         <div class="card" style="border-color:var(--accent-red);padding:10px 14px;margin-bottom:16px;">
@@ -112,7 +116,7 @@
             {% endcomment %}
             <div style="margin-bottom: 16px;">
                 <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX TOTAL EXPOSURE (%)</label>
-                <input type="number" step="any" min="0.1" max="1000" required name="max_exposure" value="{{ portfolio.max_total_exposure_pct }}"
+                <input type="number" step="any" min="0.1" max="1000" required name="max_exposure" value="{{ limits.max_total_exposure_pct }}"
                     style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
                 <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
                     No new position opens while the open book already ties up this
@@ -125,7 +129,7 @@
             </div>
             <div style="margin-bottom: 16px;">
                 <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX SINGLE POSITION (%)</label>
-                <input type="number" step="any" min="0.1" max="100" required name="max_position" value="{{ portfolio.max_single_position_pct }}"
+                <input type="number" step="any" min="0.1" max="100" required name="max_position" value="{{ limits.max_single_position_pct }}"
                     style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
                 <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
                     One position may not tie up more than this share of the
@@ -140,7 +144,7 @@
             </div>
             <div style="margin-bottom: 16px;">
                 <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX DAILY LOSS (%)</label>
-                <input type="number" step="any" min="0.1" max="100" required name="max_daily_loss" value="{{ portfolio.max_daily_loss_pct }}"
+                <input type="number" step="any" min="0.1" max="100" required name="max_daily_loss" value="{{ limits.max_daily_loss_pct }}"
                     style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
                 <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
                     Realized P&amp;L over a trailing {{ risk_window_hours }}h — the same
@@ -151,7 +155,7 @@
             </div>
             <div style="margin-bottom: 16px;">
                 <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">CORRELATION SIZE TAPER</label>
-                <input type="number" step="any" min="0.01" max="1" required name="max_correlation" value="{{ portfolio.max_correlation_threshold }}"
+                <input type="number" step="any" min="0.01" max="1" required name="max_correlation" value="{{ limits.max_correlation_threshold }}"
                     style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
                 <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
                     A taper, not a block. Above this 90-day return correlation to

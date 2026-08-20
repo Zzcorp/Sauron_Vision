@@ -214,9 +214,15 @@ def backtest_metrics(request):
 def portfolio_metrics(request):
     ctx = {"exposure": {}, "chart_data": "{}"}
     try:
-        from portfolio.models import Portfolio
         from strategies.portfolio_analyzer import analyze_exposure
-        portfolio = Portfolio.objects.filter(user=request.user).first()
+        from portfolio.services import get_or_create_default_portfolio
+        # `Portfolio` has NO user column — ownership is carried by the name,
+        # which is why `get_or_create_default_portfolio` exists. The previous
+        # `Portfolio.objects.filter(user=request.user)` therefore raised
+        # FieldError into the bare except below on every single request, and
+        # the panel rendered empty forever — the same failure Position
+        # Analytics was fixed for, in the panel directly beside it.
+        portfolio = get_or_create_default_portfolio(user=request.user)
         if portfolio:
             exposure = analyze_exposure(portfolio)
             ctx["exposure"] = exposure
@@ -344,10 +350,14 @@ def positions_metrics(request):
     }
 
     try:
-        # The shared "Main" book, not a per-user one: it is the only
-        # Position book the background pipeline marks and snapshots, and it
-        # is what unified_open_positions defaults to.
-        portfolio = get_or_create_default_portfolio()
+        # The OPERATOR'S OWN book — the same one the positions table this
+        # panel sits underneath now reads. It used to take the shared "Main"
+        # row, on the reasoning that Main was the only book the pipeline
+        # marked and snapshotted; that stopped being true when
+        # recalculate_exposure and create_daily_snapshot began walking every
+        # portfolio, and the consequence in the meantime was two panels on
+        # one screen counting two different books.
+        portfolio = get_or_create_default_portfolio(user=request.user)
         rows, n_priced = _live_open_book(request.user, portfolio)[1:3]
     except Exception as e:
         # Said out loud, in the panel and in the log. The predecessor put

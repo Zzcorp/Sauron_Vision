@@ -76,6 +76,36 @@ def _opposed(a, b) -> bool:
     return pair in OPPOSED_DIRECTIONS
 
 
+def _disjoint_universe(a, b) -> bool:
+    """True when two setups can never be scored against the same instrument.
+
+    The other half of the same mistake `_opposed` fixes. The signature is a
+    set of evaluator KINDS, so two rules that look at the same INDICATORS on
+    entirely different markets score a perfect 1.0 —
+    starter_commodity_vol_compression (commodity) and
+    starter_stock_mean_reversion (stock, etf) did exactly that, and the
+    strategist relayed it as proof the arsenal was narrower than it looked.
+    Rules that cannot meet on an instrument cannot misfire together, whatever
+    their conditions rhyme with.
+
+    An EMPTY or missing list means "every asset class" and therefore overlaps
+    with everything — the same care `_opposed` takes with an unrecognised
+    direction. Only two populated, provably non-intersecting universes excuse
+    a pair, because excusing a pair on a value nobody set would hide the real
+    duplicates this detector exists to find.
+    """
+    def _classes(value):
+        if not isinstance(value, (list, tuple, set, frozenset)):
+            return None
+        cleaned = {str(v).strip().lower() for v in value if str(v).strip()}
+        return cleaned or None
+
+    ca, cb = _classes(a), _classes(b)
+    if not ca or not cb:
+        return False
+    return ca.isdisjoint(cb)
+
+
 def _jaccard(a: frozenset, b: frozenset) -> float:
     """Standard Jaccard similarity on two sets. 0..1. Empty-vs-empty = 0."""
     if not a and not b:
@@ -205,7 +235,7 @@ def detect_evaluator_signature_overlap(*,
     setups = list(
         OpportunitySetup.objects.filter(is_active=True)
         .order_by("name")[:max_rules]
-        .values("id", "name", "direction", "conditions")
+        .values("id", "name", "direction", "conditions", "asset_classes")
     )
     # Pre-compute signatures so we don't re-derive in the inner loop.
     sigs = []
@@ -238,6 +268,12 @@ def detect_evaluator_signature_overlap(*,
             # still the diversification illusion this detector exists to find;
             # only the opposed case is excused.
             if _opposed(sa.get("direction"), sb.get("direction")):
+                continue
+            # ...and neither is a pair that can never meet on an instrument.
+            # Same failure, different axis: identical evaluator kinds pointed
+            # at markets that do not intersect are not duplicated coverage.
+            if _disjoint_universe(sa.get("asset_classes"),
+                                  sb.get("asset_classes")):
                 continue
             sim = _jaccard(sig_a, sig_b)
             if sim < threshold:

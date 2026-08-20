@@ -1609,12 +1609,22 @@ def _render_portfolio(request, live_only):
                                     live_book_value,
                                     unified_closed_positions)
     from portfolio.models import PortfolioSnapshot
-    # The SHARED "Main" book, deliberately: it is the only Position book
-    # the background pipeline maintains — snapshots, mark-to-market, the
-    # eToro sync, the REST API and the Telegram digest all operate on it.
-    # A per-user book here rendered empty equity curves and never-marked
-    # rows, and silently hid all pre-existing history.
-    portfolio = get_or_create_default_portfolio()
+    # THE USER'S OWN BOOK. This read the shared "Main" one, for a reason
+    # that has since stopped being true: Main was the only book the
+    # pipeline maintained, so a per-user book here drew an empty equity
+    # curve over never-marked rows. `recalculate_exposure` and
+    # `create_daily_snapshot` now walk EVERY portfolio, so a per-user book
+    # is marked and snapshotted like any other.
+    #
+    # Leaving it on Main had become the page contradicting itself: the
+    # headline value folded in the user's AssetBotTrades while the equity
+    # curve, the drawdown and the snapshot table underneath came from
+    # Main's bot-free series — one screen describing two books. And Main
+    # is not anybody's portfolio: it is fed by a single global eToro API
+    # key with no user attached, so on an install with more than one
+    # operator it was showing both of them the same account and calling it
+    # theirs.
+    portfolio = get_or_create_default_portfolio(user=request.user)
 
     # BOTH books, marked to live quotes: legacy Position rows plus the
     # AssetBotTrades that every interactive path (bots, TAKE TRADE,
@@ -2197,9 +2207,10 @@ def _render_positions(request, live_only):
     tab = request.GET.get("tab", "open")
     if tab not in ("open", "history"):
         tab = "open"
-    # The shared "Main" book, which is what unified_open_positions defaults
-    # to — the only Position book the background pipeline maintains.
-    portfolio = get_or_create_default_portfolio()
+    # The user's own book, the same one /portfolio/ and the headband read.
+    # Two position pages disagreeing about which book they are counting is
+    # the bug this whole pass keeps finding in new places.
+    portfolio = get_or_create_default_portfolio(user=request.user)
     # BOTH books: that shared Position book plus the user's AssetBotTrades —
     # a trade taken from a signal used to show in fills, the Op Center and
     # forensics but never here.
@@ -2855,10 +2866,23 @@ def setup(request):
     from instruments.models import Instrument
     from django.utils import timezone
 
-    # The shared "Main" book, matching the eToro sync this same page
-    # triggers and the pipeline that marks/snapshots positions — the
-    # positions pages read this book (plus the user's bot trades).
-    portfolio = get_or_create_default_portfolio()
+    # The user's own book — a position somebody adds by hand is theirs, and
+    # it has to land where the pages that display it are looking. This wrote
+    # to the shared "Main" book to match the eToro sync this same page
+    # triggers, but that sync is the odd one out: it runs off a single
+    # global API key with no user attached, so it has no book of its own to
+    # write to. A hand-added position does.
+    portfolio = get_or_create_default_portfolio(user=request.user)
+
+    # ...but the four RISK LIMITS are a different object with a different
+    # owner. `portfolio.risk_gate.limits_book()` is the shared "Main" row,
+    # and every gate on every trading path reads its percentages from there.
+    # Writing them onto the per-user book would put an operator's MAX DAILY
+    # LOSS 3% somewhere no gate looks, leaving the factory defaults enforcing
+    # in its place — the exact "the card protects nothing" failure the gates
+    # were wired to end. Card and gate therefore read and write ONE row.
+    from portfolio.risk_gate import limits_book
+    limits = limits_book()
 
     if request.method == "POST":
         action = request.POST.get("action", "")
@@ -2872,7 +2896,7 @@ def setup(request):
             messages.success(request, "Portfolio capital updated successfully.")
 
         elif action == "update_risk":
-            saved, rejected = _apply_risk_limits(portfolio, request.POST)
+            saved, rejected = _apply_risk_limits(limits, request.POST)
             if rejected:
                 messages.error(request, "Risk limits NOT saved: "
                                         + "; ".join(rejected))
@@ -2953,19 +2977,23 @@ def setup(request):
     from portfolio.risk_gate import (
         DAILY_LOSS_WINDOW_HOURS, book_value, preflight, single_position_state,
     )
-    risk_state = preflight(request.user, portfolio=portfolio)
+    risk_state = preflight(request.user, portfolio=limits)
     # The single-position ceiling in money, so the operator can compare it with
     # the pool capital they armed a bot with. The two are configured on
     # different pages and nothing reconciles them: a 10% ceiling on a 10,000
     # book refuses a position a 10,000 pool is entitled to open at 20% of
     # itself, and before this the collision only ever surfaced as a refusal at
     # the moment of trading. Notional 0 asks for the ceiling alone.
-    risk_single = single_position_state(portfolio, asset_class="stock",
+    risk_single = single_position_state(limits, asset_class="stock",
                                         notional=0.0)
 
     return render(request, "dashboard/setup.html", {
         "page_id": "setup",
         "portfolio": portfolio,
+        # The Risk Limits card renders ITS values from this row, not from
+        # `portfolio` — otherwise the card shows one book's numbers while
+        # the gates enforce another's.
+        "limits": limits,
         "api_keys": api_keys,
         "etoro_connected": bool(etoro_key),
         "etoro_key_masked": etoro_masked,
@@ -2973,7 +3001,7 @@ def setup(request):
         "risk_daily_loss": risk_state["checks"].get("daily_loss"),
         "risk_exposure": risk_state["checks"].get("exposure"),
         "risk_single": risk_single,
-        "risk_book_value": book_value(portfolio),
+        "risk_book_value": book_value(limits),
         "risk_window_hours": DAILY_LOSS_WINDOW_HOURS,
     })
 
@@ -3139,13 +3167,19 @@ def admin_dashboard(request):
 
     # Phase-3/4 HQ additions: surface broker accounts + AI-related components
     # so the template can render dedicated sections without re-querying.
-    from bot_program.models import BinanceAccount, OANDAAccount, AlpacaAccount
+    from bot_program.models import (BinanceAccount, OANDAAccount,
+                                    AlpacaAccount, IBKRAccount)
     broker_rows = []
     for u in User.objects.order_by("username"):
         binance = getattr(u, "binance_account", None)
         oanda = getattr(u, "oanda_account", None)
         alpaca = getattr(u, "alpaca_account", None)
-        if not (binance or oanda or alpaca):
+        # IBKR was absent from this table entirely, so a user whose ONLY
+        # broker is the one meant to carry the real book did not appear in
+        # it at all — the page said "no broker accounts configured yet"
+        # over a configured account.
+        ibkr = getattr(u, "ibkr_account", None)
+        if not (binance or oanda or alpaca or ibkr):
             continue
         broker_rows.append({
             "username": u.username,
@@ -3161,6 +3195,20 @@ def admin_dashboard(request):
                 "connected": bool(alpaca and alpaca.api_key_enc),
                 "paper": bool(alpaca and alpaca.paper),
             } if alpaca else None,
+            # `env` comes from the PORT, which is what actually selects the
+            # account — never from the `paper` checkbox, which the model
+            # itself documents as informational. `env` is None for a port
+            # that is none of IBKR's four, and that renders as UNKNOWN
+            # rather than as paper: "we could not tell" and "it is
+            # simulated" are different answers.
+            "ibkr": {
+                "connected": bool(ibkr and ibkr.account_id_enc),
+                "env": ibkr.env,
+                "env_label": ibkr.env_label,
+                "host": ibkr.host,
+                "port": ibkr.port,
+                "disagrees": ibkr.paper_flag_disagrees,
+            } if ibkr else None,
         })
     context["broker_rows"] = broker_rows
 

@@ -43,11 +43,12 @@ def _open_trade(cfg, symbol, side, rule_name):
     )
 
 
-def _setup(name, conditions, *, direction="bullish"):
+def _setup(name, conditions, *, direction="bullish", asset_classes=None):
     from signals.models_opportunity import OpportunitySetup
     return OpportunitySetup.objects.create(
         name=name, description="t", direction=direction,
-        asset_classes=["stock"], conditions=conditions,
+        asset_classes=(["stock"] if asset_classes is None else asset_classes),
+        conditions=conditions,
         min_match_score=0.6, suggested_horizon_days=5, sizing={},
         is_active=True,
     )
@@ -230,3 +231,85 @@ class IntegrationTests(TestCase):
         self.assertTrue(any(
             (obs.payload or {}).get("detector") == "position_overlap"
             for obs in anoms))
+
+
+class RulesThatCannotMeetAreNotDuplicatesTests(TestCase):
+    """The other half of the mirror-pair mistake.
+
+    The signature is a set of evaluator KINDS and discards every param, so
+    two rules reading the same INDICATORS on entirely different markets score
+    a perfect 1.0. The platform's own shipped starters did it —
+    starter_commodity_vol_compression (commodity) and
+    starter_stock_mean_reversion (stock, etf) — and the strategist relayed it
+    to the operator as evidence that the arsenal was narrower than the rule
+    count suggested.
+
+    Two rules that can never be scored against the same instrument cannot
+    misfire together, however much their conditions rhyme.
+    """
+
+    CONDITIONS = [
+        {"kind": "rsi", "op": "lt", "value": 30, "weight": 1},
+        {"kind": "bollinger", "op": "lt", "value": 0.1, "weight": 1},
+        {"kind": "volume", "op": "gt", "value": 1.5, "weight": 1},
+    ]
+
+    def _pair(self, classes_a, classes_b):
+        """Exactly two setups in the world, so the count is the answer.
+
+        The detector scores every ACTIVE setup against every other, so a
+        test that builds a second pair without clearing the first also
+        measures the four cross-pairs between them.
+        """
+        from brain.correlation_audit import detect_evaluator_signature_overlap
+        from signals.models_opportunity import OpportunitySetup
+        OpportunitySetup.objects.all().delete()
+        _setup("rule_a", self.CONDITIONS, asset_classes=classes_a)
+        _setup("rule_b", self.CONDITIONS, asset_classes=classes_b)
+        return detect_evaluator_signature_overlap()
+
+    def test_disjoint_universes_are_not_reported(self):
+        self.assertEqual(self._pair(["commodity"], ["stock", "etf"]), [])
+
+    def test_an_overlapping_universe_is_still_reported(self):
+        """The detector must still do its job: same evaluators, same market,
+        same direction is the diversification illusion it exists to find."""
+        found = self._pair(["stock", "etf"], ["stock"])
+        self.assertEqual(len(found), 1, found)
+        self.assertEqual(found[0]["jaccard"], 1.0)
+
+    def test_an_identical_universe_is_still_reported(self):
+        self.assertEqual(len(self._pair(["stock"], ["stock"])), 1)
+
+    def test_an_empty_universe_means_everything_and_never_excuses_a_pair(self):
+        """A value nobody set must not silently exempt a real duplicate —
+        the same care `_opposed` takes with an unrecognised direction."""
+        self.assertEqual(len(self._pair([], ["stock"])), 1)
+        self.assertEqual(len(self._pair(["stock"], [])), 1)
+
+    def test_a_non_list_universe_never_excuses_a_pair(self):
+        self.assertEqual(len(self._pair(None, ["stock"])), 1)
+
+    def test_case_and_whitespace_do_not_create_a_false_disjunction(self):
+        """"Stock" and "stock " are the same market; treating them as
+        disjoint would hide a genuine duplicate."""
+        self.assertEqual(len(self._pair([" STOCK "], ["stock"])), 1)
+
+
+class TheShippedStartersAreNotFlaggedTests(TestCase):
+    """End to end on the real rules, because both false pairs the operator
+    was shown came from the seeders rather than from a synthetic fixture."""
+
+    def test_the_platforms_own_seeded_rules_produce_no_false_pair(self):
+        from django.core.management import call_command
+        from brain.correlation_audit import detect_evaluator_signature_overlap
+        call_command("seed_strategies", "--activate", verbosity=0)
+        call_command("seed_advanced_strategies", "--activate", verbosity=0)
+        found = detect_evaluator_signature_overlap()
+        names = {tuple(sorted((f["rule_a"], f["rule_b"]))) for f in found}
+        self.assertNotIn(
+            ("starter_commodity_vol_compression", "starter_stock_mean_reversion"),
+            names, "disjoint markets reported as duplicated coverage")
+        self.assertNotIn(
+            ("advanced_smc_long", "advanced_smc_short"),
+            names, "a long and its short mirror reported as duplicates")

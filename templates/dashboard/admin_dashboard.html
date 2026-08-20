@@ -243,7 +243,7 @@ the broker, and the bot that would have honoured their stops switched off.
     <div class="card-header"><span class="card-title">Connected accounts</span></div>
     {% if broker_rows %}
     <div class="table-wrapper"><table class="sv-perf-table">
-        <thead><tr><th>User</th><th>Binance</th><th>OANDA</th><th>Alpaca</th><th>Actions</th></tr></thead>
+        <thead><tr><th>User</th><th>Binance</th><th>OANDA</th><th>Alpaca</th><th>IBKR</th><th>Actions</th></tr></thead>
         <tbody>
             {% for row in broker_rows %}
             <tr>
@@ -274,10 +274,24 @@ the broker, and the bot that would have honoured their stops switched off.
                         {% else %}<span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">NO KEY</span>{% endif %}
                     {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
                 </td>
+                <td>
+                    {# The env chip is PORT-derived. An unrecognised port is #}
+                    {# drawn as UNKNOWN, never as paper — assuming "safe" is #}
+                    {# the assumption that costs real money when it is wrong. #}
+                    {% if row.ibkr %}
+                        {% if row.ibkr.connected %}
+                        <span style="color:var(--accent);font-family:var(--font-mono);font-size:11px;">CONNECTED</span>
+                        {% else %}<span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">NO ACCOUNT ID</span>{% endif %}
+                        <span class="ib-env ib-env--{{ row.ibkr.env|default:'unknown' }}">{{ row.ibkr.env_label }}</span>
+                        <span style="display:block;color:var(--text-muted);font-size:10px;font-family:var(--font-mono);">{{ row.ibkr.host }}:{{ row.ibkr.port }}</span>
+                        {% if row.ibkr.disagrees %}<span style="display:block;color:var(--accent-gold-ink);font-size:10px;font-family:var(--font-mono);" title="The stored 'paper' checkbox and the port disagree. The port is what selects the account.">flag disagrees with port</span>{% endif %}
+                    {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+                </td>
                 <td style="display:flex;gap:6px;flex-wrap:wrap;">
                     {% if row.binance.connected %}<form method="post" action="{% url 'hq_disconnect_broker' %}">{% csrf_token %}<input type="hidden" name="target_username" value="{{ row.username }}"><input type="hidden" name="broker" value="binance"><button class="btn btn-sm btn-danger" type="submit">× Binance</button></form>{% endif %}
                     {% if row.oanda.connected %}<form method="post" action="{% url 'hq_disconnect_broker' %}">{% csrf_token %}<input type="hidden" name="target_username" value="{{ row.username }}"><input type="hidden" name="broker" value="oanda"><button class="btn btn-sm btn-danger" type="submit">× OANDA</button></form>{% endif %}
                     {% if row.alpaca.connected %}<form method="post" action="{% url 'hq_disconnect_broker' %}">{% csrf_token %}<input type="hidden" name="target_username" value="{{ row.username }}"><input type="hidden" name="broker" value="alpaca"><button class="btn btn-sm btn-danger" type="submit">× Alpaca</button></form>{% endif %}
+                    {% if row.ibkr.connected %}<form method="post" action="{% url 'hq_disconnect_broker' %}">{% csrf_token %}<input type="hidden" name="target_username" value="{{ row.username }}"><input type="hidden" name="broker" value="ibkr"><button class="btn btn-sm btn-danger" type="submit">× IBKR</button></form>{% endif %}
                 </td>
             </tr>
             {% endfor %}
@@ -312,7 +326,119 @@ the broker, and the bot that would have honoured their stops switched off.
             <button type="submit" class="btn btn-primary btn-sm">Save Alpaca</button>
         </form>
     </div>
+
+    {# IBKR had a view and a URL and no way to reach them: this page offered #}
+    {# OANDA and Alpaca only, so the one broker meant to carry the real book #}
+    {# could be configured through Django admin and nowhere else. #}
+    <div class="card fade-in-up ib-card">
+        <div class="card-header"><span class="card-title">Add / Update Interactive Brokers Connection</span></div>
+        <form method="post" action="{% url 'hq_save_ibkr' %}" id="ibkrForm" style="padding:16px;display:grid;gap:10px;">
+            {% csrf_token %}
+            <p class="ib-note">
+                IBKR speaks over a socket, not an API key: <strong>TWS or IB Gateway
+                must be running</strong> on a host this server can reach. Saving
+                these details connects to nothing on its own — the port below is
+                what selects which account an order would reach.
+            </p>
+            <input type="text" name="target_username" placeholder="Username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="text" name="ibkr_account_id" placeholder="IBKR account ID (e.g. DU1234567 paper / U1234567 live)" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="text" name="ibkr_host" value="127.0.0.1" placeholder="Host running TWS / Gateway" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+
+            {# A select, not a free number. The port IS the paper/live switch, #}
+            {# and a typo of one digit is the difference between a simulated #}
+            {# fill and a real one — so each option says which it is. #}
+            <label class="ib-field-label" for="ibkrPort">Socket — this decides which account trades</label>
+            <select id="ibkrPort" name="ibkr_port" class="ib-port-select" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+                <option value="7497" selected>7497 — TWS · PAPER (simulated money)</option>
+                <option value="4002">4002 — IB Gateway · PAPER (simulated money)</option>
+                <option value="7496">7496 — TWS · LIVE (your real funds)</option>
+                <option value="4001">4001 — IB Gateway · LIVE (your real funds)</option>
+            </select>
+            <p class="ib-live-warning" id="ibLiveWarning" hidden>
+                This is a <strong>LIVE</strong> socket. Orders routed here move real
+                money. Saving is still safe on its own — a bot must also be set to
+                live mode and armed before anything is submitted.
+            </p>
+
+            <input type="number" name="ibkr_client_id" value="1" min="0" placeholder="Client ID" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+
+            <div class="ib-routing">
+                <span class="ib-field-label">Route these through IBKR</span>
+                {# Options default ON because nothing else wired here trades #}
+                {# them at scale; the rest are opt-in and each one is a #}
+                {# decision to stop using the default broker for that class. #}
+                <label><input type="checkbox" name="primary_for_options" checked> Options</label>
+                <label><input type="checkbox" name="primary_for_stocks"> Stocks / ETFs / Indices</label>
+                <label><input type="checkbox" name="primary_for_forex"> Forex</label>
+                <label><input type="checkbox" name="primary_for_commodity"> Commodities <span class="ib-hint">(gold and futures stay on the paper venue unless this is on)</span></label>
+                <label><input type="checkbox" name="primary_for_cfd"> CFDs <span class="ib-hint">(not available to US residents)</span></label>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-sm">Save IBKR connection</button>
+        </form>
+    </div>
 </div>
+
+<script>
+/* The IBKR port is the paper/live switch — there is no second toggle inside
+   the API — so selecting a live socket has to look like what it is, and
+   saving one has to cost more than a reflex Enter.
+
+   The gate is on SAVING A LIVE SOCKET rather than on submitting the form:
+   pointing the platform at a funded account is the decision worth pausing
+   on. It still submits no orders; a bot must separately be set to live mode
+   and armed. The dialog says exactly that, because a warning that overstates
+   what is about to happen gets dismissed as noise the second time. */
+(function () {
+    var form = document.getElementById("ibkrForm");
+    var select = document.getElementById("ibkrPort");
+    var warning = document.getElementById("ibLiveWarning");
+    if (!form || !select || !warning) return;
+
+    var LIVE_PORTS = { "7496": "TWS", "4001": "IB Gateway" };
+
+    function selectedLiveVenue() {
+        return LIVE_PORTS[String(select.value)] || null;
+    }
+
+    function sync() {
+        warning.hidden = !selectedLiveVenue();
+    }
+    select.addEventListener("change", sync);
+    sync();
+
+    var armed = false;
+    form.addEventListener("submit", function (e) {
+        if (armed) return;
+        var venue = selectedLiveVenue();
+        if (!venue) return;               /* paper or unknown: no gate here */
+        e.preventDefault();
+        var who = (form.querySelector('[name="target_username"]') || {}).value || "(unnamed)";
+        var acct = (form.querySelector('[name="ibkr_account_id"]') || {}).value || "(none)";
+        SV.overlay.confirm({
+            title: "Point Sauron at a LIVE IBKR account",
+            message: "Port " + select.value + " is the " + venue +
+                     " live socket. Orders routed to it move real funds.",
+            facts: [
+                ["User", who],
+                ["Account", acct],
+                ["Socket", select.value + " · " + venue + " · LIVE"],
+                ["Submits orders now", "no — a bot must also be live and armed"]
+            ],
+            detail: "Saving stores the connection and tests whether TWS answers. "
+                  + "Nothing is traded until a bot is switched to live mode and "
+                  + "enabled, and the platform master switch is on.",
+            danger: true,
+            requireText: "LIVE",
+            confirmLabel: "Save live connection"
+        }).then(function (ok) {
+            if (!ok) return;
+            armed = true;
+            form.submit();
+        });
+    });
+})();
+</script>
 
 <!-- ═══ RULE ACTUATOR — Closed-Loop Self-Adjustment ═══ -->
 <div class="section-label fade-in-up">Rule Actuator (Self-Adjusting)</div>
