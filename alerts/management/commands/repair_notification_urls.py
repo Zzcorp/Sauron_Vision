@@ -41,6 +41,43 @@ class Command(BaseCommand):
                 Notification.objects.filter(pk=notif.pk).update(url=safe)
                 blanked += 1
 
+        # ── Upgrade the list-page fallbacks that ALREADY shipped ────────
+        #
+        # A notification's url is written once, at creation, so fixing a
+        # producer does nothing for the rows already in everybody's bell.
+        # The anomaly alert deep-linked only when a scan found exactly ONE
+        # severe anomaly and otherwise fell back to /quotes/ — and that
+        # scan fires repeatedly on one instrument, nine or thirteen times a
+        # day on the same pair, so the fallback was the normal case. Those
+        # rows still point at a list page the operator has to search.
+        #
+        # /quotes/ is a VALID page, so `safe_url` above leaves it alone.
+        # This is the separate question of whether it is the RIGHT page,
+        # and the row itself carries the answer: `data.items` holds one
+        # entry per anomaly with the asset's own url. When every item names
+        # the same asset, that is where the click belonged all along.
+        upgraded = 0
+        for notif in Notification.objects.filter(url="/quotes/").only(
+                "id", "url", "data"):
+            data = notif.data if isinstance(notif.data, dict) else {}
+            items = data.get("items")
+            if not isinstance(items, list):
+                continue
+            urls = {i.get("url") for i in items
+                    if isinstance(i, dict) and i.get("url")}
+            # One asset, one destination. Several assets keep the list
+            # page: it is the only page that holds all of them, and the
+            # rows in the panel carry their own links.
+            if len(urls) != 1:
+                continue
+            target = Notification.safe_url(urls.pop())
+            if target and target != notif.url:
+                Notification.objects.filter(pk=notif.pk).update(url=target)
+                upgraded += 1
+        if upgraded:
+            self.stdout.write(
+                f"  /quotes/  ->  the asset's own page  ({upgraded} rows)")
+
         self.stdout.write(self.style.SUCCESS(
-            f"Rewrote {total} row(s), blanked {blanked} unresolvable "
-            f"link(s)."))
+            f"Rewrote {total} row(s), upgraded {upgraded} list-page "
+            f"fallback(s), blanked {blanked} unresolvable link(s)."))

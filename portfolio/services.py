@@ -375,6 +375,34 @@ class BookValue(NamedTuple):
     # not break, and so the pair reads as "nothing open" rather than unknown.
     funded_marked: float = 0.0
     simulated_pnl: float = 0.0
+    #: Capital the open book ties up, margin-aware. NOT the notional.
+    allocated: float = 0.0
+
+    @property
+    def free(self) -> Optional[float]:
+        """What is left to deploy, or None when the book is unmeasured.
+
+        value - allocated, and never below zero: a book carrying more
+        margin than it is worth is a margin call, not a negative pile of
+        cash, and printing "-1,200 free" describes nothing an operator can
+        act on.
+        """
+        if self.value is None:
+            return None
+        return max(0.0, round(self.value - (self.allocated or 0.0), 2))
+
+    @property
+    def free_pct(self) -> Optional[float]:
+        if self.value is None or self.value <= 0:
+            return None
+        free = self.free
+        return None if free is None else free / self.value * 100
+
+    @property
+    def allocated_pct(self) -> Optional[float]:
+        if self.value is None or self.value <= 0:
+            return None
+        return (self.allocated or 0.0) / self.value * 100
 
     @property
     def currency_symbol(self) -> str:
@@ -413,6 +441,24 @@ class BookValue(NamedTuple):
             return None
         return self.cash / self.value * 100
 
+
+
+
+def _capital_at_work(row, notional: float) -> float:
+    """Account-currency capital one position ties up, margin-aware.
+
+    Routed through `manual_trade.CAPITAL_USE_FRACTION`, the platform's one
+    record of how much of its notional a class actually locks — the same
+    table the risk gates size against, so the allocation an operator reads
+    cannot drift from the number that refuses their next trade.
+    """
+    try:
+        from bot_program.manual_trade import CAPITAL_USE_FRACTION
+    except Exception:  # noqa: BLE001
+        return float(notional or 0.0)
+    cls = (getattr(row, "asset_class", "")
+           or getattr(getattr(row, "instrument", None), "asset_class", "") or "")
+    return float(notional or 0.0) * CAPITAL_USE_FRACTION.get(cls, 1.0)
 
 
 def _simulated_realized_pnl(user) -> float:
@@ -529,6 +575,11 @@ def live_book_value(user, portfolio=None, book=None) -> BookValue:
     # never left it contributes only its P&L.
     simulated_pnl = 0.0
     funded_marked = 0.0
+    # ALLOCATED — the capital the open book actually ties up, margin-aware.
+    # Notional is not it: an FX position carries thirty times the money it
+    # locks, and printing the exposure as the allocation tells an operator
+    # they have nothing left when they have most of it.
+    allocated = 0.0
     # REALIZED P&L on closed simulated trades, since inception.
     #
     # Without this the book was a snapshot of what is open and nothing else:
@@ -546,11 +597,12 @@ def live_book_value(user, portfolio=None, book=None) -> BookValue:
         if getattr(row, "current_price", None) is None \
                 or getattr(row, "unrealized_pnl", None) is None:
             continue
+        row_notional = abs(float(row.current_price) * float(row.quantity or 0))
+        allocated += _capital_at_work(row, row_notional)
         if getattr(row, "paper", False):
             simulated_pnl += float(row.unrealized_pnl)
         else:
-            funded_marked += abs(float(row.current_price)
-                                 * float(row.quantity or 0))
+            funded_marked += row_notional
 
     value = (None if cash is None or marked is None
              else round(cash + funded_marked + simulated_pnl
@@ -574,4 +626,5 @@ def live_book_value(user, portfolio=None, book=None) -> BookValue:
         partial=n_open > n_priced, currency=(pf.currency or "").upper(),
         coverage=coverage, rows=rows,
         funded_marked=round(funded_marked, 2),
-        simulated_pnl=round(simulated_pnl, 2))
+        simulated_pnl=round(simulated_pnl, 2),
+        allocated=round(allocated, 2))

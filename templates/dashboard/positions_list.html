@@ -363,7 +363,7 @@ template branches, each a fresh chance to print a confident zero.
     </div>
     {% if closed_positions %}
     <div class="ph-list">
-        {% for p in closed_positions %}
+        {% for p, d in closed_detailed %}
         {# The card toggles on click, so the symbol link has to say the #}
         {# click was for it: without the guard, following the link ALSO #}
         {# expanded the card the operator was leaving. #}
@@ -428,6 +428,47 @@ template branches, each a fresh chance to print a confident zero.
                         <div class="ph-detail-label">Duration</div>
                         {# timesince against a null closed_at returns "" too. #}
                         <div class="ph-detail-value">{% if p.opened_at and p.closed_at %}{{ p.opened_at|timesince:p.closed_at }}{% else %}—{% endif %}</div>
+                    </div>
+                    {# A closed trade is only ever what was written down #}
+                    {# about it — an open one can still be watched. It #}
+                    {# carried eight cells and none said what it COST, what #}
+                    {# it was levered at, where it executed, or which rule #}
+                    {# opened it: most of what a post-mortem needs. #}
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Capital</div>
+                        <div class="ph-detail-value">{% if d.committed %}{{ d.committed }}{% if d.committed_pct %} <span class="ph-detail-note">{{ d.committed_pct }}% of pool</span>{% endif %}{% else %}&mdash;{% endif %}</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Leverage</div>
+                        <div class="ph-detail-value">{% if d.leverage %}{{ d.leverage }}&times;{% if d.committed_kind == 'margin' %} <span class="ph-detail-note">margin</span>{% endif %}{% else %}&mdash;{% endif %}</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Notional</div>
+                        <div class="ph-detail-value">{% if d.notional %}{{ d.notional }}{% elif d.committed %}{{ d.committed }}{% else %}&mdash;{% endif %}</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Booked R</div>
+                        <div class="ph-detail-value sign-{{ p.unrealized_pnl|sign_class }}">{% if d.realized_r %}{{ d.realized_r }}R{% else %}&mdash;{% endif %}</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Venue</div>
+                        <div class="ph-detail-value">{% if d.venue %}{{ d.venue }}{% else %}&mdash;{% endif %}</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Opened by</div>
+                        <div class="ph-detail-value">{% if d.rule %}{{ d.rule }}{% else %}&mdash;{% endif %}</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Exit cost</div>
+                        <div class="ph-detail-value">{% if d.exit_cost %}{{ d.exit_cost }}{% else %}&mdash;{% endif %}</div>
+                    </div>
+                    <div class="ph-detail-item">
+                        <div class="ph-detail-label">Entry stop</div>
+                        {# The R denominator, and not always the stop the #}
+                        {# row shows: a trail rewrites stop_loss and the #}
+                        {# grade is still measured against the stop the #}
+                        {# trade opened with. #}
+                        <div class="ph-detail-value">{{ d.initial_stop|default:"&mdash;" }}</div>
                     </div>
                 </div>
                 {% comment %}

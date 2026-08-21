@@ -30,6 +30,18 @@ than in nine template branches.
         <span class="oc-strip-value {{ strip.cash.tone }}" data-sv-live-key="pf.cash">{{ strip.cash.text }}</span>
         <span class="oc-strip-sub" data-sv-live-key="pf.cash.sub">{{ strip.cash.sub }}</span>
     </div>
+    {# The two halves of "can I take another trade". EXPOSURE beside them is #}
+    {# NOTIONAL, which on a levered class is thirty times the money locked. #}
+    <div class="oc-strip-cell" title="{{ strip.allocated.title }}">
+        <span class="oc-strip-label">ALLOCATED</span>
+        <span class="oc-strip-value {{ strip.allocated.tone }}" data-sv-live-key="pf.allocated">{{ strip.allocated.text }}</span>
+        <span class="oc-strip-sub" data-sv-live-key="pf.allocated.sub">{{ strip.allocated.sub }}</span>
+    </div>
+    <div class="oc-strip-cell" title="{{ strip.free.title }}">
+        <span class="oc-strip-label">FREE</span>
+        <span class="oc-strip-value {{ strip.free.tone }}" data-sv-live-key="pf.free">{{ strip.free.text }}</span>
+        <span class="oc-strip-sub" data-sv-live-key="pf.free.sub">{{ strip.free.sub }}</span>
+    </div>
     <div class="oc-strip-cell" title="{{ strip.exposure.title }}">
         <span class="oc-strip-label">EXPOSURE</span>
         <span class="oc-strip-value {{ strip.exposure.tone }}" data-sv-live-key="pf.exposure">{{ strip.exposure.text }}</span>

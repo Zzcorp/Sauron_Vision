@@ -85,6 +85,39 @@ def _no_track_record_reason() -> str:
 
 # ── Snapshot builder (no Claude call) ─────────────────────────────────────
 
+
+def _held_symbols() -> set:
+    """Every symbol open in either book, across users.
+
+    The regime probe is a PLATFORM read — `_build_world_snapshot` takes no
+    user — so it asks both books for what is currently carried rather than
+    scoping to one operator. A symbol nobody holds can wait; a symbol that
+    is 36% of somebody's book cannot.
+
+    Never raises: a probe that cannot list the book falls back to the
+    watchlist ordering rather than costing the whole snapshot.
+    """
+    symbols = set()
+    try:
+        from bot_program.models import AssetBotTrade
+        symbols.update(
+            AssetBotTrade.objects
+            .filter(status__in=("OPEN", "CLOSE_PENDING"))
+            .values_list("symbol", flat=True))
+    except Exception:  # noqa: BLE001
+        logger.warning("regime probe: could not read the bot book",
+                       exc_info=True)
+    try:
+        from portfolio.models import Position
+        symbols.update(
+            Position.objects.filter(closed_at__isnull=True)
+            .values_list("instrument__symbol", flat=True))
+    except Exception:  # noqa: BLE001
+        logger.warning("regime probe: could not read the legacy book",
+                       exc_info=True)
+    return {s for s in symbols if s}
+
+
 def _build_world_snapshot(*, max_obs: int = 80) -> dict:
     """Compact JSON-ready dict the synthesizer reads from.
 
@@ -205,12 +238,27 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
             hurst_exponent, hurst_regime_label, garch_lite_forecast,
         )
         from market_data.models import PriceData
-        # Watchlist first — an unordered [:8] slice sampled arbitrary
-        # instruments and could miss everything the operator watches.
-        candidates = list(
-            Instrument.objects.filter(is_active=True)
-            .order_by("-is_watchlist", "symbol")[:8]
+        # HELD FIRST, then watchlist, then the rest.
+        #
+        # Watchlist-first was already an improvement on an arbitrary slice,
+        # and it still measured the wrong universe: with nothing starred —
+        # which is the shipped state — "-is_watchlist, symbol" degenerates
+        # to ALPHABETICAL, so the probe read AAPL, AAVEUSD, ABBV, ADAUSD,
+        # AGG, ALUMUSD, AMD, AMZN out of 177 instruments and reported on
+        # none of the eight the operator was actually carrying.
+        #
+        # That is how the briefing came to say, three days running, that
+        # 36% of the book sat in an asset with "zero regime probe
+        # coverage": the brain was measuring the alphabet. A regime read
+        # that skips the positions is answering a question nobody asked.
+        held = _held_symbols()
+        ordered = sorted(
+            Instrument.objects.filter(is_active=True),
+            key=lambda i: (0 if i.symbol in held else 1,
+                           0 if i.is_watchlist else 1,
+                           i.symbol),
         )
+        candidates = ordered[:max(8, min(len(held), 16))]
         regime_probes = []
         for inst in candidates:
             # Do NOT hardcode a timeframe: this deployment holds 4h and

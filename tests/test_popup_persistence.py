@@ -363,19 +363,34 @@ class MoneyBlockTests(TestCase):
 
     def test_a_forex_position_shows_margin_and_never_the_levered_notional(self):
         """1,000 units at 125.00 with the entry-time rate 0.008 is 1,000 of
-        notional — and sizing allows forex to 400% of equity precisely
-        because the leverage is the broker's. What the account put up is
-        margin, and nothing here records it. Printing 1,000.00 as "what this
-        cost me" would overstate the position by the whole leverage."""
+        notional. What the account put up is MARGIN, and printing 1,000.00
+        as "what this cost me" would overstate the position by the whole
+        leverage — that is the thing this test exists to prevent, and it
+        still does.
+
+        What changed is the other half. The margin used to render as an
+        em-dash, on the grounds that it is the broker's number and nothing
+        here records it. `manual_trade.CAPITAL_USE_FRACTION` does record a
+        model of it — 1/30 for forex — and the risk gates, the
+        concentration ceiling and the book's own ALLOCATED figure all size
+        against exactly that. Dashing it here made the one class where
+        capital and exposure differ by thirty times the only class whose
+        capital the card would not name, which is precisely backwards.
+
+        So it is the modelled margin, labelled `margin` so it can never be
+        read as cash spent, and it is emphatically not the notional.
+        """
         inst = _instrument("USDJPY", "forex")
         _quote(inst, 126)
         _trade(self.user, symbol="USDJPY", asset_class="forex", entry=125,
                stop=124, target=128, qty="1000", vpu=0.008)
         html = self._html()
         self.assertEqual(_attr(html, "committed-kind"), "margin")
-        self.assertEqual(_attr(html, "committed"), "",
-                         "a margin nobody recorded must render as the "
-                         "em-dash, never as the notional")
+        committed = _attr(html, "committed")
+        self.assertNotEqual(committed, "1,000.00",
+                            "the notional was printed as the cost")
+        # 1,000 of notional at the platform's own 1/30 forex fraction.
+        self.assertEqual(committed, "33.33")
         self.assertEqual(_attr(html, "notional"), "1,000.00")
         self.assertEqual(_attr(html, "value-now"), "1,008.00")
         # And the percentage is then a percentage OF that notional, which is

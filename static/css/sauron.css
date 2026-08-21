@@ -6448,3 +6448,11 @@ a.sig-sym:hover { color: var(--accent); text-decoration: underline; }
 }
 .lock-now[data-has-pin="0"] { color: var(--accent-gold-ink); }
 .lock-now[data-has-pin="0"]:hover { color: var(--accent-gold-ink); }
+
+/* A qualifier inside a detail cell — the share of the pool, or the word
+   that says a capital figure is margin rather than cash. Quieter than the
+   figure it qualifies, so the number is still what the eye lands on. */
+.ph-detail-note {
+    font-family: var(--font-mono); font-size: 9px; color: var(--text-muted);
+    letter-spacing: .03em;
+}

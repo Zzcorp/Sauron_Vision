@@ -1692,6 +1692,30 @@ def _render_portfolio(request, live_only):
                  else "share unknown — nothing could be priced"),
             title="Cash available to deploy, and its share of cash plus "
                   "marked exposure."),
+        # ALLOCATED and FREE — the two halves of "can I take another
+        # trade", which the page could not answer. It showed a total, a
+        # cash column and a notional exposure, and none of those is the
+        # capital actually locked: an FX position carries thirty times the
+        # money it ties up, so reading the exposure as the allocation says
+        # an operator is fully committed when most of the book is idle.
+        "allocated": _live_cell(
+            _live_num(book.allocated, "{:,.2f}"),
+            sub=(f"{book.allocated_pct:.1f}% of the book"
+                 if book.allocated_pct is not None
+                 else "share unknown — the book could not be valued"),
+            title="Capital the open positions actually tie up, margin-aware "
+                  "— the same number the risk gates size against, not the "
+                  "notional they carry."),
+        "free": _live_cell(
+            _live_num(book.free, "{:,.2f}"),
+            tone=("down" if (book.free_pct is not None and book.free_pct < 10)
+                  else ""),
+            sub=(f"{book.free_pct:.1f}% left to deploy"
+                 if book.free_pct is not None
+                 else "share unknown — the book could not be valued"),
+            title="What is left after the open book. Never negative: more "
+                  "margin than the book is worth is a margin call, not a "
+                  "negative pile of cash."),
         "exposure": _live_cell(
             _live_num(deployed_value, "{:,.2f}"),
             sub=(f"{exposure_pct:.1f}% deployed" if exposure_pct is not None
@@ -1864,7 +1888,13 @@ def _pos_fmt(value, digits=None):
     if digits is None:
         a = abs(f)
         digits = 2 if a >= 100 else (4 if a >= 1 else 8)
-    text = "{:.{}f}".format(f, digits).rstrip("0").rstrip(".")
+    text = "{:.{}f}".format(f, digits)
+    # Strip trailing zeros only AFTER a decimal point. Unconditional
+    # rstrip("0") eats the zeros of an INTEGER: at digits=0 a leverage of
+    # 30 printed as "3", 100 as "1", 20 as "2". Harmless on a price, which
+    # always has a fractional part, and silently wrong on anything whole.
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
     return text or "0"
 
 
@@ -1931,6 +1961,49 @@ def _pos_exit_cost(trade, mark, qty_abs, vpu):
         return None
     return abs(float(mark) - float(fill)) * qty_abs * vpu
 
+
+
+
+
+def _pos_modelled_margin(asset_class: str, notional):
+    """Capital a levered position ties up, per the platform's own table.
+
+    None when there is no notional to scale — an unpriced row has no
+    margin to state, and inventing one would put a number under a
+    position nobody could value.
+    """
+    if notional is None:
+        return None
+    try:
+        from bot_program.manual_trade import CAPITAL_USE_FRACTION
+    except Exception:  # noqa: BLE001
+        return None
+    frac = CAPITAL_USE_FRACTION.get(asset_class)
+    return None if not frac else float(notional) * frac
+
+
+def _pos_leverage(asset_class: str) -> str:
+    """How many times its own capital a position of this class carries.
+
+    Read off `manual_trade.CAPITAL_USE_FRACTION`, the platform's single
+    record of margin — the same table the risk gates size against — so the
+    card cannot drift from the gate. "1" is a real answer and not a
+    missing one: a spot position settles in full and carries exactly its
+    own money.
+
+    "" only when the class is unknown, because a leverage nobody can
+    establish must not be printed as 1.
+    """
+    if not asset_class:
+        return ""
+    try:
+        from bot_program.manual_trade import CAPITAL_USE_FRACTION
+    except Exception:  # noqa: BLE001
+        return ""
+    frac = CAPITAL_USE_FRACTION.get(asset_class, 1.0)
+    if not frac or frac <= 0:
+        return ""
+    return _pos_fmt(1.0 / frac, 0)
 
 
 def _pos_committed_pct(committed, trade):
@@ -2128,7 +2201,18 @@ def _position_card_details(user, positions):
         # nothing here records it, so the card dashes it and names the
         # notional separately rather than passing one off as the other.
         levered = asset_class in _POS_LEVERED_CLASSES
-        committed = None if levered else notional
+        # The MODELLED margin on a levered row, not a dash.
+        #
+        # This used to be None on the grounds that the margin is the
+        # broker's number and nothing records it. The platform does model
+        # it — `manual_trade.CAPITAL_USE_FRACTION` is what the risk gates
+        # and the book's own ALLOCATED figure size against — so dashing it
+        # here left the one class where capital and exposure differ by 30x
+        # as the one class whose capital the card would not name. It is
+        # labelled `committed_kind = "margin"` so it is never read as cash
+        # spent, and it is the same number the gate used.
+        committed = (_pos_modelled_margin(asset_class, notional) if levered
+                     else notional)
         exit_cost = _pos_exit_cost(trade, mark, qty_abs, vpu)
         if pnl is None:
             net_now = None
@@ -2166,6 +2250,14 @@ def _position_card_details(user, positions):
             # down.
             "mark_pct": (_pos_fmt((mark - entry) / entry * 100, 2)
                          if mark is not None and entry else ""),
+            # LEVERAGE, as a fact rather than a control. Nothing on this
+            # platform sets it — the broker does — but the platform models
+            # it: `manual_trade.CAPITAL_USE_FRACTION` is the fraction of a
+            # position's notional that its class actually ties up, and the
+            # risk gates size against exactly that. An operator reading a
+            # 4,800 exposure on a 160 margin is owed the number that
+            # explains the gap.
+            "leverage": _pos_leverage(asset_class),
             # What this one position ties up, as a share of the book it is
             # tying it up FROM. 4,800 means nothing without the pool it came
             # out of; "48% of the pool" is the sentence an operator sizes by.
@@ -2362,6 +2454,15 @@ def _render_positions(request, live_only):
         # keyed because a portfolio.Position row has no id to join on.
         "positions_detailed": list(zip(
             open_rows, _position_card_details(request.user, open_objects))),
+        # CLOSED rows get the same treatment. They used to carry eight
+        # cells and nothing else — no capital, no leverage, no venue, no
+        # rule, not even the R the trade was graded on — so a trade the
+        # operator wanted to LEARN from was the thinnest row on the page,
+        # which is exactly backwards: an open position can be watched, a
+        # closed one is only ever what was written down about it.
+        "closed_detailed": list(zip(
+            closed_positions,
+            _position_card_details(request.user, closed_positions))),
         "n_priced": n_priced,
         "direction_donut": direction_donut,
         "asset_breakdown": asset_breakdown,
