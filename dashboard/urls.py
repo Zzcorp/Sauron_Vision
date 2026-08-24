@@ -38,7 +38,7 @@ from .views_close import (close_position_preview, close_position_execute,
                           close_all_preview, close_all_execute)
 from .views_signals_htmx import signal_cards_htmx, signal_performance_htmx
 from .views_performance import performance_dashboard
-from .views_risk import risk_dashboard
+from .views_risk import risk_dashboard, risk_dashboard_live
 from .views_ai_insights import ai_insights_dashboard
 from .views_admin_hq import (
     admin_eye, admin_eye_geo,
@@ -145,6 +145,7 @@ urlpatterns = [
     path("signals/", views.signals_list, name="signals_list"),
     path("performance/", performance_dashboard, name="performance_dashboard"),
     path("risk/", risk_dashboard, name="risk_dashboard"),
+path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("ai-journal/", ai_insights_dashboard, name="ai_journal_dashboard"),
     path("strategies/", views.strategies_list, name="strategies_list"),
     path("strategies/<int:pk>/", views.strategy_detail, name="strategy_detail"),

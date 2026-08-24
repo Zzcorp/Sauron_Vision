@@ -78,6 +78,8 @@
     <script src="{% static 'js/sv-market-status.js' %}" defer></script>
     {# Sidebar unseen-activity dots — nothing stays unseen. #}
     <script src="{% static 'js/sv-nav-activity.js' %}" defer></script>
+    {# Headband news dwell-cards — SV.dwell client #5, not implementation #5. #}
+    <script src="{% static 'js/sv-news-dwell.js' %}" defer></script>
 {% block extra_css %}{% endblock %}
 </head>
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}">
@@ -765,7 +767,7 @@
                             <div class="ip-dd-cell"><span class="dk">DRAWDOWN</span><span class="dv red">{% if panel_drawdown %}{{ panel_drawdown }}%{% else %}<span class="sv-unknown" title="Drawdown comes from daily snapshots, and none exist for this book">&mdash;</span>{% endif %}</span></div>
                             <div class="ip-dd-cell"><span class="dk">DAY LOSS LIMIT</span><span class="dv">{% if panel_max_dd %}{{ panel_max_dd }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
                         </div>
-                        <div class="ip-dd-note">{{ panel_book_coverage }}{% if panel_realised_24h_n %} {{ panel_realised_24h_n }} close{{ panel_realised_24h_n|pluralize }} in 24h.{% endif %}</div>
+                        <div class="ip-dd-note">{{ panel_book_coverage }}{% if panel_realised_24h_n %} {{ panel_realised_24h_n }} close{{ panel_realised_24h_n|pluralize }} in 24h.{% endif %}{% if panel_as_of %} <span data-sv-live-ephemeral>Measured {{ panel_as_of }} UTC.</span>{% endif %}</div>
                         {% if panel_open_trades %}<div class="ip-dd-note">Bot trades are booked in their own base currency; no FX conversion is applied to this total.</div>{% endif %}
                         </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View Portfolio</div>
@@ -964,8 +966,19 @@
                     <div class="ip-dropdown" style="min-width:340px;">
                         <div class="ip-dd-head">RECENT NEWS</div>
                         <div data-sv-live="hb-news-detail">
+                        {% comment %}hb-news-row + data-nw-*: the dwell
+                        engine (SV.dwell, the ONE hover-card system) shows
+                        the article's summary, sentiment and age after a
+                        second's hover — the row itself stays a one-line
+                        headline. Attach lives in the script block beside
+                        the other headband wiring.{% endcomment %}
                         {% for n in panel_recent_news %}
-                        <div class="ip-dd-item" style="flex-direction:column;align-items:flex-start;gap:2px;">
+                        <div class="ip-dd-item hb-news-row" style="flex-direction:column;align-items:flex-start;gap:2px;"
+                             data-nw-title="{{ n.title|truncatechars:120 }}"
+                             data-nw-source="{{ n.source }}"
+                             data-nw-at="{{ n.published_at|date:'c' }}"
+                             data-nw-sent="{% if n.ai_sentiment_score is not None %}{{ n.ai_sentiment_score|floatformat:2 }}{% endif %}"
+                             data-nw-summary="{{ n.content_summary|default:''|truncatechars:280 }}">
                             <span style="font-size:10px;color:var(--text-primary);">{{ n.title|truncatechars:60 }}</span>
                             <span style="font-size:8px;color:var(--text-muted);">{{ n.source }} &middot; {{ n.published_at|timesince }} ago</span>
                         </div>
@@ -3848,11 +3861,24 @@ function toggleSidebar() {
     var hideTimer = null;
     function hideSoon(){
       if (hideTimer) clearTimeout(hideTimer);
-      hideTimer = setTimeout(function(){ dd.style.display = 'none'; }, 120);
+      hideTimer = setTimeout(function(){
+        dd.style.display = 'none';
+        // display:none keeps the rows in the document, so a dwell card
+        // anchored to one never sees its anchor "detach" — close it with
+        // the panel it belongs to, or it floats over a page alone.
+        if (window.SV && window.SV.dwell && window.SV.dwell.hideWithin) {
+          window.SV.dwell.hideWithin(dd);
+        }
+      }, 120);
     }
     function cancelHide(){
       if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
     }
+    // Published for the news dwell-card: stepping from a row onto its
+    // card exits this dropdown, and without a shared grace the panel
+    // folded 120ms later underneath the card the operator was reading.
+    dd._svCancelHide = cancelHide;
+    dd._svHideSoon = hideSoon;
     cat.addEventListener('mouseenter', function(){
       cancelHide();
       var r = cat.getBoundingClientRect();

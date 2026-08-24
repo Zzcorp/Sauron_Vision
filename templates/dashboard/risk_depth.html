@@ -1,10 +1,20 @@
-{% extends "base.html" %}
+{% extends base_template|default:"base.html" %}
 {% block title %}Risk Depth — Sauron Vision{% endblock %}
 {# ⚠ is the sidebar's Risk Depth mark — title and nav row agree. #}
 {% block page_title %}⚠ RISK DEPTH{% endblock %}
 
 {% block content %}
+{% comment %}The whole depth view is ONE live region: its numbers move
+together (the same book, the same engine pass), and region-per-card
+would let a refresh show a VaR from one pass beside a correlation from
+another. The live twin re-renders this exact block.{% endcomment %}
+<div data-sv-live="risk-depth">
 <div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">LIVE</span>
+        <span class="oc-strip-value" style="font-size:12px;"><span class="sv-live-chip" data-sv-live-status>●</span></span>
+        <span class="oc-strip-sub" data-sv-live-stamp="risk-depth">{% now "H:i:s" %} UTC pass</span>
+    </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">OPEN POSITIONS</span>
         <span class="oc-strip-value">{% if correlation %}{{ correlation.symbols|length }}{% else %}0{% endif %}</span>
@@ -158,6 +168,9 @@
     {% endif %}
 </div>
 
-<style>
-</style>
+</div>
+{% if not live_only %}
+{% url 'risk_dashboard_live' as live_url %}
+{% include "_partials/live_region.html" %}
+{% endif %}
 {% endblock %}

@@ -535,6 +535,18 @@
     w.SV.dwell = {
         attach: attach,
         hideAll: hideAll,
+        /* Close any card whose anchor row lives inside `container` — for
+         * hosts that HIDE rather than remove their contents (the portalled
+         * headband dropdowns set display:none, which keeps the row in the
+         * document, so the detach observer never fires and the card would
+         * outlive the panel it describes). */
+        hideWithin: function (container) {
+            if (!container || !container.contains) return;
+            for (var i = 0; i < instances.length; i++) {
+                var inst = instances[i];
+                if (inst.row && container.contains(inst.row)) inst.hide();
+            }
+        },
         HOVER_DELAY_MS: HOVER_DELAY_MS,
         hoverable: HOVERABLE
     };
@@ -545,7 +557,17 @@
     w.SV.popup = {
         opened: popupOpened,
         closed: popupClosed,
-        inside: insideOpenPopup
+        inside: insideOpenPopup,
+        /* True while the pointer is INSIDE any open popup — the "operator
+         * is reading" state the live sweeps must not swap underneath.
+         * A card is a body child, so no region's :hover can see this. */
+        engaged: function () {
+            for (var i = 0; i < openPopups.length; i++) {
+                var p = openPopups[i];
+                if (p && p.matches && p.matches(':hover')) return true;
+            }
+            return false;
+        }
     };
 
     /* ── The notification consumer ──────────────────────────────────── */

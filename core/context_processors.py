@@ -257,6 +257,9 @@ def _book_truth(user, portfolio):
     # The band hardcoded a € in front of every figure. The portfolio carries
     # its own currency and the bot configs carry theirs, so the sign is read
     # from the book rather than assumed — an unknown code prints as the code.
+    # WHEN these numbers were computed — the popup notes print it, because
+    # a 20s-cached figure labelled as live is a small lie repeated forever.
+    out["panel_as_of"] = timezone.now().strftime("%H:%M:%S")
     out["panel_currency"] = book.currency
     out["panel_currency_symbol"] = book.currency_symbol
     out["panel_cash"] = None if cash is None else f"{cash:,.0f}"

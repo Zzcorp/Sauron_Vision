@@ -53,6 +53,9 @@ Why it is shaped this way
     var reduce = !!(window.matchMedia &&
                     window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     var ticks = 0, timer = null, inFlight = false, deferred = false;
+    /* Region name -> fresh innerHTML the operator's pointer is sitting on.
+       The swap waits; the fetching never does. */
+    var held = null;
 
     function keyed() { return document.querySelectorAll('[data-sv-live-key]'); }
 
@@ -79,26 +82,33 @@ Why it is shaped this way
         });
     }
 
-    function apply(html) {
-        var doc = new DOMParser().parseFromString(html, 'text/html');
-        var before = snapshot();
-        var swapped = false;
-        Array.prototype.forEach.call(
-            document.querySelectorAll('[data-sv-live]'), function (node) {
-            var fresh = doc.querySelector(
-                '[data-sv-live="' + node.getAttribute('data-sv-live') + '"]');
-            /* A region the payload does not carry (the history tab does not
-               render the open book) is left exactly as it is. */
-            if (!fresh || node.innerHTML === fresh.innerHTML) return;
-            node.innerHTML = fresh.innerHTML;
-            swapped = true;
-            /* The donut partial draws its segments from script, and innerHTML
-               neither executes scripts nor fires htmx:afterSwap — without
-               this the allocation ring comes back as an empty track. */
-            if (window.svRenderDonuts) window.svRenderDonuts(node);
-        });
-        if (!swapped) return;
+    /* Client-painted text does not count as change. The status chip is
+       rewritten by paintChips(), the pass stamp by stampSweep(), and the
+       Measured note moves with every render by design — comparing any of
+       them to the server's raw markup would make EVERY sweep a full swap,
+       replaying entrance animations and resetting table scroll on a page
+       where nothing moved. */
+    function canon(node) {
+        var c = node.cloneNode(true);
+        Array.prototype.forEach.call(c.querySelectorAll(
+            '[data-sv-live-ephemeral],[data-sv-live-stamp],[data-sv-live-status]'
+        ), function (el) { el.textContent = ''; });
+        return c.innerHTML;
+    }
+
+    /* An open hover-card lives OUTSIDE its anchor's region (it is a body
+       child), so :hover on the region cannot see the operator reading it.
+       The dwell engine's registry can. */
+    function engaged() {
+        return !!(window.SV && window.SV.popup && window.SV.popup.engaged
+                  && window.SV.popup.engaged());
+    }
+
+    function finishSwap(before) {
         pulse(before);
+        /* A swap writes the server's raw chip ('●') and stamp back into
+           the region — repaint both from the client's actual state. */
+        paintChips();
         /* One clock on the page. The analytics panels read the same book, so
            they refresh when the numbers do instead of each running its own
            unconditional timer. */
@@ -112,6 +122,83 @@ Why it is shaped this way
         }
     }
 
+    /* "HH:MM:SS UTC pass" readouts, stamped when a sweep VERIFIES the data
+       — swapped or confirmed unchanged, both are a pass. A stamp naming a
+       region is only touched by sweeps whose payload carried that region,
+       so the headband's sweep cannot vouch for the risk page's numbers. */
+    function stampSweep(names) {
+        var els = document.querySelectorAll('[data-sv-live-stamp]');
+        if (!els.length) return;
+        var t = new Date();
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        var s = pad(t.getUTCHours()) + ':' + pad(t.getUTCMinutes()) + ':'
+                + pad(t.getUTCSeconds());
+        Array.prototype.forEach.call(els, function (el) {
+            var want = el.getAttribute('data-sv-live-stamp');
+            if (want && names.indexOf(want) < 0) return;
+            el.textContent = s + ' UTC pass';
+        });
+    }
+
+    function apply(html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var busy = engaged();
+        var before = snapshot();
+        var swapped = false, carried = [];
+        Array.prototype.forEach.call(
+            document.querySelectorAll('[data-sv-live]'), function (node) {
+            var name = node.getAttribute('data-sv-live');
+            var fresh = doc.querySelector('[data-sv-live="' + name + '"]');
+            /* A region the payload does not carry (the history tab does not
+               render the open book) is left exactly as it is. */
+            if (!fresh) return;
+            carried.push(name);
+            if (canon(node) === canon(fresh)) {
+                if (held) delete held[name];
+                return;
+            }
+            /* Never swap a region out from under the cursor — or under an
+               open card the operator is reading. THIS region waits and the
+               rest of the page stays live; the old whole-page deferral let
+               a pointer resting anywhere freeze every region on screen,
+               the headband included. */
+            if (busy || (node.matches && node.matches(':hover'))) {
+                held = held || {};
+                held[name] = fresh.innerHTML;
+                deferred = true;
+                return;
+            }
+            node.innerHTML = fresh.innerHTML;
+            swapped = true;
+            /* The donut partial draws its segments from script, and innerHTML
+               neither executes scripts nor fires htmx:afterSwap — without
+               this the allocation ring comes back as an empty track. */
+            if (window.svRenderDonuts) window.svRenderDonuts(node);
+        });
+        stampSweep(carried);
+        if (!swapped) return;
+        finishSwap(before);
+    }
+
+    /* The swaps a hovered region declined, applied the moment the pointer
+       (and any open card) has moved off. */
+    function releaseHeld() {
+        if (!held) return;
+        var pending = held;
+        held = null;
+        var before = snapshot();
+        var any = false;
+        Object.keys(pending).forEach(function (name) {
+            var node = document.querySelector(
+                '[data-sv-live="' + name + '"]');
+            if (!node) return;
+            node.innerHTML = pending[name];
+            any = true;
+            if (window.svRenderDonuts) window.svRenderDonuts(node);
+        });
+        if (any) finishSwap(before);
+    }
+
     document.addEventListener('sv:pin-unlocked', function () {
         /* The gate lifting is the page coming back to life — refresh
            now rather than at the next sweep tick. */
@@ -119,14 +206,8 @@ Why it is shaped this way
     });
     function refresh() {
         if (inFlight) return;
-        /* Never swap a table out from under the cursor: it would yank the row
-           the operator is reading — and the dwell card anchored to it — away
-           mid-read. The sweep is retried the moment they move off. */
-        if (document.querySelector('[data-sv-live]:hover')) {
-            deferred = true;
-            return;
-        }
-        deferred = false;
+        /* Fetch unconditionally — deferral is per-region, inside apply().
+           Data always arrives; only a swap under the cursor waits. */
         inFlight = true;
         fetch(LIVE_URL + window.location.search, {credentials: 'same-origin'})
             .then(function (r) {
@@ -144,7 +225,10 @@ Why it is shaped this way
     }
 
     document.addEventListener('mouseout', function () {
-        if (deferred && !document.querySelector('[data-sv-live]:hover')) refresh();
+        if (!deferred) return;
+        if (document.querySelector('[data-sv-live]:hover') || engaged()) return;
+        deferred = false;
+        releaseHeld();
     });
 
     document.addEventListener('sv:eye-event', function (e) {

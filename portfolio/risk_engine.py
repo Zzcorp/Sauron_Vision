@@ -11,6 +11,10 @@ class RiskEngine:
 
     def __init__(self, portfolio):
         self.portfolio = portfolio
+        # calculate_risk_metrics and calculate_var both ask for the same
+        # 252-day weighted return series; without this memo one page
+        # render executed the identical multi-month PriceData scan twice.
+        self._returns_cache = {}
 
     def calculate_var(self, confidence=0.95, horizon_days=1, method="historical"):
         """Calculate Value-at-Risk.
@@ -244,6 +248,10 @@ class RiskEngine:
         from django.utils import timezone
         from datetime import timedelta
 
+        key = (tuple(sorted(p.id for p in positions)), lookback_days)
+        if key in self._returns_cache:
+            return self._returns_cache[key]
+
         cutoff = timezone.now() - timedelta(days=lookback_days)
         all_returns = []
 
@@ -263,9 +271,11 @@ class RiskEngine:
                 all_returns.append(returns * weight)
 
         if not all_returns:
-            return np.array([])
+            self._returns_cache[key] = np.array([])
+            return self._returns_cache[key]
 
         # Align lengths and sum weighted returns
         min_len = min(len(r) for r in all_returns)
         portfolio_returns = np.sum([r[-min_len:] for r in all_returns], axis=0)
+        self._returns_cache[key] = portfolio_returns
         return portfolio_returns
