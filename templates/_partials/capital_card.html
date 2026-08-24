@@ -1,0 +1,48 @@
+{% comment %}
+The money question, answered in one card on both money pages.
+
+Renders the `capital` context (portfolio.services.capital_summary) — the
+POOL economy (allocated to enabled configs / committed to open tickets /
+uncommitted, per asset class AND per mode) beside the BOOK economy (cash,
+book value). The headband popups quote the same service, so a popup and
+the page it links to can never disagree. None renders as an em-dash: an
+unreadable pool table is "not measured", never 0.
+
+The wrapper region sits OUTSIDE the {% if capital %} guard on purpose:
+live_region.apply() leaves a region alone when the payload lacks it, so a
+transiently unreadable pool must still ship the (empty) region or the
+card freezes at its last reading forever. Tone classes live on elements
+INSIDE the region — the swap copies innerHTML, not attributes.
+{% endcomment %}
+<div data-sv-live="cap-card">
+{% if capital %}
+<div class="card fade-in-up" style="margin-bottom:20px;">
+    <div class="card-header"><span class="card-title">Capital · pools &amp; cash <span class="sv-live-chip" data-sv-live-status></span></span>
+        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);letter-spacing:1px;">COMMITTED AT ENTRY · MARGIN-AWARE</span></div>
+    <div class="cap-grid">
+        <div class="cap-tile"><span class="ck">POOLS</span><span class="cv" data-sv-live-key="cap.pool">{{ capital.pool_total|floatformat:"0g" }}</span><span class="cs">paper {{ capital.pool_paper|floatformat:"0g" }} · live {{ capital.pool_live|floatformat:"0g" }}</span></div>
+        <div class="cap-tile"><span class="ck">USED</span><span class="cv" data-sv-live-key="cap.used">{{ capital.used_total|floatformat:"0g" }}</span><span class="cs">committed to open tickets</span></div>
+        <div class="cap-tile"><span class="ck">FREE</span><span class="cv {% if capital.free_total < 0 %}down{% endif %}" data-sv-live-key="cap.free">{{ capital.free_total|floatformat:"0g" }}</span><span class="cs">{% if capital.free_total < 0 %}oversubscribed{% else %}uncommitted across configs · paper {{ capital.free_paper|floatformat:"0g" }} / live {{ capital.free_live|floatformat:"0g" }}{% endif %}</span></div>
+        <div class="cap-tile"><span class="ck">CASH</span><span class="cv" data-sv-live-key="cap.cash">{% if capital.cash is not None %}{{ capital.cash|floatformat:"0g" }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span><span class="cs">book cash</span></div>
+        <div class="cap-tile"><span class="ck">BOOK VALUE</span><span class="cv" data-sv-live-key="cap.book">{% if capital.book_value is not None %}{{ capital.book_value|floatformat:"0g" }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span><span class="cs">your portfolio row</span></div>
+    </div>
+    {% if capital.classes %}
+    <table class="sv-perf-table" style="margin-top:10px;">
+        <thead><tr><th>Class</th><th>Mode</th><th class="num">Pool</th><th class="num">Used</th><th class="num">Free</th></tr></thead>
+        <tbody>
+        {% for c in capital.classes %}
+        <tr>
+            <td><span class="badge badge-{{ c.asset_class }}">{{ c.asset_class }}</span></td>
+            <td style="font-family:var(--font-mono);font-size:10px;letter-spacing:1px;{% if c.mode == 'live' %}color:var(--accent-gold);{% else %}color:var(--text-muted);{% endif %}">{{ c.mode|upper }}</td>
+            <td class="num" style="font-family:var(--font-mono);">{{ c.pool|floatformat:"0g" }}</td>
+            <td class="num" style="font-family:var(--font-mono);">{{ c.used|floatformat:"0g" }}</td>
+            <td class="num {% if c.free < 0 %}down{% endif %}" style="font-family:var(--font-mono);">{{ c.free|floatformat:"0g" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+    <div class="ip-dd-note" style="margin-top:8px;">Used is capital-at-work at entry: margin for forex, premium for options, full notional for cash classes — the same margin arithmetic the pool sizing applies. The legacy/manual book is not pool-funded; the exposure gate polices it against book value instead.</div>
+</div>
+{% endif %}
+</div>

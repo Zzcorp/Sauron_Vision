@@ -66,6 +66,27 @@ class Position(models.Model):
     opened_at = models.DateTimeField()
     closed_at = models.DateTimeField(null=True, blank=True)
 
+    @property
+    def pnl_on_capital_pct(self):
+        """P&L as % of the capital this row ties up — the same second
+        percentage every UnifiedPosition carries, so the two row kinds
+        stay interchangeable in the templates. Legacy rows are the setup
+        form's and the eToro sync's (stocks/ETFs, no value_per_unit), so
+        capital_at_work usually equals notional here — but a forex row a
+        migration ever lands in this table must not silently print the
+        levered number as its cash return."""
+        from portfolio.services import pnl_on_capital_pct
+        notional = abs(float(self.entry_price or 0)
+                       * float(self.quantity or 0))
+        # None passes THROUGH: the column is non-nullable but the live
+        # re-price writes None in memory for an unpriced row, and `or 0`
+        # here turned that unmeasured value into a confident +0.00% — the
+        # exact zero the service's own fence exists to refuse.
+        pnl = self.unrealized_pnl
+        return pnl_on_capital_pct(
+            None if pnl is None else float(pnl),
+            getattr(self.instrument, "asset_class", ""), notional)
+
     class Meta:
         ordering = ["-opened_at"]
 

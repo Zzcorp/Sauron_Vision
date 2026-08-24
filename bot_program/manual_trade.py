@@ -812,7 +812,16 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
                         asset_class=cls)
 
     open_trades = _open_manual_trades(cfg)
-    committed = round(sum(_trade_capital_use(t) for t in open_trades), 2)
+    # Committed counts CLOSE_PENDING too — a close that has not filled is
+    # still capital at the broker, exactly as every gate and the capital
+    # card measure it; this sum used to read OPEN only, so the pool looked
+    # richer than it was for as long as a close was stuck retrying. The
+    # CLOSABLE list below stays OPEN-only: a pending close cannot be
+    # closed again to free capital.
+    from bot_program.models import AssetBotTrade as _ABT
+    committed = round(sum(
+        _trade_capital_use(t) for t in _ABT.objects.filter(
+            config=cfg, status__in=("OPEN", "CLOSE_PENDING"))), 2)
     available = round(capital - committed, 2)
     deficit = round(capital_use - available, 2)
 

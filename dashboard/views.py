@@ -1494,6 +1494,14 @@ def _live_row(row, stops):
 
     pnl = _as_float(row.unrealized_pnl)
     pct = _as_float(row.unrealized_pnl_pct)
+    # The SECOND percentage: the same P&L against the capital the row
+    # actually ties up — "+0.42%" on a forex leg is true about the
+    # notional and silent about the operator's cash, which moved 30x
+    # that. The suppression for cash-funded classes lives at the SOURCE
+    # (services.pnl_on_capital_pct returns None when capital == notional
+    # by construction) — a numeric comparison here only ever matched on
+    # exact equality of two independently rounded values.
+    cap_pct = _as_float(getattr(row, "pnl_on_capital_pct", None))
     instrument = getattr(row, "instrument", None)
     return {
         "key": key,
@@ -1514,6 +1522,9 @@ def _live_row(row, stops):
         "pnl_tone": _live_tone(pnl),
         "pct_text": _live_num(pct, "{:+.2f}%"),
         "pct_tone": _live_tone(pct),
+        "cap_pct": cap_pct,
+        "cap_pct_text": (_live_num(cap_pct, "{:+.2f}%")
+                         if cap_pct is not None else ""),
         "r_multiple": r_mult,
         "r_text": _live_num(r_mult, "{:+.2f}R"),
         "r_tone": _live_tone(r_mult),
@@ -1612,6 +1623,17 @@ def _live_page(request, template, context, live_only):
     context["live_only"] = live_only
     context["base_template"] = LIVE_SHELL if live_only else "base.html"
     return render(request, template, context)
+
+
+def _capital_or_none(user):
+    """capital_summary, fenced: a page must render even when the pools
+    cannot be read — None keys already render as em-dashes."""
+    from portfolio.services import capital_summary
+    try:
+        return capital_summary(user)
+    except Exception:  # noqa: BLE001
+        logger.debug("capital summary unavailable", exc_info=True)
+        return None
 
 
 def _render_portfolio(request, live_only):
@@ -1799,6 +1821,11 @@ def _render_portfolio(request, live_only):
 
     context = {
         "page_id": "portfolio", "portfolio": portfolio,
+        # Pools / used / free / cash — the money question, answered by ONE
+        # service so this page, the positions page and the headband popups
+        # can never quote three different answers. See
+        # portfolio.services.capital_summary for what the two economies are.
+        "capital": _capital_or_none(request.user),
         "strip": strip,
         "open_positions_count": n_open,
         "open_positions": open_rows[:8],
@@ -2463,6 +2490,11 @@ def _render_positions(request, live_only):
 
     context = {
         "page_id": "positions",
+        # Pools / used / free / cash — the money question, answered by ONE
+        # service so this page, the positions page and the headband popups
+        # can never quote three different answers. See
+        # portfolio.services.capital_summary for what the two economies are.
+        "capital": _capital_or_none(request.user),
         "tab": tab,
         "strip": strip,
         "positions": open_rows,

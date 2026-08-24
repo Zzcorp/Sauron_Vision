@@ -738,6 +738,16 @@
                             <div class="ip-dd-cell"><span class="dk">VALUE</span><span class="dv">{% if panel_portfolio_value %}{{ panel_currency_symbol }}{{ panel_portfolio_value }}{% else %}<span class="sv-unknown" title="Nothing open could be priced, so the book value cannot be measured">&mdash;</span>{% endif %}</span></div>
                             <div class="ip-dd-cell"><span class="dk">CASH</span><span class="dv">{% if panel_cash %}{{ panel_currency_symbol }}{{ panel_cash }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
                             <div class="ip-dd-cell"><span class="dk">DEPLOYED</span><span class="dv">{% if panel_deployed %}{{ panel_currency_symbol }}{{ panel_deployed }}{% else %}<span class="sv-unknown" title="{{ panel_book_coverage }}">&mdash;</span>{% endif %}</span></div>
+                            {% comment %}The POOL economy — allocated to
+                            configs, committed to open tickets, still free.
+                            A different set of numbers from VALUE/CASH above
+                            (the book economy) on purpose; see
+                            portfolio.services.capital_summary. Negative
+                            FREE renders red: an oversubscribed pool is the
+                            state these cells exist to surface.{% endcomment %}
+                            <div class="ip-dd-cell"><span class="dk">POOLS</span><span class="dv">{% if panel_pool %}{{ panel_pool }}{% else %}<span class="sv-unknown" title="Capital pools could not be read">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">POOL USED</span><span class="dv">{% if panel_pool_used %}{{ panel_pool_used }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">POOL FREE</span><span class="dv {% if panel_pool_free_neg %}red{% endif %}">{% if panel_pool_free %}{{ panel_pool_free }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
                             <div class="ip-dd-cell"><span class="dk">EXPOSURE</span><span class="dv">{% if panel_exposure is not None %}{{ panel_exposure }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
                             <div class="ip-dd-cell"><span class="dk">OPEN P&amp;L</span><span class="dv {% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}">{% if panel_open_pnl_display %}{{ panel_open_pnl_display }}{% else %}<span class="sv-unknown" title="No open position could be marked to a live quote">&mdash;</span>{% endif %}</span></div>
                             {% comment %}
@@ -823,6 +833,7 @@
                         <div class="sv-empty"><b>Nothing open</b>Bot trades and manual positions both appear here, with their live R.</div>
                         {% endfor %}
                         {% if panel_open_rows_hidden %}<div class="ip-dd-note">+{{ panel_open_rows_hidden }} more open — the positions page lists them all.</div>{% endif %}
+                        {% if panel_pool %}<div class="ip-dd-note">Pool tickets: {{ panel_pool_used|default:"—" }} of {{ panel_pool }} pooled committed · {% if panel_pool_free_neg %}<span class="red">{{ panel_pool_free }} free (oversubscribed)</span>{% else %}{{ panel_pool_free|default:"—" }} free{% endif %}. Manual/legacy book tickets sit outside the pools — the exposure gate polices them.</div>{% endif %}
                         <div class="ip-dd-note">{{ panel_book_coverage }}{% if panel_open_r_display %} Open risk {{ panel_open_r_display }} across {{ panel_open_r_n }} graded position{{ panel_open_r_n|pluralize }}.{% endif %}</div>
                         </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View All Positions</div>

@@ -62,8 +62,9 @@ template branches, each a fresh chance to print a confident zero.
 </div>
 
 {# ── 2. Direction donut + asset-class breakdown + monthly P&L ─── #}
+{% include "_partials/capital_card.html" %}
 <div class="grid grid-3" style="gap:14px;margin-bottom:18px;">
-    <div class="card">
+<div class="card">
         <div class="card-header"><span class="card-title">Direction · open</span></div>
         <div data-sv-live="pos-dir">
         {% if direction_donut %}
@@ -248,7 +249,7 @@ template branches, each a fresh chance to print a confident zero.
                 {% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
             </td>
             <td class="num {{ p.pnl_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pnl">{% if p.unrealized_pnl is not None %}{{ p.pnl_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
-            <td class="num {{ p.pct_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pct">{% if p.unrealized_pnl_pct is not None %}{{ p.pct_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            <td class="num {{ p.pct_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pct">{% if p.unrealized_pnl_pct is not None %}{{ p.pct_text }}{% if p.cap_pct_text %} <span class="cap-pct" title="The same P&L measured against the CAPITAL this position ties up (margin for forex, premium for options) — the notional figure is silent about your cash">{{ p.cap_pct_text }} cap</span>{% endif %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
             {# R against the stop the position OPENED with, not the current #}
             {# one: a trailing stop rewrites that column, and grading against #}
             {# it scores every trailed winner at ~1.0R. No stop recorded and #}

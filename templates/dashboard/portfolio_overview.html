@@ -92,7 +92,10 @@ than in nine template branches.
     {% endif %}
 </div>
 
+{% include "_partials/capital_card.html" %}
+
 {% if not live_only %}
+
 {# ── 2. Equity curve sparkline — daily snapshots, not a live series ── #}
 <div class="card" style="margin-bottom:18px;">
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
@@ -188,7 +191,7 @@ trade and this page would go on showing nothing until they reloaded it.
                 {# real state — the muted em-dash, never "None" or a zero. #}
                 <td class="num" data-sv-live-key="{{ p.key }}.last">{% if p.current_price is not None %}{{ p.last_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
                 <td class="num oc-mini-pnl {{ p.pnl_tone }}" data-sv-live-key="{{ p.key }}.pnl">{% if p.unrealized_pnl is not None %}{{ p.pnl_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
-                <td class="num {{ p.pct_tone }}" data-sv-live-key="{{ p.key }}.pct">{% if p.unrealized_pnl_pct is not None %}{{ p.pct_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+                <td class="num {{ p.pct_tone }}" data-sv-live-key="{{ p.key }}.pct">{% if p.unrealized_pnl_pct is not None %}{{ p.pct_text }}{% if p.cap_pct_text %} <span class="cap-pct" title="The same P&L measured against the CAPITAL this position ties up (margin for forex, premium for options) — the notional figure is silent about your cash">{{ p.cap_pct_text }} cap</span>{% endif %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
                 {# R against the stop this position OPENED with — the risk it #}
                 {# was actually taken with, which is what makes rows across #}
                 {# symbols and sizes comparable at a glance. #}

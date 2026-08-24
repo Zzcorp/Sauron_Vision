@@ -271,6 +271,21 @@ def _book_truth(user, portfolio):
     out["panel_value_partial"] = book.partial and value is not None
     out["panel_max_dd"] = f"{portfolio.max_daily_loss_pct}"
 
+    # The POOL economy — capital allocated to configs, committed to open
+    # tickets, and still free — from the ONE service the portfolio and
+    # positions pages read, so the popup and the page can never disagree.
+    # Fenced like every sibling: an unreadable pool table costs these
+    # three cells, not the band.
+    try:
+        from portfolio.services import capital_summary
+        cap = capital_summary(user)
+        out["panel_pool"] = f"{cap['pool_total']:,.0f}"
+        out["panel_pool_used"] = f"{cap['used_total']:,.0f}"
+        out["panel_pool_free"] = f"{cap['free_total']:,.0f}"
+        out["panel_pool_free_neg"] = cap["free_total"] < 0
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Panel pools unavailable: {e}")
+
     if value is None or value <= 0:
         # Positions exist and not one could be priced: the split between cash
         # and exposure is unknown, and "100% cash" would be a claim of no
@@ -931,6 +946,10 @@ def sauron_context(request):
         "panel_cash": None,
         "panel_deployed": None,
         "panel_cash_pct": None,
+        "panel_pool": None,
+        "panel_pool_used": None,
+        "panel_pool_free": None,
+        "panel_pool_free_neg": False,
         "panel_positions": 0,
         "panel_positions_priced": 0,
         # False and not None: before a book has been read there is no partial

@@ -6456,3 +6456,21 @@ a.sig-sym:hover { color: var(--accent); text-decoration: underline; }
     font-family: var(--font-mono); font-size: 9px; color: var(--text-muted);
     letter-spacing: .03em;
 }
+
+/* ── Capital truth (pools/used/free card + the second P&L percentage) ──
+   The card is the one place the POOL economy renders on the money pages;
+   .cap-pct is the on-capital percentage beside the notional one — muted,
+   because it annotates the headline number rather than competing with it.
+   Tokens only, so both themes inherit. */
+.cap-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+.cap-tile { display:flex; flex-direction:column; gap:2px; padding:10px 12px;
+    background:var(--bg-void); border:1px solid var(--border); border-radius:6px; }
+.cap-tile .ck { font-family:var(--font-mono); font-size:9px; letter-spacing:2px; color:var(--text-muted); }
+.cap-tile .cv { font-family:var(--font-mono); font-size:17px; font-weight:700; color:var(--text-primary); }
+.cap-tile .cv.down { color:var(--accent-red); }
+.cap-tile .cs { font-size:10px; color:var(--text-muted); }
+.cap-pct { font-family:var(--font-mono); font-size:10px; color:var(--text-muted); white-space:nowrap; }
+
+/* The oversubscribed note inside a dropdown body — tone class on an
+   element INSIDE the live region, so the swap preserves it. */
+.ip-dd-note .red { color: var(--accent-red); }

@@ -151,7 +151,8 @@ class UnifiedPosition:
     # a row's own numbers end up disagreeing with the bar next to them.
     __slots__ = ("instrument", "direction", "quantity", "entry_price",
                  "current_price", "stop_loss", "take_profit",
-                 "unrealized_pnl", "unrealized_pnl_pct", "opened_at",
+                 "unrealized_pnl", "unrealized_pnl_pct",
+                 "pnl_on_capital_pct", "opened_at",
                  "closed_at", "strategy", "source", "paper",
                  "trade_id", "status", "bar_pct")
 
@@ -203,6 +204,121 @@ def value_per_unit(trade) -> float:
     return vpu
 
 
+def pnl_on_capital_pct(pnl, asset_class, notional):
+    """P&L as a percentage of the CAPITAL the position actually ties up.
+
+    The headline percentage on every row is pnl/notional — true, and for a
+    margined class also the smaller number by exactly the leverage. A forex
+    leg that moved +0.4% of notional moved +12% of the cash committed to
+    it (CAPITAL_USE_FRACTION books FX at 1/30th margin), and "how did my
+    money do" is the question the operator keeps asking the page. Both
+    percentages render, labelled; for cash-funded classes they coincide
+    and the second is not shown.
+
+    None when the class is cash-funded (capital == notional): the second
+    percentage is then identical to the first BY CONSTRUCTION, and two
+    copies of one number wearing different labels read as a contradiction
+    hunting for a difference. Suppressed here at the source rather than by
+    numeric comparison downstream — two independently rounded values only
+    ever matched on exact equality, so small-notional rows leaked a
+    duplicate annotation through any epsilon.
+
+    Import inside: risk_gate imports this module at top level.
+    """
+    from portfolio.risk_gate import capital_at_work
+    if pnl is None:
+        return None
+    notional = abs(float(notional or 0))
+    cap = capital_at_work(asset_class or "", notional)
+    if not cap or cap == notional:
+        return None
+    return round(float(pnl) / cap * 100, 2)
+
+
+def capital_summary(user):
+    """Pools, used, free, cash — the money question, answered once.
+
+    Two economies live on this platform and the summary keeps them
+    honestly separate rather than adding unlike things:
+
+      * The POOL economy: every enabled AssetBotConfig carries a capital
+        pool its sizing divides by; open trades COMMIT capital-at-work
+        against it (margin for FX, premium for options, full notional for
+        cash classes). pools/used/free describe this economy, per class.
+
+      * The BOOK economy: the user's `<username>_main` portfolio row —
+        book value and cash_available — which the eToro sync and the
+        setup form maintain.
+
+    Every figure is a measurement; a book that cannot be read returns
+    None for its keys rather than a confident 0.
+    """
+    from collections import defaultdict
+
+    from bot_program.models import AssetBotConfig, AssetBotTrade
+    from portfolio.risk_gate import capital_at_work
+
+    # Keyed by (asset_class, mode): a paper pool and a live pool are not
+    # one bucket of deployable money — summing them advertised "free"
+    # capital that no live entry could actually draw on, and the sizing
+    # engine never consults such a sum.
+    pools = defaultdict(float)
+    for cfg in AssetBotConfig.objects.filter(user=user, enabled=True):
+        pools[(cfg.asset_class, cfg.mode)] += float(cfg.capital or 0)
+
+    used = defaultdict(float)
+    for trade in AssetBotTrade.objects.filter(
+            config__user=user, status__in=("OPEN", "CLOSE_PENDING")
+            ).select_related("config"):
+        notional = abs(float(trade.entry_price or 0)
+                       * float(trade.qty or 0) * value_per_unit(trade))
+        used[(trade.asset_class, trade.config.mode)] += capital_at_work(
+            trade.asset_class, notional)
+
+    classes = []
+    for ac, mode in sorted(set(pools) | set(used)):
+        pool = round(pools.get((ac, mode), 0), 2)
+        spent = round(used.get((ac, mode), 0), 2)
+        classes.append({
+            "asset_class": ac,
+            "mode": mode,
+            "pool": pool,
+            "used": spent,
+            # Negative free is shown, not clamped: an oversubscribed pool
+            # (a disabled config's trades still open, a pool shrunk under
+            # its book) is exactly the state the operator needs to see.
+            "free": round(pool - spent, 2),
+        })
+
+    def _mode_total(table, mode):
+        return round(sum(v for (ac, m), v in table.items() if m == mode), 2)
+
+    cash = book_value = None
+    try:
+        pf = get_or_create_default_portfolio(user=user)
+        cash = float(pf.cash_available)
+        book_value = float(pf.current_value)
+    except Exception:  # noqa: BLE001 — None reads as unmeasured, 0 as a lie
+        pass
+
+    return {
+        "classes": classes,
+        "pool_total": round(sum(pools.values()), 2),
+        "used_total": round(sum(used.values()), 2),
+        "free_total": round(sum(pools.values()) - sum(used.values()), 2),
+        # The paper/live split, because the totals above mix simulated and
+        # real pools — one number that no live entry could deploy in full.
+        "pool_live": _mode_total(pools, "live"),
+        "pool_paper": _mode_total(pools, "paper"),
+        "free_live": round(_mode_total(pools, "live")
+                           - _mode_total(used, "live"), 2),
+        "free_paper": round(_mode_total(pools, "paper")
+                            - _mode_total(used, "paper"), 2),
+        "cash": cash,
+        "book_value": book_value,
+    }
+
+
 def _trade_to_position(trade, instruments, quotes):
     """Normalize one AssetBotTrade into the Position shape.
 
@@ -239,6 +355,8 @@ def _trade_to_position(trade, instruments, quotes):
         up.unrealized_pnl = pnl
         notional = abs(entry * qty * vpu)
         up.unrealized_pnl_pct = round(pnl / notional * 100, 2) if notional else None
+        up.pnl_on_capital_pct = pnl_on_capital_pct(pnl, trade.asset_class,
+                                                   notional)
         return up
 
     if is_option:
@@ -249,6 +367,7 @@ def _trade_to_position(trade, instruments, quotes):
         up.current_price = None
         up.unrealized_pnl = None
         up.unrealized_pnl_pct = None
+        up.pnl_on_capital_pct = None
         return up
 
     quote = quotes.get(trade.symbol)
@@ -257,9 +376,12 @@ def _trade_to_position(trade, instruments, quotes):
     if last is not None and entry:
         up.unrealized_pnl = round((last - entry) * qty * vpu * sign, 2)
         up.unrealized_pnl_pct = round((last - entry) / entry * 100 * sign, 2)
+        up.pnl_on_capital_pct = pnl_on_capital_pct(
+            up.unrealized_pnl, trade.asset_class, abs(entry * qty * vpu))
     else:
         up.unrealized_pnl = None
         up.unrealized_pnl_pct = None
+        up.pnl_on_capital_pct = None
     return up
 
 
