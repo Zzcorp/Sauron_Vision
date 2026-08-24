@@ -24,23 +24,26 @@
                 </span>
             </div>
             {% endif %}
-        </div>
-        <div class="detail-meta">
-            <span class="badge badge-{{ instrument.asset_class }}">{{ instrument.asset_class }}</span>
-            {% if instrument.exchange %}<span>{{ instrument.exchange }}</span>{% endif %}
             {% if market %}
             {% comment %}Which market this instrument answers to, open or
-            not, and when that flips. Server-rendered truth at first paint;
-            sv-market-status.js re-paints it from /api/exchange-status/ so
-            a tab left open across a close never shows yesterday's answer.
-            "CRYPTO" has no session row in that payload — the JS knows it
-            as always-open.{% endcomment %}
+            not, and when that flips — IN the price hero, because a price
+            with no market state next to it reads as live whether it is or
+            not, and the first cut of this badge sat a line below in the
+            metadata where nobody's eye lands. Server-rendered truth at
+            first paint; sv-market-status.js re-paints it from
+            /api/exchange-status/ so a tab left open across a close never
+            shows yesterday's answer. "CRYPTO" has no session row in that
+            payload — the JS knows it as always-open.{% endcomment %}
             <span class="dtl-mkt {% if market.is_open %}mk-open{% else %}mk-closed{% endif %}"
                   data-market-session="{{ market.session }}">
                 <span class="mk-dot"></span>
                 <span class="mk-text">{{ market.name }} · {% if market.is_open %}OPEN{% else %}CLOSED{% endif %}{% if market.time_until_change %} · {{ market.next_state }} in {{ market.time_until_change }}{% endif %}</span>
             </span>
             {% endif %}
+        </div>
+        <div class="detail-meta">
+            <span class="badge badge-{{ instrument.asset_class }}">{{ instrument.asset_class }}</span>
+            {% if instrument.exchange %}<span>{{ instrument.exchange }}</span>{% endif %}
             <span>{{ instrument.name }}</span>
         </div>
     </div>
@@ -73,16 +76,20 @@
     .dtl-actions { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
     .dtl-actions .sr-pop-btn { flex:0 0 auto; }
     /* Market badge — the same open/closed vocabulary as the topbar's SE
-       dropdown (st-open/st-closed), one dot instead of a pill so it sits
-       inside detail-meta's text rhythm. */
-    .dtl-mkt { display:inline-flex; align-items:center; gap:6px;
-        font-family:var(--font-mono); font-size:11px; letter-spacing:0.4px;
-        padding:2px 8px; border:1px solid var(--border); border-radius:4px; }
-    .dtl-mkt .mk-dot { width:7px; height:7px; border-radius:50%;
+       dropdown (st-open/st-closed), sized to sit beside the price: a
+       price with no market state next to it reads as live. CLOSED wears
+       the red dot deliberately — "this number is not moving" is the one
+       fact the page must not whisper. */
+    .dtl-mkt { display:inline-flex; align-items:center; gap:7px;
+        font-family:var(--font-mono); font-size:12px; font-weight:700;
+        letter-spacing:0.6px; padding:4px 10px;
+        border:1px solid var(--border); border-radius:5px; }
+    .dtl-mkt .mk-dot { width:8px; height:8px; border-radius:50%;
         background:var(--text-muted); flex:0 0 auto; }
     .dtl-mkt.mk-open { color:var(--accent); border-color:var(--accent-dim); }
     .dtl-mkt.mk-open .mk-dot { background:var(--accent); }
     .dtl-mkt.mk-closed { color:var(--text-muted); }
+    .dtl-mkt.mk-closed .mk-dot { background:var(--accent-red); }
     /* Key-value rows: the raw 8-decimal values were unreadable — the
        label column gets a fixed rhythm and the values a mono face. */
     .kv-list .value { font-family:var(--font-mono); }

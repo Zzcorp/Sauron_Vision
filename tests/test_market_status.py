@@ -213,6 +213,31 @@ class MarketBadgeOnPageTests(TestCase):
         self.assertContains(resp, 'class="dtl-mkt mk-open"')
         self.assertContains(resp, "Crypto · OPEN")
 
+    def test_the_badge_sits_in_the_price_hero_not_the_metadata_line(self):
+        """The first cut put it in detail-meta, a line nobody's eye lands
+        on — and the operator asked where the open/closed state was while
+        it was already on the page. The badge renders BEFORE the
+        detail-meta div: next to the price, where a number with no market
+        state next to it would read as live."""
+        _instrument("AAPL", "stock", "NASDAQ")
+        resp = self.client.get("/instruments/AAPL/")
+        body = resp.content.decode()
+        self.assertLess(body.index("dtl-mkt"), body.index("detail-meta"))
+
+    def test_the_instruments_list_states_each_rows_market(self):
+        """The table-level answer: every row carries the compact cell the
+        poller repaints, so a frozen Friday close cannot sit in an
+        open-looking row."""
+        _instrument("AAPL", "stock", "NASDAQ")
+        _instrument("BTCUSD", "crypto", "CRYPTO")
+        resp = self.client.get("/instruments/")
+        self.assertContains(resp, "<th>Market</th>")
+        self.assertContains(resp, 'data-market-session="NASDAQ"')
+        self.assertContains(resp, "data-market-compact")
+        # Crypto has no clock: the honest label is 24/7, always open.
+        self.assertContains(resp, 'data-market-session="CRYPTO"')
+        self.assertContains(resp, "24/7")
+
     def test_topbar_carries_the_live_hooks(self):
         """The SE indicator's count and rows are addressable, and the
         poller script ships — without these the JS finds nothing and the

@@ -209,6 +209,7 @@
                 <th>Name</th>
                 <th>Class</th>
                 <th>Exchange</th>
+                <th>Market</th>
                 <th>Last Price</th>
                 <th>Change %</th>
                 <th>Bid</th>
@@ -237,6 +238,21 @@
                 <td>{{ item.name|truncatechars:40 }}</td>
                 <td><span class="badge badge-{{ item.asset_class }}">{{ item.asset_class }}</span></td>
                 <td style="color:var(--text-secondary);font-size:12px;">{{ item.exchange }}</td>
+                {% comment %}Whether this row's market is trading RIGHT
+                   NOW — the fact that separates a live print from
+                   Friday's close wearing today's page. Compact form
+                   (state only); the poller repaints it via
+                   data-market-session + data-market-compact. Crypto has
+                   no clock and reads 24/7.{% endcomment %}
+                <td>
+                    {% if item.market %}
+                    <span class="mkt-cell {% if item.market.is_open %}mk-open{% else %}mk-closed{% endif %}"
+                          data-market-session="{{ item.market.session }}" data-market-compact="1"
+                          title="{{ item.market.name }}{% if item.market.time_until_change %} · {{ item.market.next_state }} in {{ item.market.time_until_change }}{% endif %}">
+                        <span class="mk-dot"></span><span class="mk-text">{% if item.market.session == "CRYPTO" %}24/7{% elif item.market.is_open %}OPEN{% else %}CLOSED{% endif %}</span>
+                    </span>
+                    {% else %}<span style="color:var(--text-muted);">&mdash;</span>{% endif %}
+                </td>
                 <td style="font-family:var(--font-mono);font-weight:700;font-size:13px;">
                     {% if item.last is not None %}{{ item.last|floatformat:2 }}{% else %}<span style="color:var(--text-muted);">&mdash;</span>{% endif %}
                 </td>
@@ -272,6 +288,19 @@
 </div>
 
 <style>
+/* Market cell — the row-level open/closed truth, same vocabulary as the
+   detail hero's dtl-mkt badge. CLOSED wears the red dot: a frozen price
+   in an open-looking row is the lie this column exists to stop. */
+.mkt-cell { display:inline-flex; align-items:center; gap:5px;
+    font-family:var(--font-mono); font-size:10px; font-weight:700;
+    letter-spacing:0.8px; }
+.mkt-cell .mk-dot { width:6px; height:6px; border-radius:50%;
+    background:var(--text-muted); flex:0 0 auto; }
+.mkt-cell.mk-open { color:var(--accent); }
+.mkt-cell.mk-open .mk-dot { background:var(--accent); }
+.mkt-cell.mk-closed { color:var(--text-muted); }
+.mkt-cell.mk-closed .mk-dot { background:var(--accent-red); }
+
 /* Quick-filter row: asset class on the left, mover bucket on the right.
    Both groups wrap on their own, so the row degrades to stacked pills at
    360px instead of pushing the page into a horizontal scroll. */

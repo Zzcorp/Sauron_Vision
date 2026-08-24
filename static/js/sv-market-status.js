@@ -40,23 +40,37 @@
   }
 
   function paintBadge(d) {
-    var badge = document.querySelector('[data-market-session]');
-    if (!badge) return;
-    var code = badge.getAttribute('data-market-session');
-    var text = badge.querySelector('.mk-text');
+    /* Every market badge on the page: the detail hero's full badge and
+       each list row's compact cell (data-market-compact) — one instrument
+       page has one, the instruments table has hundreds. */
+    var badges = document.querySelectorAll('[data-market-session]');
+    if (!badges.length) return;
+    var byCode = {};
+    (d.exchanges || []).forEach(function (e) { byCode[e.code] = e; });
 
-    /* CRYPTO has no session row — there is no clock to consult. The badge
-       shipped open and stays open; nothing to repaint. */
-    if (code === 'CRYPTO') return;
+    badges.forEach(function (badge) {
+      var code = badge.getAttribute('data-market-session');
+      var text = badge.querySelector('.mk-text');
+      var compact = badge.hasAttribute('data-market-compact');
 
-    var ex = (d.exchanges || []).find(function (e) { return e.code === code; });
-    if (!ex) return; /* unknown session: leave the server's answer alone */
-    badge.classList.toggle('mk-open', !!ex.is_open);
-    badge.classList.toggle('mk-closed', !ex.is_open);
-    if (text) {
-      text.textContent = ex.name + ' · ' + (ex.is_open ? 'OPEN' : 'CLOSED') +
-        (ex.time_until_change ? ' · ' + ex.next_state + ' in ' + ex.time_until_change : '');
-    }
+      /* CRYPTO has no session row — there is no clock to consult. The
+         badge shipped open and stays open; nothing to repaint. */
+      if (code === 'CRYPTO') return;
+
+      var ex = byCode[code];
+      if (!ex) return; /* unknown session: leave the server's answer alone */
+      badge.classList.toggle('mk-open', !!ex.is_open);
+      badge.classList.toggle('mk-closed', !ex.is_open);
+      if (!text) return;
+      if (compact) {
+        text.textContent = ex.is_open ? 'OPEN' : 'CLOSED';
+        badge.title = ex.name +
+          (ex.time_until_change ? ' · ' + ex.next_state + ' in ' + ex.time_until_change : '');
+      } else {
+        text.textContent = ex.name + ' · ' + (ex.is_open ? 'OPEN' : 'CLOSED') +
+          (ex.time_until_change ? ' · ' + ex.next_state + ' in ' + ex.time_until_change : '');
+      }
+    });
   }
 
   function tick() {
