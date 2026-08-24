@@ -22,7 +22,15 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DAILY_BUDGET_USD = float(os.getenv("AI_DAILY_BUDGET_USD", "5.0"))
+# 15, not the original 5 — and the two changes travel together. The ledger
+# this budget reads used to miss every direct-provider caller (all seven
+# brain modules), so "5" was really governing about half of true spend: the
+# Anthropic console read ~2x what /ai-models/ admitted to. With the ledger
+# complete, a 5 would suddenly halt the platform's cognition mid-afternoon
+# — not a policy anyone chose, just yesterday's blind spot becoming today's
+# throttle. 15 covers the measured full burn (~4/day) with honest headroom;
+# the env var remains the operator's knob.
+DEFAULT_DAILY_BUDGET_USD = float(os.getenv("AI_DAILY_BUDGET_USD", "15.0"))
 # Reserve a slice for the cheap, operationally useful agents (journals,
 # pre-trade checks) so an expensive deep-tier run can't consume the lot.
 DEEP_TIER_SHARE = 0.7

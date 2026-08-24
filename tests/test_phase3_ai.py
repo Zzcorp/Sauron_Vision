@@ -25,7 +25,12 @@ def _mock_claude(response_dict, input_tokens=120, output_tokens=80):
     usage = {"input_tokens": input_tokens, "output_tokens": output_tokens, "cost_usd": 0.001}
 
     def fake_complete(self, system_prompt, user_message,
-                       model="claude-sonnet-5", effort=None):
+                       model="claude-sonnet-5", effort=None,
+                       agent_name="unattributed", record=True,
+                       source_ref=""):
+        # Mirrors the real contract, ledger kwargs included — a stub
+        # frozen on the old shape TypeErrors every caller it stands in
+        # for (the live_session stub caught the same change twice).
         return text, usage
     return fake_complete
 
@@ -84,8 +89,10 @@ class PreTradeSanityAgentTests(TestCase):
         self.assertEqual(len(result["concerns"]), 2)
 
     @patch("ai_agents.providers.claude_provider.ClaudeProvider.complete",
-           lambda self, system_prompt, user_message, model="x", effort=None: ("not json at all",
-               {"input_tokens": 10, "output_tokens": 5, "cost_usd": 0}))
+           lambda self, system_prompt, user_message, model="x", effort=None,
+                  agent_name="unattributed", record=True, source_ref="":
+               ("not json at all",
+                {"input_tokens": 10, "output_tokens": 5, "cost_usd": 0}))
     def test_malformed_response_fails_closed(self):
         from ai_agents.agents.pretrade_sanity import check_proposed_trade
         result = check_proposed_trade(symbol="X", direction="long",

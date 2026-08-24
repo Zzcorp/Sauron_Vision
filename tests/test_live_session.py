@@ -46,7 +46,12 @@ def _echo_provider():
         self.model = "claude-stub"
         self.provider = MagicMock()
 
-        def complete(*, system_prompt, user_message, model):
+        def complete(*, system_prompt, user_message, model,
+                     agent_name="unattributed", record=True, source_ref=""):
+            # The signature mirrors the real provider contract — which now
+            # carries the ledger kwargs (agent_name/record/source_ref). A
+            # stub frozen on an old shape TypeErrors the ask and reports it
+            # as a budget refusal — it has caught two contract steps now.
             q = user_message.split("User's current question:")[-1].strip()
             return ("ANSWER TO: " + q, usage)
 

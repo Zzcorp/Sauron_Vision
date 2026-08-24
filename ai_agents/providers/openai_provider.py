@@ -18,7 +18,14 @@ class OpenAIProvider:
             self.client = openai.OpenAI(api_key=self.api_key)
         return self.client
 
-    def complete(self, system_prompt: str, user_message: str, model: str = "gpt-4o", effort: str = None) -> tuple:
+    def complete(self, system_prompt: str, user_message: str, model: str = "gpt-4o", effort: str = None,
+                 agent_name: str = "unattributed", record: bool = True,
+                 source_ref: str = "") -> tuple:
+        # agent_name/record mirror ClaudeProvider so a provider swap can
+        # never TypeError on the ledger kwargs BaseAgent now passes.
+        # Ledger writes stay Claude-side only: this platform runs Claude,
+        # and a second writer here would double-count a future migration
+        # that moves the write into a shared base class instead.
         """Call OpenAI API and return (response_text, usage_dict)."""
         client = self._get_client()
 

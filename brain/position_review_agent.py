@@ -537,6 +537,10 @@ def review_one(verdict: dict, review) -> dict:
             system_prompt=agent.get_system_prompt(),
             user_message=agent.build_context(snapshot=snapshot),
             model=agent.model,
+            agent_name=agent.agent_name,
+            # Layer 1 wrote `review` BEFORE this call — the ref keeps a
+            # timestamp-cut backfill from booking this cost twice.
+            source_ref=f"PositionReview:{review.pk}",
         )
         parsed = agent.parse_response(raw)
     except Exception as e:  # noqa: BLE001

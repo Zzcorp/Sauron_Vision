@@ -49,6 +49,7 @@ class ConsensusEngine:
                     system_prompt=system_prompt,
                     user_message=user_message,
                     model=model_id,
+                    agent_name="consensus",
                 )
                 latency = int((time.time() - start) * 1000)
                 return {

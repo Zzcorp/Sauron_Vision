@@ -274,6 +274,7 @@ def run_strategist_now() -> dict:
         raw, usage = agent.provider.complete(
             system_prompt=system_prompt, user_message=context,
             model=agent.model,
+            agent_name=agent.agent_name,
         )
         parsed = agent.parse_response(raw)
     except Exception as e:

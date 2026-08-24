@@ -34,13 +34,32 @@ class ClaudeProvider:
         return self.client
 
     def complete(self, system_prompt: str, user_message: str,
-                 model: str = "claude-sonnet-5", effort: str = None) -> tuple:
+                 model: str = "claude-sonnet-5", effort: str = None,
+                 agent_name: str = "unattributed",
+                 record: bool = True,
+                 source_ref: str = "") -> tuple:
         """
         Call Claude API and return (response_text, usage_dict).
 
         `effort` (low|medium|high|xhigh|max) controls thinking depth and
         token spend on models that support it; it is dropped for models
         that don't, so a tier swap can never send an invalid parameter.
+
+        EVERY successful call is written to the AgentTask ledger from HERE
+        — the one function the money actually leaves through. The ledger
+        used to be written by BaseAgent.run() alone, and all seven brain
+        modules call this method directly (they need their own context and
+        parsing), so the platform's biggest recurring spender was
+        invisible to spend.spent_today(), to the /ai-models/ readout, and
+        to the daily budget that exists to govern it: the operator's
+        Anthropic console read roughly double what the platform admitted
+        to. A per-caller convention already failed once; the choke point
+        cannot be bypassed by the next module.
+
+        `agent_name` attributes the row; `record=False` is for the ONE
+        caller that writes its own richer AgentTask row (BaseAgent.run) —
+        anything else passing it is re-opening the hole, and a test
+        source-pins that it does not.
         """
         from ai_agents.catalog import pricing_for, supports_effort, supports_thinking
 
@@ -101,6 +120,65 @@ class ClaudeProvider:
         # content[0] blindly.
         text = next((b.text for b in response.content if b.type == "text"), "")
 
+        # Usage FIRST, before any verdict on the response: a refused or
+        # empty generation was still generated, Anthropic still billed it,
+        # and a ledger that only counts the calls that went well is the
+        # same under-reporting this module was rewritten to end — one
+        # failure mode over. Cost from the shared catalog, so a model
+        # added there is priced correctly everywhere instead of silently
+        # billing at a stale rate.
+        input_tokens = response.usage.input_tokens
+        output_tokens = response.usage.output_tokens
+        pricing = pricing_for(model)
+        cost = (input_tokens * pricing["input"]
+                + output_tokens * pricing["output"]) / 1_000_000
+        usage = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cost_usd": round(cost, 6),
+        }
+
+        def _ledger(success: bool, summary: str, error: str = ""):
+            if not record:
+                return
+            # Fenced: a ledger hiccup must not kill the call it measures —
+            # but it fails LOUDLY, because a quiet miss here is exactly the
+            # under-reporting this write exists to end.
+            try:
+                from ai_agents.models import AgentTask
+                AgentTask.objects.create(
+                    agent=agent_name[:30],
+                    provider="claude",
+                    model=model,
+                    prompt_summary=user_message[:500],
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost_usd=usage["cost_usd"],
+                    response_summary=summary[:500],
+                    # The row that lets the backfill recognise a call the
+                    # provider already recorded, when the caller's own
+                    # domain row predates the call (research asks, position
+                    # reviews). See backfill_llm_ledger.
+                    structured_output=({"source_ref": source_ref}
+                                       if source_ref else {}),
+                    success=success,
+                    error=error[:1000],
+                )
+            except Exception:  # noqa: BLE001 — see the fence note above
+                logger.error(
+                    "[ledger] FAILED to record $%.4f for %s (%s) — the "
+                    "daily budget is now undercounting", usage["cost_usd"],
+                    agent_name, model, exc_info=True)
+
+        def _raise_billed(message: str):
+            # The exception carries the usage so record=False callers
+            # (BaseAgent.run's except branch) can still ledger the real
+            # cost of a failed-but-billed call in their own row.
+            _ledger(False, text, error=message)
+            err = RuntimeError(message)
+            err.usage = usage
+            raise err
+
         # A truncated or refused response is a FAILED call, not an empty
         # success: without this every caller's parse_response would swallow
         # it and log success=True with no output.
@@ -110,25 +188,13 @@ class ClaudeProvider:
                            model, max_tokens)
         elif stop_reason == "refusal":
             details = getattr(response, "stop_details", None)
-            raise RuntimeError(
+            _raise_billed(
                 f"Claude declined the request (model={model}, "
                 f"category={getattr(details, 'category', None)})")
         if not text:
-            raise RuntimeError(
+            _raise_billed(
                 f"Claude returned no text (model={model}, "
                 f"stop_reason={stop_reason})")
-        input_tokens = response.usage.input_tokens
-        output_tokens = response.usage.output_tokens
 
-        # Cost from the shared catalog, so a model added there is priced
-        # correctly everywhere instead of silently billing at a stale rate.
-        pricing = pricing_for(model)
-        cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
-
-        usage = {
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cost_usd": round(cost, 6),
-        }
-
+        _ledger(True, text)
         return text, usage

@@ -490,6 +490,12 @@ def complete_ask(pending_message_id: int) -> dict:
         raw, usage = agent.provider.complete(
             system_prompt=system_prompt, user_message=context,
             model=agent.model,
+            agent_name=agent.agent_name,
+            # The pending row exists BEFORE this call, so its created_at
+            # predates the ledger row this call writes — a backfill that
+            # cut on timestamps alone would copy the cost twice. The ref
+            # ties the live ledger row to its domain row explicitly.
+            source_ref=f"ResearchMessage:{pending.pk}",
         )
         parsed = agent.parse_response(raw)
         answer = parsed.get("answer_md", "")

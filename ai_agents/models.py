@@ -4,17 +4,13 @@ from django.utils import timezone
 
 
 class AgentTask(models.Model):
-    AGENT_CHOICES = [
-        ("news_analyst", "News Analyst"),
-        ("strategy_advisor", "Strategy Advisor"),
-        ("weekly_reviewer", "Weekly Reviewer"),
-        ("anomaly_detector", "Anomaly Detector"),
-        ("earnings_analyst", "Earnings Analyst"),
-        ("macro_interpreter", "Macro Interpreter"),
-        ("monday_planner", "Monday Planner"),
-    ]
-
-    agent = models.CharField(max_length=30, choices=AGENT_CHOICES)
+    # Free-form, deliberately. This ledger now receives every LLM caller —
+    # the provider writes it at the choke point — and the seven-entry
+    # choices list it shipped with predated most of the platform's actual
+    # spenders (sauron_mind, critic, strategist, research, ...). A choices
+    # list that lags reality breaks the admin change-form for the majority
+    # of rows while validating nothing the create() path checks anyway.
+    agent = models.CharField(max_length=30)
     provider = models.CharField(max_length=20)
     model = models.CharField(max_length=50)
 

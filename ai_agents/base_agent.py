@@ -59,15 +59,26 @@ class BaseAgent(ABC):
         """Execute the agent: build context → call AI → parse response."""
         start_time = time.time()
 
+        # Pre-initialised so the failure row below can carry whatever WAS
+        # obtained before things went wrong. A parse_response crash happens
+        # AFTER Anthropic billed the generation — a $0 failure row for a
+        # paid call is the invisible-spend bug at one remove.
+        raw_response, usage = "", {}
         try:
             system_prompt = self.get_system_prompt()
             context = self.build_context(**kwargs)
 
+            # record=False: run() writes its own, richer AgentTask row
+            # below (structured_output, duration, the failure branch) —
+            # the provider's built-in ledger write would double-count
+            # every BaseAgent call. This is the ONE sanctioned opt-out;
+            # tests/test_llm_ledger_truth.py pins that nothing else uses it.
             raw_response, usage = self.provider.complete(
                 system_prompt=system_prompt,
                 user_message=context,
                 model=self.model,
                 effort=getattr(self, "effort", None),
+                record=False,
             )
 
             result = self.parse_response(raw_response)
@@ -93,11 +104,19 @@ class BaseAgent(ABC):
 
         except Exception as e:
             duration = time.time() - start_time
+            # A refused/empty generation raises INSIDE complete() but was
+            # still billed — the provider hangs the usage on the exception
+            # for exactly this row (record=False means nobody else wrote it).
+            billed = getattr(e, "usage", None) or usage
             AgentTask.objects.create(
                 agent=self.agent_name,
                 provider=self.provider_name,
                 model=self.model,
                 prompt_summary=str(kwargs)[:500],
+                input_tokens=billed.get("input_tokens", 0),
+                output_tokens=billed.get("output_tokens", 0),
+                cost_usd=billed.get("cost_usd", 0),
+                response_summary=raw_response[:500],
                 success=False,
                 error=str(e),
                 duration_seconds=round(duration, 2),

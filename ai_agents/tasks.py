@@ -52,10 +52,14 @@ class DailyBriefingAgent:
 
         start = time.time()
         try:
+            # record=False: this inline agent writes its own richer
+            # AgentTask row just below — the provider's built-in ledger
+            # write would double-count it (same opt-out as BaseAgent.run).
             raw, usage = self._provider.complete(
                 system_prompt=system_prompt,
                 user_message=context,
                 model=self._model,
+                record=False,
             )
             duration = time.time() - start
             AgentTask.objects.create(
@@ -74,11 +78,18 @@ class DailyBriefingAgent:
             return {"briefing": raw}
         except Exception as e:
             duration = time.time() - start
+            # A refused/empty generation was still billed; the provider
+            # hangs its usage on the exception so this failure row can
+            # carry the real cost instead of a $0 that undercounts.
+            billed = getattr(e, "usage", {}) or {}
             AgentTask.objects.create(
                 agent=self.agent_name,
                 provider=self._provider_name,
                 model=self._model,
                 prompt_summary=context[:500],
+                input_tokens=billed.get("input_tokens", 0),
+                output_tokens=billed.get("output_tokens", 0),
+                cost_usd=billed.get("cost_usd", 0),
                 success=False,
                 error=str(e),
                 duration_seconds=round(duration, 2),
@@ -129,10 +140,14 @@ class MondayPlanAgent:
 
         start = time.time()
         try:
+            # record=False: this inline agent writes its own richer
+            # AgentTask row just below — the provider's built-in ledger
+            # write would double-count it (same opt-out as BaseAgent.run).
             raw, usage = self._provider.complete(
                 system_prompt=system_prompt,
                 user_message=context,
                 model=self._model,
+                record=False,
             )
             duration = time.time() - start
             AgentTask.objects.create(
@@ -151,11 +166,18 @@ class MondayPlanAgent:
             return {"plan": raw}
         except Exception as e:
             duration = time.time() - start
+            # A refused/empty generation was still billed; the provider
+            # hangs its usage on the exception so this failure row can
+            # carry the real cost instead of a $0 that undercounts.
+            billed = getattr(e, "usage", {}) or {}
             AgentTask.objects.create(
                 agent=self.agent_name,
                 provider=self._provider_name,
                 model=self._model,
                 prompt_summary=context[:500],
+                input_tokens=billed.get("input_tokens", 0),
+                output_tokens=billed.get("output_tokens", 0),
+                cost_usd=billed.get("cost_usd", 0),
                 success=False,
                 error=str(e),
                 duration_seconds=round(duration, 2),
