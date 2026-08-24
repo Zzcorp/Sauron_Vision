@@ -60,9 +60,11 @@ arming anything that costs real money.
 - **Start on testnet.** `BinanceAccount.testnet=True` is the
   default. The bot arming flow in pass 1 requires a PIN to flip
   to LIVE mode — don't bypass it, and don't share the PIN.
-- **PIN defaults to 0000** if you ran `set_default_pin.py`.
-  Change it from the profile page (or re-run the script with
-  different logic) before exposing the site publicly.
+- **`set_default_pin.py` is gone.** It set PIN "0000" on every user
+  lacking one — a Render-era convenience that, run against production,
+  would trivialize the trading-PIN gate on every account at once. PINs
+  are set per user from the profile page (`/profile/?modal=pin`); if you
+  ever ran the script, change every 0000 PIN before exposing the site.
 
 ## Bot behaviour
 

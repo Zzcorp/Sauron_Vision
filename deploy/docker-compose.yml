@@ -179,8 +179,10 @@ services:
     command: python manage.py stream_finnhub
     profiles: ["streamers"]
 
-  # ── Nightly offsite backup (opt-in: --profile backup) ──────────────────
+  # ── Nightly offsite backup — runs by default, deliberately ─────────────
   # A dump that lives on the same disk as the database is not a backup.
+  # (The header once said "opt-in: --profile backup" while the service
+  # carried no profiles key — the comment below explains why it must not.)
   backup:
     build:
       context: .

@@ -17,6 +17,9 @@ env/
 *.log
 local_settings.py
 db.sqlite3
+# Leftover clones from `manage.py test --parallel` runs killed mid-flight —
+# the runner names them default_<n> and cannot clean up after a crash.
+default_*.sqlite3
 media/
 staticfiles/
 
