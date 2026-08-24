@@ -501,7 +501,7 @@ class SetupCardTests(TestCase):
     def _post(self, **overrides):
         data = {"action": "update_risk", "max_exposure": "100",
                 "max_position": "10", "max_daily_loss": "3",
-                "max_correlation": "0.7"}
+                "max_correlation": "0.7", "max_theme_legs": "3"}
         data.update(overrides)
         return self.client.post("/setup/", data, follow=True)
 

@@ -243,10 +243,29 @@ def instruments_list(request):
     except Exception:
         pass
 
+    # Whether each row's MARKET is open right now — fourteen timezones
+    # computed once for the whole table, then a dict lookup per row. A
+    # price table with no market state on it reads every frozen Friday
+    # close as a live print; this is the row-level answer, kept live by
+    # sv-market-status.js repainting every [data-market-session] element.
+    try:
+        from core.exchange_status import get_exchange_status, market_status_for
+        _ex_status = get_exchange_status()
+    except Exception:
+        _ex_status, market_status_for = None, None
+
     items = []
     for inst in instruments:
         q = quotes_map.get(inst.id)
+        market = None
+        if _ex_status is not None:
+            try:
+                market = market_status_for(inst.asset_class, inst.exchange,
+                                           _status=_ex_status)
+            except Exception:
+                market = None
         items.append({
+            "market": market,
             "id": inst.id,
             "symbol": inst.symbol,
             "name": inst.name,
@@ -2935,6 +2954,10 @@ RISK_LIMIT_BOUNDS = {
     "max_single_position_pct": (0.1, 100.0, "Max single position"),
     "max_daily_loss_pct": (0.1, 100.0, "Max daily loss"),
     "max_correlation_threshold": (0.01, 1.0, "Max correlation threshold"),
+    # A COUNT, not a percentage, and 0 is a legal value here — it turns the
+    # theme gate off, where a 0 on the sibling limits would mean "refuse
+    # everything" and is therefore out of their bounds.
+    "max_theme_legs": (0, 20, "Max theme legs"),
 }
 
 # POST field -> Portfolio field. The form names are short and the model names
@@ -2945,6 +2968,7 @@ RISK_LIMIT_FIELDS = {
     "max_position": "max_single_position_pct",
     "max_daily_loss": "max_daily_loss_pct",
     "max_correlation": "max_correlation_threshold",
+    "max_theme_legs": "max_theme_legs",
 }
 
 
@@ -2976,10 +3000,28 @@ def _apply_risk_limits(portfolio, post) -> tuple[bool, list[str]]:
             rejected.append(f"{label} must be a number, got {raw!r}")
             continue
         if not (low <= value <= high):
-            rejected.append(
-                f"{label} must be between {low:g} and {high:g} — {value:g} "
-                f"would gate every trade on this platform")
+            # The tail is per-field truth: a 0 on the percentage limits
+            # means "refuse everything", while on the theme count 0 is the
+            # legal off switch and the bound exists to catch typos like 200.
+            if field == "max_theme_legs":
+                rejected.append(
+                    f"{label} must be between {low:g} and {high:g} — it is "
+                    f"a count of concurrent same-currency tickets, and 0 "
+                    f"turns the theme gate off")
+            else:
+                rejected.append(
+                    f"{label} must be between {low:g} and {high:g} — "
+                    f"{value:g} would gate every trade on this platform")
             continue
+        if field == "max_theme_legs":
+            # A count of tickets. int() would quietly turn 2.5 into 2 and
+            # save a limit nobody typed; a count that is not whole is a
+            # typo, and typos are rejected, not rounded.
+            if value != int(value):
+                rejected.append(f"{label} is a count of tickets — "
+                                f"{value:g} is not a whole number")
+                continue
+            value = int(value)
         pending[field] = value
 
     if rejected:

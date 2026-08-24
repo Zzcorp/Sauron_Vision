@@ -1937,6 +1937,18 @@
           '</div>';
       }
 
+      /* How crowded this ticket's CURRENCY already is — six EUR crosses
+         are one ECB headline, not six decisions. Same split as its
+         siblings: the bots take the leg cap as a refusal, the human here
+         is told which tickets share the bet and decides. */
+      var theme = p.theme || {};
+      if (theme.ok === false && theme.reason) {
+        warnHtml += '<div class="sz-warn sz-warn--book"><b>CURRENCY THEME ' +
+          'CROWDED</b>' + esc(theme.reason) +
+          '<br>' + esc('You can still take it; your bots cannot. Taking it ' +
+                       'is recorded as taken against the cap.') + '</div>';
+      }
+
       /* And how hard this pool is set to swing. Not a warning about THIS
          trade — a reminder that a number typed into extras once is still
          sizing every trade since. */

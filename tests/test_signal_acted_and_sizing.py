@@ -263,9 +263,14 @@ class SignalRailRendersTakenTests(TestCase):
 
 
 class ExposureWarningTests(TestCase):
-    """The confirm step must name the position that already exists in this
-    symbol — from ANY config, not just the manual one. Its absence is what
-    let one symbol be booked twice."""
+    """What the confirm step says about a position that already exists in
+    this symbol. Reporting it (`existing_exposure`) was the first fix —
+    "the fact whose absence let one symbol be booked twice" — and then
+    the book got booked twice anyway, fourteen anomaly flags in a day,
+    because a fact an operator can read past is not a gate. The SAME
+    side from another author now refuses outright
+    (`risk_gate.duplicate_state`, tests.test_one_bet_one_ticket); the
+    report remains for the cases that still preview."""
 
     @classmethod
     def setUpTestData(cls):
@@ -275,10 +280,23 @@ class ExposureWarningTests(TestCase):
         self.inst = _quote("BTCUSD", 60000)
         self.cfg = _bot_config(self.user)
 
-    def test_preview_reports_a_bot_position_in_the_same_symbol(self):
+    def test_a_same_side_bot_position_refuses_the_preview_outright(self):
+        """The upgrade from told to stopped: this exact scenario used to
+        return a payload with the duplicate listed in it."""
+        from bot_program.manual_trade import preview_take_trade
+        _bot_trade(self.cfg)
+        p = preview_take_trade(self.user, _signal(self.inst))
+        self.assertIn("error", p)
+        self.assertIn("acted_rule", p["error"])
+
+    def test_the_opposite_side_still_previews_and_reports_the_holding(self):
+        """A short against an open long is not a duplicate — and the
+        confirm step still names what is already on."""
         from bot_program.manual_trade import preview_take_trade
         trade = _bot_trade(self.cfg)
-        p = preview_take_trade(self.user, _signal(self.inst))
+        p = preview_take_trade(
+            self.user, _signal(self.inst, direction="bearish",
+                               entry=60000, stop=63000, target=54000))
         self.assertNotIn("error", p)
         held = p["existing_exposure"]
         self.assertEqual([h["trade_id"] for h in held], [trade.id])

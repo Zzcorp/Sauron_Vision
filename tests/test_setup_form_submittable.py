@@ -61,12 +61,13 @@ class RiskLimitFormTests(SimpleTestCase):
         "max_position": "max_single_position_pct",
         "max_daily_loss": "max_daily_loss_pct",
         "max_correlation": "max_correlation_threshold",
+        "max_theme_legs": "max_theme_legs",
     }
 
     def setUp(self):
         self.inputs = {a["name"]: a for a in _inputs("dashboard/setup.html")}
 
-    def test_the_four_risk_inputs_are_present(self):
+    def test_every_risk_input_is_present(self):
         for name in self.FIELD_DEFAULTS:
             self.assertIn(name, self.inputs)
 
@@ -96,7 +97,8 @@ class RiskLimitFormTests(SimpleTestCase):
         exists to be changed."""
         typed = {"max_exposure": Decimal("85"), "max_position": Decimal("12.5"),
                  "max_daily_loss": Decimal("2.5"),
-                 "max_correlation": Decimal("0.65")}
+                 "max_correlation": Decimal("0.65"),
+                 "max_theme_legs": Decimal("4")}
         for name, value in typed.items():
             attrs = self.inputs[name]
             self.assertTrue(

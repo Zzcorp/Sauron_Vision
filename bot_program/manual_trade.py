@@ -790,6 +790,27 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         notional=notional, capital_base=float(capital or 0),
         base_label="manual pool")
 
+    # A DUPLICATE EXPRESSION is refused even on this path, where the money
+    # limits only warn — because it is not appetite. Appetite is how much
+    # of their own book an operator puts behind a decision; this is a
+    # SECOND AUTHOR already holding the same bet under a rule the popup
+    # does not show them managing. The operator who wants this entry
+    # anyway has a real move available — close the other leg — and the
+    # refusal names it. Tickets from this manual config itself are exempt:
+    # adding to your own expression is sizing, and the ceilings above
+    # already govern it.
+    from portfolio.risk_gate import duplicate_state, theme_state
+    dup = duplicate_state(user, symbol=inst.symbol, side=side,
+                          config_id=cfg.id)
+    if not dup["ok"]:
+        return {"error": dup["reason"]}
+    # The currency-theme crowd, as information on this path: stacking a
+    # fourth deliberate EUR leg is a call a present human is entitled to
+    # make, and the bots take it as a hard cap because nobody is there to
+    # make it. Rides the popup next to book_advisory; recorded at entry.
+    theme = theme_state(user, symbol=inst.symbol, side=side,
+                        asset_class=cls)
+
     open_trades = _open_manual_trades(cfg)
     committed = round(sum(_trade_capital_use(t) for t in open_trades), 2)
     available = round(capital - committed, 2)
@@ -950,6 +971,9 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         # is measured against. Enforced in `_execute`; shown here so the
         # refusal is never a surprise at the moment of pressing the button.
         "concentration": concentration,
+        # The currency-theme crowd this ticket joins. A warning here and a
+        # record at entry, never a manual refusal — see the note above.
+        "theme": theme,
         # The brain's standing verdict on discretionary entries. Reported,
         # not enforced: pausing a RULE is the platform's call because nobody
         # is watching it, but a hand-taken trade has a human on the other
@@ -1322,6 +1346,20 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         if not single["ok"]:
             return {"error": single["reason"], "closed": closed}
 
+        # The duplicate refusal, re-asked at the moment of the order — a
+        # bot may have opened this exact bet between the preview and the
+        # click, and a stale answer here is how one idea gets booked
+        # twice. Funding closes need no credit: they liquidate this
+        # config's own tickets, and this config's tickets were never
+        # duplication.
+        from portfolio.risk_gate import duplicate_state, theme_state
+        dup = duplicate_state(user, symbol=inst.symbol, side=side,
+                              config_id=cfg.id)
+        if not dup["ok"]:
+            return {"error": dup["reason"], "closed": closed}
+        theme_now = theme_state(user, symbol=inst.symbol, side=side,
+                                asset_class=cls)
+
 
         meta = {
             "manual": True,
@@ -1358,6 +1396,12 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             # recorded cannot be reviewed afterwards.
             "concentration_at_entry": {"ok": _conc_guard is None,
                                        "reason": _conc_guard or ""},
+            # And the currency-theme crowd at the moment of entry — the
+            # cap the bots take as a refusal and a present human may
+            # override. Same rule as its siblings: an override nobody
+            # recorded cannot be reviewed afterwards.
+            "theme_at_entry": {"ok": bool(theme_now["ok"]),
+                               "reason": theme_now["reason"]},
         }
         if level_overrides:
             # Only when something moved: an untouched ticket keeps the exact

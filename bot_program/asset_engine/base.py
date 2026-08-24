@@ -1076,6 +1076,32 @@ class AssetBot(ABC):
                         "limit: %s", self.asset_class, symbol, cap["reason"])
             return self._skip(symbol, skips.GATE_BLOCKED, cap["reason"])
 
+        # ONE EXPRESSION PER BET, and a leg cap per currency theme — the
+        # two holes every money limit above walks past. EURGBP BUY under
+        # bollinger_squeeze_breakout while manual_take already BUYs it is
+        # 2x one idea wearing two tickets, each leg comfortably inside the
+        # concentration and single-position ceilings; and six EUR crosses
+        # were one ECB headline away from marking together while every
+        # symbol-scoped gate stayed green. Hard refusals here because
+        # nobody is present on a beat to weigh a duplicate on purpose.
+        # Unguarded like the single-position cap above, for the same blast
+        # radius: an exception costs this symbol this pass, not the fleet.
+        from portfolio.risk_gate import duplicate_state, theme_state
+        dup = duplicate_state(self.user, symbol=symbol,
+                              side=decision.direction,
+                              config_id=self.cfg.id)
+        if not dup["ok"]:
+            logger.info("[%s_bot] %s refused as a duplicate expression: %s",
+                        self.asset_class, symbol, dup["reason"])
+            return self._skip(symbol, skips.GATE_BLOCKED, dup["reason"])
+        theme = theme_state(self.user, symbol=symbol,
+                            side=decision.direction,
+                            asset_class=self.asset_class)
+        if not theme["ok"]:
+            logger.info("[%s_bot] %s refused by the theme-leg cap: %s",
+                        self.asset_class, symbol, theme["reason"])
+            return self._skip(symbol, skips.GATE_BLOCKED, theme["reason"])
+
         # Shadow mode: everything is computed, nothing is submitted and no
         # row is written. The way to validate a change against live data
         # for 24-48h without risking money.

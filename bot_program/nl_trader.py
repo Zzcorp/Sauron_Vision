@@ -221,6 +221,22 @@ class NLTradeParser:
 
             direction = 'long' if action == 'buy' else 'short'
 
+            # The same one-bet-one-ticket and theme-leg gates every other
+            # entry path passes. Both REFUSE here — the manual popup can
+            # warn a human and record the override, but a chat reply has
+            # no confirm step to carry a warning into, so an advisory
+            # would be a gate that only ever said yes. config_id=None:
+            # nothing this path opens is "its own config adding a clip".
+            from portfolio.risk_gate import duplicate_state, theme_state
+            dup = duplicate_state(user, symbol=instrument.symbol,
+                                  side=action, config_id=None)
+            if not dup['ok']:
+                return {'status': 'error', 'message': dup['reason']}
+            theme = theme_state(user, symbol=instrument.symbol, side=action,
+                                asset_class=instrument.asset_class)
+            if not theme['ok']:
+                return {'status': 'error', 'message': theme['reason']}
+
             Position.objects.create(
                 portfolio=portfolio,
                 instrument=instrument,

@@ -770,6 +770,226 @@ def concentration_state(user, *, symbol: str, side: str, asset_class: str,
     return state
 
 
+def _position_books(user, portfolio=None) -> set:
+    """The legacy-Position books a user's bets can live on: the shared
+    limits book AND the user's own `<username>_main` row.
+
+    The NL trader writes to the per-user book, the setup form and the
+    eToro sync to the shared one — and a gate that scanned only the
+    shared book would let the NL trader's AAPL long hide from a duplicate
+    check the setup form's identical long would trip. An explicit
+    `portfolio=` stays an override so tests can pin one book.
+
+    (The money gates — symbol_side_exposure, open_capital_at_work — still
+    read the shared book alone; their docstrings state that boundary and
+    widening it changes limits arithmetic this wave does not touch.)
+    """
+    if portfolio is not None:
+        return {portfolio.pk}
+    books = {limits_book().pk}
+    if user is not None:
+        try:
+            from portfolio.services import get_or_create_default_portfolio
+            books.add(get_or_create_default_portfolio(user=user).pk)
+        except Exception:  # noqa: BLE001 — one unreadable book must not
+            pass           # blind the gate to the other
+    return books
+
+
+def _holder_is_long(trade) -> bool:
+    """The DIRECTIONAL EXPRESSION an open AssetBotTrade row carries.
+
+    trade.side for every ordinary lane — but the options lane always BUYS
+    premium, so a bought PUT is a short expression stored as side="BUY".
+    Reading the raw side there inverts this gate both ways at once: a held
+    PUT on AAPL falsely refuses a new LONG (the opposite bet) and waves
+    through a new SHORT (the same bet, doubled — the one case the gate
+    exists for). The lane records its own truth in
+    metadata["underlying_signal_direction"]; the contract right is the
+    fallback because this lane only ever buys premium, so a PUT can only
+    mean short. The write stays side="BUY" — the close path sells the
+    premium it bought and must keep reading it that way.
+    """
+    if str(trade.asset_class or "").lower() == "options":
+        meta = trade.metadata or {}
+        expr = str(meta.get("underlying_signal_direction") or "").upper()
+        if expr:
+            return expr in ("BUY", "LONG")
+        right = str(meta.get("right") or "").upper()
+        if right.startswith("P"):
+            return False
+        if right.startswith("C"):
+            return True
+    return str(trade.side or "").upper() in ("BUY", "LONG")
+
+
+def duplicate_state(user, *, symbol: str, side: str,
+                    config_id=None, portfolio=None) -> dict:
+    """Is this exact directional bet already on, booked by someone else?
+
+    A refusal, not a taper, and count-based, not money-based — which is why
+    `concentration_state` never caught it: two half-size tickets from two
+    rules sail under any money ceiling while still being 2x the intended
+    expression of one idea. EURGBP BUY held by bollinger_squeeze_breakout
+    while manual_take BUYs it again was flagged by the anomaly scanner
+    fourteen times in one day, and nothing refused the second ticket,
+    because nothing asked the question this function answers.
+
+    `config_id` is the asker's own config: tickets from the SAME config are
+    not duplication, they are that one strategy adding a clip, and the
+    money ceilings already govern how far that goes. Everything else —
+    another bot's config, the manual config when a bot asks, the legacy
+    Position book — is a second author writing the same sentence.
+    """
+    from bot_program.models import AssetBotTrade
+    from portfolio.models import Position
+
+    want_long = str(side or "").upper() in ("BUY", "LONG")
+    holders: list[str] = []
+
+    qs = AssetBotTrade.objects.filter(
+        config__user=user, symbol__iexact=symbol,
+        status__in=("OPEN", "CLOSE_PENDING")).select_related("config")
+    if config_id is not None:
+        qs = qs.exclude(config_id=config_id)
+    for trade in qs:
+        if _holder_is_long(trade) != want_long:
+            continue
+        holders.append(trade.rule_name or trade.config.name or "another bot")
+
+    for pos in Position.objects.filter(
+            portfolio_id__in=_position_books(user, portfolio),
+            closed_at__isnull=True,
+            instrument__symbol__iexact=symbol):
+        if (str(pos.direction or "").lower() in ("long", "buy")) != want_long:
+            continue
+        holders.append(getattr(pos.strategy, "name", "") or "portfolio position")
+
+    state = {"ok": True, "holders": holders, "n": len(holders), "reason": ""}
+    if holders:
+        direction = "long" if want_long else "short"
+        state["ok"] = False
+        state["reason"] = (
+            f"{symbol.upper()} {direction} is already on the book via "
+            f"{', '.join(sorted(set(holders)))} — a second ticket doubles "
+            f"the bet, it does not diversify it; close that leg first if "
+            f"this entry should replace it")
+    return state
+
+
+# The currencies the platform's seeded forex universe actually quotes —
+# the 20 bases and quotes of instruments/services.py's 47 pairs. A real
+# vocabulary rather than "any six letters", because XAUUSD is six letters
+# and alpha too: gold parsed as a currency pair would fabricate an "XAU"
+# theme and lend its short-USD leg to the USD crowd the moment a metal
+# ever reaches this tally on a misclassified forex row — and the
+# asset-class filters are routing, not proof of what a symbol is.
+THEME_CURRENCIES = frozenset({
+    "AUD", "CAD", "CHF", "CNH", "CZK", "EUR", "GBP", "HKD", "HUF", "JPY",
+    "MXN", "NOK", "NZD", "PLN", "RON", "SEK", "SGD", "TRY", "USD", "ZAR",
+})
+
+
+# Forex symbols this platform seeds are six letters, base then quote —
+# EURUSD is long EUR / short USD when bought. Anything whose halves are
+# not both known currencies (a metal, an odd length, a venue suffix) has
+# no currency legs to count.
+def _currency_legs(symbol: str, side: str) -> dict:
+    s = str(symbol or "").strip().upper()
+    if len(s) != 6 or not s.isalpha():
+        return {}
+    if s[:3] not in THEME_CURRENCIES or s[3:] not in THEME_CURRENCIES:
+        return {}
+    long_side = str(side or "").upper() in ("BUY", "LONG")
+    return {s[:3]: 1 if long_side else -1, s[3:]: -1 if long_side else 1}
+
+
+def theme_state(user, *, symbol: str, side: str, asset_class: str,
+                portfolio=None) -> dict:
+    """Would this ticket crowd one currency past the book's leg cap?
+
+    The EUR problem, made refusable: six of twelve open positions were EUR
+    crosses, five of them long EUR — one ECB headline marking five tickets
+    at once — and every leg individually cleared every money limit,
+    because every existing limit judges a SYMBOL and a theme is not a
+    symbol. This counts open tickets that share a same-direction currency
+    with the candidate (long EURUSD and long EURJPY are both long EUR;
+    long EURUSD and long USDJPY disagree about USD and do not stack), and
+    refuses when the crowd is already at `max_theme_legs`.
+
+    Forex only: currencies are the one theme vocabulary the symbol itself
+    states. Sector crowding in equities is real too, but pretending a
+    ticker names its theme would make this gate lie, and 0 on the card
+    turns the whole gate off.
+    """
+    pf = portfolio if portfolio is not None else limits_book()
+    cap = _limit_pct(pf, "max_theme_legs")
+    state = {"ok": True, "cap": cap, "currency": None, "n": 0,
+             "tickets": [], "reason": ""}
+
+    if str(asset_class or "").lower() != "forex":
+        state["reason"] = "theme legs are counted for forex only"
+        return state
+    if cap is None:
+        state["reason"] = "no theme-leg cap set on the book"
+        return state
+    candidate = _currency_legs(symbol, side)
+    if not candidate:
+        state["reason"] = f"{symbol} does not parse as a currency pair"
+        return state
+
+    from bot_program.models import AssetBotTrade
+    from portfolio.models import Position
+
+    counts: dict[str, int] = {}
+    tickets: dict[str, list[str]] = {}
+
+    def _tally(sym, trade_side, label):
+        legs = _currency_legs(sym, trade_side)
+        for ccy, sign in legs.items():
+            if candidate.get(ccy) == sign:
+                counts[ccy] = counts.get(ccy, 0) + 1
+                tickets.setdefault(ccy, []).append(f"{sym.upper()} ({label})")
+                # One ticket counts once per currency, but a pair that
+                # shares BOTH currencies with the candidate (the same
+                # pair, same side, under another rule) is still one
+                # ticket in each crowd — that is what it does to risk.
+
+    for trade in AssetBotTrade.objects.filter(
+            config__user=user, asset_class="forex",
+            status__in=("OPEN", "CLOSE_PENDING")).select_related("config"):
+        _tally(trade.symbol, trade.side,
+               trade.rule_name or trade.config.name or "bot")
+    for pos in Position.objects.filter(
+            portfolio_id__in=_position_books(user, portfolio),
+            closed_at__isnull=True,
+            instrument__asset_class="forex").select_related("instrument"):
+        _tally(pos.instrument.symbol, pos.direction,
+               getattr(pos.strategy, "name", "") or "position")
+
+    if not counts:
+        state["reason"] = "no open ticket shares a directional currency"
+        return state
+
+    worst = max(counts, key=lambda c: counts[c])
+    state["currency"] = worst
+    state["n"] = counts[worst]
+    state["tickets"] = tickets[worst]
+    if counts[worst] >= cap:
+        direction = ("long" if candidate[worst] > 0 else "short")
+        state["ok"] = False
+        state["reason"] = (
+            f"{counts[worst]} open ticket(s) already express {direction} "
+            f"{worst} ({', '.join(tickets[worst])}) — the book caps one "
+            f"currency theme at {cap:g} leg(s); one {worst} repricing "
+            f"marks them all at once")
+        return state
+    state["reason"] = (f"{counts[worst]} of {cap:g} allowed leg(s) share "
+                       f"{'long' if candidate[worst] > 0 else 'short'} "
+                       f"{worst} with this ticket")
+    return state
+
+
 def correlation_state(user, instrument, *, portfolio=None,
                       lookback_days: int = CORRELATION_LOOKBACK_DAYS) -> dict:
     """How correlated a candidate is to the open book, and the size taper.

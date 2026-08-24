@@ -490,6 +490,23 @@ class OptionsBot(AssetBot):
                         symbol, contract.strike, book_cap["reason"])
             return None
 
+        # One expression per bet, here too — this lane replaces
+        # scan_symbol wholesale, which is exactly how the size-dependent
+        # limits once lived in a method it never ran. An options ticket on
+        # a symbol another rule is already long is the same doubled idea
+        # one derivative over. Judged on decision.direction, NOT the order
+        # side: premium is always bought here, and a bought PUT is a short
+        # expression wearing a BUY. (No theme gate: options ride equity
+        # underlyings, and the theme vocabulary is currencies.)
+        from portfolio.risk_gate import duplicate_state
+        dup = duplicate_state(self.user, symbol=symbol,
+                              side=decision.direction,
+                              config_id=self.cfg.id)
+        if not dup["ok"]:
+            logger.info("[options_bot] %s refused as a duplicate "
+                        "expression: %s", symbol, dup["reason"])
+            return None
+
         client = client_for_symbol(self.user, symbol, self.cfg)
 
         # Money-safety: same guard as base.scan_symbol — a LIVE config whose

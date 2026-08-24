@@ -32,6 +32,15 @@ class Portfolio(models.Model):
     max_sector_exposure_pct = models.FloatField(default=30)
     max_correlation_threshold = models.FloatField(default=0.7)
     max_daily_loss_pct = models.FloatField(default=3.0)
+    # How many open tickets may express the same directional currency bet
+    # (long EUR, short USD, ...) before the next one is refused. A COUNT,
+    # not a percentage: the failure it exists for is six tickets wearing
+    # the costume of six decisions when they are one EUR bet, each leg
+    # individually inside every money limit. 0 disables the gate — read
+    # through `risk_gate._limit_pct` like its siblings, enforced by
+    # `risk_gate.theme_state`. Default 3: the number the concentration
+    # briefings kept asking for while nothing bound it.
+    max_theme_legs = models.IntegerField(default=3)
 
     updated_at = models.DateTimeField(auto_now=True)
 

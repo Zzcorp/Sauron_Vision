@@ -91,7 +91,12 @@
         </div>
         {% elif risk_state.failed_open %}
         <div class="card" style="border-color:var(--accent-red);padding:10px 14px;margin-bottom:16px;">
-            <span style="font-family:var(--font-mono);font-size:12px;">⚠ The four limits below are not being applied to entries right now: {{ risk_state.reason }}</span>
+            {% comment %}Named precisely: preflight's fail-open suspends
+            the MONEY limits it reads (daily loss, exposure — and the
+            symbol-scoped money gates degrade with the same book). The
+            theme-leg cap and the duplicate gate are count-scoped, read
+            their own rows, and keep refusing through this state.{% endcomment %}
+            <span style="font-family:var(--font-mono);font-size:12px;">⚠ The book money limits below are not being applied to entries right now — the theme-leg cap and the duplicate gate still refuse: {{ risk_state.reason }}</span>
         </div>
         {% endif %}
         <form method="post" action="{% url 'setup' %}">
@@ -163,6 +168,18 @@
                     linearly, to 25% at a perfect 1.00. Manual trades are told
                     the reading on the confirm popup and left to decide.
                     Set 1.00 to switch the taper off.
+                </div>
+            </div>
+            <div style="margin-bottom: 16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX THEME LEGS</label>
+                <input type="number" step="1" min="0" max="20" required name="max_theme_legs" value="{{ limits.max_theme_legs }}"
+                    style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
+                    How many open tickets may share one directional currency bet
+                    (long EUR, short USD, …) before the next is refused. A count,
+                    not a percentage — six EUR crosses are one ECB headline, not
+                    six decisions. Bots take it as a hard cap; manual trades are
+                    warned and recorded. Forex only. Set 0 to switch it off.
                 </div>
             </div>
             <button type="submit" class="btn btn-primary" style="width:100%;">Save Risk Limits</button>
