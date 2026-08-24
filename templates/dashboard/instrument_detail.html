@@ -17,6 +17,11 @@
                 </button>
             </form>
             {% if quote %}
+            {% comment %}data-instrument-live: sv-instrument-live.js polls
+            the preview API every 15s and repaints last/change (with a
+            flash), and nudges the chart's last candle — the price used to
+            render once and freeze under a live market badge, the worst
+            combination.{% endcomment %}
             <div class="dtl-price">
                 <span class="dtl-last">{{ quote.last|floatformat:4 }}</span>
                 <span class="dtl-chg {% if quote.change_pct >= 0 %}up{% else %}down{% endif %}">
@@ -96,7 +101,11 @@
 </style>
 
 <!-- TradingView Lightweight Chart (chart widget) -->
-<div class="card fade-in-up delay-1" style="margin-bottom:20px;padding:0;overflow:hidden;">
+{% comment %}data-instrument-live lives on the ALWAYS-rendered chart
+card, not the quote-gated hero: an instrument with no LiveQuote row yet
+must still poll — the poller is how the hero self-heals the moment the
+feed produces a first price. paintQuote null-guards the hero spans.{% endcomment %}
+<div class="card fade-in-up delay-1" style="margin-bottom:20px;padding:0;overflow:hidden;" data-instrument-live="{{ instrument.symbol }}">
     {% include "_partials/chart_widget.html" with chart_id="instrument-main-chart" symbol=instrument.symbol height="420" timeframe="1d" %}
 </div>
 
@@ -195,4 +204,6 @@
 </div>
 
 {% block extra_js %}{% endblock %}
+{% load static %}
+<script src="{% static 'js/sv-instrument-live.js' %}" defer></script>
 {% endblock %}

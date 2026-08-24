@@ -73,7 +73,7 @@
       headers: { 'Content-Type': 'application/json',
                  'X-CSRFToken': csrf() },
       body: JSON.stringify({ page_id: here }),
-    }).catch(function () {}).finally ? undefined : undefined;
+    }).catch(function () {});
   }
 
   setInterval(tick, POLL_MS);
@@ -81,6 +81,7 @@
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) tick();
   });
+  document.addEventListener('sv:pin-unlocked', tick);
   /* Fills and notifications announce themselves — repaint on the shared
      eye events instead of waiting out the sweep. */
   document.addEventListener('sv:eye-event', function () {

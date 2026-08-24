@@ -112,6 +112,11 @@ Why it is shaped this way
         }
     }
 
+    document.addEventListener('sv:pin-unlocked', function () {
+        /* The gate lifting is the page coming back to life — refresh
+           now rather than at the next sweep tick. */
+        schedule();
+    });
     function refresh() {
         if (inFlight) return;
         /* Never swap a table out from under the cursor: it would yank the row

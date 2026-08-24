@@ -474,26 +474,51 @@ Parameters:
     });
 
     // ── Fetch + load data ─────────────────────────────────────────────────
-    function loadData(tf) {
+    var loadSeq = 0;      /* only the newest request may paint */
+    var hasData = false;  /* a background failure keeps the last truth */
+
+    function loadData(tf, opts) {
+        opts = opts || {};
+        var quiet = !!opts.background;
         if (!SYMBOL) {
             loadingEl.style.display = 'none';
             return;
         }
-        loadingEl.style.display = 'flex';
-        errorEl.style.display = 'none';
+        /* A background refresh is a maintenance sweep, not a first paint:
+           no loading veil over a chart the operator is reading, no error
+           veil replacing good bars on a transient blip, and the viewport
+           they zoomed to survives the setData. The first load and the
+           explicit timeframe/type clicks keep the loud path. */
+        if (!quiet) {
+            loadingEl.style.display = 'flex';
+            errorEl.style.display = 'none';
+        }
+        var seq = ++loadSeq;
 
         fetch('/api/chart-data/?symbol=' + encodeURIComponent(SYMBOL) + '&timeframe=' + encodeURIComponent(tf))
-            .then(function(r) { return r.json(); })
+            .then(function(r) {
+                if (r.status === 423) {
+                    if (window.svIdleLock) window.svIdleLock.engage(false);
+                    var locked = new Error('locked'); locked.svQuiet = true; throw locked;
+                }
+                return r.json();
+            })
             .then(function(json) {
+                if (seq !== loadSeq) return; /* a newer request owns the paint */
                 loadingEl.style.display = 'none';
                 if (json.error) {
-                    showError(json.error);
+                    if (!quiet || !hasData) showError(json.error);
                     return;
                 }
                 var bars = json.bars || [];
                 if (!bars.length) {
-                    showError('No data available for ' + SYMBOL);
+                    if (!quiet || !hasData) showError('No data available for ' + SYMBOL);
                     return;
+                }
+                var keepRange = null;
+                if (quiet && hasData) {
+                    try { keepRange = chart.timeScale().getVisibleLogicalRange(); }
+                    catch (e) { keepRange = null; }
                 }
                 if (chartType === 'candlestick') {
                     mainSeries.setData(bars.map(function(b) {
@@ -512,11 +537,19 @@ Parameters:
                         color: (b.close >= b.open) ? vc.accentDim : vc.redDim,
                     };
                 }));
-                chart.timeScale().fitContent();
+                hasData = true;
+                if (keepRange) {
+                    try { chart.timeScale().setVisibleLogicalRange(keepRange); }
+                    catch (e) { /* a shrunk series can refuse the old range */ }
+                } else {
+                    chart.timeScale().fitContent();
+                }
             })
-            .catch(function() {
+            .catch(function(e) {
+                if (seq !== loadSeq) return;
                 loadingEl.style.display = 'none';
-                showError('Failed to load chart data');
+                if (e && e.svQuiet) return;
+                if (!quiet || !hasData) showError('Failed to load chart data');
             });
     }
 
@@ -583,6 +616,43 @@ Parameters:
             }, 500);
         }
     }
+
+    // ── Live handle ─────────────────────────────────────────────────
+    // The widget registers itself so page-level pollers can keep it
+    // honest without reaching into its closure: refresh() refetches the
+    // ACTIVE timeframe (the chart used to load once and freeze under a
+    // moving market), tick(price) nudges the last candle's close between
+    // refreshes so the tape visibly moves with the quote loop. tick
+    // touches candlestick mode only — a line/area repaint comes from
+    // refresh, and inventing a bar for it would draw a price at a time
+    // the API never served.
+    window.svCharts = window.svCharts || {};
+    window.svCharts[CHART_ID] = {
+        refresh: function () { if (chart) loadData(currentTf, {background: true}); },
+        tick: function (price) {
+            if (!chart || chartType !== 'candlestick' || !mainSeries) return;
+            if (typeof price !== 'number' || !isFinite(price)) return;
+            if (!mainSeries.data) return; /* older lib: refresh still covers it */
+            var bars = mainSeries.data();
+            if (!bars || !bars.length) return;
+            var last = bars[bars.length - 1];
+            /* Daily-family bars carry date-string times. Grafting a live
+               price onto one falsifies a COMPLETED session unless that
+               bar IS today — then it is the forming candle and the tick
+               is exactly what keeps it honest. Intraday bars (epoch
+               times) always end in the forming bar. */
+            if (typeof last.time === 'string') {
+                var today = new Date().toISOString().slice(0, 10);
+                if (last.time !== today) return;
+            }
+            mainSeries.update({
+                time: last.time, open: last.open,
+                high: Math.max(last.high, price),
+                low: Math.min(last.low, price),
+                close: price,
+            });
+        },
+    };
 
     bootstrap();
 })();

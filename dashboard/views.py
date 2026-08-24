@@ -3815,6 +3815,117 @@ def panel_counts_json(request):
     })
 
 
+# page_id -> "when did this section last produce something worth seeing".
+# Each probe is the cheapest honest question its table can answer, and a
+# probe that cannot be read reports None — no dot, never a lie. The dict
+# is module-level so the test that walks it and the endpoint can never
+# disagree about which sections exist.
+def _nav_activity_probes():
+    from django.db.models import Max
+
+    def latest(qs_fn):
+        def probe():
+            try:
+                return qs_fn()
+            except Exception:  # noqa: BLE001 — a dead probe is no dot
+                return None
+        return probe
+
+    from alerts.models import Notification  # noqa: F401 — locality
+    return {
+        "signals": latest(lambda: __import__("signals.models", fromlist=["Signal"])
+                          .Signal.objects.filter(is_active=True)
+                          .aggregate(m=Max("created_at"))["m"]),
+        # BOTH books, like the page: the platform's own docstrings record
+        # a single-book read of positions as a past bug, and the NL trader
+        # and setup form open legacy Position rows no AssetBotTrade sees.
+        "positions": latest(lambda: max(filter(None, (
+            __import__("bot_program.models", fromlist=["AssetBotTrade"])
+            .AssetBotTrade.objects.aggregate(m=Max("opened_at"))["m"],
+            __import__("portfolio.models", fromlist=["Position"])
+            .Position.objects.aggregate(m=Max("opened_at"))["m"],
+        )), default=None)),
+        "news": latest(lambda: __import__("scraping.models", fromlist=["NewsArticle"])
+                       .NewsArticle.objects
+                       .aggregate(m=Max("published_at"))["m"]),
+        "briefing": latest(lambda: __import__("brain.briefing_models", fromlist=["StrategistBriefing"])
+                           .StrategistBriefing.objects
+                           .aggregate(m=Max("created_at"))["m"]),
+        "hypotheses": latest(lambda: __import__("brain.knowledge_models", fromlist=["Hypothesis"])
+                             .Hypothesis.objects
+                             .aggregate(m=Max("resolved_at"))["m"]),
+        # scanned_at, not created_at: OpportunityFlag has no created_at,
+        # and the fenced FieldError made this dot permanently dark — the
+        # exact silent death the "no dot, never a lie" fence can hide.
+        "opportunities": latest(lambda: __import__("signals.models", fromlist=["OpportunityFlag"])
+                                .OpportunityFlag.objects
+                                .aggregate(m=Max("scanned_at"))["m"]),
+        "generated": latest(lambda: __import__("brain.generator_models", fromlist=["GeneratedSetupProposal"])
+                            .GeneratedSetupProposal.objects
+                            .filter(status="pending")
+                            .aggregate(m=Max("created_at"))["m"]),
+    }
+
+
+@login_required
+def nav_activity_json(request):
+    """The sidebar's unseen dots — nothing stays unseen.
+
+    GET: {"pages": {page_id: bool}} — true when the section produced
+    something newer than this operator's last visit to it. A page never
+    visited counts as unseen the moment it has ANY activity: a dot that
+    waited for a first visit would never light for the page most worth
+    discovering.
+
+    POST {"page_id": X}: stamps X seen now. Being on a page IS seeing it —
+    the JS beacons this once per page load. Server truth on the profile,
+    so two browsers agree and a phone read clears the desktop's dot.
+    """
+    import json as _json
+
+    from django.http import JsonResponse
+    from django.utils import timezone as _tz
+    from django.utils.dateparse import parse_datetime
+
+    from portfolio.trader_profile import TraderProfile
+
+    profile, _ = TraderProfile.objects.get_or_create(user=request.user)
+
+    if request.method == "POST":
+        try:
+            body = _json.loads(request.body or b"{}")
+        except ValueError:
+            body = {}
+        # Non-dict JSON ("null", a list) is just an empty payload, not a
+        # 500 — the beacon fires from every page load and must be boring.
+        page_id = (str(body.get("page_id") or "")[:40]
+                   if isinstance(body, dict) else "")
+        known = set(_nav_activity_probes())
+        if page_id in known:
+            # Rebuilt against the whitelist on every write: the map stays
+            # bounded at the probe set forever and self-heals any key an
+            # older client or a hand-edited row left behind.
+            seen = {k: v for k, v in (profile.pages_seen or {}).items()
+                    if k in known}
+            seen[page_id] = _tz.now().isoformat()
+            profile.pages_seen = seen
+            profile.save(update_fields=["pages_seen"])
+            return JsonResponse({"ok": True})
+        return JsonResponse({"ok": False})
+
+    seen = profile.pages_seen or {}
+    pages = {}
+    for page_id, probe in _nav_activity_probes().items():
+        latest = probe()
+        if latest is None:
+            pages[page_id] = False
+            continue
+        stamp = parse_datetime(str(seen.get(page_id) or "")) if seen.get(
+            page_id) else None
+        pages[page_id] = stamp is None or latest > stamp
+    return JsonResponse({"pages": pages})
+
+
 @login_required
 def exchange_status_json(request):
     """The topbar's N/14 SE indicator and its dropdown, as JSON.

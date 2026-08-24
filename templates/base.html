@@ -76,6 +76,8 @@
     <script src="{% static 'js/sv-notif-card.js' %}" defer></script>
     {# Keeps the SE indicator and the market badge true without a reload — they were render-time constants. #}
     <script src="{% static 'js/sv-market-status.js' %}" defer></script>
+    {# Sidebar unseen-activity dots — nothing stays unseen. #}
+    <script src="{% static 'js/sv-nav-activity.js' %}" defer></script>
 {% block extra_css %}{% endblock %}
 </head>
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}">
@@ -400,7 +402,7 @@
             <div class="subtitle">TRADING INTELLIGENCE</div>
 <!-- UPGRADE-9: sidebar toggle moved to unified edge button -->
         </div>
-        <nav class="sidebar-nav">
+        <nav class="sidebar-nav" data-nav-page-id="{{ page_id }}">
             {# Nav marks are drawn only from the geometric/operator sets — no pictographs — so the rail reads as one engraved vocabulary and page titles can mirror it exactly. #}
             <div class="nav-section">Command Center</div>
             <a href="{% url 'command_center' %}" class="nav-link {% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Operations Center</span></a>
@@ -413,7 +415,7 @@
             <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' or page_id == 'quotes' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Instruments & Quotes</span></a>
             <a href="{% url 'economic_calendar' %}" class="nav-link {% if page_id == 'calendar' %}active{% endif %}"><span class="icon">◇</span> <span class="label-text">Economic Calendar</span></a>
             <div class="nav-section">Intelligence</div>
-            <a href="{% url 'signals_list' %}" class="nav-link {% if page_id == 'signals' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Signals</span></a>
+            <a href="{% url 'signals_list' %}" data-nav-id="signals" class="nav-link {% if page_id == 'signals' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Signals</span></a>
             <a href="{% url 'strategies_list' %}" class="nav-link {% if page_id == 'strategies' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategies</span></a>
             {% comment %} The four pages that explain a rule's life — where it sits on the
                ladder, what the admin lane has done to it, what risk budget it was
@@ -425,9 +427,9 @@
             <a href="{% url 'rule_control_dashboard' %}" class="nav-link {% if page_id == 'rule_control' %}active{% endif %}"><span class="icon">⊙</span> <span class="label-text">Rule Controls</span></a>
             <a href="{% url 'allocator_dashboard' %}" class="nav-link {% if page_id == 'allocator' %}active{% endif %}"><span class="icon">⚖</span> <span class="label-text">Risk Allocator</span></a>
             <a href="{% url 'discoveries_dashboard' %}" class="nav-link {% if page_id == 'discoveries' %}active{% endif %}"><span class="icon">⊛</span> <span class="label-text">Discoveries</span></a>
-            <a href="{% url 'opportunities_dashboard' %}" class="nav-link {% if page_id == 'opportunities' %}active{% endif %}"><span class="icon">◍</span> <span class="label-text">Opportunities</span></a>
+            <a href="{% url 'opportunities_dashboard' %}" data-nav-id="opportunities" class="nav-link {% if page_id == 'opportunities' %}active{% endif %}"><span class="icon">◍</span> <span class="label-text">Opportunities</span></a>
             <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategy Evolution</span></a>
-            <a href="{% url 'news_feed' %}" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon">▤</span> <span class="label-text">News & Sentiment</span></a>
+            <a href="{% url 'news_feed' %}" data-nav-id="news" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon">▤</span> <span class="label-text">News & Sentiment</span></a>
             <a href="{% url 'backtest_list' %}" class="nav-link {% if page_id == 'backtest' %}active{% endif %}"><span class="icon">&#x25A1;</span> <span class="label-text">Backtesting</span></a>
             <a href="{% url 'performance_dashboard' %}" class="nav-link {% if page_id == 'performance' %}active{% endif %}"><span class="icon">◮</span> <span class="label-text">Signal Performance</span></a>
             <a href="{% url 'risk_dashboard' %}" class="nav-link {% if page_id == 'risk' %}active{% endif %}"><span class="icon">⚠</span> <span class="label-text">Risk Depth</span></a>
@@ -435,7 +437,7 @@
             <a href="{% url 'bot_home' %}" class="nav-link {% if page_id == 'bot_program' %}active{% endif %}"><span class="icon">⟳</span> <span class="label-text">Bot Program</span></a>
             <div class="nav-section">Portfolio</div>
             <a href="{% url 'portfolio_overview' %}" class="nav-link {% if page_id == 'portfolio' %}active{% endif %}"><span class="icon">◎</span> <span class="label-text">Portfolio</span></a>
-            <a href="{% url 'positions_list' %}" class="nav-link {% if page_id == 'positions' %}active{% endif %}"><span class="icon">▣</span> <span class="label-text">Positions</span></a>
+            <a href="{% url 'positions_list' %}" data-nav-id="positions" class="nav-link {% if page_id == 'positions' %}active{% endif %}"><span class="icon">▣</span> <span class="label-text">Positions</span></a>
             <a href="{% url 'tax_lots_dashboard' %}" class="nav-link {% if page_id == 'tax_lots' %}active{% endif %}"><span class="icon">▦</span> <span class="label-text">Tax Lots</span></a>
             <div class="nav-section">AI Agents</div>
             <a href="{% url 'ai_insights' %}" class="nav-link {% if page_id == 'ai' %}active{% endif %}"><span class="icon">◬</span> <span class="label-text">AI Insights</span></a>
@@ -445,14 +447,14 @@
             {% if request.user.is_staff %}<a href="{% url 'ai_models_dashboard' %}" class="nav-link {% if page_id == 'ai_models' %}active{% endif %}"><span class="icon">⊚</span> <span class="label-text">Model Selection</span></a>{% endif %}
             {# Phase 64.5: standalone "AI Chat" merged into /research/ — link removed. #}
             <a href="{% url 'intelligence_hub' %}" class="nav-link {% if page_id == 'intelligence' %}active{% endif %}"><span class="icon">◯</span> <span class="label-text">Intelligence Hub</span></a>
-            <a href="{% url 'briefing_dashboard' %}" class="nav-link {% if page_id == 'briefing' %}active{% endif %}"><span class="icon">✦</span> <span class="label-text">Strategist Briefing</span></a>
+            <a href="{% url 'briefing_dashboard' %}" data-nav-id="briefing" class="nav-link {% if page_id == 'briefing' %}active{% endif %}"><span class="icon">✦</span> <span class="label-text">Strategist Briefing</span></a>
             <a href="{% url 'earnings_reviews_dashboard' %}" class="nav-link {% if page_id == 'earnings_reviews' %}active{% endif %}"><span class="icon">$</span> <span class="label-text">Earnings Reviews</span></a>
             <a href="{% url 'research_view' %}" class="nav-link {% if page_id == 'research' %}active{% endif %}"><span class="icon">?</span> <span class="label-text">Ask Sauron</span></a>
             <a href="{% url 'brain_dashboard' %}" class="nav-link {% if page_id == 'brain' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Sauron's Mind</span></a>
             <a href="{% url 'knowledge_dashboard' %}" class="nav-link {% if page_id == 'knowledge' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Knowledge Graph</span></a>
-            <a href="{% url 'hypotheses_dashboard' %}" class="nav-link {% if page_id == 'hypotheses' %}active{% endif %}"><span class="icon">⊕</span> <span class="label-text">Hypothesis Market</span></a>
+            <a href="{% url 'hypotheses_dashboard' %}" data-nav-id="hypotheses" class="nav-link {% if page_id == 'hypotheses' %}active{% endif %}"><span class="icon">⊕</span> <span class="label-text">Hypothesis Market</span></a>
             <a href="{% url 'consolidation_dashboard' %}" class="nav-link {% if page_id == 'consolidation' %}active{% endif %}"><span class="icon">⊜</span> <span class="label-text">Consolidation</span></a>
-            <a href="{% url 'generated_dashboard' %}" class="nav-link {% if page_id == 'generated' %}active{% endif %}"><span class="icon">⊞</span> <span class="label-text">Generated Strategies</span></a>
+            <a href="{% url 'generated_dashboard' %}" data-nav-id="generated" class="nav-link {% if page_id == 'generated' %}active{% endif %}"><span class="icon">⊞</span> <span class="label-text">Generated Strategies</span></a>
             {% if request.user.is_superuser %}<div class="nav-section">Admin</div>
             <a href="{% url 'admin_dashboard' %}" class="nav-link {% if page_id == 'admin_dashboard' %}active{% endif %}"><span class="icon">⬢</span> <span class="label-text">Admin Panel</span></a>
             {% if user.is_staff %}<a href="{% url 'audit_dashboard' %}" class="nav-link {% if page_id == 'audit' %}active{% endif %}"><span class="icon">⊠</span> <span class="label-text">Audit Log</span></a>{% endif %}

@@ -98,4 +98,7 @@
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) tick();
   });
+  /* The PIN gate lifting is the page coming back to life — repaint
+     now, not at the next sweep. */
+  document.addEventListener('sv:pin-unlocked', tick);
 })();

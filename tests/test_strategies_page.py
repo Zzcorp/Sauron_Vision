@@ -357,7 +357,10 @@ class LadderNavigationTests(TestCase):
         body = self.client.get(reverse("strategies_list"),
                                HTTP_HOST="127.0.0.1").content.decode(
                                    "utf-8", "replace")
-        nav = body[body.index('<nav class="sidebar-nav">'):
+        # Prefix match, not the full opening tag: the nav element carries
+        # attributes now (data-nav-page-id for the unseen dots), and a
+        # navigation test should not break when the tag grows one.
+        nav = body[body.index('<nav class="sidebar-nav"'):
                    body.index("</nav>")]
         for name in self.LADDER_PAGES:
             self.assertIn(reverse(name), nav,

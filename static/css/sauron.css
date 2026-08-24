@@ -6474,3 +6474,37 @@ a.sig-sym:hover { color: var(--accent); text-decoration: underline; }
 /* The oversubscribed note inside a dropdown body — tone class on an
    element INSIDE the live region, so the swap preserves it. */
 .ip-dd-note .red { color: var(--accent-red); }
+
+/* Sidebar unseen-activity dot: this section changed since the
+   operator last looked. Painted by sv-nav-activity.js off the
+   per-user seen-map; dies the moment the page is visited. */
+.nav-link { position: relative; }
+.nav-dot { position: absolute; right: 12px; top: 50%;
+    width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%;
+    background: var(--accent-gold); flex: 0 0 auto;
+    animation: sv-nav-pulse 2.2s ease-in-out infinite; }
+@keyframes sv-nav-pulse {
+    0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+    .nav-dot { animation: none; } }
+
+/* ── Lock engage/release choreography ────────────────────────────────
+   The VEIL is opaque from its very first frame — animating the sheet's
+   own opacity would show the book through a screen that says LOCKED for
+   the length of the fade, and a JS hiccup could leave it open and
+   invisible. Only the CONTENTS arrive: the eye fades in and settles
+   (rise + scale) once engage stamps .il-in. Release fades the whole
+   overlay OUT (.il-out) — safe in that direction, the page beneath is
+   the operator's again — then closes. .il-wake is deliberately absent
+   here: it carries the sleep/wake fade already, and a second transition
+   at higher specificity would clobber it. */
+.il-overlay .il-eye {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+    transition: opacity .5s ease, transform .5s cubic-bezier(.22,.8,.3,1);
+}
+.il-overlay.il-in .il-eye { opacity: 1; transform: none; }
+.il-overlay.il-out { opacity: 0; transition: opacity .35s ease; }
+@media (prefers-reduced-motion: reduce) {
+    .il-overlay.il-out, .il-overlay .il-eye { transition: none; }
+}

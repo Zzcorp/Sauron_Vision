@@ -19,11 +19,21 @@
 <body class="{% if request.user.trader_profile.theme_mode == 'light' %}light-mode{% endif %}">
 
 <div class="lk-page">
-  <div class="lk-card">
+  <div class="lk-card fade-in-up">
     <div class="lk-eye" aria-hidden="true"></div>
     <h1 class="lk-title">SECOND GATE</h1>
     <p class="lk-sub">Session locked after inactivity — enter your PIN to resume.</p>
 
+    {% comment %}The sleeping face — the same contract the in-app idle
+    overlay already keeps (idle-lock.js, pinned by TheSleepingStateTests):
+    until the operator reaches for the page only the eye and the title
+    show; a PIN pad glowing at an empty desk is an invitation. Hovering
+    the CARD reveals it (pointing at the card is intent; a cursor parked
+    on empty page is not), so does any move/key/touch — and after 45s of
+    stillness it goes back to sleep with the pad CLEARED, exactly like
+    the overlay, so half-typed digits never sit on an unattended
+    screen.{% endcomment %}
+    <div class="lk-reveal">
     <div class="lk-row" id="lkPinRow">
       <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-lk-pin aria-label="PIN digit 1">
       <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-lk-pin aria-label="PIN digit 2">
@@ -39,8 +49,28 @@
       {# Recovery lives at the login gate: log out, then "PIN forgotten?". #}
       <button type="submit" class="lk-link">PIN forgotten?</button>
     </form>
+    </div>
   </div>
 </div>
+
+<style>
+  /* visibility too, matching .il-wake: opacity alone leaves invisible
+     controls clickable, and an invisible UNLOCK that submits is a trap. */
+  .lk-reveal { opacity: 0; visibility: hidden;
+               transition: opacity .4s ease, visibility .4s; }
+  .lk-card:hover .lk-reveal,
+  .lk-page.lk-awake .lk-reveal { opacity: 1; visibility: visible; }
+  /* Departure: a verified PIN lifts the card before the page turns —
+     the unlock reads as a gate opening, not a jump cut. An ANIMATION,
+     not a transition: the entrance's `forwards` fill pins opacity and
+     transform, and a transition on pinned properties never runs — a
+     later animation on the same origin wins where a transition loses. */
+  .lk-page.lk-leave .lk-card { animation: lkLeave .26s ease forwards; }
+  @keyframes lkLeave {
+      to { opacity: 0; transform: translateY(-10px) scale(1.01); } }
+  @media (prefers-reduced-motion: reduce) {
+      .lk-page.lk-leave .lk-card { animation: none; opacity: 0; } }
+</style>
 
 <script>
 (function () {
@@ -101,7 +131,9 @@
         .then(function (data) {
             if (data.status === "ok") {
                 try { localStorage.setItem("sv:unlockedAt", String(Date.now())); } catch (e) {}
-                window.location.assign(NEXT);
+                var pg = document.querySelector(".lk-page");
+                if (pg) pg.classList.add("lk-leave");
+                setTimeout(function () { window.location.assign(NEXT); }, 260);
                 return;
             }
             if (data.status === "logged_out") { window.location.assign("/wall/"); return; }
@@ -137,6 +169,27 @@
         if (t.value) { t.value = t.value.replace(/\D/g, "").slice(-1); focusFirstEmpty(); }
     });
     document.getElementById("lkUnlock").addEventListener("click", submit);
+
+    // Sleep/wake — the idle overlay's contract (idle-lock.js), kept here
+    // verbatim: any move/key/touch wakes the gate, 45s of stillness puts
+    // it back to sleep and CLEARS the pad, so half-typed digits never sit
+    // on an unattended screen. Capture-phase on keydown because the key
+    // router above preventDefaults digits before bubbling.
+    var page = document.querySelector(".lk-page");
+    var wakeTimer = null;
+    function wake() {
+        if (page) page.classList.add("lk-awake");
+        if (wakeTimer) clearTimeout(wakeTimer);
+        wakeTimer = setTimeout(function () {
+            if (page) page.classList.remove("lk-awake");
+            clear();
+            showError(null);
+        }, 45000);
+    }
+    ["mousemove", "keydown", "touchstart", "pointerdown"].forEach(function (ev) {
+        document.addEventListener(ev, wake, { capture: true, passive: true });
+    });
+
     focusFirstEmpty();
 })();
 </script>

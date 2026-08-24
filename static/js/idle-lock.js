@@ -180,7 +180,18 @@
         pinClear();
         showError(null);
         sleep();                      /* asleep until a person shows up */
+        overlay.classList.remove("il-out");
         if (w.SV && w.SV.overlay) w.SV.overlay.open(overlay);
+        /* Choreography: the veil is OPAQUE from this very frame (leaking
+           the book through a fading sheet is the bug the opacity tests
+           exist for) — only the eye arrives on the next frame, which is
+           what the double-rAF is for: same-frame class adds skip the
+           transition entirely. */
+        requestAnimationFrame(function () {
+            requestAnimationFrame(function () {
+                overlay.classList.add("il-in");
+            });
+        });
         /* The live sockets are not HTTP and never meet the middleware, so
            they would keep streaming quotes, fills and signals to a locked
            tab. base.html closes them on this event; the consumers refuse
@@ -193,7 +204,19 @@
         stamp();
         pinClear();
         showError(null);
-        if (w.SV && w.SV.overlay) w.SV.overlay.close(overlay);
+        /* Release fades the veil OUT, then closes: closing at once
+           would display:none it mid-fade and the unlock would blink.
+           Fading out is safe in this direction — the page beneath is the
+           operator's again — and the unlocked event fires immediately so
+           that page comes back to life WHILE the veil lifts. */
+        overlay.classList.remove("il-in");
+        overlay.classList.add("il-out");
+        setTimeout(function () {
+            if (!isLocked && w.SV && w.SV.overlay) {
+                w.SV.overlay.close(overlay);
+                overlay.classList.remove("il-out");
+            }
+        }, 380);
         d.dispatchEvent(new CustomEvent("sv:pin-unlocked"));
         /* The flag is per SESSION, so one verified PIN unlocks every tab.
            Locking converges through the 423 poll; unlocking had no such

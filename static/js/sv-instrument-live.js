@@ -27,8 +27,10 @@
   var QUOTE_MS = 15000;
   var CHART_MS = 60000;
 
-  var lastEl = hero.querySelector('.dtl-last');
-  var chgEl = hero.querySelector('.dtl-chg');
+  /* Document scope: the carrier is the chart card (always rendered);
+     the hero spans exist only once a quote does, and may not yet. */
+  var lastEl = document.querySelector('.dtl-last');
+  var chgEl = document.querySelector('.dtl-chg');
 
   function flash(el) {
     if (!el) return;
@@ -37,14 +39,21 @@
     el.classList.add('sv-flash');
   }
 
+  var prevPrice = null; /* flash on VALUE change, never on format drift */
+
   function paintQuote(d) {
     if (!d || d.error || d.price == null) return;
-    var txt = Number(d.price).toLocaleString(undefined, {
-      minimumFractionDigits: 4, maximumFractionDigits: 4 });
-    if (lastEl && lastEl.textContent.trim() !== txt) {
+    var price = Number(d.price);
+    /* toFixed matches the server's floatformat:4 byte for byte — the
+       first poll must not rewrite an unchanged price into a different
+       spelling and fire a lie of a flash. */
+    var txt = price.toFixed(4);
+    if (lastEl) {
+      var changed = prevPrice !== null && price !== prevPrice;
       lastEl.textContent = txt;
-      flash(lastEl);
+      if (changed) flash(lastEl);
     }
+    prevPrice = price;
     if (chgEl && d.change_pct != null) {
       var up = Number(d.change_pct) >= 0;
       chgEl.classList.toggle('up', up);
@@ -85,5 +94,9 @@
   setTimeout(quoteTick, 1500);
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) { quoteTick(); chartTick(); }
+  });
+  /* Fresh price AND a fresh chart the moment the gate lifts. */
+  document.addEventListener('sv:pin-unlocked', function () {
+    quoteTick(); chartTick();
   });
 })();

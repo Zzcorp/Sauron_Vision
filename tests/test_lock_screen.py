@@ -101,6 +101,113 @@ class TheSleepingStateTests(SimpleTestCase):
         self.assertIn("sleep()", engage)
 
 
+class TheStandalonePageSleepsTooTests(SimpleTestCase):
+    """The /locked/ page keeps the same sleeping contract as the in-app
+    overlay above: the PIN gate shows only when the operator reaches for
+    it — hover on the card, or any move/key/touch — and 45s of stillness
+    puts it back to sleep with the pad cleared. Two lock surfaces with
+    two behaviours would teach the operator the wrong reflex on one of
+    them."""
+
+    @staticmethod
+    def _page():
+        from django.conf import settings as _s
+        from pathlib import Path as _P
+        return (_P(_s.BASE_DIR) / "templates" / "dashboard"
+                / "locked.html").read_text(encoding="utf-8")
+
+    def test_the_gate_is_hidden_until_woken(self):
+        page = self._page()
+        block = page.split(".lk-reveal {", 1)[1].split("}", 1)[0]
+        self.assertIn("opacity: 0", block)
+        self.assertIn("visibility: hidden", block,
+                      "opacity alone leaves an invisible UNLOCK clickable")
+        self.assertIn(".lk-card:hover .lk-reveal", page)
+        self.assertIn(".lk-page.lk-awake .lk-reveal", page)
+
+    def test_a_move_a_key_or_a_touch_wakes_it(self):
+        page = self._page()
+        for ev in ("mousemove", "keydown", "touchstart"):
+            self.assertIn(ev, page, ev)
+        self.assertIn("wake", page)
+
+    def test_it_goes_back_to_sleep_and_clears_the_pad(self):
+        page = self._page()
+        block = page.split("wakeTimer = setTimeout", 1)[1][:300]
+        self.assertIn('classList.remove("lk-awake")', block)
+        self.assertIn("clear()", block)
+
+    def test_the_pin_gate_is_inside_the_reveal(self):
+        """A box left outside the wrapper would glow on the sleeping
+        face — the exact invitation this exists to remove."""
+        page = self._page()
+        reveal = page.split('<div class="lk-reveal">', 1)[1]
+        # Everything the gate is made of must appear BEFORE the wrapper
+        # could have closed around the following <style> block.
+        gate_zone = reveal.split("<style>", 1)[0]
+        for needle in ('id="lkPinRow"', 'id="lkError"', 'id="lkUnlock"',
+                       'id="lkLogoutForm"'):
+            self.assertIn(needle, gate_zone, needle)
+
+
+class TheGateMovesLikeAGateTests(SimpleTestCase):
+    """Engage and release are choreographed, not jump cuts — and the page
+    comes back to LIFE on release, not just back into view: every poller
+    listens for sv:pin-unlocked and repaints immediately instead of
+    waiting out its sweep."""
+
+    def test_the_veil_is_opaque_from_frame_one_and_only_the_eye_arrives(self):
+        """The first cut animated the OVERLAY's opacity — which showed
+        the book through a fading sheet that says LOCKED, and a JS hiccup
+        could have left the veil open and invisible. The sheet must be
+        opaque the frame it exists; the eye alone makes the entrance."""
+        css = _css()
+        base = _declarations(
+            css.split(".il-overlay {", 1)[1].split("}", 1)[0])
+        self.assertNotIn("opacity", base,
+                         "the veil itself must never fade IN")
+        self.assertIn(".il-overlay .il-eye", css)
+        self.assertIn(".il-overlay.il-in .il-eye", css)
+        self.assertIn(".il-overlay.il-out", css)
+
+    def test_reduced_motion_stills_the_choreography(self):
+        css = _css()
+        guard = css.split(".il-overlay.il-out, .il-overlay .il-eye", 1)
+        self.assertEqual(len(guard), 2,
+                         "the reduced-motion guard must cover the exit "
+                         "fade and the eye's entrance")
+
+    def test_engage_adds_the_class_a_frame_late_and_release_waits(self):
+        js = _js()
+        self.assertIn('classList.add("il-in")', js)
+        self.assertIn("requestAnimationFrame", js,
+                      "same-frame class add skips the transition entirely")
+        self.assertIn('classList.remove("il-in")', js)
+
+    def test_the_standalone_page_arrives_and_leaves_gracefully(self):
+        from django.conf import settings as _s
+        from pathlib import Path as _P
+        page = (_P(_s.BASE_DIR) / "templates" / "dashboard"
+                / "locked.html").read_text(encoding="utf-8")
+        self.assertIn('class="lk-card fade-in-up"', page)
+        self.assertIn(".lk-page.lk-leave .lk-card", page)
+        self.assertIn('classList.add("lk-leave")', page)
+
+    def test_every_poller_comes_back_to_life_on_release(self):
+        """A lifted gate over a frozen page is half an unlock. The event
+        already existed (sv:pin-unlocked); what is pinned here is that
+        the pollers actually use it."""
+        from django.conf import settings as _s
+        from pathlib import Path as _P
+        base = _P(_s.BASE_DIR)
+        for rel in ("static/js/sv-market-status.js",
+                    "static/js/sv-nav-activity.js",
+                    "static/js/sv-instrument-live.js",
+                    "templates/_partials/live_region.html"):
+            src = (base / rel).read_text(encoding="utf-8")
+            self.assertIn("sv:pin-unlocked", src, rel)
+
+
 class TheLockButtonTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("lock_u", password="x")

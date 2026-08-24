@@ -158,6 +158,13 @@ class TraderProfile(models.Model):
         (30, "30 minutes"),
         (60, "1 hour"),
     ]
+    # {page_id: ISO timestamp of the last visit} — the sidebar's unseen
+    # dots compare each section's latest real activity against this map.
+    # SERVER truth, deliberately: localStorage would light a dot on the
+    # desktop for a page already read on the phone, and "seen" is a fact
+    # about the operator, not about one browser.
+    pages_seen = models.JSONField(default=dict, blank=True)
+
     idle_lock_enabled = models.BooleanField(default=True,
         help_text="Lock the session behind the PIN after a period of inactivity.")
     idle_lock_minutes = models.PositiveSmallIntegerField(
