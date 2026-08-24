@@ -74,6 +74,8 @@
     <script src="{% static 'js/sv-run.js' %}" defer></script>
     {# Dwell card for notification rows — bell panel and inbox share it. #}
     <script src="{% static 'js/sv-notif-card.js' %}" defer></script>
+    {# Keeps the SE indicator and the market badge true without a reload — they were render-time constants. #}
+    <script src="{% static 'js/sv-market-status.js' %}" defer></script>
 {% block extra_css %}{% endblock %}
 </head>
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}">
@@ -494,14 +496,20 @@
                     <span class="theme-icon-light">☾</span>
                 </a>
                 <span id="clock" data-timezone="{{ user_timezone }}"></span>
+                {% comment %}data-ex-* hooks: sv-market-status.js polls
+                /api/exchange-status/ and re-paints the count, each row's
+                clock/state/countdown, and the instrument page's market
+                badge — these were render-time constants, so a tab left
+                open across the New York close kept advertising NYSE OPEN
+                until somebody reloaded.{% endcomment %}
                 <div class="exchange-indicator">
                     <span class="exchange-trigger">
-                        <span style="color:var(--accent);">{{ exchanges_open_count }}</span><span style="color:var(--text-muted);">/{{ exchanges_total }} SE</span>
+                        <span style="color:var(--accent);" data-ex-open-count>{{ exchanges_open_count }}</span><span style="color:var(--text-muted);">/<span data-ex-total>{{ exchanges_total }}</span> SE</span>
                     </span>
                     <div class="exchange-dropdown">
                         <div class="exchange-dropdown-header">Market Sessions</div>
                         {% for ex in exchanges_list %}
-                        <div class="exchange-row">
+                        <div class="exchange-row" data-ex-code="{{ ex.code }}">
                             <span class="ex-flag">{{ ex.flag }}</span>
                             <span class="ex-code">{{ ex.code }}</span>
                             <span class="ex-local">{{ ex.local_time }}</span>

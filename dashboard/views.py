@@ -3484,6 +3484,15 @@ def instrument_detail(request, symbol):
     # Get related news
     news = instrument.news_articles.order_by("-published_at")[:5]
 
+    # Which market this instrument answers to, and whether that market is
+    # open RIGHT NOW — rendered server-side so the badge is true at first
+    # paint, kept true by sv-market-status.js polling the same computation.
+    from core.exchange_status import market_status_for
+    try:
+        market = market_status_for(instrument.asset_class, instrument.exchange)
+    except Exception:
+        market = None
+
     return render(request, "dashboard/instrument_detail.html", {
         "page_id": "instruments",
         "instrument": instrument,
@@ -3491,6 +3500,7 @@ def instrument_detail(request, symbol):
         "technicals": technicals,
         "signals": signals,
         "news": news,
+        "market": market,
         "price_data_json": json.dumps(price_data),
     })
 
@@ -3729,6 +3739,28 @@ def panel_counts_json(request):
         "watchlist": watchlist,
         "notifications": unread,
     })
+
+
+@login_required
+def exchange_status_json(request):
+    """The topbar's N/14 SE indicator and its dropdown, as JSON.
+
+    Those values were render-time constants: a tab left open across the
+    New York close kept saying 5/14 with NYSE marked OPEN until somebody
+    reloaded — on a platform whose every other cell moves on its own.
+    sv-market-status.js polls this (clock arithmetic only, no queries
+    beyond none at all) and re-paints the indicator, the dropdown rows,
+    and the instrument page's market badge.
+    """
+    from django.http import JsonResponse
+    from core.exchange_status import get_exchange_status
+
+    try:
+        return JsonResponse(get_exchange_status())
+    except Exception as e:  # noqa: BLE001 — a clock bug must not 500
+        logger.debug(f"exchange status unavailable: {e}")
+        return JsonResponse({"open_count": 0, "total": 0, "exchanges": [],
+                             "error": "unavailable"})
 
 
 @login_required

@@ -74,16 +74,41 @@ def get_exchange_status(now_utc=None):
                     open_dt += timedelta(days=7)
                 time_until = _format_delta(open_dt - now_utc)
         elif ex["code"] == "CME":
-            # CME: Sun 17:00 CT to Fri 16:00 CT with daily 16:00-17:00 break
-            is_open = weekday in ex["weekdays"] and not (local_time >= time(16,0) and local_time < time(17,0))
-            if weekday == 5:
-                is_open = False
+            # The Globex week the old comment claimed and the old code did
+            # not implement: Sunday 17:00 CT through Friday 16:00 CT with a
+            # daily 16:00-17:00 CT break. The old branch modelled only the
+            # daily break, so this row read OPEN all Sunday daytime and all
+            # Friday evening — harmless while nothing consulted it, wrong
+            # everywhere once the session aliases routed every futures
+            # venue and defaulted commodity through it. And _time_until is
+            # unusable here on both sides: its weekend skip would push the
+            # Sunday 17:00 reopen to Monday, and a close can land on a
+            # Saturday-adjacent boundary it refuses to count to.
+            in_break = time(16, 0) <= local_time < time(17, 0)
+            is_open = not (
+                weekday == 5
+                or (weekday == 4 and local_time >= time(16, 0))
+                or (weekday == 6 and local_time < time(17, 0))
+                or in_break
+            )
             if is_open:
-                close_t = time(16, 0)
-                time_until = _format_delta(_time_until(local_now, close_t, tz))
+                # Close: 16:00 CT — today during the daytime hours, or
+                # tomorrow for the evening hours after the 17:00 reopen.
+                close_dt = local_now.replace(hour=16, minute=0, second=0,
+                                             microsecond=0)
+                if local_time >= time(17, 0):
+                    close_dt += timedelta(days=1)
+                time_until = _format_delta(close_dt - local_now)
             else:
-                open_t = time(17, 0)
-                time_until = _format_delta(_time_until(local_now, open_t, tz))
+                # Reopen: 17:00 CT — today for the daily break and Sunday
+                # pre-open, the coming Sunday for the weekend.
+                open_dt = local_now.replace(hour=17, minute=0, second=0,
+                                            microsecond=0)
+                if weekday == 4:
+                    open_dt += timedelta(days=2)
+                elif weekday == 5:
+                    open_dt += timedelta(days=1)
+                time_until = _format_delta(open_dt - local_now)
         else:
             is_open = weekday in ex["weekdays"] and ex["open"] <= local_time < ex["close"]
             if is_open:
@@ -104,3 +129,93 @@ def get_exchange_status(now_utc=None):
             "next_state": "closes" if is_open else "opens",
         })
     return {"open_count": open_count, "total": len(EXCHANGES), "exchanges": results}
+
+
+# ── Which session clock does an instrument answer to? ───────────────────────
+#
+# `Instrument.exchange` holds whatever the seed data wrote — "NYMEX",
+# "CBOT", "EUREX" — and most of those venues have no row in EXCHANGES.
+# Anything that reasons about "is this instrument's market open" (the
+# anomaly scan, the instrument page badge) needs one answer per instrument,
+# not a lookup that silently misses.
+#
+# Aliases map a venue to the EXCHANGES row whose clock it genuinely keeps:
+# NYMEX/COMEX/CBOT are CME Group and trade the same Globex week; ICE
+# futures keep hours within minutes of Globex; Osaka keeps Tokyo's, Madrid
+# keeps Paris's, Eurex approximates Frankfurt cash hours. LME maps to LSE —
+# wrong about intraday edges (LMEselect runs 01:00–19:00 London), right
+# about the part that bites: London weekdays on, weekends off. The weekend
+# is what produced a "Rice up 3.77%" alert on a Saturday.
+#
+# "CRYPTO" is deliberately not an EXCHANGES row: it has no local clock, no
+# open, no close. `market_status_for` synthesises it.
+
+SESSION_ALIASES = {
+    "NYMEX": "CME", "COMEX": "CME", "CBOT": "CME", "ICE": "CME",
+    "LME": "LSE", "EUREX": "XETRA", "OSE": "TSE", "BME": "EURONEXT",
+}
+
+# When the exchange string matches nothing at all, the asset class picks
+# the clock. Stocks default to NYSE — not because every unknown listing is
+# American, but because a wrong-but-stated clock beats no answer, and the
+# payload names the session it used so the approximation is visible.
+ASSET_CLASS_DEFAULT_SESSION = {
+    "crypto": "CRYPTO",
+    "forex": "FOREX",
+    "commodity": "CME",
+    "stock": "NYSE",
+    "etf": "NYSE",
+    "index": "NYSE",
+}
+
+_EXCHANGE_CODES = {ex["code"] for ex in EXCHANGES}
+
+
+def session_code_for(asset_class: str, exchange: str = "") -> str:
+    """The EXCHANGES code (or "CRYPTO") whose clock this instrument keeps.
+
+    Crypto wins over any stored exchange string: the seeds write
+    exchange="CRYPTO" and no session row will ever exist for it.
+    """
+    if asset_class == "crypto":
+        return "CRYPTO"
+    venue = (exchange or "").strip().upper()
+    if venue in _EXCHANGE_CODES:
+        return venue
+    if venue in SESSION_ALIASES:
+        return SESSION_ALIASES[venue]
+    return ASSET_CLASS_DEFAULT_SESSION.get(asset_class, "NYSE")
+
+
+def market_status_for(asset_class: str, exchange: str = "", now_utc=None,
+                      _status=None) -> dict:
+    """One instrument's market, answered: which session, open or not, and
+    when that changes. Shape matches a get_exchange_status() row plus
+    "session" (the code actually consulted, so a defaulted clock is
+    visible rather than passed off as the venue's own).
+
+    `_status` lets a caller that already paid for get_exchange_status()
+    (the anomaly scan walks every quote) reuse it instead of recomputing
+    fourteen timezones per instrument.
+    """
+    code = session_code_for(asset_class, exchange)
+    if code == "CRYPTO":
+        return {
+            "code": "CRYPTO", "name": "Crypto", "flag": "₿",
+            "session": "CRYPTO", "is_open": True,
+            "local_time": "", "opens": "", "closes": "",
+            "time_until_change": "", "next_state": "",
+        }
+    status = _status or get_exchange_status(now_utc)
+    for row in status["exchanges"]:
+        if row["code"] == code:
+            out = dict(row)
+            out["session"] = code
+            return out
+    # Unreachable while session_code_for only returns EXCHANGES codes, but
+    # a renamed row must degrade to "unknown, treat as open" — a wrongly
+    # CLOSED badge (or an anomaly scan that silently drops a market) is the
+    # worse failure.
+    return {"code": code, "name": code, "flag": "", "session": code,
+            "is_open": True, "local_time": "", "opens": "", "closes": "",
+            "time_until_change": "", "next_state": ""}

@@ -207,6 +207,75 @@ def process_unanalyzed_news():
 # under-shows rather than misreports.
 MAX_ANOMALY_ITEMS = 12
 
+# A quote the pollers have not touched in two scan cycles is a memory, not
+# a reading. Handing it to the anomaly agent produced alerts ABOUT the
+# staleness ("data timestamp 19:19:07 UTC is stale") — the scan reporting
+# its own input problem as a market event.
+ANOMALY_STALE_MINUTES = 120
+
+# The scan runs hourly and a real anomaly does not expire in an hour, so
+# the same reading re-alerted every cycle: one weekend produced the same
+# four-severe TSLA/RICE/FX alert around the clock. One notification per
+# (symbol, type) per window; the finding still counts in the task result,
+# it just stops re-ringing the bell.
+ANOMALY_REPEAT_COOLDOWN_S = 6 * 3600
+
+
+def _fresh_open_quotes(quotes, now_utc):
+    """The quotes the anomaly scan is allowed to reason about: markets that
+    are open right now, readings younger than ANOMALY_STALE_MINUTES.
+
+    The scan used to read the whole LiveQuote table around the clock. On a
+    Saturday that table is Friday's closing prints wearing today's page:
+    TSLA "up 5.14%" (frozen since the close), FX volume 0 (the market is
+    shut), rice "moving" on 1,708 lots (a stale rotation row). The agent
+    dutifully found anomalies in all of it, all weekend, because nothing
+    told it the tape it was reading had stopped. A closed market cannot
+    have a market anomaly — the anomaly was showing it the data at all.
+
+    Returns (kept, dropped_closed, dropped_stale) so the task can say what
+    it excluded rather than silently narrowing.
+    """
+    from datetime import timedelta
+    from core.exchange_status import get_exchange_status, market_status_for
+
+    # One clock read for the whole table — fourteen timezones once, not
+    # once per instrument.
+    status = get_exchange_status(now_utc)
+    stale_before = now_utc - timedelta(minutes=ANOMALY_STALE_MINUTES)
+
+    kept, dropped_closed, dropped_stale = [], 0, 0
+    for q in quotes:
+        market = market_status_for(q.instrument.asset_class,
+                                   q.instrument.exchange, _status=status)
+        if not market["is_open"]:
+            dropped_closed += 1
+            continue
+        if q.updated_at < stale_before:
+            dropped_stale += 1
+            continue
+        kept.append(q)
+    return kept, dropped_closed, dropped_stale
+
+
+def _anomaly_fingerprint(a: dict) -> "str | None":
+    """What makes two severe anomalies "the same alert": the asset and the
+    kind of anomaly. Not the description — the agent rephrases freely, and
+    a cooldown keyed on prose would never match itself.
+
+    None means "no stable identity, no cooldown": the agent's answer is
+    model output and either field can come back blank, and every blank
+    used to share ONE key — the first symbol-less anomaly would mute
+    every different symbol-less anomaly for six hours. An anomaly this
+    module cannot identify always rings; a repeated bell is cheaper than
+    a silenced distinct alert.
+    """
+    symbol = str(a.get("symbol") or "").strip().upper()
+    kind = str(a.get("type") or "").strip().lower()
+    if not symbol or not kind:
+        return None
+    return f"anomaly:notified:{symbol}:{kind}"
+
 
 def _anomaly_items(severe: list) -> list:
     """One card row per severe anomaly: the asset, what the scan saw, and
@@ -249,18 +318,56 @@ def run_anomaly_detection():
     if not quotes:
         return {"status": "no_market_data"}
 
+    now = timezone.now()
+    fresh, dropped_closed, dropped_stale = _fresh_open_quotes(quotes, now)
+    if not fresh:
+        # Saturday, mostly: every non-crypto market shut and no crypto
+        # quote young enough. Scanning anyway is how a weekend produced
+        # hourly "TSLA up 5.14%, no apparent catalyst" alerts about
+        # Friday's close.
+        return {
+            "status": "skipped",
+            "reason": (f"no open-market quotes fresh enough to scan "
+                       f"({dropped_closed} closed-market, "
+                       f"{dropped_stale} stale excluded)"),
+        }
+
     lines = []
-    for q in quotes:
+    for q in fresh:
         lines.append(
             f"{q.instrument.symbol}: last={q.last}, change_pct={q.change_pct}%, "
             f"volume={q.volume}, updated={q.updated_at.strftime('%H:%M:%S UTC')}"
         )
-    market_data_str = "\n".join(lines)
+    market_data_str = (
+        f"Snapshot time: {now.strftime('%A %H:%M UTC')}. Only instruments "
+        f"whose market is OPEN right now are listed; closed markets and "
+        f"stale rows are already excluded — do not infer anything from an "
+        f"instrument's absence.\n" + "\n".join(lines)
+    )
 
     result = AnomalyDetectorAgent().run(market_data=market_data_str)
 
     anomalies = result.get("anomalies", [])
     severe = [a for a in anomalies if a.get("severity", 0) >= 7]
+
+    # The agent re-detects the same condition every hour for as long as it
+    # holds — correctly. Re-NOTIFYING it every hour is the spam. Anything
+    # alerted within the cooldown window stays out of this notification;
+    # a dead cache fails open (alert again) because a lost reminder is
+    # cheaper than a lost alert.
+    from django.core.cache import cache
+    suppressed = 0
+    fresh_severe = []
+    for a in severe:
+        key = _anomaly_fingerprint(a)
+        try:
+            if key and cache.get(key):
+                suppressed += 1
+                continue
+        except Exception:
+            pass
+        fresh_severe.append(a)
+    severe = fresh_severe
 
     if severe:
         # .get, not indexing: the agent's answer is model output, and one
@@ -297,12 +404,27 @@ def run_anomaly_detection():
             # keeps its own asset and its own link.
             data={"items": items},
         )
+        # Stamped AFTER the notification went out: a stamp-then-fail order
+        # would silence the next six hours of a condition nobody was told
+        # about.
+        for a in severe:
+            key = _anomaly_fingerprint(a)
+            if not key:
+                continue  # no identity, no cooldown — it rings every time
+            try:
+                cache.set(key, True, ANOMALY_REPEAT_COOLDOWN_S)
+            except Exception:
+                pass
         logger.warning(f"Anomaly detection: {len(severe)} severe anomalies found.")
 
     return {
         "status": "success",
         "total_anomalies": len(anomalies),
         "severe_anomalies": len(severe),
+        "suppressed_repeats": suppressed,
+        "quotes_scanned": len(fresh),
+        "excluded_closed_market": dropped_closed,
+        "excluded_stale": dropped_stale,
         "market_stress_level": result.get("market_stress_level"),
         "notifications_sent": len(severe) > 0,
     }

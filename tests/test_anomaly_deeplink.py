@@ -64,13 +64,26 @@ class _StubAgent:
 
 
 def _scan(anomalies):
-    """Run the real task against a scripted agent answer."""
+    """Run the real task against a scripted agent answer.
+
+    Market-hours filtering and the repeat cooldown are opted out of here:
+    this file is about where an alert LEADS, and the stock fixtures above
+    would otherwise pass or fail with the wall clock (a Saturday run would
+    filter every quote out and never notify at all). Both behaviours have
+    their own file — tests/test_anomaly_market_hours.py.
+    """
+    from django.core.cache import cache
+
     from ai_agents import tasks
 
     _StubAgent.anomalies = anomalies
+    cache.clear()  # a previous test's cooldown stamp must not mute this one
     with mock.patch(
             "ai_agents.agents.anomaly_detector.AnomalyDetectorAgent",
-            _StubAgent):
+            _StubAgent), \
+        mock.patch.object(
+            tasks, "_fresh_open_quotes",
+            lambda quotes, now: (list(quotes), 0, 0)):
         return tasks.run_anomaly_detection()
 
 

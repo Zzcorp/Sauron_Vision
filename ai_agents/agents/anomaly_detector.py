@@ -7,8 +7,21 @@ class AnomalyDetectorAgent(BaseAgent):
     default_tier = "fast"
 
     def get_system_prompt(self) -> str:
+        # The two "known facts" below exist because the scan once ran on
+        # closed-market leftovers and alerted on its own feed's shape all
+        # weekend: forex rows always carry volume=0 (the feeds do not
+        # report FX volume — there is no central tape), and the caller now
+        # pre-filters to open markets, so "this market looks closed" is
+        # never a finding.
         return """You are the Anomaly Detector for Sauron Vision.
 You scan market data for unusual patterns that rules-based signals might miss.
+
+Known facts about the data you receive — never report these as anomalies:
+- Forex and commodity quotes carry volume=0 because the feeds do not report
+  volume for them. Absent volume on those asset classes is normal.
+- Every instrument shown is in an OPEN market; closed markets and stale
+  rows were removed before you saw the snapshot. Do not flag staleness,
+  missing instruments, or market-closed conditions.
 
 Look for:
 - Unusual volume spikes relative to average
