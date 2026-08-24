@@ -426,6 +426,88 @@ ALLOWED_REGIMES = {
 }
 ALLOWED_RULE_STATUSES = {"active", "watch", "pause_recommended"}
 
+# A regime flip between two KNOWN labels needs conviction or persistence:
+# either this vote is confident, or the immediately-prior vote (the raw
+# parse, recorded below) already said the same thing. On 2026-08-23 the
+# label flipped three times in a day on 0.4-0.5 confidence — every flip
+# republished the knowledge-graph node and repainted every agent's
+# context. `unknown` passes freely in both directions: it is a blackout
+# reading, not a regime worth defending.
+HYSTERESIS_MIN_CONF = 0.65
+VOTE_CONFIRM_WINDOW_MINUTES = 120  # ~2 synthesis cadences
+
+
+def _record_regime_vote(label: str, confidence: float) -> None:
+    """Persist the RAW parsed regime vote as a pre-consumed observation.
+
+    Pre-consumed (`consumed_by_brain_at` set) because the synthesis feed
+    takes `consumed_by_brain_at__isnull=True` — an unconsumed vote would
+    be fed back into the next synthesis and the brain would eat its own
+    echo. Best-effort: a lost vote only delays a low-confidence flip by
+    one cadence.
+    """
+    try:
+        from .models import BrainObservation
+        BrainObservation.objects.create(
+            kind="regime_vote",
+            payload={"label": label, "confidence": round(confidence, 4)},
+            source_agent="synthesizer",
+            consumed_by_brain_at=timezone.now(),
+        )
+    except Exception:  # noqa: BLE001 — never fail a synthesis over telemetry
+        logger.warning("[brain] regime vote record failed", exc_info=True)
+
+
+def _apply_regime_hysteresis(label: str, confidence: float
+                              ) -> tuple[str, float]:
+    """Return the (label, confidence) the report should carry.
+
+    A held flip repeats the standing report EXACTLY — same label, same
+    confidence — so the knowledge-graph upsert downstream sees no
+    movement and publishes nothing. (An earlier draft dragged the held
+    confidence down to the dissenting vote's — which republished the
+    node on every noisy vote, the very churn this gate exists to stop.
+    The dissent's strength is not lost: it is on record as the raw
+    regime_vote.)
+
+    `unknown` is a blackout reading, not a regime: a flip INTO it always
+    passes. But a flip OUT of it is gated against the last KNOWN label —
+    a malformed parse clamps to unknown, and without the anchor one weak
+    vote later would walk off with the standing regime, laundered
+    through a blackout the model itself caused. Returning from blackout
+    TO the anchor label is recovery, and free.
+    """
+    from .models import BrainObservation, BrainReport
+
+    prev = (BrainReport.objects.filter(error="")
+            .order_by("-created_at").first())
+    if prev is None:
+        return label, confidence
+    held = prev.regime_label
+    if label == held:
+        return label, confidence
+    if label == BrainReport.REGIME_UNKNOWN:
+        return label, confidence  # blackout honesty is never held back
+    if held == BrainReport.REGIME_UNKNOWN:
+        anchor = (BrainReport.objects.filter(error="")
+                  .exclude(regime_label=BrainReport.REGIME_UNKNOWN)
+                  .order_by("-created_at").first())
+        if anchor is None or anchor.regime_label == label:
+            return label, confidence
+    if confidence >= HYSTERESIS_MIN_CONF:
+        return label, confidence
+    cutoff = timezone.now() - timedelta(minutes=VOTE_CONFIRM_WINDOW_MINUTES)
+    last_vote = (BrainObservation.objects
+                 .filter(kind="regime_vote", created_at__gte=cutoff)
+                 .order_by("-created_at").first())
+    if (last_vote is not None and isinstance(last_vote.payload, dict)
+            and last_vote.payload.get("label") == label):
+        return label, confidence  # second consecutive vote — flip stands
+    logger.info("[brain] regime flip %s->%s held (conf %.2f < %.2f, "
+                "no confirming prior vote)", held, label, confidence,
+                HYSTERESIS_MIN_CONF)
+    return held, prev.regime_confidence
+
 
 def _persist_report(parsed: dict, snapshot: dict, *, model: str,
                      tokens_in: int, tokens_out: int, cost_usd: float,
@@ -475,6 +557,18 @@ def _persist_report(parsed: dict, snapshot: dict, *, model: str,
     narrative = parsed.get("narrative_md") or ""
     if not isinstance(narrative, str):
         narrative = ""
+
+    # Hysteresis sees the raw vote, then the raw vote goes on record —
+    # in that order, so a vote never confirms itself.
+    if not error:
+        raw_label, raw_conf = regime, regime_conf
+        try:
+            regime, regime_conf = _apply_regime_hysteresis(regime,
+                                                           regime_conf)
+        except Exception:  # noqa: BLE001 — a bad read must not lose the report
+            logger.warning("[brain] regime hysteresis failed open",
+                           exc_info=True)
+        _record_regime_vote(raw_label, raw_conf)
 
     valid_until = timezone.now() + timedelta(minutes=45)  # 30min cadence + grace
 

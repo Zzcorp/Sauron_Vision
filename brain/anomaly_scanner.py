@@ -34,7 +34,11 @@ logger = logging.getLogger(__name__)
 
 # ── Tunables ──────────────────────────────────────────────────────────────
 
-DEDUPE_MINUTES = 90  # don't re-emit the same (kind, key) within this window
+DEDUPE_MINUTES = 90  # first re-emit window for a fresh (detector, key)
+BACKOFF_CAP_MINUTES = 360  # the hold never exceeds 6h: consolidation
+#   promotes a standing anomaly at >=3 fires/24h, and a 6h ceiling still
+#   yields ~4 - a 12h cap would starve the promotion it exists to feed.
+BACKOFF_LOOKBACK_HOURS = 24  # how far back the escalation counts fires
 MAX_HELD_FOR_NARRATIVE_SCAN = 20  # cost cap on news lookups
 RVOL_PERIOD = 20
 RVOL_THRESHOLD = 3.0  # 3x average — high bar so we don't spam
@@ -46,46 +50,75 @@ NARRATIVE_MAX_PRICE_MOVE_PCT = 0.5
 
 # ── Dedupe helper ─────────────────────────────────────────────────────────
 
-def _recent_anomaly_keys(within_minutes: int = DEDUPE_MINUTES) -> set[str]:
-    """Set of `f"{payload.detector}:{payload.key}"` from anomaly observations
-    in the last N minutes — used to skip duplicates."""
-    out: set[str] = set()
+def _backoff_minutes(prior_fires: int) -> int:
+    """How long a (detector, key) must stay quiet before re-emitting,
+    given how many times it fired in the lookback window.
+
+    0 prior fires -> 90 min (a fresh anomaly re-alerts as before),
+    1 -> 180, 2+ -> 360 (the cap). A STANDING condition — TSLA still
+    3x RVOL, the same narrative gap all weekend — used to re-fire every
+    90 minutes, ~16 alerts/day of the same fact. Escalation says it
+    once, repeats it twice with widening patience, then settles at four
+    a day: still above the >=3/24h bar consolidation promotes on.
+    """
+    return min(DEDUPE_MINUTES * (2 ** max(0, prior_fires)),
+               BACKOFF_CAP_MINUTES)
+
+
+def _recent_anomaly_history() -> dict[str, tuple[int, "object"]]:
+    """`f"{detector}:{key}"` -> (fires in the lookback window, latest
+    created_at) for anomaly observations — feeds the escalating hold."""
+    out: dict[str, tuple[int, object]] = {}
     try:
         from .models import BrainObservation
     except Exception:
         return out
-    cutoff = timezone.now() - timedelta(minutes=max(1, within_minutes))
+    cutoff = timezone.now() - timedelta(hours=BACKOFF_LOOKBACK_HOURS)
     qs = BrainObservation.objects.filter(
         kind="anomaly_detected", created_at__gte=cutoff,
-    ).values_list("payload", flat=True)
-    for p in qs:
+    ).values_list("payload", "created_at")
+    for p, at in qs:
         if not isinstance(p, dict):
             continue
         det = p.get("detector") or ""
         key = p.get("key") or ""
-        if det and key:
-            out.add(f"{det}:{key}")
+        if not det or not key:
+            continue
+        k = f"{det}:{key}"
+        count, latest = out.get(k, (0, None))
+        out[k] = (count + 1, at if latest is None or at > latest else latest)
     return out
 
 
 def _emit_anomalies(anomalies: Iterable[dict]) -> int:
     """Persist a batch of anomaly dicts as BrainObservation rows.
-    Skips duplicates based on `_recent_anomaly_keys()`. Returns count emitted.
+
+    A repeat is held for `_backoff_minutes(prior fires)` — the escalating
+    quiet period — instead of the old flat window. Returns count emitted.
     """
     try:
         from .observations import record_observation
     except Exception:
         return 0
 
-    seen = _recent_anomaly_keys()
+    history = _recent_anomaly_history()
+    now = timezone.now()
     n = 0
     for a in anomalies:
         det = (a or {}).get("detector") or ""
         key = (a or {}).get("key") or ""
         if not det or not key:
             continue
-        if f"{det}:{key}" in seen:
-            continue
+        prior = history.get(f"{det}:{key}")
+        if prior is not None:
+            count, latest = prior
+            # The history count INCLUDES the emission that opened this
+            # window, but the ladder is defined over PRIOR fires — pass
+            # count-1 or the 90-minute first rung is unreachable and a
+            # fresh anomaly's first re-alert silently waits 180.
+            if latest is not None and latest > now - timedelta(
+                    minutes=_backoff_minutes(count - 1)):
+                continue
         # Strip non-JSON-serializable Instrument object from the payload
         # before persisting; it's used as a separate FK arg.
         instrument_obj = a.pop("_instrument_obj", None)
@@ -161,7 +194,13 @@ def detect_rvol_spikes(*, threshold: float = RVOL_THRESHOLD,
         ratio = float(details.get("ratio", 0))
         out.append({
             "detector": "rvol_spike",
-            "key": f"{inst.symbol}_{now:%Y%m%d}",
+            # No date in the key: the 24h escalation lookback and the
+            # consolidation counter already scope time, and a dated key
+            # reset the ladder at UTC midnight — a standing condition got
+            # a fresh burst of alerts every calendar day, and a late-day
+            # onset split its fires across two keys and missed the
+            # >=3-fires promotion its persistence had earned.
+            "key": inst.symbol,
             "symbol": inst.symbol,
             "ratio": round(ratio, 4),
             "threshold": threshold,
@@ -216,7 +255,8 @@ def detect_narrative_price_divergence() -> list[dict]:
             details = res.get("details") or {}
             out.append({
                 "detector": "narrative_price_divergence",
-                "key": f"{sym}_{direction}_{now:%Y%m%d}",
+                # Date-free for the same reason as rvol_spike above.
+                "key": f"{sym}_{direction}",
                 "symbol": sym,
                 "direction": direction,
                 "avg_sentiment": details.get("avg_sentiment"),

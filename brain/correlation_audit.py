@@ -286,7 +286,12 @@ def detect_evaluator_signature_overlap(*,
             common = sorted(sig_a & sig_b)
             out.append({
                 "detector": "signature_overlap",
-                "key": f"{names[0]}__VS__{names[1]}",
+                # Detector-tagged: consolidation counts per KEY alone, and
+                # this detector shared its pair format with
+                # realized_return_correlation — two different findings
+                # about the same rule pair pooled their fire counts and
+                # promoted a mongrel node neither had earned.
+                "key": f"sigoverlap:{names[0]}__VS__{names[1]}",
                 "rule_a": names[0],
                 "rule_b": names[1],
                 "jaccard": round(sim, 4),
@@ -359,7 +364,8 @@ def detect_realized_return_correlation(*,
             seen_pairs.add(names)
             out.append({
                 "detector": "realized_return_correlation",
-                "key": f"{names[0]}__VS__{names[1]}",
+                # Detector-tagged — see signature_overlap above.
+                "key": f"retcorr:{names[0]}__VS__{names[1]}",
                 "rule_a": names[0],
                 "rule_b": names[1],
                 "correlation": round(corr, 4),

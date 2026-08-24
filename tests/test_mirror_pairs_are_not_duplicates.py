@@ -70,7 +70,7 @@ class SignatureOverlapTests(TestCase):
         kinds = ["fair_value_gap", "relative_volume", "market_structure_break"]
         self._setup("clone_a", "bullish", kinds)
         self._setup("clone_b", "bullish", kinds)
-        self.assertEqual(self._pairs(), {"clone_a__VS__clone_b"})
+        self.assertEqual(self._pairs(), {"sigoverlap:clone_a__VS__clone_b"})
 
     def test_the_real_pair_the_briefing_named_still_reports(self):
         """starter_commodity_vol_compression and starter_stock_mean_reversion
@@ -79,14 +79,14 @@ class SignatureOverlapTests(TestCase):
         self._setup("starter_commodity_vol_compression", "bullish", kinds)
         self._setup("starter_stock_mean_reversion", "bullish", kinds)
         self.assertIn(
-            "starter_commodity_vol_compression__VS__starter_stock_mean_reversion",
+            "sigoverlap:starter_commodity_vol_compression__VS__starter_stock_mean_reversion",
             self._pairs())
 
     def test_an_unknown_direction_is_still_audited(self):
         kinds = ["fair_value_gap", "relative_volume", "market_structure_break"]
         self._setup("odd_a", "bullish", kinds)
         self._setup("odd_b", "sideways", kinds)
-        self.assertEqual(self._pairs(), {"odd_a__VS__odd_b"})
+        self.assertEqual(self._pairs(), {"sigoverlap:odd_a__VS__odd_b"})
 
     def test_the_shipped_smc_pair_stops_being_flagged(self):
         """End to end on the real seeded rows, which is where this was found."""
