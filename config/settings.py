@@ -132,6 +132,11 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # The investor cage, immediately after auth: an investor session may
+    # reach its panel and the way out, and NOTHING else — deny-by-default,
+    # so every future route ships investor-proof. Before presence and the
+    # idle lock: an investor has no PIN and no seat on the Eye.
+    "core.investor_gate.InvestorGateMiddleware",
     # After auth (needs request.user); stamps who-is-online for the admin
     # Eye, throttled to one write per user per minute.
     "core.presence.PresenceMiddleware",

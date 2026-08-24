@@ -5,6 +5,25 @@ from asgiref.sync import sync_to_async
 
 
 @sync_to_async
+def _investor_socket_denied(user) -> bool:
+    """True when this user must NEVER hold a live socket.
+
+    The investor cage is HTTP middleware and websockets never meet it —
+    which left one door: an investor with a valid session cookie opening
+    /ws/dashboard/ from devtools would have streamed the platform's
+    entire live signal feed, the exact intelligence their flags exist to
+    withhold. So the consumers ask the question themselves, and unlike
+    the pin check this one fails CLOSED: an investor row we cannot read
+    is an investor we do not stream to, and a REVOKED row still denies —
+    revocation must not leave a socket the HTTP gate cannot see.
+    """
+    try:
+        return getattr(user, "investor_access", None) is not None
+    except Exception:  # noqa: BLE001 — fail closed, see above
+        return True
+
+
+@sync_to_async
 def _session_pin_locked(scope) -> bool:
     """True when this socket's session is idle-locked (core/idle_lock.py).
 
@@ -34,6 +53,9 @@ class DashboardConsumer(AsyncWebsocketConsumer):
             await self.close()
             return
         if await _session_pin_locked(self.scope):
+            await self.close()
+            return
+        if await _investor_socket_denied(user):
             await self.close()
             return
         self.group_name = "dashboard_live"
@@ -206,6 +228,9 @@ class EyeConsumer(AsyncWebsocketConsumer):
             await self.close()
             return
         if await _session_pin_locked(self.scope):
+            await self.close()
+            return
+        if await _investor_socket_denied(user):
             await self.close()
             return
         self.group_name = f"eye_user_{user.id}"

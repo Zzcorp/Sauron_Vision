@@ -110,3 +110,9 @@ class PortfolioSnapshot(models.Model):
     class Meta:
         unique_together = ["portfolio", "date"]
         ordering = ["-date"]
+
+
+# Registered here, not via an admin-module side effect: the app registry
+# must see InvestorAccess whether or not anything imports the admin —
+# the same reason core/models.py re-exports its satellite modules.
+from .investor_models import InvestorAccess  # noqa: E402, F401

@@ -3479,6 +3479,15 @@ def admin_dashboard(request):
     context["evo_forks_alive"] = RuleControl.objects.filter(
         rule_name__contains=FORK_INFIX).count()
 
+    # The investor windows — listed beside the broker credentials they
+    # conceptually neighbour: both are HQ-granted access to a book.
+    try:
+        from portfolio.investor_models import InvestorAccess
+        investor_accesses = list(
+            InvestorAccess.objects.select_related("investor", "owner"))
+    except Exception:  # noqa: BLE001
+        investor_accesses = []
+    context["investor_accesses"] = investor_accesses
     return render(request, "dashboard/admin_dashboard.html", context)
 
 

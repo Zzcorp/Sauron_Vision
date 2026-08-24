@@ -237,6 +237,45 @@ the broker, and the bot that would have honoured their stops switched off.
     </div>
 </div>
 
+<!-- ═══ INVESTOR ACCESS ═══ -->
+<div class="section-label fade-in-up">Investor Access</div>
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Read-only windows onto funded accounts</span>
+        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);letter-spacing:1px;">DENY-BY-DEFAULT GATE · REVOCABLE</span></div>
+    {% if investor_accesses %}
+    <div class="table-wrapper"><table class="sv-perf-table">
+        <thead><tr><th>Investor</th><th>Sees</th><th>Label</th><th>Positions</th><th>History</th><th>Amounts</th><th>State</th><th></th></tr></thead>
+        <tbody>
+        {% for a in investor_accesses %}
+        <tr>
+            <td style="font-weight:600;">{{ a.investor.username }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{{ a.owner.username }}</td>
+            <td style="font-size:11px;">{{ a.label|default:"—" }}</td>
+            <td style="font-family:var(--font-mono);font-size:10px;">{{ a.show_positions|yesno:"YES,no" }}</td>
+            <td style="font-family:var(--font-mono);font-size:10px;">{{ a.show_history|yesno:"YES,no" }}</td>
+            <td style="font-family:var(--font-mono);font-size:10px;">{{ a.percents_only|yesno:"pct only,dollars" }}</td>
+            <td>{% if a.is_active %}<span style="color:var(--accent);font-family:var(--font-mono);font-size:11px;">ACTIVE</span>{% else %}<span style="color:var(--accent-red);font-family:var(--font-mono);font-size:11px;">REVOKED</span>{% endif %}</td>
+            <td><form method="post" action="{% url 'hq_toggle_investor' %}" style="margin:0;">{% csrf_token %}
+                <input type="hidden" name="access_id" value="{{ a.pk }}">
+                <button type="submit" class="sr-pop-btn" style="font-size:10px;">{% if a.is_active %}Revoke{% else %}Restore{% endif %}</button>
+            </form></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}<div class="sv-empty"><b>No investor windows yet</b>Create one below — the investor sees exactly the book you name, and nothing else on this platform.</div>{% endif %}
+    <form method="post" action="{% url 'hq_create_investor' %}" style="margin-top:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;align-items:end;">{% csrf_token %}
+        <label style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);">FUNDED ACCOUNT<input name="owner_username" required style="width:100%;padding:8px;background:var(--bg-void);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);"></label>
+        <label style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);">INVESTOR USERNAME<input name="investor_username" required style="width:100%;padding:8px;background:var(--bg-void);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);"></label>
+        <label style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);">PASSWORD (8+)<input name="investor_password" type="password" required minlength="8" autocomplete="new-password" style="width:100%;padding:8px;background:var(--bg-void);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);"></label>
+        <label style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);">LABEL<input name="label" placeholder="Fund A" required style="width:100%;padding:8px;background:var(--bg-void);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);"></label>
+        <label style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);"><input type="checkbox" name="show_positions"> positions</label>
+        <label style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);"><input type="checkbox" name="show_history"> history</label>
+        <label style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);"><input type="checkbox" name="show_amounts"> dollar amounts</label>
+        <button type="submit" class="btn btn-primary" style="padding:8px 14px;">Create investor</button>
+    </form>
+</div>
+
 <!-- ═══ BROKER CREDENTIALS ═══ -->
 <div class="section-label fade-in-up">Broker Credentials</div>
 <div class="card fade-in-up" style="margin-bottom:24px;">

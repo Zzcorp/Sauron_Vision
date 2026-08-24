@@ -1,0 +1,71 @@
+{% comment %}The panel's moving half — rendered inside the shell and by
+the live twin alike, so the refresh can never disagree with first paint.
+Unmeasured is an em-dash, never 0; a dollar figure appears ONLY when the
+access row says dollars are disclosed.{% endcomment %}
+<div class="cap-grid" style="margin-bottom:18px;">
+    {% if value is not None %}
+    <div class="cap-tile"><span class="ck">VALUE</span><span class="cv" data-sv-live-key="inv.value">{{ currency }} {{ value|floatformat:"0g" }}</span><span class="cs">marked book value</span></div>
+    {% endif %}
+    <div class="cap-tile"><span class="ck">SINCE INCEPTION</span><span class="cv {% if cumulative_pct and cumulative_pct < 0 %}down{% elif cumulative_pct %}up{% endif %}" data-sv-live-key="inv.cum">{% if cumulative_pct is not None %}{% if cumulative_pct >= 0 %}+{% endif %}{{ cumulative_pct|floatformat:2 }}%{% else %}<span class="sv-unknown" title="No daily snapshot exists for this book yet">&mdash;</span>{% endif %}</span><span class="cs">cumulative return</span></div>
+    <div class="cap-tile"><span class="ck">TODAY</span><span class="cv {% if daily_pct and daily_pct < 0 %}down{% elif daily_pct %}up{% endif %}" data-sv-live-key="inv.day">{% if daily_pct is not None %}{% if daily_pct >= 0 %}+{% endif %}{{ daily_pct|floatformat:2 }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span><span class="cs">latest snapshot day</span></div>
+    <div class="cap-tile"><span class="ck">MAX DRAWDOWN</span><span class="cv down" data-sv-live-key="inv.dd">{% if max_drawdown is not None %}{{ max_drawdown|floatformat:1 }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span><span class="cs">peak to trough</span></div>
+    {% if n_open is not None %}
+    <div class="cap-tile"><span class="ck">OPEN POSITIONS</span><span class="cv" data-sv-live-key="inv.open">{{ n_open }}</span><span class="cs">currently deployed</span></div>
+    {% endif %}
+</div>
+
+{% if curve %}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Equity curve · cumulative %</span>
+        <span class="sv-live-chip" data-sv-live-status></span></div>
+    {% comment %}Inline SVG from snapshot data — no chart library, no
+    scripts an investor page does not need. Cumulative percent only:
+    the curve's SHAPE is disclosed even under percents_only.{% endcomment %}
+    <svg viewBox="0 0 600 160" preserveAspectRatio="none" style="width:100%;height:160px;display:block;" aria-label="Equity curve">
+        {% if curve_points %}<polyline points="{{ curve_points }}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/>{% endif %}
+    </svg>
+    <div class="ip-dd-note">{{ curve|length }} daily snapshot{{ curve|length|pluralize }} · drawn from close-of-day marks, not intraday ticks.</div>
+</div>
+{% endif %}
+
+{% if access.show_positions %}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Open positions</span></div>
+    {% if positions %}
+    <div class="table-wrapper"><table class="sv-perf-table">
+        <thead><tr><th>Symbol</th><th>Class</th><th>Side</th><th class="num">P&amp;L %</th>{% if not access.percents_only %}<th class="num">P&amp;L</th>{% endif %}</tr></thead>
+        <tbody>
+        {% for p in positions %}
+        <tr>
+            <td style="font-family:var(--font-mono);font-weight:700;">{{ p.symbol }}</td>
+            <td><span class="badge badge-{{ p.asset_class }}">{{ p.asset_class }}</span></td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{{ p.direction }}</td>
+            <td class="num {% if p.pnl_pct and p.pnl_pct < 0 %}down{% elif p.pnl_pct %}up{% endif %}" style="font-family:var(--font-mono);">{% if p.pnl_pct is not None %}{% if p.pnl_pct >= 0 %}+{% endif %}{{ p.pnl_pct|floatformat:2 }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            {% if not access.percents_only %}<td class="num" style="font-family:var(--font-mono);">{% if p.pnl is not None %}{{ p.pnl|floatformat:2 }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>{% endif %}
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}<div class="sv-empty"><b>Nothing deployed</b>The book is in cash right now.</div>{% endif %}
+</div>
+{% endif %}
+
+{% if access.show_history and history %}
+<div class="card">
+    <div class="card-header"><span class="card-title">Recent closed trades</span></div>
+    <div class="table-wrapper"><table class="sv-perf-table">
+        <thead><tr><th>Symbol</th><th>Side</th><th class="num">Result %</th>{% if not access.percents_only %}<th class="num">Result</th>{% endif %}<th>Closed</th></tr></thead>
+        <tbody>
+        {% for h in history %}
+        <tr>
+            <td style="font-family:var(--font-mono);font-weight:700;">{{ h.symbol }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{{ h.direction }}</td>
+            <td class="num {% if h.pnl_pct and h.pnl_pct < 0 %}down{% elif h.pnl_pct %}up{% endif %}" style="font-family:var(--font-mono);">{% if h.pnl_pct is not None %}{% if h.pnl_pct >= 0 %}+{% endif %}{{ h.pnl_pct|floatformat:2 }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            {% if not access.percents_only %}<td class="num" style="font-family:var(--font-mono);">{% if h.pnl is not None %}{{ h.pnl|floatformat:2 }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>{% endif %}
+            <td style="font-size:11px;color:var(--text-muted);">{{ h.closed_at|date:"M d, H:i" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+</div>
+{% endif %}

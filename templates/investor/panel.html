@@ -1,0 +1,59 @@
+{% load static %}
+{% if live_only %}
+{% comment %}The live twin: regions only, no shell — the same contract
+/portfolio/live/ keeps, so the swap can never say something the first
+render would not have said.{% endcomment %}
+<div data-sv-live="inv-panel">{% include "investor/_panel_body.html" %}</div>
+{% else %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ label }} · Sauron Vision</title>
+    <link rel="icon" href="{% static 'logo/favicon.ico' %}" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="{% static 'logo/sauron_eye.svg' %}">
+    <meta name="theme-color" content="#030806">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/sauron.css' %}">
+    <link rel="stylesheet" href="{% static 'css/sv-overlay.css' %}">
+    <style>
+        /* Standalone on purpose: the app shell is an operator's cockpit
+           wired to request.user — an investor gets their own small world.
+           Tokens only, so the house look and both themes come for free. */
+        .inv-page { min-height: 100vh; background: var(--bg-dark);
+            display: flex; flex-direction: column; align-items: center;
+            padding: 40px 18px; }
+        .inv-head { display: flex; align-items: center; gap: 14px;
+            margin-bottom: 26px; }
+        .inv-eye { width: 34px; height: 34px;
+            background: url("{% static 'logo/sauron_eye.svg' %}") center/contain no-repeat; }
+        .inv-title { font-family: var(--font-display); font-size: 20px;
+            letter-spacing: 2px; color: var(--text-primary); margin: 0; }
+        .inv-sub { font-family: var(--font-mono); font-size: 10px;
+            letter-spacing: 2px; color: var(--text-muted); }
+        .inv-body { width: 100%; max-width: 860px; }
+        .inv-exit { margin-top: 30px; }
+    </style>
+</head>
+<body class="{% if request.user.trader_profile.theme_mode == 'light' %}light-mode{% endif %}">
+<div class="inv-page">
+    <div class="inv-head">
+        <div class="inv-eye" aria-hidden="true"></div>
+        <div>
+            <h1 class="inv-title">{{ label }}</h1>
+            <span class="inv-sub">INVESTOR VIEW · READ ONLY</span>
+        </div>
+    </div>
+    <div class="inv-body" data-sv-live="inv-panel">
+        {% include "investor/_panel_body.html" %}
+    </div>
+    <form method="post" action="{% url 'logout' %}" class="inv-exit">{% csrf_token %}
+        <button type="submit" class="sr-pop-btn">⏻ Sign out</button>
+    </form>
+</div>
+{% url 'investor_panel_live' as live_url %}
+{% include "_partials/live_region.html" %}
+</body>
+</html>
+{% endif %}
