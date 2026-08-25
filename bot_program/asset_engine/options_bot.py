@@ -566,6 +566,19 @@ class OptionsBot(AssetBot):
                         contract.symbol or symbol, "BUY", n_contracts,
                     )
                 order_id = str(res.get("orderId", ""))
+                # A REJECTED response used to be booked as a live fill:
+                # TWS down at order time returned the ibkr_unavailable
+                # dict and the bot minted N contracts it never bought —
+                # whose later SL/TP close would SELL real contracts the
+                # account does not hold.
+                status = (res.get("status") or "").upper()
+                if status in ("REJECTED", "DUPLICATE", "CANCELLED",
+                              "CANCELED", "INACTIVE", "EXPIRED"):
+                    logger.warning(
+                        "[options_bot] live order refused for %s "
+                        "(status=%s, reason=%s)", symbol, status,
+                        (res.get("raw") or {}).get("reason", ""))
+                    return None
             except Exception as e:
                 logger.error("[options_bot] live order failed for %s: %s", symbol, e)
                 return None

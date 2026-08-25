@@ -1166,9 +1166,13 @@ class AssetBot(ABC):
                     stop_loss=float(sl), take_profit=float(tp),
                 )
                 order_id = str(res.get("orderId", ""))
-                # Detect broker-side dedup rejections: log + skip trade row.
+                # Detect broker-side refusals: log + skip trade row.
+                # CANCELLED/INACTIVE/EXPIRED belong here too — brokers
+                # whose raw vocabulary never says "REJECTED" (IBKR) used
+                # to sail past this check and book a phantom live row.
                 status = (res.get("status") or "").upper()
-                if status in ("REJECTED", "DUPLICATE"):
+                if status in ("REJECTED", "DUPLICATE", "CANCELLED",
+                              "CANCELED", "INACTIVE", "EXPIRED"):
                     logger.warning("[%s_bot] live order DEDUP for %s "
                                     "(status=%s, client_order_id=%s)",
                                     self.asset_class, symbol, status,

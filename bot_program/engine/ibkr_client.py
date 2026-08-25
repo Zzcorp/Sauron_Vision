@@ -305,6 +305,55 @@ class IBKRTrader:
             })
         return out
 
+    @staticmethod
+    def _dead_order_reason(trade, filled_qty) -> "Optional[str]":
+        """A dead, unfilled order's reason string — or None while alive.
+
+        Cancelled/ApiCancelled/Inactive with zero filled is a rejection
+        whatever TWS chooses to call it; the reason is fished out of the
+        trade log because the status alone says only that it died.
+        """
+        status = getattr(trade.orderStatus, "status", "") or ""
+        if status not in ("Cancelled", "ApiCancelled", "Inactive"):
+            return None
+        if filled_qty:
+            return None
+        notes = "; ".join(
+            str(getattr(entry, "message", "") or "")
+            for entry in (getattr(trade, "log", None) or [])
+            if getattr(entry, "message", ""))
+        return f"broker_rejected: {(notes or status)[:300]}"
+
+    def _bind_order_account(self, order) -> "Optional[str]":
+        """Stamp `order.account` with this trader's account, or name the
+        reason the order must NOT be sent.
+
+        With account_id set, every order says where it belongs — the
+        session default never decides. Without one, a single-account
+        session is unambiguous and passes; a multi-account session is
+        refused: an unstamped BUY lands on whichever account TWS calls
+        primary, and an unstamped CLOSE against the wrong book does not
+        close anything — it opens a fresh position there. If the managed
+        list itself cannot be read, the order passes with a loud log:
+        every current deployment is single-account, and bricking those
+        on a flaky library call would strand real exposure.
+        """
+        if self.account_id:
+            order.account = self.account_id
+            return None
+        try:
+            managed = [a for a in (self._ib.managedAccounts() or []) if a]
+        except Exception as e:  # noqa: BLE001 — see docstring
+            log.warning("IBKR managedAccounts() unreadable (%s) — "
+                        "sending unstamped order on the single-account "
+                        "assumption", e)
+            return None
+        if len(managed) > 1:
+            return (f"ambiguous_account: session manages {len(managed)} "
+                    f"accounts and this trader has no account_id — refusing "
+                    f"to trade on the session default")
+        return None
+
     def market_order(self, symbol: str, side: str, quantity: float, **kwargs) -> dict:
         empty = {
             "orderId": "", "symbol": symbol, "side": side,
@@ -320,10 +369,29 @@ class IBKRTrader:
             self._ib.qualifyContracts(contract)
             action = "BUY" if side.upper() == "BUY" else "SELL"
             order = _ib.MarketOrder(action, abs(float(quantity)))
+            refusal = self._bind_order_account(order)
+            if refusal:
+                log.error("IBKR market_order(%s) refused: %s",
+                          symbol, refusal)
+                empty["raw"] = {"reason": refusal}
+                return empty
             trade = self._ib.placeOrder(contract, order)
             self._ib.sleep(1.0)
             filled_qty = float(trade.orderStatus.filled or 0)
             avg_px = float(trade.orderStatus.avgFillPrice or 0)
+            # TWS-side rejections never say "Rejected" — ib_insync's
+            # vocabulary surfaces them as Cancelled/ApiCancelled/Inactive
+            # with nothing filled. Raw, that status walked straight past
+            # the engine's REJECTED check and booked a full-size phantom
+            # live trade at the pre-order ticker price. Normalize at the
+            # boundary so every consumer's existing check catches it.
+            dead = self._dead_order_reason(trade, filled_qty)
+            if dead:
+                log.error("IBKR market_order(%s, %s, %s) dead on "
+                          "arrival: %s", symbol, side, quantity, dead)
+                empty["orderId"] = str(trade.order.orderId or "")
+                empty["raw"] = {"reason": dead}
+                return empty
             return {
                 "orderId": str(trade.order.orderId or ""),
                 "symbol": symbol, "side": side,
@@ -440,8 +508,22 @@ class IBKRTrader:
             self._ib.qualifyContracts(opt)
             action = "BUY" if side.upper() == "BUY" else "SELL"
             order = _ib.MarketOrder(action, abs(int(contracts)))
+            refusal = self._bind_order_account(order)
+            if refusal:
+                log.error("IBKR market_order_option(%s) refused: %s",
+                          underlying, refusal)
+                empty["raw"] = {"reason": refusal}
+                return empty
             trade = self._ib.placeOrder(opt, order)
             self._ib.sleep(1.0)
+            dead = self._dead_order_reason(
+                trade, float(trade.orderStatus.filled or 0))
+            if dead:
+                log.error("IBKR market_order_option(%s) dead on "
+                          "arrival: %s", underlying, dead)
+                empty["orderId"] = str(trade.order.orderId or "")
+                empty["raw"] = {"reason": dead}
+                return empty
             return {
                 "orderId": str(trade.order.orderId or ""),
                 "symbol": f"{underlying} {expiry} {strike}{right.upper()}",
