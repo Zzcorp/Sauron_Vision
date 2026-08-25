@@ -63,6 +63,20 @@
 
 
     <script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossorigin="anonymous"></script>
+    {% comment %}
+    THE ONE HOVER BEAT. Every hover card on the platform — the dwell engine,
+    the feed and briefing rows, the signals rail, the instrument preview,
+    the headband/watchlist/ticker portals and the bottom-band dropdowns —
+    arms on this number. They used to arm on 90, 1000, 1500 and 2000ms
+    and on nothing at all, so the same gesture opened a card instantly in
+    one strip and two seconds later in the next. 450ms reads as intent
+    without letting a pointer crossing a row flash a card. Inline and
+    BEFORE the deferred scripts so each of them finds it set. ONE source:
+    a CSS twin that nothing consumed was a second number free to drift.
+    Departure grace timers are NOT this number — leaving is a different
+    gesture from arriving.
+    {% endcomment %}
+    <script>window.SV_HOVER_BEAT_MS = 450;</script>
     <link rel="stylesheet" href="{% static 'css/sauron.css' %}">
     {% comment %} The overlay system loads after sauron.css: it re-points the older
        hand-picked z-indexes onto one ladder, and that has to win. {% endcomment %}
@@ -80,6 +94,7 @@
     <script src="{% static 'js/sv-nav-activity.js' %}" defer></script>
     {# Headband news dwell-cards — SV.dwell client #5, not implementation #5. #}
     <script src="{% static 'js/sv-news-dwell.js' %}" defer></script>
+    <script src="{% static 'js/sv-gollum.js' %}" defer></script>
 {% block extra_css %}{% endblock %}
 </head>
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}">
@@ -776,7 +791,7 @@
                 <a href="{% url 'positions_list' %}" class="ip-cat ip-cat-link">
                     <span class="ip-label">POSITIONS</span>
                     <span class="ip-count" id="ipPositionsCount" data-sv-live="hb-pos-count" data-sv-live-key="hb-pos-count">{{ panel_positions }}</span>
-                    <span class="ip-sub" data-sv-live="hb-pos-sub">{% if panel_open_pnl_display %}<span class="{% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}">{{ panel_open_pnl_display }}</span> open{% elif panel_positions %}<span class="sv-unknown" title="{{ panel_book_coverage }}">&mdash; no live mark</span>{% else %}none open{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-pos-sub">{% if not panel_positions %}none open{% elif panel_n_long is None %}<span class="sv-unknown" title="A position's side could not be read, so the split is unknown">&mdash; long &middot; &mdash; short</span>{% else %}<span class="up">{{ panel_n_long }} long</span> &middot; <span class="down">{{ panel_n_short }} short</span>{% endif %}</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">OPEN POSITIONS &middot; BOTH BOOKS <span class="sv-live-chip" data-sv-live-status></span></div>
                         {% comment %}
@@ -792,6 +807,19 @@
                         per-user book, so it would render +0.00 forever.
                         {% endcomment %}
                         <div data-sv-live="hb-pos-detail">
+                        {% comment %}
+                        The split strip sits ABOVE the rows: how many longs,
+                        how many shorts, and what the whole book is marking
+                        at — the three numbers an operator reads before any
+                        single row. An unreadable side dashes the split; it
+                        never lands in the long column by default.
+                        {% endcomment %}
+                        {% if panel_positions %}
+                        <div class="ip-split">
+                            {% if panel_n_long is None %}<span class="ip-split-side sv-unknown" title="A position's side could not be read">&mdash; long &middot; &mdash; short</span>{% else %}<span class="ip-split-side up">&#9650; {{ panel_n_long }} LONG</span><span class="ip-split-side down">&#9660; {{ panel_n_short }} SHORT</span>{% endif %}
+                            <span class="ip-split-pnl {% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}">{% if panel_open_pnl_display %}{{ panel_open_pnl_display }}{% else %}<span class="sv-unknown" title="No open position could be marked to a live quote">&mdash;</span>{% endif %}</span>
+                        </div>
+                        {% endif %}
                         {% comment %}
                         TWO LINES, not one. This was a single flex row holding
                         eight things — symbol, side, size, R, %, two chips and
@@ -839,6 +867,34 @@
                         {% if panel_open_rows_hidden %}<div class="ip-dd-note">+{{ panel_open_rows_hidden }} more open — the positions page lists them all.</div>{% endif %}
                         {% if panel_pool %}<div class="ip-dd-note">Pool tickets: {{ panel_pool_used|default:"—" }} of {{ panel_pool }} pooled committed · {% if panel_pool_free_neg %}<span class="red">{{ panel_pool_free }} free (oversubscribed)</span>{% else %}{{ panel_pool_free|default:"—" }} free{% endif %}. Manual/legacy book tickets sit outside the pools — the exposure gate polices them.</div>{% endif %}
                         <div class="ip-dd-note">{{ panel_book_coverage }}{% if panel_open_r_display %} Open risk {{ panel_open_r_display }} across {{ panel_open_r_n }} graded position{{ panel_open_r_n|pluralize }}.{% endif %}</div>
+                        </div>
+                        <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View All Positions</div>
+                    </div>
+                </a>
+                {% comment %}
+                OPEN P&L gets its own cell. It used to be the 9px sub-line
+                under the POSITIONS count — the one number on the band an
+                operator glances at most, rendered smallest. The value is the
+                same panel_open_pnl the POSITIONS and PORTFOLIO popups quote,
+                so the three can never disagree. No live mark on any open
+                position is an em-dash: an unmarked book is unknown, not flat.
+                {% endcomment %}
+                <a href="{% url 'positions_list' %}" class="ip-cat ip-cat-link ip-cat-pnl">
+                    <span class="ip-label">OPEN P&amp;L</span>
+                    <span class="ip-count" data-sv-live="hb-pnl" data-sv-live-key="hb-pnl">{% if panel_open_pnl_display %}<span class="{% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}" title="Unrealised across both books at live marks. {{ panel_book_coverage }}">{{ panel_open_pnl_display }}</span>{% elif panel_positions %}<span class="sv-unknown" title="{{ panel_book_coverage }} No open position could be marked to a live quote.">&mdash;</span>{% else %}<span class="sv-unknown" title="Nothing open in either book">&mdash;</span>{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-pnl-sub" title="{{ panel_book_coverage }}">{% if not panel_positions %}none open{% elif panel_positions_priced < panel_positions %}across {{ panel_positions_priced }} of {{ panel_positions }} positions{% else %}across {{ panel_positions }} position{{ panel_positions|pluralize }}{% endif %}</span>
+                    <div class="ip-dropdown">
+                        <div class="ip-dd-head">OPEN P&amp;L &middot; BOTH BOOKS, LIVE MARKS <span class="sv-live-chip" data-sv-live-status></span></div>
+                        <div data-sv-live="hb-pnl-detail">
+                        <div class="ip-dd-grid">
+                            <div class="ip-dd-cell"><span class="dk">OPEN P&amp;L</span><span class="dv {% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}">{% if panel_open_pnl_display %}{{ panel_open_pnl_display }}{% else %}<span class="sv-unknown" title="No open position could be marked to a live quote">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">OPEN R</span><span class="dv {% if panel_open_r > 0 %}up{% elif panel_open_r < 0 %}down{% endif %}">{% if panel_open_r_display %}{{ panel_open_r_display }}{% else %}<span class="sv-unknown" title="R needs an entry, an opening stop and a live quote">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">LONG</span><span class="dv up">{% if panel_n_long is None %}<span class="sv-unknown" title="A position's side could not be read">&mdash;</span>{% else %}{{ panel_n_long }}{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">SHORT</span><span class="dv down">{% if panel_n_short is None %}<span class="sv-unknown" title="A position's side could not be read">&mdash;</span>{% else %}{{ panel_n_short }}{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">GRADED</span><span class="dv">{{ panel_open_r_n }} of {{ panel_positions }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">PRICED</span><span class="dv">{{ panel_positions_priced }} of {{ panel_positions }}</span></div>
+                        </div>
+                        <div class="ip-dd-note">{{ panel_book_coverage }}{% if panel_as_of %} <span data-sv-live-ephemeral>Measured {{ panel_as_of }} UTC.</span>{% endif %}</div>
                         </div>
                         <div class="ip-dd-item" style="justify-content:center;color:var(--accent);">▸ View All Positions</div>
                     </div>
@@ -1462,7 +1518,7 @@
         enterTimer = setTimeout(function() {
           showPopup(wrap);
           if (pop && window.SV && SV.popup) SV.popup.opened(pop);
-        }, 90);
+        }, window.SV_HOVER_BEAT_MS || 450);
       });
       wrap.addEventListener('mouseleave', function(e) {
         if (enterTimer) { clearTimeout(enterTimer); enterTimer = null; }
@@ -2922,7 +2978,7 @@
 </script>
 
 <script>
-// Instrument preview on hover (2s delay)
+// Instrument preview on hover — on the platform's one hover beat.
 (function() {
     let hoverTimer = null;
     let previewEl = null;
@@ -2930,10 +2986,11 @@
     document.addEventListener('mouseover', function(e) {
         const link = e.target.closest('[data-instrument]');
         if (!link) return;
+        if (hoverTimer) clearTimeout(hoverTimer);
         hoverTimer = setTimeout(function() {
             const sym = link.getAttribute('data-instrument');
             showPreview(link, sym);
-        }, 1500);
+        }, window.SV_HOVER_BEAT_MS || 450);
     });
 
     document.addEventListener('mouseout', function(e) {
@@ -3723,10 +3780,28 @@ function toggleSidebar() {
     hidePortalPopup(activePopup);
   });
 
+  // Portal popups arm on the one hover beat, and a mouseleave before the
+  // beat lands cancels the arm — the card is for the item the pointer
+  // STOPPED on, not for every item it crossed on the way there. Showing
+  // on mouseenter directly is what made the ticker strobe under a
+  // travelling pointer while the feed rows two bands away took 2s.
+  function armPortal(item, sel, width, side){
+    item.addEventListener('mouseenter', function(){
+      if (item._svBeat) clearTimeout(item._svBeat);
+      item._svBeat = setTimeout(function(){
+        item._svBeat = null;
+        showPortalPopup(item, sel, width, side);
+      }, window.SV_HOVER_BEAT_MS || 450);
+    });
+    item.addEventListener('mouseleave', function(){
+      if (item._svBeat) { clearTimeout(item._svBeat); item._svBeat = null; }
+    });
+  }
+
   // Data headband popups (portal to body) — hover-friendly
   document.querySelectorAll('.data-headband .dh-item').forEach(function(item){
     var pop = item.querySelector('.dh-pop');
-    item.addEventListener('mouseenter', function(){ showPortalPopup(item, '.dh-pop', 380); });
+    armPortal(item, '.dh-pop', 380);
     item.addEventListener('mouseleave', function(e){ maybeHidePortalPopup(item, item._portalPop || pop, e.relatedTarget); });
   });
 
@@ -3735,7 +3810,7 @@ function toggleSidebar() {
   document.querySelectorAll('.wl-item').forEach(function(item){
     var pop = item.querySelector('.wl-pop');
     if (!pop) return;
-    item.addEventListener('mouseenter', function(){ showPortalPopup(item, '.wl-pop', 380, 'left'); });
+    armPortal(item, '.wl-pop', 380, 'left');
     item.addEventListener('mouseleave', function(e){ maybeHidePortalPopup(item, item._portalPop || pop, e.relatedTarget); });
   });
 
@@ -3784,7 +3859,7 @@ function toggleSidebar() {
   // Ticker popups (portal to body) — hover-friendly
   document.querySelectorAll('.ticker-bar .ticker-item').forEach(function(item){
     var pop = item.querySelector('.ticker-popup');
-    item.addEventListener('mouseenter', function(){ showPortalPopup(item, '.ticker-popup', 420); });
+    armPortal(item, '.ticker-popup', 420);
     item.addEventListener('mouseleave', function(e){ maybeHidePortalPopup(item, item._portalPop || pop, e.relatedTarget); });
   });
 
@@ -3887,8 +3962,13 @@ function toggleSidebar() {
     // folded 120ms later underneath the card the operator was reading.
     dd._svCancelHide = cancelHide;
     dd._svHideSoon = hideSoon;
-    cat.addEventListener('mouseenter', function(){
-      cancelHide();
+    // The dropdown opens on the one hover beat. A pointer sliding along
+    // the band to reach a cell used to open and close every dropdown on
+    // the way; now only the cell it settles on opens, and leaving before
+    // the beat cancels the arm. Re-entering an already-open dropdown's
+    // cell still only cancels the hide — there is nothing to re-arm.
+    var openTimer = null;
+    function open(){
       var r = cat.getBoundingClientRect();
       dd.style.visibility = 'hidden'; dd.style.display = 'block';
       dd.style.pointerEvents = 'auto';
@@ -3901,8 +3981,18 @@ function toggleSidebar() {
       if(left < 16) left = 16;
       dd.style.left = left + 'px';
       dd.style.visibility = '';
+    }
+    cat.addEventListener('mouseenter', function(){
+      cancelHide();
+      if (dd.style.display === 'block') return;
+      if (openTimer) clearTimeout(openTimer);
+      openTimer = setTimeout(function(){ openTimer = null; open(); },
+                             window.SV_HOVER_BEAT_MS || 450);
     });
-    cat.addEventListener('mouseleave', hideSoon);
+    cat.addEventListener('mouseleave', function(){
+      if (openTimer) { clearTimeout(openTimer); openTimer = null; }
+      hideSoon();
+    });
     dd.addEventListener('mouseenter', cancelHide);
     dd.addEventListener('mouseleave', hideSoon);
   });
@@ -4313,6 +4403,63 @@ if ('serviceWorker' in navigator) {
 {# ── Phase 64: 2 background code-stream paragraphs (flank the screen) ── #}
 <div class="se-cs-paragraph left"  id="seCsParaLeft"  aria-hidden="true"></div>
 <div class="se-cs-paragraph right" id="seCsParaRight" aria-hidden="true"></div>
+
+{% comment %}Gollum — the guide who knows the way to Mordor. Bottom-left,
+opposite the Palantír: one orb SEES (Ask Sauron), the other POINTS. He
+searches every page and section from the sidebar's own links plus his
+lore (static/js/sv-gollum.js), and the nav-activity poll tells him what
+changed while the operator looked away — he fidgets and whispers once,
+never nags. He never acts.{% endcomment %}
+<button type="button" class="gollum-fab" id="gollumFab"
+        title="Gollum — the guide. Press /"
+        aria-label="Gollum, the guide" aria-expanded="false"
+        aria-controls="gollumDialog" aria-haspopup="dialog">
+    <svg class="gollum-face" viewBox="0 0 60 60" aria-hidden="true">
+        <defs>
+            <radialGradient id="glStone" cx="50%" cy="45%" r="55%">
+                <stop offset="0%" stop-color="#3a5a46"/>
+                <stop offset="70%" stop-color="#16281d"/>
+                <stop offset="100%" stop-color="#07110b"/>
+            </radialGradient>
+            <radialGradient id="glEye" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#e9ffe6"/>
+                <stop offset="55%" stop-color="#9df5c0"/>
+                <stop offset="100%" stop-color="#2fbf72" stop-opacity=".6"/>
+            </radialGradient>
+        </defs>
+        <circle class="gl-stone" cx="30" cy="30" r="24" fill="url(#glStone)"/>
+        <g class="gl-eyes">
+            <ellipse class="gl-eye gl-eye-l" cx="21" cy="28" rx="7.5" ry="8.5" fill="url(#glEye)"/>
+            <ellipse class="gl-eye gl-eye-r" cx="39" cy="28" rx="7.5" ry="8.5" fill="url(#glEye)"/>
+            <g class="gl-pupils">
+                <ellipse class="gl-pupil" cx="21" cy="29" rx="2.2" ry="4.6"/>
+                <ellipse class="gl-pupil" cx="39" cy="29" rx="2.2" ry="4.6"/>
+            </g>
+            <g class="gl-lids">
+                <ellipse class="gl-lid" cx="21" cy="28" rx="8" ry="9"/>
+                <ellipse class="gl-lid" cx="39" cy="28" rx="8" ry="9"/>
+            </g>
+        </g>
+        <path class="gl-brow" d="M 13 19 Q 21 15 28 19" fill="none"/>
+        <path class="gl-brow" d="M 32 19 Q 39 15 47 19" fill="none"/>
+        <path class="gl-mouth" d="M 24 42 Q 30 46 36 42" fill="none"/>
+        <circle class="gl-ring" cx="30" cy="30" r="27" fill="none"/>
+    </svg>
+    <span class="gollum-count" data-gollum-count hidden></span>
+</button>
+<div class="gollum-bubble" id="gollumBubble" role="status" hidden></div>
+<div class="gollum-dialog" id="gollumDialog" role="dialog" aria-label="Gollum, the guide" hidden>
+    <div class="gl-head">
+        <span class="gl-title">GOLLUM</span>
+        <span class="gl-sub">knows the way</span>
+        <button type="button" class="gl-close" data-gollum-close aria-label="Close">✕</button>
+    </div>
+    <input type="search" class="gl-input" data-gollum-input autocomplete="off" spellcheck="false"
+           placeholder="Where to, precious? briefing · positions · pnl · brain…">
+    <div class="gl-whisper" data-gollum-whisper hidden></div>
+    <div class="gl-results" data-gollum-results></div>
+    <div class="gl-foot">/ calls him · Esc sends him away · he points, Sauron acts</div>
+</div>
 
 <button type="button" class="se-eye-fab" id="seEyeFab"
         title="Ask Sauron — press ? to toggle" aria-label="Ask Sauron">
@@ -5335,7 +5482,7 @@ if ('serviceWorker' in navigator) {
             if (!j.pending && !panel.classList.contains('open')) {
                 /* No server push follows the fallback path, so this page
                    raises the banner itself — as it always did. */
-                notifyAnswer(j.assistant_html || j.error || 'Answer ready.');
+                notifyAnswer(j.assistant_text || j.error || 'Answer ready.');
             }
         })
         .catch(function(e) {

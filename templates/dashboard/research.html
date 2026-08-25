@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load sauron_tags %}
 {% block title %}Ask Sauron{% endblock %}
 {% block page_title %}◬ ASK SAURON{% endblock %}
 {% block content %}
@@ -119,7 +120,12 @@ error-stamped assistant messages.
                     data-role="{{ m.role }}" aria-label="Delete this message">Delete</button>
           </div>
         </div>
-        <div class="turn-body">{% if m.error %}{{ m.content }}{% else %}{{ m.rendered_content|default:m.content }}{% endif %}</div>
+        {% comment %}
+        Only a Sauron turn goes through research_md: the operator's own
+        words are printed verbatim, and an error turn is a stack of
+        plain text that markdown would only mangle.
+        {% endcomment %}
+        <div class="turn-body">{% if m.error %}{{ m.content }}{% elif m.role == 'assistant' %}{{ m.rendered_content|research_md }}{% else %}{{ m.content }}{% endif %}</div>
 
         {% if m.has_draft %}
         <div class="turn-draft">
@@ -144,7 +150,11 @@ error-stamped assistant messages.
         {% endif %}
 
         {% if m.role == 'assistant' and m.tokens_in %}
-        <div class="turn-cost">{{ m.model_used }} · {{ m.tokens_in }}/{{ m.tokens_out }} tok · ${{ m.cost_usd|floatformat:5 }}</div>
+        <div class="turn-cost">
+          <span class="rs-chip"><span class="k">model</span>{{ m.model_used|default:"—" }}</span>
+          <span class="rs-chip"><span class="k">tok</span>{{ m.tokens_in }} in / {{ m.tokens_out }} out</span>
+          <span class="rs-chip"><span class="k">cost</span>${{ m.cost_usd|floatformat:5 }}</span>
+        </div>
         {% endif %}
       </article>
       {% empty %}
@@ -231,7 +241,14 @@ error-stamped assistant messages.
 .turn { max-width: 100%; border-radius: 10px; padding: 11px 14px; border: 1px solid var(--border); position: relative; }
 .turn--user { align-self: flex-end; max-width: 74%; background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
               border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
-.turn--assistant { align-self: stretch; background: var(--bg-card); }
+/* A Sauron turn carries its mark: an accent rail down the left and the
+   eye in the head. Before this, both voices wore the same grey box and a
+   long thread read as one undifferentiated column. */
+.turn--assistant { align-self: stretch; background: var(--bg-card);
+                   border-left: 3px solid var(--accent); padding-left: 16px; }
+.turn--assistant .turn-who::before { content: "\25EC"; color: var(--accent); margin-right: 6px;
+                                     font-size: 11px; letter-spacing: 0; }
+.turn--assistant .turn-who { color: var(--accent); }
 .turn--error { border-color: var(--accent-red); }
 .turn--error .turn-body { color: var(--accent-red); }
 .turn-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -247,15 +264,47 @@ error-stamped assistant messages.
 .turn-tool--danger:hover { color: var(--accent-red); border-color: var(--accent-red); }
 .turn-body { font-size: 14px; line-height: 1.68; white-space: pre-wrap; word-wrap: break-word; }
 .turn-body a { color: var(--accent); }
-.turn-cost { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-muted); margin-top: 8px; }
+
+/* ── Answer typography (research_md output) ─────────────────────────
+   Rendered markup sets its own line breaks, so pre-wrap comes OFF for a
+   Sauron turn — kept for the operator's text and for error turns, whose
+   bodies are still raw text. */
+.turn--assistant:not(.turn--error) .turn-body { white-space: normal; }
+.turn-body .rs-p { margin: 0 0 10px; }
+.turn-body .rs-p:last-child { margin-bottom: 0; }
+.turn-body .rs-lead { font-size: 15px; color: var(--text-primary); }
+.turn-body .rs-h { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .14em;
+                   text-transform: uppercase; color: var(--accent); margin: 14px 0 6px; }
+.turn-body .rs-h:first-child { margin-top: 0; }
+.turn-body .rs-list { margin: 0 0 10px; padding-left: 20px; }
+.turn-body .rs-list li { margin-bottom: 4px; }
+.turn-body .rs-list li::marker { color: var(--accent-dim); }
+.turn-body .rs-code { font-family: var(--font-mono); font-size: 12.5px; padding: 1px 5px;
+                      border-radius: 4px; background: var(--bg-elev); border: 1px solid var(--border); }
+.turn-body .rs-pre { margin: 8px 0 12px; padding: 10px 12px; overflow-x: auto; border-radius: 6px;
+                     background: var(--bg-elev); border: 1px solid var(--border);
+                     font-family: var(--font-mono); font-size: 12px; line-height: 1.55; white-space: pre; }
+.turn-body .rs-pre code { font-family: inherit; }
+.turn-body .rs-link { display: inline-block; font-family: var(--font-mono); font-size: 11px;
+                      color: var(--accent); text-decoration: none; padding: 1px 8px; margin: 0 1px;
+                      border-radius: 10px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+                      background: color-mix(in srgb, var(--accent) 8%, transparent); white-space: nowrap; }
+.turn-body .rs-link:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
+/* The cost line as fact chips, the briefing footer's shape. */
+.turn-cost { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.rs-chip { font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px; color: var(--text-muted);
+           border: 1px solid var(--border); border-radius: 3px; padding: 2px 7px; white-space: nowrap; }
+.rs-chip .k { text-transform: uppercase; color: var(--accent-dim); margin-right: 5px; }
 .turn-draft { margin-top: 10px; padding: 10px 12px; background: var(--accent-glow);
               border-left: 3px solid var(--accent); font-size: 12px; display: flex;
               justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .turn-draft form { margin: 0; }
-.turn-actions { margin-top: 10px; padding: 9px 12px; background: var(--bg-elev);
-                border-left: 3px solid var(--accent-dim); }
-.turn-actions-label { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-muted);
-                      text-transform: uppercase; letter-spacing: .1em; margin-bottom: 7px; }
+.turn-actions { margin-top: 12px; padding: 10px 14px; background: var(--bg-elev);
+                border: 1px solid var(--border); border-left: 3px solid var(--accent-dim); border-radius: 0 6px 6px 0; }
+.turn-actions-label { font-family: var(--font-mono); font-size: 9.5px; color: var(--accent-dim);
+                      text-transform: uppercase; letter-spacing: .14em; margin-bottom: 8px; }
+.turn-actions-label::before { content: "\25B8  "; }
 .turn-actions-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .turn-actions-row form { margin: 0; }
 
@@ -410,6 +459,8 @@ error-stamped assistant messages.
         var copy = t.closest && t.closest("[data-copy]");
         if (copy) {
             var turn = copy.closest(".turn");
+            /* innerText, not innerHTML: the operator wants the words of a
+               rendered answer, not its <p> and <a> scaffolding. */
             var text = turn ? turn.querySelector(".turn-body").innerText : "";
             navigator.clipboard && navigator.clipboard.writeText(text);
             copy.textContent = "Copied";

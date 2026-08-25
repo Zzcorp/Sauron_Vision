@@ -188,11 +188,11 @@ class DetailCardMarkupTests(TestCase):
         self.assertGreaterEqual(html.count("data-nc-row"), 2)
 
     def test_the_engine_ships_the_dwell_contract(self):
-        """The fixes the news feed and the briefing already paid for: a 2s
-        dwell, a body-portalled card, the relatedTarget guard on the way to
+        """The fixes the news feed and the briefing already paid for: a
+        dwell on the platform's one hover beat, a body-portalled card, the relatedTarget guard on the way to
         it, the selection check before navigating, and a touch branch."""
         js = _static("js", "sv-notif-card.js")
-        self.assertIn("HOVER_DELAY_MS = 2000", js)
+        self.assertIn("HOVER_DELAY_MS = (w.SV_HOVER_BEAT_MS || 450)", js)
         self.assertIn("d.body.appendChild(pop)", js)
         self.assertIn("pop.contains(to)", js)
         self.assertIn("pointerleave", js)

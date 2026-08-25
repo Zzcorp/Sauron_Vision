@@ -167,6 +167,102 @@ def briefing_md(value):
 
 
 @register.filter
+def research_md(value):
+    """Markdown-lite for Ask Sauron answers: escape EVERYTHING first, then
+    grow exactly the shapes the research agent writes — fenced code,
+    `code`, **bold**, [label →](url) links, ##/### headings, bullet and
+    numbered lists, paragraphs (first one is the lead). It runs on LLM
+    output, so links are the one place this can hurt: a URL is honoured
+    only when it is a same-site path (single leading "/") or https://,
+    and anything else — javascript:, data:, protocol-relative // — is
+    printed as its label, plain. No markdown library: a full engine here
+    would be an HTML injection surface bought for features unused.
+    """
+    import re
+
+    from django.utils.html import escape
+    from django.utils.safestring import mark_safe
+
+    text = escape(str(value or "")).replace("\r\n", "\n").strip()
+    if not text:
+        return ""
+
+    # Fences come out FIRST, as whole lines, so the inline passes never
+    # bold or link something inside a code block.
+    fences = []
+
+    def _fence(m):
+        fences.append('<pre class="rs-pre"><code>'
+                      + m.group(1).strip("\n") + "</code></pre>")
+        return "\x00%d\x00" % (len(fences) - 1)
+
+    text = re.sub(r"(?m)^```[^\n]*\n(.*?)^```[ \t]*$", _fence, text,
+                  flags=re.S)
+
+    def _link(m):
+        label, url = m.group(1), m.group(2)
+        # A backslash is a SLASH to every browser's URL parser, so
+        # "/\evil.com" is protocol-relative and leaves the site.
+        if "\\" not in url and re.match(r"^(?:/(?![/\\])|https://)", url):
+            return f'<a class="rs-link" href="{url}">{label}</a>'
+        return label
+
+    def _inline(s):
+        s = re.sub(r"`([^`\n]+)`", r'<code class="rs-code">\1</code>', s)
+        s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+        # One level of parentheses inside the URL, so a refused
+        # javascript:alert(1) is swallowed whole rather than leaving a
+        # stray ")" after its label.
+        return re.sub(r"\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)",
+                      _link, s)
+
+    out, para, items, list_tag, n_para = [], [], [], None, 0
+
+    def _flush_para():
+        nonlocal n_para
+        if para:
+            cls = "rs-p rs-lead" if n_para == 0 else "rs-p"
+            out.append(f'<p class="{cls}">' + "<br>".join(para) + "</p>")
+            n_para += 1
+            para.clear()
+
+    def _flush_list():
+        if items:
+            out.append(f'<{list_tag} class="rs-list">'
+                       + "".join(f"<li>{i}</li>" for i in items)
+                       + f"</{list_tag}>")
+            items.clear()
+
+    for line in text.split("\n"):
+        s = line.strip()
+        m_fence = re.fullmatch(r"\x00(\d+)\x00", s)
+        m_head = re.match(r"^#{1,6}\s+(.+)$", s)
+        m_ul = re.match(r"^[-*•]\s+(.+)$", s)
+        m_ol = re.match(r"^\d+[.)]\s+(.+)$", s)
+        if not s or m_fence or m_head:
+            _flush_para()
+            _flush_list()
+            if m_fence:
+                out.append(fences[int(m_fence.group(1))])
+            elif m_head:
+                out.append('<h4 class="rs-h">' + _inline(m_head.group(1))
+                           + "</h4>")
+        elif m_ul or m_ol:
+            _flush_para()
+            tag = "ul" if m_ul else "ol"
+            if tag != list_tag:
+                _flush_list()
+                list_tag = tag
+            items.append(_inline((m_ul or m_ol).group(1)))
+        else:
+            _flush_list()
+            para.append(_inline(s))
+    _flush_para()
+    _flush_list()
+    return mark_safe("".join(out))
+
+
+@register.filter
 def briefing_plain(value):
     """briefing_md's plain-text twin for data attributes and preview
     stubs: the emphasis markers come OFF instead of becoming markup —

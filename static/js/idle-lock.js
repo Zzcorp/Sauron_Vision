@@ -180,6 +180,14 @@
         pinClear();
         showError(null);
         sleep();                      /* asleep until a person shows up */
+        /* A fullscreen element lives in the browser's TOP LAYER, above
+           every z-index there is — including this veil. A chart left
+           fullscreen would keep painting the book over a locked screen. */
+        try {
+            if (d.fullscreenElement && d.exitFullscreen) {
+                d.exitFullscreen().catch(function () {});
+            }
+        } catch (e) {}
         overlay.classList.remove("il-out");
         if (w.SV && w.SV.overlay) w.SV.overlay.open(overlay);
         /* Choreography: the veil is OPAQUE from this very frame (leaking

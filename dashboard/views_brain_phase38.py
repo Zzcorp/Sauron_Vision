@@ -896,15 +896,22 @@ def research_ask_ajax(request):
 
     result = complete_ask(pending.pk)
 
+    from core.templatetags.sauron_tags import research_md
+
     asst_id = result.get("assistant_message_id")
-    asst_html = ""
+    asst_html = asst_text = ""
     has_draft = False
     if asst_id:
         from brain.research_models import ResearchMessage
         msg = ResearchMessage.objects.filter(pk=asst_id).first()
         if msg is not None:
             cleaned, _actions = extract_action_markers(msg.content)
-            asst_html = render_markers(cleaned)
+            asst_text = render_markers(cleaned)
+            # The same filter the page template applies to a stored turn,
+            # so an answer painted in place looks like the same answer
+            # after a reload. The plain twin feeds the banner preview,
+            # which quotes text and would otherwise show the tags.
+            asst_html = str(research_md(asst_text))
             has_draft = has_strategy_draft(msg.content)
 
     return JsonResponse({
@@ -914,6 +921,7 @@ def research_ask_ajax(request):
         "user_message_id": result.get("user_message_id"),
         "assistant_message_id": asst_id,
         "assistant_html": asst_html,
+        "assistant_text": asst_text,
         "has_draft": has_draft,
         "tokens_in": result.get("tokens_in"),
         "tokens_out": result.get("tokens_out"),

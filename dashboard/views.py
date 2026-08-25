@@ -3532,6 +3532,77 @@ def admin_bulk_toggle(request):
     return redirect("admin_dashboard")
 
 
+def _chart_positions(user, instrument):
+    """The open bets on THIS instrument that belong on this operator's
+    chart, flattened to one JSON-safe shape the chart widget can draw
+    without knowing which table a bet came from.
+
+    Two sources, one vocabulary: legacy Positions on the user's books
+    (the same set the risk gate scans — shared limits book plus the
+    per-user `<username>_main`) and AssetBotTrades whose config the user
+    owns, OPEN or CLOSE_PENDING (still exposure at the broker). Anything
+    outside those books is another operator's money and never reaches
+    the page. Prices go out as floats and opened_at as epoch seconds
+    because lightweight-charts snaps markers to bar times, and a Decimal
+    or an ISO string would need a second parse in the browser.
+    """
+    from bot_program.models import AssetBotTrade
+    from portfolio.models import Position
+    from portfolio.risk_gate import _position_books
+
+    def _f(v):
+        return float(v) if v is not None else None
+
+    def _epoch(dt):
+        return int(dt.timestamp()) if dt else None
+
+    out = []
+    for pos in (Position.objects
+                .filter(portfolio_id__in=_position_books(user),
+                        instrument=instrument, closed_at__isnull=True)
+                .select_related("strategy")):
+        side = ("long" if str(pos.direction or "").lower() in ("long", "buy")
+                else "short")
+        via = getattr(pos.strategy, "name", "") or "book"
+        out.append({
+            "id": f"book-{pos.pk}", "source": "book", "side": side,
+            "entry": _f(pos.entry_price), "stop": _f(pos.stop_loss),
+            "tp": _f(pos.take_profit), "qty": _f(pos.quantity),
+            "opened_at": _epoch(pos.opened_at),
+            "label": f"{side.upper()} {via}",
+        })
+    for t in AssetBotTrade.objects.filter(
+            config__user=user, symbol=instrument.symbol,
+            status__in=("OPEN", "CLOSE_PENDING")):
+        side = "long" if t.side == "BUY" else "short"
+        tag = t.rule_name or "bot"
+        out.append({
+            "id": f"bot-{t.pk}", "source": "bot", "side": side,
+            "entry": _f(t.entry_price), "stop": _f(t.stop_loss),
+            "tp": _f(t.take_profit), "qty": _f(t.qty),
+            "opened_at": _epoch(t.opened_at),
+            "label": f"{side.upper()} {tag}" + ("" if t.paper else " LIVE"),
+        })
+    return out
+
+
+def _chart_signal_marks(signals):
+    """The signals' suggested entries as chart marks — only the ones that
+    actually name a price; a signal without suggested_entry has nothing
+    to pin to the tape and is left out rather than plotted at zero."""
+    marks = []
+    for sig in signals:
+        if sig.suggested_entry is None:
+            continue
+        marks.append({
+            "id": sig.pk, "price": float(sig.suggested_entry),
+            "at": int(sig.created_at.timestamp()) if sig.created_at else None,
+            "direction": str(sig.direction or "").lower(),
+            "label": sig.rule_name or sig.signal_type,
+        })
+    return marks
+
+
 @login_required
 def instrument_detail(request, symbol):
     """Instrument detail page with chart, indicators, signals, news."""
@@ -3562,7 +3633,11 @@ def instrument_detail(request, symbol):
     technicals = TechnicalIndicator.objects.filter(instrument=instrument).first()
 
     # Get signals
-    signals = Signal.objects.filter(instrument=instrument).order_by("-created_at")[:10]
+    signals = list(Signal.objects.filter(instrument=instrument).order_by("-created_at")[:10])
+
+    # The operator's open bets and the signals' entries, for the chart.
+    chart_positions = _chart_positions(request.user, instrument)
+    chart_signals = _chart_signal_marks(signals)
 
     # Get related news
     news = instrument.news_articles.order_by("-published_at")[:5]
@@ -3585,6 +3660,8 @@ def instrument_detail(request, symbol):
         "news": news,
         "market": market,
         "price_data_json": json.dumps(price_data),
+        "chart_positions": chart_positions,
+        "chart_signals": chart_signals,
     })
 
 

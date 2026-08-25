@@ -79,10 +79,15 @@
     var region = d.querySelector('[data-sv-live="hb-news-detail"]');
     var dd = region && region.closest && region.closest(".ip-dropdown");
     if (!dd || !inst || !inst.pop) return;
-    inst.pop.addEventListener("pointerenter", function () {
+    /* MOUSE family, same as the portal it bridges — not pointer. The
+       browser fires every pointer boundary event BEFORE any mouse one,
+       so a pointerenter bridge cancelled the hide first and the
+       dropdown's own mouseleave re-armed it a beat later: panel and
+       card folded 120ms after the operator arrived on the card. */
+    inst.pop.addEventListener("mouseenter", function () {
       if (dd._svCancelHide) dd._svCancelHide();
     });
-    inst.pop.addEventListener("pointerleave", function (e) {
+    inst.pop.addEventListener("mouseleave", function (e) {
       if (e.relatedTarget && dd.contains(e.relatedTarget)) return;
       if (dd._svHideSoon) dd._svHideSoon();
     });
@@ -93,8 +98,9 @@
     var inst = w.SV.dwell.attach({
       rows: ".hb-news-row",
       className: "nf-pop nc-pop",
-      delay: 1000, /* the operator asked for a deliberate second, not a
-                      trigger-happy flicker on every pass of the cursor */
+      /* No delay override: the engine's default IS the platform's one hover
+         beat (window.SV_HOVER_BEAT_MS). This client used to ask for its own
+         second, which made the news rows the slowest card on the page. */
       build: build,
       click: follow,
       tap: follow,

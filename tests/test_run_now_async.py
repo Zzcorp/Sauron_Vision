@@ -194,7 +194,7 @@ class BriefingReaderTests(TestCase):
         resp = self.client.get("/briefing/")
         self.assertContains(resp, f"?id={self.old.pk}")
         self.assertContains(resp, "data-brf-summary")
-        self.assertContains(resp, "HOVER_DELAY_MS = 2000")
+        self.assertContains(resp, "HOVER_DELAY_MS = (window.SV_HOVER_BEAT_MS")
 
 
 class OrderingRegressionTests(TestCase):

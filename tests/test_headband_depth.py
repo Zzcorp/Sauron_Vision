@@ -91,6 +91,13 @@ class NewsDwellTests(TestCase):
         dwell = self._dwell_src()
         self.assertIn("_svCancelHide", dwell)
         self.assertIn("_svHideSoon", dwell)
+        # The bridge must speak the portal's event FAMILY: pointer
+        # boundary events all fire before mouse ones, so a pointerenter
+        # cancel was undone by the dropdown's own mouseleave a beat later.
+        bridge = dwell.split("function bridge")[1]
+        self.assertIn('addEventListener("mouseenter"', bridge)
+        self.assertIn('addEventListener("mouseleave"', bridge)
+        self.assertNotIn('addEventListener("pointerenter"', bridge)
         shell = (base / "templates" / "base.html").read_text(
             encoding="utf-8")
         self.assertIn("dd._svCancelHide = cancelHide", shell)
@@ -107,13 +114,17 @@ class NewsDwellTests(TestCase):
         return (Path(settings.BASE_DIR) / "static" / "js"
                 / "sv-news-dwell.js").read_text(encoding="utf-8")
 
-    def test_the_dwell_client_asks_for_the_deliberate_second(self):
+    def test_the_dwell_client_rides_the_one_hover_beat(self):
+        """The news rows used to ask for their own second; every hover card
+        now arms on window.SV_HOVER_BEAT_MS, and this client inherits it by
+        NOT overriding the engine's delay."""
         from pathlib import Path
 
         from django.conf import settings
         src = (Path(settings.BASE_DIR) / "static" / "js"
                / "sv-news-dwell.js").read_text(encoding="utf-8")
-        self.assertIn("delay: 1000", src)
+        self.assertNotIn("delay: 1000", src)
+        self.assertNotRegex(src, r"delay:\s*\d")
         self.assertIn('rows: ".hb-news-row"', src)
         self.assertIn("SV.dwell.attach", src)
 

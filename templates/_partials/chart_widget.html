@@ -7,6 +7,9 @@ Parameters:
   symbol     — ticker symbol (default: "")
   height     — height in px (default: 400)
   timeframe  — initial timeframe: 1d, 1w, 1m, 3m, 1y (default: 1d)
+Optional page data (json_script blocks the widget picks up when present):
+  <chart_id>-positions — [{id, source, side, entry, stop, tp, qty, opened_at, label}]
+  <chart_id>-signals   — [{id, price, at, direction, label}]
 {% endcomment %}
 {% load static %}
 
@@ -22,7 +25,21 @@ Parameters:
     border: 1px solid var(--border, #1a2e1a);
     border-radius: var(--radius-md, 6px);
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
+/* Fullscreen fallback for browsers that refuse requestFullscreen (or an
+   embedded frame that cannot grant it): the card pins itself to the
+   viewport with the same class the real fullscreen path also sets, so the
+   layout code has one state to size against. */
+.sv-candle-container.sv-chart-fs {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    border-radius: 0;
+    height: 100vh !important;
+}
+.sv-candle-container:fullscreen { height: 100vh !important; }
 .sv-chart-toolbar {
     display: flex;
     align-items: center;
@@ -31,6 +48,7 @@ Parameters:
     background: var(--bg-card, #111a11);
     border-bottom: 1px solid var(--border, #1a2e1a);
     flex-wrap: wrap;
+    flex: 0 0 auto;
 }
 .sv-chart-symbol-badge {
     font-family: var(--font-display, monospace);
@@ -41,7 +59,9 @@ Parameters:
     min-width: 60px;
 }
 .sv-chart-timeframes,
-.sv-chart-type-btns {
+.sv-chart-type-btns,
+.sv-chart-ind-btns,
+.sv-chart-ctl-btns {
     display: flex;
     gap: 3px;
     align-items: center;
@@ -51,7 +71,10 @@ Parameters:
     background: var(--border, #1a2e1a);
 }
 .sv-tf-btn,
-.sv-type-btn {
+.sv-type-btn,
+.sv-ind-btn,
+.sv-ctl-btn,
+.sv-chart-btn {
     background: transparent;
     border: 1px solid var(--border, #1a2e1a);
     border-radius: 3px;
@@ -64,28 +87,53 @@ Parameters:
     line-height: 1.6;
 }
 .sv-tf-btn:hover,
-.sv-type-btn:hover {
+.sv-type-btn:hover,
+.sv-ind-btn:hover,
+.sv-ctl-btn:hover,
+.sv-chart-btn:hover {
     color: var(--accent, #00e868);
     border-color: var(--accent, #00e868);
 }
 .sv-tf-btn.active,
-.sv-type-btn.active {
+.sv-type-btn.active,
+.sv-ind-btn.active,
+.sv-ctl-btn.active,
+.sv-chart-btn.active {
     color: var(--accent, #00e868);
     border-color: var(--accent, #00e868);
     background: rgba(0, 232, 104, 0.08);
 }
+/* An indicator button wears its series' tone once active, so the toolbar
+   is the legend for the overlays: the operator matches a line to its
+   name by colour without a separate key. */
+.sv-ind-btn.active { color: var(--sv-ind-tone, var(--accent, #00e868)); border-color: var(--sv-ind-tone, var(--accent, #00e868)); background: transparent; }
+.sv-ind-btn[hidden] { display: none; }
 /* The chart-type marks are line drawings, not glyphs, so they need an
    explicit box. 12px + 2px margins = the same 16px line box the 10px/1.6
    timeframe buttons produce, which keeps the toolbar row flush. Colour
    comes from currentColor, so hover/active states drive them for free. */
-.sv-type-btn svg {
+.sv-type-btn svg,
+.sv-ctl-btn svg {
     width: 12px; height: 12px;
     display: block; margin: 2px 0;
     stroke: currentColor;
 }
 .sv-chart-body {
     width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
 }
+/* The RSI pane is a second chart under the first, sharing its time scale.
+   Hidden until the RSI toggle asks for it; the main body shrinks to make
+   room (see layout() in the script) rather than the card growing. */
+.sv-chart-rsi {
+    width: 100%;
+    height: 0;
+    flex: 0 0 auto;
+    border-top: 1px solid var(--border, #1a2e1a);
+    display: none;
+}
+.sv-chart-rsi.on { display: block; }
 .sv-chart-legend {
     position: absolute;
     top: 44px;
@@ -105,6 +153,26 @@ Parameters:
     border-radius: 3px;
     padding: 2px 6px;
 }
+.sv-chart-legend:empty { display: none; }
+.sv-chart-legend .sv-ind-val { margin-left: 6px; }
+/* The bar-close countdown sits under the legend, only on intraday frames:
+   a daily candle has no close the operator is waiting on. */
+.sv-chart-countdown {
+    position: absolute;
+    top: 44px;
+    right: 70px;
+    font-family: var(--font-mono, monospace);
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: var(--text-muted, #5a7a5a);
+    pointer-events: none;
+    z-index: 5;
+    background: var(--bg-card, #111a11);
+    border: 1px solid var(--border, #1a2e1a);
+    border-radius: 3px;
+    padding: 1px 6px;
+}
+.sv-chart-countdown:empty { display: none; }
 .sv-chart-loading-overlay,
 .sv-chart-error-overlay {
     position: absolute;
@@ -134,7 +202,7 @@ Parameters:
 }
 </style>
 
-<div class="sv-candle-container" id="{{ chart_id }}-container" style="height: {{ height }}px;">
+<div class="sv-candle-container" id="{{ chart_id }}-container" style="height: {{ height }}px;" tabindex="0" aria-label="{{ symbol }} price chart">
     <!-- Toolbar -->
     <div class="sv-chart-toolbar">
         <div class="sv-chart-symbol-badge">{{ symbol }}</div>
@@ -166,6 +234,13 @@ Parameters:
                     <path d="M11 4v9"/><rect x="9.2" y="6.5" width="3.6" height="4.5"/>
                 </svg>
             </button>
+            <button class="sv-type-btn" data-type="heikin" title="Heikin-Ashi" aria-label="Heikin-Ashi chart">
+                {# Smoothed candles: the same two bodies, filled, no wicks poking through — the mark says "averaged" where the candle mark says "raw". #}
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M5 3v10"/><rect x="3.2" y="5" width="3.6" height="6" fill="currentColor" fill-opacity="0.35"/>
+                    <path d="M11 5v8"/><rect x="9.2" y="7" width="3.6" height="4" fill="currentColor" fill-opacity="0.35"/>
+                </svg>
+            </button>
             <button class="sv-type-btn" data-type="line" title="Line" aria-label="Line chart">
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M2 12l3.5-4.5L9 10l5-6"/>
@@ -179,20 +254,55 @@ Parameters:
             </button>
         </div>
 
+        <!-- Indicators -->
+        {% comment %}Each toggle owns one overlay computed in the browser from the bars already loaded — no second request, so a toggle answers instantly and a background refresh recomputes for free. VWAP is intraday-only: a session-anchored average has no meaning across daily candles, so the button hides itself on the daily family.{% endcomment %}
+        <div class="sv-chart-ind-btns" role="group" aria-label="Indicators">
+            <span class="sv-tf-sep" aria-hidden="true"></span>
+            <button class="sv-ind-btn" data-ind="sma20" title="Simple moving average, 20 bars">SMA20</button>
+            <button class="sv-ind-btn" data-ind="sma50" title="Simple moving average, 50 bars">SMA50</button>
+            <button class="sv-ind-btn" data-ind="ema20" title="Exponential moving average, 20 bars">EMA20</button>
+            <button class="sv-ind-btn" data-ind="bb" title="Bollinger Bands 20, 2σ">BB</button>
+            <button class="sv-ind-btn" data-ind="vwap" title="Volume-weighted average price, session-anchored (intraday only)">VWAP</button>
+            <button class="sv-ind-btn" data-ind="rsi" title="RSI 14 in its own pane">RSI</button>
+            <button class="sv-ind-btn active" data-ind="positions" title="Open positions, stops, targets and signal entries on the tape">POSITIONS</button>
+        </div>
+
+        <!-- View controls -->
+        <div class="sv-chart-ctl-btns" role="group" aria-label="View">
+            <span class="sv-tf-sep" aria-hidden="true"></span>
+            <button class="sv-ctl-btn" data-ctl="log" title="Logarithmic price scale">LOG</button>
+            <button class="sv-ctl-btn" data-ctl="fit" title="Fit all bars (reset zoom)" aria-label="Fit all bars">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/>
+                </svg>
+            </button>
+            <button class="sv-ctl-btn" data-ctl="fullscreen" title="Fullscreen (Esc to leave)" aria-label="Fullscreen">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="2" y="2" width="12" height="12" rx="1"/><path d="M6 2v12M2 6h12"/>
+                </svg>
+            </button>
+        </div>
+
         <!-- Drawing tools -->
         <div class="sv-chart-drawing-btns">
-            <button class="sv-chart-btn" data-tool="crosshair" title="Crosshair" style="background:transparent;border:1px solid var(--border,#1a2e1a);border-radius:3px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--text-muted,#5a7a5a);transition:color 0.15s,border-color 0.15s;">&#8982;</button>
-            <button class="sv-chart-btn" data-tool="hline" title="H-Line" style="background:transparent;border:1px solid var(--border,#1a2e1a);border-radius:3px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--text-muted,#5a7a5a);transition:color 0.15s,border-color 0.15s;">&#8213;</button>
-            <button class="sv-chart-btn" data-tool="trendline" title="Trend Line" style="background:transparent;border:1px solid var(--border,#1a2e1a);border-radius:3px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--text-muted,#5a7a5a);transition:color 0.15s,border-color 0.15s;">&#8599;</button>
-            <button class="sv-chart-btn" data-tool="clear" title="Clear drawings" style="background:transparent;border:1px solid var(--border,#1a2e1a);border-radius:3px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--text-muted,#5a7a5a);transition:color 0.15s,border-color 0.15s;">&#10005;</button>
+            <button class="sv-chart-btn" data-tool="crosshair" title="Crosshair">&#8982;</button>
+            <button class="sv-chart-btn" data-tool="hline" title="H-Line">&#8213;</button>
+            <button class="sv-chart-btn" data-tool="trendline" title="Trend Line">&#8599;</button>
+            <button class="sv-chart-btn" data-tool="clear" title="Clear drawings">&#10005;</button>
         </div>
     </div>
 
     <!-- Chart canvas -->
     <div class="sv-chart-body" id="{{ chart_id }}" style="height: calc({{ height }}px - 36px);"></div>
 
+    <!-- RSI pane (synchronised time scale) -->
+    <div class="sv-chart-rsi" id="{{ chart_id }}-rsi"></div>
+
     <!-- OHLCV legend overlay -->
     <div class="sv-chart-legend" id="{{ chart_id }}-legend"></div>
+
+    <!-- Bar-close countdown (intraday only) -->
+    <div class="sv-chart-countdown" id="{{ chart_id }}-countdown" aria-live="off"></div>
 
     <!-- Loading overlay -->
     <div class="sv-chart-loading-overlay" id="{{ chart_id }}-loading">
@@ -232,14 +342,33 @@ Parameters:
     var SYMBOL       = '{{ symbol }}';
     var INIT_TF      = '{{ timeframe }}';
     var CHART_HEIGHT = parseInt('{{ height }}', 10) || 400;
+    var TOOLBAR_H    = 36;
+    var RSI_H        = 90;
+    var INTRADAY     = ['1min', '5min', '15min', '1h', '4h'];
+    var TF_SECONDS   = { '1min': 60, '5min': 300, '15min': 900, '1h': 3600, '4h': 14400 };
 
     var container   = document.getElementById(CHART_ID + '-container');
     var canvasEl    = document.getElementById(CHART_ID);
+    var rsiEl       = document.getElementById(CHART_ID + '-rsi');
     var legendEl    = document.getElementById(CHART_ID + '-legend');
+    var countdownEl = document.getElementById(CHART_ID + '-countdown');
     var loadingEl   = document.getElementById(CHART_ID + '-loading');
     var errorEl     = document.getElementById(CHART_ID + '-error');
 
     if (!container || !canvasEl) return;
+
+    /* Page data: the instrument page ships the operator's open bets and
+       the signals' entries as json_script blocks named after this widget.
+       Absent blocks (the widget on any other page) mean "nothing to draw",
+       not an error. */
+    function pageJson(suffix) {
+        var el = document.getElementById(CHART_ID + suffix);
+        if (!el) return [];
+        try { var v = JSON.parse(el.textContent); return Array.isArray(v) ? v : []; }
+        catch (e) { return []; }
+    }
+    var POSITIONS = pageJson('-positions');
+    var SIGNALS   = pageJson('-signals');
 
     // ── Theme colours ────────────────────────────────────────────────────
     function getThemeColors() {
@@ -272,6 +401,11 @@ Parameters:
         }
         var accent = token('--accent', isDark ? '#00e868' : '#00994d');
         var red = token('--accent-red', '#e83030');
+        /* Indicator tones come from the platform's secondary palette so an
+           overlay never borrows the candle green or the down red — a
+           moving average the same colour as an up-candle is invisible on
+           the bar it matters most. Fallbacks restate the dashboard's own
+           gold/blue/purple so the widget reads the same off-platform. */
         return {
             isDark:       isDark,
             alpha:        alpha,
@@ -281,6 +415,9 @@ Parameters:
             redDim:       alpha(red, 0.25),
             accent:       accent,
             red:          red,
+            gold:         token('--accent-gold', '#d8b020'),
+            blue:         token('--accent-blue', '#30a0e8'),
+            purple:       token('--accent-purple', '#8840d0'),
             bg:           token('--bg-void', isDark ? '#030806' : '#f0f2f0'),
             grid:         alpha(token('--border', isDark ? '#133020' : '#c0d0c0'),
                                 isDark ? 0.9 : 0.7),
@@ -288,25 +425,77 @@ Parameters:
             text:         token('--text-muted', isDark ? '#3a6850' : '#8aaa8a'),
         };
     }
+    function indicatorTone(key, c) {
+        return { sma20: c.gold, sma50: c.blue, ema20: c.purple,
+                 bb: c.alpha(c.blue, 0.7), vwap: c.gold, rsi: c.purple }[key] || c.accent;
+    }
+
+    // ── Persisted preferences (per symbol) ──────────────────────────────
+    /* localStorage can throw (private mode, blocked site data) and can be
+       empty; both mean "the defaults", never an error the operator sees. */
+    var PREF_KEY = 'sv-chart:' + SYMBOL;
+    function loadPrefs() {
+        try {
+            var raw = window.localStorage.getItem(PREF_KEY);
+            var p = raw ? JSON.parse(raw) : null;
+            return (p && typeof p === 'object') ? p : {};
+        } catch (e) { return {}; }
+    }
+    function savePrefs() {
+        try {
+            window.localStorage.setItem(PREF_KEY, JSON.stringify({
+                type: chartType, log: logScale, indicators: activeInds,
+            }));
+        } catch (e) { /* no storage: the session keeps its state in memory */ }
+    }
 
     // ── State ────────────────────────────────────────────────────────────
+    var prefs        = loadPrefs();
     var chart        = null;
-    var mainSeries   = null;   // candlestick | line | area
+    var rsiChart     = null;
+    var rsiSeries    = null;
+    var mainSeries   = null;   // candlestick | heikin | line | area
     var volumeSeries = null;
-    var chartType    = 'candlestick';
+    var chartType    = (['candlestick', 'heikin', 'line', 'area'].indexOf(prefs.type) !== -1) ? prefs.type : 'candlestick';
+    var logScale     = !!prefs.log;
+    var activeInds   = (prefs.indicators && typeof prefs.indicators === 'object')
+                       ? prefs.indicators : { positions: true };
+    if (activeInds.positions === undefined) activeInds.positions = true;
     var currentTf    = INIT_TF;
     var activeTool   = 'crosshair';
     var drawingPts   = [];
     var drawings     = [];
+    var lastBars     = [];     // the bars the overlays are computed from
+    var indSeries    = {};     // key -> [line series] on the main chart
+    var posLines     = [];     // price lines belonging to positions
+    var syncing      = false;  // guard against range ping-pong between panes
+    var countdownTimer = null;
+
+    function isIntraday(tf) { return INTRADAY.indexOf(tf) !== -1; }
+
+    // ── Layout ───────────────────────────────────────────────────────────
+    /* One place decides the pane heights: the toolbar takes 36px, the RSI
+       pane 90px when on, the main chart the rest. Fullscreen changes the
+       total, so both charts are re-sized from the container's live box. */
+    function layout() {
+        var total = container.classList.contains('sv-chart-fs') || document.fullscreenElement === container
+            ? container.clientHeight : CHART_HEIGHT;
+        var rsiOn = !!activeInds.rsi;
+        var rsiH = rsiOn ? RSI_H : 0;
+        var bodyH = Math.max(120, total - TOOLBAR_H - rsiH);
+        canvasEl.style.height = bodyH + 'px';
+        rsiEl.style.height = rsiH + 'px';
+        rsiEl.classList.toggle('on', rsiOn);
+        var w = container.offsetWidth || 600;
+        if (chart) chart.applyOptions({ width: w, height: bodyH });
+        if (rsiChart && rsiOn) rsiChart.applyOptions({ width: w, height: rsiH });
+    }
 
     // ── Initialise chart ─────────────────────────────────────────────────
-    function initChart() {
-        var c = getThemeColors();
-        var bodyH = CHART_HEIGHT - 36; // subtract toolbar
-
-        chart = LightweightCharts.createChart(canvasEl, {
+    function baseOptions(c, h) {
+        return {
             width:  container.offsetWidth || 600,
-            height: bodyH,
+            height: h,
             layout: {
                 background: { type: 'solid', color: c.bg },
                 textColor:  c.text,
@@ -326,7 +515,14 @@ Parameters:
             timeScale: { borderColor: c.border, timeVisible: true, secondsVisible: false },
             handleScroll: true,
             handleScale:  true,
-        });
+        };
+    }
+
+    function initChart() {
+        var c = getThemeColors();
+        var bodyH = CHART_HEIGHT - TOOLBAR_H;
+
+        chart = LightweightCharts.createChart(canvasEl, baseOptions(c, bodyH));
 
         addSeries(chartType);
 
@@ -339,11 +535,63 @@ Parameters:
         });
         chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
+        applyLogScale();
+
         // Crosshair legend
         chart.subscribeCrosshairMove(onCrosshair);
 
         // Click handler for drawing tools
         chart.subscribeClick(onChartClick);
+
+        /* The RSI pane follows the main chart's viewport and vice versa:
+           a zoom on either moves both. The guard stops the echo — each
+           setVisibleLogicalRange fires the other pane's subscriber. */
+        chart.timeScale().subscribeVisibleLogicalRangeChange(function (range) {
+            if (syncing || !rsiChart || !range) return;
+            syncing = true;
+            try { rsiChart.timeScale().setVisibleLogicalRange(range); } catch (e) {}
+            syncing = false;
+        });
+
+        if (activeInds.rsi) ensureRsiPane();
+        paintToolbarState();
+        layout();
+    }
+
+    function ensureRsiPane() {
+        if (rsiChart) return;
+        var c = getThemeColors();
+        rsiEl.classList.add('on');
+        rsiEl.style.height = RSI_H + 'px';
+        var opts = baseOptions(c, RSI_H);
+        opts.timeScale.visible = false; /* one time axis for both panes */
+        rsiChart = LightweightCharts.createChart(rsiEl, opts);
+        rsiSeries = rsiChart.addLineSeries({
+            color: indicatorTone('rsi', c), lineWidth: 1,
+            priceLineVisible: false, lastValueVisible: true,
+            priceFormat: { type: 'price', precision: 1, minMove: 0.1 },
+            autoscaleInfoProvider: function () {
+                return { priceRange: { minValue: 0, maxValue: 100 } };
+            },
+        });
+        /* 30/70 are the overbought/oversold guides the reading is judged
+           against; without them the pane is a squiggle with no scale. */
+        rsiSeries.createPriceLine({ price: 70, color: c.redDim, lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
+        rsiSeries.createPriceLine({ price: 30, color: c.accentDim, lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
+        rsiChart.timeScale().subscribeVisibleLogicalRangeChange(function (range) {
+            if (syncing || !chart || !range) return;
+            syncing = true;
+            try { chart.timeScale().setVisibleLogicalRange(range); } catch (e) {}
+            syncing = false;
+        });
+        /* A crosshair on the RSI pane should light the main legend too;
+           the main chart's own crosshair drives the legend directly. */
+        rsiChart.subscribeCrosshairMove(function (param) {
+            if (!param || !param.time || !chart) return;
+            try { chart.setCrosshairPosition(NaN, param.time, mainSeries); } catch (e) {}
+        });
     }
 
     // ── Add/replace main series ──────────────────────────────────────────
@@ -352,9 +600,10 @@ Parameters:
         if (mainSeries) {
             try { chart.removeSeries(mainSeries); } catch(e) {}
             mainSeries = null;
+            posLines = []; /* they died with the series */
         }
         chartType = type;
-        if (type === 'candlestick') {
+        if (type === 'candlestick' || type === 'heikin') {
             mainSeries = chart.addCandlestickSeries({
                 upColor:        c.accent,
                 downColor:      c.red,
@@ -362,6 +611,8 @@ Parameters:
                 borderDownColor:c.red,
                 wickUpColor:    c.accent,
                 wickDownColor:  c.red,
+                lastValueVisible: true,
+                priceLineVisible: true,
             });
         } else if (type === 'line') {
             mainSeries = chart.addLineSeries({
@@ -376,8 +627,269 @@ Parameters:
                 topColor:    c.accentWash,
                 bottomColor: c.accentGhost,
                 lineWidth:   2,
+                lastValueVisible: true,
+                priceLineVisible: true,
             });
         }
+    }
+
+    /* Heikin-Ashi: each candle averages the raw bar and the previous HA
+       candle, so trends read as runs of one colour. Computed here from
+       the raw bars — the API keeps serving what actually traded. */
+    function heikinAshi(bars) {
+        var out = [], prev = null;
+        for (var i = 0; i < bars.length; i++) {
+            var b = bars[i];
+            var close = (b.open + b.high + b.low + b.close) / 4;
+            var open = prev ? (prev.open + prev.close) / 2 : (b.open + b.close) / 2;
+            var ha = { time: b.time, open: open, close: close,
+                       high: Math.max(b.high, open, close),
+                       low: Math.min(b.low, open, close) };
+            out.push(ha);
+            prev = ha;
+        }
+        return out;
+    }
+
+    function seriesData(bars) {
+        if (chartType === 'candlestick') {
+            return bars.map(function(b) {
+                return { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
+            });
+        }
+        if (chartType === 'heikin') return heikinAshi(bars);
+        return bars.map(function(b) { return { time: b.time, value: b.close }; });
+    }
+
+    // ── Indicator maths (from the loaded bars) ──────────────────────────
+    function sma(bars, n) {
+        var out = [], sum = 0;
+        for (var i = 0; i < bars.length; i++) {
+            sum += bars[i].close;
+            if (i >= n) sum -= bars[i - n].close;
+            if (i >= n - 1) out.push({ time: bars[i].time, value: sum / n });
+        }
+        return out;
+    }
+    function ema(bars, n) {
+        var out = [], k = 2 / (n + 1), prev = null;
+        for (var i = 0; i < bars.length; i++) {
+            var v = bars[i].close;
+            if (prev === null) {
+                if (i < n - 1) continue;
+                var s = 0;
+                for (var j = i - n + 1; j <= i; j++) s += bars[j].close;
+                prev = s / n;
+            } else {
+                prev = v * k + prev * (1 - k);
+            }
+            out.push({ time: bars[i].time, value: prev });
+        }
+        return out;
+    }
+    function bollinger(bars, n, mult) {
+        var mid = [], up = [], lo = [];
+        for (var i = n - 1; i < bars.length; i++) {
+            var s = 0, s2 = 0;
+            for (var j = i - n + 1; j <= i; j++) { s += bars[j].close; }
+            var m = s / n;
+            for (j = i - n + 1; j <= i; j++) { s2 += (bars[j].close - m) * (bars[j].close - m); }
+            var sd = Math.sqrt(s2 / n);
+            mid.push({ time: bars[i].time, value: m });
+            up.push({ time: bars[i].time, value: m + mult * sd });
+            lo.push({ time: bars[i].time, value: m - mult * sd });
+        }
+        return [up, mid, lo];
+    }
+    /* Session-anchored: the running average resets at each UTC day so the
+       line is the day's fair price, the way a desk reads it. Bars without
+       volume contribute nothing — a zero-volume bar cannot move a
+       volume-weighted average. */
+    function vwap(bars) {
+        var out = [], pv = 0, vol = 0, day = null;
+        for (var i = 0; i < bars.length; i++) {
+            var b = bars[i];
+            var d = (typeof b.time === 'number') ? Math.floor(b.time / 86400) : b.time;
+            if (d !== day) { day = d; pv = 0; vol = 0; }
+            var v = b.volume || 0;
+            pv += ((b.high + b.low + b.close) / 3) * v;
+            vol += v;
+            if (vol > 0) out.push({ time: b.time, value: pv / vol });
+        }
+        return out;
+    }
+    function rsi(bars, n) {
+        var out = [], gain = 0, loss = 0;
+        for (var i = 1; i < bars.length; i++) {
+            var ch = bars[i].close - bars[i - 1].close;
+            var g = ch > 0 ? ch : 0, l = ch < 0 ? -ch : 0;
+            if (i <= n) {
+                gain += g; loss += l;
+                if (i === n) {
+                    gain /= n; loss /= n;
+                    out.push({ time: bars[i].time, value: loss === 0 ? 100 : 100 - 100 / (1 + gain / loss) });
+                }
+                continue;
+            }
+            gain = (gain * (n - 1) + g) / n;
+            loss = (loss * (n - 1) + l) / n;
+            out.push({ time: bars[i].time, value: loss === 0 ? 100 : 100 - 100 / (1 + gain / loss) });
+        }
+        return out;
+    }
+
+    // ── Overlays: indicators, positions, signals ─────────────────────────
+    /* setData on the main series wipes its markers and a removed series
+       takes its price lines with it, so everything drawn ON TOP of the
+       bars is re-applied from scratch after every load — the background
+       refresh included — from the one function below. */
+    function clearIndicatorSeries(key) {
+        (indSeries[key] || []).forEach(function (s) { try { chart.removeSeries(s); } catch (e) {} });
+        delete indSeries[key];
+    }
+    function applyIndicators(bars) {
+        var c = getThemeColors();
+        var intraday = isIntraday(currentTf);
+        var vwapBtn = container.querySelector('.sv-ind-btn[data-ind="vwap"]');
+        if (vwapBtn) vwapBtn.hidden = !intraday;
+
+        Object.keys(indSeries).forEach(clearIndicatorSeries);
+        function line(key, data, width, style) {
+            var s = chart.addLineSeries({
+                color: indicatorTone(key, c), lineWidth: width || 1,
+                lineStyle: style || LightweightCharts.LineStyle.Solid,
+                priceLineVisible: false, lastValueVisible: false,
+                crosshairMarkerVisible: false,
+            });
+            s.setData(data);
+            (indSeries[key] = indSeries[key] || []).push(s);
+        }
+        if (activeInds.sma20) line('sma20', sma(bars, 20));
+        if (activeInds.sma50) line('sma50', sma(bars, 50));
+        if (activeInds.ema20) line('ema20', ema(bars, 20));
+        if (activeInds.bb) {
+            var bands = bollinger(bars, 20, 2);
+            line('bb', bands[0], 1, LightweightCharts.LineStyle.Dotted);
+            line('bb', bands[1], 1);
+            line('bb', bands[2], 1, LightweightCharts.LineStyle.Dotted);
+        }
+        if (activeInds.vwap && intraday) line('vwap', vwap(bars), 1, LightweightCharts.LineStyle.Dashed);
+
+        if (activeInds.rsi) {
+            ensureRsiPane();
+            rsiSeries.setData(rsi(bars, 14));
+        } else if (rsiChart) {
+            try { rsiChart.remove(); } catch (e) {}
+            rsiChart = null; rsiSeries = null;
+            rsiEl.classList.remove('on');
+        }
+    }
+
+    /* A marker must sit on a bar the series actually has; opened_at is a
+       wall-clock instant that rarely equals a bar boundary. Daily bars
+       carry 'YYYY-MM-DD' strings, intraday bars epoch seconds — both are
+       reduced to epoch for the nearest-bar search, and the marker gets
+       the bar's own time value back, whichever shape it was. */
+    function barEpoch(t) {
+        if (typeof t === 'number') return t;
+        if (typeof t === 'string') return Date.parse(t + 'T00:00:00Z') / 1000;
+        if (t && t.year) return Date.UTC(t.year, t.month - 1, t.day) / 1000;
+        return NaN;
+    }
+    function nearestBarTime(bars, epoch) {
+        if (!bars.length || typeof epoch !== 'number' || !isFinite(epoch)) return null;
+        var first = barEpoch(bars[0].time), last = barEpoch(bars[bars.length - 1].time);
+        if (epoch < first) return null; /* opened before the loaded range: nowhere honest to put it */
+        if (epoch >= last) return bars[bars.length - 1].time;
+        var lo = 0, hi = bars.length - 1;
+        while (lo < hi) {
+            var mid = (lo + hi) >> 1;
+            if (barEpoch(bars[mid].time) < epoch) lo = mid + 1; else hi = mid;
+        }
+        /* The bar that CONTAINS the instant, never the closest one: a
+           daily bar opens at midnight, so an entry at 15:30 is nearer to
+           tomorrow's open than to today's and would draw one session
+           late — on a chart, a day is a lie. */
+        if (barEpoch(bars[lo].time) === epoch) return bars[lo].time;
+        return bars[Math.max(0, lo - 1)].time;
+    }
+    function fmtPrice(v) {
+        if (typeof v !== 'number' || !isFinite(v)) return '—';
+        return v >= 100 ? v.toFixed(2) : v.toFixed(4);
+    }
+
+    function applyPositions(bars) {
+        if (!mainSeries) return;
+        var c = getThemeColors();
+        posLines.forEach(function (pl) { try { mainSeries.removePriceLine(pl); } catch (e) {} });
+        posLines = [];
+        var markers = [];
+        if (activeInds.positions) {
+            POSITIONS.forEach(function (p) {
+                var isLong = p.side === 'long';
+                var tone = isLong ? c.accent : c.red;
+                if (typeof p.entry === 'number') {
+                    posLines.push(mainSeries.createPriceLine({
+                        price: p.entry, color: tone, lineWidth: 2,
+                        lineStyle: LightweightCharts.LineStyle.Solid,
+                        axisLabelVisible: true,
+                        title: (isLong ? 'LONG ' : 'SHORT ') + (typeof p.qty === 'number' ? +p.qty.toFixed(4) : ''),
+                    }));
+                }
+                if (typeof p.stop === 'number') {
+                    posLines.push(mainSeries.createPriceLine({
+                        price: p.stop, color: c.red, lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dashed,
+                        axisLabelVisible: true, title: 'SL',
+                    }));
+                }
+                if (typeof p.tp === 'number') {
+                    posLines.push(mainSeries.createPriceLine({
+                        price: p.tp, color: c.accent, lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dashed,
+                        axisLabelVisible: true, title: 'TP',
+                    }));
+                }
+                var t = nearestBarTime(bars, p.opened_at);
+                if (t !== null) {
+                    markers.push({
+                        time: t, position: isLong ? 'belowBar' : 'aboveBar',
+                        shape: isLong ? 'arrowUp' : 'arrowDown', color: tone,
+                        text: (isLong ? 'LONG @ ' : 'SHORT @ ') + fmtPrice(p.entry),
+                    });
+                }
+            });
+            SIGNALS.forEach(function (s) {
+                var t = nearestBarTime(bars, s.at);
+                if (t === null) return;
+                var bull = s.direction === 'bullish' || s.direction === 'long' || s.direction === 'buy';
+                markers.push({
+                    time: t, position: 'inBar', shape: 'circle', size: 0.6,
+                    color: bull ? c.accentWash : c.redDim,
+                    text: String(s.label || '') + ' ' + fmtPrice(s.price),
+                });
+            });
+        }
+        /* lightweight-charts wants markers ascending by time; two on the
+           same bar are fine, out-of-order ones throw. */
+        markers.sort(function (a, b) { return barEpoch(a.time) - barEpoch(b.time); });
+        try { mainSeries.setMarkers(markers); } catch (e) {}
+    }
+
+    function applyOverlays(bars) {
+        lastBars = bars;
+        applyIndicators(bars);
+        applyPositions(bars);
+        layout();
+    }
+
+    // ── Log scale ────────────────────────────────────────────────────────
+    function applyLogScale() {
+        if (!chart) return;
+        chart.priceScale('right').applyOptions({
+            mode: logScale ? LightweightCharts.PriceScaleMode.Logarithmic
+                           : LightweightCharts.PriceScaleMode.Normal,
+        });
     }
 
     // ── Crosshair legend ─────────────────────────────────────────────────
@@ -391,16 +903,17 @@ Parameters:
         var vol = volumeSeries ? param.seriesData.get(volumeSeries) : null;
         if (!bar) { legendEl.textContent = ''; return; }
 
-        var intraday = ['1min','5min','15min','1h','4h'].indexOf(currentTf) !== -1;
+        var intraday = isIntraday(currentTf);
         var d = (typeof param.time === 'object')
             ? param.time.year + '-' + String(param.time.month).padStart(2,'0') + '-' + String(param.time.day).padStart(2,'0')
             : intraday
                 ? new Date(param.time * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
                 : new Date(param.time * 1000).toISOString().slice(0, 10);
 
-        if (chartType === 'candlestick') {
-            legendEl.innerHTML =
-                '<span style="color:var(--text-muted,#5a7a5a);">' + d + '</span>&nbsp; ' +
+        var html;
+        if (chartType === 'candlestick' || chartType === 'heikin') {
+            html =
+                '<span style="color:var(--text-muted,#5a7a5a);">' + d + (chartType === 'heikin' ? ' HA' : '') + '</span>&nbsp; ' +
                 'O <b>' + bar.open.toFixed(4) + '</b>&nbsp; ' +
                 'H <b style="color:' + c.accent + ';">' + bar.high.toFixed(4) + '</b>&nbsp; ' +
                 'L <b style="color:' + c.red + ';">' + bar.low.toFixed(4) + '</b>&nbsp; ' +
@@ -408,11 +921,54 @@ Parameters:
                 (vol ? '&nbsp; V <span style="color:var(--text-muted,#5a7a5a);">' + Number(vol.value).toLocaleString() + '</span>' : '');
         } else {
             var val = bar.value !== undefined ? bar.value : bar.close;
-            legendEl.innerHTML =
+            html =
                 '<span style="color:var(--text-muted,#5a7a5a);">' + d + '</span>&nbsp; ' +
                 '<b style="color:' + c.accent + ';">' + (val ? val.toFixed(4) : '—') + '</b>' +
                 (vol ? '&nbsp; V <span style="color:var(--text-muted,#5a7a5a);">' + Number(vol.value).toLocaleString() + '</span>' : '');
         }
+        /* Active overlays read at the same bar. BB reports its three
+           bands; a bar before an indicator's warm-up shows nothing for
+           it rather than a zero. All values are numbers from our own
+           maths — nothing here came from a server string. */
+        var LABELS = { sma20: 'SMA20', sma50: 'SMA50', ema20: 'EMA20', bb: 'BB', vwap: 'VWAP' };
+        Object.keys(indSeries).forEach(function (key) {
+            var vals = indSeries[key].map(function (s) {
+                var pt = param.seriesData.get(s);
+                return pt && typeof pt.value === 'number' ? pt.value.toFixed(4) : null;
+            }).filter(function (v) { return v !== null; });
+            if (!vals.length) return;
+            html += '<span class="sv-ind-val" style="color:' + indicatorTone(key, c) + ';">' +
+                    LABELS[key] + ' ' + vals.join('/') + '</span>';
+        });
+        if (rsiSeries) {
+            var rv = null;
+            try { var arr = rsiSeries.data(); var te = barEpoch(param.time);
+                  for (var i = arr.length - 1; i >= 0; i--) { if (barEpoch(arr[i].time) === te) { rv = arr[i].value; break; } }
+            } catch (e) {}
+            if (typeof rv === 'number') {
+                html += '<span class="sv-ind-val" style="color:' + indicatorTone('rsi', c) + ';">RSI ' + rv.toFixed(1) + '</span>';
+            }
+        }
+        legendEl.innerHTML = html;
+    }
+
+    // ── Bar-close countdown ──────────────────────────────────────────────
+    /* Intraday frames only: the forming bar closes on a clock boundary
+       the operator is waiting on. Daily and longer have no such moment
+       worth a counter, so the element empties itself and hides. */
+    function tickCountdown() {
+        var secs = TF_SECONDS[currentTf];
+        if (!secs) { countdownEl.textContent = ''; return; }
+        var now = Math.floor(Date.now() / 1000);
+        var left = secs - (now % secs);
+        var h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), s = left % 60;
+        countdownEl.textContent = 'BAR CLOSE ' +
+            (h ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    }
+    function startCountdown() {
+        if (countdownTimer) clearInterval(countdownTimer);
+        tickCountdown();
+        countdownTimer = setInterval(tickCountdown, 1000);
     }
 
     // ── Click / drawing tools ────────────────────────────────────────────
@@ -433,7 +989,7 @@ Parameters:
         } else if (activeTool === 'trendline') {
             drawingPts.push({ time: param.time, price: price });
             if (drawingPts.length === 2) {
-                var pts = drawingPts.slice().sort(function(a, b) { return a.time - b.time; });
+                var pts = drawingPts.slice().sort(function(a, b) { return barEpoch(a.time) - barEpoch(b.time); });
                 drawingPts = [];
                 var ls = chart.addLineSeries({
                     color: c.accent, lineWidth: 1,
@@ -520,15 +1076,7 @@ Parameters:
                     try { keepRange = chart.timeScale().getVisibleLogicalRange(); }
                     catch (e) { keepRange = null; }
                 }
-                if (chartType === 'candlestick') {
-                    mainSeries.setData(bars.map(function(b) {
-                        return { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
-                    }));
-                } else {
-                    mainSeries.setData(bars.map(function(b) {
-                        return { time: b.time, value: b.close };
-                    }));
-                }
+                mainSeries.setData(seriesData(bars));
                 var vc = getThemeColors();
                 volumeSeries.setData(bars.map(function(b) {
                     return {
@@ -538,12 +1086,17 @@ Parameters:
                     };
                 }));
                 hasData = true;
+                /* Overlays are rebuilt from these bars BEFORE the range is
+                   restored: the RSI pane may have just been created and
+                   must receive the same viewport as the main chart. */
+                applyOverlays(bars);
                 if (keepRange) {
                     try { chart.timeScale().setVisibleLogicalRange(keepRange); }
                     catch (e) { /* a shrunk series can refuse the old range */ }
                 } else {
                     chart.timeScale().fitContent();
                 }
+                startCountdown();
             })
             .catch(function(e) {
                 if (seq !== loadSeq) return;
@@ -556,6 +1109,22 @@ Parameters:
     function showError(msg) {
         errorEl.querySelector('div').textContent = msg;
         errorEl.style.display = 'flex';
+    }
+
+    // ── Toolbar state ────────────────────────────────────────────────────
+    function paintToolbarState() {
+        var c = getThemeColors();
+        container.querySelectorAll('.sv-type-btn').forEach(function(b) {
+            b.classList.toggle('active', b.dataset.type === chartType);
+        });
+        container.querySelectorAll('.sv-ind-btn').forEach(function(b) {
+            var key = b.dataset.ind;
+            b.classList.toggle('active', !!activeInds[key]);
+            b.setAttribute('aria-pressed', activeInds[key] ? 'true' : 'false');
+            if (key !== 'positions' && key !== 'rsi') b.style.setProperty('--sv-ind-tone', indicatorTone(key, c));
+        });
+        var logBtn = container.querySelector('.sv-ctl-btn[data-ctl="log"]');
+        if (logBtn) { logBtn.classList.toggle('active', logScale); logBtn.setAttribute('aria-pressed', logScale ? 'true' : 'false'); }
     }
 
     // ── Timeframe buttons ─────────────────────────────────────────────────
@@ -573,11 +1142,118 @@ Parameters:
     container.querySelectorAll('.sv-type-btn').forEach(function(btn) {
         btn.addEventListener('click', function() {
             var type = btn.dataset.type;
-            container.querySelectorAll('.sv-type-btn').forEach(function(b) { b.classList.remove('active'); });
-            btn.classList.add('active');
             addSeries(type);
+            paintToolbarState();
+            savePrefs();
             loadData(currentTf);
         });
+    });
+
+    // ── Indicator toggles ─────────────────────────────────────────────────
+    /* A toggle recomputes from the bars already on screen — no refetch,
+       and the viewport stays where the operator left it. */
+    container.querySelectorAll('.sv-ind-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var key = btn.dataset.ind;
+            activeInds[key] = !activeInds[key];
+            paintToolbarState();
+            savePrefs();
+            if (!chart || !hasData) return;
+            var keepRange = null;
+            try { keepRange = chart.timeScale().getVisibleLogicalRange(); } catch (e) {}
+            applyOverlays(lastBars);
+            if (keepRange) { try { chart.timeScale().setVisibleLogicalRange(keepRange); } catch (e) {} }
+        });
+    });
+
+    // ── View controls ─────────────────────────────────────────────────────
+    function toggleFullscreen() {
+        /* Fullscreen outranks the idle veil (top layer beats z-index), so
+           a locked session must not be able to open one. */
+        if (window.svIdleLock && window.svIdleLock.isLocked
+            && window.svIdleLock.isLocked()) return;
+        var inFs = document.fullscreenElement === container || container.classList.contains('sv-chart-fs');
+        if (inFs) {
+            if (document.fullscreenElement === container && document.exitFullscreen) {
+                document.exitFullscreen().catch(function () {});
+            }
+            container.classList.remove('sv-chart-fs');
+            layout();
+            return;
+        }
+        var req = container.requestFullscreen ? container.requestFullscreen() : Promise.reject();
+        Promise.resolve(req).then(function () {
+            container.classList.add('sv-chart-fs');
+            layout();
+        }).catch(function () {
+            /* No fullscreen API (or refused): pin to the viewport instead. */
+            container.classList.add('sv-chart-fs');
+            layout();
+        });
+    }
+    document.addEventListener('fullscreenchange', function () {
+        if (document.fullscreenElement !== container) container.classList.remove('sv-chart-fs');
+        layout();
+    });
+    container.querySelectorAll('.sv-ctl-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var ctl = btn.dataset.ctl;
+            if (ctl === 'log') {
+                logScale = !logScale;
+                applyLogScale();
+                paintToolbarState();
+                savePrefs();
+            } else if (ctl === 'fit') {
+                if (chart) chart.timeScale().fitContent();
+            } else if (ctl === 'fullscreen') {
+                toggleFullscreen();
+            }
+        });
+    });
+
+    // ── Keyboard: +/- zoom, arrows pan, while hovered or focused ─────────
+    /* Bound to the container, not the document: two widgets on one page
+       must not both answer, and a key typed into a search box elsewhere
+       must not move the chart. The container is focusable (tabindex) and
+       takes focus on hover so the keys work without a click first. */
+    /* Focus on a CLICK, not on a passing cursor: stealing focus on
+       hover moves the caret out of whatever the operator was typing. */
+    container.addEventListener('pointerdown', function () {
+        try { container.focus({ preventScroll: true }); } catch (e) {}
+    });
+    container.addEventListener('mouseleave', function () {
+        if (d.activeElement === container) { try { container.blur(); } catch (e) {} }
+    });
+    container.addEventListener('mouseenter', function () {
+        if (document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
+        try { container.focus({ preventScroll: true }); } catch (e) {}
+    });
+    container.addEventListener('keydown', function (ev) {
+        if (!chart) return;
+        var ts = chart.timeScale();
+        var range;
+        try { range = ts.getVisibleLogicalRange(); } catch (e) { range = null; }
+        if (!range) return;
+        var span = range.to - range.from;
+        var step = Math.max(1, Math.round(span * 0.1));
+        var handled = true;
+        /* Ctrl+= / Ctrl+- are browser zoom and Alt+Arrow is history —
+           a chart that eats them has taken the page hostage. */
+        if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+        if (ev.key === '+' || ev.key === '=') {
+            ts.setVisibleLogicalRange({ from: range.from + step, to: range.to - step });
+        } else if (ev.key === '-' || ev.key === '_') {
+            ts.setVisibleLogicalRange({ from: range.from - step, to: range.to + step });
+        } else if (ev.key === 'ArrowLeft') {
+            ts.setVisibleLogicalRange({ from: range.from - step, to: range.to - step });
+        } else if (ev.key === 'ArrowRight') {
+            ts.setVisibleLogicalRange({ from: range.from + step, to: range.to + step });
+        } else if (ev.key === 'Escape' && container.classList.contains('sv-chart-fs')) {
+            toggleFullscreen();
+        } else {
+            handled = false;
+        }
+        if (handled) ev.preventDefault();
     });
 
     // ── Auto-resize ───────────────────────────────────────────────────────
@@ -585,9 +1261,7 @@ Parameters:
     window.addEventListener('resize', function() {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(function() {
-            if (chart && container.offsetWidth > 0) {
-                chart.applyOptions({ width: container.offsetWidth });
-            }
+            if (chart && container.offsetWidth > 0) layout();
         }, 150);
     });
 
@@ -617,7 +1291,7 @@ Parameters:
         }
     }
 
-    // ── Live handle ─────────────────────────────────────────────────
+    // ── Live handle ─────────────────────────────────────────────
     // The widget registers itself so page-level pollers can keep it
     // honest without reaching into its closure: refresh() refetches the
     // ACTIVE timeframe (the chart used to load once and freeze under a
@@ -625,7 +1299,10 @@ Parameters:
     // refreshes so the tape visibly moves with the quote loop. tick
     // touches candlestick mode only — a line/area repaint comes from
     // refresh, and inventing a bar for it would draw a price at a time
-    // the API never served.
+    // the API never served; Heikin-Ashi candles are averages, so a raw
+    // tick grafted on one would lie too. The series' own last-value line
+    // on the price axis follows the update, which is what keeps the
+    // axis price live between refreshes.
     window.svCharts = window.svCharts || {};
     window.svCharts[CHART_ID] = {
         refresh: function () { if (chart) loadData(currentTf, {background: true}); },

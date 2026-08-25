@@ -207,12 +207,24 @@ def _book_truth(user, portfolio):
     stops = _initial_stops(user) if n_open else {}
 
     detail, r_sum, r_n, bot_r_sum, bot_r_n = [], 0.0, 0, 0.0, 0
+    # The long/short split the POSITIONS cell prints under its count. A row
+    # whose direction column is blank still renders as LONG below (the sign
+    # defaults that way so its P&L has a side), but it cannot be COUNTED as
+    # one: a split that silently files unknowns under long is a claim of
+    # exposure the book never made, so one unreadable side dashes both.
+    n_long, n_short, sides_unreadable = 0, 0, False
     for row in sorted(rows,
                       key=lambda p: getattr(p, "opened_at", None) or _EPOCH,
                       reverse=True):
         source = "bot" if getattr(row, "source", "") == "bot" else "manual"
         direction = (getattr(row, "direction", "") or "").lower()
         sign = -1 if direction in ("short", "sell") else 1
+        if direction in ("short", "sell"):
+            n_short += 1
+        elif direction in ("long", "buy"):
+            n_long += 1
+        else:
+            sides_unreadable = True
         trade_id = getattr(row, "trade_id", None)
         entry = _f(row.entry_price)
         mark = _f(row.current_price)
@@ -304,6 +316,13 @@ def _book_truth(user, portfolio):
 
     out["panel_open_pnl"] = unrealized
     out["panel_open_pnl_display"] = _signed(unrealized)
+    # Both 0 only for an EMPTY book; over an open book with a side nothing
+    # could read, None — the cell prints an em-dash, never a 0 that reads
+    # as "no shorts".
+    if n_open and sides_unreadable:
+        out["panel_n_long"] = out["panel_n_short"] = None
+    else:
+        out["panel_n_long"], out["panel_n_short"] = n_long, n_short
     out["panel_open_r"] = round(r_sum, 2) if r_n else None
     out["panel_open_r_display"] = f"{r_sum:+.2f}R" if r_n else None
     out["panel_open_r_n"] = r_n
@@ -964,6 +983,8 @@ def sauron_context(request):
         "panel_book_coverage": "",
         "panel_open_pnl": None,
         "panel_open_pnl_display": None,
+        "panel_n_long": 0,
+        "panel_n_short": 0,
         "panel_open_r": None,
         "panel_open_r_display": None,
         "panel_open_r_n": 0,

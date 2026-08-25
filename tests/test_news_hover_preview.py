@@ -125,10 +125,11 @@ class NewsHoverPreviewTests(TestCase):
         self.assertContains(resp, 'data-nf-instruments="AAPL, MSFT"')
 
     def test_the_dwell_script_is_armed(self):
-        """The contract the user asked for, pinned: a TWO-second dwell on
-        the feed rows opens the portal card."""
+        """The contract, pinned: a dwell on the feed rows opens the portal
+        card, on the platform's ONE hover beat (window.SV_HOVER_BEAT_MS) —
+        the feed no longer keeps its own two seconds."""
         _article()
         resp = self.client.get("/news/")
         self.assertContains(resp, 'id="newsFeedBody"')
-        self.assertContains(resp, "HOVER_DELAY_MS = 2000")
+        self.assertContains(resp, "HOVER_DELAY_MS = (window.SV_HOVER_BEAT_MS || 450)")
         self.assertContains(resp, "nf-pop")

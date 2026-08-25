@@ -210,7 +210,8 @@
         });
         return;
     }
-    var HOVER_DELAY_MS = 2000, GAP = 8;
+    // The platform's one hover beat, declared in base.html's head.
+    var HOVER_DELAY_MS = (window.SV_HOVER_BEAT_MS || 450), GAP = 8;
     var pop = document.createElement('div');
     pop.className = 'nf-pop';
     pop.id = 'brfPop';

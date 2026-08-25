@@ -168,6 +168,7 @@ Why it is shaped this way
                 deferred = true;
                 return;
             }
+            if (held) delete held[name];   /* a newer payload just landed */
             node.innerHTML = fresh.innerHTML;
             swapped = true;
             /* The donut partial draws its segments from script, and innerHTML

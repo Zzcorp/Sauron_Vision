@@ -10,12 +10,47 @@
       <div class="card nd-article">
         <div class="nd-meta">
           <span class="nd-source">{{ article.source }}</span>
+          {% if facts.domain %}<span class="nd-domain">{{ facts.domain }}</span>{% endif %}
           <span class="nd-dot">·</span>
           <span>{{ article.published_at|date:"M d, Y · H:i" }}</span>
           <span class="nd-dot">·</span>
           <span>{{ article.published_at|timesince }} ago</span>
         </div>
         <h1 class="nd-title">{{ article.title }}</h1>
+
+        {% comment %}
+        Reading facts strip. Each cell is None when the article cannot
+        support it (no text at all, not yet analysed) and shows the muted
+        em-dash: "0 words · 0 min" would claim the article was measured
+        and found empty.
+        {% endcomment %}
+        <div class="nd-facts">
+          <div class="nd-fact">
+            <span class="nd-fact-k">WORDS</span>
+            <span class="nd-fact-v">{% if facts.words is not None %}{{ facts.words }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+            {% if facts.text_kind %}<span class="nd-fact-s">{{ facts.text_kind }}</span>{% endif %}
+          </div>
+          <div class="nd-fact">
+            <span class="nd-fact-k">READ</span>
+            <span class="nd-fact-v">{% if facts.read_min is not None %}{{ facts.read_min }} min{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+          </div>
+          <div class="nd-fact">
+            <span class="nd-fact-k">ANALYSED</span>
+            <span class="nd-fact-v">{% if facts.latency is not None %}{{ facts.latency }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+            <span class="nd-fact-s">{% if facts.latency is not None %}after scrape{% else %}not yet processed{% endif %}</span>
+          </div>
+          <div class="nd-fact">
+            <span class="nd-fact-k">SCRAPED</span>
+            <span class="nd-fact-v">{{ article.scraped_at|timesince }}</span>
+            <span class="nd-fact-s">ago</span>
+          </div>
+          <div class="nd-fact">
+            <span class="nd-fact-k">INSTRUMENTS</span>
+            <span class="nd-fact-v">{% if affected %}{{ affected|length }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span>
+            <span class="nd-fact-s">{% if affected %}tagged{% else %}none tagged{% endif %}</span>
+          </div>
+        </div>
+
         {% if article.url %}
           <a href="{{ article.url }}" target="_blank" rel="noopener" class="btn btn-primary btn-sm" style="margin:10px 0 18px;">
             ↗ OPEN ORIGINAL SOURCE
@@ -30,6 +65,20 @@
             {% else %}<em style="color:var(--text-muted);">No summary available. Click "OPEN ORIGINAL SOURCE" to read the full article.</em>
             {% endif %}
           </div>
+        </div>
+
+        <div class="nd-section" id="nd-keywords">
+          <div class="nd-section-title">KEYWORDS</div>
+          {% if keywords %}
+          <div class="nd-chips nd-kw">
+            {% for k in keywords %}
+              <span class="nd-kw-chip nd-kw-{{ k.kind }}" title="{{ k.count }}× in the text">{{ k.text }}{% if k.count > 1 %}<span class="nd-kw-n">{{ k.count }}</span>{% endif %}</span>
+            {% endfor %}
+          </div>
+          <div class="nd-kw-legend"><span class="nd-kw-chip nd-kw-entity nd-kw-sample">entity</span><span class="nd-kw-chip nd-kw-ticker nd-kw-sample">ticker</span><span class="nd-kw-chip nd-kw-term nd-kw-sample">term</span></div>
+          {% else %}
+          <div class="nd-empty"><span class="sv-unknown">&mdash;</span> no text to extract from</div>
+          {% endif %}
         </div>
 
         {% if key_points %}
@@ -81,6 +130,7 @@
       <!-- Sentiment -->
       <div class="card">
         <div class="nd-card-title">SENTIMENT</div>
+        {% if sentiment_measured %}
         <div class="nd-sent-label
           {% if sentiment > 0.2 %}pos{% elif sentiment < -0.2 %}neg{% else %}neu{% endif %}">
           {{ sentiment_label|upper }}
@@ -92,11 +142,20 @@
             background:{% if sentiment > 0.2 %}var(--accent){% elif sentiment < -0.2 %}var(--accent-red){% else %}var(--text-muted){% endif %};"></div>
         </div>
         <div class="nd-sent-axis"><span>-1</span><span>0</span><span>+1</span></div>
-        {% if article.ai_urgency %}
-        <div class="nd-kv" style="margin-top:14px;">
-          <span>Urgency</span><span class="badge badge-{{ article.ai_urgency }}">{{ article.ai_urgency|upper }}</span>
-        </div>
+        {% else %}
+        {% comment %}
+        An unscored article used to print "NEUTRAL 0.00" with the needle
+        on the midpoint: a verdict the analyst never gave.
+        {% endcomment %}
+        <div class="nd-sent-label neu"><span class="sv-unknown">&mdash;</span></div>
+        <div class="nd-sent-score">not yet scored</div>
+        <div class="nd-sent-bar"><div class="nd-sent-mid"></div></div>
+        <div class="nd-sent-axis"><span>-1</span><span>0</span><span>+1</span></div>
         {% endif %}
+        <div class="nd-kv" style="margin-top:14px;">
+          <span>Urgency</span>
+          {% if article.ai_urgency %}<span class="badge badge-{{ article.ai_urgency }}">{{ article.ai_urgency|upper }}</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
+        </div>
       </div>
 
       <!-- Affected instruments -->
@@ -111,14 +170,85 @@
       </div>
       {% endif %}
 
+      <!-- Market reaction + sentiment context, one row per instrument -->
+      {% if instrument_rows %}
+      <div class="card" id="nd-reaction">
+        <div class="nd-card-title">MARKET REACTION</div>
+        <div class="nd-tbl-wrap">
+        <table class="nd-tbl">
+          <thead><tr><th>SYM</th><th class="r">SINCE PUB</th><th class="r">DAY</th><th class="r">LAST</th></tr></thead>
+          <tbody>
+          {% for r in instrument_rows %}
+            <tr>
+              <td><a href="{% url 'instrument_detail' r.symbol %}" class="nd-tbl-sym">{{ r.symbol }}</a></td>
+              <td class="r nd-tone-{{ r.since_tone }}">{% if r.since_pct is not None %}{{ r.since_pct|floatformat:2 }}%{% else %}<span class="sv-unknown" title="No daily close on or before publication, or no live quote">&mdash;</span>{% endif %}</td>
+              <td class="r nd-tone-{{ r.day_tone }}">{% if r.day_pct is not None %}{{ r.day_pct|floatformat:2 }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+              <td class="r">{% if r.last is not None %}{{ r.last|floatformat:2 }}<span class="nd-tbl-age">{% if r.quote_age %}{{ r.quote_age }}{% endif %}</span>{% else %}<span class="sv-unknown" title="No live quote">&mdash;</span>{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        </div>
+        <div class="nd-tbl-note">Since pub = live last vs the 1d close at or before publication.</div>
+      </div>
+
+      <div class="card" id="nd-sentiment-ctx">
+        <div class="nd-card-title">SENTIMENT CONTEXT</div>
+        <div class="nd-tbl-wrap">
+        <table class="nd-tbl">
+          <thead><tr><th>SYM</th><th class="r">SCORE</th><th class="r">BULL</th><th class="r">BEAR</th><th class="r">TREND</th></tr></thead>
+          <tbody>
+          {% for r in instrument_rows %}
+            <tr>
+              <td><span class="nd-tbl-sym">{{ r.symbol }}</span>{% if r.sent_source %}<span class="nd-tbl-age">{{ r.sent_source }}</span>{% endif %}</td>
+              <td class="r nd-tone-{{ r.sent_tone }}">{% if r.sent_score is not None %}{{ r.sent_score|floatformat:2 }}{% else %}<span class="sv-unknown" title="No sentiment snapshot for this instrument">&mdash;</span>{% endif %}</td>
+              <td class="r">{% if r.bull is not None %}{{ r.bull }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+              <td class="r">{% if r.bear is not None %}{{ r.bear }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+              <td class="r">{% if r.trending is None %}<span class="sv-unknown">&mdash;</span>{% elif r.trending %}<span class="nd-trend on">▲ HOT</span>{% else %}<span class="nd-trend">quiet</span>{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Coverage -->
+      <div class="card" id="nd-coverage">
+        <div class="nd-card-title">COVERAGE · 7D</div>
+        {% if coverage %}
+        <div class="nd-cov-head">
+          <div class="nd-cov-big">{{ coverage.total }}</div>
+          <div class="nd-cov-sub">article{{ coverage.total|pluralize }} on these instruments</div>
+        </div>
+        <div class="nd-kv nd-cov-rank">
+          <span>This report</span>
+          <span class="{% if coverage.first %}nd-tone-up{% endif %}">{{ coverage.rank_label }} to file{% if coverage.first %} · FIRST{% endif %}</span>
+        </div>
+        {% if coverage.by_source %}
+        <div class="nd-cov-src">
+          {% for s in coverage.by_source %}
+            <div class="nd-cov-row">
+              <span class="nd-cov-name">{{ s.source }}</span>
+              <span class="nd-cov-bar"><span style="width:{% widthratio s.n coverage.max_source 100 %}%"></span></span>
+              <span class="nd-cov-n">{{ s.n }}</span>
+            </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="nd-empty"><span class="sv-unknown">&mdash;</span> no instruments tagged, nothing to count coverage of</div>
+        {% endif %}
+      </div>
+
       <!-- Related news -->
       {% if related %}
       <div class="card">
         <div class="nd-card-title">RELATED</div>
         {% for r in related %}
-          <a href="{% url 'news_detail' r.id %}" class="nd-related">
-            <div class="nd-related-t">{{ r.title|truncatechars:70 }}</div>
-            <div class="nd-related-m">{{ r.source }} · {{ r.published_at|timesince }} ago</div>
+          <a href="{% url 'news_detail' r.article.id %}" class="nd-related">
+            <div class="nd-related-t"><span class="nd-rel-dot nd-dot-{{ r.tone }}" title="{% if r.tone == 'unknown' %}not scored{% else %}sentiment {{ r.tone }}{% endif %}"></span>{{ r.article.title|truncatechars:70 }}</div>
+            <div class="nd-related-m">{{ r.article.source }} · {{ r.article.published_at|timesince }} ago{% if r.urgency %} <span class="nd-rel-urg badge-{{ r.urgency }}">{{ r.urgency|upper }}</span>{% endif %}</div>
           </a>
         {% endfor %}
       </div>
@@ -135,6 +265,7 @@
   .nd-article { padding: 28px 32px; }
   .nd-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); letter-spacing: 1px; }
   .nd-source { color: var(--accent); font-weight: 700; }
+  .nd-domain { margin-left: 8px; opacity: .7; letter-spacing: 0; }
   .nd-dot { margin: 0 8px; opacity: .5; }
   .nd-title { font-family: var(--font-heading); font-size: 28px; font-weight: 700;
               color: var(--text-primary); line-height: 1.25; margin: 12px 0 6px; }
@@ -147,6 +278,31 @@
   .nd-points li { padding: 8px 0; border-bottom: 1px dashed var(--border);
                   color: var(--text-primary); font-size: 14px; line-height: 1.5; }
   .nd-bullet { color: var(--accent); margin-right: 8px; }
+  .nd-empty { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+  .sv-unknown { color: var(--text-muted); opacity: .6; }
+
+  /* reading facts strip */
+  .nd-facts { display: flex; flex-wrap: wrap; gap: 0; margin: 12px 0 8px;
+              border: 1px solid var(--border); border-radius: 6px; background: var(--bg-void); }
+  .nd-fact { flex: 1 1 100px; padding: 8px 12px; border-right: 1px solid var(--border);
+             display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .nd-fact:last-child { border-right: 0; }
+  .nd-fact-k { font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px; color: var(--text-muted); }
+  .nd-fact-v { font-family: var(--font-display); font-size: 16px; font-weight: 700; color: var(--text-primary); }
+  .nd-fact-s { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); white-space: nowrap; }
+
+  /* keywords */
+  .nd-kw { gap: 8px; }
+  .nd-kw-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px;
+                border-radius: 10px; font-family: var(--font-mono); font-size: 11px;
+                border: 1px solid transparent; }
+  .nd-kw-entity { background: rgba(216,176,32,.12); color: var(--accent-gold);
+                  border-color: rgba(216,176,32,.35); font-weight: 700; letter-spacing: .5px; }
+  .nd-kw-ticker { background: var(--accent-dim); color: var(--accent); font-weight: 700; }
+  .nd-kw-term { background: transparent; color: var(--text-secondary); border-color: var(--border); }
+  .nd-kw-n { font-size: 9px; opacity: .7; padding-left: 6px; border-left: 1px solid currentColor; }
+  .nd-kw-legend { margin-top: 10px; display: flex; gap: 6px; }
+  .nd-kw-sample { font-size: 9px; padding: 1px 8px; opacity: .7; }
 
   .nd-side .card { margin-bottom: 18px; }
   .nd-card-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 3px;
@@ -193,12 +349,48 @@
              text-decoration: none; transition: all .15s; }
   .nd-chip:hover { background: var(--accent); color: var(--bg-void); }
 
+  /* per-instrument tables */
+  .nd-tbl-wrap { overflow-x: auto; }
+  .nd-tbl { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
+  .nd-tbl th { font-size: 9px; letter-spacing: 2px; color: var(--text-muted); font-weight: 400;
+               text-align: left; padding: 0 4px 6px; border-bottom: 1px solid var(--border); }
+  .nd-tbl td { padding: 6px 4px; border-bottom: 1px dashed var(--border); color: var(--text-primary);
+               white-space: nowrap; }
+  .nd-tbl tr:last-child td { border-bottom: 0; }
+  .nd-tbl .r { text-align: right; }
+  .nd-tbl-sym { color: var(--accent); font-weight: 700; text-decoration: none; }
+  .nd-tbl-age { display: block; font-size: 9px; color: var(--text-muted); }
+  .nd-tbl-note { margin-top: 8px; font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); }
+  .nd-tone-up { color: var(--accent); }
+  .nd-tone-down { color: var(--accent-red); }
+  .nd-tone-flat { color: var(--text-secondary); }
+  .nd-trend { font-size: 9px; letter-spacing: 1px; color: var(--text-muted); }
+  .nd-trend.on { color: var(--accent-gold); font-weight: 700; }
+
+  /* coverage */
+  .nd-cov-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+  .nd-cov-big { font-family: var(--font-display); font-size: 28px; font-weight: 900; color: var(--text-primary); }
+  .nd-cov-sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+  .nd-cov-rank { padding: 6px 0 10px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+  .nd-cov-row { display: grid; grid-template-columns: 90px 1fr 28px; align-items: center; gap: 8px;
+                font-family: var(--font-mono); font-size: 10px; padding: 3px 0; }
+  .nd-cov-name { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nd-cov-bar { height: 6px; background: var(--bg-void); border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  .nd-cov-bar span { display: block; height: 100%; background: var(--accent); }
+  .nd-cov-n { text-align: right; color: var(--text-primary); }
+
   .nd-related { display: block; padding: 10px 0; border-bottom: 1px solid var(--border);
                 text-decoration: none; }
   .nd-related:last-child { border-bottom: 0; }
   .nd-related-t { color: var(--text-primary); font-size: 12px; line-height: 1.4; }
   .nd-related-m { color: var(--text-muted); font-size: 10px; font-family: var(--font-mono); margin-top: 3px; }
   .nd-related:hover .nd-related-t { color: var(--accent); }
+  .nd-rel-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px;
+                vertical-align: middle; background: var(--border-glow); }
+  .nd-dot-up { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .nd-dot-down { background: var(--accent-red); box-shadow: 0 0 6px var(--accent-red); }
+  .nd-dot-flat { background: var(--text-muted); }
+  .nd-rel-urg { display: inline-block; padding: 0 6px; border-radius: 6px; font-size: 8px; letter-spacing: 1px; margin-left: 4px; }
 
   .nd-kv { display: flex; justify-content: space-between; font-family: var(--font-mono);
            font-size: 11px; color: var(--text-secondary); }

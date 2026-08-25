@@ -1048,6 +1048,22 @@
             font-family: var(--font-display); line-height: 1.1;
         }
         .ip-cat .ip-sub { font-size: 9px; color: var(--text-secondary); }
+        /* OPEN P&L is the band's headline figure and reads at the size of
+           one: a step above the sibling counts, tabular so a swing from
+           +1,234.56 to -987.65 keeps its columns. The cell floats in the
+           same scroller as the rest — nothing pins its width, so a wider
+           figure pushes the strip rather than clipping. */
+        .ip-cat-pnl .ip-count { font-size: 17px; font-variant-numeric: tabular-nums; letter-spacing: 0.3px; }
+        .ip-cat-pnl .ip-count .sv-unknown { font-size: 14px; }
+        /* The long/short strip above the POSITIONS rows. */
+        .ip-split {
+            display: flex; align-items: baseline; gap: 10px;
+            padding: 4px 16px 6px; margin-bottom: 4px;
+            border-bottom: 1px solid var(--border);
+            font-family: var(--font-display); font-size: 11px; font-weight: 700;
+            letter-spacing: 0.6px; font-variant-numeric: tabular-nums;
+        }
+        .ip-split-pnl { margin-left: auto; font-size: 13px; }
         /* The tone class sits on .ip-count on some cells and on a span
            INSIDE it on the live ones — the refresher swaps innerHTML, not
            attributes, so a cell that repaints has to carry its colour on a
@@ -6704,3 +6720,154 @@ a.sig-sym:hover { color: var(--accent); text-decoration: underline; }
 .nf-pop-chip--aggressive { color: var(--up); border-color: var(--up); }
 .nf-pop-chip--defensive  { color: var(--down); border-color: var(--down); }
 .nf-pop-chip--balanced   { color: var(--accent-gold); border-color: var(--accent-gold); }
+
+/* ── Gollum — the guide at the bottom-left, opposite the Palantír ────
+   Same anchoring vocabulary as the seeing-stone (--se-left-chrome /
+   --se-bottom-edge adapt to the sidebar and the headband), same orb
+   craft: a stone with two great eyes that look about, blink, widen when
+   something changed, and narrow when he is listening. */
+.gollum-fab {
+    position: fixed;
+    left: calc(var(--se-left-chrome) + 18px);
+    bottom: var(--se-bottom-edge);
+    width: var(--se-fab-size); height: var(--se-fab-size);
+    border-radius: 50%;
+    /* The overlay ladder, not a hand-picked number: the idle veil sits at
+       --z-dialog and MUST cover him — a locked screen with a working
+       search box is a screen that is not locked. */
+    z-index: var(--z-fab, 2100);
+    border: 1px solid rgba(0,232,104,0.35);
+    padding: 0; cursor: pointer; overflow: visible;
+    box-sizing: border-box;
+    background: radial-gradient(circle at 50% 40%,
+        color-mix(in srgb, var(--accent) 12%, var(--bg-card)) 0%, color-mix(in srgb, var(--bg-void) 92%, transparent) 70%, color-mix(in srgb, var(--bg-void) 96%, transparent) 100%);
+    box-shadow:
+        inset -3px 0 8px rgba(0,0,0,0.55),
+        inset 3px 0 6px rgba(0,0,0,0.40),
+        inset 0 -3px 6px rgba(0,0,0,0.50),
+        0 4px 18px rgba(0,232,104,0.16),
+        0 1px 3px rgba(0,0,0,0.45);
+    transition: box-shadow .25s ease, transform .25s ease, border-color .25s ease;
+    animation: glFloat 6s ease-in-out infinite;
+}
+.gollum-fab:hover, .gollum-fab:focus-visible {
+    outline: none;
+    border-color: var(--accent-gold);
+    box-shadow: inset -3px 0 8px rgba(0,0,0,0.55), inset 3px 0 6px rgba(0,0,0,0.40),
+                0 6px 26px rgba(216,176,32,0.28), 0 1px 3px rgba(0,0,0,0.45);
+    transform: translateY(-2px);
+}
+.gollum-fab.is-open { border-color: var(--accent); transform: none; animation: none; }
+.gollum-fab .gollum-face { width: 100%; height: 100%; display: block; }
+.gollum-fab .gl-pupil { fill: var(--bg-void); }
+.gollum-fab .gl-pupils { animation: glLook 9s ease-in-out infinite; transform-origin: 30px 29px; }
+.gollum-fab .gl-lid { fill: var(--bg-elev); transform-origin: center; transform: scaleY(0); }
+.gollum-fab .gl-lids { animation: glBlink 6.5s ease-in-out infinite; }
+.gollum-fab .gl-brow { stroke: color-mix(in srgb, var(--text-secondary) 70%, transparent); stroke-width: 1.2; stroke-linecap: round; }
+.gollum-fab .gl-mouth { stroke: color-mix(in srgb, var(--text-muted) 80%, transparent); stroke-width: 1; stroke-linecap: round; }
+.gollum-fab .gl-ring { stroke: rgba(216,176,32,0); stroke-width: .8; transition: stroke .4s; }
+.gollum-fab:hover .gl-ring, .gollum-fab.has-unseen .gl-ring {
+    stroke: rgba(216,176,32,0.55); animation: glRing 2.4s ease-out infinite; }
+.gollum-fab.has-unseen .gl-eye { filter: drop-shadow(0 0 3px var(--accent-glow)); }
+.gollum-fab.is-open .gl-lids { animation: none; }
+.gollum-fab.is-open .gl-lid { transform: scaleY(.45); }   /* listening — eyes narrow */
+.gollum-fab.is-fidget { animation: glFidget .7s cubic-bezier(.36,.07,.19,.97); }
+.gollum-fab.is-fidget .gl-pupils { animation: glDart .7s ease-in-out; }
+.gollum-count {
+    position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
+    padding: 0 5px; border-radius: 9px; background: var(--accent-gold);
+    color: var(--bg-void); font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+    line-height: 18px; text-align: center; box-shadow: 0 0 10px rgba(216,176,32,.6);
+}
+@keyframes glFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes glLook {
+    0%, 18% { transform: translate(0,0); } 25%, 40% { transform: translate(2.2px,.4px); }
+    47%, 62% { transform: translate(-2.2px,.6px); } 70%, 84% { transform: translate(.6px,-1px); }
+    90%, 100% { transform: translate(0,0); } }
+@keyframes glBlink { 0%, 92%, 100% { transform: scaleY(0); } 95%, 97% { transform: scaleY(1); } }
+@keyframes glRing { 0% { r: 25; opacity: .8; } 100% { r: 31; opacity: 0; } }
+@keyframes glFidget {
+    10%, 90% { transform: translateX(-1px) rotate(-2deg); }
+    20%, 80% { transform: translateX(2px) rotate(2deg); }
+    30%, 50%, 70% { transform: translateX(-3px) rotate(-3deg) scale(1.04); }
+    40%, 60% { transform: translateX(3px) rotate(3deg) scale(1.04); } }
+@keyframes glDart { 0%, 100% { transform: translate(0,0); } 30% { transform: translate(3px,0); } 60% { transform: translate(-3px,0); } }
+
+/* His whisper — a small bubble above the stone, tail pointing at him. */
+.gollum-bubble {
+    position: fixed;
+    left: calc(var(--se-left-chrome) + 18px);
+    bottom: calc(var(--se-bottom-edge) + var(--se-fab-size) + 12px);
+    max-width: 240px; padding: 8px 12px; z-index: var(--z-fab, 2100);
+    background: var(--bg-card); border: 1px solid var(--accent-gold);
+    border-radius: 10px 10px 10px 3px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-primary);
+    box-shadow: 0 8px 24px rgba(0,0,0,.45), 0 0 18px rgba(216,176,32,.15);
+    opacity: 0; transform: translateY(6px); transition: opacity .26s ease, transform .26s ease;
+    pointer-events: none;
+}
+.gollum-bubble.is-in { opacity: 1; transform: none; }
+
+/* The dialog — above the stone, in the card idiom. */
+.gollum-dialog {
+    position: fixed;
+    left: calc(var(--se-left-chrome) + 18px);
+    bottom: calc(var(--se-bottom-edge) + var(--se-fab-size) + 12px);
+    width: 360px; max-width: calc(100vw - var(--se-left-chrome) - 36px);
+    z-index: calc(var(--z-fab, 2100) + 1);
+    background: var(--bg-card); border: 1px solid var(--border-glow);
+    border-radius: var(--radius-lg); box-shadow: 0 18px 48px rgba(0,0,0,.55), var(--shadow-glow);
+    padding: 12px 12px 10px;
+    opacity: 0; transform: translateY(10px) scale(.98);
+    transition: opacity .22s ease, transform .22s cubic-bezier(.2,.8,.3,1);
+}
+.gollum-dialog.is-in { opacity: 1; transform: none; }
+.gollum-dialog .gl-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.gollum-dialog .gl-title { font-family: var(--font-display); font-size: 13px; font-weight: 900;
+                           letter-spacing: 4px; color: var(--accent-gold); }
+.gollum-dialog .gl-sub { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px;
+                         color: var(--text-muted); flex: 1; }
+.gollum-dialog .gl-close { background: none; border: 0; color: var(--text-muted); cursor: pointer;
+                           font-size: 12px; padding: 2px 6px; }
+.gollum-dialog .gl-close:hover { color: var(--accent); }
+.gollum-dialog .gl-input {
+    width: 100%; box-sizing: border-box; padding: 9px 11px;
+    background: var(--bg-void); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text-primary); font-family: inherit; font-size: 13px; outline: none;
+}
+.gollum-dialog .gl-input:focus { border-color: var(--accent); box-shadow: 0 0 14px var(--accent-glow); }
+.gollum-dialog .gl-whisper { margin: 8px 2px 4px; font-family: var(--font-mono); font-size: 10.5px;
+                             color: var(--accent-gold); line-height: 1.5; }
+.gollum-dialog .gl-results { max-height: 300px; overflow-y: auto; margin-top: 6px; }
+.gollum-dialog .gl-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px;
+                         border-radius: 6px; text-decoration: none; color: var(--text-primary);
+                         font-size: 12.5px; }
+.gollum-dialog .gl-row:hover, .gollum-dialog .gl-row.is-cursor,
+.gollum-dialog .gl-row:focus-visible { background: var(--bg-card-hover); outline: none; }
+.gollum-dialog .gl-kind { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 1.2px;
+                          color: var(--text-muted); border: 1px solid var(--border); border-radius: 3px;
+                          padding: 1px 5px; min-width: 52px; text-align: center; }
+.gollum-dialog .gl-row--page .gl-kind { color: var(--accent); border-color: var(--accent-dim); }
+.gollum-dialog .gl-label { flex: 1; }
+.gollum-dialog .gl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-gold);
+                         box-shadow: 0 0 8px rgba(216,176,32,.8); animation: glDotPulse 1.8s ease-in-out infinite; }
+.gollum-dialog .gl-empty { padding: 14px 8px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.gollum-dialog .gl-foot { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+                          font-family: var(--font-mono); font-size: 9.5px; color: var(--text-muted);
+                          letter-spacing: .5px; }
+@keyframes glDotPulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+/* When he points at the headband, the band answers with a glow. */
+.info-panel-wrap.gl-pointed { animation: glPointed 1.6s ease-out; }
+@keyframes glPointed { 0% { box-shadow: 0 0 0 0 rgba(216,176,32,.7); } 100% { box-shadow: 0 0 0 18px rgba(216,176,32,0); } }
+
+body.light-mode .gollum-fab { background: radial-gradient(circle at 50% 40%, var(--bg-card) 0%, var(--bg-elev) 70%, var(--border) 100%); }
+body.light-mode .gollum-fab .gl-pupil { fill: var(--bg-void); }
+body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
+@media (max-width: 900px) { .gollum-dialog { width: calc(100vw - 24px); left: 12px; } .gollum-fab, .gollum-bubble { left: 12px; } }
+@media (prefers-reduced-motion: reduce) {
+    .gollum-fab, .gollum-fab .gl-pupils, .gollum-fab .gl-lids, .gollum-fab.is-fidget,
+    .gollum-fab.is-fidget .gl-pupils, .gollum-fab:hover .gl-ring, .gollum-fab.has-unseen .gl-ring,
+    .gollum-dialog .gl-dot, .info-panel-wrap.gl-pointed { animation: none; }
+    .gollum-dialog, .gollum-bubble { transition: none; }
+}

@@ -448,7 +448,9 @@ class SharedDwellEngineTests(TestCase):
 
     def test_the_dwell_contract_the_other_three_paid_for_survives(self):
         js = _static("js", "sv-notif-card.js")
-        self.assertIn("HOVER_DELAY_MS = 2000", js)
+        # One beat for every hover card on the platform now — the
+        # engine reads it rather than carrying its own number.
+        self.assertIn("HOVER_DELAY_MS = (w.SV_HOVER_BEAT_MS || 450)", js)
         self.assertIn("pop.contains(to)", js)
         self.assertIn("pointerleave", js)
         self.assertIn("isCollapsed", js)

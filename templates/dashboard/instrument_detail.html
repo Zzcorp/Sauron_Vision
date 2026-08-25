@@ -106,6 +106,12 @@ card, not the quote-gated hero: an instrument with no LiveQuote row yet
 must still poll — the poller is how the hero self-heals the moment the
 feed produces a first price. paintQuote null-guards the hero spans.{% endcomment %}
 <div class="card fade-in-up delay-1" style="margin-bottom:20px;padding:0;overflow:hidden;" data-instrument-live="{{ instrument.symbol }}">
+    {% comment %}The widget reads <chart_id>-positions / -signals when
+    they exist: entries, stops, targets and the signals' suggested
+    entries drawn on the tape. json_script escapes, so a rule name is
+    data, never markup.{% endcomment %}
+    {{ chart_positions|json_script:"instrument-main-chart-positions" }}
+    {{ chart_signals|json_script:"instrument-main-chart-signals" }}
     {% include "_partials/chart_widget.html" with chart_id="instrument-main-chart" symbol=instrument.symbol height="420" timeframe="1d" %}
 </div>
 

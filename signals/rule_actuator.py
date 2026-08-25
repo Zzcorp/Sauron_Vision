@@ -20,6 +20,7 @@ Public API:
   rule_size_multiplier(rule_name) -> float
 
   propose_actions_from_decay()    -> int (count of new proposals)
+  propose_from_brain(report, rule_name, action, user) -> RuleAction
   apply_action(action_id, user)   -> RuleAction
   rollback_action(action_id, user)-> RuleAction
   reject_action(action_id, user)  -> RuleAction
@@ -251,6 +252,120 @@ def propose_actions_from_decay(lookback_days: int = 1) -> int:
         n_created += 1
 
     return n_created
+
+
+# The brain's overlay only ever votes for these two. Anything else — monitor,
+# investigate_data, retune_params — enforces nothing, and `apply_action`
+# would refuse it anyway; refusing here keeps the HQ queue free of rows an
+# admin can neither apply nor meaningfully reject.
+BRAIN_PROPOSABLE_ACTIONS = ("pause_rule", "reduce_size")
+
+
+def governed_rule_names() -> set:
+    """Rule names the actuator can really enforce.
+
+    The overlay's keys are LLM-typed. A lever for a rule no RuleControl,
+    signal or trade has ever heard of enforces nothing — it just files a
+    ticket at HQ that can never be applied to anything.
+    """
+    from signals.models import RuleControl, Signal
+    names = set()
+    try:
+        names |= set(RuleControl.objects.values_list("rule_name", flat=True))
+        names |= set(Signal.objects.exclude(rule_name="")
+                     .values_list("rule_name", flat=True).distinct())
+    except Exception:  # noqa: BLE001 — an unreadable table gates nothing
+        return names
+    try:
+        from bot_program.models import AssetBotTrade
+        names |= set(AssetBotTrade.objects.exclude(rule_name="")
+                     .values_list("rule_name", flat=True).distinct())
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        # The manual lane reads the brain's advisory, never RuleControl —
+        # a control row for it would enforce nothing at all.
+        from bot_program.manual_trade import MANUAL_RULE
+        names.discard(MANUAL_RULE)
+    except Exception:  # noqa: BLE001
+        pass
+    names.discard("")
+    return names
+
+
+def propose_from_brain(report, rule_name: str, action: str, user=None):
+    """One press on the brain page becomes one RuleAction proposal.
+
+    The operator cannot move the live account from here and the platform
+    will not pretend to: this queues a proposal that an admin still has to
+    apply at HQ, under the same live-mode gate and daily caps as every
+    decay proposal. Idempotent per (report, rule_name, action) — the same
+    concern pressed twice returns the row it already made, in whatever
+    state it has reached since, rather than a second one for the admin to
+    wade through.
+    """
+    from signals.models import RuleAction
+
+    if action not in BRAIN_PROPOSABLE_ACTIONS:
+        raise ActuatorError(
+            f"Action {action!r} is informational; the brain can only propose "
+            f"{' or '.join(BRAIN_PROPOSABLE_ACTIONS)}.")
+    rule_name = (rule_name or "").strip()
+    if not rule_name:
+        raise ActuatorError("A proposal needs a rule name.")
+    if report is None:
+        raise ActuatorError("A brain proposal needs the report it came from.")
+    governed = governed_rule_names()
+    if governed and rule_name not in governed:
+        raise ActuatorError(
+            f"'{rule_name}' is not a rule this platform governs — the "
+            f"overlay named it, but nothing here would enforce a pause.")
+
+    # STANDING rows only: a proposal the admin rejected is a decision,
+    # and the brain re-raising the same concern tomorrow deserves a fresh
+    # ticket rather than the corpse of the old one.
+    standing = (RuleAction.STATE_PROPOSED, RuleAction.STATE_APPLIED)
+    existing = RuleAction.objects.filter(
+        source_brain_report=report, rule_name=rule_name, action=action,
+        state__in=standing,
+    ).order_by("-proposed_at").first()
+    if existing is not None:
+        return existing
+
+    overlay = report.rule_status_overlay or {}
+    status = overlay.get(rule_name) or "unlisted"
+    # The overlay names the rule; the concern text explains it. Carry the
+    # matching concern into the rationale so the admin at HQ reads the
+    # brain's reason, not just its verdict.
+    concern_text = ""
+    for c in (report.top_concerns or []):
+        if not isinstance(c, dict):
+            continue
+        blob = f"{c.get('ref', '')} {c.get('text', '')}"
+        if rule_name in blob:
+            concern_text = str(c.get("text") or "")
+            break
+    rationale = (f"Proposed from brain synthesis #{report.id} "
+                 f"({report.created_at:%Y-%m-%d %H:%M} UTC): overlay {status}")
+    if concern_text:
+        rationale += f" — {concern_text[:400]}"
+    else:
+        rationale += " — no matching concern text in the synthesis"
+    if user is not None and getattr(user, "is_authenticated", False):
+        rationale += f" (pressed by {user.get_username()})"
+
+    # Two presses land in two requests; a filter-then-create between them
+    # queues the same concern twice. The DB decides.
+    rule_action = RuleAction.objects.create(
+        rule_name=rule_name,
+        action=action,
+        state=RuleAction.STATE_PROPOSED,
+        source_brain_report=report,
+        rationale=rationale,
+    )
+    logger.info("[actuator] brain proposal %s on rule=%s from report #%s by %s",
+                action, rule_name, report.id, user)
+    return rule_action
 
 
 # ── Apply / rollback / reject ───────────────────────────────────────────────

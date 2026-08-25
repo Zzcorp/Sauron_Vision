@@ -3,6 +3,15 @@
 
 {% block content %}
 
+    {% comment %}The brain page's OWN result, not the global messages
+    queue: a flash left by any view whose target never renders one used
+    to surface here dressed as a brain-action result.{% endcomment %}
+    {% if brain_propose_result %}
+        <div class="brain-flash">
+            <div class="brain-flash-row {% if brain_propose_result.ok %}ok{% else %}err{% endif %}">{% if brain_propose_result.ok %}OK{% else %}ERR{% endif %} {{ brain_propose_result.msg }}</div>
+        </div>
+    {% endif %}
+
     {% if request.session.brain_run_result %}
         <div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent);">
             <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;">Last manual run</div>
@@ -54,14 +63,47 @@
             <div style="color:var(--down);">Synthesis error: {{ latest.error|truncatechars:200 }}</div>
         {% else %}
             <div style="font-size:13px;line-height:1.5;white-space:pre-wrap;">{{ latest.narrative_md }}</div>
-            {% if latest.top_concerns %}
+            {% if concern_rows %}
                 <div style="margin-top:14px;">
-                    <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Top concerns</div>
-                    <ul style="margin:0;padding-left:18px;">
-                        {% for c in latest.top_concerns %}
-                            <li><strong>[{{ c.kind }}]</strong> {{ c.text }} <span style="color:var(--text-muted);">(severity {{ c.severity|floatformat:2 }})</span></li>
+                    <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Top concerns · act on them</div>
+                    <div class="brain-concerns">
+                        {% for c in concern_rows %}
+                        <div class="brain-concern tone-{{ c.tone }}" data-concern-kind="{{ c.kind }}">
+                            <div class="brain-concern-head">
+                                <span class="badge badge-{{ c.tone }}">{{ c.kind }}</span>
+                                <span class="brain-concern-sev">
+                                    {% if c.severity is not None %}
+                                        <span class="brain-sev-bar"><span class="brain-sev-fill" style="width:{% widthratio c.severity 1 100 %}%;"></span></span>
+                                        <span class="brain-sev-num">{{ c.severity|floatformat:2 }}</span>
+                                    {% else %}
+                                        <span class="sv-unknown" title="severity not reported">&mdash;</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+                            <div class="brain-concern-text">{{ c.text }}</div>
+                            <div class="brain-concern-actions">
+                                {% for r in c.rules %}
+                                    {% include "dashboard/_brain_rule_lever.html" with r=r report=latest %}
+                                {% endfor %}
+                                {% for l in c.links %}
+                                    <a class="btn btn-sm btn-ghost" href="{{ l.url }}">{{ l.label }} &rarr;</a>
+                                {% endfor %}
+                                {% for cfg in c.manual_configs %}
+                                    {% comment %}A DISABLE, never a toggle: hq_toggle_asset_bot
+                                    flips whatever it finds, so a stale page or a double
+                                    submit would RE-ARM the very config the brain asked to
+                                    quiet.{% endcomment %}
+                                    <form method="post" action="{% url 'brain_disable_manual' %}" class="brain-lever-form">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="config_id" value="{{ cfg.id }}">
+                                        <button type="submit" class="btn btn-sm btn-danger">Disable manual &middot; {{ cfg.asset_class }}</button>
+                                    </form>
+                                {% endfor %}
+                                {% if c.note %}<span class="brain-concern-note">{{ c.note }}</span>{% endif %}
+                            </div>
+                        </div>
                         {% endfor %}
-                    </ul>
+                    </div>
                 </div>
             {% endif %}
             {% if latest.theme_pressures %}
@@ -76,25 +118,36 @@
                     </div>
                 </div>
             {% endif %}
-            {% if latest.rule_status_overlay %}
+            {% if overlay_rows %}
                 <div style="margin-top:14px;">
                     <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Rule overlay</div>
                     <div class="table-wrapper">
-                    <table class="sv-perf-table" style="width:auto;">
-                        {% for k, v in latest.rule_status_overlay.items %}
-                            <tr>
-                                <td style="padding-right:14px;">{{ k }}</td>
+                    <table class="sv-perf-table brain-overlay" style="width:auto;">
+                        <thead><tr><th>rule</th><th>verdict</th><th>action</th></tr></thead>
+                        <tbody>
+                        {% for r in overlay_rows %}
+                            <tr data-overlay-rule="{{ r.rule }}">
+                                <td style="padding-right:14px;">{{ r.rule }}</td>
                                 <td>
-                                    {% if v == "pause_recommended" %}<span style="color:var(--down);">{{ v }}</span>
-                                    {% elif v == "watch" %}<span style="color:var(--accent);">{{ v }}</span>
-                                    {% else %}{{ v }}{% endif %}
+                                    {% if r.status == "pause_recommended" %}<span style="color:var(--down);">{{ r.status }}</span>
+                                    {% elif r.status == "watch" %}<span style="color:var(--accent);">{{ r.status }}</span>
+                                    {% else %}{{ r.status }}{% endif %}
+                                </td>
+                                <td>
+                                    {% if r.action %}
+                                        {% include "dashboard/_brain_rule_lever.html" with r=r report=latest %}
+                                    {% else %}
+                                        <span class="sv-unknown" title="the overlay asks for nothing here">&mdash;</span>
+                                    {% endif %}
                                 </td>
                             </tr>
                         {% endfor %}
+                        </tbody>
                     </table>
                     </div>
                 </div>
             {% endif %}
+            <div class="brain-contract">Proposals wait for an admin at HQ; nothing here trades.</div>
             <div style="margin-top:14px;font-size:11px;color:var(--text-muted);">
                 model: {{ latest.model_used }} · tokens {{ latest.tokens_in }} in / {{ latest.tokens_out }} out · cost ${{ latest.cost_usd|floatformat:5 }} · consumed {{ latest.n_observations_consumed }} obs
             </div>
@@ -171,5 +224,37 @@
         </table>
         </div>
     </div>
+
+<style>
+/* The brain page's own idiom: a concern is a row with its lever on the
+   right, toned by the severity the brain assigned, never by a guess. */
+.brain-flash { margin-bottom:14px; }
+.brain-flash-row { font-family:var(--font-mono); font-size:12px; padding:8px 12px; margin-bottom:6px;
+                   border:1px solid var(--border); border-left:3px solid var(--accent); background:var(--bg-elev); }
+.brain-flash-row.err { border-left-color:var(--accent-red); }
+.brain-concerns { display:flex; flex-direction:column; gap:8px; }
+.brain-concern { padding:10px 12px; background:var(--bg-elev); border:1px solid var(--border);
+                 border-left:3px solid var(--text-muted); }
+.brain-concern.tone-critical { border-left-color:var(--accent-red); }
+.brain-concern.tone-high { border-left-color:var(--accent-gold); }
+.brain-concern.tone-medium { border-left-color:var(--accent-blue); }
+.brain-concern-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.brain-concern-sev { display:inline-flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:11px; color:var(--text-muted); }
+.brain-sev-bar { display:inline-block; width:90px; height:4px; background:var(--border); border-radius:2px; overflow:hidden; }
+.brain-sev-fill { display:block; height:100%; background:var(--accent); }
+.tone-critical .brain-sev-fill { background:var(--accent-red); }
+.tone-high .brain-sev-fill { background:var(--accent-gold); }
+.tone-medium .brain-sev-fill { background:var(--accent-blue); }
+.brain-concern-text { font-size:13px; line-height:1.5; margin-top:6px; }
+.brain-concern-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
+.brain-concern-actions form, .brain-lever-form { margin:0; display:inline; }
+.brain-concern-note { font-family:var(--font-mono); font-size:11px; color:var(--text-muted); }
+.brain-lever-chip { display:inline-flex; align-items:center; gap:6px; }
+.brain-lever-chip a { font-family:var(--font-mono); font-size:10px; color:var(--text-muted); text-decoration:none; }
+.brain-lever-chip a:hover { color:var(--accent); }
+.brain-overlay th { font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); text-align:left; padding-right:14px; }
+.brain-contract { margin-top:12px; font-family:var(--font-mono); font-size:11px; color:var(--text-muted); letter-spacing:.3px; }
+.sv-unknown { color:var(--text-muted); opacity:.6; }
+</style>
 
 {% endblock %}

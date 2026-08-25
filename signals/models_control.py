@@ -171,6 +171,16 @@ class RuleAction(models.Model):
         null=True, blank=True, related_name="rule_actions",
     )
 
+    # Source — the BrainReport whose synthesis the operator acted on. Set
+    # by `propose_from_brain`; the (report, rule, action) triple is the
+    # idempotency key there, so one press on the brain page can never queue
+    # two proposals for the same concern. Nullable: decay proposals and
+    # manual admin proposals have no report behind them.
+    source_brain_report = models.ForeignKey(
+        "brain.BrainReport", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="rule_actions",
+    )
+
     rationale = models.TextField(blank=True)
 
     # Snapshot taken at apply-time so rollback can restore exactly. NULL

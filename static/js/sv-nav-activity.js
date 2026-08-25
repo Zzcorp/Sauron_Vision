@@ -59,7 +59,23 @@
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
-      .then(function (d) { if (d && d.pages) paint(d.pages); })
+      .then(function (d) {
+        if (!d || !d.pages) return;
+        /* ONE filtered map for both consumers: being on a page IS seeing
+           it, and a guide that counts the page under the operator's nose
+           as unseen is a guide nobody believes. */
+        var here = currentPage();
+        var pages = {};
+        Object.keys(d.pages).forEach(function (k) {
+          pages[k] = !!d.pages[k] && k !== here;
+        });
+        paint(pages);
+        /* Gollum learns what the dots learn — one poll, two listeners. */
+        try {
+          document.dispatchEvent(new CustomEvent('sv:nav-activity',
+                                                 { detail: { pages: pages } }));
+        } catch (e) { /* an old engine without CustomEvent keeps its dots */ }
+      })
       .catch(function () { /* keep the last paint */ });
   }
 

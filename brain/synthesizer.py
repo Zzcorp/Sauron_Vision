@@ -534,6 +534,14 @@ def _persist_report(parsed: dict, snapshot: dict, *, model: str,
     if not isinstance(concerns, list):
         concerns = []
     concerns = [c for c in concerns if isinstance(c, dict)][:5]
+    # Severity drives a bar width and a tone. Unclamped, a model that
+    # writes 8.5 or "high" overflows the bar or breaks the float() every
+    # reader does — the same clamp theme_pressures already gets.
+    for c in concerns:
+        try:
+            c["severity"] = max(0.0, min(1.0, float(c.get("severity"))))
+        except (TypeError, ValueError):
+            c["severity"] = None
 
     pressures = parsed.get("theme_pressures")
     if not isinstance(pressures, dict):

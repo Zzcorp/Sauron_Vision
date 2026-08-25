@@ -49,7 +49,10 @@
 
     if (!d.querySelector) return;
 
-    var HOVER_DELAY_MS = 2000, GAP = 8;
+    /* The dwell is the platform's ONE hover beat, set inline in base.html's
+     * head before this deferred file runs. The fallback exists for a page
+     * that inlines the engine without the shell — it must still open. */
+    var HOVER_DELAY_MS = (w.SV_HOVER_BEAT_MS || 450), GAP = 8;
 
     /* The grace between the pointer leaving BOTH the row and the card and the
      * card closing. It exists for one crossing only — the few pixels of gap

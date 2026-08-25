@@ -17,7 +17,8 @@ from .views_admin_bots import (
 )
 from .views_strategy_wizard import strategy_wizard, strategy_wizard_save
 from .views_bot_console import bot_console, bot_pause
-from .views_brain import brain_dashboard, brain_run_now
+from .views_brain import (brain_dashboard, brain_run_now, brain_propose,
+                          brain_disable_manual)
 from .views_brain_phase38 import (
     knowledge_dashboard, knowledge_node_history,
     hypotheses_dashboard, consolidation_dashboard,
@@ -418,6 +419,9 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     # ── Phase 37: Sauron's Mind dashboard ──────────────────────────────────────
     path("brain/", brain_dashboard, name="brain_dashboard"),
     path("brain/run/", brain_run_now, name="brain_run_now"),
+    path("brain/propose/", brain_propose, name="brain_propose"),
+    path("brain/disable-manual/", brain_disable_manual,
+         name="brain_disable_manual"),
 
     # ── Phase 38: knowledge graph + hypothesis market ──────────────────────────
     path("knowledge/", knowledge_dashboard, name="knowledge_dashboard"),

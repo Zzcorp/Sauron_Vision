@@ -1,0 +1,23 @@
+{% comment %}
+One rule lever. `r` is an overlay row from views_brain._overlay_rows and
+`report` the BrainReport it belongs to. A standing proposal renders as its
+state chip with a link to the HQ actuator queue; otherwise staff get the
+button and everyone else a note, so the page never offers a press the
+server would refuse.
+{% endcomment %}
+{% if r.existing %}
+    <span class="brain-lever-chip" data-lever-state="{{ r.existing.state }}">
+        <span class="badge badge-{% if r.existing.state == 'applied' %}active{% else %}proposed{% endif %}">{{ r.existing.state }} &middot; {{ r.existing.action }}</span>
+        <a href="{% url 'admin_dashboard' %}#actuator">HQ queue &rarr;</a>
+    </span>
+{% elif r.can_propose %}
+    <form method="post" action="{% url 'brain_propose' %}" class="brain-lever-form">
+        {% csrf_token %}
+        <input type="hidden" name="report_id" value="{{ report.id }}">
+        <input type="hidden" name="rule_name" value="{{ r.rule }}">
+        <input type="hidden" name="action" value="{{ r.action }}">
+        <button type="submit" class="btn btn-sm {% if r.action == 'pause_rule' %}btn-danger{% else %}btn-primary{% endif %}">{{ r.label }}</button>
+    </form>
+{% else %}
+    <span class="brain-concern-note">{{ r.label }} &middot; staff only</span>
+{% endif %}
