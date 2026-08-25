@@ -446,20 +446,63 @@ class AssetBot(ABC):
         return client.market_order(trade.symbol, close_side, float(trade.qty),
                                    client_order_id=client_order_id)
 
-    def _cancel_protective_orders(self, trade, client):
-        """Best-effort cancel of resting broker-side SL/TP orders before a
-        manual/expiry/kill flatten — a stop left behind would fire against a
-        flat book and open a brand-new reverse position."""
+    # A broker that ANSWERS with a refusal has not closed anything. Only
+    # an exception used to reach the failure path, so a client that
+    # returns {"status": "REJECTED"} instead of raising — which is
+    # exactly what the IBKR client does — took the success branch and
+    # stripped the bracket off a position that is still live.
+    CLOSE_REFUSED_STATUSES = frozenset({
+        "REJECTED", "DUPLICATE", "CANCELLED", "CANCELED",
+        "INACTIVE", "EXPIRED", "ERROR",
+    })
+
+    def _submit_close_or_raise(self, trade, client, client_order_id):
+        """The close, with a refusal RESPONSE raised like a refusal."""
+        res = self._submit_close_order(trade, client, client_order_id)
+        if isinstance(res, dict):
+            status = (res.get("status") or "").strip().upper()
+            try:
+                filled = float(res.get("executedQty") or 0)
+            except (TypeError, ValueError):
+                filled = 0.0
+            if status in self.CLOSE_REFUSED_STATUSES and filled <= 0:
+                reason = ""
+                raw = res.get("raw")
+                if isinstance(raw, dict):
+                    reason = str(raw.get("reason") or "")
+                raise RuntimeError(
+                    f"broker refused the close ({status}"
+                    + (f": {reason}" if reason else "") + ")")
+        return res
+
+    def _cancel_protective_orders(self, trade, client) -> bool:
+        """Cancel resting broker-side SL/TP legs before a flatten.
+
+        Returns True only when every leg was confirmed handled. A stop
+        left behind fires against a flat book and OPENS a brand-new
+        reverse position, so "we could not tell" must never be recorded
+        as "done" — the caller marks the row when this comes back False.
+        """
         ids = (trade.metadata or {}).get("protective_order_ids") or []
         cancel = getattr(client, "cancel_order", None)
-        if not ids or not callable(cancel):
-            return
+        if not ids:
+            return True
+        if not callable(cancel):
+            logger.error("[%s_bot] %s carries protective legs but this "
+                         "broker client cannot cancel orders — they may "
+                         "still be resting",
+                         self.asset_class, trade.symbol)
+            return False
+        ok = True
         for oid in ids:
             try:
                 cancel(oid)
             except Exception as e:
-                logger.warning("[%s_bot] cancel protective order %s failed: %s",
-                               self.asset_class, oid, e)
+                ok = False
+                logger.error("[%s_bot] cancel protective order %s failed: "
+                             "%s — it may still be resting at the broker",
+                             self.asset_class, oid, e)
+        return ok
 
     def _close_trade(self, trade, price: Decimal, client, *, reason: str) -> bool:
         """Close a trade — pnl is realised in the config's base_currency.
@@ -504,7 +547,7 @@ class AssetBot(ABC):
                 # Cancelling up-front would leave a live, unprotected position
                 # whenever the close then fails.
                 try:
-                    close_result = self._submit_close_order(
+                    close_result = self._submit_close_or_raise(
                         trade, client, client_order_id)
                 except Exception:
                     if not (trade.metadata or {}).get("protective_order_ids"):
@@ -520,7 +563,7 @@ class AssetBot(ABC):
                     # state than an ordinary pending close, and the retry task
                     # and the operator both need to know which one it is.
                     stripped = True
-                    close_result = self._submit_close_order(
+                    close_result = self._submit_close_or_raise(
                         trade, client, client_order_id)
                     stripped = False
                 else:
@@ -529,7 +572,19 @@ class AssetBot(ABC):
                     # fires against a flat book and opens a brand-new
                     # position in the opposite direction — unmonitored,
                     # because no row in our database describes it.
-                    self._cancel_protective_orders(trade, client)
+                    if not self._cancel_protective_orders(trade, client):
+                        # Say so on the row: a leg we could not confirm
+                        # gone is the operator's problem now, and a
+                        # silent flag would hide it forever.
+                        meta = dict(trade.metadata or {})
+                        meta["protective_legs_unconfirmed"] = True
+                        trade.metadata = meta
+                        trade.save(update_fields=["metadata"])
+                        logger.critical(
+                            "[%s_bot] %s closed, but a protective leg could "
+                            "not be confirmed cancelled — check the broker "
+                            "for a resting order",
+                            self.asset_class, trade.symbol)
             except Exception as e:
                 logger.error("[%s_bot] live close order failed for %s: %s — "
                              "marking CLOSE_PENDING",

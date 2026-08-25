@@ -84,13 +84,23 @@ class AccountBindingTests(TestCase):
         from django.conf import settings
         src = (Path(settings.BASE_DIR) / "bot_program" / "engine"
                / "ibkr_client.py").read_text(encoding="utf-8")
-        self.assertEqual(src.count("self._bind_order_account(order)"),
-                         src.count("self._ib.placeOrder("))
-        for seg in src.split("def ")[1:]:
+        # Every method that PLACES must BIND first, and must bind the
+        # very thing it places. Counting literals broke the moment the
+        # bracket path started binding a list in a loop — the invariant
+        # is the ordering and the coverage, not the spelling.
+        for seg in src.split("\n    def ")[1:]:
             if "self._ib.placeOrder(" not in seg:
                 continue
+            name = seg.split("(")[0]
+            self.assertIn("_bind_order_account", seg, name)
             self.assertLess(seg.index("_bind_order_account"),
-                            seg.index("self._ib.placeOrder("), seg[:40])
+                            seg.index("self._ib.placeOrder("), name)
+            # What gets placed is what got bound: either the single
+            # `order`, or every member of the list the loop walks.
+            placed = seg.split("self._ib.placeOrder(")[1].split(")")[0]
+            placed_var = placed.split(",")[-1].strip()
+            bound = seg.split("_bind_order_account(")[1].split(")")[0].strip()
+            self.assertEqual(placed_var, bound, name)
 
     def test_the_options_order_refuses_before_placing_too(self):
         from unittest.mock import patch

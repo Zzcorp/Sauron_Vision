@@ -237,6 +237,25 @@ def _close_as_orphan(trade) -> None:
         if not trade.outcome:
             trade.outcome = "manual_close"
             trade.save(update_fields=["outcome"])
+    # A row reconciled as an orphan may still have its OTHER leg resting:
+    # a stop that filled leaves the target behind (and vice versa) unless
+    # the broker's OCA pair cancelled it. A resting exit against a flat
+    # book opens a position rather than closing one.
+    ids = (trade.metadata or {}).get("protective_order_ids") or []
+    for oid in ids:
+        # Its own client lookup: the one above lives inside a try that a
+        # dead ticker call can leave unbound, and a leg left resting is
+        # not a detail to skip on the way past.
+        try:
+            leg_client = client_for_symbol(trade.config.user, trade.symbol,
+                                           trade.config)
+            cancel = getattr(leg_client, "cancel_order", None)
+            if callable(cancel):
+                cancel(oid)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("reconcile: leg %s for #%s may still rest at "
+                           "the broker (%s)", oid, trade.id, e)
+
     # Every broker-side bracket exit (all stock and forex stops) is
     # finalised HERE — and none of them reached the dashboards live.
     try:

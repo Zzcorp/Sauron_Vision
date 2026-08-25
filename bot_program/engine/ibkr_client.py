@@ -354,6 +354,163 @@ class IBKRTrader:
                     f"to trade on the session default")
         return None
 
+    def _min_tick_for(self, contract) -> float:
+        """The contract's REAL minimum price variation, or 0 if unknown.
+
+        Guessing decimal places was wrong for almost everything that is
+        not a US equity: IDEALPRO forex ticks 0.00005 (0.005 on JPY
+        crosses), ES ticks 0.25, CL 0.01. A price off the tick is
+        rejected by TWS with error 110 — and a rejected stop is a naked
+        position that still LOOKS protected, which is the one outcome
+        this whole module exists to prevent. minTick lives on
+        ContractDetails, not on Contract, so qualifyContracts cannot
+        supply it.
+        """
+        try:
+            details = self._ib.reqContractDetails(contract)
+        except Exception as e:  # noqa: BLE001 — an unknown tick is handled
+            log.warning("IBKR contract details unreadable (%s)", e)
+            return 0.0
+        if not details:
+            return 0.0
+        try:
+            return float(getattr(details[0], "minTick", 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _snap_to_tick(price, min_tick: float, *, widen: bool) -> "Optional[float]":
+        """Snap a price onto a multiple of `min_tick`, never tightening.
+
+        `widen` says which way to break the tie: a stop rounds AWAY from
+        the position (more room, never less), a target rounds toward it
+        (achievable). Decimal, because float arithmetic lands prices a
+        hair off the tick and TWS counts hairs.
+        """
+        from decimal import Decimal, ROUND_DOWN, ROUND_UP
+        try:
+            p = Decimal(str(float(price)))
+        except (TypeError, ValueError, ArithmeticError):
+            return None
+        if p <= 0:
+            return None
+        if min_tick <= 0:
+            return None          # unknown tick — the caller must refuse
+        tick = Decimal(str(min_tick))
+        mode = ROUND_DOWN if widen else ROUND_UP
+        snapped = (p / tick).quantize(Decimal(1), rounding=mode) * tick
+        if snapped <= 0:
+            return None
+        return float(snapped)
+
+    def _bracket_orders(self, action: str, quantity: float, symbol: str,
+                        stop_loss, take_profit,
+                        min_tick: float = 0.0) -> "Optional[list]":
+        """Parent MARKET + protective STP and LMT children, or None.
+
+        IBKR's own bracket helper builds the OCA group and the parent
+        linkage, which is what makes the two children cancel each other
+        when either fills. `transmit` discipline is the whole game here:
+        every order but the LAST must be transmit=False, or TWS starts
+        working a parent whose protection has not arrived yet — the
+        exact unprotected window this method exists to close. The helper
+        sets that; we only re-assert it so a library change cannot
+        silently open the window again.
+        """
+        exit_action = "SELL" if action == "BUY" else "BUY"
+        # A long's stop sits BELOW and rounds down; its target sits above
+        # and rounds down toward it. Mirrored for a short. Either way the
+        # snap never moves a stop closer to the entry.
+        sl = self._snap_to_tick(stop_loss, min_tick,
+                                widen=(action == "BUY"))
+        tp = self._snap_to_tick(take_profit, min_tick,
+                                widen=(action != "BUY"))
+        if sl is None or tp is None:
+            log.warning("IBKR %s: cannot price protection on a %s tick "
+                        "(sl=%s tp=%s) — refusing the bracket rather than "
+                        "sending legs TWS will reject",
+                        symbol, min_tick or "unknown", stop_loss, take_profit)
+            return None
+        # A stop on the wrong side of the entry is not protection, it is
+        # an instant exit at the worst price on the sheet.
+        if action == "BUY" and not (tp > sl):
+            return None
+        if action == "SELL" and not (tp < sl):
+            return None
+        try:
+            bracket = self._ib.bracketOrder(
+                action, abs(float(quantity)),
+                limitPrice=None, takeProfitPrice=tp, stopLossPrice=sl,
+            )
+        except Exception as e:  # noqa: BLE001 — see the fallback below
+            log.warning("IBKR bracketOrder() unavailable (%s) — building "
+                        "the legs by hand", e)
+            # The parent's orderId is 0 until placeOrder mints one, and a
+            # child carrying parentId=0 is not a child at all: TWS holds
+            # the untransmitted parent forever and releases the STOP as a
+            # standalone order, which then OPENS a position when it fires
+            # against a book that never got the entry. Mint the id here
+            # or refuse — an unprotected entry the bot still manages is
+            # far safer than an orphan stop nobody owns.
+            try:
+                parent_id = int(self._ib.client.getReqId())
+            except Exception as exc:  # noqa: BLE001
+                log.error("IBKR %s: no order id for a hand-built bracket "
+                          "(%s) — refusing to emit orphan legs", symbol, exc)
+                return None
+            if not parent_id:
+                return None
+            parent = _ib.MarketOrder(action, abs(float(quantity)))
+            parent.orderId = parent_id
+            parent.transmit = False
+            oca = f"SV{parent_id}"
+            tp_order = _ib.LimitOrder(exit_action, abs(float(quantity)), tp)
+            tp_order.parentId = parent_id
+            tp_order.ocaGroup, tp_order.ocaType = oca, 1
+            tp_order.transmit = False
+            sl_order = _ib.StopOrder(exit_action, abs(float(quantity)), sl)
+            sl_order.parentId = parent_id
+            sl_order.ocaGroup, sl_order.ocaType = oca, 1
+            sl_order.transmit = True
+            return [parent, tp_order, sl_order]
+        orders = list(bracket)
+        if not orders:
+            return None
+        # The helper builds a LIMIT parent, so it carries an lmtPrice —
+        # here that price is None (we passed limitPrice=None) and TWS
+        # rejects a market order that still carries a limit field. Clear
+        # it with the type rather than leaving the two disagreeing.
+        orders[0].orderType = "MKT"
+        for attr in ("lmtPrice", "auxPrice"):
+            if hasattr(orders[0], attr):
+                try:
+                    setattr(orders[0], attr, 0.0)
+                except Exception:  # noqa: BLE001 — a frozen field is fine
+                    pass
+        for o in orders[:-1]:
+            o.transmit = False
+        orders[-1].transmit = True
+        return orders
+
+    @staticmethod
+    def _leg_is_resting(trade) -> bool:
+        """True when TWS has ACCEPTED this protective leg.
+
+        ib_insync's active vocabulary is PendingSubmit / PreSubmitted /
+        Submitted; Cancelled, ApiCancelled and Inactive mean the leg was
+        refused (error 110 off-tick, 201 margin, an order type the
+        exchange will not take). An error line in the trade log says the
+        same thing earlier.
+        """
+        status = str(getattr(getattr(trade, "orderStatus", None),
+                             "status", "") or "")
+        if status in ("Cancelled", "ApiCancelled", "Inactive"):
+            return False
+        for entry in (getattr(trade, "log", None) or []):
+            if getattr(entry, "errorCode", None):
+                return False
+        return bool(status)
+
     def market_order(self, symbol: str, side: str, quantity: float, **kwargs) -> dict:
         empty = {
             "orderId": "", "symbol": symbol, "side": side,
@@ -368,14 +525,62 @@ class IBKRTrader:
                 return empty
             self._ib.qualifyContracts(contract)
             action = "BUY" if side.upper() == "BUY" else "SELL"
-            order = _ib.MarketOrder(action, abs(float(quantity)))
-            refusal = self._bind_order_account(order)
-            if refusal:
-                log.error("IBKR market_order(%s) refused: %s",
-                          symbol, refusal)
-                empty["raw"] = {"reason": refusal}
-                return empty
-            trade = self._ib.placeOrder(contract, order)
+            # Broker-side protection, the same contract OANDA and Alpaca
+            # keep: the stop and the target rest AT IBKR, so the position
+            # survives this process dying. Without it the only thing
+            # standing between a live position and an unbounded loss is a
+            # five-minute tick loop on a machine that can reboot.
+            stop_loss = kwargs.get("stop_loss")
+            take_profit = kwargs.get("take_profit")
+            bracket = None
+            if stop_loss and take_profit:
+                bracket = self._bracket_orders(
+                    action, quantity, symbol, stop_loss, take_profit,
+                    min_tick=self._min_tick_for(contract))
+                if bracket is None:
+                    log.warning("IBKR %s: protective levels unusable "
+                                "(sl=%s tp=%s) — sending the entry "
+                                "UNPROTECTED, bot-side management owns it",
+                                symbol, stop_loss, take_profit)
+            orders = bracket or [_ib.MarketOrder(action, abs(float(quantity)))]
+            # EVERY leg carries the account. A child that lands on the
+            # session default is a stop resting against a book that does
+            # not hold the position — it opens one when it fires.
+            for o in orders:
+                refusal = self._bind_order_account(o)
+                if refusal:
+                    log.error("IBKR market_order(%s) refused: %s",
+                              symbol, refusal)
+                    empty["raw"] = {"reason": refusal}
+                    return empty
+            legs, child_trades = [], []
+            trade = None
+            parent_id = 0
+            for o in orders:
+                if trade is not None and bracket is not None:
+                    # The parent is held (transmit=False) until the last
+                    # leg arrives, so its id is known by now — re-stamp
+                    # every child from the id TWS actually assigned
+                    # rather than the one we guessed before placement.
+                    if not parent_id:
+                        log.error("IBKR %s: parent has no order id after "
+                                  "placement — refusing to release "
+                                  "children that would rest alone", symbol)
+                        self._retract(contract, child_trades, trade)
+                        empty["raw"] = {"reason": "bracket_parent_unidentified"}
+                        return empty
+                    o.parentId = parent_id
+                placed = self._ib.placeOrder(contract, o)
+                if trade is None:
+                    trade = placed          # the parent owns the fill
+                    parent_id = int(getattr(getattr(placed, "order", None),
+                                            "orderId", 0) or 0)
+                else:
+                    child_trades.append(placed)
+                    leg_id = str(getattr(getattr(placed, "order", None),
+                                         "orderId", "") or "")
+                    if leg_id:
+                        legs.append(leg_id)
             self._ib.sleep(1.0)
             filled_qty = float(trade.orderStatus.filled or 0)
             avg_px = float(trade.orderStatus.avgFillPrice or 0)
@@ -392,7 +597,7 @@ class IBKRTrader:
                 empty["orderId"] = str(trade.order.orderId or "")
                 empty["raw"] = {"reason": dead}
                 return empty
-            return {
+            out = {
                 "orderId": str(trade.order.orderId or ""),
                 "symbol": symbol, "side": side,
                 "executedQty": str(filled_qty or quantity),
@@ -400,10 +605,94 @@ class IBKRTrader:
                 "status": (trade.orderStatus.status or "PENDING").upper(),
                 "raw": trade.dict() if hasattr(trade, "dict") else {},
             }
+            if bracket is not None:
+                # PROVEN, not assumed. `protected` turns OFF bot-side
+                # SL/TP management, so claiming it for a leg TWS refused
+                # leaves the position naked AND unwatched — strictly
+                # worse than never bracketing at all. The stop is the leg
+                # that matters; a target without it is just an order.
+                refused = [ct for ct in child_trades
+                           if not self._leg_is_resting(ct)]
+                partial = 0 < filled_qty < abs(float(quantity))
+                if refused or partial:
+                    why = ("a protective leg was refused" if refused
+                           else f"the parent filled {filled_qty} of "
+                                f"{quantity} and the legs would over-cover")
+                    log.error("IBKR %s: %s — cancelling the bracket and "
+                              "leaving this position to bot-side "
+                              "management", symbol, why)
+                    # An over-sized stop is not a smaller problem than no
+                    # stop: on a partial fill it closes what filled and
+                    # OPENS the remainder the other way.
+                    self._retract(contract, child_trades, None)
+                else:
+                    out["protectedOnFill"] = True
+                    out["protectiveOrders"] = legs
+            return out
         except Exception as e:
             log.error("IBKR market_order(%s, %s, %s) failed: %s",
                       symbol, side, quantity, e)
             return empty
+
+    def _retract(self, contract, child_trades, parent_trade) -> None:
+        """Pull back legs that must not rest — best effort, never raises.
+
+        Used when a bracket cannot be completed honestly: a leg TWS
+        refused, a partial fill the legs would over-cover, or a parent we
+        could not identify. Anything left resting here is an order no
+        part of the platform knows about, and a resting exit against a
+        flat book opens a position rather than closing one.
+        """
+        for placed in list(child_trades or []):
+            try:
+                self._ib.cancelOrder(placed.order)
+            except Exception as e:  # noqa: BLE001
+                log.error("IBKR retract leg failed (%s) — an unmanaged "
+                          "order may be resting at the broker", e)
+        if parent_trade is not None:
+            try:
+                self._ib.cancelOrder(parent_trade.order)
+            except Exception as e:  # noqa: BLE001
+                log.error("IBKR retract parent failed: %s", e)
+
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel one resting order — a bracket leg before a flatten.
+
+        The engine reaches for this by name
+        (`getattr(client, "cancel_order", None)`) and skips the whole
+        cancellation step when it is absent, which is what made shipping
+        brackets without it dangerous: the close would sell the position
+        and leave the stop resting, and a resting stop against a flat
+        book does not protect anything — it opens a fresh position the
+        other way when it fires.
+
+        True when the cancel was sent. An order already filled or gone is
+        not an error: the leg is no longer resting either way.
+        """
+        if not self._connect():
+            # NOT the same as "already gone". The caller flattens on this
+            # answer, and a stop we could not even look at may still be
+            # resting — say so loudly rather than reporting a tidy False.
+            log.error("IBKR cancel_order(%s): no session — the leg may "
+                      "still be resting at the broker", order_id)
+            raise ConnectionError(f"IBKR unreachable, cannot cancel {order_id}")
+        try:
+            wanted = str(order_id)
+            for trade in (self._ib.openTrades() or []):
+                oid = str(getattr(getattr(trade, "order", None),
+                                  "orderId", "") or "")
+                if oid != wanted:
+                    continue
+                self._ib.cancelOrder(trade.order)
+                return True
+            log.info("IBKR cancel %s: not among the open orders — already "
+                     "filled or cancelled", wanted)
+            return False
+        except ConnectionError:
+            raise
+        except Exception as e:
+            log.error("IBKR cancel_order(%s) failed: %s", order_id, e)
+            raise
 
     # ── options-specific surface ──────────────────────────────────────────
 
