@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load sauron_tags %}
 {% block title %}Intelligence hub · Sauron's Mind{% endblock %}
 {% block content %}
 
@@ -60,7 +61,7 @@
             <span class="card-title">Today's briefing</span>
             <a href="{% url 'briefing_dashboard' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">full briefing →</a>
         </div>
-        <div style="font-size:13px;line-height:1.6;white-space:pre-wrap;">{{ latest_briefing.outlook_md|truncatechars:600 }}</div>
+        <div style="font-size:13px;line-height:1.6;white-space:pre-wrap;">{{ latest_briefing.outlook_md|briefing_plain|truncatechars:600 }}</div>
         {% if latest_briefing.posture_rationale %}
             <p style="margin:10px 0 0;color:var(--text-muted);font-size:12px;font-style:italic;">{{ latest_briefing.posture_rationale }}</p>
         {% endif %}

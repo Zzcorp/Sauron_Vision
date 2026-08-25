@@ -1232,6 +1232,9 @@
         .notif-item.ni-signal .ni-kind    { color: var(--accent); }
         .notif-item.ni-news .ni-kind      { color: var(--accent-blue); }
         .notif-item.ni-system .ni-kind    { color: var(--text-muted); }
+        .notif-item.ni-briefing .ni-kind  { color: var(--accent-gold); }
+        .notif-item.ni-briefing           { border-left-color: var(--accent-gold); }
+        .notif-item.ni-briefing.unread    { border-left-color: var(--accent-gold); }
         .notif-item.ni-portfolio.unread   { border-left-color: var(--accent-gold); }
         .notif-item.ni-bot.unread         { border-left-color: var(--accent-gold); }
         /* Arrived while the panel was already on screen. The rows refresh
@@ -6508,3 +6511,68 @@ a.sig-sym:hover { color: var(--accent); text-decoration: underline; }
 @media (prefers-reduced-motion: reduce) {
     .il-overlay.il-out, .il-overlay .il-eye { transition: none; }
 }
+
+/* ── Briefing depth — the strategist's report wears its own clothes ──
+   Page (brf-*) and dwell-card chip (nf-pop-chip). The posture tones
+   reuse the platform's up/down/gold vocabulary; nothing here invents a
+   colour. */
+.brf-card { border-left: 3px solid var(--border); }
+.brf-card.brf-aggressive { border-left-color: var(--up); }
+.brf-card.brf-defensive  { border-left-color: var(--down); }
+.brf-card.brf-balanced   { border-left-color: var(--accent-gold); }
+.brf-outlook .brf-p {
+    margin: 0 0 12px; font-size: 13px; line-height: 1.65;
+    color: var(--text-secondary);
+}
+.brf-outlook .brf-lead {
+    font-size: 15px; line-height: 1.6; color: var(--text-primary);
+}
+.brf-outlook strong { color: var(--text-primary); }
+.brf-outlook code {
+    font-family: var(--font-mono); font-size: 12px;
+    background: var(--bg-card-hover); padding: 1px 5px;
+    border-radius: 3px;
+}
+.brf-rationale {
+    margin-top: 14px; padding: 8px 12px;
+    border-left: 2px solid var(--border);
+    font-size: 12px; color: var(--text-muted); font-style: italic;
+}
+.brf-wl-kind {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--accent-gold);
+    border: 1px solid var(--border); border-radius: 3px;
+    padding: 2px 6px; white-space: nowrap;
+}
+.brf-wl-ref { font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
+.brf-idea {
+    padding: 10px 12px; margin-bottom: 8px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg-card);
+}
+.brf-idea-text { font-size: 13px; line-height: 1.55; margin-bottom: 8px; }
+.brf-facts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.brf-chip {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px;
+    color: var(--text-muted); border: 1px solid var(--border);
+    border-radius: 3px; padding: 2px 7px; white-space: nowrap;
+}
+.brf-chip--graded { color: var(--accent); border-color: var(--accent); }
+.brf-conf {
+    position: relative; width: 64px; height: 4px; border-radius: 2px;
+    background: var(--bg-card-hover); overflow: hidden;
+}
+.brf-conf > span {
+    position: absolute; inset: 0 auto 0 0; border-radius: 2px;
+    background: var(--accent);
+}
+.brf-foot { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.nf-pop-chip {
+    display: inline-block; font-family: var(--font-mono); font-size: 9px;
+    letter-spacing: 1.5px; padding: 2px 8px; border-radius: 3px;
+    border: 1px solid var(--border); color: var(--text-muted);
+    margin-bottom: 6px;
+}
+.nf-pop-chip--aggressive { color: var(--up); border-color: var(--up); }
+.nf-pop-chip--defensive  { color: var(--down); border-color: var(--down); }
+.nf-pop-chip--balanced   { color: var(--accent-gold); border-color: var(--accent-gold); }

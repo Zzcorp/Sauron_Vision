@@ -132,3 +132,49 @@ def get_display_name(context):
             pass
         return request.user.username.upper()
     return ""
+
+
+@register.filter
+def briefing_md(value):
+    """Markdown-lite for briefing prose: escape EVERYTHING first, then
+    allow exactly **bold** and `code`, and split paragraphs (first one
+    is the lead). The strategist writes emphasis, not documents — a
+    full markdown engine here would be an HTML injection surface run on
+    LLM output, traded for features the briefing never uses.
+    """
+    import re
+
+    from django.utils.html import escape
+    from django.utils.safestring import mark_safe
+
+    text = escape(str(value or "")).replace("\r\n", "\n").strip()
+    if not text:
+        return ""
+    out = []
+    # Paragraphs FIRST, inline passes per paragraph: a ** pair whose
+    # members straddle a blank line used to open <strong> in one <p>
+    # and close it in the next — unbalanced markup shipped via
+    # mark_safe, and the browser's recovery bolded both fragments.
+    for i, para in enumerate(
+            p.strip() for p in text.split("\n\n") if p.strip()):
+        para = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", para,
+                      flags=re.S)
+        para = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", para)
+        cls = "brf-p brf-lead" if i == 0 else "brf-p"
+        out.append(f'<p class="{cls}">' + para.replace("\n", "<br>")
+                   + "</p>")
+    return mark_safe("".join(out))
+
+
+@register.filter
+def briefing_plain(value):
+    """briefing_md's plain-text twin for data attributes and preview
+    stubs: the emphasis markers come OFF instead of becoming markup —
+    a dwell card showing literal asterisks is the same wart the page
+    had, one surface over. Output is plain text; Django's attribute
+    auto-escaping does the rest."""
+    import re
+    text = str(value or "")
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.S)
+    text = re.sub(r"`([^`\n]+)`", r"\1", text)
+    return text

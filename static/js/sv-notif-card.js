@@ -587,18 +587,23 @@
      * inside the row (Django's json_script — escaped by the server, never
      * built by hand here). Parsed once per row: a malformed payload from a
      * producer must cost one card, not every card after it. */
-    function itemsOf(row) {
-        if (row._ncItems) return row._ncItems;
-        var out = [];
+    function payloadOf(row) {
+        if (row._ncPayload) return row._ncPayload;
+        var out = {};
         var tag = row.querySelector('script[type="application/json"]');
         if (tag) {
             try {
                 var parsed = JSON.parse(tag.textContent);
-                if (parsed && Array.isArray(parsed.items)) out = parsed.items;
-            } catch (err) { out = []; }
+                if (parsed && typeof parsed === "object") out = parsed;
+            } catch (err) { out = {}; }
         }
-        row._ncItems = out;
+        row._ncPayload = out;
         return out;
+    }
+
+    function itemsOf(row) {
+        var items = payloadOf(row).items;
+        return Array.isArray(items) ? items : [];
     }
 
     /* Producer-supplied urls reach an href here, so only the two shapes a
@@ -618,6 +623,13 @@
         el(pop, "div", "nf-pop-title", ds.ncTitle || "Notification");
         el(pop, "div", "nf-pop-meta",
            [ds.ncKind, ds.ncAt].filter(Boolean).join(" · "));
+        /* The briefing card leads with its posture — the one word the
+         * whole report hangs off, toned like the page's own badge. */
+        var brf = payloadOf(row).briefing;
+        if (brf && brf.posture) {
+            el(pop, "div", "nf-pop-chip nf-pop-chip--" + brf.posture,
+               String(brf.posture).toUpperCase());
+        }
         /* pre-line, because bodies arrive as written: the bot fill summary
          * and the anomaly alert both use line breaks as their structure. */
         el(pop, "div", "nf-pop-summary nf-pop-summary--pre",

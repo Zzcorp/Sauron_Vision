@@ -70,6 +70,10 @@ OPERATOR_KINDS = {"manual_fill_open"}
 # event, it already has an inbox tab and a colour in the bell, and it is not
 # the word "bot" — which is the claim that was wrong.
 _ROW_TYPE = {kind: "portfolio" for kind in OPERATOR_KINDS}
+# The daily briefing is neither a bot event nor a portfolio alert — it is
+# the one row the operator reads rather than reacts to, and it dresses
+# accordingly (ni-briefing in sauron.css).
+_ROW_TYPE["strategist_briefing"] = "briefing"
 
 # Rows whose event already drew a richer live banner straight from its
 # producer (fill_open/fill_close on /ws/eye/). The row is still pushed so the
@@ -80,7 +84,8 @@ _BANNER_SILENT_KINDS = {"bot_fill_open", "bot_fill_close", "manual_fill_open"}
 
 
 def dispatch_notification(user, kind: str, *, title: str, body: str = "",
-                          url: str = "", payload=None) -> bool:
+                          url: str = "", payload=None,
+                          row_data=None) -> bool:
     """Send a bot-event or operator-event notification to `user`.
 
     Returns True if at least one delivery channel succeeded (including in-app).
@@ -119,6 +124,11 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
             user=user, notification_type=_ROW_TYPE.get(kind, "bot"),
             title=title[:200], body=body, url=url[:200],
         )
+        if isinstance(row_data, dict) and row_data:
+            # Structured facts for the dwell card (rides as json_script,
+            # server-escaped) — the card renders data["items"] as lines
+            # and a posture chip from data["briefing"].
+            n.data = row_data
         n._banner_silent = kind in _BANNER_SILENT_KINDS
         n.save()
         delivered = True
@@ -475,23 +485,59 @@ def notify_strategist_briefing_to_all(briefing) -> dict:
         f"Sauron briefing — {briefing.posture.upper()} "
         f"({briefing.created_at:%Y-%m-%d})"
     )
+    # Strip the strategist's **emphasis** BEFORE truncation: the bell
+    # body, Telegram and Discord all render plain text, and an 800-char
+    # cut could otherwise land mid-marker.
+    from core.templatetags.sauron_tags import briefing_plain
+
     body_parts = []
     if briefing.outlook_md:
-        outlook = briefing.outlook_md.strip()
+        outlook = briefing_plain(briefing.outlook_md).strip()
         if len(outlook) > 800:
             outlook = outlook[:800].rsplit(" ", 1)[0] + "…"
         body_parts.append(outlook)
     if briefing.posture_rationale:
-        body_parts.append(f"Posture: {briefing.posture_rationale}")
+        body_parts.append(
+            f"Posture: {briefing_plain(briefing.posture_rationale)}")
     if briefing.ideas:
         idea_lines = []
         for i, idea in enumerate(briefing.ideas[:3], start=1):
-            summary = (idea or {}).get("summary", "")
+            summary = briefing_plain((idea or {}).get("summary", ""))
             if summary:
                 idea_lines.append(f"{i}. {summary}")
         if idea_lines:
             body_parts.append("Ideas:\n" + "\n".join(idea_lines))
     body = "\n\n".join(body_parts)[:4000]
+
+    # Structured facts for the bell row's dwell card — the card was
+    # showing a text stub while every one of these already existed.
+    briefing_url = f"/briefing/?id={briefing.pk}"
+    items = []
+    if briefing.posture_rationale:
+        items.append({"label": "POSTURE",
+                      "detail": briefing.posture_rationale[:160],
+                      "url": briefing_url})
+    for i, idea in enumerate((briefing.ideas or [])[:3], start=1):
+        summary = (idea or {}).get("summary", "")
+        if summary:
+            items.append({"label": f"IDEA {i}",
+                          "detail": summary[:160], "url": briefing_url})
+    if briefing.watchlist:
+        heads = ", ".join(
+            str((w or {}).get("ref", ""))[:28]
+            for w in briefing.watchlist[:3] if (w or {}).get("ref"))
+        items.append({"label": "WATCHLIST",
+                      "detail": (f"{len(briefing.watchlist)} items"
+                                 + (f" · {heads}" if heads else "")),
+                      "url": briefing_url})
+    items.append({"label": "COST",
+                  "detail": (f"${float(briefing.cost_usd or 0):.4f} · "
+                             f"{briefing.tokens_in or 0} in / "
+                             f"{briefing.tokens_out or 0} out"),
+                  "url": ""})
+    row_data = {"items": items,
+                "briefing": {"posture": briefing.posture,
+                             "id": briefing.pk}}
 
     n_delivered = 0
     n_skipped = 0
@@ -499,8 +545,9 @@ def notify_strategist_briefing_to_all(briefing) -> dict:
         try:
             ok = dispatch_notification(
                 prefs.user, "strategist_briefing",
-                title=title, body=body, url="/briefing/",
+                title=title, body=body, url=briefing_url,
                 payload=briefing,  # Phase-45 — email path uses HTML template
+                row_data=row_data,
             )
             if ok:
                 n_delivered += 1

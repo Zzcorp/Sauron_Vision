@@ -5880,11 +5880,13 @@ if ('serviceWorker' in navigator) {
                listener so the bell badge updates. */
             if (d.silent) return null;
             var typeCls = { signal: "signal", portfolio: "warn",
-                            bot: "open", news: "signal" };
+                            bot: "open", news: "signal",
+                            briefing: "signal" };
             var typeLabel = { signal: "New signal", strategy: "Strategy",
                               news: "Breaking news", portfolio: "Portfolio alert",
                               system: "System", newsletter: "Newsletter",
-                              bot: "Bot event" };
+                              bot: "Bot event",
+                              briefing: "Sauron briefing" };
             return {
                 cls: typeCls[d.type] || "close",
                 kind: typeLabel[d.type] || "Alert",

@@ -123,6 +123,7 @@ class Notification(models.Model):
         ("system", "System Message"),
         ("newsletter", "Newsletter"),
         ("bot", "Bot Event"),
+        ("briefing", "Sauron Briefing"),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")

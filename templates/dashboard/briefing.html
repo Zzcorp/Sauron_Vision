@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load sauron_tags %}
 {% block title %}Strategist briefing · Sauron's Mind{% endblock %}
 {% block content %}
 
@@ -84,7 +85,7 @@
 
     <div id="brfMain">
     {% if selected %}
-    <div class="card" style="margin-bottom:20px;">
+    <div class="card brf-card brf-{{ selected.posture }}" style="margin-bottom:20px;">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="card-title">
                 {% if is_latest %}Today · {% endif %}{{ selected.created_at|date:"Y-m-d H:i" }} UTC
@@ -99,9 +100,12 @@
         {% if selected.error %}
             <div style="color:var(--down);">Strategist error: {{ selected.error|truncatechars:200 }}</div>
         {% else %}
-            <div style="font-size:14px;line-height:1.6;white-space:pre-wrap;">{{ selected.outlook_md }}</div>
+            {% comment %}briefing_md escapes everything, then allows
+            exactly **bold** and `code` — the page was printing the
+            strategist's emphasis as literal asterisks.{% endcomment %}
+            <div class="brf-outlook">{{ selected.outlook_md|briefing_md }}</div>
             {% if selected.posture_rationale %}
-                <p style="margin-top:14px;color:var(--text-muted);font-size:12px;"><em>Posture: {{ selected.posture_rationale }}</em></p>
+                <div class="brf-rationale">Posture: {{ selected.posture_rationale }}</div>
             {% endif %}
 
             {% if selected.watchlist %}
@@ -109,13 +113,16 @@
                     <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Watchlist</div>
                     <div class="table-wrapper">
                     <table class="sv-perf-table" style="width:auto;">
+                    <thead><tr><th>signal</th><th>ref</th><th>what to watch</th></tr></thead>
+                    <tbody>
                     {% for w in selected.watchlist %}
                         <tr>
-                            <td><span class="badge badge-medium">{{ w.kind }}</span></td>
-                            <td><strong>{{ w.ref }}</strong></td>
-                            <td style="color:var(--text-muted);">{{ w.what_to_watch }}</td>
+                            <td><span class="brf-wl-kind">{{ w.kind }}</span></td>
+                            <td class="brf-wl-ref">{{ w.ref }}</td>
+                            <td style="color:var(--text-muted);font-size:12px;line-height:1.5;">{{ w.what_to_watch }}</td>
                         </tr>
                     {% endfor %}
+                    </tbody>
                     </table>
                     </div>
                 </div>
@@ -124,23 +131,23 @@
             {% if selected.ideas %}
                 <div style="margin-top:18px;">
                     <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Ideas</div>
-                    <ul style="margin:0;padding-left:18px;">
                     {% for i in selected.ideas %}
-                        <li>
-                            {{ i.summary }}
-                            <span style="color:var(--text-muted);font-size:11px;">
-                                — conf {{ i.confidence|default:"—" }} ·
-                                {% if i.hypothesis_kind %}<span style="color:var(--accent);">graded</span>{% else %}observational{% endif %}
-                                {% if i.horizon_hours %} · {{ i.horizon_hours }}h{% endif %}
-                            </span>
-                        </li>
+                        <div class="brf-idea">
+                            <div class="brf-idea-text">{{ i.summary }}</div>
+                            <div class="brf-facts">
+                                {% if i.confidence %}<span class="brf-chip">CONF {{ i.confidence }}</span><span class="brf-conf" title="Author's stated confidence"><span style="width:{% widthratio i.confidence 1 100 %}%;"></span></span>{% else %}<span class="brf-chip">CONF &mdash;</span>{% endif %}
+                                {% if i.hypothesis_kind %}<span class="brf-chip brf-chip--graded">GRADED</span>{% else %}<span class="brf-chip">OBSERVATIONAL</span>{% endif %}
+                                {% if i.horizon_hours %}<span class="brf-chip">{{ i.horizon_hours }}H</span>{% endif %}
+                            </div>
+                        </div>
                     {% endfor %}
-                    </ul>
                 </div>
             {% endif %}
 
-            <div style="margin-top:18px;font-size:11px;color:var(--text-muted);">
-                model: {{ selected.model_used }} · tokens {{ selected.tokens_in }} in / {{ selected.tokens_out }} out · cost ${{ selected.cost_usd|floatformat:5 }}
+            <div class="brf-foot">
+                <span class="brf-chip">{{ selected.model_used|default:"&mdash;" }}</span>
+                <span class="brf-chip">{{ selected.tokens_in }} IN / {{ selected.tokens_out }} OUT</span>
+                <span class="brf-chip">${{ selected.cost_usd|floatformat:5 }}</span>
             </div>
         {% endif %}
     </div>
@@ -164,7 +171,7 @@
                     data-brf-href="{% url 'briefing_dashboard' %}?id={{ b.pk }}"
                     data-brf-date="{{ b.created_at|date:'Y-m-d H:i' }} UTC"
                     data-brf-posture="{% if b.error %}ERROR{% else %}{{ b.posture|upper }}{% endif %}"
-                    data-brf-summary="{% if b.error %}{{ b.error|truncatechars:200 }}{% else %}{{ b.outlook_md|truncatechars:420 }}{% endif %}"
+                    data-brf-summary="{% if b.error %}{{ b.error|truncatechars:200 }}{% else %}{{ b.outlook_md|briefing_plain|truncatechars:420 }}{% endif %}"
                     data-brf-ideas="{{ b.ideas|length }}"
                     data-brf-watch="{{ b.watchlist|length }}"
                     data-brf-meta="{{ b.model_used }} · ${{ b.cost_usd|floatformat:4 }}"
