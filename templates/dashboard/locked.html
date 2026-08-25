@@ -65,9 +65,18 @@
      not a transition: the entrance's `forwards` fill pins opacity and
      transform, and a transition on pinned properties never runs — a
      later animation on the same origin wins where a transition loses. */
-  .lk-page.lk-leave .lk-card { animation: lkLeave .26s ease forwards; }
+  .lk-page.lk-leave .lk-card { animation: lkLeave .4s cubic-bezier(.3,.7,.3,1) forwards; }
   @keyframes lkLeave {
-      to { opacity: 0; transform: translateY(-10px) scale(1.01); } }
+      30% { opacity: 1; transform: translateY(-4px) scale(1.012);
+            box-shadow: 0 24px 80px rgba(0,0,0,.5), 0 0 60px var(--accent-glow); }
+      to  { opacity: 0; transform: translateY(-26px) scale(1.03); } }
+  /* The room's lights follow the card out. The ambient layer's opacity
+     is OWNED by its infinite lkAmbient animation, and a transition on an
+     animated property never runs (the same lesson as lkLeave above) — so
+     the fade is a LATER animation on the same origin, which wins. */
+  .lk-page.lk-leave::before { transition: opacity .4s ease; opacity: 0; }
+  .lk-page.lk-leave::after { animation: lkLightsOut .4s ease forwards; }
+  @keyframes lkLightsOut { to { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) {
       .lk-page.lk-leave .lk-card { animation: none; opacity: 0; } }
 </style>
@@ -95,23 +104,33 @@
         inp.setAttribute("data-lk-pin", "");
         return inp;
     }
+    function paintFill() {
+        boxes().forEach(function (b) { b.classList.toggle("has-val", !!b.value); });
+    }
     function insert(d) {
         var b = boxes();
-        for (var i = 0; i < b.length; i++) { if (!b[i].value) { b[i].value = d; focusFirstEmpty(); return; } }
-        if (b.length < MAX) { var nb = makeBox(); row.appendChild(nb); nb.value = d; nb.focus({preventScroll:true}); }
+        for (var i = 0; i < b.length; i++) { if (!b[i].value) { b[i].value = d; paintFill(); focusFirstEmpty(); return; } }
+        if (b.length < MAX) { var nb = makeBox(); row.appendChild(nb); nb.value = d; paintFill(); nb.focus({preventScroll:true}); }
     }
     function back() {
         var b = boxes();
         for (var i = b.length - 1; i >= 0; i--) {
-            if (b[i].value) { b[i].value = ""; if (i >= MIN) b[i].remove(); focusFirstEmpty(); return; }
+            if (b[i].value) { b[i].value = ""; if (i >= MIN) b[i].remove(); paintFill(); focusFirstEmpty(); return; }
         }
         focusFirstEmpty();
     }
-    function clear() { boxes().forEach(function (b, i) { if (i >= MIN) b.remove(); else b.value = ""; }); }
+    function clear() { boxes().forEach(function (b, i) { if (i >= MIN) b.remove(); else b.value = ""; }); paintFill(); }
     function showError(msg) {
         if (!errEl) return;
-        if (msg) { errEl.textContent = msg; errEl.hidden = false; }
-        else { errEl.textContent = ""; errEl.hidden = true; }
+        if (msg) {
+            errEl.textContent = msg; errEl.hidden = false;
+            row.classList.remove("pin-shake");
+            void row.offsetWidth;
+            row.classList.add("pin-shake");
+        } else {
+            errEl.textContent = ""; errEl.hidden = true;
+            row.classList.remove("pin-shake");
+        }
     }
     function csrf() {
         var i = document.querySelector("#lkLogoutForm input[name=csrfmiddlewaretoken]");
@@ -133,7 +152,7 @@
                 try { localStorage.setItem("sv:unlockedAt", String(Date.now())); } catch (e) {}
                 var pg = document.querySelector(".lk-page");
                 if (pg) pg.classList.add("lk-leave");
-                setTimeout(function () { window.location.assign(NEXT); }, 260);
+                setTimeout(function () { window.location.assign(NEXT); }, 420);
                 return;
             }
             if (data.status === "logged_out") { window.location.assign("/wall/"); return; }

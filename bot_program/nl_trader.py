@@ -179,6 +179,12 @@ class NLTradeParser:
             except LiveQuote.DoesNotExist:
                 pass
             position.save()
+            try:
+                from dashboard.consumers import push_eye_event
+                push_eye_event(user, "fill_close", {
+                    "symbol": symbol, "source": "nl_trader"})
+            except Exception:
+                pass
 
             return {'status': 'executed', 'action': 'close', 'symbol': symbol}
 

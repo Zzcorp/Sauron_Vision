@@ -3262,7 +3262,15 @@ function toggleSidebar() {
         body.innerHTML = html;
         body.querySelectorAll('.sr-signal-wrap[data-signal-id]').forEach(w => {
           const was = before.get(w.dataset.signalId);
-          if (was === undefined) w.classList.add('sr-slide-in');
+          if (was === undefined) {
+            w.classList.add('sr-slide-in');
+            /* The entrance ends, the class leaves with it — a hover
+               DURING the half-second slide would still position the
+               fixed popup against the transforming wrap otherwise. */
+            w.addEventListener('animationend', function () {
+              w.classList.remove('sr-slide-in');
+            }, { once: true });
+          }
           else if (!was && w.dataset.acted) w.classList.add('sr-just-acted');
         });
         /* Named, for the same reason the bell rows name theirs: a signal

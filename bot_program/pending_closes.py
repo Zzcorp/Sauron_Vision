@@ -785,6 +785,35 @@ def _finalise_closed(trade, *, fill: dict, reason: str) -> None:
         close_lots_for(trade)
     except Exception as e:
         logger.warning("close retry tax_lots failed for #%s: %s", trade.id, e)
+    # The dashboards hear about a close from push_eye_event and nothing
+    # else — and this finaliser never called it. The user's exact story:
+    # a live close fails once (the page correctly shows CLOSE_PENDING),
+    # the retry — button or the five-minute beat — succeeds, and the
+    # position sits on every open page until a manual refresh.
+    try:
+        from dashboard.consumers import push_eye_event
+        push_eye_event(trade.config.user, "fill_close", {
+            "trade_id": trade.id, "asset_class": trade.asset_class,
+            "symbol": trade.symbol, "side": trade.side,
+            "outcome": trade.outcome or "",
+            "pnl": str(trade.pnl) if trade.pnl is not None else "0",
+        })
+    except Exception as e:
+        logger.warning("close retry eye push failed for #%s: %s",
+                       trade.id, e)
+    # Same hole, second channel: a first-attempt close rings
+    # notify_bot_fill_close; a retried one never did.
+    try:
+        from bot_program.notifications import notify_bot_fill_close
+        notify_bot_fill_close(
+            trade.config.user, asset_class=trade.asset_class,
+            symbol=trade.symbol, side=trade.side, qty=trade.qty,
+            exit_price=trade.exit_price, pnl=trade.pnl,
+            outcome=trade.outcome or "", trade_id=trade.id,
+        )
+    except Exception as e:
+        logger.warning("close retry notify failed for #%s: %s",
+                       trade.id, e)
 
 
 def _record_partial(trade, fill: dict) -> None:
@@ -817,6 +846,17 @@ def _give_up(trade, error: str) -> None:
     trade.reason = ((trade.reason or "")
                     + " | close-abandoned").strip()[:1000]
     trade.save(update_fields=["status", "reason"])
+    # ERROR leaves every OPEN/CLOSE_PENDING read at once — the pages
+    # must re-render the row out now, not at the next slow sweep.
+    try:
+        from dashboard.consumers import push_eye_event
+        push_eye_event(trade.config.user, "close_pending", {
+            "trade_id": trade.id, "asset_class": trade.asset_class,
+            "symbol": trade.symbol, "abandoned": True,
+        })
+    except Exception as e:
+        logger.warning("close-abandoned eye push failed for #%s: %s",
+                       trade.id, e)
     try:
         from alerts.links import page_url
         from alerts.models import Notification

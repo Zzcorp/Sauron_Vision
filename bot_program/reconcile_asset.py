@@ -237,6 +237,19 @@ def _close_as_orphan(trade) -> None:
         if not trade.outcome:
             trade.outcome = "manual_close"
             trade.save(update_fields=["outcome"])
+    # Every broker-side bracket exit (all stock and forex stops) is
+    # finalised HERE — and none of them reached the dashboards live.
+    try:
+        from dashboard.consumers import push_eye_event
+        push_eye_event(trade.config.user, "fill_close", {
+            "trade_id": trade.id, "asset_class": trade.asset_class,
+            "symbol": trade.symbol, "side": trade.side,
+            "outcome": trade.outcome or "",
+            "pnl": str(trade.pnl) if trade.pnl is not None else "0",
+        })
+    except Exception as e:
+        logger.warning("reconcile: eye push failed for #%s: %s",
+                       trade.id, e)
 
 
 def reconcile_all_users() -> dict:

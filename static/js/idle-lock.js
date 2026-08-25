@@ -260,15 +260,26 @@
         }
         if (boxes.length) boxes[boxes.length - 1].focus({ preventScroll: true });
     }
+    function paintFill() {
+        /* A filled box says so — the dot pops in (il-fill keyframe) and
+           the border warms, so progress reads at a glance. */
+        pinBoxes().forEach(function (b) {
+            b.classList.toggle("has-val", !!b.value);
+        });
+    }
     function pinInsert(digit) {
         var boxes = pinBoxes();
         for (var i = 0; i < boxes.length; i++) {
-            if (!boxes[i].value) { boxes[i].value = digit; focusFirstEmpty(); return; }
+            if (!boxes[i].value) {
+                boxes[i].value = digit; paintFill(); focusFirstEmpty();
+                return;
+            }
         }
         if (boxes.length < PIN_MAX) {
             var nb = makeBox();
             pinRow.appendChild(nb);
             nb.value = digit;
+            paintFill();
             nb.focus({ preventScroll: true });
         }
     }
@@ -278,6 +289,7 @@
             if (boxes[i].value) {
                 boxes[i].value = "";
                 if (i >= PIN_MIN) boxes[i].remove();
+                paintFill();
                 focusFirstEmpty();
                 return;
             }
@@ -288,13 +300,25 @@
         pinBoxes().forEach(function (b, i) {
             if (i >= PIN_MIN) b.remove(); else b.value = "";
         });
+        paintFill();
     }
 
     function showError(msg) {
         var el = d.getElementById("ilError");
         if (!el) return;
-        if (msg) { el.textContent = msg; el.hidden = false; }
-        else { el.textContent = ""; el.hidden = true; }
+        if (msg) {
+            el.textContent = msg; el.hidden = false;
+            /* The row shakes once — restart the keyframe if it is
+               already wearing the class from the previous miss. */
+            if (pinRow) {
+                pinRow.classList.remove("pin-shake");
+                void pinRow.offsetWidth;
+                pinRow.classList.add("pin-shake");
+            }
+        } else {
+            el.textContent = ""; el.hidden = true;
+            if (pinRow) pinRow.classList.remove("pin-shake");
+        }
     }
 
     /* ── unlock: the PIN is verified by the server, never here ───────── */
@@ -343,6 +367,21 @@
     /* ── wiring ──────────────────────────────────────────────────────── */
 
     if (overlay) {
+        /* The router listens on the DOCUMENT while locked: keys land on
+           <body> when nothing inside the overlay has focus, and an
+           overlay-scoped listener never hears them — the PIN could not
+           be typed until a box was clicked. Type anywhere; the waking
+           keystroke itself lands in the first box. */
+        d.addEventListener("keydown", function (e) {
+            if (!isLocked) return;
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            var t = e.target;
+            if (t && t.closest && t.closest("a, button")) return;
+            if (t && t.hasAttribute && t.hasAttribute("data-il-pin")) return;
+            if (/^[0-9]$/.test(e.key)) { e.preventDefault(); pinInsert(e.key); }
+            else if (e.key === "Backspace") { e.preventDefault(); pinBackspace(); }
+            else if (e.key === "Enter") { e.preventDefault(); submitPin(); }
+        });
         overlay.addEventListener("keydown", function (e) {
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             if (/^[0-9]$/.test(e.key)) { e.preventDefault(); pinInsert(e.key); }
@@ -362,6 +401,7 @@
             var t = e.target;
             if (!t.hasAttribute || !t.hasAttribute("data-il-pin")) return;
             if (t.value) t.value = t.value.replace(/\D/g, "").slice(-1);
+            paintFill();
             if (t.value) focusFirstEmpty();
         });
         var unlockBtn = d.getElementById("ilUnlockBtn");

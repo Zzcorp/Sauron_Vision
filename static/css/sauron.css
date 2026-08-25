@@ -2387,7 +2387,17 @@
             to   { opacity: 1; transform: none; }
         }
         .sr-signal-wrap.sr-slide-in {
-            animation: srSlideIn .5s cubic-bezier(.2,.8,.25,1) both;
+            /* `backwards`, NEVER `both`: a FILLING animation whose
+               keyframes touch transform acts as will-change:transform
+               for as long as it applies — and `both` applies forever —
+               which makes this wrap the containing block for its
+               position:fixed .sr-popup. The popup then positions
+               against the 280px card instead of the viewport and dies
+               inside the rail's overflow:hidden: hover looked dead on
+               every new signal until a full page render dropped the
+               class. The last keyframe equals the natural style, so
+               forwards-fill painted nothing anyway. */
+            animation: srSlideIn .5s cubic-bezier(.2,.8,.25,1) backwards;
         }
         /* Fresh headline in the marquee: the track already moves, so a
            slide would fight it — a decaying glow marks the newcomer as it
@@ -5177,12 +5187,43 @@ body.light-mode .il-overlay { background: var(--bg-secondary); }
 .il-overlay.is-awake .il-wake {
     opacity: 1; visibility: visible; transform: none;
 }
+/* Waking is a cascade here too: the card surfaces, then its pieces —
+   the same rhythm the standalone gate keeps, so the two screens read
+   as one door. */
+/* Compound, not descendant: the card IS the wake element
+   (<div class="il-card il-wake">). Visibility rides the transition list
+   because this rule REPLACES .il-wake's own (see the overlay-transition
+   note further down: dropping visibility leaves invisible controls
+   clickable). */
+.il-card.il-wake { transition: opacity .3s ease .04s,
+                               transform .3s ease .04s,
+                               visibility .3s .04s;
+                   transform: translateY(8px) scale(.985); }
+.il-overlay.is-awake .il-card.il-wake {
+    opacity: 1; visibility: visible; transform: none; }
 .il-overlay.is-awake .il-clock { font-size: 30px; opacity: .7; }
 .il-overlay.is-awake .il-eye { width: 60px; height: 60px; margin-bottom: 16px; }
 @media (prefers-reduced-motion: reduce) {
     .il-eye { animation: none; opacity: .85; }
     .il-wake { transition: none; }
+    .il-card.il-wake { transition: none; }
 }
+/* The veil carries the same faint grid the standalone gate wears —
+   OPAQUE background untouched (the veil's whole job); this layer only
+   adds texture above it, behind the content. */
+.il-overlay::before {
+    content: ""; position: absolute; inset: -60px; pointer-events: none;
+    background-image:
+        linear-gradient(color-mix(in srgb, var(--accent) 5%, transparent) 1px, transparent 1px),
+        linear-gradient(90deg, color-mix(in srgb, var(--accent) 5%, transparent) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 0%, transparent 78%);
+    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 0%, transparent 78%);
+    animation: lkGridDrift 60s linear infinite;
+    opacity: 0; transition: opacity .8s ease;
+}
+.il-overlay.il-in::before { opacity: 1; }
+.il-overlay > * { position: relative; }
 
 .il-card {
     width: 340px;
@@ -5325,7 +5366,38 @@ body.light-mode .il-title { color: var(--text-primary); }
     justify-content: center;
     padding: 24px;
     background: var(--bg-void);
+    position: relative;
+    overflow: hidden;
 }
+/* The locked room is not a blank void: the house grid lies faint under
+   a slow-breathing pair of glows — enough presence to say Sauron, never
+   enough light to distract from the gate. Layers, not markup: the page
+   stays dataless. */
+.lk-page::before {
+    content: ""; position: absolute; inset: -60px; pointer-events: none;
+    background-image:
+        linear-gradient(color-mix(in srgb, var(--accent) 6%, transparent) 1px, transparent 1px),
+        linear-gradient(90deg, color-mix(in srgb, var(--accent) 6%, transparent) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 0%, transparent 78%);
+    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 0%, transparent 78%);
+    animation: lkGridDrift 60s linear infinite;
+}
+.lk-page::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background:
+        radial-gradient(ellipse 55% 42% at 50% 40%,
+                        color-mix(in srgb, var(--accent) 10%, transparent),
+                        transparent 70%),
+        radial-gradient(ellipse 120% 70% at 50% 118%,
+                        color-mix(in srgb, var(--accent-gold) 7%, transparent),
+                        transparent 60%);
+    animation: lkAmbient 7s ease-in-out infinite;
+}
+@keyframes lkGridDrift { to { background-position: 48px 48px; } }
+@keyframes lkAmbient { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+.lk-card { position: relative; z-index: 1; }
+body.light-mode .lk-page::before { opacity: .5; }
 .lk-card {
     width: 100%;
     max-width: 380px;
@@ -5376,6 +5448,62 @@ body.light-mode .il-title { color: var(--text-primary); }
 .lk-row input:focus {
     border-color: var(--accent);
     box-shadow: 0 0 18px var(--accent-glow);
+}
+
+/* ── Lock choreography — shared by /locked/ and the idle overlay ─────
+   A filled box answers the touch; a wrong PIN shakes the row once; the
+   waking controls arrive as a cascade, not a curtain. */
+.lk-row input.has-val, .il-card input.has-val {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-void));
+    animation: pinFill .18s cubic-bezier(.3,1.4,.5,1);
+}
+@keyframes pinFill {
+    0% { transform: scale(.92); } 55% { transform: scale(1.07); }
+    100% { transform: scale(1); }
+}
+.pin-shake { animation: pinShake .38s cubic-bezier(.36,.07,.19,.97); }
+@keyframes pinShake {
+    10%, 90% { transform: translateX(-1px); }
+    20%, 80% { transform: translateX(3px); }
+    30%, 50%, 70% { transform: translateX(-5px); }
+    40%, 60% { transform: translateX(5px); }
+}
+/* The gate's eye blooms once on arrival, then hands over to its idle
+   glow; the title and hint follow a half-beat behind. */
+.lk-card .lk-eye { animation: lkEyeBloom .9s cubic-bezier(.2,.8,.3,1) both; }
+.lk-card .lk-title { animation: lkRise .5s ease .25s both; }
+.lk-card .lk-sub { animation: lkRise .5s ease .38s both; }
+@keyframes lkEyeBloom {
+    0% { opacity: 0; transform: scale(.6);
+         box-shadow: 0 0 0 transparent, inset 0 0 0 transparent; }
+    60% { opacity: 1; transform: scale(1.06);
+          box-shadow: 0 0 44px var(--accent-glow), inset 0 0 24px var(--accent-glow); }
+    100% { opacity: 1; transform: scale(1);
+           box-shadow: 0 0 26px var(--accent-glow), inset 0 0 18px var(--accent-glow); }
+}
+@keyframes lkRise { from { opacity: 0; transform: translateY(8px); } }
+/* The reveal cascades: boxes, then the verdict line, then the button,
+   then the quiet exits — each a half-step behind the last. */
+.lk-reveal .lk-row { transition: opacity .35s ease .05s, transform .35s ease .05s; }
+.lk-reveal .lk-err { transition: opacity .35s ease .14s; }
+.lk-reveal .lk-unlock { transition: opacity .35s ease .2s, transform .35s ease .2s; }
+.lk-reveal #lkLogoutForm { transition: opacity .35s ease .3s; }
+.lk-reveal .lk-row, .lk-reveal .lk-unlock { transform: translateY(6px); }
+.lk-reveal .lk-row, .lk-reveal .lk-err,
+.lk-reveal .lk-unlock, .lk-reveal #lkLogoutForm { opacity: 0; }
+.lk-card:hover .lk-reveal .lk-row, .lk-page.lk-awake .lk-reveal .lk-row,
+.lk-card:hover .lk-reveal .lk-unlock, .lk-page.lk-awake .lk-reveal .lk-unlock {
+    opacity: 1; transform: none; }
+.lk-card:hover .lk-reveal .lk-err, .lk-page.lk-awake .lk-reveal .lk-err,
+.lk-card:hover .lk-reveal #lkLogoutForm, .lk-page.lk-awake .lk-reveal #lkLogoutForm {
+    opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+    .lk-page::before, .lk-page::after, .il-overlay::before,
+    .lk-card .lk-eye, .lk-card .lk-title, .lk-card .lk-sub,
+    .lk-row input.has-val, .il-card input.has-val, .pin-shake { animation: none; }
+    .lk-reveal .lk-row, .lk-reveal .lk-err,
+    .lk-reveal .lk-unlock, .lk-reveal #lkLogoutForm { transition: none; }
 }
 .lk-err {
     font-family: var(--font-mono);

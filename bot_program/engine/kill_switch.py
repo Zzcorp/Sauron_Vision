@@ -19,6 +19,25 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+def _push_close_event(user, trade, kind):
+    """A kill-switch close is still a close — the dashboards must hear
+    it the same way they hear the engine's own. Guarded like every
+    other hook in this sweep: one deaf channel never aborts a flatten.
+    """
+    try:
+        from dashboard.consumers import push_eye_event
+        payload = {"source": "kill_switch"}
+        if trade is not None:
+            payload.update({
+                "trade_id": trade.id,
+                "asset_class": getattr(trade, "asset_class", "crypto"),
+                "symbol": trade.symbol,
+            })
+        push_eye_event(user, kind, payload)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[KILL SWITCH] eye push failed: %s", e)
+
+
 def execute_kill_switch(user=None, reason="manual"):
     """Emergency: disable all bots and close all open positions.
 
@@ -71,6 +90,7 @@ def execute_kill_switch(user=None, reason="manual"):
         try:
             _close_legacy_trade(trade, now)
             results["positions_closed"] += 1
+            _push_close_event(trade.config.user, trade, "fill_close")
         except Exception as e:  # noqa: BLE001 — never let one trade abort the sweep
             msg = f"legacy trade {trade.id} ({trade.symbol}): {e}"
             results["errors"].append(msg)
@@ -84,10 +104,23 @@ def execute_kill_switch(user=None, reason="manual"):
         try:
             _close_asset_trade(trade, now)
             results["asset_positions_closed"] += 1
+            _push_close_event(trade.config.user, trade, "fill_close")
         except Exception as e:  # noqa: BLE001
             msg = f"asset trade {trade.id} ({trade.symbol}): {e}"
             results["errors"].append(msg)
             logger.error("[KILL SWITCH] %s", msg)
+            # The partial-fill branch SAVES CLOSE_PENDING and then
+            # raises — the one close state this sweep can strand is the
+            # one the success path could never announce. Refresh from
+            # the DB (the in-memory row predates the save) and tell the
+            # pages a close is in trouble.
+            try:
+                trade.refresh_from_db(fields=["status"])
+                if trade.status == "CLOSE_PENDING":
+                    _push_close_event(trade.config.user, trade,
+                                      "close_pending")
+            except Exception:  # noqa: BLE001
+                pass
 
     # ── 4. Mark portfolio positions closed ───────────────────────────────────
     positions = Position.objects.filter(closed_at__isnull=True)
@@ -99,6 +132,11 @@ def execute_kill_switch(user=None, reason="manual"):
         pos.closed_at = now
         pos.save(update_fields=["closed_at"])
         results["portfolio_positions_closed"] += 1
+    if results["portfolio_positions_closed"] and user is not None:
+        # Position rows carry no user FK; the initiating operator is the
+        # one watching. A global sweep (user=None) has no address — those
+        # pages converge on the slow sweep instead.
+        _push_close_event(user, None, "fill_close")
 
     # ── 5. Notify ────────────────────────────────────────────────────────────
     from alerts.models import Notification
