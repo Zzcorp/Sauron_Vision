@@ -1516,3 +1516,164 @@ def admin_eye_geo(request):
         if label:
             out[p.last_ip] = label
     return JsonResponse({"geo": out})
+
+
+@login_required
+def hq_books(request):
+    """The whole house at one glance — every book, and what is held where.
+
+    The capital_summary discipline holds ALL the way down here: the two
+    economies are separate tables, paper and live pools are separate
+    rows (simulated money is not deployable money), currencies are never
+    summed into one figure (a EUR book plus a USD bot is two numbers,
+    not a number in no currency that exists), and an unpriced leg is
+    counted, never booked at zero or a stale entry. Underneath, the
+    cross-book concentration table: one symbol held in several
+    REAL-money books is one bet wearing several accounts — paper
+    holders are listed and marked, but only real money trips the flag.
+    """
+    if not request.user.is_superuser:
+        return HttpResponseForbidden("Superuser access required.")
+
+    from collections import defaultdict
+    from decimal import Decimal
+
+    from django.shortcuts import render
+
+    from bot_program.models import AssetBotConfig, AssetBotTrade
+    from portfolio.models import Portfolio, Position
+    from portfolio.services import is_option_row, value_per_unit
+
+    # One fetch of every open legacy position, shared by both passes.
+    all_open = list(Position.objects.filter(closed_at__isnull=True)
+                    .select_related("instrument", "portfolio"))
+    by_book = defaultdict(list)
+    for pos in all_open:
+        by_book[pos.portfolio_id].append(pos)
+
+    books = []
+    for pf in Portfolio.objects.order_by("name"):
+        marked = Decimal("0")
+        unpriced = 0
+        legs = by_book.get(pf.pk, [])
+        for pos in legs:
+            if pos.current_price:
+                marked += abs(pos.quantity * pos.current_price)
+            else:
+                unpriced += 1
+        books.append({
+            "name": pf.name,
+            "currency": pf.currency,
+            "cash": pf.cash_available,
+            "initial": pf.initial_capital,
+            "n_open": len(legs),
+            "n_priced": len(legs) - unpriced,
+            "marked": marked,
+            "unpriced": unpriced,
+        })
+
+    # Bot books: one row per (trader, mode, currency) — the three axes
+    # along which the figures must never be added together.
+    pools = defaultdict(float)
+    for cfg in (AssetBotConfig.objects.filter(enabled=True)
+                .select_related("user")):
+        pools[(cfg.user.username, cfg.mode,
+               cfg.base_currency or "USD")] += float(cfg.capital or 0)
+    open_trades = list(AssetBotTrade.objects.filter(
+        status__in=("OPEN", "CLOSE_PENDING")).select_related("config__user"))
+    by_lane = {}
+    for tr in open_trades:
+        key = (tr.config.user.username, tr.config.mode,
+               tr.config.base_currency or "USD")
+        row = by_lane.setdefault(key, {"n": 0, "notional": 0.0})
+        row["n"] += 1
+        row["notional"] += abs(float(tr.qty or 0)
+                               * float(tr.entry_price or 0)
+                               * value_per_unit(tr))
+    bot_books = []
+    for key in sorted(set(pools) | set(by_lane)):
+        username, mode, currency = key
+        row = by_lane.get(key, {"n": 0, "notional": 0.0})
+        bot_books.append({
+            "user": username,
+            "mode": mode,
+            "currency": currency,
+            "pool": round(pools.get(key, 0.0), 2),
+            "n_open": row["n"],
+            "notional": round(row["notional"], 2),
+        })
+
+    # Cross-book concentration. Per-currency buckets — never one sum.
+    held = {}
+
+    def _row(sym):
+        return held.setdefault(sym, {
+            "symbol": sym, "holders": set(), "real_holders": set(),
+            "long": defaultdict(float), "short": defaultdict(float),
+            "premium": defaultdict(float), "unpriced": 0,
+        })
+
+    for pos in all_open:
+        h = _row(pos.instrument.symbol)
+        holder = f"book · {pos.portfolio.name}"
+        h["holders"].add(holder)
+        h["real_holders"].add(holder)
+        if not pos.current_price:
+            # Same discipline as the books table: counted, never valued
+            # at a stale entry or a confident zero.
+            h["unpriced"] += 1
+            continue
+        side = "long" if pos.direction == "long" else "short"
+        h[side][pos.portfolio.currency] += abs(
+            float(pos.quantity or 0) * float(pos.current_price))
+    for tr in open_trades:
+        h = _row(tr.symbol)
+        mode = tr.config.mode
+        holder = f"bot · {tr.config.user.username} [{mode}]"
+        h["holders"].add(holder)
+        if mode != "paper":
+            h["real_holders"].add(holder)
+        currency = tr.config.base_currency or "USD"
+        notional = abs(float(tr.qty or 0) * float(tr.entry_price or 0)
+                       * value_per_unit(tr))
+        if is_option_row(tr):
+            # Premium dollars are not share exposure — folding them into
+            # the long/short columns would understate the bet by orders
+            # of magnitude. Own bucket, rendered as its own fact.
+            h["premium"][currency] += notional
+        else:
+            side = ("long" if (tr.side or "").upper() in ("BUY", "LONG")
+                    else "short")
+            h[side][currency] += notional
+
+    def _parts(bucket):
+        return " + ".join(f"{cur} {amt:,.2f}"
+                          for cur, amt in sorted(bucket.items())) or ""
+
+    concentration = []
+    for h in held.values():
+        per_ccy = [h["long"][c] + h["short"][c]
+                   for c in set(h["long"]) | set(h["short"])]
+        concentration.append({
+            "symbol": h["symbol"],
+            "holders": sorted(h["holders"]),
+            "n_holders": len(h["holders"]),
+            "crowded": len(h["real_holders"]) >= 2,
+            "long_display": _parts(h["long"]),
+            "short_display": _parts(h["short"]),
+            "premium_display": _parts(h["premium"]),
+            "unpriced": h["unpriced"],
+            # Sort tiebreak: the largest SINGLE-CURRENCY share notional.
+            # Mixing currencies into one sortable sum would rank a JPY
+            # book ~150x overstated; premium stays out by design.
+            "_rank": max(per_ccy) if per_ccy else 0.0,
+        })
+    concentration.sort(key=lambda r: (-r["n_holders"], -r["_rank"]))
+
+    return render(request, "dashboard/hq_books.html", {
+        "page_id": "admin",
+        "books": books,
+        "bot_books": bot_books,
+        "concentration": concentration,
+        "n_crowded": sum(1 for r in concentration if r["crowded"]),
+    })

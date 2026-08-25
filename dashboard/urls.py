@@ -41,6 +41,7 @@ from .views_performance import performance_dashboard
 from .views_risk import risk_dashboard, risk_dashboard_live
 from .views_ai_insights import ai_insights_dashboard
 from .views_admin_hq import (
+    hq_books,
     admin_eye, admin_eye_geo,
     flatten_all_positions,
     run_signal_scan, run_smc_lifecycle, run_grade_signals,
@@ -120,6 +121,7 @@ urlpatterns = [
     path("investor/live/", __import__("dashboard.views_investor",
          fromlist=["investor_panel_live"]).investor_panel_live,
          name="investor_panel_live"),
+    path("admin-dashboard/books/", hq_books, name="hq_books"),
     path("admin-dashboard/investors/create/",
          __import__("dashboard.views_investor",
          fromlist=["hq_create_investor"]).hq_create_investor,

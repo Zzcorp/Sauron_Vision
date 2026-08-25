@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}All Books — Sauron Vision{% endblock %}
+{% block page_title %}⌂ ALL BOOKS{% endblock %}
+
+{% block content %}
+<div class="section-label fade-in-up">Legacy books</div>
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Portfolio books — shared Main and one per trader</span></div>
+    <div class="table-wrapper"><table class="sv-perf-table">
+        <thead><tr><th>Book</th><th>Cash</th><th>Seeded</th><th>Open</th><th>Marked exposure</th></tr></thead>
+        <tbody>
+        {% for b in books %}
+        <tr>
+            <td style="font-weight:600;">{{ b.name }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{{ b.currency }} {{ b.cash|floatformat:2 }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{{ b.currency }} {{ b.initial|floatformat:0 }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{{ b.n_open }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{% if b.n_open == 0 or b.n_priced == 0 %}&mdash;{% else %}{{ b.currency }} {{ b.marked|floatformat:2 }}{% endif %}{% if b.unpriced %} <span class="sv-unknown" title="{{ b.unpriced }} open position(s) carry no mark — their value is not in this figure">+{{ b.unpriced }} unpriced</span>{% endif %}</td>
+        </tr>
+        {% empty %}<tr><td colspan="5">No books yet.</td></tr>{% endfor %}
+        </tbody>
+    </table></div>
+</div>
+
+<div class="section-label fade-in-up">Bot books</div>
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">One row per trader, mode and currency — never summed across them</span></div>
+    <div class="table-wrapper"><table class="sv-perf-table">
+        <thead><tr><th>Trader</th><th>Mode</th><th>Enabled pools</th><th>Open trades</th><th>Entry notional</th></tr></thead>
+        <tbody>
+        {% for b in bot_books %}
+        <tr>
+            <td style="font-weight:600;">{{ b.user }}</td>
+            <td style="font-family:var(--font-mono);font-size:10px;letter-spacing:1px;">{{ b.mode|upper }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{{ b.currency }} {{ b.pool|floatformat:2 }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{{ b.n_open }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{% if b.n_open %}{{ b.currency }} {{ b.notional|floatformat:2 }}{% else %}&mdash;{% endif %}</td>
+        </tr>
+        {% empty %}<tr><td colspan="5">No bot configurations yet.</td></tr>{% endfor %}
+        </tbody>
+    </table></div>
+</div>
+
+<div class="section-label fade-in-up">Cross-book concentration</div>
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">One symbol in several books is one bet wearing several accounts</span>
+        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);letter-spacing:1px;">{{ n_crowded }} CROWDED</span></div>
+    <div class="table-wrapper"><table class="sv-perf-table">
+        <thead><tr><th></th><th>Symbol</th><th>Held by</th><th>Long</th><th>Short</th><th>Option premium</th></tr></thead>
+        <tbody>
+        {% for r in concentration %}
+        <tr>
+            <td>{% if r.crowded %}<span title="Held in {{ r.n_holders }} books at once — the risk gates judge each book alone; this is the view they cannot have">⚠</span>{% endif %}</td>
+            <td style="font-weight:600;">{{ r.symbol }}</td>
+            <td style="font-size:11px;">{{ r.holders|join:", " }}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{% if r.long_display %}{{ r.long_display }}{% else %}&mdash;{% endif %}{% if r.unpriced %} <span class="sv-unknown" title="{{ r.unpriced }} unmarked leg(s) counted as holders but not valued">+{{ r.unpriced }} unpriced</span>{% endif %}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{% if r.short_display %}{{ r.short_display }}{% else %}&mdash;{% endif %}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;">{% if r.premium_display %}{{ r.premium_display }}{% else %}&mdash;{% endif %}</td>
+        </tr>
+        {% empty %}<tr><td colspan="6">Nothing open anywhere.</td></tr>{% endfor %}
+        </tbody>
+    </table></div>
+</div>
+{% endblock %}
