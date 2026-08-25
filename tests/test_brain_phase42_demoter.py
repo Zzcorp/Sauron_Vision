@@ -117,7 +117,8 @@ class CheckHypothesisRefutedTests(TestCase):
         setup, rule = _make_generated_rule("pend_test")
         h = post_hypothesis(claim_text="x", source_agent="strategy_generator",
                               confidence=0.5, horizon_hours=24,
-                              resolution_criteria={"kind": "rule_avg_r"})
+                              resolution_criteria={"kind": "rule_avg_r",
+                                                    "rule_name": "pend_test"})
         GeneratedSetupProposal.objects.create(
             proposed_name="pend_test", direction="bullish",
             asset_classes=["stock"], conditions=[],
@@ -284,7 +285,8 @@ class ScanGeneratedRulesNowTests(TestCase):
         setup, rule = _make_generated_rule("hyp_ref_rule")
         h = post_hypothesis(claim_text="x", source_agent="strategy_generator",
                               confidence=0.5, horizon_hours=1,
-                              resolution_criteria={"kind": "rule_avg_r"})
+                              resolution_criteria={"kind": "rule_avg_r",
+                                                    "rule_name": "hyp_ref_rule"})
         Hypothesis.objects.filter(id=h.id).update(
             outcome=Hypothesis.OUTCOME_REFUTED,
             resolved_at=timezone.now())

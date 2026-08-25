@@ -240,6 +240,12 @@ def _emit_idea_hypotheses(briefing, ideas: list) -> int:
         if not isinstance(payload, dict) or not payload:
             continue
         criteria = {"kind": kind, **payload}
+        if kind == "regime_holds":
+            from .hypotheses import canonical_regime
+            regime = canonical_regime(payload.get("regime"))
+            if regime is None:
+                continue  # not a token the classifier speaks — no bet
+            criteria["regime"] = regime
         try:
             try:
                 conf = max(0.0, min(1.0, float(idea.get("confidence", 0.5))))

@@ -34,18 +34,20 @@ from django.utils import timezone
 def _due_hypothesis(*, criteria, confidence=0.7, source="sauron_mind",
                     claim="claim", deadline_minutes_ago=5,
                     agent_prediction=None):
-    """Post a hypothesis and force its deadline into the past."""
-    from brain.hypotheses import post_hypothesis
+    """Mint a due hypothesis DIRECTLY, bypassing the creation gate.
+
+    Several tests here exercise the resolvers against malformed legacy
+    criteria the gate now refuses at post time — and the resolvers must
+    stay robust to rows that predate it."""
     from brain.knowledge_models import Hypothesis
-    h = post_hypothesis(
-        claim_text=claim, source_agent=source, confidence=confidence,
-        resolution_criteria=criteria, horizon_hours=1,
+    return Hypothesis.objects.create(
+        claim_text=claim, claim_payload={},
+        resolution_criteria=dict(criteria or {}),
+        confidence=confidence, source_agent=source,
+        resolution_deadline=(timezone.now()
+                             - timedelta(minutes=deadline_minutes_ago)),
         agent_prediction=agent_prediction,
     )
-    Hypothesis.objects.filter(id=h.id).update(
-        resolution_deadline=timezone.now() - timedelta(minutes=deadline_minutes_ago))
-    h.refresh_from_db()
-    return h
 
 
 def _report(regime, *, minutes_ago=0, error=""):

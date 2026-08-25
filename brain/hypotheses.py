@@ -24,6 +24,7 @@ score — and the rule demoter that kills rules on OUTCOME_REFUTED — with it.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import timedelta
 from typing import Optional
 
@@ -63,6 +64,103 @@ REPORT_GRACE_HOURS = 12
 MIN_TRADES_FOR_RULE_R = 3
 
 
+def canonical_regime(value) -> "Optional[str]":
+    """Map a free-text regime token onto the classifier's vocabulary.
+
+    The synthesizer and strategist feed LLM output into regime_holds
+    criteria; the model writes "Risk-On" or "mean-reversion" where the
+    classifier says risk_on and mean_reverting, and an unmapped token
+    would either be refused by the gate (silently dropping a
+    near-canonical claim) or die UNRESOLVABLE at grading. Returns None
+    when nothing matches — the caller then posts no bet at all.
+    """
+    from .models import BrainReport
+    allowed = {v for v, _ in BrainReport.REGIME_CHOICES}
+    token = str(value or "").strip().lower().replace("-", "_")
+    token = "_".join(token.split())
+    if token in allowed:
+        return token
+    aliases = {
+        "riskon": "risk_on", "riskoff": "risk_off",
+        "risk_on_regime": "risk_on", "risk_off_regime": "risk_off",
+        "mean_reversion": "mean_reverting",
+        "meanreverting": "mean_reverting",
+        "mean_reverting_regime": "mean_reverting",
+        "trend": "trending", "trending_regime": "trending",
+        "blowoff": "blow_off", "blow_off_regime": "blow_off",
+    }
+    return aliases.get(token)
+
+
+class UnmeasurableClaim(ValueError):
+    """The claim's resolution_criteria can never be graded by any
+    registered resolver — refused at creation, not buried at grading.
+
+    65% of graded hypotheses were dying UNRESOLVABLE, and every one of
+    them spent its whole horizon polluting the pending count and the
+    briefing's market stats first. A claim that names no measurable
+    resolver is not a bet, it is noise wearing a deadline."""
+
+
+def _validate_criteria(criteria: dict) -> None:
+    """Raise UnmeasurableClaim unless a registered resolver could, given
+    evidence, actually grade these criteria.
+
+    This checks only what is knowable AT CREATION — the kind and its
+    required fields. Whether the evidence later arrives (a witnessing
+    report, enough graded trades) stays the resolver's judgment; the
+    gate's job is claims that could NEVER be graded, however the world
+    turns out.
+    """
+    kind = criteria.get("kind")
+    if kind not in RESOLVERS:
+        raise UnmeasurableClaim(
+            f"no resolver registered for kind {kind!r} — this claim "
+            f"could never be graded (known: {sorted(RESOLVERS)})")
+
+    if kind == "regime_holds":
+        from .models import BrainReport
+        allowed = {value for value, _ in BrainReport.REGIME_CHOICES}
+        regime = criteria.get("regime")
+        if regime not in allowed:
+            raise UnmeasurableClaim(
+                f"regime_holds needs a classifiable regime, got "
+                f"{regime!r} (known: {sorted(allowed)})")
+
+    elif kind == "rule_avg_r":
+        if not criteria.get("rule_name"):
+            raise UnmeasurableClaim("rule_avg_r needs a rule_name")
+        cmp_ = criteria.get("comparator", ">=")
+        if cmp_ not in (">=", "<=", "<", ">"):
+            raise UnmeasurableClaim(
+                f"rule_avg_r comparator {cmp_!r} is not one the resolver "
+                f"understands")
+        try:
+            threshold = float(criteria.get("threshold", 0.0))
+        except (TypeError, ValueError):
+            raise UnmeasurableClaim(
+                f"rule_avg_r threshold {criteria.get('threshold')!r} "
+                f"is not a number")
+        if not math.isfinite(threshold):
+            raise UnmeasurableClaim(
+                f"rule_avg_r threshold {criteria.get('threshold')!r} is "
+                f"not finite — every comparison against it is decided at "
+                f"creation, not by evidence")
+        for field in ("window_days", "min_n"):
+            if field in criteria:
+                try:
+                    int(criteria[field])
+                except (TypeError, ValueError):
+                    raise UnmeasurableClaim(
+                        f"rule_avg_r {field} {criteria[field]!r} is not "
+                        f"an integer — the resolver would crash on it "
+                        f"every pass, forever")
+
+    elif kind == "anomaly_persists":
+        if not criteria.get("anomaly_key"):
+            raise UnmeasurableClaim("anomaly_persists needs an anomaly_key")
+
+
 # ── Posting + voting ──────────────────────────────────────────────────────
 
 def post_hypothesis(*,
@@ -76,15 +174,28 @@ def post_hypothesis(*,
                     agent_prediction=None) -> "Hypothesis":
     """Append a hypothesis. Returns the row.
 
-    `resolution_criteria` is a free-form dict the resolver consumes —
-    callers should match it to one of the keys in `RESOLVERS` below.
+    `resolution_criteria` must name a resolver in `RESOLVERS` and carry
+    that resolver's required fields, or the claim is refused with
+    UnmeasurableClaim before it ever reaches the market. Every posting
+    site wraps this call in try/except, so a refused claim costs its
+    author a warning line, never a crash.
     """
     from .knowledge_models import Hypothesis
+
+    criteria = dict(resolution_criteria or {})
+    try:
+        _validate_criteria(criteria)
+    except UnmeasurableClaim as exc:
+        logger.warning("[hypothesis] refused unmeasurable claim from "
+                       "%s: %s (claim: %.120s)",
+                       source_agent, exc, claim_text)
+        raise
+
     deadline = timezone.now() + timedelta(hours=max(1, int(horizon_hours)))
     return Hypothesis.objects.create(
         claim_text=str(claim_text or "")[:400],
         claim_payload=dict(claim_payload or {}),
-        resolution_criteria=dict(resolution_criteria or {}),
+        resolution_criteria=criteria,
         confidence=max(0.0, min(1.0, float(confidence))),
         source_agent=str(source_agent or "")[:80],
         resolution_deadline=deadline,
@@ -181,9 +292,19 @@ def _resolve_rule_avg_r_threshold(hyp):
     crit = hyp.resolution_criteria or {}
     rule = crit.get("rule_name")
     cmp_ = crit.get("comparator", ">=")
-    threshold = float(crit.get("threshold", 0.0))
-    window = int(crit.get("window_days", 7))
-    min_n = max(1, int(crit.get("min_n", MIN_TRADES_FOR_RULE_R)))
+    # Legacy rows predate the creation gate; a poisoned numeric here used
+    # to raise, land in `skipped`, and re-crash on every pass forever —
+    # the pending-pollution loop one field to the left of the gated ones.
+    try:
+        threshold = float(crit.get("threshold", 0.0))
+        window = int(crit.get("window_days", 7))
+        min_n = max(1, int(crit.get("min_n", MIN_TRADES_FOR_RULE_R)))
+    except (TypeError, ValueError):
+        return None, ("ungradeable: non-numeric threshold/window_days/"
+                      "min_n in resolution_criteria")
+    if not math.isfinite(threshold):
+        return None, ("ungradeable: non-finite threshold — the comparison "
+                      "was decided at creation, not by evidence")
     if not rule:
         return None, "ungradeable: no rule_name in resolution_criteria"
     rows = bot_performance_summary(rule_name=rule, days=window, min_n=1)
@@ -256,17 +377,26 @@ def resolve_due() -> dict:
     )
     confirmed = refuted = unresolvable = skipped = deferred = 0
     for hyp in qs:
-        kind = (hyp.resolution_criteria or {}).get("kind")
+        crit = hyp.resolution_criteria
+        kind = crit.get("kind") if isinstance(crit, dict) else None
         resolver = RESOLVERS.get(kind)
+        zombie = resolver is None
         if resolver is None:
-            skipped += 1
-            continue
-        try:
-            result, note = resolver(hyp)
-        except Exception as e:  # pragma: no cover
-            logger.warning("[hypothesis] resolver %s raised: %s", kind, e)
-            skipped += 1
-            continue
+            # Rows posted before the creation gate existed. Skipping left
+            # them PENDING forever, quietly inflating the market stats —
+            # past their deadline with no resolver, they are unresolvable
+            # and should say so. (`skipped` still counts resolver crashes,
+            # which are transient and retried.)
+            result, note = None, (
+                f"ungradeable: no resolver registered for kind {kind!r}")
+        else:
+            try:
+                result, note = resolver(hyp)
+            except Exception as e:  # pragma: no cover
+                logger.warning("[hypothesis] resolver %s raised: %s",
+                               kind, e)
+                skipped += 1
+                continue
 
         if result is DEFER:
             # Gradeable evidence may still arrive — leave the row PENDING
@@ -283,7 +413,12 @@ def resolve_due() -> dict:
         else:
             hyp.outcome = Hypothesis.OUTCOME_REFUTED
             refuted += 1
-        hyp.resolved_at = now
+        # A back-graded zombie is dated when it CAME DUE, not when the
+        # cleanup ran: stamping the whole legacy backlog "now" would
+        # flood every recent-resolved window — the research agent's
+        # snapshot, the dashboard's resolved list — with ungradeable
+        # rows the night this deploys.
+        hyp.resolved_at = hyp.resolution_deadline if zombie else now
         hyp.resolution_notes = note[:500]
         hyp.save(update_fields=["outcome", "resolved_at", "resolution_notes"])
 

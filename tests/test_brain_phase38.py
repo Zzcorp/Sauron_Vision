@@ -82,7 +82,8 @@ class HypothesisLifecycleTests(TestCase):
     def test_post_creates_pending_with_deadline(self):
         from brain.hypotheses import post_hypothesis
         from brain.knowledge_models import Hypothesis
-        h = post_hypothesis(claim_text="USD weakens further",
+        h = post_hypothesis(resolution_criteria={"kind": "regime_holds", "regime": "trending"},
+                              claim_text="USD weakens further",
                               source_agent="sauron_mind",
                               confidence=0.7, horizon_hours=12)
         self.assertEqual(h.outcome, Hypothesis.OUTCOME_PENDING)
@@ -90,7 +91,8 @@ class HypothesisLifecycleTests(TestCase):
 
     def test_vote_one_per_agent(self):
         from brain.hypotheses import post_hypothesis, vote
-        h = post_hypothesis(claim_text="x", source_agent="A", confidence=0.5,
+        h = post_hypothesis(resolution_criteria={"kind": "regime_holds", "regime": "trending"},
+                              claim_text="x", source_agent="A", confidence=0.5,
                               horizon_hours=1)
         v1 = vote(h, agent="critic", stance="dissent",
                    confidence=0.8, reasoning="r1")
@@ -156,20 +158,25 @@ class ResolveDueTests(TestCase):
         result = resolve_due()
         self.assertEqual(result["confirmed"], 1)
 
-    def test_unknown_resolver_skipped(self):
-        from brain.hypotheses import post_hypothesis, resolve_due
+    def test_unknown_resolver_grades_unresolvable(self):
+        """Skipping unknown kinds left them PENDING forever, quietly
+        inflating the market stats. Past deadline with no resolver they
+        now grade UNRESOLVABLE — minted directly, the way the legacy
+        pending mountain actually accumulated (the creation gate refuses
+        new ones)."""
+        from brain.hypotheses import resolve_due
         from brain.knowledge_models import Hypothesis
-        h = post_hypothesis(
+        h = Hypothesis.objects.create(
             claim_text="x", source_agent="x", confidence=0.5,
             resolution_criteria={"kind": "unknown_kind"},
-            horizon_hours=1,
+            resolution_deadline=timezone.now() - timedelta(minutes=5),
         )
-        Hypothesis.objects.filter(id=h.id).update(
-            resolution_deadline=timezone.now() - timedelta(minutes=5))
         result = resolve_due()
-        self.assertEqual(result["skipped"], 1)
+        self.assertEqual(result["skipped"], 0)
+        self.assertEqual(result["unresolvable"], 1)
         h.refresh_from_db()
-        self.assertEqual(h.outcome, Hypothesis.OUTCOME_PENDING)
+        self.assertEqual(h.outcome, Hypothesis.OUTCOME_UNRESOLVABLE)
+        self.assertIn("no resolver registered", h.resolution_notes)
 
     def test_mirrors_into_agent_prediction(self):
         from brain.hypotheses import post_hypothesis, resolve_due
@@ -200,7 +207,8 @@ class AgentTrustScoreTests(TestCase):
         from brain.hypotheses import post_hypothesis, agent_trust_score
         from brain.knowledge_models import Hypothesis
         for i in range(5):
-            h = post_hypothesis(claim_text=f"c{i}", source_agent="A",
+            h = post_hypothesis(resolution_criteria={"kind": "regime_holds", "regime": "trending"},
+                              claim_text=f"c{i}", source_agent="A",
                                   confidence=0.9, horizon_hours=1)
             Hypothesis.objects.filter(id=h.id).update(
                 outcome=Hypothesis.OUTCOME_CONFIRMED,
@@ -224,10 +232,12 @@ class CriticSelectionTests(TestCase):
         from brain.knowledge_models import Hypothesis
 
         # A: no prior data → trust None → eligible
-        h1 = post_hypothesis(claim_text="from_A", source_agent="A",
+        h1 = post_hypothesis(resolution_criteria={"kind": "regime_holds", "regime": "trending"},
+                              claim_text="from_A", source_agent="A",
                               confidence=0.5, horizon_hours=24)
         # B: high-confidence — sanity-check eligible
-        h2 = post_hypothesis(claim_text="from_B", source_agent="B",
+        h2 = post_hypothesis(resolution_criteria={"kind": "regime_holds", "regime": "trending"},
+                              claim_text="from_B", source_agent="B",
                               confidence=0.85, horizon_hours=24)
         targets = select_hypotheses_for_review(max_n=10, sample_pct=0.0)
         ids = {h.id for h in targets}
@@ -237,7 +247,8 @@ class CriticSelectionTests(TestCase):
     def test_already_critiqued_excluded(self):
         from brain.hypotheses import post_hypothesis, vote
         from brain.critic import select_hypotheses_for_review
-        h = post_hypothesis(claim_text="x", source_agent="A",
+        h = post_hypothesis(resolution_criteria={"kind": "regime_holds", "regime": "trending"},
+                              claim_text="x", source_agent="A",
                               confidence=0.5, horizon_hours=24)
         vote(h, agent="critic", stance="co_sign", confidence=0.5)
         targets = select_hypotheses_for_review(max_n=10, sample_pct=0.0)
@@ -264,7 +275,8 @@ class ReviewHypothesisTests(TestCase):
         from brain.critic import review_hypothesis
         from brain.knowledge_models import HypothesisVote
 
-        h = post_hypothesis(claim_text="x", source_agent="A",
+        h = post_hypothesis(resolution_criteria={"kind": "regime_holds", "regime": "trending"},
+                              claim_text="x", source_agent="A",
                               confidence=0.5, horizon_hours=24)
         with _stub_critic_provider({
             "stance": "co_sign", "confidence": 0.7,
@@ -282,7 +294,8 @@ class ReviewHypothesisTests(TestCase):
         from brain.critic import review_hypothesis
         from brain.knowledge_models import Hypothesis
 
-        h = post_hypothesis(claim_text="regime trending continues",
+        h = post_hypothesis(resolution_criteria={"kind": "regime_holds", "regime": "trending"},
+                              claim_text="regime trending continues",
                               source_agent="A", confidence=0.8, horizon_hours=24)
         with _stub_critic_provider({
             "stance": "dissent", "confidence": 0.85,
@@ -306,7 +319,8 @@ class ReviewHypothesisTests(TestCase):
         from brain.hypotheses import post_hypothesis
         from brain.critic import review_hypothesis
 
-        h = post_hypothesis(claim_text="x", source_agent="A", confidence=0.5,
+        h = post_hypothesis(resolution_criteria={"kind": "regime_holds", "regime": "trending"},
+                              claim_text="x", source_agent="A", confidence=0.5,
                               horizon_hours=24)
         with _stub_critic_provider({
             "stance": "dissent", "confidence": 0.5,
@@ -319,7 +333,8 @@ class ReviewHypothesisTests(TestCase):
     def test_provider_failure_returns_none(self):
         from brain.hypotheses import post_hypothesis
         from brain.critic import review_hypothesis
-        h = post_hypothesis(claim_text="x", source_agent="A", confidence=0.5,
+        h = post_hypothesis(resolution_criteria={"kind": "regime_holds", "regime": "trending"},
+                              claim_text="x", source_agent="A", confidence=0.5,
                               horizon_hours=24)
         def bad_init(self, *a, **kw):
             self.agent_name = "critic"
@@ -336,7 +351,8 @@ class RunCriticPassTests(TestCase):
         from brain.hypotheses import post_hypothesis
         from brain.critic import run_critic_pass
         for i in range(8):
-            post_hypothesis(claim_text=f"c{i}", source_agent="A",
+            post_hypothesis(resolution_criteria={"kind": "regime_holds", "regime": "trending"},
+                              claim_text=f"c{i}", source_agent="A",
                               confidence=0.85, horizon_hours=24)
         with _stub_critic_provider({
             "stance": "co_sign", "confidence": 0.7, "reasoning": "ok",

@@ -680,7 +680,13 @@ def _prediction_to_hypothesis_criteria(ptype: str, pval: str) -> Optional[dict]:
     is posted.
     """
     if ptype == "regime_persistence" and pval:
-        return {"kind": "regime_holds", "regime": pval}
+        from .hypotheses import canonical_regime
+        regime = canonical_regime(pval)
+        if regime is None:
+            # A token the classifier does not speak — the AgentPrediction
+            # still records the call; no market bet forms on it.
+            return None
+        return {"kind": "regime_holds", "regime": regime}
     if ptype == "rule_decay_continues" and pval:
         return {"kind": "rule_avg_r", "rule_name": pval,
                 "comparator": "<", "threshold": 0.0, "window_days": 7}
