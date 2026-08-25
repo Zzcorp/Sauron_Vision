@@ -41,6 +41,57 @@ CRITIC_SCHEMA = """{
 }"""
 
 
+def _graded_record(*, source_agent=None, kind=None, limit=8,
+                   exclude_id=None) -> list:
+    """Recent GRADED claims (newest first) — the receipts.
+
+    Filter by author, by resolver kind, or both. UNRESOLVABLE rows are
+    excluded: a measurement failure is evidence of the platform's blind
+    spot, not of the author's judgment.
+    """
+    from .knowledge_models import Hypothesis
+    qs = (Hypothesis.objects
+          .filter(outcome__in=(Hypothesis.OUTCOME_CONFIRMED,
+                               Hypothesis.OUTCOME_REFUTED))
+          .order_by("-resolved_at"))
+    # `is not None`, not truthiness: source_agent="" is storable, and
+    # skipping the filter would present EVERY agent's refutations as
+    # this nameless author's record — fabricated receipts.
+    if source_agent is not None:
+        qs = qs.filter(source_agent=source_agent)
+    if kind:
+        qs = qs.filter(resolution_criteria__kind=kind)
+    if exclude_id:
+        qs = qs.exclude(id=exclude_id)
+    return [{
+        "outcome": h.outcome,
+        "claim": (h.claim_text or "")[:120],
+        "source_agent": h.source_agent,
+        "resolved": h.resolved_at.strftime("%Y-%m-%d %H:%M")
+        if h.resolved_at else "",
+        "notes": (h.resolution_notes or "")[:100],
+    } for h in qs[:limit]]
+
+
+def _refuted_streak(source_agent, kind=None, exclude_id=None) -> int:
+    """Consecutive REFUTED at the head of the author's graded history.
+
+    Walks newest-first over confirmed/refuted only; a confirmed call
+    breaks the streak, an unresolvable row never enters the walk.
+    exclude_id keeps the row under review out of its own evidence — a
+    pending row can be graded by a concurrent resolver between
+    selection and review, and its fresh refutation must not lead the
+    siren against re-evaluating itself.
+    """
+    streak = 0
+    for row in _graded_record(source_agent=source_agent, kind=kind,
+                              limit=20, exclude_id=exclude_id):
+        if row["outcome"] != "refuted":
+            break
+        streak += 1
+    return streak
+
+
 class CriticAgent(BaseAgent):
     """Red-team agent that audits another agent's hypothesis."""
 
@@ -65,7 +116,16 @@ class CriticAgent(BaseAgent):
             "co-sign, add a novel supporting data point.\n"
             "2. If you dissent with confidence ≥ 0.7, you MUST emit a "
             "counter_hypothesis with concrete resolution_criteria.\n"
-            "3. Be terse. 2-4 sentences max in reasoning.\n\n"
+            "3. Be terse. 2-4 sentences max in reasoning.\n"
+            "4. The graded record in the context is EVIDENCE, not "
+            "decoration. A refutation streak shifts the burden of proof "
+            "onto the claim: co_sign an author on a streak ONLY if you "
+            "can cite a CURRENT data point that changed since those "
+            "refutations. Absent one, dissent or refine.\n"
+            "5. Confidence must answer to the record: a claim asserted "
+            "at 0.8 by an author whose similar claims keep grading "
+            "refuted is mis-calibrated even when the direction is "
+            "plausible — refine the confidence down and say why.\n\n"
             f"Respond ONLY with valid JSON:\n{CRITIC_SCHEMA}\n\n"
             "No code fences, no surrounding text."
         )
@@ -74,6 +134,28 @@ class CriticAgent(BaseAgent):
         hyp = kwargs.get("hypothesis")
         snapshot = kwargs.get("snapshot") or {}
         agent_trust = kwargs.get("source_agent_trust", "n/a")
+
+        # The receipts. The critic used to audit claim #9 with no idea
+        # that #1-#8 had all graded refuted — the health check caught it
+        # rubber-stamping, and it could do nothing else: agreement was
+        # the only thing the context supported.
+        kind = None
+        if isinstance(hyp.resolution_criteria, dict):
+            kind = hyp.resolution_criteria.get("kind")
+        author_record = _graded_record(source_agent=hyp.source_agent,
+                                       limit=8, exclude_id=hyp.id)
+        kind_record = _graded_record(kind=kind, limit=6,
+                                     exclude_id=hyp.id) if kind else []
+        streak = _refuted_streak(hyp.source_agent, kind,
+                                 exclude_id=hyp.id)
+        streak_line = ""
+        if streak >= 2:
+            scope = f" of kind '{kind}'" if kind else ""
+            streak_line = (
+                f"⚠ TRACK RECORD: this author's last {streak} graded "
+                f"claims{scope} were ALL REFUTED. The burden of proof is "
+                f"on this claim.\n\n")
+
         return (
             f"Hypothesis under review:\n"
             f"  source_agent: {hyp.source_agent} (trust score: {agent_trust})\n"
@@ -82,6 +164,11 @@ class CriticAgent(BaseAgent):
             f"  payload:      {json.dumps(hyp.claim_payload, default=str)}\n"
             f"  criteria:     {json.dumps(hyp.resolution_criteria, default=str)}\n"
             f"  deadline:     {hyp.resolution_deadline}\n\n"
+            f"{streak_line}"
+            f"Author's graded record, newest first (JSON):\n"
+            f"{json.dumps(author_record, default=str)}\n\n"
+            f"Recent graded claims of the same kind, any author (JSON):\n"
+            f"{json.dumps(kind_record, default=str)}\n\n"
             f"Current world snapshot (JSON):\n{json.dumps(snapshot, indent=2, default=str)}\n\n"
             "Audit this hypothesis."
         )
@@ -131,7 +218,10 @@ def select_hypotheses_for_review(*, max_n: int = 5,
                               .values_list("hypothesis_id", flat=True))
     pending = [h for h in pending if h.id not in already_critiqued]
 
-    # Score each: low source-agent trust + high claim confidence → priority.
+    # Score each: low source-agent trust + high claim confidence →
+    # priority — and an author on a refutation streak with this kind of
+    # claim outranks both: their next claim is the one most worth
+    # catching before it grades.
     scored = []
     for h in pending:
         trust = agent_trust_score(h.source_agent)
@@ -139,6 +229,11 @@ def select_hypotheses_for_review(*, max_n: int = 5,
         if trust is None or trust < 0.4:
             score += 1.0
         if h.confidence >= 0.75:
+            score += 1.0
+        kind = (h.resolution_criteria or {}).get("kind") \
+            if isinstance(h.resolution_criteria, dict) else None
+        if _refuted_streak(h.source_agent, kind,
+                           exclude_id=h.id) >= 3:
             score += 1.0
         # Random sample for the rest.
         if random.random() < sample_pct:
