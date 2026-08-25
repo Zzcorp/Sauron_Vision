@@ -30,6 +30,12 @@ app.conf.imports = (
 app.conf.task_default_queue = "default"
 
 app.conf.task_routes = {
+    # Overrides the market_data.tasks.* glob below: Celery's MapRoute checks
+    # exact task names before any pattern, so this wins wherever it sits. A
+    # cold FRED run walks twelve series of 500 observations each; on the fast
+    # queue it sits in front of the 60-second quote poller, which is the one
+    # task in the system that must not wait.
+    "market_data.tasks.fetch_fred_updates": {"queue": "slow"},
     # Tier 1-2: Fast queue (price fetching, news, signals)
     "market_data.tasks.*": {"queue": "fast"},
     "scraping.tasks.fetch_breaking_news": {"queue": "fast"},

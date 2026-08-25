@@ -65,7 +65,8 @@ def fetch_breaking_news():
 @guarded_task("scraper_sentiment")
 def fetch_social_sentiment():
     """Tier 2: Fetch sentiment from Reddit + StockTwits."""
-    from scraping.scrapers.reddit_sentiment import fetch_reddit_sentiment
+    from scraping.scrapers.reddit_sentiment import (fetch_reddit_sentiment,
+                                                    reddit_unavailable_reason)
     from scraping.scrapers.stocktwits import fetch_trending
 
     from scraping.models import SentimentSnapshot
@@ -77,10 +78,19 @@ def fetch_social_sentiment():
     before = SentimentSnapshot.objects.count()
     results = {"reddit": 0, "stocktwits": 0}
 
-    try:
-        results["reddit"] = len(fetch_reddit_sentiment(limit=50))
-    except Exception as e:
-        logger.error(f"Reddit sentiment failed: {e}")
+    # An unconfigured Reddit returned [] exactly like a quiet hour on
+    # r/wallstreetbets, so a source that has never once run looked like a
+    # source with nothing to say. Naming the reason puts the task in
+    # judge_result's not-configured branch, which is the only verdict that
+    # tells the operator there is something to DO about it.
+    reddit_skipped = reddit_unavailable_reason()
+    if reddit_skipped:
+        results["reddit_skipped"] = reddit_skipped
+    else:
+        try:
+            results["reddit"] = len(fetch_reddit_sentiment(limit=50))
+        except Exception as e:
+            logger.error(f"Reddit sentiment failed: {e}")
 
     try:
         results["stocktwits"] = len(fetch_trending())
@@ -98,10 +108,13 @@ def fetch_social_sentiment():
         results["stocktwits_watchlist"] = 0
 
     stored = SentimentSnapshot.objects.count() - before
-    return {"status": "success", **results,
-            "parsed": (results["reddit"] + results["stocktwits"]
-                       + results["stocktwits_watchlist"]),
-            "stored": stored}
+    out = {"status": "success", **results,
+           "parsed": (results["reddit"] + results["stocktwits"]
+                      + results["stocktwits_watchlist"]),
+           "stored": stored}
+    if reddit_skipped:
+        out["skipped"] = reddit_skipped
+    return out
 
 
 @shared_task
@@ -110,7 +123,14 @@ def check_economic_calendar():
     """Tier 2: Fetch earnings calendar from FMP."""
     from scraping.scrapers.earnings_calendar import fetch_earnings_calendar_fmp
     result = fetch_earnings_calendar_fmp(days_ahead=14)
-    return {"status": "success", **result}
+    # The scraper's word goes LAST. This used to read {"status": "success",
+    # **result}: the scraper's failure paths return an `error` key and no
+    # status, so a 403, a timeout or a DNS failure kept the hardcoded
+    # "success" and graded as a mere warning ("ran and produced nothing") —
+    # the same verdict a quiet calendar earns. An error the source reported
+    # has to reach task_gate as an error.
+    status = "error" if result.get("error") else result.get("status", "success")
+    return {**result, "status": status}
 
 
 @shared_task
@@ -217,14 +237,27 @@ def fetch_cot_reports():
     from scraping.scrapers.cot_reports import fetch_latest_cot_report
 
     try:
-        reports = fetch_latest_cot_report()
+        outcome = fetch_latest_cot_report()
     except Exception as e:
-        logger.error(f"COT reports failed: {e}")
+        logger.exception("COT reports failed")
         return {"status": "error", "error": str(e)}
 
+    # Counts come back FROM the call. They used to be read off a function
+    # attribute the scraper set only when it succeeded, and a Celery prefork
+    # child outlives many beats — so a failed week reported the previous
+    # week's stored count and the gate graded a dead scraper green.
+    #
     # 'stored' counts UPSERTS, not a row-count delta: the Saturday beat can
     # fire before the CFTC posts the new week, and re-asserting last week's
     # rows is a healthy run, not "handled N rows and stored none".
-    return {"status": "success", "reports_processed": len(reports),
-            "parsed": len(reports),
-            "stored": getattr(fetch_latest_cot_report, "last_upserted", 0)}
+    parsed = int(outcome.get("parsed") or 0)
+    stored = int(outcome.get("stored") or 0)
+    result = {"status": "success", "reports_processed": parsed,
+              "parsed": parsed, "stored": stored}
+    # Not under a 'skipped' key: that word is the gate's own, and it grades a
+    # missing credential. A mapped market with no catalogue row is a seeding
+    # gap, so it rides along named while the counts stay the verdict.
+    missing = outcome.get("missing_instruments") or []
+    if missing:
+        result["missing_instruments"] = list(missing)[:25]
+    return result

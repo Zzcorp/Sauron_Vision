@@ -123,7 +123,8 @@ which is how it catches a task that reports success and writes nothing.
     </div>
     {% for p in problems %}
     <div class="tm-problem">
-        <span class="tm-state tm-state--{{ p.meta.tone }}">{{ p.meta.glyph }}</span>
+        {# These marks come from the system-map vocabulary, which carries states the map legend above has no node for (NOT SET UP). The label rides along so a mark with no legend row still says what it means. #}
+        <span class="tm-state tm-state--{{ p.meta.tone }}" title="{{ p.meta.label }}" aria-label="{{ p.meta.label }}">{{ p.meta.glyph }}</span>
         <div class="tm-problem-body">
             <div class="tm-problem-title">{{ p.stage }} · {{ p.label }}</div>
             <div class="tm-problem-why">{{ p.why }}</div>

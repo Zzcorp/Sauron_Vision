@@ -158,6 +158,23 @@ def fetch_symbol_sentiment(symbol: str, trending: bool = False) -> dict:
     return result
 
 
+def _catalogue_symbols() -> set[str]:
+    """Upper-cased symbols a snapshot can actually be written against.
+
+    Anything outside this set costs a rate-limited stream call and stores
+    nothing, because _persist_sentiment_snapshot has no instrument to hang
+    the row on. An empty set on a DB error is the safe answer: skip the pass
+    rather than spend thirty calls we know we cannot keep.
+    """
+    try:
+        from instruments.models import Instrument
+        return {(s or "").upper() for s in Instrument.objects.filter(
+            is_active=True).values_list("symbol", flat=True) if s}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("StockTwits: instrument catalogue unavailable: %s", exc)
+        return set()
+
+
 """How many trending symbols we actually pull a message stream for.
 
 _get is rate-limited to 20 calls/minute and StockTwits typically returns
@@ -208,14 +225,25 @@ def fetch_trending(with_sentiment: bool = True) -> list[dict]:
             item["trending"] = True
         return results
 
-    # Pull the message stream for the head of the list. Each call persists a
-    # SentimentSnapshot, which is the only way this integration produces data.
+    # Intersect BEFORE spending stream calls. _persist_sentiment_snapshot
+    # drops anything outside the catalogue, and most trending StockTwits
+    # names are small caps we do not carry — so the pass burned a
+    # rate-limited call per symbol to report parsed=30/stored=1, which reads
+    # as "handled 30 rows and stored none of them" forever. Walking only the
+    # symbols we can persist makes the two numbers describe one universe.
+    catalogue = _catalogue_symbols()
+    in_catalogue = [item for item in results
+                    if (item.get("symbol") or "").upper() in catalogue]
+    covered = in_catalogue[:TRENDING_SENTIMENT_LIMIT]
+    logger.info("StockTwits trending: %d of %d symbols are in the catalogue, "
+                "pulling streams for %d",
+                len(in_catalogue), len(results), len(covered))
+
+    # Each call persists a SentimentSnapshot, which is the only way this
+    # integration produces data.
     stored = 0
-    for item in results[:TRENDING_SENTIMENT_LIMIT]:
-        symbol = item.get("symbol") or ""
-        if not symbol:
-            continue
-        detail = fetch_symbol_sentiment(symbol, trending=True)
+    for item in covered:
+        detail = fetch_symbol_sentiment(item["symbol"], trending=True)
         item.update({
             "trending": True,
             "bullish_count": detail.get("bullish_count", 0),
@@ -227,37 +255,72 @@ def fetch_trending(with_sentiment: bool = True) -> list[dict]:
         if detail.get("volume"):
             stored += 1
 
-    for item in results[TRENDING_SENTIMENT_LIMIT:]:
-        item["trending"] = True
-
     logger.info("StockTwits: fetched sentiment for %d of %d trending symbols",
-                stored, len(results))
-    return results
+                stored, len(covered))
+    # Only the symbols a stream was actually pulled for. The caller counts
+    # this list as `parsed`, and parsed has to be measured on the same
+    # universe as stored or the task grades itself against work it never did.
+    return covered
 
 
 """How many of the operator's own symbols get a message-stream pass."""
 WATCHLIST_SENTIMENT_LIMIT = 8
 
 
+def _sentiment_universe(limit: int) -> tuple[list[str], str]:
+    """The equities a per-symbol pass should walk, and which set they came from.
+
+    This filtered on is_watchlist=True alone, and nothing in the platform
+    sets that flag — not one of the 179 active instruments has it. So the one
+    pass whose entire job is to guarantee a snapshot row iterated zero times
+    and returned 0, which is why "Social Sentiment ran and produced nothing"
+    survived the trending fix as well.
+
+    An empty watchlist is a configuration the operator has not got round to,
+    not an instruction to do nothing, so fall back the way
+    scraping.tasks._scan_universe does: the active instruments we actually
+    have prices for, which is the set any of this can say something about.
+    Stocks and ETFs only — StockTwits spells crypto BTC.X, which the
+    catalogue does not, so a crypto row would spend a call on a 404.
+    """
+    from instruments.models import Instrument
+
+    equities = Instrument.objects.filter(
+        is_active=True, asset_class__in=("stock", "etf"))
+
+    starred = list(equities.filter(is_watchlist=True).order_by("symbol")
+                   .values_list("symbol", flat=True)[:limit])
+    if starred:
+        return starred, "watchlist"
+
+    priced = list(equities.filter(prices__isnull=False).distinct()
+                  .order_by("symbol").values_list("symbol", flat=True)[:limit])
+    if priced:
+        logger.info("No equities are flagged is_watchlist; falling back to "
+                    "%d active instruments that have price history. Run "
+                    "`manage.py seed_watchlist` to set a real watchlist.",
+                    len(priced))
+        return priced, "priced"
+
+    logger.warning("No watchlist and no equities with price history — "
+                   "StockTwits per-symbol sentiment has nothing to walk.")
+    return [], "empty"
+
+
 def fetch_watchlist_sentiment(limit: int = WATCHLIST_SENTIMENT_LIMIT) -> int:
-    """Message-stream sentiment for the operator's OWN starred equities.
+    """Message-stream sentiment for the equities we can persist rows for.
 
     Trending-only coverage sampled StockTwits' universe instead of ours:
     most trending names are small caps outside the catalogue, so a pass
     could fetch thirty symbols and persist zero rows — "Social Sentiment
     ran and produced nothing" was the DESIGNED outcome on most days. The
-    symbols the operator starred are by definition in the catalogue, so
-    their snapshots always land. Stocks and ETFs only: StockTwits spells
-    crypto as BTC.X etc., which the catalogue does not.
+    symbols this walks are in the catalogue by definition, so their
+    snapshots always land.
 
     Returns the number of symbols whose stream produced messages.
     """
     try:
-        from instruments.models import Instrument
-        symbols = list(Instrument.objects.filter(
-            is_watchlist=True, is_active=True,
-            asset_class__in=("stock", "etf"))
-            .order_by("symbol").values_list("symbol", flat=True)[:limit])
+        symbols, universe = _sentiment_universe(limit)
     except Exception as exc:  # noqa: BLE001
         logger.warning("StockTwits watchlist selection failed: %s", exc)
         return 0
@@ -267,8 +330,8 @@ def fetch_watchlist_sentiment(limit: int = WATCHLIST_SENTIMENT_LIMIT) -> int:
         detail = fetch_symbol_sentiment(sym)
         if detail.get("volume"):
             covered += 1
-    logger.info("StockTwits watchlist: sentiment for %d of %d starred equities",
-                covered, len(symbols))
+    logger.info("StockTwits %s pass: sentiment for %d of %d equities",
+                universe, covered, len(symbols))
     return covered
 
 

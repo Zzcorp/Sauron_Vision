@@ -68,7 +68,8 @@ from typing import Optional
 from django.utils import timezone
 
 from .opportunity_scanner import (
-    cot_net_speculative, cot_sign, register_kind, _recent_closes,
+    cot_net_speculative, cot_sign, latest_fresh_cot_report, register_kind,
+    _recent_closes,
 )
 from .quant_primitives import (
     hurst_exponent,
@@ -1288,21 +1289,13 @@ def _eval_smart_money_divergence(params: dict, instrument, now: datetime) -> dic
     except (TypeError, ValueError):
         return {"matched": False, "score": 0.0, "details": {"reason": "bad numeric param"}}
 
-    try:
-        from scraping.models import COTReport
-    except Exception:
-        return {"matched": False, "score": 0.0,
-                "details": {"reason": "COTReport unavailable"}}
-
-    # Bounded by `now` for the same reason as cot_report: the price slope below
-    # is already as-of, so an unbounded COT read would diverge the two halves of
-    # the divergence test onto different dates.
-    report = (COTReport.objects.filter(instrument=instrument,
-                                       report_date__lte=now.date())
-              .order_by("-report_date").first())
+    # Bounded by `now` AND by age — see `latest_fresh_cot_report`. This test is
+    # the one that pays most for a stale read: the slope half is live, so
+    # frozen positioning drifts out from under a moving price and the
+    # divergence it "finds" is nothing but the scraper's own downtime.
+    report, reason = latest_fresh_cot_report(instrument, now)
     if report is None:
-        return {"matched": False, "score": 0.0,
-                "details": {"reason": "no COT report"}}
+        return {"matched": False, "score": 0.0, "details": {"reason": reason}}
 
     closes = _recent_closes(instrument, slope_lookback + 2, now)
     if len(closes) < slope_lookback:

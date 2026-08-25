@@ -617,13 +617,34 @@ register_kind("institutional_filings", _eval_institutional_filings,
                         "min_value_usd"))
 
 
+# EconomicEvent has no FK to Instrument, so "does this event concern this
+# symbol" is a string question. `source="fmp"` is the earnings calendar's
+# stamp, and that writer is issuer-scoped by construction: one row per US
+# issuer per print, every one of them impact="high", ticker in
+# `currency_affected`. Macro rows (FOMC, CPI) carry another source and do
+# concern everybody.
+_ISSUER_SCOPED_SOURCE = "fmp"
+
+
 def _eval_calendar_event(params: dict, instrument, now: datetime) -> dict:
-    """An EconomicEvent matching the title-filter occurred in the lookback window."""
+    """An EconomicEvent matching the title-filter occurred in the lookback window.
+
+    Issuer-scoped rows only count for their own issuer. Without that link a
+    setup asking "was there a high-impact event in the last three days" was
+    TRUE for every instrument on nearly every day of earnings season, because
+    the earnings calendar stamps every issuer's print impact="high" — a
+    condition that is always on is not a condition, and pattern_miner mines
+    exactly this feature into DiscoveredSetups people are asked to approve.
+    The link is spelled the way bot_program/asset_engine/stock_bot.py spells
+    it, so the scanner and the earnings blackout agree on what "AAPL's
+    earnings" means.
+    """
     lookback_days = int((params or {}).get("lookback_days", 3))
     title_contains = (params or {}).get("title_contains", "")
     impact = (params or {}).get("impact")  # optional: "high" | "medium" | "low"
 
     try:
+        from django.db.models import Q
         from market_data.models import EconomicEvent
     except Exception:
         return {"matched": False, "score": 0.0, "details": {"reason": "EconomicEvent model unavailable"}}
@@ -634,10 +655,21 @@ def _eval_calendar_event(params: dict, instrument, now: datetime) -> dict:
         qs = qs.filter(title__icontains=title_contains)
     if impact:
         qs = qs.filter(impact=impact)
+
+    symbol = (getattr(instrument, "symbol", "") or "").strip().upper()
+    # A one-character symbol is a substring of almost every headline, so it
+    # gets the exact column only — a title match there would re-create the
+    # always-true condition this link exists to remove.
+    names_this = Q(currency_affected__iexact=symbol) if symbol else Q(pk__in=[])
+    if len(symbol) >= 2:
+        names_this = names_this | Q(title__icontains=symbol)
+    qs = qs.filter(names_this | ~Q(source__iexact=_ISSUER_SCOPED_SOURCE))
+
     n = qs.count()
     matched = n > 0
     return {"matched": matched, "score": 1.0 if matched else 0.0,
-            "details": {"n": n, "title_contains": title_contains, "impact": impact}}
+            "details": {"n": n, "title_contains": title_contains,
+                        "impact": impact, "symbol": symbol}}
 
 
 register_kind("calendar_event", _eval_calendar_event,
@@ -905,7 +937,7 @@ def cot_sign(instrument) -> int:
     BASE of (USDJPY, USDCHF, USDCAD, USDMXN) — manufacturing divergences where
     positioning and price agreed and scoring the genuine ones at zero.
 
-    A sign, not a universe cut. XAUUSD, OATS, LUMBER, BTCUSD and the two real
+    A sign, not a universe cut. XAUUSD, LUMBER, BTCUSD and the two real
     cross contracts (EURGBP from 'EURO FX/BRITISH POUND XRATE', EURJPY from
     'EURO FX/JAPANESE YEN XRATE') are all quoted with the contract's unit as the
     BASE, so their column already reads in the symbol's frame. Gating those out
@@ -929,6 +961,49 @@ def cot_net_speculative(report, instrument) -> int:
     return cot_sign(instrument) * int(getattr(report, "net_speculative", 0) or 0)
 
 
+# The CFTC publishes weekly. Three weeks is generous — it absorbs a holiday
+# week, a shutdown-delayed release and a slipped Saturday beat — and still
+# stops a read from crossing into "the scraper died a month ago".
+COT_MAX_AGE_DAYS = 21
+
+
+def latest_fresh_cot_report(instrument, now, max_age_days: int = COT_MAX_AGE_DAYS):
+    """The newest COT report at or before `now`, and a reason when it cannot
+    be scored. Returns `(report, None)` or `(None, reason)`.
+
+    One helper for all three readers — the scanner's cot_report leg,
+    smart_money_divergence and the pattern miner's cot_* features — because
+    each of them used to take the newest row with no upper bound on its age.
+    That is silent while the scraper runs and poisonous the moment it stops:
+    price keeps moving, positioning freezes, and a divergence test comparing a
+    live slope against months-old positioning MANUFACTURES divergences that
+    never happened. A missing report is honest starvation; a stale one is a
+    confident wrong answer, so it has to be refused by name rather than
+    scored.
+
+    Bounded by `now` and not by wall clock for the same reason as the rest of
+    the as-of machinery: COT is backfilled weekly, so an unbounded "latest"
+    hands a replay positioning that was still unpublished on the date being
+    evaluated.
+    """
+    try:
+        from scraping.models import COTReport
+    except Exception:
+        return None, "COTReport unavailable"
+
+    as_of = now.date() if hasattr(now, "date") else now
+    report = (COTReport.objects.filter(instrument=instrument,
+                                       report_date__lte=as_of)
+              .order_by("-report_date").first())
+    if report is None:
+        return None, "no COT report"
+
+    age_days = (as_of - report.report_date).days
+    if age_days > max_age_days:
+        return None, f"COT report stale ({age_days} days)"
+    return report, None
+
+
 def _eval_cot_report(params: dict, instrument, now: datetime) -> dict:
     """COT positioning extreme: |net_speculative| / total_speculative ratio.
 
@@ -949,19 +1024,9 @@ def _eval_cot_report(params: dict, instrument, now: datetime) -> dict:
     except (TypeError, ValueError):
         return {"matched": False, "score": 0.0, "details": {"reason": "invalid min_ratio"}}
 
-    try:
-        from scraping.models import COTReport
-    except Exception:
-        return {"matched": False, "score": 0.0, "details": {"reason": "COTReport unavailable"}}
-
-    # The newest report AS OF `now`, not the newest row in the table: COT is
-    # backfilled weekly, so an unbounded "latest" hands a replay the positioning
-    # that was still unpublished on the date being evaluated.
-    report = (COTReport.objects.filter(instrument=instrument,
-                                       report_date__lte=now.date())
-              .order_by("-report_date").first())
+    report, reason = latest_fresh_cot_report(instrument, now)
     if report is None:
-        return {"matched": False, "score": 0.0, "details": {"reason": "no COT report"}}
+        return {"matched": False, "score": 0.0, "details": {"reason": reason}}
 
     net = cot_net_speculative(report, instrument)
     total = abs(int(report.non_commercial_long or 0)) + abs(int(report.non_commercial_short or 0))

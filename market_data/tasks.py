@@ -385,19 +385,36 @@ def fetch_index_quotes():
 @shared_task
 @guarded_task("scraper_fred")
 def fetch_fred_updates():
-    """Tier 4: Fetch latest FRED macro data."""
+    """Tier 4: Fetch latest FRED macro data.
+
+    Reports parsed (observations SEEN) alongside observations_saved (rows
+    upserted, the fetch_cot_reports convention), and the not-configured
+    marker when there is no key. Without those, a missing FRED_API_KEY and a
+    healthy run over series that had nothing new both returned
+    observations_saved=0 — one is a broken integration, the other is a
+    Tuesday, and task_gate could not tell them apart or say which it was
+    looking at.
+    """
     from core.constants import FRED_SERIES
     from market_data.adapters.fred_adapter import save_series_to_db
 
-    total = 0
+    parsed = saved = 0
+    skipped = None
     for series_id in FRED_SERIES:
         try:
-            count = save_series_to_db(series_id)
-            total += count
+            out = save_series_to_db(series_id)
         except Exception as e:
             logger.warning(f"FRED fetch failed for {series_id}: {e}")
+            continue
+        parsed += int(out.get("parsed") or 0)
+        saved += int(out.get("observations_saved") or 0)
+        if out.get("skipped"):
+            skipped = out["skipped"]
 
-    return {"status": "success", "observations_saved": total}
+    result = {"status": "success", "parsed": parsed, "observations_saved": saved}
+    if skipped:
+        result["skipped"] = skipped
+    return result
 
 
 @shared_task
@@ -495,7 +512,13 @@ def fetch_crypto_quotes():
 def fetch_crypto_news_task():
     """Fetch crypto news from RSS feeds."""
     from market_data.adapters.crypto_news import fetch_crypto_news
-    count = fetch_crypto_news()
+    result = fetch_crypto_news()
+    if not isinstance(result, dict):
+        # The scraper used to hand back a bare count of rows created. Accept
+        # it rather than raising: a stub or an older adapter must not turn a
+        # reporting task into a crash.
+        result = {"parsed": int(result or 0), "stored": int(result or 0)}
+    count = int(result.get("stored") or 0)
     if count > 0:
         # Same announcement fetch_breaking_news makes — the browsers'
         # ticker listens for it and pulls the fresh headlines in live.
@@ -505,7 +528,16 @@ def fetch_crypto_news_task():
                                     "message": f"{count} new crypto articles"})
         except Exception as e:  # noqa: BLE001 — a WS hiccup must not fail the scrape
             logger.warning("[crypto news] WS push failed: %s", e)
-    return {"status": "success", "articles": count}
+    # One done key, not two: judge_result sums every DONE_KEYS name it finds,
+    # so reporting the same rows as both "stored" and "articles" would double
+    # the count on the health page. parsed/feeds_dead ride alongside because
+    # three of the five feeds are URLs fetch_rss_news already polls — no new
+    # rows is the normal outcome, and "the feeds answered" is what actually
+    # separates a quiet beat from a dead one.
+    return {"status": "success", "articles": count,
+            "parsed": int(result.get("parsed") or 0),
+            "feeds_ok": int(result.get("feeds_ok") or 0),
+            "feeds_dead": result.get("feeds_dead", [])}
 
 
 @shared_task

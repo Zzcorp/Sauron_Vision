@@ -47,15 +47,24 @@ def _event_datetime(date_str, session):
 
 
 def _persist_earnings(rows):
-    """Write the calendar to market_data.EconomicEvent. Returns rows stored.
+    """Write the calendar to market_data.EconomicEvent. Returns rows UPSERTED.
 
     Keyed on (source, title, day) rather than on title alone: the same issuer
     prints four times a year, and keying on title would make each quarter
     overwrite the last.
+
+    A re-asserted row counts, exactly as fetch_cot_reports counts its upserts.
+    This used to count creates only, and FMP serves the whole rolling
+    fortnight on every call: after the first beat of the day the remaining 47
+    reported parsed=hundreds / stored=0, which task_gate.judge_result grades
+    "handled N rows and stored none" — its loudest warning, and reserved for
+    the case where the source answered and we kept nothing. Keeping a row that
+    is already correct is a healthy run, not a dropped batch.
     """
     from market_data.models import EconomicEvent
 
     stored = 0
+    created = 0
     for row in rows:
         symbol = (row.get("symbol") or "").strip().upper()
         when = _event_datetime(row.get("date"), row.get("time"))
@@ -79,15 +88,21 @@ def _persist_earnings(rows):
                 for field, value in defaults.items():
                     setattr(existing, field, value)
                 existing.save(update_fields=list(defaults.keys()))
+                stored += 1
             else:
                 EconomicEvent.objects.create(source="fmp", title=title, **defaults)
                 stored += 1
+                created += 1
         except Exception as exc:
             # Loud on purpose. The previous generation of persist helpers in
             # this package logged failures at DEBUG, so a mid-batch database
             # error dropped every remaining row with no trace at default level.
             logger.error("earnings persist failed for %s: %s", title, exc)
 
+    # `created` is logged rather than returned: the caller's contract is a
+    # single stored count, and the new-vs-re-asserted split is only ever
+    # wanted when reading the log after a run looks odd.
+    logger.debug("earnings upserts: %s (%s new)", stored, created)
     return stored
 
 

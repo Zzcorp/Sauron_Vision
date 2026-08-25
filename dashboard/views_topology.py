@@ -57,54 +57,61 @@ LAYERS = [
 #
 # `note` carries what the trace found that a run record cannot show: a missing
 # credential, an unreachable write, a task that does not exist.
+#
+# `task` is the beat entry's task path, and it is what tells this page how
+# often the component is SUPPOSED to run. `cadence` (seconds) is declared only
+# where beat cannot answer: a crontab schedule states when it next fires, not
+# how often, so Saturday-only and daily entries name their own period here.
+# Without this the map judged every component against one 48-hour rule and
+# called the weekly ones STALE for five days out of every seven.
 WIRING = {
     # ── ingest ────────────────────────────────────────────────────────
-    "scraper_live_quotes":  {"layer": "ingest", "writes": ["LiveQuote"], "feeds": ["execute_bots", "kill_switch"],
+    "scraper_live_quotes":  {"task": "market_data.tasks.fetch_live_quotes", "layer": "ingest", "writes": ["LiveQuote"], "feeds": ["execute_bots", "kill_switch"],
                              "note": "Universe is watchlist + enabled-bot symbols; with no watchlist flagged it polls a short list."},
-    "scraper_crypto":       {"layer": "ingest", "writes": ["LiveQuote"], "feeds": ["execute_bots", "kill_switch", "pipeline_opportunity_scanner"],
+    "scraper_crypto":       {"task": "market_data.tasks.fetch_crypto_quotes", "layer": "ingest", "writes": ["LiveQuote"], "feeds": ["execute_bots", "kill_switch", "pipeline_opportunity_scanner"],
                              "note": "Keyless Binance public ticker — the healthiest feed on the platform."},
-    "scraper_commodities":  {"layer": "ingest", "writes": ["LiveQuote"], "feeds": ["execute_bots", "kill_switch", "pipeline_opportunity_scanner"],
+    "scraper_commodities":  {"task": "market_data.tasks.fetch_commodity_quotes", "layer": "ingest", "writes": ["LiveQuote"], "feeds": ["execute_bots", "kill_switch", "pipeline_opportunity_scanner"],
                              "note": "Universe is the commodity catalogue through the shared Yahoo symbol map. The LME base metals and the gold crosses have no free source and are skipped by name rather than warned about forever."},
-    "scraper_forex":        {"layer": "ingest", "writes": ["LiveQuote"], "feeds": ["execute_bots", "kill_switch", "pipeline_opportunity_scanner"],
+    "scraper_forex":        {"task": "market_data.tasks.fetch_forex_quotes", "layer": "ingest", "writes": ["LiveQuote"], "feeds": ["execute_bots", "kill_switch", "pipeline_opportunity_scanner"],
                              "note": "Alpha Vantage first when a key is configured (25/day, budgeted in-task); every pair the budget does not reach gets a keyless yfinance mark, so a forex bot always has a price to measure its stop against."},
-    "scraper_indices":      {"layer": "ingest", "writes": ["LiveQuote"], "feeds": ["pipeline_opportunity_scanner"],
+    "scraper_indices":      {"task": "market_data.tasks.fetch_index_quotes", "layer": "ingest", "writes": ["LiveQuote"], "feeds": ["pipeline_opportunity_scanner"],
                              "note": "Indices have no bot class, so nothing here reaches execution — the dashboard headband and the scanner are the consumers."},
-    "scraper_eod":          {"layer": "ingest", "writes": ["PriceData 1d"], "feeds": ["pipeline_indicators", "pipeline_opportunity_scanner"],
+    "scraper_eod":          {"task": "market_data.tasks.fetch_eod_all_instruments", "cadence": 86400, "layer": "ingest", "writes": ["PriceData 1d"], "feeds": ["pipeline_indicators", "pipeline_opportunity_scanner"],
                              "note": "Has never run: zero PriceData rows carry timeframe=1d. All 5,600 bars come from the bot-bar refresh instead."},
     "feed_bot_bars":        {"layer": "ingest", "writes": ["PriceData 1h/4h"], "feeds": ["pipeline_indicators", "pipeline_signals", "execute_bots"],
                              "synthetic": True, "task": "market_data.tasks.refresh_bot_bars_task", "interval": 600,
                              "note": "The actual writer of every bar the rule layer reads — scheduled, ungated, and absent from the component registry, so there is no switch for it. Its universe is the enabled bots PLUS starred instruments (keyless feeds), so the star delivers bars as well as quotes."},
-    "scraper_news":         {"layer": "ingest", "writes": ["NewsArticle"], "feeds": ["agent_news_analyst"]},
-    "scraper_crypto_news":  {"layer": "ingest", "writes": ["NewsArticle"], "feeds": ["agent_news_analyst"]},
-    "scraper_sentiment":    {"layer": "ingest", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_sentiment_agg", "pipeline_opportunity_scanner"],
+    "scraper_news":         {"task": "scraping.tasks.fetch_breaking_news", "layer": "ingest", "writes": ["NewsArticle"], "feeds": ["agent_news_analyst"]},
+    "scraper_crypto_news":  {"task": "market_data.tasks.fetch_crypto_news_task", "layer": "ingest", "writes": ["NewsArticle"], "feeds": ["agent_news_analyst"]},
+    "scraper_sentiment":    {"task": "scraping.tasks.fetch_social_sentiment", "layer": "ingest", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_sentiment_agg", "pipeline_opportunity_scanner"],
                              "note": "Reddit half needs REDDIT_CLIENT_ID/SECRET; the StockTwits half is keyless and now wired."},
-    "scraper_tradingview":  {"layer": "ingest", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_sentiment_agg", "pipeline_opportunity_scanner"]},
-    "scraper_calendar":     {"layer": "ingest", "writes": ["EconomicEvent"], "feeds": ["execute_bots", "pipeline_opportunity_scanner"],
+    "scraper_tradingview":  {"task": "scraping.tasks.fetch_tradingview_ideas", "layer": "ingest", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_sentiment_agg", "pipeline_opportunity_scanner"]},
+    "scraper_calendar":     {"task": "scraping.tasks.check_economic_calendar", "layer": "ingest", "writes": ["EconomicEvent"], "feeds": ["execute_bots", "pipeline_opportunity_scanner"],
                              "note": "Needs FMP_API_KEY. While this table is empty the bot's earnings blackout cannot fire."},
-    "scraper_sec":          {"layer": "ingest", "writes": ["InstitutionalFiling"], "feeds": ["pipeline_opportunity_scanner"],
+    "scraper_sec":          {"task": "scraping.tasks.fetch_sec_filings", "cadence": 86400, "layer": "ingest", "writes": ["InstitutionalFiling"], "feeds": ["pipeline_opportunity_scanner"],
                              "note": "Form-4 issuers resolve to catalogue instruments through SEC's CIK map, so insider rows reach the evaluator. 13F rows stay filer-level (the holdings live in an attachment this scraper does not follow) and are unlinked by design."},
-    "scraper_cot":          {"layer": "ingest", "writes": ["COTReport"], "feeds": ["pipeline_opportunity_scanner"],
+    "scraper_cot":          {"task": "scraping.tasks.fetch_cot_reports", "cadence": 604800, "layer": "ingest", "writes": ["COTReport"], "feeds": ["pipeline_opportunity_scanner"],
                              "note": "Reads the CFTC legacy sources in their verified formats (the old code decoded an Excel workbook as text, so it stored zero rows for its whole life). Market names map to catalogue symbols by exact name."},
-    "scraper_fred":         {"layer": "ingest", "writes": ["MacroIndicator"], "feeds": ["pipeline_opportunity_scanner"],
+    "scraper_fred":         {"task": "market_data.tasks.fetch_fred_updates", "layer": "ingest", "writes": ["MacroIndicator"], "feeds": ["pipeline_opportunity_scanner"],
                              "note": "Writes indicator shells; zero observations have ever landed."},
     "scraper_etoro":        {"layer": "ingest", "writes": ["Position"], "feeds": ["pipeline_exposure", "pipeline_snapshot"],
                              "note": "No task and no schedule — reachable only from the manual Sync button, which never checks this switch."},
 
     # ── enrich ────────────────────────────────────────────────────────
-    "pipeline_indicators":    {"layer": "enrich", "writes": ["TechnicalIndicator"], "feeds": ["execute_bots"],
+    "pipeline_indicators":    {"task": "indicators.tasks.recalculate_watchlist_indicators", "layer": "enrich", "writes": ["TechnicalIndicator"], "feeds": ["execute_bots"],
                                "note": "Feeds the bot's ATR sizing only. The signal rules do NOT read this table — they load their own bars."},
-    "agent_news_analyst":     {"layer": "enrich", "writes": ["NewsArticle.ai_*"], "feeds": ["pipeline_opportunity_scanner"],
+    "agent_news_analyst":     {"task": "ai_agents.tasks.process_unanalyzed_news", "layer": "enrich", "writes": ["NewsArticle.ai_*"], "feeds": ["pipeline_opportunity_scanner"],
                                "note": "Needs ANTHROPIC_API_KEY. Instrument tagging also happens keylessly at ingest."},
-    "pipeline_sentiment_agg": {"layer": "enrich", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_opportunity_scanner"]},
+    "pipeline_sentiment_agg": {"task": "scraping.tasks.aggregate_sentiment", "layer": "enrich", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_opportunity_scanner"]},
 
     # ── the eye: where it decides ─────────────────────────────────────
-    "pipeline_signals":             {"layer": "eye", "writes": ["Signal", "SmcSignal"], "feeds": ["gate_orchestrator", "execute_bots"]},
-    "pipeline_opportunity_scanner": {"layer": "eye", "writes": ["OpportunityFlag"], "feeds": ["execute_bots"]},
+    "pipeline_signals":             {"task": "signals.tasks.run_signal_scan", "layer": "eye", "writes": ["Signal", "SmcSignal"], "feeds": ["gate_orchestrator", "execute_bots"]},
+    "pipeline_opportunity_scanner": {"task": "signals.tasks.scan_opportunities", "cadence": 86400, "layer": "eye", "writes": ["OpportunityFlag"], "feeds": ["execute_bots"]},
     "pipeline_event_engine":        {"layer": "eye", "writes": ["Signal", "FastEvent"], "feeds": ["execute_bots"],
                                      "note": "The switch gates the async dispatch wrapper (dispatch_event_task). Direct synchronous dispatch_event calls bypass it by design, so the admin test-fire button works even with the platform stopped."},
-    "agent_strategy":               {"layer": "eye", "writes": ["StrategyAdjustment"], "feeds": [],
+    "agent_strategy":               {"task": "ai_agents.tasks.review_active_strategies", "layer": "eye", "writes": ["StrategyAdjustment"], "feeds": [],
                                      "note": "Needs ANTHROPIC_API_KEY. Its adjustments are written and rendered nowhere."},
-    "agent_anomaly":                {"layer": "eye", "writes": ["AgentTask"], "feeds": [],
+    "agent_anomaly":                {"task": "ai_agents.tasks.run_anomaly_detection", "layer": "eye", "writes": ["AgentTask"], "feeds": [],
                                      "note": "Needs ANTHROPIC_API_KEY. Produces prose for a human, nothing machine-readable."},
 
     # ── gate ──────────────────────────────────────────────────────────
@@ -113,31 +120,31 @@ WIRING = {
                                  "note": "Deliberately ungated: it must keep working when everything else is switched off. Operator-triggered only."},
     "feature_ai_pretrade_gate": {"layer": "gate", "writes": ["AgentPrediction"], "feeds": [],
                                  "note": "Consulted only by the legacy crypto bot, which is itself unscheduled."},
-    "pipeline_exposure":        {"layer": "gate", "writes": ["Portfolio.current_value", "Position marks"], "feeds": ["execute_bots"],
+    "pipeline_exposure":        {"task": "portfolio.tasks.recalculate_exposure", "layer": "gate", "writes": ["Portfolio.current_value", "Position marks"], "feeds": ["execute_bots"],
                                  "note": "Marks open positions to market (current_price + unrealized P&L, day-fresh data only), then recomputes exposure. The three per-category breakdowns are still returned without being stored."},
 
     # ── learn ─────────────────────────────────────────────────────────
-    "pipeline_snapshot":        {"layer": "learn", "writes": ["PortfolioSnapshot"], "feeds": ["eye_core"],
+    "pipeline_snapshot":        {"task": "portfolio.tasks.create_daily_snapshot", "cadence": 86400, "layer": "learn", "writes": ["PortfolioSnapshot"], "feeds": ["eye_core"],
                                  "note": "Drawdown and daily P&L are computed from these; with none taken, both read as unknown platform-wide."},
-    "pipeline_calibration":     {"layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_signals"]},
-    "pipeline_actuator":        {"layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_signals", "execute_bots"]},
-    "pipeline_meta_allocator":  {"layer": "learn", "writes": ["RuleControl.weight"], "feeds": ["execute_bots"]},
-    "pipeline_promotion":       {"layer": "learn", "writes": ["RuleControl.stage"], "feeds": ["pipeline_signals", "execute_bots"]},
-    "pipeline_ai_decay":        {"layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_actuator"],
+    "pipeline_calibration":     {"task": "ai_agents.tasks.resolve_pending_calibrations", "cadence": 86400, "layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_signals"]},
+    "pipeline_actuator":        {"task": "signals.tasks.propose_rule_actions", "cadence": 86400, "layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_signals", "execute_bots"]},
+    "pipeline_meta_allocator":  {"task": "signals.tasks.propose_meta_allocation", "cadence": 604800, "layer": "learn", "writes": ["RuleControl.weight"], "feeds": ["execute_bots"]},
+    "pipeline_promotion":       {"task": "signals.tasks.auto_evaluate_promotions", "cadence": 86400, "layer": "learn", "writes": ["RuleControl.stage"], "feeds": ["pipeline_signals", "execute_bots"]},
+    "pipeline_ai_decay":        {"task": "ai_agents.tasks.investigate_decaying_rules", "cadence": 86400, "layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_actuator"],
                                  "note": "Needs ANTHROPIC_API_KEY."},
     "pipeline_ai_journal":      {"layer": "learn", "writes": ["Signal.journal"], "feeds": [],
                                  "note": "Event-driven from signal grading rather than scheduled, which is correct."},
-    "pipeline_evolution":       {"layer": "learn",
+    "pipeline_evolution":       {"task": "signals.tasks.propose_strategy_evolutions", "cadence": 86400, "layer": "learn",
                                  "writes": ["RuleMutation", "RuleControl"],
                                  "feeds": ["pipeline_promotion"],
                                  "note": "Proposes scored mutations of decaying "
                                          "rules (daily, evidence-gated) and forks "
                                          "approved ones into RESEARCH."},
-    "pipeline_pattern_miner":   {"layer": "learn", "writes": [], "feeds": ["pipeline_opportunity_scanner"]},
-    "agent_daily_briefing":     {"layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
-    "agent_weekly_review":      {"layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
-    "agent_optimization":       {"layer": "learn", "writes": ["StrategyAdjustment"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
-    "agent_monday_plan":        {"layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
+    "pipeline_pattern_miner":   {"task": "signals.tasks.mine_patterns", "cadence": 604800, "layer": "learn", "writes": [], "feeds": ["pipeline_opportunity_scanner"]},
+    "agent_daily_briefing":     {"task": "ai_agents.tasks.generate_daily_briefing", "cadence": 86400, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
+    "agent_weekly_review":      {"task": "ai_agents.tasks.generate_weekly_review", "cadence": 604800, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
+    "agent_optimization":       {"task": "ai_agents.tasks.optimize_strategies", "cadence": 604800, "layer": "learn", "writes": ["StrategyAdjustment"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
+    "agent_monday_plan":        {"task": "ai_agents.tasks.generate_monday_plan", "cadence": 604800, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
 }
 
 # Components whose only job is to be a mode flag on another component. Drawn as
@@ -149,10 +156,89 @@ MODE_FLAGS = {
     "meta_allocator_mode_live": "pipeline_meta_allocator",
 }
 
+# A component is late when it has missed more than two of its own beats. One
+# missed beat is a worker restart or a queue backlog; two and a half is the
+# schedule not running. The 48h default is what every component used to be
+# judged by, and it is now only the answer for something with no declared
+# schedule at all.
+STALE_FACTOR = 2.5
+DEFAULT_STALE_AFTER_S = 172800.0
+
+_BEAT_INTERVALS = None
+
+
+def _beat_intervals():
+    """Beat task path -> seconds between runs, for entries that state a period.
+
+    Read from the live schedule rather than copied into this file, so changing
+    a cadence in config/celery.py cannot leave the map judging a component
+    against a rhythm it no longer runs on. crontab entries are skipped on
+    purpose: remaining_estimate() needs a reference datetime and answers "when
+    next", not "how often", so those declare `cadence` in WIRING instead.
+    """
+    global _BEAT_INTERVALS
+    if _BEAT_INTERVALS is None:
+        found = {}
+        try:
+            from config.celery import app
+            for entry in app.conf.beat_schedule.values():
+                sched = entry.get("schedule")
+                if isinstance(sched, timedelta):
+                    sched = sched.total_seconds()
+                if isinstance(sched, (int, float)) and not isinstance(sched, bool):
+                    found[entry.get("task", "")] = float(sched)
+        except Exception:                                    # pragma: no cover
+            found = {}
+        _BEAT_INTERVALS = found
+    return _BEAT_INTERVALS
+
+
+def _expected_cadence(key):
+    """How often this component is scheduled to run, in seconds, or None.
+
+    None means nothing schedules it — the manual eToro sync, the kill switch,
+    the event-driven journal. Those keep the old blanket threshold, because
+    there is no rhythm to measure them against.
+    """
+    wiring = WIRING.get(key) or {}
+    declared = wiring.get("cadence")
+    if declared:
+        return float(declared)
+    task = wiring.get("task")
+    if task:
+        return _beat_intervals().get(task)
+    return None
+
+
+def _stale_after(cadence):
+    return DEFAULT_STALE_AFTER_S if not cadence else cadence * STALE_FACTOR
+
+
+def _fmt_cadence(seconds):
+    """The schedule in the operator's words, so the verdict shows its reason."""
+    if not seconds:
+        return "no declared cadence"
+    if seconds >= 604800 * 0.9:
+        return "weekly"
+    if seconds >= 86400 * 0.9:
+        return "daily"
+    if seconds >= 3600:
+        hours = round(seconds / 3600)
+        return "hourly" if hours == 1 else f"every {hours}h"
+    if seconds >= 60:
+        mins = round(seconds / 60)
+        return "every minute" if mins == 1 else f"every {mins}m"
+    return f"every {int(seconds)}s"
+
+
 STATE_META = {
     "broken":  {"label": "BROKEN", "glyph": "✕", "tone": "critical"},
     "stale":   {"label": "STALE",  "glyph": "▲", "tone": "serious"},
-    "silent":  {"label": "SILENT", "glyph": "◌", "tone": "warning"},
+    # ◌ is the platform's declared mark for "not set up / nothing measured",
+    # and views_system_map spells it that way in the problem list this same
+    # page renders. SILENT is a different animal — the thing ran and produced
+    # nothing — so it takes ◯, the mark for a pass that closed flat.
+    "silent":  {"label": "SILENT", "glyph": "◯", "tone": "warning"},
     "off":     {"label": "OFF",    "glyph": "⏻", "tone": "muted"},
     "idle":    {"label": "IDLE",   "glyph": "·", "tone": "muted"},
     "live":    {"label": "LIVE",   "glyph": "●", "tone": "good"},
@@ -182,6 +268,11 @@ def _component_state(comp):
     The distinction that matters and that the registry never drew: a task can
     run, not raise, and store nothing. The gate now records that as 'warning',
     and here it becomes SILENT — present, running, producing nothing.
+
+    Lateness is measured against the component's OWN schedule. Judged by one
+    48-hour rule, the four weekly components (COT Saturday 00:00, the weekly
+    review Saturday 10:00, the allocator and the pattern miner on Sunday) read
+    STALE for five days out of every seven while running perfectly.
     """
     if not comp.is_enabled:
         return "off", "Switched off."
@@ -192,12 +283,17 @@ def _component_state(comp):
         return "broken", f"Last run failed: {comp.last_message or ''}"
     if status == "warning":
         return "silent", f"Ran, stored nothing: {comp.last_message or ''}"
+    cadence = _expected_cadence(comp.key)
+    label = _fmt_cadence(cadence)
     if not comp.last_run_at:
-        return "idle", "Enabled, but has never run."
+        return "idle", f"{label} · enabled, but has never run."
     age = _age(comp.last_run_at)
-    if age and age > 172800:
-        return "stale", f"Last ran {_fmt_age(age)} ago."
-    return "live", f"Ran {_fmt_age(age)} ago · {comp.run_count} runs, {comp.error_count} errors."
+    limit = _stale_after(cadence)
+    if age and age > limit:
+        return "stale", (f"{label} · last ran {_fmt_age(age)} ago, "
+                         f"past the {_fmt_age(limit)} it is allowed.")
+    return "live", (f"{label} · last ran {_fmt_age(age)} ago · "
+                    f"{comp.run_count} runs, {comp.error_count} errors.")
 
 
 def _synthetic_node(key, wiring):
@@ -287,6 +383,11 @@ def build_topology(user):
             "writes": wiring["writes"],
             "feeds": wiring["feeds"],
             "last_run": _fmt_age(_age(comp.last_run_at)),
+            # The schedule rides with the node so the inspector can say WHY a
+            # 3-day-old weekly component is fine and a 10-minute-old poller is
+            # not, instead of asserting a verdict the operator has to trust.
+            "cadence": _expected_cadence(key),
+            "cadence_label": _fmt_cadence(_expected_cadence(key)),
             "last_status": comp.last_status or "never run",
             "last_message": comp.last_message or "",
             "runs": comp.run_count, "errors": comp.error_count,

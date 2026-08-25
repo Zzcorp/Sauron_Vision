@@ -51,6 +51,26 @@ DOLLAR_TICKER_RE = re.compile(r'\$([A-Z]{1,5})')
 WORD_TICKER_RE = re.compile(r'\b([A-Z]{2,5})\b')
 
 
+def reddit_unavailable_reason() -> str | None:
+    """Why Reddit cannot be scraped right now, or None if it can.
+
+    Without this the caller could not tell a quiet hour on r/wallstreetbets
+    from an integration that has never once been configured: both came back
+    as an empty list and the task reported success. The strings are the
+    `skipped` vocabulary core.task_gate.judge_result grades, so an
+    unconfigured source lands in its not-configured branch and the health
+    page names the missing credential instead of shrugging.
+    """
+    try:
+        import praw  # noqa: F401
+    except ImportError:
+        return "reddit_praw_missing"
+    if not os.getenv("REDDIT_CLIENT_ID", "") or not os.getenv(
+            "REDDIT_CLIENT_SECRET", ""):
+        return "reddit_no_credentials"
+    return None
+
+
 def _score_sentiment(text: str) -> tuple[int, int]:
     """Return (bullish_count, bearish_count) keyword hits in text."""
     lower = text.lower()
@@ -82,21 +102,23 @@ def fetch_reddit_sentiment(subreddits: list[str] | None = None, limit: int = 50)
         subreddit, bullish_count, bearish_count, tickers, sentiment_label.
         Returns empty list on any fatal error.
     """
-    try:
-        import praw  # noqa: F401
-    except ImportError:
+    # One gate, checked in one place, so the caller's report and this
+    # function's behaviour can never disagree about whether Reddit is usable.
+    reason = reddit_unavailable_reason()
+    if reason == "reddit_praw_missing":
         logger.warning("PRAW is not installed — reddit_sentiment scraper disabled. "
                        "Install with: pip install praw")
         return []
+    if reason:
+        logger.warning("REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET not set — "
+                       "reddit_sentiment scraper returning empty list.")
+        return []
+
+    import praw
 
     client_id = os.getenv("REDDIT_CLIENT_ID", "")
     client_secret = os.getenv("REDDIT_CLIENT_SECRET", "")
     user_agent = os.getenv("REDDIT_USER_AGENT", "SauronVision/1.0 (financial intelligence bot)")
-
-    if not client_id or not client_secret:
-        logger.warning("REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET not set — "
-                       "reddit_sentiment scraper returning empty list.")
-        return []
 
     if subreddits is None:
         subreddits = DEFAULT_SUBREDDITS

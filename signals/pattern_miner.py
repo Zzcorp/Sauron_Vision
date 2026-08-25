@@ -247,21 +247,21 @@ def _feat_calendar_high_impact(lookback_days: int = 3):
 
 def _feat_cot_extreme(side: str, min_ratio: float = 0.4):
     def _fn(instrument, dt) -> bool:
-        try:
-            from scraping.models import COTReport
-        except Exception:
-            return False
+        # Age-bounded like the evaluators — see
+        # `opportunity_scanner.latest_fresh_cot_report`. A mined feature that
+        # scores off frozen positioning writes the scraper's downtime into a
+        # DiscoveredSetup someone is then asked to approve.
+        from signals.opportunity_scanner import (
+            cot_net_speculative, latest_fresh_cot_report)
         dt = _aware(dt)
-        report = (COTReport.objects.filter(instrument=instrument, report_date__lte=dt.date())
-                  .order_by("-report_date").first())
-        if not report:
+        report, _reason = latest_fresh_cot_report(instrument, dt)
+        if report is None:
             return False
         # In the SYMBOL's frame. The CFTC denominates an FX future in the
         # foreign currency, so the raw column is sign-inverted on the pairs the
         # dollar is the base of — see `opportunity_scanner.cot_sign`. Mined
         # features feed DiscoveredSetup proposals, so an inverted feature here
         # becomes a setup someone is asked to approve.
-        from signals.opportunity_scanner import cot_net_speculative
         net = cot_net_speculative(report, instrument)
         total = abs(int(report.non_commercial_long or 0)) + abs(int(report.non_commercial_short or 0))
         if total <= 0:

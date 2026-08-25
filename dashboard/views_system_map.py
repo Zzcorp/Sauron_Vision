@@ -22,7 +22,7 @@ than no diagnostic surface.
 """
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.db.models import Max
@@ -271,15 +271,43 @@ def collect_system_map(user):
         ingest.append(node("sec", "SEC filings", "Filings.", why=f"probe failed: {e}"))
 
     try:
+        # Measured, not remembered. This node used to state a diagnosis in
+        # prose — that the parser read column names the CFTC release no longer
+        # publishes — and it kept stating it after the parser was rewritten to
+        # read by position and verified storing rows. A diagnostic page that
+        # narrates a fixed bug sends the operator to repair working code, so
+        # the verdict now comes from the rows and the newest report_date.
+        #
+        # CFTC publishes once a week, for Tuesday's positions, on the Friday.
+        # Two missed publications (~14 days) is the schedule having stopped;
+        # anything less is the normal gap between releases.
         from scraping.models import COTReport
         total = COTReport.objects.count()
-        st = "live" if total else "idle"
-        why = (f"{total:,} weekly reports." if total
-               else "Empty. The CFTC parser reads column names that the current "
-                    "release does not use, so every row is skipped.")
+        newest_date = COTReport.objects.aggregate(m=Max("report_date"))["m"]
+        weeks = COTReport.objects.values("report_date").distinct().count()
+        if total == 0:
+            st = "idle"
+            why = ("No CFTC rows have ever been stored. The fetch runs weekly, "
+                   "Saturday 00:00 UTC.")
+        else:
+            days = (timezone.now().date() - newest_date).days
+            if days > 14:
+                st = "stale"
+                why = (f"{total:,} rows across {weeks} report dates, newest "
+                       f"{newest_date} — {days} days old, so two weekly "
+                       f"releases have been missed.")
+            else:
+                st = "live"
+                why = (f"{total:,} rows across {weeks} report dates, newest "
+                       f"{newest_date} ({days}d old).")
         ingest.append(finish(node(
             "cot", "COT positioning", "CFTC commitments of traders, weekly.",
-            state=st, why=why, metric=total, metric_label="reports",
+            state=st, why=why, metric=total, metric_label="rows",
+            # report_date is a date; the card's freshness field measures
+            # datetimes, and handing it None would print "never" beside a
+            # sentence that just named the date.
+            newest=(timezone.make_aware(datetime.combine(newest_date, time.min))
+                    if newest_date else None),
             reads=["Opportunity scanner", "Advanced evaluators"]), "scraper_cot"))
     except Exception as e:                                    # pragma: no cover
         ingest.append(node("cot", "COT positioning", "CFTC.", why=f"probe failed: {e}"))

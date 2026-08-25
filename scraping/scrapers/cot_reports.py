@@ -59,7 +59,10 @@ MARKET_NAME_MAP: dict[str, str] = {
     "WHEAT-SRW": "WHEATUSD",
     "CORN": "CORNUSD",
     "SOYBEANS": "SOYUSD",
-    "OATS": "OATS",
+    # No OATS row. The contract left the CFTC legacy futures-only
+    # report, so the entry could never match a market name again — and
+    # a key that never fires reads as a broken map to the next person
+    # auditing it, not as a delisted contract.
     "ROUGH RICE": "RICE",
     "COFFEE C": "COFFEEUSD",
     "COCOA": "COCOAUSD",
@@ -287,19 +290,29 @@ def _parse_fixed_width_txt(text: str) -> list[dict]:
     return results
 
 
-def fetch_latest_cot_report() -> list[dict]:
-    """Download and parse the most recent CFTC COT report.
+def fetch_latest_cot_report() -> dict:
+    """Download, parse and persist the most recent CFTC COT report.
 
     Tries multiple sources in order:
     1. Raw current-week TXT file (headerless positional CSV)
     2. Current-year legacy ZIP (headered CSV, all weeks)
 
-    Returns:
-        List of dicts with keys: market_name, report_date,
-        commercial_long, commercial_short, non_commercial_long,
-        non_commercial_short, open_interest, net_speculative,
-        instrument_symbol.  Returns empty list on total failure.
+    Returns a dict the task can read straight through:
+        reports  — the parsed rows (market_name, report_date, the six
+                   position columns, net_speculative, instrument_symbol)
+        parsed   — len(reports)
+        stored   — rows UPSERTED, created or refreshed
+        created  — the subset that were new rows
+        missing_instruments — mapped symbols with no Instrument row
+    Every key is present on a total failure too, with zero counts.
     """
+    # Reset FIRST, on every path. This count used to live only in the
+    # attribute below and was written only where the run succeeded; a Celery
+    # prefork child survives many beats, so a week that failed outright in a
+    # worker that had succeeded earlier re-reported LAST WEEK'S upsert count
+    # and the gate read a total failure as green.
+    fetch_latest_cot_report.last_upserted = 0
+
     current_year = datetime.utcnow().year
     results: list[dict] = []
 
@@ -319,30 +332,44 @@ def fetch_latest_cot_report() -> list[dict]:
 
     if not results:
         logger.error("fetch_latest_cot_report: all sources exhausted — returning empty list")
-        return []
+        return {"reports": [], "parsed": 0, "stored": 0, "created": 0,
+                "missing_instruments": []}
 
     logger.info("fetch_latest_cot_report: parsed %d markets", len(results))
-    upserted = _persist_cot_reports(results)
-    # Stashed for the task's gate report: rows UPSERTED, not just created —
-    # a same-week re-run re-asserts existing rows and must judge green.
-    fetch_latest_cot_report.last_upserted = upserted
-    return results
+    outcome = _persist_cot_reports(results)
+    # Kept for anything still reading the attribute, but the task reads the
+    # returned count: a module attribute cannot say WHICH run wrote it.
+    fetch_latest_cot_report.last_upserted = outcome["upserted"]
+    return {"reports": results, "parsed": len(results),
+            "stored": outcome["upserted"], "created": outcome["created"],
+            "missing_instruments": outcome["missing_instruments"]}
 
 
-def _persist_cot_reports(reports: list[dict]) -> int:
-    """Upsert COTReport rows for instruments we track. Returns rows UPSERTED
-    (created or refreshed) — not just created: a re-run over the same report
+def _persist_cot_reports(reports: list[dict]) -> dict:
+    """Upsert COTReport rows for instruments we track.
+
+    Returns {"upserted", "created", "missing_instruments"}. `upserted` counts
+    rows created OR refreshed — not just created: a re-run over the same report
     week re-asserts existing rows, and counting those as zero made the gate
     flag scraper_cot amber every week the CFTC release slipped past the
-    Saturday beat."""
-    if not reports:
-        return 0
-    try:
-        from scraping.models import COTReport
-        from instruments.models import Instrument
+    Saturday beat.
 
-        upserted = 0
-        created = 0
+    Persistence errors are logged with a traceback and re-raised. They used to
+    be swallowed at DEBUG behind `return 0`, so a missing migration, a locked
+    database and an integrity failure all reached the gate as the same
+    "ran and produced nothing" — a real breakage wearing a starvation's
+    clothes, with nothing in the logs at default level to tell them apart.
+    """
+    if not reports:
+        return {"upserted": 0, "created": 0, "missing_instruments": []}
+
+    from scraping.models import COTReport
+    from instruments.models import Instrument
+
+    upserted = 0
+    created = 0
+    missing: set[str] = set()
+    try:
         for r in reports:
             sym = r.get("instrument_symbol")
             if not sym:
@@ -350,6 +377,11 @@ def _persist_cot_reports(reports: list[dict]) -> int:
             try:
                 instrument = Instrument.objects.get(symbol=sym)
             except Instrument.DoesNotExist:
+                # Named, not counted silently: a mapped market with no
+                # catalogue row is a seeding gap someone can fix, and it is
+                # the difference between "the CFTC gave us nothing" and
+                # "we threw away what it gave us".
+                missing.add(sym)
                 continue
 
             report_date_str = r.get("report_date")
@@ -375,10 +407,12 @@ def _persist_cot_reports(reports: list[dict]) -> int:
             upserted += 1
             if was_created:
                 created += 1
+    except Exception:
+        logger.exception("COT persistence failed after %d upserts", upserted)
+        raise
 
-        logger.debug("COT persistence: %d upserted (%d new)", upserted, created)
-        return upserted
-
-    except Exception as exc:
-        logger.debug("COTReport persistence skipped: %s", exc)
-        return 0
+    if missing:
+        logger.warning("COT: no Instrument row for %s", ", ".join(sorted(missing)))
+    logger.debug("COT persistence: %d upserted (%d new)", upserted, created)
+    return {"upserted": upserted, "created": created,
+            "missing_instruments": sorted(missing)}
