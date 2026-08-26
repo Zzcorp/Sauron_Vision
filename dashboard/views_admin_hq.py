@@ -671,6 +671,45 @@ def hq_create_asset_bot(request):
         messages.error(request, "PIN required to configure a LIVE asset bot.")
         return redirect("admin_dashboard")
 
+    # Stop-management knobs. These live in `extras` because the engine
+    # reads them with `_extras_float`, but they get real inputs of their
+    # own: `trail_pct` has existed since the trailing rule was written and
+    # was reachable only by typing the key into the raw Extras JSON box,
+    # so in practice every position ran with its entry stop until it was
+    # hit. A winner giving everything back is the failure that finds.
+    #
+    # A blank field means "leave whatever extras already holds", and that
+    # has to be true of the DICT as well as the key. This form is a
+    # create-or-overwrite: it posts the whole extras blob from a box that
+    # defaults to "{}", so saving it to change one number used to replace
+    # every stored key with nothing - switching these rules back off on
+    # the very next edit, silently, which is the failure they exist to
+    # prevent. Start from what the config already holds, let the JSON box
+    # overlay it, then the dedicated fields. An explicit 0 means off; the
+    # JSON box remains the way to change anything without an input.
+    existing = (AssetBotConfig.objects
+                .filter(user=request.user, asset_class=asset_class, name=name)
+                .values_list("extras", flat=True).first()) or {}
+    if isinstance(existing, dict):
+        merged = dict(existing)
+        merged.update(extras)
+        extras = merged
+
+    for field in ("breakeven_at_r", "breakeven_buffer_r",
+                  "trail_pct", "trail_start_r"):
+        raw = (request.POST.get(field) or "").strip()
+        if not raw:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            messages.error(request, f"{field} must be a number (got {raw!r})")
+            return redirect("admin_dashboard")
+        if value < 0:
+            messages.error(request, f"{field} cannot be negative")
+            return redirect("admin_dashboard")
+        extras[field] = value
+
     cfg, created = AssetBotConfig.objects.update_or_create(
         user=request.user, asset_class=asset_class, name=name,
         defaults={

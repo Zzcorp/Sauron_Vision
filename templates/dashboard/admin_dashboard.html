@@ -612,6 +612,21 @@ the broker, and the bot that would have honoured their stops switched off.
             {# Deliberately no value= — blank means "inherit the class ceiling", and a prefilled number would hide that. #}
             <input type="number" step="1" min="0" name="max_hold_hours" placeholder="Max hold h (blank = class default · 0 = off)" title="Hours before the bot flattens an unresolved position with reason TIME. Blank inherits the asset-class default; 0 disables the time stop." style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;">
 
+            {% comment %}
+            Stop management. Blank = leave as-is, 0 = off. These write into
+            extras, which is where the engine reads them from — but a knob
+            reachable only by typing JSON is a knob nobody turns, and a
+            position that runs to profit and back to its entry stop is what
+            that costs.
+            {% endcomment %}
+            <input type="number" step="0.1" min="0" name="breakeven_at_r" placeholder="Break-even at (R)" title="Once the position has run this many R in profit, move the stop to entry. R is measured against the stop the trade OPENED with. Blank leaves it unchanged; 0 turns it off." style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;">
+
+            <input type="number" step="0.01" min="0" name="breakeven_buffer_r" placeholder="Break-even buffer (R)" title="How far BEYOND entry to place the break-even stop, in R. A stop exactly at entry still books a small loss once the spread and both commissions come out of it. 0.05-0.1 is usually enough." style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;">
+
+            <input type="number" step="0.1" min="0" name="trail_pct" placeholder="Trail (% below mark)" title="Ratchet the stop to this percentage below the mark (above it on a short). Only ever tightens. 0 turns it off." style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;">
+
+            <input type="number" step="0.1" min="0" name="trail_start_r" placeholder="Start trailing at (R)" title="Do not begin trailing until the position has run this many R. Trailing from the first tick in profit turns a trade that has barely moved into a scratch on the first pullback. 0 trails as soon as it is in profit." style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;">
+
             <input type="text" name="extras" placeholder="Extras JSON" value="{}" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;grid-column:1/4;">
 
             <button type="submit" class="btn btn-primary btn-sm" style="grid-column:1/4;">Create / Update</button>

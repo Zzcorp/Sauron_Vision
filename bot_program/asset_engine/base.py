@@ -254,6 +254,14 @@ class AssetBot(ABC):
                 # Reconciliation detects the broker-side close and finalises
                 # the row.
                 if protected:
+                    # ...but say so when the operator has asked for stop
+                    # rules this position cannot honour. Its stop rests AT
+                    # THE BROKER and no client here can modify a resting
+                    # order, so break-even and trailing are inert on
+                    # exactly the configs most likely to hold real money.
+                    # Silence there is how a form promising stop
+                    # management becomes a false sense of protection.
+                    self._note_stop_rules_inert(trade)
                     continue
 
                 # Exits carry most of a trend system's P&L: a trailing stop
@@ -312,31 +320,91 @@ class AssetBot(ABC):
                            key, raw, default)
             return float(default)
 
-    def _update_trailing_stop(self, trade, price: Decimal) -> bool:
-        """Ratchet the stop toward price once the trade is in profit.
+    def _note_stop_rules_inert(self, trade) -> None:
+        """Warn once per trade that its stop rules cannot run.
 
-        Opt-in via extras['trail_pct']; only ever tightens, never loosens.
-        Skipped for broker-protected trades — the resting stop lives at the
-        broker and moving only our copy would desynchronise the two.
+        Only for positions whose config actually asked for one: a config
+        with no stop rules configured is not owed a warning about them.
         """
+        if not (self._extras_float("breakeven_at_r") > 0
+                or self._extras_float("trail_pct") > 0):
+            return
+        meta = trade.metadata or {}
+        if meta.get("stop_rules_inert"):
+            return
+        logger.warning(
+            "[%s_bot] %s: break-even/trailing are configured but this "
+            "position's stop RESTS AT THE BROKER, which no client can "
+            "modify yet - the stop stays where the bracket put it",
+            self.asset_class, trade.symbol)
+        try:
+            meta = dict(meta)
+            meta["stop_rules_inert"] = "broker_protected"
+            trade.metadata = meta
+            trade.save(update_fields=["metadata"])
+        except Exception as e:  # pragma: no cover - never block the tick
+            logger.warning("[%s_bot] could not stamp stop_rules_inert: %s",
+                           self.asset_class, e)
+
+    def _update_trailing_stop(self, trade, price: Decimal) -> bool:
+        """Move the stop as the trade runs. True if it moved.
+
+        Two rules, applied in order, both opt-in and both off by default:
+
+          extras['breakeven_at_r']  - once the trade has run this many R,
+              put the stop at entry (plus extras['breakeven_buffer_r'],
+              also in R, so the spread and both commissions come out of
+              the winning side rather than turning a "break-even" exit
+              into a small loss). Fires once.
+          extras['trail_pct']       - ratchet the stop to a percentage
+              below the mark, no sooner than extras['trail_start_r'].
+
+        Break-even runs FIRST: it is the cheap, one-off move that stops a
+        winner becoming a loser, and the trail takes the stop from there.
+        Running them the other way round would let a trail that has
+        already passed entry be dragged back to it.
+
+        Neither rule can loosen a stop, and neither can place one on the
+        wrong side of the mark - see bot_program.engine.trailing.
+        """
+        breakeven_at_r = self._extras_float("breakeven_at_r")
         trail_pct = self._extras_float("trail_pct")
-        if trail_pct <= 0 or (trade.metadata or {}).get("protected"):
+        if breakeven_at_r <= 0 and trail_pct <= 0:
             return False
         if trade.stop_loss is None:
             return False
-        # Only trail once the position is actually in profit, otherwise the
-        # stop marches up on a losing trade and cuts it early.
-        in_profit = (price > trade.entry_price if trade.side == "BUY"
-                     else price < trade.entry_price)
-        if not in_profit:
+
+        # Defensive only. manage_positions already skips protected rows
+        # and calls _note_stop_rules_inert at that skip, which is where
+        # the disclosure belongs - putting it here made it unreachable
+        # from production while a direct-call test kept passing.
+        if (trade.metadata or {}).get("protected"):
             return False
+
+        moved = False
         try:
-            from bot_program.engine.trailing import update_trailing_stop
-            return bool(update_trailing_stop(trade, price, trail_pct))
+            from bot_program.engine.trailing import (
+                apply_breakeven, update_trailing_stop,
+            )
+            if breakeven_at_r > 0:
+                moved = bool(apply_breakeven(
+                    trade, price, breakeven_at_r,
+                    self._extras_float("breakeven_buffer_r")))
+            if trail_pct > 0:
+                moved = bool(update_trailing_stop(
+                    trade, price, trail_pct,
+                    self._extras_float("trail_start_r"))) or moved
         except Exception as e:
-            logger.warning("[%s_bot] trailing stop failed for %s: %s",
+            # A knob typo must never take the exit block down with it: the
+            # trade would then run unmanaged until reconciliation noticed.
+            logger.warning("[%s_bot] stop management failed for %s: %s",
                            self.asset_class, trade.symbol, e)
             return False
+        if moved:
+            logger.info("[%s_bot] %s stop moved to %s at mark %s",
+                        self.asset_class, trade.symbol,
+                        trade.stop_loss, price)
+        return moved
 
     def _time_stop_status(self, trade) -> dict:
         """This config's time-stop reading for `trade`. See `time_stop_status`.
