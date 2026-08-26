@@ -5,15 +5,42 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _position_value(p) -> float:
+    """What one open Position is worth right now, in account currency.
+
+    `current_price` when the re-pricer has been past, entry otherwise —
+    the same fallback `portfolio.services` uses, so the concentration panel
+    and the book value cannot disagree about what a row is worth.
+    """
+    px = getattr(p, "current_price", None) or getattr(p, "entry_price", None)
+    try:
+        return float(px or 0) * float(getattr(p, "quantity", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def analyze_exposure(portfolio):
     """Analyze portfolio exposure by asset class, sector, currency.
 
     Returns dict with breakdowns. Tolerant to missing fields.
+
+    Reads the same three fields as every other consumer of this table:
+    `closed_at IS NULL` for open, `direction` for the side, and
+    price x quantity for the value. It previously asked for `is_open`,
+    `market_value` and `side`, none of which exist on `Position` — the
+    filter raised FieldError into the bare except below and the function
+    returned {} on every single call. That empty dict renders as an empty
+    chart with no error anywhere on the page, so a book 80% concentrated in
+    one sector and the answer "you have no concentration" looked identical.
     """
     try:
         from portfolio.models import Position
-        positions = Position.objects.filter(portfolio=portfolio, is_open=True).select_related("instrument")
-    except Exception:
+        positions = list(
+            Position.objects
+            .filter(portfolio=portfolio, closed_at__isnull=True)
+            .select_related("instrument"))
+    except Exception as e:  # noqa: BLE001 — a panel must not 500 the page
+        logger.warning("analyze_exposure could not read positions: %s", e)
         return {}
 
     by_asset = {}
@@ -24,11 +51,11 @@ def analyze_exposure(portfolio):
     short_value = 0.0
 
     for p in positions:
-        mv = float(getattr(p, "market_value", 0) or 0)
+        mv = _position_value(p)
         if mv == 0:
             continue
         total_value += abs(mv)
-        if getattr(p, "side", "") in ("long", "BUY"):
+        if str(getattr(p, "direction", "") or "").lower() in ("long", "buy"):
             long_value += mv
         else:
             short_value += abs(mv)
@@ -63,8 +90,13 @@ def calculate_correlation_matrix(portfolio, lookback_days=60):
     except Exception:
         return {}
     try:
-        positions = Position.objects.filter(portfolio=portfolio, is_open=True).select_related("instrument")
-    except Exception:
+        # Same field as above: `is_open` does not exist on Position, so this
+        # raised FieldError and returned an empty matrix on every call.
+        positions = (Position.objects
+                     .filter(portfolio=portfolio, closed_at__isnull=True)
+                     .select_related("instrument"))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("correlation matrix could not read positions: %s", e)
         return {}
 
     series = {}

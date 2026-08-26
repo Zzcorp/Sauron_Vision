@@ -546,6 +546,19 @@ class OptionsBot(AssetBot):
                         contract.strike, cost_reason)
             return None
 
+        # Shadow mode: everything is computed, nothing is submitted and no
+        # row is written. This lane overrides base.scan_symbol wholesale and
+        # never re-implemented the gate, so a live options config the console
+        # and the headband both labelled "decides, submits nothing" went on
+        # buying real premium — the one state an operator turns shadow mode on
+        # precisely to be sure cannot happen.
+        from bot_program.asset_engine import skips
+        from bot_program.asset_engine.safety import is_shadow, log_shadow_entry
+        if is_shadow(self.cfg):
+            log_shadow_entry(self.cfg, symbol, decision, premium, n_contracts)
+            return self._skip(symbol, skips.SHADOW,
+                              "shadow mode — computed, not submitted")
+
         # A paper-STAGE rule trades on the paper venue even in a live config.
         paper = (self.cfg.mode == "paper") or bool(stage["force_paper"])
         order_id = ""

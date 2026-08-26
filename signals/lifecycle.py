@@ -32,8 +32,27 @@ TRIGGERED_TTL_HOURS_BY_TIMEFRAME = {
 # poller's last print would corrupt the evidence the promotion ladder reads.
 MAX_QUOTE_AGE_SECONDS = 900
 
+# How old the newest BAR may be and still count as a price, per timeframe.
+# The quote bound above was enforced and the bar fallback right underneath it
+# had none at all, which defeated the whole point: a symbol whose ingestion
+# had stopped returned the same fossil close on every pass, and every ACTIVE
+# card whose stop sat on the wrong side of it was stamped INVALIDATED at
+# -1.0R — losses that never happened, fed to get_hit_rate as measurement and
+# from there into the composite that sizes live entries. Scaled by timeframe
+# because a 1d card's newest bar is legitimately a day old (and four days
+# over a long weekend), while a 5m card's is stale within the hour.
+MAX_BAR_AGE_SECONDS_BY_TIMEFRAME = {
+    "1m": 15 * 60,
+    "5m": 60 * 60,
+    "15m": 3 * 3600,
+    "1h": 6 * 3600,
+    "4h": 24 * 3600,
+    "1d": 4 * 86400,
+}
+DEFAULT_MAX_BAR_AGE_SECONDS = 6 * 3600
 
-def _latest_price(symbol):
+
+def _latest_price(symbol, timeframe=None):
     """Best-effort recent price from LiveQuote / PriceData. Returns float or None.
 
     The LiveQuote branch was dead for the model's whole life: it queried
@@ -41,6 +60,10 @@ def _latest_price(symbol):
     (it is one row per instrument: `instrument`, `last`, `updated_at`) — so
     every call raised FieldError into the bare except and outcome grading
     silently ran on bar closes alone, hours stale on the 4h timeframe.
+
+    Both branches are now age-bounded. None means "no price", and every
+    caller must treat that as "do not grade", never as "the price has not
+    moved".
     """
     try:
         from django.utils import timezone as tz
@@ -57,7 +80,12 @@ def _latest_price(symbol):
         from instruments.models import Instrument
         inst = Instrument.objects.filter(symbol__iexact=symbol).first()
         if inst:
-            pd = PriceData.objects.filter(instrument=inst).order_by("-timestamp").first()
+            max_age = MAX_BAR_AGE_SECONDS_BY_TIMEFRAME.get(
+                timeframe, DEFAULT_MAX_BAR_AGE_SECONDS)
+            cutoff = timezone.now() - timedelta(seconds=max_age)
+            pd = (PriceData.objects
+                  .filter(instrument=inst, timestamp__gte=cutoff)
+                  .order_by("-timestamp").first())
             if pd:
                 return float(pd.close)
     except Exception:
@@ -102,8 +130,33 @@ def transition_signal(sig, now=None):
     if sig.status not in ("ACTIVE", "TRIGGERED"):
         return sig.status
 
-    price = _latest_price(sig.symbol)
+    price = _latest_price(sig.symbol, sig.timeframe)
+
+    # Age is answerable without a price, and it has to be answered here or
+    # bounding the price lookup above just moves the damage: a symbol whose
+    # feed has died would sit ACTIVE forever instead of being graded against
+    # a fossil, still occupying the rail and still absent from the sample
+    # setup_performance_summary reads.
     if price is None:
+        if sig.status == "ACTIVE":
+            ttl_hours = TTL_HOURS_BY_TIMEFRAME.get(sig.timeframe, 168)
+            if (now - sig.created_at) > timedelta(hours=ttl_hours):
+                sig.status = "EXPIRED"
+                sig.closed_at = now
+                sig.save(update_fields=["status", "closed_at"])
+                return sig.status
+        else:
+            triggered_ttl = TRIGGERED_TTL_HOURS_BY_TIMEFRAME.get(
+                sig.timeframe, 336)
+            trig_ts = sig.triggered_at or sig.created_at
+            if (now - trig_ts) > timedelta(hours=triggered_ttl):
+                # realized_r stays NULL: there was no price to mark against,
+                # and a fabricated 0.0 would enter the hit-rate evidence as a
+                # measurement nobody made.
+                sig.status = "EXPIRED"
+                sig.closed_at = now
+                sig.save(update_fields=["status", "closed_at"])
+                return sig.status
         return sig.status
 
     is_long = sig.direction == "LONG"
