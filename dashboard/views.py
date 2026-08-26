@@ -3201,8 +3201,10 @@ def setup(request):
     # book refuses a position a 10,000 pool is entitled to open at 20% of
     # itself, and before this the collision only ever surfaced as a refusal at
     # the moment of trading. Notional 0 asks for the ceiling alone.
+    # The card has to quote the same book the gate enforces against, or it
+    # is describing a limit nobody applies.
     risk_single = single_position_state(limits, asset_class="stock",
-                                        notional=0.0)
+                                        user=request.user, notional=0.0)
 
     return render(request, "dashboard/setup.html", {
         "page_id": "setup",

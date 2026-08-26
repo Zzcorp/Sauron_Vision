@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 # tests/test_wall_facts.py counts the suite and fails when this drifts: the
 # first version of this module shipped a number its own commit had already
 # invalidated, which is exactly the failure it was written to prevent.
-TESTS_GREEN = 4544
+TESTS_GREEN = 4556
 
 # Broker adapters implemented under bot_program/engine/ — one module and one
 # client class each, all reachable from broker_router.client_for_symbol().

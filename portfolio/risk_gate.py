@@ -261,6 +261,59 @@ def limits_book():
     return get_or_create_default_portfolio()
 
 
+def gate_book_value(user, portfolio) -> float | None:
+    """The size the limits are percentages OF, for THIS operator.
+
+    The four percentages live on the shared limits book, deliberately —
+    see `limits_book`. The book VALUE does not, and that split is what
+    made every gate on this platform scale against the wrong number.
+
+    `/setup/`'s capital form writes `current_value` onto the OPERATOR's
+    own row (`dashboard.views.setup_view` resolves
+    `get_or_create_default_portfolio(user=request.user)` and saves the
+    three capital fields there), while every gate below read the size
+    from the shared row. Nothing puts the operator's money on that row:
+    `recalculate_exposure` re-values EVERY book from its own positions,
+    and the shared book's bot half is empty by construction, so on any
+    deploy without the global eToro sync it settles back to the seeded
+    `PORTFOLIO_INITIAL_CAPITAL` — 10,000 by default — and stays there.
+
+    Meanwhile the numerator is already per-operator: `realized_since`
+    and `open_capital_at_work` both filter `config__user=user`. So a
+    real 50,000 book was measured against a 10,000 denominator, and a
+    3% daily-loss floor stopped the fleet at -300 instead of -1,500 with
+    a reason that never mentioned the book it used. The error runs the
+    other way for a book under the seed, which is the dangerous
+    direction.
+
+    The operator's own row is the right answer AND the self-maintaining
+    one: the hourly re-valuation already keeps it true from that book's
+    own positions. Falls back to the passed book when there is no user
+    or no per-user row, so a shared-book caller keeps its old meaning.
+    """
+    from portfolio.models import Portfolio
+    from portfolio.services import PER_USER_SUFFIX
+
+    # LOOKED UP, never created. `get_or_create_default_portfolio` seeds a
+    # new row at PORTFOLIO_INITIAL_CAPITAL, so calling it here would turn
+    # "this book's size was never set" — which `book_value` deliberately
+    # answers None to, so a gate abstains instead of enforcing a number
+    # nobody entered — into a confident 10,000. That is the same
+    # fabrication this function exists to remove, one level up.
+    username = getattr(user, "username", "") if user is not None else ""
+    if username and getattr(user, "is_authenticated", True):
+        try:
+            own = Portfolio.objects.filter(
+                name=f"{username}{PER_USER_SUFFIX}").first()
+        except Exception:  # pragma: no cover - never break a gate on lookup
+            own = None
+        if own is not None:
+            value = book_value(own)
+            if value is not None:
+                return value
+    return book_value(portfolio)
+
+
 def book_value(portfolio) -> float | None:
     """The book value the limits are percentages OF, or None if unusable.
 
@@ -481,7 +534,7 @@ def daily_loss_state(user, *, portfolio=None, now=None) -> dict:
     """
     portfolio = portfolio if portfolio is not None else limits_book()
     limit_pct = _limit_pct(portfolio, "max_daily_loss_pct")
-    book = book_value(portfolio)
+    book = gate_book_value(user, portfolio)
     state = {"ok": True, "limit_pct": limit_pct, "book_value": book,
              "limit_money": None, "realized": None, "unmeasured": 0,
              "measured": False, "reason": ""}
@@ -535,7 +588,7 @@ def exposure_state(user, *, portfolio=None) -> dict:
     """
     portfolio = portfolio if portfolio is not None else limits_book()
     limit_pct = _limit_pct(portfolio, "max_total_exposure_pct")
-    book = book_value(portfolio)
+    book = gate_book_value(user, portfolio)
     state = {"ok": True, "limit_pct": limit_pct, "book_value": book,
              "cap_money": None, "committed": None, "headroom": None,
              "n_open": 0, "reason": ""}
@@ -589,7 +642,7 @@ def exposure_state(user, *, portfolio=None) -> dict:
     return state
 
 
-def single_position_state(portfolio, *, asset_class: str,
+def single_position_state(portfolio, *, asset_class: str, user=None,
                           notional: float, capital_base: float = None,
                           base_label: str = "book") -> dict:
     """Whether one proposed position clears MAX SINGLE POSITION.
@@ -617,7 +670,8 @@ def single_position_state(portfolio, *, asset_class: str,
     so the operator reads a sentence about the pool that actually refused.
     """
     limit_pct = _limit_pct(portfolio, "max_single_position_pct")
-    base = capital_base if capital_base is not None else book_value(portfolio)
+    base = (capital_base if capital_base is not None
+            else gate_book_value(user, portfolio))
     at_work = capital_at_work(asset_class, notional)
     state = {"ok": True, "limit_pct": limit_pct, "book_value": base,
              "capital_base": base, "base_label": base_label,
@@ -728,7 +782,8 @@ def concentration_state(user, *, symbol: str, side: str, asset_class: str,
     """
     pf = portfolio if portfolio is not None else limits_book()
     limit_pct = _limit_pct(pf, "max_single_position_pct")
-    base = capital_base if capital_base is not None else book_value(pf)
+    base = (capital_base if capital_base is not None
+            else gate_book_value(user, pf))
     held = symbol_side_exposure(user, symbol, side, portfolio=pf)
     adding = capital_at_work(asset_class, notional)
     after = held["committed"] + adding
