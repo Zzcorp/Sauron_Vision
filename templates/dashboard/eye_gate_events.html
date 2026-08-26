@@ -24,10 +24,13 @@
         <span class="oc-strip-value down">{{ rejects }}</span>
         <span class="oc-strip-sub">always logged</span>
     </div>
+    {# Not "rejection rate": rejects are all logged and allows are kept at #}
+    {# 1-in-10, so this is the share of THESE ROWS and not the share of the #}
+    {# decisions the gate actually made. The label has to say which. #}
     <div class="oc-strip-cell">
-        <span class="oc-strip-label">REJECTION RATE</span>
+        <span class="oc-strip-label">REJECTS IN LOG</span>
         <span class="oc-strip-value {% if rejection_rate > 0.5 %}down{% endif %}">{% widthratio rejection_rate 1 100 %}%</span>
-        <span class="oc-strip-sub">of {{ total }} events</span>
+        <span class="oc-strip-sub">of {{ total }} rows · not a gate rate</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">ASSET CLASSES</span>

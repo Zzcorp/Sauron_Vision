@@ -199,7 +199,19 @@ def _market_exit_price(symbol, fallback, client=None):
     return float(fallback)
 
 
-def _try_broker_close(client, symbol, side, qty):
+def _kill_order_id(trade) -> str:
+    """A stable name for "flatten THIS row", so a repeat is a copy."""
+    from bot_program.engine.idempotency import make_client_order_id
+    try:
+        return make_client_order_id(
+            config_id=int(getattr(trade, "config_id", 0) or 0),
+            symbol=str(trade.symbol), signal_id=str(trade.id),
+            intent="KILL")
+    except Exception:  # pragma: no cover - never block a flatten
+        return ""
+
+
+def _try_broker_close(client, symbol, side, qty, client_order_id=""):
     """Submit a closing market order if the client supports it. Best-effort:
     raises on broker error so the caller can record it.
 
@@ -212,7 +224,17 @@ def _try_broker_close(client, symbol, side, qty):
     if not hasattr(client, "market_order"):
         return None
     close_side = "SELL" if side == "BUY" else "BUY"
-    return client.market_order(symbol, close_side, float(qty))
+    # The kill switch is the WORST place to send an anonymous order.
+    # It fires when something is already wrong, it can be triggered
+    # twice by two operators or by a retry, and it flattens at
+    # market. Every other exit path here stamps a deterministic
+    # client_order_id so the broker itself refuses the second copy;
+    # this one sent none, so two overlapping flattens meant two
+    # full-size market orders - and the second one is a reversal.
+    kwargs = {}
+    if client_order_id:
+        kwargs["client_order_id"] = client_order_id
+    return client.market_order(symbol, close_side, float(qty), **kwargs)
 
 
 def _close_legacy_trade(trade, now):
@@ -238,7 +260,9 @@ def _close_legacy_trade(trade, now):
                 "sent and the position is still open at the broker")
         exit_price = _market_exit_price(trade.symbol, trade.entry_price,
                                         client=client)
-        result = _try_broker_close(client, trade.symbol, trade.side, trade.qty)
+        result = _try_broker_close(
+            client, trade.symbol, trade.side, trade.qty,
+            client_order_id=_kill_order_id(trade))
     except Exception as e:  # noqa: BLE001
         logger.warning("[KILL SWITCH] broker close failed for %s: %s", trade.symbol, e)
         raise
@@ -420,8 +444,9 @@ def _close_asset_trade(trade, now):
                         f"close the remainder manually at the broker")
                 result = submit_option_close(client, trade)
             else:
-                result = _try_broker_close(client, trade.symbol, trade.side,
-                                            outstanding)
+                result = _try_broker_close(
+                    client, trade.symbol, trade.side, outstanding,
+                    client_order_id=_kill_order_id(trade))
     except Exception as e:  # noqa: BLE001
         logger.warning("[KILL SWITCH] broker close failed for %s: %s", trade.symbol, e)
         raise

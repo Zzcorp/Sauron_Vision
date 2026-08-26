@@ -27,17 +27,32 @@ class Command(BaseCommand):
         try: asyncio.run(run(opts.get("symbols")))
         except KeyboardInterrupt: log.info("stopped")
 
+# depth20@100ms is a firehose per symbol; the cap bounds both the socket
+# and the write rate, which is throttled to one snapshot per 500ms each.
+MAX_DEPTH_SYMBOLS = 20
+DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT"]
+
+
 @sync_to_async
 def discover_symbols(override):
+    """Spot symbols to book, in Binance spelling.
+
+    This used to KEEP only catalogue symbols already spelled *USDT, and the
+    catalogue spells every crypto row *USD, so the match was always empty
+    and the worker booked exactly BTC and ETH forever — every other
+    instrument's liquidity score was computed from no order book at all.
+    """
     if override: return [s.upper() for s in override]
     try:
         from instruments.models import Instrument
+        from market_data.management.commands.stream_binance import binance_symbols
         syms = list(Instrument.objects.filter(
-            asset_class__iexact="crypto", is_active=True).values_list("symbol", flat=True))
-        return [s.upper().replace("-","").replace("/","") for s in syms
-                if s.upper().endswith("USDT")][:20] or ["BTCUSDT","ETHUSDT"]
-    except Exception:
-        return ["BTCUSDT","ETHUSDT"]
+            asset_class__iexact="crypto", is_active=True
+        ).order_by("symbol").values_list("symbol", flat=True))
+        return binance_symbols(syms)[:MAX_DEPTH_SYMBOLS] or list(DEFAULT_SYMBOLS)
+    except Exception as e:
+        log.warning("depth symbol discovery failed, using defaults: %s", e)
+        return list(DEFAULT_SYMBOLS)
 
 def compute_metrics(bids_raw, asks_raw):
     """bids/asks: list of [price_str, qty_str]."""

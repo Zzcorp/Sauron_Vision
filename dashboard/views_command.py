@@ -486,7 +486,17 @@ def command_tab_live(request):
         context["live_deployed_pct"] = DASH
         context["live_cash_pct"] = DASH
 
-    # Today's gate allow/reject ratio (Phase 15 orchestrator).
+    # Today's gate activity (Phase 15 orchestrator).
+    #
+    # This cell used to lead with an accept rate, and the rate was not one.
+    # OrchestratorEvent keeps every reject and only a ~1-in-10 sample of the
+    # allows (bot_program.orchestrator._log_decision), so allow/(allow+reject)
+    # divides a sampled numerator by a mixed denominator: a gate letting 40 of
+    # 50 entries through logs ~4 allows and 10 rejects and the strip read
+    # "GATE 24H 28.6%". The operator sees a gate refusing three quarters of
+    # their entries and goes and loosens the exposure caps. The reject count
+    # is exact and is the number worth leading with; the allow count rides
+    # along labelled as the sample it is.
     try:
         from bot_program.orchestrator_models import OrchestratorEvent
         cutoff = timezone.now() - timedelta(hours=24)
@@ -494,17 +504,15 @@ def command_tab_live(request):
             user=user, created_at__gte=cutoff)
         n_allow = today_events.filter(decision="allow").count()
         n_reject = today_events.filter(decision="reject").count()
-        n_total = n_allow + n_reject
         context["gate_n_allow"] = n_allow
         context["gate_n_reject"] = n_reject
-        # No decisions in 24h is "the gate was not asked", not "0% accepted".
-        context["gate_accept_rate"] = (
-            round(n_allow / n_total * 100, 1) if n_total > 0 else DASH)
+        # No decisions in 24h is "the gate was not asked", not "0 refused".
+        context["gate_asked"] = (n_allow + n_reject) > 0
     except Exception as e:
-        logger.warning("Op Center gate ratio unavailable: %s", e, exc_info=True)
+        logger.warning("Op Center gate counts unavailable: %s", e, exc_info=True)
         context["gate_n_allow"] = DASH
         context["gate_n_reject"] = DASH
-        context["gate_accept_rate"] = DASH
+        context["gate_asked"] = False
 
     # Recent fills (last 5 closed bot trades in the last 24h) + 24h session metrics.
     try:

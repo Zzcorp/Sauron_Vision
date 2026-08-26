@@ -107,25 +107,24 @@ def fetch_binance_klines(symbol, interval="1d", limit=100):
 
 
 def save_crypto_quotes_to_db(symbols=None):
-    """Fetch and save crypto quotes."""
-    from instruments.models import Instrument
-    from market_data.models import LiveQuote
+    """Fetch and save crypto quotes, THROUGH the one writer.
+
+    This wrote LiveQuote directly, which skipped both guards that
+    make the quote table trustworthy: the source-precedence check
+    and the zero/negative price refusal. CoinGecko sits at priority
+    40 and the Binance stream at 100, so a five-minute poll could -
+    and on any run where the stream was live, did - overwrite a
+    real-time tick with a delayed one. `stream_oanda` carries a
+    comment about being "the last streamer writing LiveQuote
+    directly"; this was the last adapter still doing it.
+    """
+    from market_data.quotes import write_quote
 
     prices = fetch_coingecko_prices(symbols)
     saved = 0
     for sym, data in prices.items():
-        try:
-            inst = Instrument.objects.get(symbol=sym)
-            LiveQuote.objects.update_or_create(
-                instrument=inst,
-                defaults={
-                    "last": data["price"],
-                    "change_pct": Decimal(str(data["change_24h"])),
-                    "volume": int(data.get("volume_24h", 0)),
-                    "source": "coingecko",
-                }
-            )
+        if write_quote(sym, last=data.get("price"), source="coingecko",
+                       change_pct=data.get("change_24h"),
+                       volume=data.get("volume_24h", 0)):
             saved += 1
-        except Instrument.DoesNotExist:
-            pass
     return saved

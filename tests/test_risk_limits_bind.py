@@ -85,24 +85,32 @@ def _closed_trade(cfg, pnl, *, hours_ago=1, symbol="BTCUSD"):
     ordinary close writes it and only the close time differs. A negative
     `hours_ago` puts the close in the future, which is how the as-of bound on
     the window is tested.
+
+    `paper=False` because these are the real-money closes the book limits
+    exist for; the model defaults the flag to True. The two venues are
+    measured apart and never netted — that split is pinned in
+    tests.test_venue_and_book_scope.
     """
     from bot_program.models import AssetBotTrade
     t = AssetBotTrade.objects.create(
         config=cfg, asset_class=cfg.asset_class, symbol=symbol, side="BUY",
         qty=Decimal("1"), entry_price=Decimal("100"), exit_price=Decimal("90"),
-        status="CLOSED", pnl=Decimal(str(pnl)))
+        status="CLOSED", pnl=Decimal(str(pnl)), paper=False)
     t.closed_at = timezone.now() - timedelta(hours=hours_ago)
     t.save(update_fields=["closed_at"])
     return t
 
 
 def _open_trade(cfg, *, entry="100", qty="1", symbol="BTCUSD",
-                asset_class=None, metadata=None):
+                asset_class=None, metadata=None, paper=False):
+    """An OPEN row on the LIVE venue unless asked otherwise — the exposure
+    ceiling is a bound on real money, and live and simulated capital are
+    judged apart rather than added."""
     from bot_program.models import AssetBotTrade
     return AssetBotTrade.objects.create(
         config=cfg, asset_class=asset_class or cfg.asset_class, symbol=symbol,
         side="BUY", qty=Decimal(qty), entry_price=Decimal(entry),
-        status="OPEN", metadata=metadata or {})
+        status="OPEN", metadata=metadata or {}, paper=paper)
 
 
 class DailyLossGateTests(TestCase):

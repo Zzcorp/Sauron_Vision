@@ -78,8 +78,8 @@ class ReviewRegressionTests(TestCase):
         with open("market_data/funding_alerts.py", encoding="utf-8") as fh:
             src = fh.read()
         self.assertEqual(
-            src.count('Instrument.objects.filter(symbol__iexact=sym)'), 1,
-            "one lookup per symbol — iexact cannot use the symbol index")
+            src.count("inst = resolve_instrument(sym)"), 1,
+            "one lookup per symbol — the divergence block reuses this row")
 
 
 class RegimeNodeFollowsTheBrainTests(TestCase):

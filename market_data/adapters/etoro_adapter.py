@@ -55,12 +55,24 @@ class EtoroClient:
             return None
 
 
+def _usable_mark(value):
+    """A finite, strictly positive price, or None.
+
+    Zero is not a price. eToro reports currentRate 0 for a halted or
+    unpriced instrument, and it must not reach the mark table as a fact.
+    """
+    from decimal import Decimal, InvalidOperation
+    try:
+        d = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return d if d.is_finite() and d > 0 else None
+
+
 def sync_etoro_positions():
     """Sync eToro positions into Sauron Vision portfolio."""
-    from decimal import Decimal, InvalidOperation
-
     from instruments.models import Instrument
-    from market_data.models import LiveQuote
+    from market_data.quotes import write_quote
     from portfolio.models import Position
     from portfolio.services import get_or_create_default_portfolio
     from django.utils import timezone
@@ -86,10 +98,28 @@ def sync_etoro_positions():
     # user needs per-user eToro credentials, which is a bigger change than
     # a book swap and should not be faked by guessing an owner.
     portfolio = get_or_create_default_portfolio()
-    synced = 0
+    synced = skipped = 0
 
     for pos in positions_data.get("positions", []):
-        symbol = pos.get("symbol", "")
+        symbol = (pos.get("symbol") or "").strip().upper()
+        if not symbol:
+            # eToro's API is instrumentId-based and can answer without a
+            # ticker. Instrument.symbol is unique but "" is a legal value, so
+            # an unguarded get_or_create collapsed EVERY unsymboled position
+            # — this sync and every future one — onto one blank row. The
+            # Position upsert underneath then overwrote that single row on
+            # each iteration, and N distinct real-money holdings were recorded
+            # as one carrying the last one's quantity and P&L, with the book
+            # value and the risk denominator wrong by whatever the discarded
+            # positions were worth. A position we cannot name is skipped and
+            # counted, not merged into a fiction.
+            logger.warning(
+                "eToro position %r has no symbol — skipped rather than "
+                "merged onto a blank Instrument row",
+                pos.get("positionId") or pos.get("instrumentId") or "?")
+            skipped += 1
+            continue
+
         instrument, _ = Instrument.objects.get_or_create(
             symbol=symbol,
             defaults={
@@ -108,18 +138,23 @@ def sync_etoro_positions():
         # positions counted as UNPRICED: the book value went unmeasured, the
         # nightly snapshot was skipped, the equity curve stopped and the risk
         # denominator froze — on the real-money book, silently.
+        #
+        # Through the one writer now, and past a real price check first. The
+        # old guard was `current_rate not in (None, "")`, which 0 satisfies,
+        # so a halted instrument's currentRate of 0 went in as a genuine mark
+        # under a source the priority table does not name — and then held
+        # that zero against yfinance and coingecko for the full 300-second
+        # hold while portfolio/services valued the position at nothing.
         current_rate = pos.get("currentRate")
-        if current_rate not in (None, ""):
-            try:
-                LiveQuote.objects.update_or_create(
-                    instrument=instrument,
-                    defaults={"last": Decimal(str(current_rate)),
-                              "source": "etoro"})
-            except (InvalidOperation, TypeError, ValueError):
-                logger.warning(
-                    "eToro sent an unusable currentRate for %s (%r); the "
-                    "position is recorded but stays unpriced.",
-                    instrument.symbol, current_rate)
+        mark = _usable_mark(current_rate)
+        if mark is not None:
+            write_quote(instrument.symbol, last=mark, source="etoro",
+                        instrument=instrument)
+        elif current_rate not in (None, ""):
+            logger.warning(
+                "eToro sent an unusable currentRate for %s (%r); the "
+                "position is recorded but stays unpriced.",
+                instrument.symbol, current_rate)
 
         Position.objects.update_or_create(
             portfolio=portfolio,
@@ -129,7 +164,15 @@ def sync_etoro_positions():
                 "direction": "long" if pos.get("isBuy", True) else "short",
                 "quantity": pos.get("amount", 0),
                 "entry_price": pos.get("openRate", 0),
-                "current_price": pos.get("currentRate", 0),
+                # The same validated mark the quote table got. Handing the
+                # raw field through meant an unusable currentRate reached a
+                # DecimalField and raised out of the loop, so ONE malformed
+                # position aborted the sync and every holding after it in
+                # the payload went unrecorded — on the real-money book,
+                # under a warning that said the position was recorded. With
+                # no usable mark the row values at cost rather than at zero.
+                "current_price": (mark if mark is not None
+                                  else pos.get("openRate", 0)),
                 "stop_loss": pos.get("stopLossRate"),
                 "take_profit": pos.get("takeProfitRate"),
                 "unrealized_pnl": pos.get("netProfit", 0),
@@ -146,4 +189,9 @@ def sync_etoro_positions():
         portfolio.cash_available = balance.get("availableBalance", portfolio.cash_available)
         portfolio.save()
 
-    return {"status": "success", "synced": synced}
+    out = {"status": "success", "synced": synced}
+    if skipped:
+        # Surfaced rather than swallowed: a sync that reports success while
+        # silently dropping holdings is how a book goes wrong unnoticed.
+        out["skipped_unsymboled"] = skipped
+    return out

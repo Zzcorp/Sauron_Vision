@@ -7,7 +7,6 @@ This is an HTTP chunked stream (not WebSocket) — we use aiohttp.
 """
 from __future__ import annotations
 import asyncio, json, logging, os, random
-from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from asgiref.sync import sync_to_async
@@ -58,8 +57,8 @@ def update_live_quote(symbol_display, bid, ask):
     and could itself be clobbered. 'oanda_stream' is the tier the priority
     table always reserved for it.
     """
-    from market_data.models import LiveQuote
-    from market_data.quotes import resolve_instrument, write_quote
+    from market_data.quotes import (resolve_instrument, session_change_pct,
+                                    write_quote)
     try:
         inst = resolve_instrument(symbol_display)
         if not inst:
@@ -69,11 +68,15 @@ def update_live_quote(symbol_display, bid, ask):
                         "dropped", symbol_display)
             return
         mid = (bid + ask) / 2
-        prev = LiveQuote.objects.filter(instrument=inst).first()
-        prev_last = float(prev.last) if prev and prev.last else mid
-        change_pct = ((mid - prev_last) / prev_last * 100) if prev_last else 0
+        # Against the previous session's close, not the previous PRINT. The
+        # tick-over-tick delta this used to store is a sub-second jitter with
+        # a random sign, and change_pct is the column the movers screen and
+        # the briefing's top-movers list read as the session move. None here
+        # means "no daily bar to measure from", and write_quote then leaves
+        # whatever a day-scale poller last wrote intact.
         write_quote(inst.symbol, last=mid, source="oanda_stream",
-                    bid=bid, ask=ask, change_pct=round(change_pct, 4),
+                    bid=bid, ask=ask,
+                    change_pct=session_change_pct(inst, mid),
                     instrument=inst)
     except Exception as e:
         log.debug("update_live_quote: %s", e)

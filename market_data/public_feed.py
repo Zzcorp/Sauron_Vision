@@ -155,10 +155,17 @@ class YFinanceFeed:
         if limit:
             df = df.tail(int(limit))
 
+        # Yahoo stamps a daily/weekly index at the EXCHANGE's local midnight,
+        # which for anything east of UTC is the previous UTC calendar day —
+        # see `session_timestamp` for what that costs downstream. Intraday
+        # rows are real instants and pass through untouched.
+        from market_data.adapters.yfinance_adapter import session_timestamp
+
         rows = []
         for ts, r in df.iterrows():
             try:
-                open_ms = int(pd.Timestamp(ts).timestamp() * 1000)
+                stamp = session_timestamp(pd.Timestamp(ts), fetch_interval)
+                open_ms = int(stamp.timestamp() * 1000)
                 rows.append([
                     open_ms,
                     str(r["Open"]), str(r["High"]), str(r["Low"]),

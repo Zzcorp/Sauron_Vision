@@ -215,15 +215,35 @@ class NLTradeParser:
             entry_price = parsed_order.get('price') or current_price
             quantity = parsed_order.get('quantity', 1)
 
-            # Check portfolio limits
+            # MAX SINGLE POSITION, read from the row the operator's card
+            # actually writes to.
+            #
+            # This took the percentage off the PER-USER book, and nothing on
+            # this platform ever writes that field: /setup/ saves all four
+            # limits onto the shared "Main" row, so what this enforced was
+            # whatever the model's factory default happened to be — 20% —
+            # however the operator had set the card. Tighten it to 5%, read
+            # the confirmation that it "now gates every bot entry and every
+            # manual trade", then type "buy 300 AAPL" here and get four times
+            # the position you just forbade, with no refusal, because the
+            # number checked was one nobody had ever set. Loosening it did
+            # nothing either.
+            #
+            # `single_position_state` is the same reading the bot and manual
+            # paths take, so the three cannot disagree, and it charges the
+            # position at capital AT WORK rather than raw notional — a chat
+            # order for a forex pair is margined at the broker like any other.
+            # The base stays this user's own book: that is where /setup/
+            # records their capital and where the row below lands.
+            from portfolio.risk_gate import limits_book, single_position_state
             position_value = float(entry_price) * float(quantity)
-            max_position = float(portfolio.current_value) * float(portfolio.max_single_position_pct) / 100
-
-            if position_value > max_position:
-                return {
-                    'status': 'error',
-                    'message': f'Position value ${position_value:.2f} exceeds limit ${max_position:.2f}',
-                }
+            single = single_position_state(
+                limits_book(), asset_class=instrument.asset_class,
+                notional=position_value,
+                capital_base=float(portfolio.current_value or 0),
+                base_label="book")
+            if not single['ok']:
+                return {'status': 'error', 'message': single['reason']}
 
             direction = 'long' if action == 'buy' else 'short'
 

@@ -130,19 +130,19 @@ def news_metrics(request):
     ctx = {"totals": {}, "chart_data": "{}", "sentiment_data": "{}",
            "current_sentiment": None}
     try:
-        from scraping.models import NewsItem
+        # NewsArticle, not NewsItem. There has never been a model called
+        # NewsItem in this codebase; the import raised ImportError, the broad
+        # except at the bottom caught it, and the page rendered "0 articles in
+        # 14 days / no sentiment" on every single request while the table held
+        # thousands of rows. The operator reads that as a dead news pipeline.
+        # The field probe that used to sit here was part of the same guess —
+        # NewsArticle states its timestamp, so name it.
+        from scraping.models import NewsArticle
         since = timezone.now() - timedelta(days=14)
-        # NewsItem may not have published_at; tolerate both
-        ts_field = None
-        for f in ("published_at", "created_at", "scraped_at", "timestamp"):
-            if hasattr(NewsItem, f):
-                ts_field = f
-                break
-        if ts_field is None:
-            ctx["totals"]["count_14d"] = 0
-            return render(request, "dashboard/_news_metrics.html", ctx)
-
-        items = list(NewsItem.objects.filter(**{f"{ts_field}__gte": since}).order_by(ts_field))
+        ts_field = "published_at"
+        items = list(NewsArticle.objects
+                     .filter(**{f"{ts_field}__gte": since})
+                     .order_by(ts_field))
         ctx["totals"]["count_14d"] = len(items)
 
         per_day = {}

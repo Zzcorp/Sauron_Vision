@@ -1788,22 +1788,44 @@ def _emit_match(setup, instrument, composite: float, conditions_out: list,
     risk_per = abs(entry - stop)
     rr = abs((target - entry) / risk_per) if risk_per > 0 else None
 
-    signal = Signal.objects.create(
-        instrument=instrument,
-        signal_type="composite",
-        direction=setup.direction,
-        urgency="medium",
-        title=f"{setup.name} matched on {instrument.symbol}",
-        description=setup.description or f"Setup '{setup.name}' triggered with score {composite:.2f}.",
-        rule_name=setup.name,
-        score=round(composite, 4),
-        sub_scores={"opportunity_setup": setup.name},
-        price_at_signal=Decimal(str(last_price)),
-        suggested_entry=Decimal(str(round(entry, 8))),
-        suggested_stop=Decimal(str(round(stop, 8))),
-        suggested_target=Decimal(str(round(target, 8))),
-        risk_reward_ratio=rr,
-    )
+    # ONE active Signal per (instrument, rule) — the same dedupe the rule
+    # engine has always applied (signals/tasks.py). Without it a setup that
+    # still matched on a later pass — the 09:00 beat, then an admin's Run Now
+    # — wrote a second identical row, and the bot's consensus sums evidence
+    # PER ROW: aggregation.side_weight counted one rule's 0.80 twice for a
+    # net weight of 1.60 while `rules` counted 1, so a single setup could
+    # outvote a genuine opposing rule and turn a HOLD into a live BUY.
+    # AssetBot.decide()'s top-32 cut assumes the same thing ("per-rule
+    # dedupe keeps the real row count near the rule count").
+    #
+    # The existing row is reused rather than refreshed: price_at_signal and
+    # the levels are the basis performance grading measures R against, and
+    # rewriting them mid-life would re-anchor an outcome already in flight.
+    signal = (Signal.objects
+              .filter(instrument=instrument, rule_name=setup.name,
+                      is_active=True)
+              .order_by("-created_at").first())
+    if signal is None:
+        signal = Signal.objects.create(
+            instrument=instrument,
+            signal_type="composite",
+            direction=setup.direction,
+            urgency="medium",
+            title=f"{setup.name} matched on {instrument.symbol}",
+            description=setup.description or f"Setup '{setup.name}' triggered with score {composite:.2f}.",
+            rule_name=setup.name,
+            score=round(composite, 4),
+            sub_scores={"opportunity_setup": setup.name},
+            price_at_signal=Decimal(str(last_price)),
+            suggested_entry=Decimal(str(round(entry, 8))),
+            suggested_stop=Decimal(str(round(stop, 8))),
+            suggested_target=Decimal(str(round(target, 8))),
+            risk_reward_ratio=rr,
+        )
+    else:
+        logger.debug("[opportunity] %s × %s already has active signal %s — "
+                     "flagging against it instead of writing a duplicate",
+                     setup.name, instrument.symbol, signal.pk)
 
     flag = OpportunityFlag.objects.create(
         setup=setup, instrument=instrument, signal=signal,

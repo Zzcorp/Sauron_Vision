@@ -7,7 +7,6 @@ Run:  python manage.py stream_finnhub
 """
 from __future__ import annotations
 import asyncio, json, logging, os, random
-from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from asgiref.sync import sync_to_async
@@ -42,20 +41,33 @@ def discover_symbols(override):
 
 @sync_to_async
 def update_live_quote(symbol, last, volume):
-    from instruments.models import Instrument
-    from market_data.models import LiveQuote
+    """Through the one writer, as source 'finnhub_ws'.
+
+    Two things were wrong here. It wrote LiveQuote directly, skipping the
+    source-precedence guard, the zero/NaN refusal and the shared symbol
+    resolution, and it stamped source='finnhub' — a name absent from the
+    priority table, so a real-time trade print ranked at the anonymous
+    default while 'finnhub_ws' sat unused at the tier reserved for it.
+
+    Worse, change_pct was the move since the PREVIOUS PRINT: a sub-second
+    jitter with a random sign, written into a column every reader takes to
+    mean the session change. The movers screen bucketed a stock down 3% on
+    the day as a gainer because its last trade ticked up a cent, and the
+    briefing's "top movers" became whichever symbols were NOT being
+    streamed. `session_change_pct` measures against the previous session's
+    close, and returns None when there is no daily bar to measure from —
+    which leaves the column to the pollers rather than corrupting it.
+    """
+    from market_data.quotes import (resolve_instrument, session_change_pct,
+                                    write_quote)
     try:
-        inst = Instrument.objects.filter(symbol__iexact=symbol).first()
-        if not inst: return
-        prev = LiveQuote.objects.filter(instrument=inst).first()
-        prev_last = float(prev.last) if prev and prev.last else last
-        change_pct = ((last - prev_last) / prev_last * 100) if prev_last else 0
-        LiveQuote.objects.update_or_create(
-            instrument=inst,
-            defaults=dict(last=Decimal(str(last)),
-                          change_pct=Decimal(str(round(change_pct, 4))),
-                          volume=int(volume or 0), source="finnhub"),
-        )
+        inst = resolve_instrument(symbol)
+        if not inst:
+            log.debug("update_live_quote: no Instrument for %r", symbol)
+            return
+        write_quote(inst.symbol, last=last, source="finnhub_ws",
+                    change_pct=session_change_pct(inst, last),
+                    volume=volume, instrument=inst)
     except Exception as e:
         log.debug("update_live_quote: %s", e)
 
@@ -95,7 +107,9 @@ async def run(api_key, override):
                             last = float(t.get("p") or 0)
                             vol = float(t.get("v") or 0)
                             if not sym or not last: continue
-                            # We don't have change_pct from finnhub trades; compute on save
+                            # Finnhub trade frames carry no change figure;
+                            # it is derived against the last daily close on
+                            # save, never from the previous print.
                             asyncio.create_task(update_live_quote(sym, last, vol))
                             await broadcast(sym, last, 0, vol)
                     except Exception as e:

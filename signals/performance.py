@@ -152,6 +152,13 @@ def _close_signal(signal, outcome, close_price, now):
     elif outcome == "hit_target":
         signal.realized_r = float(signal.risk_reward_ratio) if signal.risk_reward_ratio \
             else _compute_realized_r(signal, close_price)
+    elif close_price is None:
+        # An expiry that had no price to mark against. realized_r stays NULL
+        # rather than 0.0: a flat result is a measurement, and handing the
+        # decay tracker and the meta-allocator a scratch that nobody observed
+        # is worse than telling them this one was never measured. `_aggregate`
+        # already excludes NULL from expectancy.
+        signal.realized_r = None
     else:
         signal.realized_r = _compute_realized_r(signal, close_price)
     signal.time_to_outcome_seconds = int((now - signal.created_at).total_seconds())
@@ -179,7 +186,9 @@ def evaluate_signal_outcome(signal, current_price=None):
     records realized_r and time_to_outcome_seconds.
 
     Returns the outcome string ("hit_target" | "stopped_out" | "expired" | "active")
-    or None if the price could not be fetched.
+    or None if the price could not be fetched AND the signal is still inside
+    its TTL. Past the TTL it expires with or without a price — age is the one
+    question that can be answered without one.
     """
     if not signal.is_active:
         return signal.outcome or None
@@ -203,10 +212,23 @@ def evaluate_signal_outcome(signal, current_price=None):
     if current_price is None:
         current_price = _bar_close_fallback(signal.instrument)
 
+    now = timezone.now()
+
     if current_price is None:
+        # The TTL needs no price, and it used to sit behind this gate — so
+        # the signals that most needed expiring were the only ones that never
+        # could. An instrument that stops being quoted and stops getting bars
+        # (a symbol left in a bot's list while that asset class's fetch is
+        # failing) kept every Signal ever written for it is_active=True
+        # forever: still voting in AssetBot.decide(), still invisible to
+        # _closed_signal_qs, so the rule behind it could never be measured,
+        # decayed or demoted and its live orders stayed weighted at a
+        # permanent neutral 1.0.
+        if (now - signal.created_at).days > SIGNAL_TTL_DAYS:
+            _close_signal(signal, "expired", None, now)
+            return "expired"
         return None
 
-    now = timezone.now()
     extremes_changed = _update_extremes(signal, current_price)
 
     cp = Decimal(current_price)

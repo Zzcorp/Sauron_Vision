@@ -8,6 +8,11 @@ Three public functions:
 
 All hooks are no-ops for SELL-side opens (short trades — different tax rules,
 out of scope for v1) and for trades missing data (safe degrade).
+
+`TaxLotConsumption.realized_gain` is in ACCOUNT currency, like every other
+money column on the platform — see `_account_ccy_rate`. The lot's own
+`cost_basis_per_unit` stays in the instrument's quote currency, because that
+is the price a human reconciling the lot against a broker statement sees.
 """
 from __future__ import annotations
 
@@ -35,6 +40,31 @@ def _multiplier(trade) -> int:
         except Exception:
             return 100
     return 1
+
+
+def _account_ccy_rate(trade) -> Decimal:
+    """Account-currency value of one quote-currency unit for this trade.
+
+    1 for every class quoted in the account currency; the entry-time
+    quote->USD rate for forex, the same number `forex_usd_multiplier` hands
+    every other money path (`_trade_pnl`, the pending-close retries,
+    reconciliation, and the risk denominator in grading).
+
+    Without it this file was the one consumer left booking forex gains in
+    QUOTE currency: (sale - cost) x qty on a USDJPY row is a yen figure, and
+    it went straight into `TaxLotConsumption.realized_gain`, a column every
+    tax report reads as account currency. A trade that made 33 dollars was
+    filed as a 5,000 gain — right sign, right symbol, 150x wrong, and
+    nothing about the row looked odd.
+
+    The consuming trade's rate is the one used, not the lot's, so a
+    consumption always agrees with the `pnl` booked on the same close.
+    """
+    try:
+        from bot_program.asset_engine.forex_bot import forex_usd_multiplier
+        return Decimal(str(forex_usd_multiplier(trade)))
+    except Exception:
+        return Decimal("1")
 
 
 def open_lot(trade):
@@ -99,6 +129,7 @@ def close_lots_for(trade):
 
         qty_to_consume = Decimal(str(trade.qty))
         sale_price = Decimal(str(trade.exit_price))
+        fx = _account_ccy_rate(trade)
         consumptions = []
         for lot in list(qs):
             if qty_to_consume <= 0:
@@ -108,7 +139,7 @@ def close_lots_for(trade):
                 continue
             mult = Decimal(str(lot.multiplier or 1))
             gain_per_unit = (sale_price - Decimal(str(lot.cost_basis_per_unit))) * mult
-            realized_gain = gain_per_unit * take
+            realized_gain = gain_per_unit * take * fx
             holding_days = max(0, (trade.closed_at - lot.opened_at).days)
             cons = TaxLotConsumption.objects.create(
                 lot=lot, consuming_trade=trade,

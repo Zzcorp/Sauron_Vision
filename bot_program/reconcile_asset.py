@@ -237,6 +237,30 @@ def _close_as_orphan(trade) -> None:
         if not trade.outcome:
             trade.outcome = "manual_close"
             trade.save(update_fields=["outcome"])
+
+    # The audit chain and the tax ledger are closed here for the same reason
+    # the grading above is: this is the finaliser for every broker-side exit,
+    # so skipping them is not an edge case, it is most stock and forex trades.
+    # Without the audit entry the hash-chained log holds an open that never
+    # closes. Without the lot consumption the TaxLot opened at entry keeps its
+    # full qty_remaining forever, so the NEXT sale of that symbol consumes it
+    # instead of its own lot — cost basis is wrong from then on by a whole
+    # position, in the same direction, permanently, and /tax-lots/ still lists
+    # the sold shares as held. Order matches the other two finalisers: audit
+    # after grading (so outcome and realized_r are in the entry), lots after.
+    try:
+        from bot_program.audit import record_trade_close
+        record_trade_close(trade.config.user, trade=trade)
+    except Exception as e:
+        logger.warning("reconcile: audit record_trade_close #%s failed: %s",
+                       trade.id, e)
+    try:
+        from bot_program.tax_lots import close_lots_for
+        close_lots_for(trade)
+    except Exception as e:
+        logger.warning("reconcile: tax_lots.close_lots_for #%s failed: %s",
+                       trade.id, e)
+
     # A row reconciled as an orphan may still have its OTHER leg resting:
     # a stop that filled leaves the target behind (and vice versa) unless
     # the broker's OCA pair cancelled it. A resting exit against a flat

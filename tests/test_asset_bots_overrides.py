@@ -89,13 +89,14 @@ class ActiveForexSessionsTests(TestCase):
         active = _active_forex_sessions(mon)
         self.assertEqual(active, {"tokyo", "sydney"})
 
-    def test_monday_pre_london_tokyo_only(self):
+    def test_monday_pre_london_is_covered_not_a_hole(self):
+        # This hour used to return set(), which decide() reported as the
+        # weekend on a Monday morning. Sydney is 16:30 local here and Tokyo
+        # 15:30 — both plainly open.
         from bot_program.asset_engine.forex_bot import _active_forex_sessions
-        # Monday 06:30 UTC = Tokyo closed (06:00), Sydney closed (05:00),
-        # London not yet open (07:00). So no session active.
         mon = datetime(2026, 5, 4, 6, 30, tzinfo=dt_tz.utc)
         active = _active_forex_sessions(mon)
-        self.assertEqual(active, set())
+        self.assertEqual(active, {"sydney", "tokyo"})
 
 
 # ── ForexBot session-aware decide ──────────────────────────────────────────

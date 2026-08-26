@@ -1,9 +1,12 @@
 """Composite bot signal engine. Merges multiple signal sources into a
 single score in [-1, +1] and a confidence in [0, 1]."""
 from __future__ import annotations
+import logging
 from dataclasses import dataclass
 from typing import Iterable
 from .indicators import ema, rsi, macd, vwap, atr, volatility
+
+_log = logging.getLogger(__name__)
 
 @dataclass
 class Decision:
@@ -98,26 +101,47 @@ def _score_sauron_signals(symbol: str) -> tuple[float, list[str]]:
         return (0, [])
 
 def _score_news(symbol: str) -> tuple[float, list[str]]:
+    """Sentiment of the last 12h of news that names this symbol.
+
+    The model is `NewsArticle` with `ai_sentiment_score`, written by the
+    news-analyst agent. This asked for `scraping.models.NewsItem`, which has
+    never existed: the ImportError went straight into the except below and
+    the leg returned a flat 0 for every symbol on every bar, silently — so a
+    config that authored 0.3 of its weight to news was in fact damping its
+    composite by that whole 0.3 toward zero and taking fewer entries than it
+    was configured for. The backtester runs the same function, so a backtest
+    could not reveal it either.
+    """
     try:
-        from scraping.models import NewsItem  # if exists
+        from scraping.models import NewsArticle
         from django.utils import timezone
         from datetime import timedelta
-        recent = NewsItem.objects.filter(
+        recent = NewsArticle.objects.filter(
             published_at__gte=timezone.now() - timedelta(hours=12),
         ).order_by("-published_at")[:20]
         pos, neg = 0, 0
         base = symbol.replace("USDT","").lower()
         for n in recent:
-            text = f"{getattr(n,'title','')} {getattr(n,'summary','')}".lower()
+            text = (f"{getattr(n, 'title', '')} "
+                    f"{getattr(n, 'ai_summary', '')} "
+                    f"{getattr(n, 'content_summary', '')}").lower()
             if base not in text: continue
-            sent = float(getattr(n, "sentiment_score", 0) or 0)
+            # None means the analyst has not graded this article yet, which
+            # is not the same as neutral — an ungraded article contributes
+            # nothing rather than pulling the score toward 0.
+            sent = getattr(n, "ai_sentiment_score", None)
+            if sent is None: continue
+            sent = float(sent)
             if sent > 0.1: pos += sent
             elif sent < -0.1: neg += sent
         total = pos + abs(neg)
         if total == 0: return (0, [])
         s = (pos - abs(neg)) / total
         return (max(-1, min(1, s)), [f"news sent {s:+.2f}"])
-    except Exception:
+    except Exception as e:
+        # Loud, because the failure this hides is invisible in the output:
+        # a leg that returns 0 looks exactly like neutral news.
+        _log.warning("news leg failed for %s: %s", symbol, e)
         return (0, [])
 
 def _score_macro() -> tuple[float, list[str]]:

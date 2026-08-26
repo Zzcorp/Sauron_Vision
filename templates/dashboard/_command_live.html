@@ -14,9 +14,11 @@ Layered rendering:
         <span class="oc-strip-sub">conf {{ brain_regime_conf|default:"0"|floatformat:2 }} · trust <span class="oc-trust-{{ brain_trust_band }}">{{ brain_trust_band|upper }}</span> · {{ brain_age_str }} ago</span>
     </div>
     <div class="oc-strip-cell">
+        {# No accept rate: the gate logs every reject and only a 10% sample of #}
+        {# its allows, so a ratio of the two is not a rate anybody measured. #}
         <span class="oc-strip-label">GATE 24H</span>
-        <span class="oc-strip-value">{{ gate_accept_rate|default:"—" }}%</span>
-        <span class="oc-strip-sub">{{ gate_n_allow }} allow · {{ gate_n_reject }} reject</span>
+        <span class="oc-strip-value">{% if gate_asked %}{{ gate_n_reject }}{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">refused · {{ gate_n_allow }} allow logged (sampled)</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">DEPLOYED</span>

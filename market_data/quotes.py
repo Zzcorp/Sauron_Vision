@@ -18,6 +18,7 @@ Two silent data defects this exists to stop:
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.utils import timezone
@@ -117,6 +118,72 @@ def _dec(value):
     # serves NaN closes (in-progress FX candles, thin listings): non-finite
     # is "no value", not a value.
     return d if d.is_finite() else None
+
+
+# ── the day-scale meaning of change_pct ────────────────────────────────
+#
+# `change_pct` is a DAY-SCALE column and every writer but the streamers
+# treated it as one: yfinance stores regularMarketChangePercent, Binance the
+# 24h figure, CoinGecko usd_24h_change. Every reader assumes the same — the
+# movers screen buckets gainers and losers on it, and the morning briefing
+# takes its "top movers" from an order_by on it.
+#
+# A tick streamer has no such number in its payload: a trade print is a
+# price, not a change. Writing the move since the PREVIOUS PRINT put a
+# sub-second jitter with a random sign into that column, so a stock down 3%
+# on the session was classified as a gainer because its last trade ticked up
+# a cent — and the day-scale pollers could not correct it, because the live
+# stream held the row against them. The streamers now compute the real thing
+# from the previous session's close, or write nothing and leave the column
+# to whoever can.
+
+# instrument id -> (expiry epoch seconds, close or None). Process-local by
+# design: this is a read cache in front of an immutable historical bar.
+_PREV_CLOSE_CACHE: dict[int, tuple[float, object]] = {}
+# A symbol with no daily bar yet is re-asked this often, so one whose EOD
+# row lands mid-session starts reporting a real change without a restart.
+_PREV_CLOSE_MISS_TTL = 900
+
+
+def previous_daily_close(instrument):
+    """Last COMPLETED daily close for an instrument, or None.
+
+    Cached because the streamers ask on every print: a query per tick across
+    fifty subscribed symbols would cost more than the write it serves. A hit
+    is good until the next UTC midnight, which is where the daily bar
+    boundary sits for every writer on the platform.
+    """
+    from market_data.models import PriceData
+
+    now = timezone.now()
+    cached = _PREV_CLOSE_CACHE.get(instrument.id)
+    if cached is not None and cached[0] > now.timestamp():
+        return cached[1]
+
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    close = (PriceData.objects
+             .filter(instrument=instrument, timeframe="1d",
+                     timestamp__lt=midnight)
+             .order_by("-timestamp")
+             .values_list("close", flat=True).first())
+    expires = ((midnight + timedelta(days=1)).timestamp() if close is not None
+               else now.timestamp() + _PREV_CLOSE_MISS_TTL)
+    _PREV_CLOSE_CACHE[instrument.id] = (expires, close)
+    return close
+
+
+def session_change_pct(instrument, last):
+    """Day-scale % change for a live print, or None when it is unknowable.
+
+    None means "leave the column alone": `write_quote` skips change_pct when
+    it is None, so the last figure a day-scale poller wrote survives instead
+    of being replaced by a number that does not mean the same thing.
+    """
+    prev = _dec(previous_daily_close(instrument))
+    price = _dec(last)
+    if prev is None or price is None or prev <= 0:
+        return None
+    return float((price - prev) / prev * 100)
 
 
 def write_quote(symbol: str, *, last, source: str, change_pct=None,

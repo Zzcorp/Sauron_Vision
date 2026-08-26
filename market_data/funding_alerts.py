@@ -32,14 +32,21 @@ def _notify_all(title: str, body: str, url: str = "/liquidations/"):
 @shared_task
 def scan_funding_signals():
     from market_data.models import FundingRate, LiveQuote
-    from instruments.models import Instrument
+    from market_data.quotes import resolve_instrument
     from alerts.links import instrument_url
 
     now = timezone.now()
     window_start = now - timedelta(minutes=LOOKBACK_MIN + 5)
-    # Distinct symbols with recent funding data
-    symbols = (FundingRate.objects.filter(timestamp__gte=window_start)
-               .values_list("symbol", flat=True).distinct())
+    # Distinct symbols with recent funding data.
+    #
+    # `.order_by()` is load-bearing: FundingRate.Meta sets
+    # ordering=["-timestamp"], and Django adds every ordering column to a
+    # DISTINCT select — so this asked for DISTINCT (symbol, timestamp) and
+    # returned one entry per SNAPSHOT. The mark stream writes a row every
+    # 30s, so a 20-minute window put the same perp through the loop up to
+    # forty times and every alert it raised was sent forty times over.
+    symbols = list(FundingRate.objects.filter(timestamp__gte=window_start)
+                   .order_by().values_list("symbol", flat=True).distinct())
     alerts = 0
     for sym in symbols:
         recent = list(FundingRate.objects.filter(
@@ -54,13 +61,21 @@ def scan_funding_signals():
         # funding, mark and chart already are; the feed stays the fallback
         # for a symbol we do not track as an Instrument.
         #
-        # Fetched ONCE per symbol: the divergence block below needs the same
-        # row, and `symbol__iexact` cannot use the symbol index (both sides
-        # get wrapped in UPPER), so a second identical lookup per symbol on
-        # a five-minute scan is pure waste. The `if not inst` guard stays
-        # down there — hoisting it would silently stop the flip and extreme
-        # alerts for any perp we do not track as an Instrument.
-        inst = Instrument.objects.filter(symbol__iexact=sym).first()
+        # `resolve_instrument`, not a bare symbol match: FundingRate.symbol
+        # and LiquidationEvent.symbol always carry Binance FUTURES spelling
+        # (the streamer writes o["s"]/d["s"] verbatim, i.e. BTCUSDT) and the
+        # catalogue only ever holds BTCUSD. A direct match found nothing for
+        # any symbol on any scan, so every alert linked to the generic feed
+        # and the whole funding/price divergence block below — the squeeze
+        # notifications — was unreachable code. The scan still returned a
+        # non-zero count from the flip and extreme branches, so nothing
+        # looked broken.
+        #
+        # Fetched ONCE per symbol: the divergence block needs the same row,
+        # and a second lookup per symbol on a five-minute scan is waste. The
+        # `if not inst` guard stays down there — hoisting it would silently
+        # stop the flip and extreme alerts for any perp we do not track.
+        inst = resolve_instrument(sym)
         sym_url = (instrument_url(inst.symbol) if inst else "") or "/liquidations/"
 
         # (a) Sign flip
@@ -106,5 +121,6 @@ def scan_funding_signals():
         except Exception as e:
             log.debug("divergence check failed for %s: %s", sym, e)
 
-    log.info("scan_funding_signals: raised %d alerts across %d symbols", alerts, len(list(symbols)))
+    log.info("scan_funding_signals: raised %d alerts across %d symbols",
+             alerts, len(symbols))
     return alerts
