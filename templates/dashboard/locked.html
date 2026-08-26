@@ -15,12 +15,21 @@
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/sauron.css' %}">
     <link rel="stylesheet" href="{% static 'css/sv-overlay.css' %}">
+    <script src="{% static 'js/sv-gate.js' %}" defer></script>
 </head>
 <body class="{% if request.user.trader_profile.theme_mode == 'light' %}light-mode{% endif %}">
 
 <div class="lk-page">
   <div class="lk-card fade-in-up">
-    <div class="lk-eye" aria-hidden="true"></div>
+    {% comment %}The eye is the state: it brightens per digit, recoils on
+    a refusal, and flares as the ring closes and the gate opens.{% endcomment %}
+    <div class="gate-iris" data-gate-iris aria-hidden="true">
+      <svg class="gate-ring" viewBox="0 0 100 100">
+        <circle class="gate-ring-track" cx="50" cy="50" r="46"/>
+        <circle class="gate-ring-fill" cx="50" cy="50" r="46" data-gate-ring/>
+      </svg>
+      <div class="lk-eye"></div>
+    </div>
     <h1 class="lk-title">SECOND GATE</h1>
     <p class="lk-sub">Session locked after inactivity — enter your PIN to resume.</p>
 
@@ -41,6 +50,24 @@
       <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-lk-pin aria-label="PIN digit 4">
     </div>
 
+    {% comment %}A keypad, because a PIN is a thing you PRESS. The boxes
+    above stay the source of truth (and the keyboard still types straight
+    into them); this is the same gesture for a touch screen, and it gives
+    the eye something to react to.{% endcomment %}
+    <div class="gate-pad" data-gate-pad aria-label="PIN keypad">
+      <button type="button" class="gate-key" data-gate-key="1">1</button>
+      <button type="button" class="gate-key" data-gate-key="2">2</button>
+      <button type="button" class="gate-key" data-gate-key="3">3</button>
+      <button type="button" class="gate-key" data-gate-key="4">4</button>
+      <button type="button" class="gate-key" data-gate-key="5">5</button>
+      <button type="button" class="gate-key" data-gate-key="6">6</button>
+      <button type="button" class="gate-key" data-gate-key="7">7</button>
+      <button type="button" class="gate-key" data-gate-key="8">8</button>
+      <button type="button" class="gate-key" data-gate-key="9">9</button>
+      <button type="button" class="gate-key gate-key--ghost" data-gate-clear aria-label="Clear">✕</button>
+      <button type="button" class="gate-key" data-gate-key="0">0</button>
+      <button type="button" class="gate-key gate-key--ghost" data-gate-back aria-label="Delete">⌫</button>
+    </div>
     <div class="lk-err" id="lkError" hidden></div>
     <button type="button" class="lk-unlock" id="lkUnlock">UNLOCK</button>
 

@@ -5147,11 +5147,18 @@ thead th, td.num, td.nowrap { white-space: nowrap; }
 .il-overlay {
     position: fixed;
     inset: 0;
+    /* The gate grew: on a short laptop viewport the eye clipped at the
+       top and Disconnect — the ONLY way out of a screen whose PIN has
+       been forgotten — fell off the bottom with no way to scroll to it.
+       `safe` because plain centring clips unreachably at the TOP in a
+       flex column. */
+    overflow-y: auto;
+    overscroll-behavior: contain;
     z-index: calc(var(--z-dialog) + var(--sv-stack, 0));
     display: none;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: safe center;
     padding: 20px;
     /* OPAQUE. This was rgba(...,0.78) over a 14px backdrop blur, which
        dims the page rather than hiding it: position sizes and P&L are
@@ -6870,4 +6877,162 @@ body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
     .gollum-fab.is-fidget .gl-pupils, .gollum-fab:hover .gl-ring, .gollum-fab.has-unseen .gl-ring,
     .gollum-dialog .gl-dot, .info-panel-wrap.gl-pointed { animation: none; }
     .gollum-dialog, .gollum-bubble { transition: none; }
+}
+
+/* ── The second gate — shared by /locked/ and the idle overlay ───────
+   The choreography wave gave both surfaces ambience; this gives them a
+   GATE. The eye is the state indicator: it brightens with every digit,
+   recoils on a refusal and flares as the iris opens. The ring closes
+   as the PIN completes. The keypad exists because a PIN is a thing you
+   press, and because a touch screen has no keyboard to route.
+   Everything paints from tokens — the containment pass forbids a hex
+   literal past this point in the file. */
+.gate-iris {
+    position: relative;
+    width: 132px; height: 132px;
+    margin: 0 auto 20px;
+    display: grid; place-items: center;
+}
+.il-overlay .gate-iris { width: 150px; height: 150px; margin-bottom: 22px; }
+/* Awake, the gate needs its room for the pad — the eye shrinks and the
+   iris shrinks with it rather than holding 150px of empty ring. */
+.il-overlay.is-awake .gate-iris { width: 96px; height: 96px; margin-bottom: 14px; }
+/* margin 0 with enough weight to beat the awake-state shrink rule,
+   which sets its own bottom margin — an off-centre eye inside its own
+   progress ring is worst exactly while the ring is doing its job. */
+.gate-iris .lk-eye,
+.il-overlay.is-awake .gate-iris .il-eye,
+.gate-iris .il-eye { margin: 0; }
+.gate-ring {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    transform: rotate(-90deg);   /* start the sweep at twelve o'clock */
+    pointer-events: none;
+}
+.gate-ring-track {
+    fill: none; stroke: var(--border); stroke-width: 1.5;
+}
+.gate-ring-fill {
+    fill: none; stroke: var(--accent); stroke-width: 2.5;
+    stroke-linecap: round;
+    /* r=46 → circumference 289. Fully open at rest; the JS closes it. */
+    stroke-dasharray: 289;
+    stroke-dashoffset: 289;
+    transition: stroke-dashoffset .32s cubic-bezier(.2,.8,.3,1),
+                stroke .3s ease;
+    filter: drop-shadow(0 0 6px var(--accent-glow));
+}
+.gate-iris.is-wrong .gate-ring-fill { stroke: var(--accent-red); }
+.gate-iris.is-open .gate-ring-fill { stroke-dashoffset: 0; }
+
+/* The eye answers the hand: dimmer at rest, brighter as the PIN builds,
+   a flare on the way through, a recoil on a refusal.
+
+   The FIRST digit stops the idle animation. Both eyes carry one — the
+   standalone gate's entrance bloom fills `both` (so its last frame is
+   pinned forever) and the overlay's breathe runs infinitely — and an
+   animation outranks any plain declaration on the same property, so
+   every level below was a dead letter until the animation was stood
+   down. The same lesson the entrance and the lights-out fade each
+   taught once already. */
+.gate-iris[data-gate-lit] .lk-eye,
+.gate-iris[data-gate-lit] .il-eye {
+    transition: box-shadow .3s ease, transform .3s cubic-bezier(.2,.8,.3,1),
+                opacity .3s ease;
+}
+.gate-iris[data-gate-lit]:not([data-gate-lit="0"]) .lk-eye,
+.gate-iris[data-gate-lit]:not([data-gate-lit="0"]) .il-eye {
+    animation: none;
+}
+.gate-iris[data-gate-lit="1"] .lk-eye, .gate-iris[data-gate-lit="1"] .il-eye { opacity: .9; }
+.gate-iris[data-gate-lit="2"] .lk-eye, .gate-iris[data-gate-lit="2"] .il-eye { opacity: .95; transform: scale(1.02); }
+.gate-iris[data-gate-lit="3"] .lk-eye, .gate-iris[data-gate-lit="3"] .il-eye { opacity: 1; transform: scale(1.04); }
+.gate-iris[data-gate-lit="4"] .lk-eye, .gate-iris[data-gate-lit="4"] .il-eye {
+    opacity: 1; transform: scale(1.06);
+    box-shadow: 0 0 40px var(--accent-glow), inset 0 0 26px var(--accent-glow);
+}
+/* A longer PIN keeps answering: the ring is full at the threshold, so
+   past it the EYE is the only thing that can still say "heard that". */
+.gate-iris[data-gate-lit="5"] .lk-eye, .gate-iris[data-gate-lit="5"] .il-eye,
+.gate-iris[data-gate-lit="6"] .lk-eye, .gate-iris[data-gate-lit="6"] .il-eye,
+.gate-iris[data-gate-lit="7"] .lk-eye, .gate-iris[data-gate-lit="7"] .il-eye,
+.gate-iris[data-gate-lit="8"] .lk-eye, .gate-iris[data-gate-lit="8"] .il-eye {
+    opacity: 1; transform: scale(1.08);
+    box-shadow: 0 0 52px var(--accent-glow), inset 0 0 30px var(--accent-glow);
+}
+/* declared BELOW is-open on purpose: both animate .gate-iris, and a
+   refusal must win over a flare the completed ring left playing. */
+@keyframes gateRecoil {
+    20% { transform: translateX(-6px) rotate(-1.5deg); }
+    45% { transform: translateX(6px) rotate(1.5deg); }
+    70% { transform: translateX(-3px); }
+    100% { transform: none; }
+}
+.gate-iris.is-open { animation: gateFlare .5s ease-out; }
+@keyframes gateFlare {
+    0% { filter: brightness(1); }
+    35% { filter: brightness(1.9) saturate(1.3); }
+    100% { filter: brightness(1); }
+}
+.gate-iris.is-wrong { animation: gateRecoil .45s cubic-bezier(.36,.07,.19,.97); }
+
+/* The keypad — glass keys, a press that answers, a ripple that does not
+   outlive the finger. */
+.gate-pad {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 8px; margin: 16px auto 0; max-width: 240px;
+}
+.gate-key {
+    position: relative; overflow: hidden;
+    height: 46px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--accent) 4%, var(--bg-void));
+    color: var(--text-primary);
+    font-family: var(--font-display); font-size: 17px; font-weight: 600;
+    letter-spacing: 1px;
+    transition: border-color .18s ease, background .18s ease,
+                transform .12s cubic-bezier(.3,1.4,.5,1), box-shadow .18s ease;
+}
+.gate-key:hover, .gate-key:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg-void));
+    box-shadow: 0 0 16px var(--accent-glow);
+}
+.gate-key:active, .gate-key.is-hit {
+    transform: scale(.93);
+    background: color-mix(in srgb, var(--accent) 18%, var(--bg-void));
+}
+.gate-key--ghost { color: var(--text-muted); font-size: 14px; }
+.gate-key--ghost:hover { color: var(--accent-red); border-color: var(--accent-red);
+                         box-shadow: 0 0 16px rgba(232,48,48,.25); }
+.gate-key .gate-ripple {
+    position: absolute; border-radius: 50%; pointer-events: none;
+    background: var(--accent-glow);
+    transform: translate(-50%, -50%) scale(0);
+    animation: gateRipple .45s ease-out forwards;
+}
+@keyframes gateRipple {
+    to { transform: translate(-50%, -50%) scale(3.2); opacity: 0; }
+}
+
+/* The boxes read as a trail of held digits rather than form fields. */
+.lk-row input, .il-pin-row input {
+    caret-color: transparent;   /* the dot IS the feedback */
+}
+.lk-row input.has-val, .il-card input.has-val {
+    box-shadow: 0 0 18px var(--accent-glow),
+                inset 0 0 12px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+/* Passing through. NOT a clip-path iris: clip-path has no interpolable
+   start value here, so `none → circle(140%)` is a discrete jump that
+   clips nothing, and the veil's existing opacity fade already owns the
+   exit. The gate flares instead — the eye is the thing that should
+   look like it opened. */
+.il-overlay.il-out .gate-iris { animation: gateFlare .38s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+    .gate-ring-fill, .gate-iris .lk-eye, .gate-iris .il-eye,
+    .gate-key { transition: none; }
+    .gate-iris.is-wrong, .gate-iris.is-open, .gate-key .gate-ripple,
+    .il-overlay.il-out .gate-iris { animation: none; }
 }

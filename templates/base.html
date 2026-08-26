@@ -95,6 +95,7 @@
     {# Headband news dwell-cards — SV.dwell client #5, not implementation #5. #}
     <script src="{% static 'js/sv-news-dwell.js' %}" defer></script>
     <script src="{% static 'js/sv-gollum.js' %}" defer></script>
+    <script src="{% static 'js/sv-gate.js' %}" defer></script>
 {% block extra_css %}{% endblock %}
 </head>
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}">
@@ -5883,8 +5884,14 @@ never nags. He never acts.{% endcomment %}
 {# The overlay is paint over a SERVER flag (core/idle_lock.py answers 423 everywhere while pin_locked) — deleting this div from devtools unlocks nothing. #}
 <div id="idleLockOverlay" class="il-overlay" data-sv-overlay="dialog" data-sv-persist data-sv-backdrop="none" aria-labelledby="ilTitle" hidden>
     {# Asleep: the eye and the hour, nothing to read and nothing to press. #}
-    <div class="il-eye" aria-hidden="true">
-        <img src="{% static 'logo/sauron_eye.svg' %}" alt="">
+    <div class="gate-iris" data-gate-iris aria-hidden="true">
+        <svg class="gate-ring" viewBox="0 0 100 100">
+            <circle class="gate-ring-track" cx="50" cy="50" r="46"/>
+            <circle class="gate-ring-fill" cx="50" cy="50" r="46" data-gate-ring/>
+        </svg>
+        <div class="il-eye">
+            <img src="{% static 'logo/sauron_eye.svg' %}" alt="">
+        </div>
     </div>
     <div class="il-clock" id="ilClock" aria-hidden="true">--:--</div>
     <div class="il-standby" id="ilStandby">Locked · move to wake</div>
@@ -5898,6 +5905,24 @@ never nags. He never acts.{% endcomment %}
             <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-il-pin aria-label="PIN digit 2">
             <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-il-pin aria-label="PIN digit 3">
             <input type="password" maxlength="1" inputmode="numeric" autocomplete="one-time-code" data-il-pin aria-label="PIN digit 4">
+        </div>
+        {% comment %}A keypad, because a PIN is a thing you PRESS. The boxes
+    above stay the source of truth (and the keyboard still types straight
+    into them); this is the same gesture for a touch screen, and it gives
+    the eye something to react to.{% endcomment %}
+        <div class="gate-pad" data-gate-pad aria-label="PIN keypad">
+          <button type="button" class="gate-key" data-gate-key="1">1</button>
+          <button type="button" class="gate-key" data-gate-key="2">2</button>
+          <button type="button" class="gate-key" data-gate-key="3">3</button>
+          <button type="button" class="gate-key" data-gate-key="4">4</button>
+          <button type="button" class="gate-key" data-gate-key="5">5</button>
+          <button type="button" class="gate-key" data-gate-key="6">6</button>
+          <button type="button" class="gate-key" data-gate-key="7">7</button>
+          <button type="button" class="gate-key" data-gate-key="8">8</button>
+          <button type="button" class="gate-key" data-gate-key="9">9</button>
+          <button type="button" class="gate-key gate-key--ghost" data-gate-clear aria-label="Clear">✕</button>
+          <button type="button" class="gate-key" data-gate-key="0">0</button>
+          <button type="button" class="gate-key gate-key--ghost" data-gate-back aria-label="Delete">⌫</button>
         </div>
         <button type="button" class="il-unlock" id="ilUnlockBtn">Unlock</button>
         <form method="post" action="{% url 'logout' %}" id="ilLogoutForm" style="display:none;">{% csrf_token %}</form>

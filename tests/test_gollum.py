@@ -148,7 +148,11 @@ class GollumWearsTheOrbCraftTests(TestCase):
     def test_reduced_motion_stills_him_after_his_base_rules(self):
         css = self._css()
         base_at = css.index(".gollum-fab {")
-        guard_at = css.rindex("@media (prefers-reduced-motion: reduce)")
+        # HIS block, not merely the last one — later waves append their
+        # own reduced-motion sections after his.
+        guard_at = max(i for i in range(len(css))
+                       if css.startswith("@media (prefers-reduced-motion: reduce)", i)
+                       and ".gollum-fab" in css[i:i + 700])
         self.assertGreater(guard_at, base_at)
         guard = css[guard_at:guard_at + 700]
         self.assertIn(".gollum-fab", guard)
