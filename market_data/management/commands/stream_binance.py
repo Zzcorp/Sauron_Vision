@@ -31,6 +31,49 @@ log = logging.getLogger("stream_binance")
 BINANCE_WS_BASE = "wss://stream.binance.com:9443/stream?streams="
 REFRESH_SYMBOLS_EVERY = 60  # seconds
 
+# Quote assets Binance actually lists spot pairs against. A catalogue symbol
+# that does not translate onto one of these has no stream to subscribe to.
+BINANCE_QUOTE_ASSETS = ("USDT", "BUSD", "USDC", "BTC")
+
+# Last resort only: these are streamed when the catalogue holds no crypto
+# instrument at all. Nothing they produce can be stored in that state —
+# write_quote needs an Instrument row — so falling back here is logged.
+DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+
+
+def binance_symbols(catalogue_symbols, quote_assets=BINANCE_QUOTE_ASSETS) -> list[str]:
+    """Catalogue spelling -> Binance stream spelling.
+
+    The catalogue says BTCUSD — instruments/services.py seeds all fifteen
+    crypto rows that way — and Binance lists BTCUSDT. This step used to
+    FILTER on the venue's quote assets rather than translate onto them, so
+    every seeded symbol was discarded, the cleaned list was always empty,
+    and the worker silently fell through to its hardcoded defaults on every
+    60-second refresh. Twelve of the fifteen crypto instruments therefore
+    never received a real-time tick, the documented "new watchlist entries
+    are picked up without a restart" could never take effect, and one of the
+    four subscriptions was spent on BNBUSDT, which has no Instrument row at
+    all — every tick it produced was dropped on the floor.
+    """
+    from market_data.management.commands.backfill_bars import venue_symbol
+
+    out, seen = [], set()
+    for raw in catalogue_symbols or []:
+        s = (raw or "").upper().replace("-", "").replace("/", "").replace(
+            ":", "").replace("_", "")
+        if not s:
+            continue
+        s = venue_symbol(s)
+        if not s.endswith(tuple(quote_assets)):
+            # Named rather than dropped quietly: an unexplained absence from
+            # the stream list is what made the original bug invisible.
+            log.warning("no Binance pair for catalogue symbol %r — not streamed", raw)
+            continue
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
 
 class Command(BaseCommand):
     help = "Stream live Binance tickers into LiveQuote and broadcast to WebSockets."
@@ -64,17 +107,16 @@ def discover_symbols(override: list[str] | None) -> list[str]:
         from instruments.models import Instrument
         syms = list(Instrument.objects.filter(
             asset_class__iexact="crypto", is_active=True
-        ).values_list("symbol", flat=True))
-        # Normalise: Binance expects BTCUSDT format (no slashes, no dashes)
-        cleaned = []
-        for s in syms:
-            s = s.upper().replace("-", "").replace("/", "").replace(":", "")
-            if s.endswith("USDT") or s.endswith("BUSD") or s.endswith("USDC") or s.endswith("BTC"):
-                cleaned.append(s)
-        return cleaned or ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+        ).order_by("symbol").values_list("symbol", flat=True))
+        cleaned = binance_symbols(syms)
+        if cleaned:
+            return cleaned
+        log.warning("no crypto Instrument rows resolved to a Binance pair — "
+                    "streaming defaults, which cannot be stored")
+        return list(DEFAULT_SYMBOLS)
     except Exception as e:
         log.warning("symbol discovery failed, using defaults: %s", e)
-        return ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+        return list(DEFAULT_SYMBOLS)
 
 
 @sync_to_async

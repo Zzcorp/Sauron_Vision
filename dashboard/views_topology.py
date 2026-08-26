@@ -242,8 +242,16 @@ STATE_META = {
     "off":     {"label": "OFF",    "glyph": "⏻", "tone": "muted"},
     "idle":    {"label": "IDLE",   "glyph": "·", "tone": "muted"},
     "live":    {"label": "LIVE",   "glyph": "●", "tone": "good"},
+    # A synthetic node's probe can raise — a half-applied migration, a DB
+    # blip — and _synthetic_node hands back "unknown" for exactly that. It was
+    # missing here and from STATE_ORDER, so the legend tally below indexed a
+    # key that did not exist and the whole page plus its 15-second refresh
+    # returned 500: the operations map went dark at the one moment the
+    # operator was using it to find out what had broken. Same spelling as
+    # views_system_map's vocabulary, so the two pages mark it identically.
+    "unknown": {"label": "UNKNOWN", "glyph": "?", "tone": "muted"},
 }
-STATE_ORDER = ["broken", "stale", "silent", "off", "idle", "live"]
+STATE_ORDER = ["broken", "stale", "silent", "off", "idle", "live", "unknown"]
 
 
 def _fmt_age(seconds):
@@ -443,14 +451,25 @@ def build_topology(user):
         recent = OrchestratorEvent.objects.filter(created_at__gte=day_ago)
         n = recent.count()
         rejects = recent.filter(decision="reject").count()
+        allows_logged = n - rejects
+        # No percentage here, and no "almost everything is blocked" verdict.
+        # The gate keeps EVERY reject but only a ~1-in-10 sample of its allows
+        # (bot_program.orchestrator._log_decision, and the model docstring says
+        # so), so rejects/rows is not a reject rate — it is a complete
+        # numerator over a sampled denominator. A gate letting 80% through with
+        # 40 allows and 10 rejects logs ~4 allows, and the old rule read that
+        # as 71% rejected; at a true 70% it crossed 0.95 and flipped this node
+        # to STALE with "almost everything is blocked". An operator acting on
+        # that loosens the exposure caps that were doing their job. The reject
+        # count IS exact, so that is what the node reports.
         if not master_on:
             g_state, g_why = "off", "Master switch is off."
         elif n == 0:
             g_state, g_why = "idle", "No decisions in 24h — nothing reached the gate."
-        elif n and rejects / n >= 0.95:
-            g_state, g_why = "stale", f"{rejects} of {n} rejected — almost everything is blocked."
         else:
-            g_state, g_why = "live", f"{n} decisions in 24h, {rejects} rejected."
+            g_state, g_why = "live", (
+                f"{rejects} refused in 24h. Allows are logged at a sample "
+                f"({allows_logged} kept), so these rows are not an accept rate.")
         nodes.append({
             "key": "gate_orchestrator", "kind": "gate", "label": "Risk gate",
             "purpose": "The last check before an order leaves the platform.",
@@ -460,7 +479,9 @@ def build_topology(user):
             "feeds": ["execute_bots"], "last_run": "—",
             "last_status": "", "last_message": "", "runs": n, "errors": rejects,
             "flags": [], "can_toggle": False,
-            "metric": n, "metric_label": "decisions 24h",
+            # rejects, not n: the headline number on a node has to be one the
+            # table can actually answer for.
+            "metric": rejects, "metric_label": "rejects 24h",
             "link": "/eye/gate-events/",
         })
     except Exception:                                        # pragma: no cover
@@ -536,7 +557,10 @@ def build_topology(user):
 
     counts = {k: 0 for k in STATE_ORDER}
     for n in nodes:
-        counts[n["state"]] += 1
+        # .get, not counts[...]: this page is the one an operator opens when
+        # something else is already broken, and it must not be the second
+        # thing that 500s over a state nobody added to the vocabulary.
+        counts[n["state"]] = counts.get(n["state"], 0) + 1
 
     orphans = [n["key"] for n in nodes
                if n["kind"] == "component"
@@ -546,7 +570,10 @@ def build_topology(user):
         "layers": LAYERS, "nodes": nodes, "edges": edges,
         "counts": counts, "orphans": orphans,
         "state_meta": STATE_META,
-        "legend": [{"key": k, "count": counts[k], **STATE_META[k]} for k in STATE_ORDER],
+        # UNKNOWN earns a legend chip only when something actually is unknown;
+        # a permanent 0 next to the six real states teaches nothing.
+        "legend": [{"key": k, "count": counts[k], **STATE_META[k]}
+                   for k in STATE_ORDER if k != "unknown" or counts["unknown"]],
         "master_on": master_on,
         "generated_at": timezone.now(),
     }

@@ -469,17 +469,23 @@ def collect_system_map(user):
         n = r24.count()
         rejects = r24.filter(decision="reject").count()
         newest = OrchestratorEvent.objects.aggregate(m=Max("created_at"))["m"]
+        # Every reject is logged; allows are kept at a ~1-in-10 sample
+        # (bot_program.orchestrator._log_decision). Dividing the two gave a
+        # reject "percentage" of a population that does not exist — a gate
+        # passing 70% of entries printed 96% rejected here and went STALE with
+        # "almost everything is being blocked", which points the operator at
+        # loosening the caps that were working. The reject count is exact, so
+        # the node says that and nothing it cannot measure.
         if n == 0:
             st, why = "idle", "No gate decisions in 24h — nothing reached the gate."
         else:
-            pct = round(rejects / n * 100)
-            st = "stale" if pct >= 95 else "live"
-            why = (f"{n} decisions in 24h, {rejects} rejected ({pct}%)."
-                   + (" Almost everything is being blocked — check the gate reasons."
-                      if pct >= 95 else ""))
+            st = "live"
+            why = (f"{rejects} refused in 24h. Allows are logged at a sample "
+                   f"({n - rejects} kept), so these rows are not an accept rate.")
         gate.append(node(
             "gate", "Risk gate", "The last check before an order is sent.",
-            state=st, why=why, metric=n, metric_label="decisions 24h", rows_24h=n,
+            state=st, why=why, metric=rejects, metric_label="rejects 24h",
+            rows_24h=n,
             newest=newest, link="/eye/gate-events/", link_label="Gate events",
             reads=["Every bot entry"]))
     except Exception as e:                                    # pragma: no cover

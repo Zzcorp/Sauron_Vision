@@ -34,20 +34,32 @@ class Command(BaseCommand):
         try: asyncio.run(run(opts.get("symbols")))
         except KeyboardInterrupt: log.info("stopped")
 
+# USDT-margined perps only — that is what fstream lists.
+FUTURES_QUOTE_ASSETS = ("USDT",)
+DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+
+
 @sync_to_async
 def discover_symbols(override):
+    """Perp symbols to subscribe to, in Binance futures spelling.
+
+    This used to KEEP only catalogue symbols already spelled *USDT and the
+    catalogue spells every crypto row *USD, so the match was always empty
+    and the worker fell through to three hardcoded defaults forever. Every
+    FundingRate and LiquidationEvent on the platform came from BTC, ETH and
+    SOL no matter what the operator held or watched.
+    """
     if override: return [s.upper() for s in override]
     try:
         from instruments.models import Instrument
+        from market_data.management.commands.stream_binance import binance_symbols
         syms = list(Instrument.objects.filter(
-            asset_class__iexact="crypto", is_active=True).values_list("symbol", flat=True))
-        clean = []
-        for s in syms:
-            s = s.upper().replace("-","").replace("/","").replace(":","")
-            if s.endswith("USDT"): clean.append(s)
-        return clean or ["BTCUSDT","ETHUSDT","SOLUSDT"]
-    except Exception:
-        return ["BTCUSDT","ETHUSDT","SOLUSDT"]
+            asset_class__iexact="crypto", is_active=True
+        ).order_by("symbol").values_list("symbol", flat=True))
+        return binance_symbols(syms, FUTURES_QUOTE_ASSETS) or list(DEFAULT_SYMBOLS)
+    except Exception as e:
+        log.warning("futures symbol discovery failed, using defaults: %s", e)
+        return list(DEFAULT_SYMBOLS)
 
 @sync_to_async
 def save_liquidation(symbol, side, qty, price, notional, ts):

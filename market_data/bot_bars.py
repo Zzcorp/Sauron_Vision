@@ -75,6 +75,31 @@ def _public_market_data_client(cfg):
         return None
 
 
+def _venue_symbol(client, symbol: str) -> str:
+    """Platform spelling -> the spelling THIS client's venue lists.
+
+    Binance is the only wired venue whose client maps nothing of its own:
+    OANDA translates inside `klines` (`_to_oanda_symbol`), Alpaca and Yahoo
+    take the platform symbol as-is. Asking Binance for BTCUSD is not an
+    error — /api/v3/klines answers an empty list or a 400 — so an
+    untranslated crypto config quietly received no bars at all, every rule
+    on it returned None, and the bot could only ever HOLD. That is exactly
+    the failure this module exists to prevent, reintroduced one symbol
+    spelling at a time.
+    """
+    try:
+        from bot_program.engine.binance_client import BinanceClient
+        from bot_program.engine.binance_futures_client import (
+            BinanceFuturesClient,
+        )
+    except Exception:      # pragma: no cover - import-time breakage only
+        return symbol
+    if not isinstance(client, (BinanceClient, BinanceFuturesClient)):
+        return symbol
+    from market_data.management.commands.backfill_bars import venue_symbol
+    return venue_symbol(symbol)
+
+
 def _upsert_rows(inst, interval, rows, source) -> tuple[int, int]:
     """Persist Binance-style kline rows. Returns (written, skipped)."""
     from market_data.models import PriceData
@@ -139,9 +164,11 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
         if getattr(client, "_sv_public_feed", False):
             source += "_public"
         out["symbols"] += 1
+        fetch_symbol = _venue_symbol(client, symbol)
         for interval in intervals:
             try:
-                rows = client.klines(symbol, interval=interval, limit=limit)
+                rows = client.klines(fetch_symbol, interval=interval,
+                                     limit=limit)
             except Exception as e:
                 logger.warning("[bars] klines(%s, %s) failed: %s",
                                symbol, interval, e)
@@ -185,12 +212,7 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
         if client is None:
             out["no_client"] += 1
             continue
-        fetch_symbol = inst.symbol
-        if inst.asset_class == "crypto":
-            from market_data.management.commands.backfill_bars import (
-                venue_symbol,
-            )
-            fetch_symbol = venue_symbol(inst.symbol)
+        fetch_symbol = _venue_symbol(client, inst.symbol)
         source = type(client).__name__.replace("Trader", "").replace(
             "Client", "").lower() or "broker"
         if getattr(client, "_sv_public_feed", False):

@@ -2523,7 +2523,7 @@ def _render_positions(request, live_only):
         # The closed book and its 12-month bars. They only move when a trade
         # closes — and a close reloads the whole page's live regions anyway —
         # but the history list is long, so the refresh does not carry it.
-        from datetime import timedelta as _td
+        from datetime import date as _date
         now = timezone.now()
         monthly_pnl: dict = defaultdict(float)
         for p in stats["graded"]:
@@ -2531,8 +2531,16 @@ def _render_positions(request, live_only):
                 monthly_pnl[p.closed_at.strftime("%Y-%m")] += float(
                     p.unrealized_pnl)
         monthly_rows = []
+        # Count months, not 30-day blocks. Stepping back by i*30 days is not a
+        # month step: on roughly one calendar day in six two consecutive
+        # offsets land inside the same month, so that month got two identical
+        # bars and one of its neighbours — a whole month of realized P&L that
+        # IS in monthly_pnl — never appeared on the chart at all. Open the
+        # page on 25 Jan and February vanishes while March is drawn twice.
+        anchor = now.year * 12 + (now.month - 1)
         for i in range(11, -1, -1):
-            month = (now - _td(days=i * 30)).replace(day=1)
+            y, m = divmod(anchor - i, 12)
+            month = _date(y, m + 1, 1)
             pnl = round(monthly_pnl.get(month.strftime("%Y-%m"), 0), 2)
             monthly_rows.append({
                 "month": month.strftime("%b"),
@@ -4110,17 +4118,34 @@ def backtest_list(request):
 
     # None, not 0, when there is nothing completed to average: a 0% average
     # return across zero runs is a measurement nobody made.
+    #
+    # The same rule has to hold PER RUN. A completed run that never triggered
+    # leaves win_rate and sharpe NULL — the engine's way of saying it has no
+    # opinion — and the old `getattr(r, attr) or 0` read that as a measured
+    # zero and divided by every completed run anyway. Three runs at 60% win
+    # rate plus one that took no trades printed AVG WIN RATE 45.0%, so the
+    # operator compares strategies on a number that punishes them for the
+    # runs that produced no evidence at all. Average only over the runs that
+    # answered, and say nothing when none did.
     def _avg(attr):
-        if not completed:
-            return None
-        return sum(getattr(r, attr) or 0 for r in completed) / n_completed
+        vals = [getattr(r, attr) for r in completed]
+        vals = [v for v in vals if v is not None]
+        return sum(vals) / len(vals) if vals else None
 
-    avg_return = None if not completed else round(_avg("total_return_pct"), 2)
-    best = max((r.total_return_pct or 0 for r in completed), default=None)
-    worst = min((r.total_return_pct or 0 for r in completed), default=None)
-    avg_sharpe = None if not completed else round(_avg("sharpe_ratio"), 2)
-    avg_win_rate = None if not completed else round(_avg("win_rate"), 1)
-    avg_dd = None if not completed else round(_avg("max_drawdown_pct"), 2)
+    def _rounded(attr, places):
+        v = _avg(attr)
+        return None if v is None else round(v, places)
+
+    avg_return = _rounded("total_return_pct", 2)
+    # Same rule for the callouts: a NULL return is not a 0% run, and letting
+    # it in made "BEST +0.00%" the headline whenever every measured run lost.
+    returns = [r.total_return_pct for r in completed
+               if r.total_return_pct is not None]
+    best = max(returns, default=None)
+    worst = min(returns, default=None)
+    avg_sharpe = _rounded("sharpe_ratio", 2)
+    avg_win_rate = _rounded("win_rate", 1)
+    avg_dd = _rounded("max_drawdown_pct", 2)
 
     # Status donut.
     status_donut = []

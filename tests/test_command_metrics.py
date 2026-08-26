@@ -405,9 +405,13 @@ class LiveTabTruthTests(TestCase):
         self.assertEqual(_tab_bar_metrics(self.user)["live"]["primary"],
                          "2 OPEN")
 
-    def test_gate_ratio_with_no_decisions_is_not_zero_percent(self):
+    def test_gate_cell_with_no_decisions_says_the_gate_was_not_asked(self):
+        # The cell no longer carries an accept rate at all: allows are
+        # sampled, so allow/(allow+reject) never was one.
         r = self.client.get("/command/tab/live/")
-        self.assertEqual(r.context["gate_accept_rate"], DASH)
+        self.assertFalse(r.context["gate_asked"])
+        self.assertNotIn("gate_accept_rate", r.context)
+        self.assertIn("allow logged (sampled)", r.content.decode())
 
     def test_session_r_with_nothing_graded_is_a_dash(self):
         r = self.client.get("/command/tab/live/")

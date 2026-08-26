@@ -211,3 +211,72 @@ class LiveManageGuardTests(TestCase):
         self.assertEqual(closed, 0)
         trade.refresh_from_db()
         self.assertEqual(trade.status, "OPEN")
+
+
+# ── Venue symbol translation ────────────────────────────────────────────
+
+class CryptoVenueSymbolTests(TestCase):
+    """The catalogue says BTCUSD; Binance lists BTCUSDT.
+
+    The scheduled bar writer used to hand `cfg.symbols` straight to
+    `client.klines`, so every enabled crypto config asked Binance for a pair
+    it does not list. That is not an error at the venue — the response is
+    empty or a 400 — so the config got zero bars, every rule returned None
+    and the bot could only ever HOLD.
+    """
+
+    def setUp(self):
+        self.user = _user("venue_u")
+        self.inst = _instrument("BTCUSD", asset_class="crypto")
+        self.cfg = _cfg(self.user, asset_class="crypto", symbols=("BTCUSD",),
+                        name="VENUE")
+
+    def _binance(self):
+        from bot_program.engine.binance_client import BinanceClient
+        client = BinanceClient("", "", testnet=False)
+        client.klines = MagicMock(return_value=_klines(2))
+        return client
+
+    def _asked(self, client):
+        return {call.args[0] for call in client.klines.call_args_list}
+
+    def test_binance_is_asked_for_its_own_spelling_not_the_catalogues(self):
+        from market_data.bot_bars import refresh_bot_bars
+
+        client = self._binance()
+        with patch("market_data.bot_bars._client_for", return_value=client):
+            out = refresh_bot_bars()
+
+        self.assertEqual(self._asked(client), {"BTCUSDT"})
+        self.assertEqual(out["bars"], 4)  # 2 bars x 2 intervals
+
+    def test_translated_bars_are_stored_against_the_catalogue_instrument(self):
+        from market_data.bot_bars import refresh_bot_bars
+        from market_data.models import PriceData
+
+        client = self._binance()
+        with patch("market_data.bot_bars._client_for", return_value=client):
+            refresh_bot_bars()
+
+        self.assertEqual(
+            PriceData.objects.filter(instrument=self.inst).count(), 4)
+        self.assertEqual(
+            PriceData.objects.filter(instrument=self.inst,
+                                     timeframe="4h").count(), 2)
+
+    def test_a_venue_that_maps_its_own_symbols_is_left_alone(self):
+        """OANDA translates inside klines and Alpaca needs no translation —
+        rewriting the symbol for them would break the pair that works."""
+        from market_data.bot_bars import refresh_bot_bars
+
+        self.cfg.asset_class = "forex"
+        self.cfg.symbols = ["EURUSD"]
+        self.cfg.save()
+        _instrument("EURUSD", asset_class="forex")
+
+        client = MagicMock()
+        client.klines = MagicMock(return_value=_klines(2))
+        with patch("market_data.bot_bars._client_for", return_value=client):
+            refresh_bot_bars()
+
+        self.assertEqual(self._asked(client), {"EURUSD"})

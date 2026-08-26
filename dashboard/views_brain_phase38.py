@@ -123,11 +123,15 @@ def hypotheses_dashboard(request):
     confirmed_rate = round(n_confirmed / max(n_resolved_total, 1) * 100, 1)
     refuted_rate = round(n_refuted / max(n_resolved_total, 1) * 100, 1)
 
-    # Due-soon: pending with deadline in next 24h
+    # Due-soon: pending with deadline in the next 24h, and NOT already past
+    # it. Without the lower bound every overdue hypothesis was counted twice —
+    # once here and once as overdue — and the tile prints the two side by side
+    # as "3 overdue · 3 due 24h", which reads as six items to resolve when
+    # there are three. The two numbers could never be added or reconciled.
     due_soon = Hypothesis.objects.filter(
         outcome=Hypothesis.OUTCOME_PENDING,
+        resolution_deadline__gte=timezone.now(),
         resolution_deadline__lte=timezone.now() + _td(hours=24),
-        resolution_deadline__isnull=False,
     ).count()
     overdue = Hypothesis.objects.filter(
         outcome=Hypothesis.OUTCOME_PENDING,
