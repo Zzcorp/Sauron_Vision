@@ -3244,7 +3244,14 @@ function toggleSidebar() {
   function applyTick(d) {
     if (!d || !d.symbol) return;
     const sym = (d.symbol || "").toUpperCase();
-    const pct = +d.change_pct || 0;
+    /* null means "this source has no daily open and did not measure a
+       day change" - leave whatever the poller last wrote. `+null || 0`
+       collapsed that to a real-looking 0.00%, which is how a live
+       forex stream flattened the change column across the headband,
+       the watchlist rail and the ticker bar. */
+    const hasPct = d.change_pct !== null && d.change_pct !== undefined
+                   && d.change_pct !== "" && isFinite(+d.change_pct);
+    const pct = hasPct ? +d.change_pct : null;
     const last = +d.last || 0;
 
     // 1. Dashboard headband
@@ -3253,12 +3260,12 @@ function toggleSidebar() {
       const chg = el.querySelector('.dh-chg');
       const dot = el.querySelector('.dh-dot');
       if (val) { val.textContent = last.toFixed(2); flash(val); }
-      if (chg) {
+      if (chg && hasPct) {
         const sign = pct >= 0 ? '+' : '';
         chg.textContent = `${sign}${pct.toFixed(2)}%`;
         chg.className = 'dh-chg ' + (pct >= 0 ? 'up' : 'down');
       }
-      if (dot) dot.className = 'dh-dot ' + (pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat');
+      if (dot && hasPct) dot.className = 'dh-dot ' + (pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat');
     });
 
     // 2. Watchlist rail
@@ -3268,7 +3275,7 @@ function toggleSidebar() {
       const lastEl = el.querySelector('.wl-last');
       const chgEl = el.querySelector('.wl-chg');
       if (lastEl) { lastEl.textContent = last.toFixed(4); flash(lastEl); }
-      if (chgEl) {
+      if (chgEl && hasPct) {
         const sign = pct >= 0 ? '+' : '';
         chgEl.textContent = `${sign}${pct.toFixed(2)}%`;
         chgEl.className = 'wl-chg ' + (pct >= 0 ? 'up' : 'down');
@@ -3282,7 +3289,7 @@ function toggleSidebar() {
       const p = el.querySelector('.t-price');
       const c = el.querySelector('.t-change');
       if (p) p.textContent = last.toFixed(2);
-      if (c) {
+      if (c && hasPct) {
         c.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
         c.className = 't-change ' + (pct >= 0 ? 'up' : 'down');
       }

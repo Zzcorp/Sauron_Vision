@@ -58,7 +58,6 @@ def update_live_quote(symbol_display, bid, ask):
     and could itself be clobbered. 'oanda_stream' is the tier the priority
     table always reserved for it.
     """
-    from market_data.models import LiveQuote
     from market_data.quotes import resolve_instrument, write_quote
     try:
         inst = resolve_instrument(symbol_display)
@@ -69,12 +68,20 @@ def update_live_quote(symbol_display, bid, ask):
                         "dropped", symbol_display)
             return
         mid = (bid + ask) / 2
-        prev = LiveQuote.objects.filter(instrument=inst).first()
-        prev_last = float(prev.last) if prev and prev.last else mid
-        change_pct = ((mid - prev_last) / prev_last * 100) if prev_last else 0
+        # NO change_pct. What this stream can compute is the move since
+        # the LAST TICK, and `change_pct` is the field every reader on
+        # this platform renders as the change on the DAY - the headband
+        # cells, the watchlist rail, the ticker bar. A tick-over-tick
+        # delta on a forex mid is a pip or two, so writing it here
+        # flattened the day column to +0.00% for every pair the moment
+        # the stream came up, and kept it there for as long as ticks
+        # arrived. write_quote leaves the column alone when it is None,
+        # so the poller - which reads a real daily open and therefore
+        # actually knows - keeps owning it. Binance is the shape to
+        # copy: its @ticker payload carries a true 24h "P", so it has
+        # something honest to write and writes it.
         write_quote(inst.symbol, last=mid, source="oanda_stream",
-                    bid=bid, ask=ask, change_pct=round(change_pct, 4),
-                    instrument=inst)
+                    bid=bid, ask=ask, instrument=inst)
     except Exception as e:
         log.debug("update_live_quote: %s", e)
 
@@ -124,7 +131,10 @@ async def run(api_key, account_id, env, override):
                             ask = float(asks[0]["price"])
                             mid = (bid + ask) / 2
                             asyncio.create_task(update_live_quote(sym, bid, ask))
-                            await broadcast(sym, mid, 0, bid, ask)
+                            # None, not 0: a hardcoded zero painted
+                            # "+0.00%" over the real day change in the
+                            # headband and the rail on every tick.
+                            await broadcast(sym, mid, None, bid, ask)
                         except Exception as e:
                             log.debug("tick: %s", e)
         except Exception as e:

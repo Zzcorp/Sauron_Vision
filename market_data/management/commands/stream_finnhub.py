@@ -42,20 +42,28 @@ def discover_symbols(override):
 
 @sync_to_async
 def update_live_quote(symbol, last, volume):
-    from instruments.models import Instrument
-    from market_data.models import LiveQuote
+    """Through the one writer, as source `finnhub_ws`.
+
+    Two things were wrong here. It wrote LiveQuote DIRECTLY, so it
+    skipped both guards that make the quote table trustworthy - the
+    source-precedence check and the zero/negative price refusal. And
+    it stamped source "finnhub", which is not a key in
+    SOURCE_PRIORITY: a real-time exchange trade landed on the default
+    tier of 50 instead of the 90 the table reserves for `finnhub_ws`,
+    below ibkr and alpaca, so a delayed REST poll could overwrite a
+    live trade print.
+
+    It also computed change_pct as the move since the LAST TICK and
+    wrote it into the field every reader renders as the change on the
+    DAY. On a liquid name that is a rounding error, so the day column
+    read +0.00% for as long as the stream was up. A streamer with no
+    daily open has nothing honest to say there; write_quote leaves the
+    column alone when it is None and the poller keeps owning it.
+    """
+    from market_data.quotes import write_quote
     try:
-        inst = Instrument.objects.filter(symbol__iexact=symbol).first()
-        if not inst: return
-        prev = LiveQuote.objects.filter(instrument=inst).first()
-        prev_last = float(prev.last) if prev and prev.last else last
-        change_pct = ((last - prev_last) / prev_last * 100) if prev_last else 0
-        LiveQuote.objects.update_or_create(
-            instrument=inst,
-            defaults=dict(last=Decimal(str(last)),
-                          change_pct=Decimal(str(round(change_pct, 4))),
-                          volume=int(volume or 0), source="finnhub"),
-        )
+        write_quote(symbol, last=last, source="finnhub_ws",
+                    volume=volume or 0)
     except Exception as e:
         log.debug("update_live_quote: %s", e)
 
@@ -95,9 +103,12 @@ async def run(api_key, override):
                             last = float(t.get("p") or 0)
                             vol = float(t.get("v") or 0)
                             if not sym or not last: continue
-                            # We don't have change_pct from finnhub trades; compute on save
+                            # A finnhub trade print carries no daily
+                            # open, so there is no day change to send.
+                            # None leaves the column as the poller set
+                            # it; 0 painted "+0.00%" over it.
                             asyncio.create_task(update_live_quote(sym, last, vol))
-                            await broadcast(sym, last, 0, vol)
+                            await broadcast(sym, last, None, vol)
                     except Exception as e:
                         log.debug("tick: %s", e)
         except Exception as e:

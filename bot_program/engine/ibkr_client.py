@@ -23,6 +23,48 @@ Graceful-degrade strategy:
 """
 from __future__ import annotations
 
+import math as _math
+from datetime import date as _date, datetime as _datetime
+from datetime import timezone as _utc
+
+
+def _num(v) -> float:
+    """A price, or 0.0 - never a NaN.
+
+    ib_insync initialises Ticker.last/bid/ask to float("nan"), and
+    bool(nan) is True, so every `if t.last` guard in this file was
+    passing on a value that is not a number. Downstream that became
+    the string "nan" in a price field, and Decimal("NaN") does not
+    compare quietly: `if last > 0` raises InvalidOperation rather
+    than returning False.
+    """
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0 if (_math.isnan(f) or _math.isinf(f)) else f
+
+
+def _bar_millis(d) -> int:
+    """Epoch ms for a bar stamp that may be a `date` OR a `datetime`.
+
+    ib_insync returns a `datetime` for intraday bars and a plain
+    `date` for 1 day / 1 week / 1 month. A `date` is NOT an instance
+    of `datetime` - the inheritance runs the other way - so an
+    isinstance(d, datetime) test stamped every daily and weekly bar
+    0, and every consumer that filters on a sane timestamp dropped
+    them. Daily sessions file at midnight UTC, the convention the
+    rest of the platform already uses.
+    """
+    if isinstance(d, _datetime):
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=_utc.utc)
+        return int(d.timestamp() * 1000)
+    if isinstance(d, _date):
+        return int(_datetime(d.year, d.month, d.day,
+                             tzinfo=_utc.utc).timestamp() * 1000)
+    return 0
+
 import logging
 from datetime import datetime, timezone as dt_tz
 from typing import Optional
@@ -191,14 +233,22 @@ class IBKRTrader:
             self._ib.qualifyContracts(contract)
             t = self._ib.reqMktData(contract, "", False, False)
             self._ib.sleep(1.0)  # let the tick stream warm up
-            last = float(t.last) if t.last else (
-                (float(t.bid) + float(t.ask)) / 2 if (t.bid and t.ask) else 0.0
-            )
+            # `if t.last` was never False when it mattered - see _num.
+            # The midpoint branch below was written for exactly the
+            # case it could never reach: FX on IDEALPRO has no last
+            # trade at all, only a bid and an ask, and any contract
+            # without a market-data subscription leaves last unset. So
+            # the one venue an operator would set as primary for forex
+            # was the one that answered "nan".
+            bid, ask = _num(getattr(t, "bid", None)), _num(getattr(t, "ask", None))
+            last = _num(getattr(t, "last", None))
+            if last <= 0 and bid > 0 and ask > 0:
+                last = (bid + ask) / 2
             return {
                 "lastPrice": str(last),
                 "symbol": symbol,
-                "bid": str(t.bid) if t.bid else "0",
-                "ask": str(t.ask) if t.ask else "0",
+                "bid": str(bid),
+                "ask": str(ask),
             }
         except Exception as e:
             log.warning("IBKR ticker(%s) failed: %s", symbol, e)
@@ -222,8 +272,7 @@ class IBKRTrader:
             )
             rows = []
             for b in bars[-limit:]:
-                ts = int(b.date.replace(tzinfo=dt_tz.utc).timestamp() * 1000) \
-                    if isinstance(b.date, datetime) else 0
+                ts = _bar_millis(b.date)
                 rows.append([
                     ts,
                     str(b.open), str(b.high), str(b.low), str(b.close),
@@ -509,7 +558,17 @@ class IBKRTrader:
         for entry in (getattr(trade, "log", None) or []):
             if getattr(entry, "errorCode", None):
                 return False
-        return bool(status)
+        # PROVEN, not merely un-refused. `bool(status)` accepted
+        # PendingSubmit, which ib_insync assigns LOCALLY the instant
+        # placeOrder is called - before TWS has said anything at all.
+        # A leg still in that state one second later has not been
+        # accepted by anyone, and claiming `protectedOnFill` for it
+        # turns OFF bot-side SL/TP management over a position whose
+        # stop may never have existed. PreSubmitted, Submitted and
+        # Filled are the states TWS itself sends. Being strict here
+        # costs only a fallback to bot-side management, which is the
+        # safe direction to be wrong in.
+        return status in ("PreSubmitted", "Submitted", "Filled")
 
     def market_order(self, symbol: str, side: str, quantity: float, **kwargs) -> dict:
         empty = {
@@ -546,7 +605,22 @@ class IBKRTrader:
             # EVERY leg carries the account. A child that lands on the
             # session default is a stop resting against a book that does
             # not hold the position — it opens one when it fires.
+            # IBKR was the only live broker here dropping
+            # `client_order_id` on the floor: OANDA sends it as
+            # clientExtensions.id, Alpaca as client_order_id, Binance
+            # as newClientOrderId. IBKR offers no server-enforced
+            # dedup key, so `orderRef` buys traceability rather than
+            # idempotency - every order at TWS can be traced to the
+            # row that sent it, which is what makes a duplicate
+            # visible at all. Preventing one stays the row-claim
+            # layer's job.
+            coid = str(kwargs.get("client_order_id") or "")
             for o in orders:
+                if coid:
+                    try:
+                        o.orderRef = coid[:60]
+                    except Exception:  # pragma: no cover - defensive
+                        pass
                 refusal = self._bind_order_account(o)
                 if refusal:
                     log.error("IBKR market_order(%s) refused: %s",
@@ -600,7 +674,25 @@ class IBKRTrader:
             out = {
                 "orderId": str(trade.order.orderId or ""),
                 "symbol": symbol, "side": side,
-                "executedQty": str(filled_qty or quantity),
+                # The TRUTH, not the request. `filled_qty or quantity`
+                # substituted the full order size whenever IBKR reported 0
+                # filled after the one-second wait — which is exactly what a
+                # market order held pre-open, on a halted symbol, or simply
+                # not acked inside that second looks like. Downstream,
+                # `broker_filled_qty` documents the opposite contract: a
+                # reported 0 means "nothing gone yet, the position is live".
+                # Fabricating the size made `complete` True in
+                # `resolve_exit_fill`, which short-circuits the
+                # `order_still_working` branch, cancels the resting bracket
+                # and books the row CLOSED — leaving a full-size order still
+                # working at IBKR against a position that is still on the
+                # account, naked, and scanned by no sweep. It also disabled
+                # the refusal gate itself: `_submit_close_or_raise` raises
+                # only when `filled <= 0`. Alpaca has always reported
+                # honestly here and says why in its own comment.
+                # Safe on the way in: the entry path only overwrites `qty`
+                # `if fill_qty > 0`, and `qty` already holds what we asked.
+                "executedQty": str(filled_qty),
                 "avgPrice": str(avg_px or 0),
                 "status": (trade.orderStatus.status or "PENDING").upper(),
                 "raw": trade.dict() if hasattr(trade, "dict") else {},
@@ -624,7 +716,19 @@ class IBKRTrader:
                     # An over-sized stop is not a smaller problem than no
                     # stop: on a partial fill it closes what filled and
                     # OPENS the remainder the other way.
-                    self._retract(contract, child_trades, None)
+                    #
+                    # The PARENT goes back too when this is a partial.
+                    # Passing None cancelled the two children and left
+                    # an unfilled MarketOrder remainder live at TWS
+                    # under the default DAY TIF. We reported the partial
+                    # as the fill, the engine booked a row for that
+                    # smaller quantity, and the rest filled after we had
+                    # stopped looking: naked at the broker, absent from
+                    # the row, invisible to reconciliation - which walks
+                    # AssetBotTrade rows and so can only ever see
+                    # quantities some row already claims.
+                    self._retract(contract, child_trades,
+                                  trade if partial else None)
                 else:
                     out["protectedOnFill"] = True
                     out["protectiveOrders"] = legs
@@ -817,7 +921,11 @@ class IBKRTrader:
                 "orderId": str(trade.order.orderId or ""),
                 "symbol": f"{underlying} {expiry} {strike}{right.upper()}",
                 "side": side,
-                "executedQty": str(trade.orderStatus.filled or contracts),
+                # Same fabrication as the equity path above, and this one
+                # is not opt-in: options and CFDs route to IBKR
+                # unconditionally, and a thin option book is where a
+                # one-second unfilled market order is most likely of all.
+                "executedQty": str(float(trade.orderStatus.filled or 0)),
                 "avgPrice": str(trade.orderStatus.avgFillPrice or 0),
                 "status": (trade.orderStatus.status or "PENDING").upper(),
             }

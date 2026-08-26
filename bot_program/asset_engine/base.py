@@ -556,7 +556,24 @@ class AssetBot(ABC):
                         "[%s_bot] close rejected for %s — cancelling "
                         "protective legs and retrying once",
                         self.asset_class, trade.symbol)
-                    self._cancel_protective_orders(trade, client)
+                    # The answer matters on THIS branch too. The success
+                    # branch below records an unconfirmed leg on the row;
+                    # here it was dropped on the floor, so a stop we
+                    # could not confirm cancelled left no trace at all
+                    # once the retry succeeded and the row went CLOSED.
+                    # A resting exit against a flat book does not close
+                    # anything - it opens a position the other way.
+                    if not self._cancel_protective_orders(trade, client):
+                        meta = dict(trade.metadata or {})
+                        meta["protective_legs_unconfirmed"] = True
+                        trade.metadata = meta
+                        trade.save(update_fields=["metadata"])
+                        logger.critical(
+                            "[%s_bot] %s: a protective leg could not be "
+                            "confirmed cancelled while clearing the way "
+                            "for a close retry - check the broker for a "
+                            "resting order",
+                            self.asset_class, trade.symbol)
                     # From here the position has no broker-side stop. If the
                     # retry also fails the row goes CLOSE_PENDING with a live,
                     # UNPROTECTED position behind it — a materially worse
@@ -848,6 +865,16 @@ class AssetBot(ABC):
         book = preflight(self.user)
         if not book["ok"]:
             return (False, book["reason"])
+        # preflight FAILS OPEN by design - halting a fleet on a
+        # transient database hiccup is worse than one unenforced tick.
+        # But its own docstring asks callers to read `failed_open`
+        # rather than `ok` alone, precisely because `ok` True carries
+        # two opposite meanings: the limits cleared, or nobody could
+        # read them. Reading `ok` alone painted the most reassuring
+        # heartbeat note this bot has exactly when the book limits
+        # were binding nothing at all.
+        self._book_gate_blind = (book.get("reason") or "book unreadable") \
+            if book.get("failed_open") else ""
 
         # CLOSE_PENDING still holds capital/exposure at the broker.
         open_count = AssetBotTrade.objects.filter(
@@ -886,6 +913,9 @@ class AssetBot(ABC):
                                self.asset_class, e)
             return (False,
                     f"daily loss limit hit ({realized:.2f} {self.cfg.base_currency})")
+        blind = getattr(self, "_book_gate_blind", "")
+        if blind:
+            return (True, f"ok (book limits UNCHECKED: {blind})")
         return (True, "ok")
 
     # ── per-symbol scan ─────────────────────────────────────────────────
@@ -1226,8 +1256,26 @@ class AssetBot(ABC):
                 # whose raw vocabulary never says "REJECTED" (IBKR) used
                 # to sail past this check and book a phantom live row.
                 status = (res.get("status") or "").upper()
+                # ...but only when NOTHING printed. The close path in
+                # this same file has always got this right
+                # (CLOSE_REFUSED_STATUSES is honoured only when
+                # `filled <= 0`); the entry path did not. A broker that
+                # fills part of an order and then cancels the remainder
+                # has still put real units in the account, and IBKR
+                # reaches exactly that state because
+                # `_dead_order_reason` deliberately returns None once
+                # anything is filled. Treating it as a refusal meant
+                # logging a DEDUP warning and creating NO ROW AT ALL -
+                # live units at the broker that no part of this
+                # platform knows about, and that reconciliation cannot
+                # find, because reconciliation walks rows.
+                try:
+                    refused_qty = float(res.get("executedQty") or 0)
+                except (TypeError, ValueError):
+                    refused_qty = 0.0
                 if status in ("REJECTED", "DUPLICATE", "CANCELLED",
-                              "CANCELED", "INACTIVE", "EXPIRED"):
+                              "CANCELED", "INACTIVE", "EXPIRED") \
+                        and refused_qty <= 0:
                     logger.warning("[%s_bot] live order DEDUP for %s "
                                     "(status=%s, client_order_id=%s)",
                                     self.asset_class, symbol, status,

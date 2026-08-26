@@ -248,7 +248,15 @@ class OANDATrader:
             "orderId": str(fill.get("id") or data.get("orderCreateTransaction", {}).get("id", "")),
             "symbol": symbol,
             "side": side,
-            "executedQty": str(abs(float(fill.get("units", units)))),
+            # `fill` is {} when OANDA answers 201 with no
+            # orderFillTransaction — a FOK market order cancelled for
+            # liquidity, a halt, or a FIFO violation. Defaulting to `units`
+            # reported the full requested size for an order that filled
+            # nothing, and `status` is "PENDING" in that case, which is in
+            # neither the entry-refusal list nor CLOSE_REFUSED_STATUSES. So
+            # a completely unfilled order was booked as a complete fill on
+            # both sides. Report what actually printed.
+            "executedQty": str(abs(float(fill.get("units", 0) or 0))),
             "avgPrice": str(fill.get("price", "0")),
             "status": "FILLED" if fill else "PENDING",
             "raw": data,
