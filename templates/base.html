@@ -3341,6 +3341,17 @@ function toggleSidebar() {
       .finally(() => { railRefreshing = false; });
   }
 
+  /* The rail's own slow sweep, for the same reason the ticker has one:
+     a Signal written by a path that does not reach the post_save push
+     (a bulk create, a replay, a migration) would otherwise sit unseen
+     until a reload. */
+  setInterval(function () {
+    if (!document.hidden) refreshSignalRail();
+  }, 300000);
+  document.addEventListener('sv:pin-unlocked', function () {
+    refreshSignalRail();
+  });
+
   /* Exposed for the /ws/eye/ listener. A fill is the ONLY announcement a
      bot-taken signal ever produces — no new Signal row is written, so the
      'signal' message above never fires and the rail sat there showing an
@@ -3435,6 +3446,23 @@ function toggleSidebar() {
         .catch(() => {});
     }, 800);
   }
+
+  /* A sweep of its own. The push only fires when a scrape CREATED rows,
+     and a headline can reach the platform without this run creating
+     one — the analyst pass fills a summary, another scraper got there
+     first, a dedupe collapses the copy. The marquee is a view of recent
+     news, so it asks on a slow clock rather than waiting to be told,
+     and asks immediately when the operator comes back to the tab: a
+     ticker that is only fresh after a reload is a ticker nobody
+     believes. Cheap — one small partial, and never while hidden. */
+  setInterval(function () {
+    if (!document.hidden) refreshTicker();
+  }, 300000);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') refreshTicker();
+  });
+  /* The gate lifting is the page coming back to life. */
+  document.addEventListener('sv:pin-unlocked', function () { refreshTicker(); });
 
   /* Watchlist stars broadcast their ABSOLUTE count — patch the bottom
      headband cell and the rail header in place, no refetch needed. */

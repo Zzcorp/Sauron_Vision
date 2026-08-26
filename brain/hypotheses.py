@@ -351,7 +351,23 @@ def _resolve_anomaly_persists(hyp):
     if node is None:
         return None, (f"ungradeable: anomaly '{key}' was never recorded in the "
                       f"knowledge graph — nothing was watching it")
-    return node.confidence >= 0.4, f"confidence={node.confidence:.2f}"
+    # A node the claim's own deadline never saw cannot answer for it.
+    # `KnowledgeNode.current` never expires, and consolidation only
+    # touches keys that fired in the last 24h — so a long-silent anomaly
+    # kept grading True on the confidence it had the last time anyone
+    # looked. That measures "was it hot once", not "is it hot now".
+    seen_at = getattr(node, "updated_at", None) or getattr(node, "created_at", None)
+    if seen_at is not None and hyp.resolution_deadline is not None \
+            and seen_at < hyp.resolution_deadline:
+        return None, (f"ungradeable: the anomaly node for '{key}' has not "
+                      f"been refreshed since before the deadline — nothing "
+                      f"measured it at the moment the claim came due")
+    # The floor the WRITER uses, not a rounder number: consolidation
+    # promotes at >=3 fires in 24h and stores confidence count/10, so the
+    # cheapest node that can exist scores 0.30. Judging against 0.4 made
+    # a freshly promoted anomaly grade REFUTED for existing at exactly
+    # the strength its own promotion rule requires.
+    return node.confidence >= 0.3, f"confidence={node.confidence:.2f}"
 
 
 RESOLVERS = {

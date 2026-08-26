@@ -169,7 +169,13 @@ def hypotheses_dashboard(request):
         n_resolved = Hypothesis.objects.filter(
             source_agent=agent,
         ).exclude(outcome=Hypothesis.OUTCOME_PENDING).count()
-        n_confirmed = Hypothesis.objects.filter(
+        # NOT `n_confirmed`: that name already holds the MARKET's
+        # all-time confirmations, computed above and rendered on the
+        # headline tile. Rebinding it here left the tile showing
+        # whichever agent sorted last — the page reported CONFIRMED 0
+        # beside a rate of 3.5%, which is arithmetically impossible and
+        # read as "the market has never once been right".
+        agent_confirmed = Hypothesis.objects.filter(
             source_agent=agent, outcome=Hypothesis.OUTCOME_CONFIRMED).count()
         leaderboard.append({
             "agent": agent,
@@ -177,7 +183,7 @@ def hypotheses_dashboard(request):
             "brier_only_trust": brier,
             "combined_trust": combined,
             "n_resolved": n_resolved,
-            "n_confirmed": n_confirmed,
+            "n_confirmed": agent_confirmed,
             "n_total": Hypothesis.objects.filter(source_agent=agent).count(),
         })
     leaderboard.sort(key=lambda r: (r["trust"] or 0), reverse=True)

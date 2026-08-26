@@ -185,22 +185,27 @@ def consolidate_now() -> dict:
     from .knowledge_models import ConsolidationRun
 
     run = ConsolidationRun.objects.create()
+
+    # Grading runs FIRST and outside the consolidation block. It used to
+    # sit after five graph steps inside their shared `try`, so any one of
+    # them raising meant not a single hypothesis was graded that night —
+    # silently, and the market's own dashboard would look exactly as it
+    # does on a healthy day. Grading owes nothing to the graph.
+    resolution = {}
+    try:
+        from .hypotheses import resolve_due
+        resolution = resolve_due()
+    except Exception as e:  # pragma: no cover
+        logger.warning("[consolidation] resolve_due failed: %s", e)
+    n_resolved = (resolution.get("confirmed", 0)
+                  + resolution.get("refuted", 0))
+
     try:
         regime_added, regime_superseded = _consolidate_regime()
         theme_added, theme_superseded = _consolidate_theme_states()
         rule_added, rule_superseded = _consolidate_rule_states()
         anomaly_added, anomaly_superseded = _consolidate_anomalies()
         pruned = _prune_observations()
-
-        # Resolve due hypotheses as part of the cycle.
-        try:
-            from .hypotheses import resolve_due
-            resolution = resolve_due()
-            n_resolved = (resolution.get("confirmed", 0)
-                          + resolution.get("refuted", 0))
-        except Exception as e:  # pragma: no cover
-            logger.warning("[consolidation] resolve_due failed: %s", e)
-            n_resolved = 0
 
         run.n_observations_pruned = pruned
         run.n_hypotheses_resolved = n_resolved
@@ -232,7 +237,16 @@ def consolidate_now() -> dict:
             f"anomalies: +{anomaly_added}/sup {anomaly_superseded}; "
             f"pruned: {pruned} obs; "
             f"critic_dissent={critic_check.get('dissent_rate')}"
-            f" ({critic_check.get('direction', 'n/a')})"
+            f" ({critic_check.get('direction', 'n/a')}); "
+            # The counters the run used to throw away. A resolver that
+            # crashes deterministically reports `skipped` on every pass
+            # forever, and with only confirmed+refuted recorded that
+            # stuck row was invisible — the night grading breaks looks
+            # identical to a quiet night.
+            f"graded: {n_resolved} decided, "
+            f"{resolution.get('unresolvable', 0)} unresolvable, "
+            f"{resolution.get('deferred', 0)} deferred, "
+            f"{resolution.get('skipped', 0)} skipped"
         )
     except Exception as e:
         logger.warning("[consolidation] failed: %s", e)
