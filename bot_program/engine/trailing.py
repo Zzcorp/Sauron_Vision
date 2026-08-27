@@ -112,6 +112,62 @@ def _commit(trade, candidate, price, note):
     return True
 
 
+def breakeven_candidate(trade, current_price, at_r, buffer_r=0.0):
+    """WHERE break-even would put the stop, or None. Writes nothing.
+
+    Split out so the broker-held path can ask the same question the
+    row-writing path asks. Two copies of this arithmetic would drift,
+    and the one that drifted would be the one moving a live stop.
+    """
+    if at_r is None or at_r <= 0:
+        return None
+    r_now = unrealised_r(trade, current_price)
+    if r_now is None or r_now < Decimal(str(at_r)):
+        return None
+    if (getattr(trade, "metadata", None) or {}).get("breakeven_armed"):
+        return None
+    entry = _dec(trade.entry_price)
+    risk = initial_risk_per_unit(trade)
+    if entry is None or risk is None:
+        return None
+    offset = risk * Decimal(str(buffer_r or 0))
+    return entry + offset if trade.side == "BUY" else entry - offset
+
+
+def trail_candidate(trade, current_price, trail_pct, start_r=0.0):
+    """WHERE the trail would put the stop, or None. Writes nothing."""
+    if trail_pct is None or trail_pct <= 0:
+        return None
+    price = _dec(current_price)
+    entry = _dec(getattr(trade, "entry_price", None))
+    if price is None or price <= 0 or entry is None:
+        return None
+    in_profit = price > entry if trade.side == "BUY" else price < entry
+    if not in_profit:
+        return None
+    if start_r and start_r > 0:
+        r_now = unrealised_r(trade, price)
+        if r_now is None or r_now < Decimal(str(start_r)):
+            return None
+    trail = Decimal(str(trail_pct)) / Decimal("100")
+    return (price * (Decimal("1") - trail) if trade.side == "BUY"
+            else price * (Decimal("1") + trail))
+
+
+def is_improvement(trade, candidate, price):
+    """True when this candidate is a stop worth moving to.
+
+    The same two guards `_commit` applies, asked before anything has
+    been sent to a broker — because a leg modified and then rejected by
+    our own tighten-only rule would be a round trip that changed the
+    venue and not the row.
+    """
+    if candidate is None:
+        return False
+    return (_tighter(trade, candidate, _dec(getattr(trade, "stop_loss", None)))
+            and _on_the_right_side(trade, candidate, _dec(price)))
+
+
 def apply_breakeven(trade, current_price, at_r, buffer_r=0.0):
     """Move the stop to entry once the trade has run `at_r` in profit.
 
@@ -124,23 +180,10 @@ def apply_breakeven(trade, current_price, at_r, buffer_r=0.0):
     Fires once — the trailing rule owns the stop from there, and
     re-running this would drag a trailed stop BACK toward entry.
     """
-    if at_r is None or at_r <= 0:
-        return False
-    r_now = unrealised_r(trade, current_price)
-    if r_now is None or r_now < Decimal(str(at_r)):
-        return False
-    meta = getattr(trade, "metadata", None) or {}
-    if meta.get("breakeven_armed"):
-        return False
-
-    entry = _dec(trade.entry_price)
-    risk = initial_risk_per_unit(trade)
+    candidate = breakeven_candidate(trade, current_price, at_r, buffer_r)
     price = _dec(current_price)
-    if entry is None or risk is None or price is None:
+    if candidate is None or price is None:
         return False
-
-    offset = risk * Decimal(str(buffer_r or 0))
-    candidate = entry + offset if trade.side == "BUY" else entry - offset
 
     if not _commit(trade, candidate, price, "breakeven"):
         return False

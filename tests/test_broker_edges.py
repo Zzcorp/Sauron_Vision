@@ -284,3 +284,70 @@ class ABlindGateSaysSoTests(TestCase):
             ok, reason = bot.can_open_new()
         self.assertFalse(ok)
         self.assertIn("daily loss", reason)
+
+
+class TheTallStateFillsTheWorkingAreaTests(SimpleTestCase):
+    """The state between normal and fullscreen.
+
+    The first version grew the container WHERE IT STOOD, and the chart
+    card sits partway down a scrolling page — so the "free" height it
+    computed was about six pixels more than the height it already had.
+    The button worked perfectly and nothing appeared to happen.
+
+    Filling the working area means leaving the flow and pinning to the
+    rectangle the fixed furniture leaves behind.
+    """
+
+    def _src(self):
+        from pathlib import Path
+
+        from django.conf import settings
+        return (Path(settings.BASE_DIR) / "templates" / "_partials"
+                / "chart_widget.html").read_text(encoding="utf-8")
+
+    def test_it_pins_rather_than_growing_in_place(self):
+        src = self._src()
+        self.assertIn("container.style.position = 'fixed'", src)
+        self.assertNotIn("function tallHeight()", src)
+
+    def test_it_measures_every_piece_of_furniture(self):
+        """Headbands collapse, the rail opens, the sidebar minifies —
+        a hardcoded offset would put the chart under whichever moved."""
+        seg = self._src().split("function tallBox")[1][:1200]
+        for sel in (".topbar", ".ticker-bar", ".data-headband",
+                    ".info-panel-wrap", ".sidebar", ".signals-rail"):
+            self.assertIn(sel, seg, sel)
+
+    def test_a_hidden_headband_takes_no_space(self):
+        """visibleRect returns null for display:none, so a collapsed
+        strip does not reserve a gap the chart cannot use."""
+        seg = self._src().split("function visibleRect")[1][:500]
+        self.assertIn("display === 'none'", seg)
+        self.assertIn("visibility === 'hidden'", seg)
+
+    def test_the_pin_is_cleared_on_the_way_out(self):
+        """A container left fixed after leaving the state would float
+        over the page for the rest of the session."""
+        src = self._src()
+        self.assertIn("function clearPin()", src)
+        seg = src.split("function clearPin")[1][:300]
+        for prop in ("'position'", "'top'", "'right'", "'bottom'", "'left'"):
+            self.assertIn(prop, seg)
+
+    def test_fullscreen_clears_the_pin_too(self):
+        """Both states set a height; only one may own the container."""
+        seg = self._src().split("function layout()")[1][:900]
+        self.assertIn("if (inFs) {", seg)
+        self.assertIn("clearPin();", seg)
+
+    def test_the_pinned_card_has_a_ground(self):
+        """Out of the flow, the page shows through without one."""
+        seg = self._src().split(".sv-candle-container.sv-chart-tall")[1][:1400]
+        self.assertIn("background:", seg)
+
+    def test_it_sits_below_the_veil_and_the_dialogs(self):
+        """An expanded chart must never cover a locked screen or a
+        confirmation the operator has to answer."""
+        seg = self._src().split(".sv-candle-container.sv-chart-tall")[1][:1400]
+        self.assertIn("--z-hovercard", seg)
+        self.assertNotIn("--z-dialog", seg)

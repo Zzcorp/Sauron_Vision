@@ -46,8 +46,21 @@ Optional page data (json_script blocks the widget picks up when present):
    with the inline height the include renders and with .sv-chart-fs above.
    The class exists so the card can shed the furniture that costs rows. */
 .sv-candle-container.sv-chart-tall {
+    /* The pin itself is INLINE — position and the four insets are
+       measured in layout(), because every piece of furniture they are
+       measured against can move while the chart is expanded. What lives
+       here is only what does not vary.
+
+       A ground is not optional once the card leaves the flow: without
+       it the page shows through and the candles sit on whatever
+       happened to be underneath. And the layer sits BELOW the veil and
+       the dialogs on purpose — an expanded chart must never cover a
+       locked screen or a confirmation the operator has to answer. */
+    background: var(--bg-card, #111a11);
+    z-index: var(--z-hovercard, 1200);
     border-color: var(--accent, #00e868);
-    box-shadow: 0 0 0 1px var(--accent, #00e868) inset;
+    box-shadow: 0 0 0 1px var(--accent, #00e868) inset,
+                0 24px 60px -20px var(--bg-void, #030806);
 }
 .sv-chart-toolbar {
     display: flex;
@@ -513,14 +526,58 @@ Optional page data (json_script blocks the widget picks up when present):
 
        No CSS height and therefore no `!important` fight with the
        inline height the include renders, or with .sv-chart-fs. */
-    function tallHeight() {
-        var top = container.getBoundingClientRect().top;
-        var panel = document.querySelector('.info-panel-wrap');
-        var below = 0;
-        if (panel && getComputedStyle(panel).display !== 'none') {
-            below = panel.offsetHeight || 0;
-        }
-        return Math.max(320, Math.round(window.innerHeight - top - below - 14));
+    function visibleRect(sel) {
+        var el = document.querySelector(sel);
+        if (!el) return null;
+        var cs = window.getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return null;
+        var r = el.getBoundingClientRect();
+        return (r.width > 0 && r.height > 0) ? r : null;
+    }
+
+    /* The rectangle left over once every piece of fixed furniture has
+       taken its share — the topbar and both headbands above, the info
+       panel below, the sidebar left, the signals rail right.
+
+       MEASURED on each call rather than read from CSS variables,
+       because every one of those can change while the chart is
+       expanded: headbands collapse, the rail opens and closes, the
+       sidebar minifies. A hardcoded offset would put the chart under
+       whichever one moved.
+
+       The first version of this grew the container WHERE IT STOOD, and
+       the container sits partway down a scrolling page — so the "free"
+       height it computed was roughly the height the chart already had,
+       and the button appeared to do nothing. Filling the working area
+       means leaving the flow. */
+    function tallBox() {
+        var pad = 8;
+        var top = 0;
+        ['.topbar', '.ticker-bar', '.data-headband'].forEach(function (sel) {
+            var r = visibleRect(sel);
+            /* Only the ones actually sitting at the top: the same class
+               could match something further down a future page. */
+            if (r && r.top < window.innerHeight * 0.5) {
+                top = Math.max(top, r.bottom);
+            }
+        });
+        var panel = visibleRect('.info-panel-wrap');
+        var bottom = panel ? Math.max(0, window.innerHeight - panel.top) : 0;
+        var side = visibleRect('.sidebar');
+        var left = side ? Math.max(0, side.right) : 0;
+        var rail = visibleRect('.signals-rail');
+        var right = rail ? Math.max(0, window.innerWidth - rail.left) : 0;
+        return {
+            top: Math.round(top + pad),
+            right: Math.round(right + pad),
+            bottom: Math.round(bottom + pad),
+            left: Math.round(left + pad)
+        };
+    }
+
+    function clearPin() {
+        ['position', 'top', 'right', 'bottom', 'left', 'width']
+            .forEach(function (prop) { container.style[prop] = ''; });
     }
 
     function layout() {
@@ -531,9 +588,21 @@ Optional page data (json_script blocks the widget picks up when present):
            and produce a chart sized for the wrong one. */
         if (inFs) {
             container.style.height = '';
+            clearPin();
         } else if (viewState === 'tall') {
-            container.style.height = tallHeight() + 'px';
+            var box = tallBox();
+            container.style.position = 'fixed';
+            container.style.top = box.top + 'px';
+            container.style.right = box.right + 'px';
+            container.style.bottom = box.bottom + 'px';
+            container.style.left = box.left + 'px';
+            container.style.width = 'auto';
+            /* Height comes from the four insets, so it cannot disagree
+               with them — but lightweight-charts needs a NUMBER, and it
+               is read back from the live box below. */
+            container.style.height = 'auto';
         } else {
+            clearPin();
             container.style.height = CHART_HEIGHT + 'px';
         }
         var total = inFs || viewState === 'tall'

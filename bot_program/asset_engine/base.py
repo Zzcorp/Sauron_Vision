@@ -261,7 +261,7 @@ class AssetBot(ABC):
                     # exactly the configs most likely to hold real money.
                     # Silence there is how a form promising stop
                     # management becomes a false sense of protection.
-                    self._note_stop_rules_inert(trade)
+                    self._manage_broker_stop(trade, price, client)
                     continue
 
                 # Exits carry most of a trend system's P&L: a trailing stop
@@ -319,6 +319,105 @@ class AssetBot(ABC):
                            "treating as %s", self.asset_class, self.cfg.id,
                            key, raw, default)
             return float(default)
+
+    def _manage_broker_stop(self, trade, price, client) -> bool:
+        """Run the stop rules against a position whose stop is AT THE BROKER.
+
+        The same arithmetic as the bot-managed path — `trailing` exposes
+        the derivations without the write, so there is ONE answer to
+        "where should this stop be" and two ways to apply it. Two copies
+        would drift, and the copy that drifted would be the one moving a
+        live stop.
+
+        The order is the whole point. The leg moves at the BROKER first,
+        and the row is written only if that worked. The other order
+        leaves the database claiming a level the venue never accepted,
+        which is worse than not moving it: the operator would read a
+        protected position at a stop that exists nowhere but here.
+        """
+        breakeven_at_r = self._extras_float("breakeven_at_r")
+        trail_pct = self._extras_float("trail_pct")
+        if breakeven_at_r <= 0 and trail_pct <= 0:
+            return False
+        if trade.stop_loss is None:
+            return False
+
+        try:
+            from bot_program.engine.trailing import (
+                breakeven_candidate, is_improvement, trail_candidate,
+            )
+            candidate, why = None, ""
+            if breakeven_at_r > 0:
+                candidate = breakeven_candidate(
+                    trade, price, breakeven_at_r,
+                    self._extras_float("breakeven_buffer_r"))
+                why = "breakeven"
+            if candidate is None and trail_pct > 0:
+                candidate = trail_candidate(
+                    trade, price, trail_pct,
+                    self._extras_float("trail_start_r"))
+                why = "trail"
+            # Asked BEFORE anything reaches a broker: a leg modified and
+            # then refused by our own tighten-only rule would be a round
+            # trip that changed the venue and not the row.
+            if not is_improvement(trade, candidate, price):
+                return False
+        except Exception as e:  # noqa: BLE001 — a knob typo must not
+            # take the exit block down with it; the trade would then run
+            # unmanaged until reconciliation noticed.
+            logger.warning("[%s_bot] stop rules failed for %s: %s",
+                           self.asset_class, trade.symbol, e)
+            return False
+
+        mover = getattr(client, "modify_protective", None)
+        if not callable(mover):
+            # This broker cannot move a resting order. Say so once and
+            # leave the stop where the bracket put it — a row-only write
+            # here is the exact lie this method exists to avoid.
+            self._note_stop_rules_inert(trade)
+            return False
+
+        ids = (trade.metadata or {}).get("protective_order_ids") or []
+        if not ids:
+            self._note_stop_rules_inert(trade)
+            return False
+
+        moved, note = False, "no leg matched"
+        for oid in ids:
+            try:
+                res = mover(str(oid), float(candidate))
+            except Exception as e:  # noqa: BLE001
+                note = str(e)
+                continue
+            if res and res.get("ok"):
+                moved, note = True, str(res.get("price"))
+                break
+            note = (res or {}).get("reason") or note
+
+        if not moved:
+            logger.warning(
+                "[%s_bot] %s: %s wanted the stop at %s but the broker leg "
+                "could not be moved (%s) — the position is still protected "
+                "at its old level",
+                self.asset_class, trade.symbol, why, candidate, note)
+            return False
+
+        # The venue accepted it, so the row may now say so.
+        meta = dict(trade.metadata or {})
+        moves = list(meta.get("stop_moves") or [])
+        moves.append({"to": str(candidate), "at": str(price),
+                      "why": why + ":broker"})
+        meta["stop_moves"] = moves[-20:]
+        if why == "breakeven":
+            meta["breakeven_armed"] = True
+        # A leg that MOVED is proof the rules are not inert after all.
+        meta.pop("stop_rules_inert", None)
+        trade.stop_loss = candidate
+        trade.metadata = meta
+        trade.save(update_fields=["stop_loss", "metadata"])
+        logger.info("[%s_bot] %s %s moved the BROKER stop to %s at mark %s",
+                    self.asset_class, trade.symbol, why, candidate, price)
+        return True
 
     def _note_stop_rules_inert(self, trade) -> None:
         """Warn once per trade that its stop rules cannot run.

@@ -427,3 +427,122 @@ class SavingTheFormDoesNotDisarmTheRulesTests(TestCase):
         from bot_program.models import AssetBotConfig
         self.assertFalse(
             AssetBotConfig.objects.filter(user=self.user, name="FORM").exists())
+
+
+class ABrokerHeldStopIsManagedAtTheBrokerTests(TestCase):
+    """Break-even and trailing finally reach bracketed positions.
+
+    Until now they refused them — correctly, because no client could
+    move a resting order and writing only our copy would leave the row
+    claiming a level the venue never accepted. `modify_protective`
+    closed that gap, so the rules route through it.
+
+    The ORDER is the whole point: the leg moves at the broker first and
+    the row is written only if that worked.
+    """
+
+    def _bot_and_trade(self, extras, ids=("77",)):
+        from decimal import Decimal as D
+
+        from django.contrib.auth.models import User
+        from django.utils import timezone as tz
+
+        from bot_program.asset_engine.stock_bot import StockBot
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+
+        user = User.objects.create_user("bk_u", password="x")
+        cfg = AssetBotConfig.objects.create(
+            user=user, asset_class="stock", name="BK", mode="paper",
+            symbols=["AAPL"], capital=D("10000"), enabled=True, extras=extras)
+        meta = {"initial_stop_loss": 98.0, "protected": True}
+        if ids:
+            meta["protective_order_ids"] = list(ids)
+        trade = AssetBotTrade.objects.create(
+            config=cfg, asset_class="stock", symbol="AAPL", side="BUY",
+            qty=D("10"), entry_price=D("100"), stop_loss=D("98"),
+            take_profit=D("110"), status="OPEN", paper=True,
+            metadata=meta, opened_at=tz.now())
+        return StockBot(cfg), trade
+
+    def _run(self, bot, client, mark="104"):
+        from decimal import Decimal as D
+        from unittest.mock import patch
+
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                   return_value=client), \
+                patch.object(type(bot), "_is_paper_client", return_value=False), \
+                patch.object(type(bot), "_mark_price", return_value=D(mark)):
+            bot.manage_positions()
+
+    def _client(self, ok=True, price=100.0):
+        from unittest.mock import MagicMock
+        c = MagicMock()
+        c.modify_protective.return_value = {"ok": ok, "price": price,
+                                            "reason": "" if ok else "no session"}
+        return c
+
+    def test_break_even_moves_the_broker_leg(self):
+        from decimal import Decimal as D
+        bot, trade = self._bot_and_trade({"breakeven_at_r": 1.0})
+        client = self._client(price=100.0)
+        self._run(bot, client)
+        client.modify_protective.assert_called_once()
+        trade.refresh_from_db()
+        self.assertEqual(trade.stop_loss, D("100"))
+
+    def test_the_row_is_not_written_when_the_broker_refuses(self):
+        """Otherwise the row claims a stop the venue never accepted and
+        the operator reads a protection that does not exist."""
+        from decimal import Decimal as D
+        bot, trade = self._bot_and_trade({"breakeven_at_r": 1.0})
+        self._run(bot, self._client(ok=False))
+        trade.refresh_from_db()
+        self.assertEqual(trade.stop_loss, D("98"))
+        self.assertNotIn("breakeven_armed", trade.metadata)
+
+    def test_nothing_is_sent_when_the_move_is_not_an_improvement(self):
+        """A leg modified and then refused by our own tighten-only rule
+        would be a round trip that changed the venue and not the row."""
+        bot, trade = self._bot_and_trade({"breakeven_at_r": 1.0})
+        client = self._client()
+        self._run(bot, client, mark="100.5")     # only 0.25R, no trigger
+        client.modify_protective.assert_not_called()
+
+    def test_a_broker_that_cannot_modify_is_still_disclosed(self):
+        from unittest.mock import MagicMock
+        bot, trade = self._bot_and_trade({"breakeven_at_r": 1.0})
+        self._run(bot, MagicMock(spec=[]))       # no modify_protective
+        trade.refresh_from_db()
+        self.assertEqual(trade.metadata.get("stop_rules_inert"),
+                         "broker_protected")
+
+    def test_a_row_with_no_recorded_legs_is_disclosed_not_guessed(self):
+        bot, trade = self._bot_and_trade({"breakeven_at_r": 1.0}, ids=())
+        client = self._client()
+        self._run(bot, client)
+        client.modify_protective.assert_not_called()
+        trade.refresh_from_db()
+        self.assertEqual(trade.metadata.get("stop_rules_inert"),
+                         "broker_protected")
+
+    def test_a_successful_move_clears_a_stale_inert_stamp(self):
+        """The rules are demonstrably not inert once a leg has moved."""
+        bot, trade = self._bot_and_trade({"breakeven_at_r": 1.0})
+        trade.metadata = dict(trade.metadata, stop_rules_inert="broker_protected")
+        trade.save(update_fields=["metadata"])
+        self._run(bot, self._client(price=100.0))
+        trade.refresh_from_db()
+        self.assertNotIn("stop_rules_inert", trade.metadata)
+
+    def test_the_move_is_recorded_with_its_reason(self):
+        bot, trade = self._bot_and_trade({"breakeven_at_r": 1.0})
+        self._run(bot, self._client(price=100.0))
+        trade.refresh_from_db()
+        self.assertEqual(trade.metadata["stop_moves"][-1]["why"],
+                         "breakeven:broker")
+
+    def test_an_unconfigured_config_sends_nothing(self):
+        bot, trade = self._bot_and_trade({})
+        client = self._client()
+        self._run(bot, client)
+        client.modify_protective.assert_not_called()
