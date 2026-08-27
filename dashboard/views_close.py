@@ -273,3 +273,42 @@ def close_all_execute(request):
         # abandoned close denies it exactly as loudly as an open row does.
         "flat": not still_open and not unclosable and not abandoned,
     })
+
+
+@login_required
+def position_levels(request, trade_id):
+    """POST {stop, target, clear_target, pin} — move a position's levels.
+
+    Beside the close flow because it is the same shape of decision: a
+    money action on one row, taken from a dialog, refused with a reason
+    the operator can act on rather than a status code.
+
+    The PIN is required for LIVE positions only, matching the close. A
+    paper row is a simulation and gating it teaches the operator to type
+    the PIN reflexively, which is the opposite of what a PIN is for.
+    """
+    from bot_program.adjust_levels import adjust_levels
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    trade = _trade_for(request, trade_id)
+    body, err = _body(request)
+    if err:
+        return JsonResponse({"error": err}, status=400)
+
+    if not trade.paper and not _pin_ok(request, body):
+        return JsonResponse(
+            {"error": "This is a LIVE position — the trading PIN is "
+                      "required to move its stop or target. Nothing was "
+                      "changed.", "pin_required": True}, status=403)
+
+    result = adjust_levels(
+        request.user, trade,
+        stop=body.get("stop"), target=body.get("target"),
+        clear_target=bool(body.get("clear_target")))
+    if result.get("gone"):
+        return JsonResponse({"error": result["error"]}, status=404)
+    if not result.get("ok"):
+        return JsonResponse({"error": result.get("error", "Refused.")},
+                            status=400)
+    return JsonResponse(result)

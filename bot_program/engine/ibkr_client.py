@@ -827,6 +827,78 @@ class IBKRTrader:
             log.error("IBKR cancel_order(%s) failed: %s", order_id, e)
             raise
 
+    def modify_protective(self, order_id: str, new_price: float) -> dict:
+        """Move a resting stop or target to `new_price`.
+
+        IN PLACE, not cancel-then-replace. ib_insync re-places an order
+        carrying the SAME orderId as a modification, so the leg never
+        stops existing — which matters more here than anywhere else on
+        this client. Cancel-first leaves the position bare for as long as
+        the round trip takes; place-first leaves TWO stops resting, and
+        an over-covered position closes on one and OPENS THE OTHER WAY on
+        the other. Neither window is acceptable on a live stop, and
+        neither is necessary.
+
+        The leg's own type decides which field moves: a STP carries its
+        trigger in auxPrice, a LMT its price in lmtPrice. Reading that
+        off the resting order rather than off our own bookkeeping is what
+        makes this safe when `protective_order_ids` has drifted — it is a
+        flat list with no record of which id is which.
+
+        Returns {"ok": bool, "reason": str, "price": float|None}. Never
+        raises for a leg that is simply gone: an order already filled is
+        not an error, it is an answer.
+        """
+        empty = {"ok": False, "reason": "ibkr_unavailable", "price": None}
+        if not self._connect():
+            log.error("IBKR modify_protective(%s): no session — the leg "
+                      "still rests at whatever it was", order_id)
+            return empty
+        try:
+            wanted = str(order_id)
+            for trade in (self._ib.openTrades() or []):
+                order = getattr(trade, "order", None)
+                oid = str(getattr(order, "orderId", "") or "")
+                if oid != wanted or order is None:
+                    continue
+
+                kind = str(getattr(order, "orderType", "") or "").upper()
+                contract = getattr(trade, "contract", None)
+                tick = self._min_tick_for(contract) if contract else 0.0
+                # WIDEN, never tighten, when snapping: a stop nudged the
+                # wrong way by a rounding step is a stop that fires
+                # earlier than the operator asked for.
+                px = self._snap_to_tick(float(new_price), tick) if tick \
+                    else float(new_price)
+
+                if "STP" in kind:
+                    order.auxPrice = px
+                elif "LMT" in kind:
+                    order.lmtPrice = px
+                else:
+                    return {"ok": False, "price": None,
+                            "reason": f"leg {wanted} is a {kind or 'unknown'} "
+                                      f"order — refusing to guess which "
+                                      f"field carries its price"}
+
+                # The account must survive a modification: a leg re-placed
+                # without it lands on the session default, which is a stop
+                # resting against a book that does not hold the position.
+                refusal = self._bind_order_account(order)
+                if refusal:
+                    return {"ok": False, "reason": refusal, "price": None}
+
+                self._ib.placeOrder(contract, order)
+                log.info("IBKR modified leg %s (%s) to %s", wanted, kind, px)
+                return {"ok": True, "reason": "", "price": px}
+
+            return {"ok": False, "price": None,
+                    "reason": f"leg {wanted} is not among the open orders — "
+                              f"already filled or cancelled"}
+        except Exception as e:  # noqa: BLE001
+            log.error("IBKR modify_protective(%s) failed: %s", order_id, e)
+            return {"ok": False, "reason": str(e), "price": None}
+
     # ── options-specific surface ──────────────────────────────────────────
 
     def option_chain(self, underlying: str, expiry: Optional[str] = None) -> list[dict]:

@@ -7054,3 +7054,36 @@ body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
 .hb-trend-down { color: var(--accent-red); }
 .hb-trend-flat { color: var(--text-muted); }
 .hb-news-spark { height: 30px; }
+
+/* -- Editing a stop where it is read -------------------------------- */
+/* Tokens only: everything past the CARD CONTAINMENT marker is scanned
+   for hex literals, and a colour hard-coded here would be the dark
+   theme's answer printed onto the light one. */
+.lvl-edit { background: none; border: 1px dashed transparent; border-radius: 3px;
+    padding: 2px 5px; margin: -2px -5px; cursor: pointer; font: inherit;
+    color: inherit; text-align: right; display: block; width: 100%; }
+.lvl-edit:hover, .lvl-edit:focus-visible { border-color: var(--border);
+    background: var(--bg-darker); outline: none; }
+.lvl-add { font-size: 10px; color: var(--text-muted); letter-spacing: .06em; }
+.lvl-dlg { position: fixed; z-index: var(--z-dialog); background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 4px; padding: 14px;
+    min-width: 250px; font-family: var(--font-mono);
+    box-shadow: 0 12px 40px -12px var(--bg-void); }
+.lvl-dlg h4 { margin: 0 0 10px; font-size: 11px; letter-spacing: .12em;
+    color: var(--text-muted); font-weight: 500; }
+.lvl-dlg label { display: block; font-size: 9.5px; letter-spacing: .12em;
+    color: var(--text-muted); margin: 8px 0 3px; }
+.lvl-dlg input { width: 100%; padding: 6px 8px; background: var(--bg-darker);
+    border: 1px solid var(--border); color: var(--text-primary);
+    font-family: var(--font-mono); font-size: 12px; }
+.lvl-dlg-row { display: flex; gap: 8px; margin-top: 12px; }
+.lvl-dlg-row button { flex: 1; padding: 7px; font-family: var(--font-mono);
+    font-size: 10px; letter-spacing: .1em; cursor: pointer; border-radius: 3px;
+    background: var(--bg-darker); border: 1px solid var(--border);
+    color: var(--text-primary); }
+.lvl-dlg-row button.primary { border-color: var(--accent); color: var(--accent); }
+.lvl-dlg-row button[disabled] { opacity: .6; cursor: default; }
+.lvl-warn { font-size: 10px; margin-top: 8px; line-height: 1.4;
+    color: var(--accent-gold-ink, var(--accent-gold)); }
+.lvl-err { font-size: 10px; margin-top: 8px; line-height: 1.4;
+    color: var(--accent-red); }
