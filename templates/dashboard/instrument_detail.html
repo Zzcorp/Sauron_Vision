@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load sauron_tags %}
 {% block title %}{{ instrument.symbol }} — Sauron Vision{% endblock %}
 {% block page_title %}{{ instrument.symbol }} — {{ instrument.name }}{% endblock %}
 
@@ -23,7 +24,7 @@
             render once and freeze under a live market badge, the worst
             combination.{% endcomment %}
             <div class="dtl-price">
-                <span class="dtl-last">{{ quote.last|floatformat:4 }}</span>
+                <span class="dtl-last">{% px quote.last instrument.asset_class instrument.symbol %}</span>
                 <span class="dtl-chg {% if quote.change_pct >= 0 %}up{% else %}down{% endif %}">
                     {% if quote.change_pct >= 0 %}▲ +{% else %}▼ {% endif %}{{ quote.change_pct|floatformat:2 }}%
                 </span>
@@ -64,8 +65,33 @@
                 data-ask-kind="instrument">▸ ASK SAURON</button>
         <a href="{% url 'instruments_list' %}" class="sr-pop-btn">← BACK</a>
     </div>
+    {% comment %}
+    Bid and ask beside the buttons that use them: LONG lifts the ask and
+    SHORT hits the bid, so the spread is the first cost of the decision
+    those two buttons take. It was only in the stats list further down,
+    which is the wrong place to read it from.
+    {% endcomment %}
+    {% if quote.bid or quote.ask %}
+    <div class="dtl-quote" data-decimals="{% px_decimals quote.last instrument.asset_class instrument.symbol %}">
+        <span class="dq-cell"><span class="dq-k">BID</span><span class="dq-v dq-bid" data-dq="bid">{% px quote.bid instrument.asset_class instrument.symbol %}</span></span>
+        <span class="dq-cell"><span class="dq-k">ASK</span><span class="dq-v dq-ask" data-dq="ask">{% px quote.ask instrument.asset_class instrument.symbol %}</span></span>
+        {% if quote.bid and quote.ask %}
+        <span class="dq-cell"><span class="dq-k">SPREAD</span><span class="dq-v" data-dq="spread">{% px quote.spread instrument.asset_class instrument.symbol %}</span></span>
+        {% endif %}
+    </div>
+    {% endif %}
 </div>
 <style>
+    .dtl-quote { display:flex; gap:22px; flex-wrap:wrap; margin-top:14px;
+        padding-top:12px; border-top:1px solid var(--border); }
+    .dq-cell { display:flex; flex-direction:column; gap:2px; }
+    .dq-k { font-family:var(--font-mono); font-size:9.5px; letter-spacing:.14em;
+        color:var(--text-muted); }
+    .dq-v { font-family:var(--font-mono); font-size:15px; font-weight:600;
+        font-variant-numeric:tabular-nums; color:var(--text-primary); }
+    .dq-bid { color:var(--accent-red); }
+    .dq-ask { color:var(--accent); }
+
     .wl-star { background:none; border:1px solid var(--border); border-radius:6px;
         cursor:pointer; font-size:18px; line-height:1; padding:4px 9px;
         color:var(--text-muted); transition:color .15s, border-color .15s; }
@@ -121,9 +147,9 @@ feed produces a first price. paintQuote null-guards the hero spans.{% endcomment
         <div class="card-header"><span class="card-title">Latest Quote</span></div>
         {% if quote %}
         <ul class="kv-list">
-            <li><span class="label">LAST</span><span class="value" style="font-size:18px;font-weight:700;">{{ quote.last|floatformat:4 }}</span></li>
+            <li><span class="label">LAST</span><span class="value" style="font-size:18px;font-weight:700;">{% px quote.last instrument.asset_class instrument.symbol %}</span></li>
             <li><span class="label">CHANGE 24H</span><span class="value" style="color:{% if quote.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{% if quote.change_pct >= 0 %}+{% endif %}{{ quote.change_pct|floatformat:2 }}%</span></li>
-            <li><span class="label">BID / ASK</span><span class="value">{% if quote.bid %}{{ quote.bid|floatformat:4 }}{% else %}—{% endif %} / {% if quote.ask %}{{ quote.ask|floatformat:4 }}{% else %}—{% endif %}</span></li>
+            <li><span class="label">BID / ASK</span><span class="value">{% px quote.bid instrument.asset_class instrument.symbol %} / {% px quote.ask instrument.asset_class instrument.symbol %}</span></li>
             <li><span class="label">VOLUME</span><span class="value">{% if quote.volume %}{{ quote.volume|floatformat:0 }}{% else %}—{% endif %}</span></li>
             <li><span class="label">SOURCE</span><span class="value" style="color:var(--accent);">{{ quote.source|default:"—" }}</span></li>
             <li><span class="label">UPDATED</span><span class="value">{{ quote.updated_at|timesince }} ago</span></li>

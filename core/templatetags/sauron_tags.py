@@ -274,3 +274,30 @@ def briefing_plain(value):
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.S)
     text = re.sub(r"`([^`\n]+)`", r"\1", text)
     return text
+
+
+@register.simple_tag
+def px(value, asset_class="", symbol="", dash="—"):
+    """A price at the precision its own venue quotes it in.
+
+    `{% px m.last m.asset_class m.symbol %}`
+
+    Replaces `floatformat:4`, which rendered AAPL as 227.5300 and a JPY
+    cross one digit past what the broker's ticket shows. See
+    core.price_format for the convention.
+    """
+    from core.price_format import format_price
+    return format_price(value, asset_class, symbol, dash)
+
+
+@register.simple_tag
+def px_decimals(value, asset_class="", symbol=""):
+    """Just the digit count, for a data-decimals attribute.
+
+    The live painter repaints these cells on every tick, and it has only
+    the symbol and the number — not the asset class. Rendering the count
+    server-side, where the class IS known, is what stops a value being
+    formatted one way on load and another one tick later.
+    """
+    from core.price_format import price_decimals
+    return price_decimals(value, asset_class, symbol)

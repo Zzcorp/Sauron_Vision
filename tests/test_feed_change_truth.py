@@ -148,5 +148,15 @@ class ThePainterLeavesAnUnmeasuredColumnAloneTests(SimpleTestCase):
         """The tick's whole point is the price. It must paint regardless
         of whether the source knew a day change."""
         seg = self._shell().split("function applyTick")[1][:2600]
-        self.assertIn("val.textContent = last.toFixed(2); flash(val);", seg)
-        self.assertIn("lastEl.textContent = last.toFixed(4); flash(lastEl);", seg)
+        # The INTENT, not the digit count: the price assignment must not
+        # sit behind the hasPct guard. Pinning the literal `toFixed(2)`
+        # made this fail the moment precision became per-instrument,
+        # which is a change to how many digits print — not to whether
+        # the price prints at all.
+        for guard in ("if (val) { val.textContent",
+                      "if (lastEl) { lastEl.textContent"):
+            self.assertIn(guard, seg)
+        self.assertNotIn("if (val && hasPct)", seg)
+        self.assertNotIn("if (lastEl && hasPct)", seg)
+        self.assertIn("flash(val);", seg)
+        self.assertIn("flash(lastEl);", seg)

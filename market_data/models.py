@@ -39,6 +39,19 @@ class LiveQuote(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     source = models.CharField(max_length=50)
 
+    @property
+    def spread(self):
+        """ask - bid, or None when either side is missing.
+
+        A property rather than a column: it is derived, it must never go
+        stale against the two numbers it comes from, and a template
+        cannot subtract. Surfaced on the instrument page beside LONG and
+        SHORT, because it is the first cost of taking either.
+        """
+        if self.bid is None or self.ask is None:
+            return None
+        return self.ask - self.bid
+
     def __str__(self):
         return f"{self.instrument.symbol}: {self.last}"
 

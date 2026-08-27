@@ -1289,10 +1289,10 @@
         </div>
         <div class="rail-body" id="railWatchBody">
             {% for w in ui_watchlist %}
-            <a href="{% url 'instrument_detail' w.symbol %}" class="wl-item">
+            <a href="{% url 'instrument_detail' w.symbol %}" class="wl-item" data-decimals="{% px_decimals w.last w.asset_class w.symbol %}">
                 <div class="wl-row1">
                     <span class="wl-sym">{{ w.symbol }}</span>
-                    <span class="wl-last">{% if w.last %}{{ w.last|floatformat:4 }}{% else %}—{% endif %}</span>
+                    <span class="wl-last">{% px w.last w.asset_class w.symbol %}</span>
                 </div>
                 {% if w.name and w.name != w.symbol %}
                 <div class="wl-rowname">
@@ -3259,7 +3259,7 @@ function toggleSidebar() {
       const val = el.querySelector('.dh-val');
       const chg = el.querySelector('.dh-chg');
       const dot = el.querySelector('.dh-dot');
-      if (val) { val.textContent = last.toFixed(2); flash(val); }
+      if (val) { val.textContent = last.toFixed(svDecimals(val, last)); flash(val); }
       if (chg && hasPct) {
         const sign = pct >= 0 ? '+' : '';
         chg.textContent = `${sign}${pct.toFixed(2)}%`;
@@ -3274,7 +3274,7 @@ function toggleSidebar() {
       if (!symEl || symEl.textContent.trim().toUpperCase() !== sym) return;
       const lastEl = el.querySelector('.wl-last');
       const chgEl = el.querySelector('.wl-chg');
-      if (lastEl) { lastEl.textContent = last.toFixed(4); flash(lastEl); }
+      if (lastEl) { lastEl.textContent = last.toFixed(svDecimals(lastEl, last)); flash(lastEl); }
       if (chgEl && hasPct) {
         const sign = pct >= 0 ? '+' : '';
         chgEl.textContent = `${sign}${pct.toFixed(2)}%`;
@@ -3288,12 +3288,32 @@ function toggleSidebar() {
       if (!s || s.textContent.trim().toUpperCase() !== sym) return;
       const p = el.querySelector('.t-price');
       const c = el.querySelector('.t-change');
-      if (p) p.textContent = last.toFixed(2);
+      if (p) p.textContent = last.toFixed(svDecimals(p, last));
       if (c && hasPct) {
         c.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
         c.className = 't-change ' + (pct >= 0 ? 'up' : 'down');
       }
     });
+  }
+
+  /* The precision the SERVER decided, carried on the element. The
+     painter has only a symbol and a number, so it cannot tell a forex
+     pair (five decimals, three on a JPY cross) from a share (two) —
+     it used to guess toFixed(2) here and toFixed(4) in the rail, so a
+     price changed shape the instant it ticked. Falls back to the same
+     magnitude rule core/price_format.py uses, which is right for
+     everything except forex. */
+  function svDecimals(el, v) {
+    const holder = el && el.closest && el.closest('[data-decimals]');
+    if (holder) {
+      const n = parseInt(holder.getAttribute('data-decimals'), 10);
+      if (isFinite(n) && n >= 0 && n <= 10) return n;
+    }
+    const a = Math.abs(v);
+    if (a >= 1) return 2;
+    if (a >= 0.01) return 4;
+    if (a >= 0.0001) return 6;
+    return 8;
   }
 
   function flash(el) {
