@@ -220,14 +220,24 @@ class ComposeProdStructureTests(TestCase):
         """A first deploy should have as few moving parts as possible, so the
         market-data streamers are opt-in. Backups are NOT: "optional extras"
         is the wrong category for the only thing standing between a disk
-        failure and losing every trade, position and credential recorded."""
+        failure and losing every trade, position and credential recorded.
+
+        The allowlist is the point. A service may be opt-in when it needs
+        credentials the operator may not have yet and would otherwise
+        restart-loop — the streamers, and IB Gateway, which cannot log in
+        without an IBKR username. Anything else defaults to running, and
+        adding a name here has to be a deliberate edit rather than a
+        profiles key nobody reviewed.
+        """
         if self.data is None:
             self.skipTest("PyYAML not installed")
         for svc in ("stream-binance", "stream-oanda"):
             self.assertIn("streamers",
                           self.data["services"][svc].get("profiles", []))
+        may_be_opt_in = {"ibgateway"}
         for name, svc in self.data["services"].items():
-            if svc.get("profiles") and not name.startswith("stream-"):
+            if (svc.get("profiles") and not name.startswith("stream-")
+                    and name not in may_be_opt_in):
                 self.fail(f"{name} is opt-in but should start with the stack")
 
     def test_data_lives_on_named_volumes(self):

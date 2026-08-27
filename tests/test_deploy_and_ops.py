@@ -163,11 +163,18 @@ class DeploymentStackTests(TestCase):
     def test_only_the_streamers_are_opt_in(self):
         """Backups deliberately are NOT. "Optional extras" is the wrong
         category for the only thing standing between a disk failure and
-        losing every trade, position and credential the platform recorded."""
+        losing every trade, position and credential the platform recorded.
+
+        A service earns a profile only when it needs credentials the
+        operator may not have yet and would restart-loop without them:
+        the streamers, and IB Gateway, which cannot log in without an
+        IBKR username. The allowlist keeps that a deliberate decision.
+        """
+        may_be_opt_in = {"ibgateway"}
         for name, svc in self.services.items():
             if name.startswith("stream-"):
                 self.assertTrue(svc.get("profiles"), name)
-            else:
+            elif name not in may_be_opt_in:
                 self.assertFalse(svc.get("profiles"),
                                  msg=f"{name} must start with the stack")
 

@@ -205,10 +205,52 @@ the delayed public feeds:
 | crypto           | Binance | live-endpoint spot key (read-only is enough) |
 | options, cfd     | IBKR    | must be reachable from inside the container  |
 
-> IBKR: `127.0.0.1:7497` means *the container itself*. Use
-> `host.docker.internal` (add
-> `extra_hosts: ["host.docker.internal:host-gateway"]` to the service) or the
-> box's LAN address.
+> IBKR: `127.0.0.1:7497` means *the container itself* — the one place
+> nothing is listening. Two ways to give it a real address:
+
+**Run Gateway in the stack (recommended).** Put your IBKR login in `.env`
+and start the profile:
+
+```bash
+./deploy/dc --profile ibkr up -d
+```
+
+The admin form's host field is then just `ibgateway`, with port `4002`
+for paper or `4001` for live. No bridge address to look up, no `ufw` rule
+for the docker subnet, no virtual display, no trusted-IP list. The image
+bundles IB Gateway with IBC, which performs the login the dialog would
+otherwise wait on forever. The socket is reachable from the compose
+network and from nowhere else — 4001/4002 accept unauthenticated,
+unencrypted orders, so they are deliberately never published to the host.
+
+**Or run Gateway on the box.** The host field is then
+`host.docker.internal` (the compose anchor declares it), or the compose
+network's gateway address:
+
+```bash
+docker network inspect sauron_default --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'
+```
+
+Note this is NOT the `docker0` address from `ip addr` — compose builds its
+own network. Gateway must also accept it: **Configuration → API →
+Settings**, untick *Allow connections from localhost only*, and add that
+address to **Trusted IPs**. A host firewall that DROPs the docker subnet
+shows up as a connection TIMEOUT rather than a refusal.
+
+Either way, verify from inside the container before trusting the form —
+this is the only test that answers the question:
+
+```bash
+./deploy/dc exec web python -c "import socket; socket.create_connection(('ibgateway', 4002), 5); print('reachable')"
+```
+
+**One session per IBKR username.** Logging into the IBKR portal or the
+mobile app with the same credentials kicks Gateway out mid-session. Use
+the paper username for Gateway and keep the live one for the portal.
+`TRADING_MODE` decides which account Gateway logs into and the PORT
+decides which one Sauron talks to — paper with 4002, live with 4001. Set
+one without the other and the socket never answers, which looks exactly
+like a network fault.
 
 Symbols must match the seeded `Instrument.symbol` spelling exactly — `EURUSD`
 not `EUR_USD`, `BTCUSD` not `BTCUSDT`, `GOOGL` not `GOOG`. An unrecognised

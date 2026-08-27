@@ -27,6 +27,14 @@ x-django: &django
     context: ..
     dockerfile: Dockerfile.prod
   env_file: ../.env
+  # The runbook tells an operator to point IBKR at `host.docker.internal`
+  # when TWS or Gateway runs on the box rather than in a container — and
+  # that name resolved to nothing, because this anchor never declared it.
+  # `host-gateway` is Docker's own alias for the host as seen from a
+  # container. Harmless when unused, and it is the difference between a
+  # documented instruction working and timing out.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   environment:
     # Every service MUST share one Redis: the streamers publish into a
     # pub/sub channel that the web process subscribes to for browser
@@ -178,6 +186,38 @@ services:
     <<: *django
     command: python manage.py stream_finnhub
     profiles: ["streamers"]
+
+  # ── IB Gateway (opt-in: --profile ibkr) ────────────────────────────────
+  # IBKR speaks a socket, not an API key, so something has to be logged in
+  # and listening. Running it HERE rather than on the host is what makes
+  # `ibgateway` the answer to the admin form's host field: no bridge IP to
+  # look up, no ufw rule for the docker subnet, no Xvfb, and no trusted-IP
+  # list. The image bundles Gateway with IBC, which types the login the
+  # dialog would otherwise wait on forever.
+  #
+  # Plain interpolation with a default, NOT a required-variable marker:
+  # compose interpolates this whole file at parse time, so demanding a
+  # variable here would refuse to start the STACK for every operator who
+  # does not use IBKR — including everyone who never opts into this
+  # profile at all.
+  #
+  # `ports` is deliberately absent. 4001/4002 accept unauthenticated,
+  # unencrypted orders from anyone who can reach them — they belong on the
+  # compose network and nowhere else. Sauron reaches this by service name.
+  #
+  # TRADING_MODE and the port the bot connects to must AGREE: paper with
+  # 4002, live with 4001. Mismatched, the socket simply never answers and
+  # it looks exactly like a network fault.
+  ibgateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    restart: unless-stopped
+    profiles: ["ibkr"]
+    environment:
+      TWS_USERID: ${IBKR_USERNAME:-}
+      TWS_PASSWORD: ${IBKR_PASSWORD:-}
+      TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
+      READ_ONLY_API: "no"
+      TIME_ZONE: ${TZ:-UTC}
 
   # ── Nightly offsite backup — runs by default, deliberately ─────────────
   # A dump that lives on the same disk as the database is not a backup.
