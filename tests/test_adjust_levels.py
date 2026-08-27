@@ -243,3 +243,49 @@ class TheEndpointGuardsLiveMoneyTests(_Base):
         t = self._trade()
         self.assertEqual(
             self.client.get(f"/positions/{t.pk}/levels/").status_code, 405)
+
+
+class TheEditorActuallyReachesThePageTests(_Base):
+    """The first version shipped with the script tag AFTER the final
+    endblock. Django discards anything outside a block in an extending
+    template, silently — the file read correctly, the endpoint worked,
+    every service test passed, and clicking the cell did nothing.
+
+    So these assert the rendered PAGE, not the template source.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.user)
+
+    def _page(self):
+        return self.client.get("/positions/").content.decode()
+
+    def test_the_script_is_served(self):
+        self.assertIn("sv-level-edit.js", self._page())
+
+    def test_an_open_position_renders_an_edit_button(self):
+        self._trade()
+        body = self._page()
+        self.assertIn('class="lvl-edit"', body)
+        self.assertIn("data-lvl-trade=", body)
+
+    def test_the_button_carries_what_the_dialog_needs(self):
+        self._trade()
+        body = self._page()
+        for attr in ("data-lvl-stop=", "data-lvl-target=",
+                     "data-lvl-decimals=", "data-lvl-live=",
+                     "data-lvl-protected="):
+            self.assertIn(attr, body, attr)
+
+    def test_a_live_row_is_marked_so_the_dialog_asks_for_a_pin(self):
+        self._trade(paper=False)
+        self.assertIn('data-lvl-live="1"', self._page())
+
+    def test_a_bracketed_row_is_marked_so_the_dialog_warns(self):
+        self._trade(metadata={"initial_stop_loss": 80.0, "protected": True})
+        self.assertIn('data-lvl-protected="1"', self._page())
+
+    def test_a_closed_row_gets_no_button(self):
+        self._trade(status="CLOSED")
+        self.assertNotIn('class="lvl-edit"', self._page())

@@ -1515,6 +1515,12 @@ def _live_row(row, stops):
         "stop_loss": row.stop_loss,
         "initial_stop": stop,
         "take_profit": row.take_profit,
+        # Whether the stop RESTS AT THE BROKER. The level editor warns
+        # before an edit that has to be accepted by the venue, and the
+        # row is the only place that knows — reading trade.metadata from
+        # the template gets nothing, because these rows are dicts built
+        # from a slotted UnifiedPosition, not the trade itself.
+        "protected": bool(getattr(row, "protected", False)),
         "unrealized_pnl": pnl,
         "unrealized_pnl_pct": pct,
         "last_text": _live_num(mark, "{:,.4f}"),

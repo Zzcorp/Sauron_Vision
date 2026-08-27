@@ -154,7 +154,14 @@ class UnifiedPosition:
                  "unrealized_pnl", "unrealized_pnl_pct",
                  "pnl_on_capital_pct", "opened_at",
                  "closed_at", "strategy", "source", "paper",
-                 "trade_id", "status", "bar_pct")
+                 "trade_id", "status", "bar_pct",
+                 # Whether the stop RESTS AT THE BROKER. The positions page
+                 # needs it to tell the operator, before they edit a level,
+                 # that the change has to be accepted by the venue — and a
+                 # slotted class refuses an attribute it never declared, so
+                 # a template reading trade.metadata directly would silently
+                 # get nothing. Position rows have no brokered stop at all.
+                 "protected")
 
 
 def is_option_row(trade) -> bool:
@@ -343,6 +350,7 @@ def _trade_to_position(trade, instruments, quotes):
     up.paper = trade.paper
     up.trade_id = trade.id
     up.status = trade.status
+    up.protected = bool((trade.metadata or {}).get("protected"))
 
     entry = float(trade.entry_price or 0)
     qty = float(trade.qty or 0)

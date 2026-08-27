@@ -1086,6 +1086,11 @@ a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
     });
 })();
 </script>
-{% endblock %}
-{% load static %}
+{% comment %}
+Inside extra_js, not after it. A tag appended past the
+final endblock of an EXTENDING template is discarded
+silently by Django — the file looks right and the page
+never loads the script.
+{% endcomment %}
 <script src="{% static 'js/sv-level-edit.js' %}"></script>
+{% endblock %}
