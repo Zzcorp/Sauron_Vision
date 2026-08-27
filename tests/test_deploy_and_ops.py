@@ -170,11 +170,11 @@ class DeploymentStackTests(TestCase):
         the streamers, and IB Gateway, which cannot log in without an
         IBKR username. The allowlist keeps that a deliberate decision.
         """
-        may_be_opt_in = {"ibgateway"}
+        may_be_opt_in_prefix = "ibgateway"
         for name, svc in self.services.items():
             if name.startswith("stream-"):
                 self.assertTrue(svc.get("profiles"), name)
-            elif name not in may_be_opt_in:
+            elif not name.startswith(may_be_opt_in_prefix):
                 self.assertFalse(svc.get("profiles"),
                                  msg=f"{name} must start with the stack")
 

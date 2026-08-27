@@ -3963,7 +3963,31 @@ function toggleSidebar() {
 
   // Info panel hover arrows (scrollLeft-based because the panel uses native overflow)
   var ipScroll = document.getElementById('ipScroll');
+  /* A wheel over a horizontal strip should move it sideways.
+
+     Two details make this feel right rather than merely work. A mouse
+     reports deltaY and a trackpad swipe reports deltaX, so whichever is
+     larger is the gesture the operator made. And the wheel is only
+     CLAIMED when the strip actually moved: at either end it falls
+     through to the page, so reaching the last cell does not trap the
+     scroll and leave the operator stuck on a strip 48 pixels tall. */
+  function svWheelScrollsSideways(el) {
+    if (!el || el._svWheel) return;
+    el._svWheel = true;
+    el.addEventListener('wheel', function (e) {
+      var max = el.scrollWidth - el.clientWidth;
+      if (max <= 1) return;
+      var delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (!delta) return;
+      var before = el.scrollLeft;
+      el.scrollLeft = Math.max(0, Math.min(max, before + delta));
+      if (el.scrollLeft !== before) e.preventDefault();
+    }, { passive: false });
+  }
+  window.svWheelScrollsSideways = svWheelScrollsSideways;
+
   if (ipScroll) {
+    svWheelScrollsSideways(ipScroll);
     var ipTimer = 0;
     var ipArrowL = document.querySelector('.info-panel-wrap .ip-arrow.left');
     var ipArrowR = document.querySelector('.info-panel-wrap .ip-arrow.right');

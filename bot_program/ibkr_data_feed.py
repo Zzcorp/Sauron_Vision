@@ -76,11 +76,16 @@ def refresh_ibkr_data_for_user(user_id: int, *,
         return {"skipped": "no_symbols"}
 
     if _client is None:
-        from .engine.ibkr_client import IBKRTrader, is_ibkr_available
+        from .engine.ibkr_client import (
+            IBKRTrader, is_ibkr_available, purpose_client_id,
+        )
         if not is_ibkr_available():
             return {"skipped": "ib_insync_missing"}
+        # A bar refresh must never evict the trader — see
+        # IBKRTrader.CLIENT_ID_PURPOSE_OFFSET.
         client = IBKRTrader(
-            host=acct.host, port=acct.port, client_id=acct.client_id,
+            host=acct.host, port=acct.port,
+            client_id=purpose_client_id(acct.client_id, "data"),
             account_id=acct.get_account_id() or "", paper=acct.paper,
         )
     else:

@@ -22,6 +22,10 @@
 
 name: sauron
 
+x-ibgateway: &ibgateway
+  image: ghcr.io/gnzsnz/ib-gateway:stable
+  restart: unless-stopped
+
 x-django: &django
   build:
     context: ..
@@ -187,7 +191,7 @@ services:
     command: python manage.py stream_finnhub
     profiles: ["streamers"]
 
-  # ── IB Gateway (opt-in: --profile ibkr) ────────────────────────────────
+  # ── IB Gateway (opt-in: --profile ibkr … ibkr5) ────────────────────────
   # IBKR speaks a socket, not an API key, so something has to be logged in
   # and listening. Running it HERE rather than on the host is what makes
   # `ibgateway` the answer to the admin form's host field: no bridge IP to
@@ -195,27 +199,73 @@ services:
   # list. The image bundles Gateway with IBC, which types the login the
   # dialog would otherwise wait on forever.
   #
+  # ONE SESSION PER IBKR USERNAME — that is IBKR's rule, not ours, and it
+  # is why separate logins need separate containers rather than separate
+  # rows. Accounts UNDER one login do not: `managedAccounts()` lists them
+  # and `order.account` picks per order, so one Gateway serves all of them
+  # and `IBKRAccount.account_id` is what decides where a trade lands.
+  #
+  # A SLOT PER LOGIN, each behind its own profile, so an operator starts
+  # exactly the ones they have credentials for. Defining five and running
+  # one would leave four containers restart-looping on an empty username.
+  # Add a sixth by copying six lines; the anchor holds everything that
+  # does not vary.
+  #
+  # `ports` is deliberately absent everywhere. 4001/4002 accept
+  # unauthenticated, unencrypted orders from anyone who can reach them —
+  # they belong on the compose network and nowhere else.
+  #
   # Plain interpolation with a default, NOT a required-variable marker:
-  # compose interpolates this whole file at parse time, so demanding a
-  # variable here would refuse to start the STACK for every operator who
-  # does not use IBKR — including everyone who never opts into this
-  # profile at all.
-  #
-  # `ports` is deliberately absent. 4001/4002 accept unauthenticated,
-  # unencrypted orders from anyone who can reach them — they belong on the
-  # compose network and nowhere else. Sauron reaches this by service name.
-  #
-  # TRADING_MODE and the port the bot connects to must AGREE: paper with
-  # 4002, live with 4001. Mismatched, the socket simply never answers and
-  # it looks exactly like a network fault.
+  # compose interpolates this whole file BEFORE it looks at profiles, so
+  # demanding a variable here would refuse to start the STACK for every
+  # operator who never opts in.
   ibgateway:
-    image: ghcr.io/gnzsnz/ib-gateway:stable
-    restart: unless-stopped
+    <<: *ibgateway
     profiles: ["ibkr"]
     environment:
       TWS_USERID: ${IBKR_USERNAME:-}
       TWS_PASSWORD: ${IBKR_PASSWORD:-}
       TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
+      READ_ONLY_API: "no"
+      TIME_ZONE: ${TZ:-UTC}
+
+  ibgateway-2:
+    <<: *ibgateway
+    profiles: ["ibkr2"]
+    environment:
+      TWS_USERID: ${IBKR2_USERNAME:-}
+      TWS_PASSWORD: ${IBKR2_PASSWORD:-}
+      TRADING_MODE: ${IBKR2_TRADING_MODE:-paper}
+      READ_ONLY_API: "no"
+      TIME_ZONE: ${TZ:-UTC}
+
+  ibgateway-3:
+    <<: *ibgateway
+    profiles: ["ibkr3"]
+    environment:
+      TWS_USERID: ${IBKR3_USERNAME:-}
+      TWS_PASSWORD: ${IBKR3_PASSWORD:-}
+      TRADING_MODE: ${IBKR3_TRADING_MODE:-paper}
+      READ_ONLY_API: "no"
+      TIME_ZONE: ${TZ:-UTC}
+
+  ibgateway-4:
+    <<: *ibgateway
+    profiles: ["ibkr4"]
+    environment:
+      TWS_USERID: ${IBKR4_USERNAME:-}
+      TWS_PASSWORD: ${IBKR4_PASSWORD:-}
+      TRADING_MODE: ${IBKR4_TRADING_MODE:-paper}
+      READ_ONLY_API: "no"
+      TIME_ZONE: ${TZ:-UTC}
+
+  ibgateway-5:
+    <<: *ibgateway
+    profiles: ["ibkr5"]
+    environment:
+      TWS_USERID: ${IBKR5_USERNAME:-}
+      TWS_PASSWORD: ${IBKR5_PASSWORD:-}
+      TRADING_MODE: ${IBKR5_TRADING_MODE:-paper}
       READ_ONLY_API: "no"
       TIME_ZONE: ${TZ:-UTC}
 

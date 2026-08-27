@@ -433,10 +433,12 @@ def test_ibkr_connection(request):
             f"Re-save the credentials to reconnect.")
         return redirect("admin_dashboard")
 
-    from bot_program.engine.ibkr_client import IBKRTrader
+    from bot_program.engine.ibkr_client import IBKRTrader, purpose_client_id
+    # A probe from the web container must not evict a running trader.
     reachable = _broker_ping(
         lambda: IBKRTrader(host=acct.host, port=acct.port,
-                           client_id=acct.client_id, account_id=account_id,
+                           client_id=purpose_client_id(acct.client_id, "probe"),
+                           account_id=account_id,
                            paper=acct.paper), "IBKR")
 
     acct.connected = reachable
@@ -507,6 +509,24 @@ def save_ibkr_credentials(request):
     # meaningful for rows edited elsewhere (Django admin), which is now
     # the only way the two can diverge.
     paper = port in IBKRAccount.PAPER_PORTS
+    # The Gateway LOGIN. Sauron never authenticates to IBKR — it connects
+    # to a socket that is already logged in — so these exist only so IBC
+    # can sign the container in at boot. Stored encrypted here rather than
+    # typed into .env, and rendered out by `manage.py render_ibkr_env`.
+    #
+    # BLANK MEANS KEEP. Nobody should have to retype a brokerage password
+    # to change a routing checkbox, and a form that silently cleared the
+    # credential would take the Gateway down on its next restart.
+    ibkr_username = request.POST.get("ibkr_username", "").strip()
+    ibkr_password = request.POST.get("ibkr_password", "")
+    try:
+        gateway_slot = int(request.POST.get("gateway_slot", "1") or 1)
+    except ValueError:
+        gateway_slot = 1
+    if not 1 <= gateway_slot <= 5:
+        messages.error(request, "IBKR: gateway slot must be between 1 and 5.")
+        return redirect("admin_dashboard")
+
     primary_stocks = request.POST.get("primary_for_stocks") == "on"
     primary_forex = request.POST.get("primary_for_forex") == "on"
     primary_options = request.POST.get("primary_for_options") == "on"
@@ -525,6 +545,8 @@ def save_ibkr_credentials(request):
 
     acct, _ = IBKRAccount.objects.get_or_create(user=user)
     acct.set_credentials(account_id)
+    acct.set_login(ibkr_username, ibkr_password)
+    acct.gateway_slot = gateway_slot
     acct.host = host
     acct.port = port
     acct.client_id = client_id
@@ -537,14 +559,30 @@ def save_ibkr_credentials(request):
     # IBKR's ping() proves the TWS/Gateway socket answers — NOT that the
     # account id is valid (that is all ib_insync exposes cheaply). The
     # message says which of the two was checked.
-    from bot_program.engine.ibkr_client import IBKRTrader
+    from bot_program.engine.ibkr_client import IBKRTrader, purpose_client_id
     acct.connected = _broker_ping(
-        lambda: IBKRTrader(host=host, port=port, client_id=client_id,
+        lambda: IBKRTrader(host=host, port=port,
+                           client_id=purpose_client_id(client_id, "probe"),
                            account_id=account_id, paper=paper), "IBKR")
     if acct.connected:
         from django.utils import timezone
         acct.last_sync = timezone.now()
     acct.save()
+
+    # A container reads its environment ONCE, at boot. Saying so here is
+    # the difference between "I saved it and nothing happened" and a step
+    # the operator knows they still owe — and the restart stays theirs,
+    # because bouncing a Gateway drops a live session that may have
+    # positions behind it.
+    if ibkr_username or ibkr_password:
+        suffix = "" if gateway_slot == 1 else str(gateway_slot)
+        messages.info(
+            request,
+            f"Gateway login stored for slot {gateway_slot} "
+            f"({acct.gateway_host}). It reaches the container on its next "
+            f"start: run `manage.py render_ibkr_env --write`, then "
+            f"`./deploy/dc --profile ibkr{suffix} up -d {acct.gateway_host}` "
+            f"when no position is open on it.")
 
     # The PORT decides, not the checkbox. The checkbox is documented on the
     # model as informational and the socket is what actually selects the

@@ -410,7 +410,27 @@ the broker, and the bot that would have honoured their stops switched off.
                 live mode and armed before anything is submitted.
             </p>
 
-            <input type="number" name="ibkr_client_id" value="1" min="0" placeholder="Client ID" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            {% comment %}
+            The Gateway login. Sauron never authenticates to IBKR — it
+            connects to a socket that is already logged in — so these sign
+            the CONTAINER in, and reach it on its next start rather than on
+            save. Blank leaves whatever is stored, so changing a routing
+            checkbox never costs a retyped password.
+            {% endcomment %}
+            <label class="ib-field-label" for="ibkrUser">Gateway login — signs the container in, applied on its next start</label>
+            <input id="ibkrUser" type="text" name="ibkr_username" autocomplete="off" placeholder="IBKR username (blank = keep stored)" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="password" name="ibkr_password" autocomplete="new-password" placeholder="IBKR password (blank = keep stored)" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+
+            <label class="ib-field-label" for="ibkrSlot">Gateway slot — one per LOGIN, shared by accounts under it</label>
+            <select id="ibkrSlot" name="gateway_slot" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+                <option value="1" selected>1 — ibgateway</option>
+                <option value="2">2 — ibgateway-2</option>
+                <option value="3">3 — ibgateway-3</option>
+                <option value="4">4 — ibgateway-4</option>
+                <option value="5">5 — ibgateway-5</option>
+            </select>
+
+            <input type="number" name="ibkr_client_id" value="1" min="0" placeholder="Client ID (unique per account, under 100)" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
 
             <div class="ib-routing">
                 <span class="ib-field-label">Route these through IBKR</span>

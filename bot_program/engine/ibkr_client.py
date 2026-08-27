@@ -92,6 +92,19 @@ BAR_SIZE_MAP = {
 }
 
 
+def purpose_client_id(base, purpose: str) -> int:
+    """A distinct clientId per (account, purpose).
+
+    See IBKRTrader.CLIENT_ID_PURPOSE_OFFSET. Bases must be distinct
+    across accounts and below 100, which the admin form documents.
+    """
+    try:
+        n = int(base)
+    except (TypeError, ValueError):
+        n = 1
+    return n + IBKRTrader.CLIENT_ID_PURPOSE_OFFSET.get(purpose, 0)
+
+
 def is_ibkr_available() -> bool:
     """True when `ib_insync` is importable. Does NOT check TWS connectivity."""
     return _IB_AVAILABLE
@@ -372,6 +385,22 @@ class IBKRTrader:
             for entry in (getattr(trade, "log", None) or [])
             if getattr(entry, "message", ""))
         return f"broker_rejected: {(notes or status)[:300]}"
+
+    # Every concurrent connection to one Gateway needs its OWN clientId:
+    # connect twice with the same one and IBKR EVICTS the earlier holder.
+    # Sauron opens sockets from at least three places at once — the
+    # trading router on a worker, the bar/quote feed on another worker,
+    # and an operator clicking "test connection" on the web container —
+    # and all three passed the configured id verbatim. So a routine bar
+    # refresh could drop the trader mid-tick, and a test-connection click
+    # could knock out a live session, in a way that reads as a flaky
+    # broker rather than as us.
+    #
+    # The configured number is now a BASE and keeps its old meaning for
+    # trading, so nothing an operator already set has to change. Purposes
+    # are spaced 100 apart, which leaves room for bases 1..99 — far more
+    # accounts than the five Gateway slots compose ships.
+    CLIENT_ID_PURPOSE_OFFSET = {"trade": 0, "data": 100, "probe": 200}
 
     def _bind_order_account(self, order) -> "Optional[str]":
         """Stamp `order.account` with this trader's account, or name the

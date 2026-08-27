@@ -135,7 +135,11 @@ class IBKRAccount(models.Model):
     port = models.IntegerField(default=7497,
         help_text="7497=TWS paper, 7496=TWS live, 4002=Gateway paper, 4001=Gateway live.")
     client_id = models.IntegerField(default=1,
-        help_text="API client ID. Allows multiple connections to the same TWS.")
+        help_text="BASE API client ID — must be UNIQUE per account and below "
+                  "100. Sauron opens several sockets at once (trading, data "
+                  "feed, connection test) and derives a distinct id for each "
+                  "from this number; IBKR evicts the earlier holder when two "
+                  "connections share one.")
     account_id_enc = models.TextField(blank=True)
 
     paper = models.BooleanField(default=True,
@@ -157,10 +161,65 @@ class IBKRAccount(models.Model):
     last_balance_usd = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # The Gateway LOGIN. Sauron itself never authenticates to IBKR — it
+    # connects to a socket that is already logged in — so these exist
+    # only so IBC can sign the Gateway container in at boot. They live
+    # here rather than in .env because the database is the one place
+    # that is encrypted at rest, backed up, and editable by the account's
+    # owner; `render_ibkr_env` writes them out when a slot is (re)started.
+    username_enc = models.TextField(blank=True)
+    password_enc = models.TextField(blank=True)
+
+    # Which Gateway container serves this login. IBKR permits ONE session
+    # per username, so separate logins need separate containers — but
+    # accounts UNDER one login share a slot, and `account_id` is what
+    # decides where an order lands. 1 is `ibgateway`, 2 is `ibgateway-2`.
+    gateway_slot = models.PositiveSmallIntegerField(
+        default=1,
+        help_text="Which ibgateway container serves this login (1-5). "
+                  "Logins that differ need different slots; accounts under "
+                  "the SAME login should share one.")
+
     def set_credentials(self, account_id: str):
         """Only the IBKR account ID is encrypted — host/port/client_id are not secret."""
         f = _fernet()
         self.account_id_enc = f.encrypt(account_id.encode()).decode()
+
+    def set_login(self, username: str, password: str):
+        """Store the Gateway login. Blank leaves the stored value alone.
+
+        Blank-means-keep matters on a form nobody wants to retype a
+        password into: an edit to the routing checkboxes must not wipe
+        the credential that logs the container in.
+        """
+        f = _fernet()
+        if username:
+            self.username_enc = f.encrypt(username.encode()).decode()
+        if password:
+            self.password_enc = f.encrypt(password.encode()).decode()
+
+    def get_login(self) -> tuple:
+        """(username, password), either possibly None."""
+        return (_decrypt(self.username_enc) or None if self.username_enc
+                else None,
+                _decrypt(self.password_enc) or None if self.password_enc
+                else None)
+
+    @property
+    def has_login(self) -> bool:
+        return bool(self.username_enc and self.password_enc)
+
+    @property
+    def gateway_host(self) -> str:
+        """The compose service name for this account's slot."""
+        n = int(self.gateway_slot or 1)
+        return "ibgateway" if n <= 1 else f"ibgateway-{n}"
+
+    @property
+    def env_prefix(self) -> str:
+        """The .env variable prefix compose reads for this slot."""
+        n = int(self.gateway_slot or 1)
+        return "IBKR" if n <= 1 else f"IBKR{n}"
 
     def get_account_id(self) -> "str | None":
         if not self.account_id_enc:

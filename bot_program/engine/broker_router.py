@@ -76,8 +76,10 @@ def _ibkr_client_for(user, cfg):
             # socket is the funded one.
             log.info("[router] IBKR account has no id (disconnected?) — paper")
             return _paper_client(cfg)
+        from bot_program.engine.ibkr_client import purpose_client_id
         return IBKRTrader(
-            host=acct.host, port=acct.port, client_id=acct.client_id,
+            host=acct.host, port=acct.port,
+            client_id=purpose_client_id(acct.client_id, "trade"),
             account_id=account_id, paper=acct.paper,
         )
     except Exception as e:

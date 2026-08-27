@@ -234,10 +234,10 @@ class ComposeProdStructureTests(TestCase):
         for svc in ("stream-binance", "stream-oanda"):
             self.assertIn("streamers",
                           self.data["services"][svc].get("profiles", []))
-        may_be_opt_in = {"ibgateway"}
+        may_be_opt_in_prefix = "ibgateway"
         for name, svc in self.data["services"].items():
             if (svc.get("profiles") and not name.startswith("stream-")
-                    and name not in may_be_opt_in):
+                    and not name.startswith(may_be_opt_in_prefix)):
                 self.fail(f"{name} is opt-in but should start with the stack")
 
     def test_data_lives_on_named_volumes(self):
