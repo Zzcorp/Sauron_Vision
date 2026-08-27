@@ -146,6 +146,12 @@ def reconcile_user(user) -> dict:
     return out
 
 
+#: Set on a row that had to be closed with no price available. Its `pnl`
+#: column reads 0.00 because the field is not nullable; this says that zero
+#: is an absence of measurement, not a measurement of zero.
+UNPRICED_EXIT_KEY = "exit_price_unavailable"
+
+
 def _close_as_orphan(trade) -> None:
     """Mark an orphan trade CLOSED at last-known price."""
     # Best-effort exit price: use the broker's ticker, or fall back to
@@ -155,13 +161,16 @@ def _close_as_orphan(trade) -> None:
     from market_data.models import LiveQuote
 
     exit_price = trade.entry_price
+    priced = False           # did anything but the entry price answer?
     if trade.asset_class == "options":
         # trade.symbol is the UNDERLYING — its ticker/LiveQuote is the wrong
         # scale for a premium-denominated trade. Mark at the option's own
         # premium, or entry (zero P&L) when unknown.
         try:
             from bot_program.asset_engine.options_bot import current_premium_for_trade
-            exit_price = current_premium_for_trade(trade) or trade.entry_price
+            premium = current_premium_for_trade(trade)
+            if premium:
+                exit_price, priced = premium, True
         except Exception:
             pass
     else:
@@ -170,7 +179,7 @@ def _close_as_orphan(trade) -> None:
             tk = client.ticker(trade.symbol) or {}
             last = float(tk.get("lastPrice", 0) or 0)
             if last > 0:
-                exit_price = Decimal(str(last))
+                exit_price, priced = Decimal(str(last)), True
         except Exception:
             try:
                 from instruments.models import Instrument
@@ -178,7 +187,7 @@ def _close_as_orphan(trade) -> None:
                 if inst:
                     lq = LiveQuote.objects.filter(instrument=inst).first()
                     if lq and lq.last:
-                        exit_price = lq.last
+                        exit_price, priced = lq.last, True
             except Exception:
                 pass
 
@@ -212,6 +221,16 @@ def _close_as_orphan(trade) -> None:
     # large share of the track record would silently be estimates.
     meta = dict(trade.metadata or {})
     meta["exit_price_inferred"] = True
+    if not priced:
+        # Nothing anywhere could price this exit, so the number booked above
+        # is the ENTRY price and the P&L is a fabricated zero. The row still
+        # closes — an orphan left open forever is its own failure — but it
+        # is marked, and `realized_since` excludes a marked row from the
+        # daily-loss sum instead of counting a real loss as a scratch.
+        meta[UNPRICED_EXIT_KEY] = True
+        logger.error("reconcile: #%s %s closed with NO price available — "
+                     "booked at entry and flagged UNMEASURED, not flat",
+                     trade.id, trade.symbol)
     # A CLOSE_PENDING row arrives here carrying `exit_fill_source: broker`
     # from the partial close that stranded it. The price booked just above is
     # NOT that fill — it is a ticker read taken now, for the whole quantity —

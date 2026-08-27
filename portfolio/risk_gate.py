@@ -365,10 +365,25 @@ def capital_at_work(asset_class: str, notional: float) -> float:
 def open_capital_at_work(user, portfolio) -> dict:
     """Capital tied up by the open book — BOTH books — at entry prices.
 
-    Returns {"total": float, "n": int}. Both halves, because exposure genuinely
-    lives in two places here: `portfolio.Position` and
-    `bot_program.AssetBotTrade` (the bots, TAKE TRADE, the LONG/SHORT
-    buttons). CLOSE_PENDING is counted — the broker position is still on.
+    Returns {"total": float, "n": int} plus the venue split described below.
+    Both halves, because exposure genuinely lives in two places here:
+    `portfolio.Position` and `bot_program.AssetBotTrade` (the bots, TAKE
+    TRADE, the LONG/SHORT buttons). CLOSE_PENDING is counted — the broker
+    position is still on.
+
+    LIVE and PAPER capital are counted apart and NEVER added. `paper` is not a
+    property of a config an operator can reason about from the outside: a LIVE
+    config runs its paper-stage rules on the paper venue at full nominal size
+    (`paper = mode == "paper" or stage["force_paper"]`), and every hand-taken
+    TAKE TRADE writes `paper=True` today, so one user's book routinely carries
+    both at once. Adding them let five simulated positions eat a ceiling that
+    exists to bound real money and refuse the live entry behind them. The
+    ceiling is applied to each venue on its own instead — `total` is whichever
+    binds — so neither venue can spend the other's room.
+
+    Position rows carry no venue flag of their own and are counted as live:
+    they describe holdings at a real broker, which is what the operator
+    entered them for.
 
     The Position rows reaching this are the setup form's and the eToro sync's,
     and only those: both write to the shared no-user "Main" row `limits_book`
@@ -392,16 +407,23 @@ def open_capital_at_work(user, portfolio) -> dict:
     from portfolio.models import Position
     from portfolio.services import value_per_unit
 
-    total = 0.0
-    n = 0
+    live_total = 0.0
+    live_n = 0
+    paper_total = 0.0
+    paper_n = 0
     for trade in AssetBotTrade.objects.filter(
             config__user=user,
             status__in=("OPEN", "CLOSE_PENDING")).only(
-                "asset_class", "entry_price", "qty", "metadata"):
+                "asset_class", "entry_price", "qty", "metadata", "paper"):
         notional = (float(trade.entry_price or 0) * float(trade.qty or 0)
                     * value_per_unit(trade))
-        total += capital_at_work(trade.asset_class, notional)
-        n += 1
+        at_work = capital_at_work(trade.asset_class, notional)
+        if trade.paper:
+            paper_total += at_work
+            paper_n += 1
+            continue
+        live_total += at_work
+        live_n += 1
 
     # The legacy half is counted, AND its age is carried out with it.
     #
@@ -433,10 +455,19 @@ def open_capital_at_work(user, portfolio) -> dict:
         legacy_n += 1
         if pos.opened_at and (oldest is None or pos.opened_at < oldest):
             oldest = pos.opened_at
-    total += legacy_total
-    n += legacy_n
+    live_total += legacy_total
+    live_n += legacy_n
 
-    return {"total": round(total, 2), "n": n,
+    # `total` is what the ceiling is judged against: the LARGER venue, not the
+    # sum. Both figures travel out so a refusal can name which book filled the
+    # ceiling — "you are fully invested" and "your paper experiment is holding
+    # your live ceiling" are different sentences and the operator acts on them
+    # differently.
+    paper_binds = paper_total > live_total
+    return {"total": round(paper_total if paper_binds else live_total, 2),
+            "n": paper_n if paper_binds else live_n,
+            "live_total": round(live_total, 2), "live_n": live_n,
+            "paper_total": round(paper_total, 2), "paper_n": paper_n,
             "legacy_total": round(legacy_total, 2), "legacy_n": legacy_n,
             "legacy_oldest": oldest}
 
@@ -445,11 +476,22 @@ def realized_since(user, portfolio, *, hours: int = DAILY_LOSS_WINDOW_HOURS,
                    now=None) -> dict:
     """Realized P&L over the trailing window, across BOTH position books.
 
-    Returns {"realized": float | None, "n": int, "unmeasured": int,
-    "since": datetime}. `realized` is None when nothing in the window could be
-    measured and something was there to measure — an unmeasurable book is
-    unknown, not flat, and a confident 0.00 is how a losing day gets waved
-    through.
+    Returns {"realized": float | None, "live_realized", "paper_realized",
+    "n": int, "unmeasured": int, "since": datetime}. `realized` is None when
+    nothing in the window could be measured and something was there to measure
+    — an unmeasurable book is unknown, not flat, and a confident 0.00 is how a
+    losing day gets waved through.
+
+    LIVE and PAPER closes are measured apart and NEVER netted, and `realized`
+    is the WORSE of the two venues rather than their sum. Netting them was a
+    hole big enough to drive the whole card through: a live config runs its
+    paper-stage rules at full nominal size and every hand-taken TAKE TRADE is
+    paper today, so a book that lost 2,400 of real money while simulated rules
+    booked +2,600 reported +200 realized, the card read green, and every bot
+    kept opening while the real account fell. Simulated profit cannot pay for a
+    real loss, so it is not allowed to. Nor is the reverse arithmetic — two
+    venues each 200 down are not a 400-down day on a book that only lost the
+    live 200.
 
     The bot half is `AssetBotTrade.pnl` over `status="CLOSED"` inside the
     window, which on the live clock is the query `AssetBot.can_open_new` runs
@@ -492,15 +534,29 @@ def realized_since(user, portfolio, *, hours: int = DAILY_LOSS_WINDOW_HOURS,
     now = now or timezone.now()
     since = now - timedelta(hours=hours)
 
-    realized = 0.0
-    n = 0
+    live = 0.0
+    live_n = 0
+    paper = 0.0
+    paper_n = 0
     unmeasured = 0
 
     for trade in AssetBotTrade.objects.filter(
             config__user=user, status="CLOSED",
-            closed_at__gte=since, closed_at__lte=now).only("pnl"):
-        realized += float(trade.pnl or 0)
-        n += 1
+            closed_at__gte=since,
+            closed_at__lte=now).only("pnl", "paper", "metadata"):
+        # A row reconciliation had to close with no price available carries a
+        # fabricated 0.00 in a column that cannot hold NULL. Summing it would
+        # book a real stop-out as a scratch — invisible to this floor, which
+        # is the one number an operator trusts to stop the day.
+        if (trade.metadata or {}).get("exit_price_unavailable"):
+            unmeasured += 1
+            continue
+        if trade.paper:
+            paper += float(trade.pnl or 0)
+            paper_n += 1
+            continue
+        live += float(trade.pnl or 0)
+        live_n += 1
 
     for pos in Position.objects.filter(portfolio=portfolio,
                                        closed_at__gte=since,
@@ -512,13 +568,23 @@ def realized_since(user, portfolio, *, hours: int = DAILY_LOSS_WINDOW_HOURS,
             unmeasured += 1
             continue
         sign = -1 if (pos.direction or "").lower() in ("short", "sell") else 1
-        realized += (exit_mark - entry) * qty * sign
-        n += 1
+        live += (exit_mark - entry) * qty * sign
+        live_n += 1
 
+    n = live_n + paper_n
+    # A venue with nothing closed in it is not a 0.00 to be compared against
+    # the other: on a book that only trades live, "min(live, paper)" with an
+    # empty paper side would report a +500 day as a flat one. Only venues that
+    # actually closed something are candidates.
+    venues = [v for v, count in ((live, live_n), (paper, paper_n)) if count]
     return {
         # Nothing closed at all IS a measurement (no loss). Rows that closed
         # and none of them measurable is not.
-        "realized": round(realized, 2) if (n or not unmeasured) else None,
+        "realized": (round(min(venues), 2) if venues else 0.0)
+                    if (n or not unmeasured) else None,
+        "live_realized": round(live, 2) if (n or not unmeasured) else None,
+        "paper_realized": round(paper, 2) if (n or not unmeasured) else None,
+        "live_n": live_n, "paper_n": paper_n,
         "n": n, "unmeasured": unmeasured, "since": since,
     }
 
@@ -527,10 +593,16 @@ def daily_loss_state(user, *, portfolio=None, now=None) -> dict:
     """Where the book stands against MAX DAILY LOSS. Never raises on data.
 
     {"ok", "reason", "limit_pct", "limit_money", "realized", "book_value",
-     "unmeasured", "measured"}
+     "unmeasured", "measured", "live_realized", "paper_realized"}
 
     `ok` False is a hard refusal: this is the one number on the card an
     operator reads as "the platform stops here".
+
+    `realized` is the worse of the live and paper venues, never their sum —
+    see `realized_since`. The floor therefore binds each venue on its own, and
+    the reason names both whenever both closed something, because "you are
+    down 2,400 of real money" and "your paper experiment is down 2,400" are
+    the same refusal wearing very different consequences.
     """
     portfolio = portfolio if portfolio is not None else limits_book()
     limit_pct = _limit_pct(portfolio, "max_daily_loss_pct")
@@ -552,6 +624,8 @@ def daily_loss_state(user, *, portfolio=None, now=None) -> dict:
     limit_money = -book * limit_pct / 100.0
     state["limit_money"] = round(limit_money, 2)
     state["realized"] = window["realized"]
+    state["live_realized"] = window["live_realized"]
+    state["paper_realized"] = window["paper_realized"]
     state["unmeasured"] = window["unmeasured"]
     state["measured"] = window["realized"] is not None
 
@@ -565,33 +639,68 @@ def daily_loss_state(user, *, portfolio=None, now=None) -> dict:
 
     blind = (f" ({window['unmeasured']} further close(s) had no price and are "
              f"not in this figure)") if window["unmeasured"] else ""
+    # Both venues named the moment any simulated close is in the window.
+    # Without it the operator reads one number and cannot tell whether the
+    # platform stopped because their money is gone or because a simulation is.
+    split = ""
+    if window["paper_n"]:
+        split = (f" (live {window['live_realized']:,.2f}, paper "
+                 f"{window['paper_realized']:,.2f} — measured apart, never "
+                 f"netted)")
     if window["realized"] <= limit_money:
         state["ok"] = False
         state["reason"] = (
             f"daily loss limit hit: {window['realized']:,.2f} realized in the "
             f"last {DAILY_LOSS_WINDOW_HOURS}h against a "
             f"{limit_money:,.2f} floor ({limit_pct:g}% of the "
-            f"{book:,.2f} book){blind}")
+            f"{book:,.2f} book){split}{blind}")
         return state
 
     state["reason"] = (
         f"{window['realized']:,.2f} realized in the last "
-        f"{DAILY_LOSS_WINDOW_HOURS}h, floor {limit_money:,.2f}{blind}")
+        f"{DAILY_LOSS_WINDOW_HOURS}h, floor {limit_money:,.2f}{split}{blind}")
     return state
 
 
-def exposure_state(user, *, portfolio=None) -> dict:
+def exposure_state(user, *, portfolio=None, adding: float = 0.0,
+                   venue: str = "") -> dict:
     """Where the book stands against MAX TOTAL EXPOSURE. Never raises on data.
 
     {"ok", "reason", "limit_pct", "cap_money", "committed", "n_open",
      "headroom", "book_value"}
+
+    Live and paper capital are judged separately (see `open_capital_at_work`);
+    `committed` is whichever venue binds, and the reason names the other.
+
+    `venue` is "live" or "paper" when a SPECIFIC entry is being judged, and
+    empty for the display call that describes the book as a whole. It is
+    what stops a simulation spending real money's room: `open_capital_at_work`
+    reports the two venues apart and `committed` defaults to whichever is
+    larger, which is the right summary for a card — but judging a LIVE entry
+    against it means five paper positions can refuse a real one, which is the
+    same defect as the netting this split was written to remove, pointed the
+    other way. With a venue named, the ceiling binds that venue's own capital
+    and the reason still names the other.
+
+    `adding` is the CAPITAL AT WORK of the position about to be opened, and
+    passing it turns this from "am I already over?" into "would this put me
+    over?". Without it the ceiling can only ever refuse the entry AFTER the
+    one that breached it: committed at 99,500 of a 100,000 ceiling reads as
+    headroom, `scan_symbol` opens a position at the 20% single-position cap,
+    and the book sits at 119.5% of a limit the operator set to 100% with
+    nothing having refused anything.
+
+    Pass `capital_at_work(asset_class, notional)`, not the raw notional —
+    the ceiling is margin-aware and a forex ticket would otherwise be
+    charged its levered size and refused for nothing.
     """
     portfolio = portfolio if portfolio is not None else limits_book()
     limit_pct = _limit_pct(portfolio, "max_total_exposure_pct")
     book = gate_book_value(user, portfolio)
+    adding = abs(float(adding or 0.0))
     state = {"ok": True, "limit_pct": limit_pct, "book_value": book,
              "cap_money": None, "committed": None, "headroom": None,
-             "n_open": 0, "reason": ""}
+             "n_open": 0, "adding": round(adding, 2), "reason": ""}
 
     if limit_pct is None:
         state["reason"] = "no total-exposure limit set on the book"
@@ -604,19 +713,63 @@ def exposure_state(user, *, portfolio=None) -> dict:
     open_book = open_capital_at_work(user, portfolio)
     cap = book * limit_pct / 100.0
     state["cap_money"] = round(cap, 2)
+    # The venue's own committed capital when one is named; the binding
+    # venue otherwise.
+    if venue == "live":
+        committed = open_book.get("live_total", open_book["total"])
+        n_open = open_book.get("live_n", open_book["n"])
+    elif venue == "paper":
+        committed = open_book.get("paper_total", open_book["total"])
+        n_open = open_book.get("paper_n", open_book["n"])
+    else:
+        committed, n_open = open_book["total"], open_book["n"]
+    open_book = {**open_book, "total": committed, "n": n_open}
+
+    state["venue"] = venue or "both"
     state["committed"] = open_book["total"]
     state["n_open"] = open_book["n"]
     state["headroom"] = round(cap - open_book["total"], 2)
 
     state["legacy_committed"] = open_book.get("legacy_total")
     state["legacy_n"] = open_book.get("legacy_n", 0)
+    state["live_committed"] = open_book.get("live_total")
+    state["paper_committed"] = open_book.get("paper_total")
 
-    if open_book["total"] >= cap:
+    # Both venues named whenever any simulated capital is open, for the same
+    # reason the daily-loss refusal names them: an operator whose entries are
+    # being refused needs to know whether it is their money holding the
+    # ceiling or a simulation, and that is the one sentence that tells them.
+    split = ""
+    if open_book.get("paper_n"):
+        split = (f" (live {open_book['live_total']:,.2f} across "
+                 f"{open_book['live_n']}, paper "
+                 f"{open_book['paper_total']:,.2f} across "
+                 f"{open_book['paper_n']} — each judged on its own, never "
+                 f"added)")
+
+    # `>= cap` with nothing proposed, `> cap` once something is: the first
+    # is "the book is full", the second is "this ticket is the one that would
+    # overflow it". The 1e-9 is float noise on an exactly-fitting size, the
+    # same slack the sibling gates allow.
+    breached = ((open_book["total"] + adding > cap + 1e-9) if adding
+                else (open_book["total"] >= cap))
+    if breached:
         state["ok"] = False
-        state["reason"] = (
-            f"total exposure limit reached: {open_book['n']} open position(s) "
-            f"tie up {open_book['total']:,.2f} against a {cap:,.2f} ceiling "
-            f"({limit_pct:g}% of the {book:,.2f} book)")
+        if adding and open_book["total"] < cap:
+            # The book is not full; THIS ticket is the one that would
+            # overflow it. Naming which of the two it is decides what the
+            # operator does next — size this entry down, or close something.
+            state["reason"] = (
+                f"this position would take total exposure past its ceiling: "
+                f"{open_book['n']} open position(s) tie up "
+                f"{open_book['total']:,.2f} of a {cap:,.2f} ceiling "
+                f"({limit_pct:g}% of the {book:,.2f} book) and this one adds "
+                f"{adding:,.2f}{split}")
+        else:
+            state["reason"] = (
+                f"total exposure limit reached: {open_book['n']} open position(s) "
+                f"tie up {open_book['total']:,.2f} against a {cap:,.2f} ceiling "
+                f"({limit_pct:g}% of the {book:,.2f} book){split}")
         # A halt whose cause the operator cannot see is a halt they cannot
         # clear. Nothing on this platform routinely closes the legacy book,
         # so if its rows are what filled the ceiling, that is the single
@@ -638,7 +791,7 @@ def exposure_state(user, *, portfolio=None) -> dict:
         return state
 
     state["reason"] = (f"{open_book['total']:,.2f} of {cap:,.2f} committed "
-                       f"across {open_book['n']} position(s)")
+                       f"across {open_book['n']} position(s){split}")
     return state
 
 

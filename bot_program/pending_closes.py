@@ -408,14 +408,25 @@ def resolve_exit_fill(trade, result, *, mark) -> dict:
 
 # ── the CLOSE_PENDING retry loop ────────────────────────────────────────
 
-def _mark_price(trade, client) -> Decimal:
-    """Best-effort current price on the trade's own scale."""
+def _mark_price(trade, client) -> Optional[Decimal]:
+    """Current price on the trade's own scale, or None when there isn't one.
+
+    None, never the entry price. Two of this module's callers book the mark
+    AS the exit price — the paths where the broker is already flat and there
+    is no fill to read — so an entry price handed back here does not degrade
+    gracefully, it invents a scratch: exit == entry, pnl 0.00, realized_r
+    0.0. A stop-out that actually cost 450 dollars then reads as flat, which
+    the 24h daily-loss gate sums as nothing and the promotion track record
+    counts as a break-even trade. `AssetBot._mark_price` has always answered
+    None for the same question, and manage_positions skips the trade rather
+    than mark it against a price nobody quoted; this now agrees with it.
+    """
     if trade.asset_class == "options":
         try:
             from bot_program.asset_engine.options_bot import current_premium_for_trade
-            return current_premium_for_trade(trade) or trade.entry_price
+            return current_premium_for_trade(trade) or None
         except Exception:
-            return trade.entry_price
+            return None
     try:
         tk = client.ticker(trade.symbol) or {}
         last = float(tk.get("lastPrice", 0) or 0)
@@ -423,7 +434,7 @@ def _mark_price(trade, client) -> Decimal:
             return Decimal(str(last))
     except Exception:
         pass
-    return trade.entry_price
+    return None
 
 
 def _pnl(trade, price: Decimal) -> Decimal:
@@ -682,6 +693,11 @@ def _reconcile_filled_against_broker(trade, client) -> None:
         return
 
     delta = implied_filled - recorded
+    # The QUANTITY is the point here — leaving it wrong oversells the
+    # difference on the next attempt — so a missing mark must not abandon the
+    # correction. With no price at all the entry price is the only real number
+    # on the row; the slice is already stamped `mark`, so the blended exit
+    # correctly stops claiming a broker fill.
     mark = _mark_price(trade, client)
     mark_px = _decimal(mark) or _decimal(trade.entry_price) or Decimal(0)
     logger.info("close retry: broker shows %s of %s left on #%s — booking the "
@@ -875,6 +891,82 @@ def _give_up(trade, error: str) -> None:
         logger.warning("close-abandoned alert failed for #%s: %s", trade.id, e)
 
 
+# How long a flat-at-broker row may wait for a price before the operator is
+# told. It is not an error state and it is not stranded — the position is
+# gone — but a row that sits CLOSE_PENDING unexplained is its own problem.
+MARK_WAIT_ALERT_SECONDS = 3600
+
+
+def _alert_unpriced(trade) -> None:
+    """Tell the operator once an hour that a closed position has no price."""
+    meta = dict(trade.metadata or {})
+    last = meta.get("unpriced_alert_at")
+    now = timezone.now()
+    if last:
+        try:
+            from django.utils.dateparse import parse_datetime
+            when = parse_datetime(str(last))
+            if when and (now - when).total_seconds() < MARK_WAIT_ALERT_SECONDS:
+                return
+        except Exception:  # noqa: BLE001
+            pass
+    meta["unpriced_alert_at"] = now.isoformat()
+    trade.metadata = meta
+    trade.save(update_fields=["metadata"])
+    try:
+        from alerts.links import page_url
+        from alerts.models import Notification
+        Notification.objects.create(
+            user=trade.config.user, notification_type="bot",
+            title=f"⊙ Closed but unpriced: {trade.symbol}",
+            body=(f"{trade.asset_class} trade #{trade.id} is FLAT at the "
+                  f"broker — nothing is live — but no price could be read to "
+                  f"book the exit, so the row stays CLOSE_PENDING rather than "
+                  f"record the trade as a scratch. It will close itself as "
+                  f"soon as a quote returns."),
+            url=page_url("forensics_detail", trade.id) or "/eye/fills/",
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("unpriced-close alert failed for #%s: %s", trade.id, e)
+
+
+def _finalise_flat(trade, client, *, reason: str) -> bool:
+    """Book a position the broker no longer holds. False when we cannot.
+
+    Nothing was sent on this path, so there is no fill to read: the mark IS
+    the exit price. With no mark there is nothing to book, and the old
+    fallback — the entry price — recorded a stop-out that cost real money as
+    a scratch: exit == entry, pnl 0.00, realized_r 0.0. That zero is
+    invisible to the 24h daily-loss gate, which is the number the operator
+    trusts to stop the day, and it enters the promotion track record as a
+    break-even trade that never happened.
+
+    So the row waits. Deliberately NOT through `_after_failed_attempt`: that
+    counts toward MAX_RETRY_ATTEMPTS and ends at `_give_up`, whose entire
+    vocabulary — "stranded", "STILL OPEN at the broker", "close it manually"
+    — is the opposite of what is true here. The broker is FLAT. Nothing is
+    live, nothing is at risk, and nothing needs a human at the venue; the
+    only missing thing is a number to write down. Abandoning the row for the
+    lack of it would tell the operator to go chase a position that does not
+    exist, and would leave the trade permanently unbooked into the bargain.
+
+    It waits with a voice, not in silence — hourly, and with the truth.
+    """
+    mark = _decimal(_mark_price(trade, client))
+    if mark is None or mark <= 0:
+        logger.error(
+            "close retry #%s: the broker is flat but no price could be read "
+            "for %s — refusing to book the exit at the entry price, which "
+            "would record this trade as a scratch. Waiting for a quote.",
+            trade.id, trade.symbol)
+        _alert_unpriced(trade)
+        return False
+    _finalise_closed(trade,
+                     fill=resolve_exit_fill(trade, None, mark=mark),
+                     reason=reason)
+    return True
+
+
 def retry_trade_close(trade) -> bool:
     """Retry one CLOSE_PENDING trade. True when it ended CLOSED."""
     from bot_program.engine.broker_router import client_for_symbol
@@ -904,12 +996,7 @@ def retry_trade_close(trade) -> bool:
                     "finalising without a new order", trade.id, trade.symbol)
         # No order was sent, so there is no fill to read: the remainder is
         # booked at the current mark and flagged as such.
-        _finalise_closed(
-            trade,
-            fill=resolve_exit_fill(trade, None,
-                                   mark=_mark_price(trade, client)),
-            reason="RETRY_ALREADY_FLAT")
-        return True
+        return _finalise_flat(trade, client, reason="RETRY_ALREADY_FLAT")
 
     # The previous attempt may have left an order alive at the broker (an
     # accepted market close that had not printed when we read it). Clear it
@@ -932,12 +1019,8 @@ def retry_trade_close(trade) -> bool:
             logger.info("close retry: cancel unconfirmed on #%s but the "
                         "broker no longer holds %s — the working close "
                         "filled; finalising", trade.id, trade.symbol)
-            _finalise_closed(
-                trade,
-                fill=resolve_exit_fill(trade, None,
-                                       mark=_mark_price(trade, client)),
-                reason="RETRY_WORKING_CLOSE_FILLED")
-            return True
+            return _finalise_flat(trade, client,
+                                  reason="RETRY_WORKING_CLOSE_FILLED")
         msg = ("the previous close is still working at the broker and could "
                "not be cancelled — refusing to stack a second close on it")
         logger.error("close retry #%s for %s: %s", trade.id, trade.symbol, msg)
@@ -974,17 +1057,80 @@ def retry_trade_close(trade) -> bool:
     return True
 
 
-def retry_all_pending_closes() -> dict:
-    """Retry every CLOSE_PENDING live trade. Paper rows never reach this
-    state (they have no broker order to fail)."""
+def _claim_for_retry(trade_pk):
+    """Take the in-flight claim on one CLOSE_PENDING row, or None.
+
+    The sweep used to iterate a plain queryset and start closing: no row
+    lock, and no look at the claim the CLOSE button takes. Every ingredient
+    for two live closes on one position was present — `retry_pending_closes`
+    is deliberately ungated, beat fires it every 300s onto the `default`
+    queue, that worker runs two slots, and one pass over a timing-out broker
+    takes longer than a beat. The module's only anti-stacking device,
+    `_cancel_working_close`, reads a metadata key written AFTER a submit
+    returns, so while the first close is in flight there is nothing in the
+    row for the second caller to see: both read CLOSE_PENDING, both hear
+    "the broker still holds it", both send a market order, and the flatten
+    becomes a naked reverse position.
+
+    Deliberately the SAME claim `manual_close` takes, not a second private
+    one, so the beat and the CLOSE button exclude each other instead of each
+    excluding only its own kind. `_stale` bounds it, so a worker that dies
+    mid-close does not make the row unclosable forever.
+    """
+    from django.db import transaction
+    from bot_program.manual_close import CLAIM_KEY, _stale
     from bot_program.models import AssetBotTrade
 
-    qs = (AssetBotTrade.objects
-          .filter(status="CLOSE_PENDING", paper=False)
-          .select_related("config", "config__user"))
+    with transaction.atomic():
+        try:
+            trade = (AssetBotTrade.objects
+                     .select_for_update()
+                     .select_related("config", "config__user")
+                     .get(pk=trade_pk))
+        except AssetBotTrade.DoesNotExist:
+            return None
+        # Everything that decides whether a retry may start is re-read INSIDE
+        # the lock: the row may have been closed, abandoned or claimed
+        # between the sweep's queryset and this moment.
+        if trade.status != "CLOSE_PENDING" or trade.paper:
+            return None
+        held = (trade.metadata or {}).get(CLAIM_KEY)
+        if held and not _stale(str(held)):
+            logger.info("close retry: #%s is already being closed elsewhere "
+                        "— leaving it to that attempt", trade_pk)
+            return None
+        meta = dict(trade.metadata or {})
+        meta[CLAIM_KEY] = timezone.now().isoformat()
+        trade.metadata = meta
+        trade.save(update_fields=["metadata"])
+    return trade
+
+
+def retry_all_pending_closes() -> dict:
+    """Retry every CLOSE_PENDING live trade. Paper rows never reach this
+    state (they have no broker order to fail).
+
+    One row at a time, each claimed first — see `_claim_for_retry`. A row
+    somebody else is already closing counts as STILL PENDING rather than as
+    a separate outcome: nothing closed it on this pass, and the next beat
+    picks it up if that attempt failed.
+    """
+    from bot_program.manual_close import _release
+    from bot_program.models import AssetBotTrade
+
+    # Primary keys, not row snapshots: the claim re-reads each row under a
+    # lock, so carrying stale copies out of the queryset would only invite
+    # writing one back.
+    pks = list(AssetBotTrade.objects
+               .filter(status="CLOSE_PENDING", paper=False)
+               .values_list("pk", flat=True))
     out = {"pending": 0, "closed": 0, "still_pending": 0}
-    for trade in qs:
+    for pk in pks:
         out["pending"] += 1
+        trade = _claim_for_retry(pk)
+        if trade is None:
+            out["still_pending"] += 1
+            continue
         try:
             if retry_trade_close(trade):
                 out["closed"] += 1
@@ -993,4 +1139,6 @@ def retry_all_pending_closes() -> dict:
         except Exception as e:
             logger.exception("close retry crashed for #%s: %s", trade.id, e)
             out["still_pending"] += 1
+        finally:
+            _release(pk)
     return out

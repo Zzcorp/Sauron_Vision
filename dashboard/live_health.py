@@ -1,5 +1,14 @@
-"""Streamer health endpoint — reports freshness per data source."""
+"""Streamer health endpoint — reports every declared feed, not just the
+ones that happen to have written.
+
+The old version grouped `LiveQuote.source` and reported what it found. See
+`market_data/feeds.py` for why that could not say the three things the
+operator most needed: a feed with no credentials was ABSENT rather than off,
+a feed outranked on every instrument VANISHED rather than yielding, and a
+feed whose market is shut went RED every night rather than idle.
+"""
 from datetime import timedelta
+
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.utils import timezone
@@ -9,45 +18,128 @@ from django.views.decorators.cache import never_cache
 @never_cache
 @login_required
 def live_health(request):
-    """Returns freshness for each `source` value seen in LiveQuote.
-    Status: green (<60s old), yellow (<10min), red (older or missing)."""
+    """Freshness and configuration for every feed this platform declares.
+
+    Each row carries `state` from the vocabulary in `market_data.feeds`,
+    plus `configured`, a human `label` and a one-line `note` saying what the
+    state means. The aggregate `pill` is computed here rather than in the
+    browser: the client used to derive it with a pessimistic dot (any red
+    wins) and an optimistic label (any green wins), so one green feed among
+    five red ones painted a red dot beside the word LIVE.
+    """
+    from django.db.models import Max
+
+    from market_data.feeds import BY_KEY, BENIGN_STATES, FEEDS, is_configured
     from market_data.models import LiveQuote
+
     try:
-        from django.db.models import Max
         now = timezone.now()
-        # Group by source, take freshest updated_at
-        by_src = (LiveQuote.objects.values("source")
-                  .annotate(latest=Max("updated_at")))
+
+        # One pass over the table: freshest write per source, and whether
+        # that source currently OWNS any row. `LiveQuote` is one row per
+        # instrument, so owning none while having written before is the
+        # signature of a feed that is running and being outranked.
+        seen = {}
+        for row in (LiveQuote.objects.values("source")
+                    .annotate(latest=Max("updated_at"))):
+            key = (row["source"] or "").strip()
+            if key:
+                seen[key] = row["latest"]
+
+        from market_data.feeds import state_for
+
+        def _fresh(key):
+            """Is the feed named by `key` delivering right now?"""
+            spec = BY_KEY.get(key)
+            stamp = seen.get(key)
+            if not spec or stamp is None:
+                return False
+            return (now - stamp).total_seconds() < spec["ages"][0]
+
         sources = []
-        for row in by_src:
-            src = (row["source"] or "unknown").strip()
-            if not src or src == "unknown":
-                continue
-            latest = row["latest"]
-            if not latest:
-                state = "red"; age_s = None
-            else:
-                age_s = (now - latest).total_seconds()
-                if age_s < 60: state = "green"
-                elif age_s < 600: state = "yellow"
-                else: state = "red"
+        for feed in FEEDS:
+            latest = seen.get(feed["key"])
+            age = (now - latest).total_seconds() if latest else None
+            state, note = state_for(
+                feed, latest=latest, age_seconds=age,
+                superseder_ok=_fresh(feed.get("superseded_by")), now=now)
             sources.append({
-                "source": src, "state": state, "age_seconds": age_s,
+                "source": feed["key"],
+                "label": feed["label"],
+                "kind": feed["kind"],
+                "configured": is_configured(feed),
+                "state": state,
+                "note": note,
+                "age_seconds": age,
                 "latest": latest.isoformat() if latest else None,
             })
-        sources.sort(key=lambda s: s["source"])
 
-        # Recent liquidations + funding as bonus health signals
-        from market_data.models import LiquidationEvent, FundingRate
+        # A source string in the database that feeds.py does not declare.
+        # Reported rather than dropped: it means this platform grew a writer
+        # the registry has not caught up with, and silently hiding it is how
+        # the registry stays behind.
+        for key, latest in sorted(seen.items()):
+            if key in BY_KEY:
+                continue
+            age = (now - latest).total_seconds() if latest else None
+            sources.append({
+                "source": key, "label": key, "kind": "unknown",
+                "configured": True, "state": "unregistered",
+                "note": "writing quotes but not declared in market_data/feeds.py",
+                "age_seconds": age,
+                "latest": latest.isoformat() if latest else None,
+            })
+        # An undeclared source is a gap in the REGISTRY, not a fault in the
+        # platform, and it is writing quotes — which is more than several
+        # declared feeds manage. Counting it against the pill would let one
+        # stale stray hold the top bar amber forever with nothing an
+        # operator could do about it but edit a Python file.
+
+        # Declared order first, then the strays — the operator reads the
+        # same list in the same order every time, which is what makes a
+        # changed dot noticeable.
+        watched = [s for s in sources
+                   if s["state"] not in BENIGN_STATES
+                   and s["state"] != "unregistered"]
+        live = [s for s in watched if s["state"] == "green"]
+
+        # ONE verdict, and the word is derived from the dot rather than
+        # computed beside it. The client used to reach these separately —
+        # a pessimistic dot (any red wins) and an optimistic label (any
+        # green wins) — so one green feed among five dead ones painted a
+        # red dot next to the word LIVE. Deriving the second from the first
+        # is what makes that shape impossible rather than merely fixed.
+        if not watched:
+            pill_state = "flat"
+        elif len(live) == len(watched):
+            pill_state = "green"
+        elif live or any(s["state"] == "yellow" for s in watched):
+            pill_state = "yellow"
+        else:
+            pill_state = "red"
+        pill = {"green": "live", "yellow": "degraded",
+                "red": "offline", "flat": "idle"}[pill_state]
+
+        from market_data.models import FundingRate, LiquidationEvent
         try:
-            last_liq = LiquidationEvent.objects.order_by("-timestamp").values_list("timestamp", flat=True).first()
-            last_fund = FundingRate.objects.order_by("-timestamp").values_list("timestamp", flat=True).first()
-        except Exception:
+            last_liq = (LiquidationEvent.objects.order_by("-timestamp")
+                        .values_list("timestamp", flat=True).first())
+            last_fund = (FundingRate.objects.order_by("-timestamp")
+                         .values_list("timestamp", flat=True).first())
+        except Exception:  # noqa: BLE001
             last_liq = last_fund = None
+
         return JsonResponse({
             "sources": sources,
-            "last_liquidation_age": (now - last_liq).total_seconds() if last_liq else None,
-            "last_funding_age":     (now - last_fund).total_seconds() if last_fund else None,
+            "pill": pill,
+            "pill_state": pill_state,
+            "watched": len(watched),
+            "last_liquidation_age": ((now - last_liq).total_seconds()
+                                     if last_liq else None),
+            "last_funding_age": ((now - last_fund).total_seconds()
+                                 if last_fund else None),
         })
-    except Exception as e:
-        return JsonResponse({"error": str(e), "sources": []}, status=200)
+    except Exception as e:  # noqa: BLE001 — a health panel must never 500
+        return JsonResponse({"error": str(e), "sources": [],
+                             "pill": "offline", "pill_state": "flat"},
+                            status=200)

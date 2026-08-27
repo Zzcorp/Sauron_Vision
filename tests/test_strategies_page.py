@@ -455,8 +455,20 @@ class LadderQueryBudgetTests(TestCase):
         self._rules(40, stage="paper", prefix="budget_extra")
         with CaptureQueriesContext(connection) as large:
             self.client.get(url, HTTP_HOST="127.0.0.1")
-        self.assertEqual(len(large), len(small),
-                         "the page fans out one query per rule")
+        # Does not GROW, rather than exactly equal. The claim under test is
+        # that thirteen extra rules do not buy thirteen extra queries, and
+        # `assertLessEqual` catches a fan-out just as surely — forty rules
+        # would put `large` tens of queries above `small`.
+        #
+        # Exact equality also failed the other way. Observed in a full-suite
+        # run: large=96, small=102 — the LARGER page cheaper than the small
+        # one, which no fan-out can produce. Context processors on this page
+        # memoise per process, so whichever request happens to run cold pays
+        # for the warm-up, and which one that is depends on what ran earlier
+        # in a 4,939-test serial suite. Pinning the absolute number made the
+        # test a report on suite ordering.
+        self.assertLessEqual(len(large), len(small),
+                             "the page fans out one query per rule")
 
 
 class GateMeterTests(TestCase):

@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from django.utils import timezone
 
@@ -103,15 +104,44 @@ def forex_usd_multiplier(trade) -> Decimal:
         return Decimal("1")
 
 
-# Major forex session windows in UTC (open_hour, close_hour). Floats so we can
-# express the 30-min half-hours like London 15:30 close. close_hour > 24 means
-# the session wraps past midnight UTC (used for Sydney).
-SESSION_WINDOWS_UTC: dict[str, tuple[float, float]] = {
-    "tokyo":     (0.0, 6.0),
-    "london":    (7.0, 15.5),
-    "new_york":  (13.5, 20.0),
-    "sydney":    (21.0, 24.0 + 5.0),  # 21:00 UTC -> 05:00 UTC next day
+def _in_zone(moment: datetime, zone: str) -> Optional[datetime]:
+    """`moment` read on `zone`'s clock, or None if the tz database is absent."""
+    try:
+        return moment.astimezone(ZoneInfo(zone))
+    except Exception as e:  # noqa: BLE001 - missing tzdata must not kill a tick
+        logger.warning("[forex] no timezone data for %s (%s) — session "
+                       "windows unavailable", zone, e)
+        return None
+
+
+# Major forex session windows, in each centre's OWN clock: (zone, open, close)
+# in local hours. Floats for the half-hours (the London 16:30 fix).
+#
+# They used to be a fixed UTC table — tokyo [0,6), london [7,15.5),
+# new_york [13.5,20), sydney [21,24)+[0,5) — which no clock keeps. Those
+# numbers are the liquid windows read in each centre's SUMMER time, so from
+# November to mid-March the table refused the 16:00 London fix and cut New
+# York off at 15:00 local, mid-session: the opposite of the liquidity
+# rationale this module exists for, twice a year, for four months at a time.
+#
+# The WIDTHS are the old ones exactly — Tokyo 6h, London 8.5h, New York 6.5h,
+# Sydney 8h. This is a correction to WHEN each window falls, not an opening
+# of the filter: a session filter that admits more hours is a different risk
+# posture than the operator configured, and nothing here was asked to change
+# that.
+SESSION_WINDOWS_LOCAL: dict[str, tuple[str, float, float]] = {
+    "tokyo":     ("Asia/Tokyo",        9.0, 15.0),   # 6h   (was 00:00-06:00Z)
+    "london":    ("Europe/London",     8.0, 16.5),   # 8.5h (was 07:00-15:30Z)
+    "new_york":  ("America/New_York",  9.5, 16.0),   # 6.5h (was 13:30-20:00Z)
+    "sydney":    ("Australia/Sydney",  8.0, 16.0),   # 8h   (was 21:00-05:00Z)
 }
+
+# The weekly window, anchored to New York because that is where the
+# convention is set: FX opens Sunday 17:00 ET and closes Friday 17:00 ET.
+# Anchoring it to a zone rather than to fixed UTC hours means the boundary
+# does not drift by an hour twice a year.
+MARKET_TZ = "America/New_York"
+MARKET_OPEN_HOUR_LOCAL = 17.0
 
 
 # Default preferred sessions per pair. Pairs absent from this map default to
@@ -135,33 +165,50 @@ DEFAULT_PREFERRED_SESSIONS: dict[str, set[str]] = {
 }
 
 
-def _active_forex_sessions(now: Optional[datetime] = None) -> set[str]:
-    """Return the set of currently-active forex sessions in UTC.
+def forex_market_open(now: Optional[datetime] = None) -> bool:
+    """True while the FX week is running: Sunday 17:00 ET -> Friday 17:00 ET.
 
-    Returns an empty set on weekends — forex is closed Friday 21:00 UTC through
-    Sunday 21:00 UTC.
+    Separate from `_active_forex_sessions` on purpose. The two questions have
+    different answers for a couple of hours every weekday — no major centre
+    is in session between the New York close and the Sydney open — and
+    conflating them is what had the fleet reporting an open market as the
+    weekend.
     """
     now = now or timezone.now()
-    weekday = now.weekday()  # Monday=0, Sunday=6
-    hour_utc = now.hour + now.minute / 60.0
+    local = _in_zone(now, MARKET_TZ)
+    if local is None:  # no tz database — assume open rather than halt the fleet
+        return True
+    hour = local.hour + local.minute / 60.0
+    weekday = local.weekday()  # Monday=0, Sunday=6
+    if weekday == 5:                                        # Saturday
+        return False
+    if weekday == 6 and hour < MARKET_OPEN_HOUR_LOCAL:      # Sunday pre-open
+        return False
+    if weekday == 4 and hour >= MARKET_OPEN_HOUR_LOCAL:     # Friday post-close
+        return False
+    return True
 
-    # Closed all day Saturday.
-    if weekday == 5:
-        return set()
-    # Closed Sunday before 21:00 UTC.
-    if weekday == 6 and hour_utc < 21.0:
-        return set()
-    # Closed Friday from 21:00 UTC onward.
-    if weekday == 4 and hour_utc >= 21.0:
+
+def _active_forex_sessions(now: Optional[datetime] = None) -> set[str]:
+    """The set of major centres currently in session.
+
+    Empty over the weekend, and empty during the genuine quiet hours between
+    one centre's close and the next one's open. Callers must not read "empty"
+    as "weekend" — ask `forex_market_open()` for that.
+    """
+    now = now or timezone.now()
+    if not forex_market_open(now):
         return set()
 
     active: set[str] = set()
-    for name, (start, end) in SESSION_WINDOWS_UTC.items():
-        if end > 24:
-            # Session wraps past midnight.
-            if hour_utc >= start or hour_utc < (end - 24):
-                active.add(name)
-        elif start <= hour_utc < end:
+    for name, (zone, start, end) in SESSION_WINDOWS_LOCAL.items():
+        local = _in_zone(now, zone)
+        if local is None:
+            continue
+        if local.weekday() >= 5:  # no centre trades its own weekend
+            continue
+        hour = local.hour + local.minute / 60.0
+        if start <= hour < end:
             active.add(name)
     return active
 
@@ -177,9 +224,20 @@ class ForexBot(AssetBot):
         if extras.get("session_filter_disabled"):
             return super().decide(symbol)
 
-        active = _active_forex_sessions()
-        if not active:
+        now = timezone.now()
+        if not forex_market_open(now):
             return BotDecision("HOLD", 0, ["forex market closed (weekend)"])
+
+        # An empty session set is NOT the weekend. Reporting it as one sent
+        # the operator into the weekend logic to explain refusals that were
+        # really "no major centre is open right now" — a real state for an
+        # hour or two each weekday, and the message has to say so.
+        active = _active_forex_sessions(now)
+        if not active:
+            return BotDecision("HOLD", 0, [
+                "no major forex session is open right now — the market is "
+                "running but every centre this filter watches is closed"
+            ])
 
         # Optional per-config override: extras["preferred_sessions"]["EURUSD"] = ["london"]
         config_override = (extras.get("preferred_sessions") or {}).get(symbol)

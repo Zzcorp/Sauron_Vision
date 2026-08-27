@@ -47,10 +47,16 @@
             </span>
             {% endif %}
         </div>
-        <div class="detail-meta">
+{% comment %}
+        The metadata rides the title row rather than owning one of its
+        own. It is reference, not a reading: an operator glances at it
+        once to confirm they are on the right instrument and never again,
+        and it was costing a full row above the chart on every visit.
+        {% endcomment %}
+        <div class="detail-meta detail-meta-inline">
             <span class="badge badge-{{ instrument.asset_class }}">{{ instrument.asset_class }}</span>
             {% if instrument.exchange %}<span>{{ instrument.exchange }}</span>{% endif %}
-            <span>{{ instrument.name }}</span>
+            <span class="dtl-name">{{ instrument.name }}</span>
         </div>
     </div>
     <div class="dtl-actions">
@@ -72,7 +78,13 @@
     which is the wrong place to read it from.
     {% endcomment %}
     {% if quote.bid or quote.ask %}
-    <div class="dtl-quote" data-decimals="{% px_decimals quote.last instrument.asset_class instrument.symbol %}">
+    {% comment %}
+    Beside the buttons rather than under them: LONG lifts the ask and
+    SHORT hits the bid, so this is the cost of the decision those two
+    buttons take, and a full-width strip of its own bought nothing but
+    height above the chart.
+    {% endcomment %}
+    <div class="dtl-quote dtl-quote-inline" data-decimals="{% px_decimals quote.last instrument.asset_class instrument.symbol %}">
         <span class="dq-cell"><span class="dq-k">BID</span><span class="dq-v dq-bid" data-dq="bid">{% px quote.bid instrument.asset_class instrument.symbol %}</span></span>
         <span class="dq-cell"><span class="dq-k">ASK</span><span class="dq-v dq-ask" data-dq="ask">{% px quote.ask instrument.asset_class instrument.symbol %}</span></span>
         {% if quote.bid and quote.ask %}
@@ -105,6 +117,23 @@
 
     .dtl-quote { display:flex; gap:22px; flex-wrap:wrap; margin-top:14px;
         padding-top:12px; border-top:1px solid var(--border); }
+    /* Two rows, not four. The header was title / metadata / actions /
+       book stacked, and every one of those rows pushed the chart —
+       the thing the page exists for — further down the fold. */
+    .detail-header { flex-wrap:wrap; row-gap:10px; }
+    .detail-meta-inline { display:inline-flex; align-items:center; gap:8px;
+        margin:0 0 0 4px; font-size:10.5px; }
+    .detail-meta-inline .dtl-name { color:var(--text-muted);
+        max-width:26ch; overflow:hidden; text-overflow:ellipsis;
+        white-space:nowrap; }
+    .dtl-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .dtl-quote-inline { margin-top:0; padding-top:0; border-top:0;
+        gap:18px; margin-left:auto; }
+    @media (max-width:880px) {
+        .dtl-quote-inline { margin-left:0; width:100%;
+            margin-top:10px; padding-top:10px;
+            border-top:1px solid var(--border); }
+    }
     .dq-cell { display:flex; flex-direction:column; gap:2px; }
     .dq-k { font-family:var(--font-mono); font-size:9.5px; letter-spacing:.14em;
         color:var(--text-muted); }
@@ -159,7 +188,7 @@ feed produces a first price. paintQuote null-guards the hero spans.{% endcomment
     data, never markup.{% endcomment %}
     {{ chart_positions|json_script:"instrument-main-chart-positions" }}
     {{ chart_signals|json_script:"instrument-main-chart-signals" }}
-    {% include "_partials/chart_widget.html" with chart_id="instrument-main-chart" symbol=instrument.symbol height="420" timeframe="1d" %}
+    {% include "_partials/chart_widget.html" with chart_id="instrument-main-chart" symbol=instrument.symbol height="420" timeframe="1d" decimals=quote_decimals %}
 </div>
 
 {% comment %}

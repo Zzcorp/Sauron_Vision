@@ -194,14 +194,18 @@ class ChartWidgetMarkupTests(TestCase):
 
     def test_the_toolbar_offers_every_indicator_type_and_control(self):
         for ind in ("sma20", "sma50", "ema20", "bb", "vwap", "rsi",
-                    "positions"):
+                    "macd", "volume", "positions"):
             self.assertContains(self.resp, f'data-ind="{ind}"', msg_prefix=ind)
         for kind in ("candlestick", "heikin", "line", "area"):
             self.assertContains(self.resp, f'data-type="{kind}"',
                                 msg_prefix=kind)
         for ctl in ("log", "fit", "fullscreen"):
             self.assertContains(self.resp, f'data-ctl="{ctl}"', msg_prefix=ctl)
-        self.assertContains(self.resp, 'id="instrument-main-chart-rsi"')
+        # The RSI pane is no longer a div in the markup: panes are built
+        # on demand from PANE_SPECS, so what the page ships is the HOST they
+        # are appended to. Asserting the old id would pin an implementation
+        # the registry deliberately removed.
+        self.assertContains(self.resp, 'id="instrument-main-chart-panes"')
         self.assertContains(self.resp,
                             'id="instrument-main-chart-countdown"')
         self.assertContains(self.resp, "subscribeVisibleLogicalRangeChange")

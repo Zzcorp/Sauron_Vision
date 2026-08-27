@@ -284,6 +284,12 @@ class PriceAlert(models.Model):
         ('cross', 'Price Crosses'),
     ])
     target_price = models.DecimalField(max_digits=20, decimal_places=8)
+    # Which side of the target the price was on when this alert was first
+    # SEEN by the checker. A 'cross' has to be measured from somewhere: the
+    # condition asks whether the price moved across the level, and with no
+    # remembered side there is nothing to move across.
+    baseline_price = models.DecimalField(max_digits=20, decimal_places=8,
+                                         null=True, blank=True)
     triggered = models.BooleanField(default=False)
     triggered_at = models.DateTimeField(null=True, blank=True)
     notify_telegram = models.BooleanField(default=True)
@@ -298,6 +304,52 @@ class PriceAlert(models.Model):
         return f"{self.instrument.symbol} {self.condition} {self.target_price}"
 
 
+# A quote older than this is not a market price any more. An alert fired
+# against a fossil says a level broke "now" when it broke, or did not break,
+# at some unknown time before the feed stopped: the operator reads Friday's
+# close on Sunday and opens a position into Monday's gap.
+#
+# An hour, not the 900s the trading paths use. Those read quotes for
+# instruments a bot is actively working, which the streamers keep fresh; an
+# ALERT can be set on anything in the catalogue, including instruments only
+# the ten-minute yfinance sweep covers — and that sweep runs against
+# hundreds of symbols, so an individual one can easily be twenty minutes
+# stale while the platform is perfectly healthy. At 900s those alerts would
+# never fire at all, silently, which is a worse failure than firing on a
+# price a few minutes old.
+QUOTE_MAX_AGE_SECONDS = 3600
+
+
+def _cross_triggered(alert, price) -> bool:
+    """Has the price moved to the OTHER side of the target since we started
+    watching this alert?
+
+    'cross' used to read `price >= target or price <= target`, which is true
+    of every finite number: the alert fired on the first beat whatever the
+    market was doing, sent its notification, and — being consumed — could
+    never fire when the level was actually crossed.
+
+    A crossing needs a side to cross FROM, so the first sighting arms the
+    alert (records the side, fires nothing) and every later beat compares
+    against it. That does mean an alert created on the wrong side of the
+    target waits for the price to come back through the level, which is what
+    'crosses' means; 'above' and 'below' are there for "is it past it".
+    """
+    from decimal import Decimal
+    target = Decimal(str(alert.target_price))
+    now_above = Decimal(str(price)) >= target
+    baseline = alert.baseline_price
+    if baseline is None:
+        # Conditional so two workers arming the same alert in the same beat
+        # record one baseline rather than the later one overwriting the
+        # earlier — a rewritten baseline is a crossing erased.
+        PriceAlert.objects.filter(pk=alert.pk, baseline_price__isnull=True
+                                  ).update(baseline_price=price)
+        alert.baseline_price = price
+        return False
+    return (Decimal(str(baseline)) >= target) != now_above
+
+
 def check_price_alerts():
     """Check all active price alerts against current prices."""
     import logging
@@ -310,7 +362,15 @@ def check_price_alerts():
 
     for alert in alerts:
         try:
-            quote = LiveQuote.objects.get(instrument=alert.instrument)
+            quote = LiveQuote.objects.filter(instrument=alert.instrument).first()
+            if quote is None:
+                continue
+            age = (timezone.now() - quote.updated_at).total_seconds()
+            if age > QUOTE_MAX_AGE_SECONDS:
+                logger.debug("price alert %s: %s quote is %.0fs old — not a "
+                             "price to fire an alert on", alert.id,
+                             alert.instrument.symbol, age)
+                continue
             current_price = quote.last
 
             should_trigger = False
@@ -319,12 +379,28 @@ def check_price_alerts():
             elif alert.condition == 'below' and current_price <= alert.target_price:
                 should_trigger = True
             elif alert.condition == 'cross':
-                should_trigger = current_price >= alert.target_price or current_price <= alert.target_price
+                should_trigger = _cross_triggered(alert, current_price)
 
             if should_trigger:
-                alert.triggered = True
-                alert.triggered_at = timezone.now()
-                alert.save()
+                # Claim the row instead of saving a snapshot loaded who knows
+                # how many seconds ago. This beat runs every 60s on a queue
+                # with two worker slots, and one pass sends a Telegram POST
+                # and an SMTP mail per firing alert — so a busy open runs
+                # long enough for the next copy to start on rows this one has
+                # not reached. `save()` on the stale row also wrote back every
+                # field, reverting a target_price the user edited meanwhile.
+                # A conditional UPDATE makes the claim the same act as the
+                # test: exactly one worker gets a 1 back. `target_price` is
+                # in the condition too, so an edit that landed while this
+                # pass was deciding cancels the decision it invalidated —
+                # the next beat re-asks against the level the user now
+                # wants, instead of firing on the one they just changed.
+                claimed = PriceAlert.objects.filter(
+                    pk=alert.pk, triggered=False,
+                    target_price=alert.target_price).update(
+                        triggered=True, triggered_at=timezone.now())
+                if not claimed:
+                    continue
 
                 title = f"Price Alert: {alert.instrument.symbol} {alert.condition} {alert.target_price}"
                 body = f"Current price: {current_price}. {alert.note}" if alert.note else f"Current price: {current_price}"

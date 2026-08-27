@@ -34,14 +34,67 @@ def _extras(cfg) -> dict:
     return getattr(cfg, "extras", None) or {}
 
 
-def _save_extras(cfg, **updates) -> None:
-    extras = dict(_extras(cfg))
-    extras.update(updates)
-    cfg.extras = extras
+def _knob(cfg, extras: dict, key: str, default: float) -> float:
+    """A breaker threshold out of hand-edited JSON, never raising.
+
+    extras is typed by a human. `float("10%")` raised straight out of
+    check_drawdown_from_peak into check_all's handler, which continued past
+    it with no reason recorded — so a typo in one field turned a circuit
+    breaker off while can_open_new read the result as "both breakers ran and
+    cleared". A bad value falls back to the shipped default: the breaker
+    stays armed, which is the only safe direction for a halt, and a config
+    error is not the transient kind that argues for standing aside.
+    """
+    raw = extras.get(key, default)
     try:
-        cfg.save(update_fields=["extras", "updated_at"])
+        return float(raw if raw is not None else default)
+    except (TypeError, ValueError):
+        logger.warning("[safety] cfg %s: extras[%r]=%r is not numeric — "
+                       "the breaker stays armed at %s",
+                       getattr(cfg, "id", "?"), key, raw, default)
+        return float(default)
+
+
+def _save_extras(cfg, **updates) -> None:
+    """Merge `updates` into the config's extras, re-reading the row first.
+
+    extras is not scratch space — risk_per_trade_pct, trail_pct,
+    max_notional_fraction, premium_stop_pct, shadow_until and the breaker
+    knobs all live in it. The old version merged onto the in-memory `cfg`,
+    which asset_engine.runner loads ONCE and holds for the whole tick, then
+    wrote the entire JSON column back. A tick takes tens of seconds and
+    writes here at least three times (start, every skipped symbol, end), so
+    an operator who tightened risk_per_trade_pct on the HQ form mid-tick had
+    it silently reverted to the pre-tick value by the next skip — no error,
+    no log line, and the next entry sized at the risk they had just removed.
+    Only the keys this call actually sets may move; everything else comes
+    from the row as it stands now.
+    """
+    updated = dict(_extras(cfg))
+    updated.update(updates)
+    pk = getattr(cfg, "pk", None)
+    if pk is None:  # unsaved config (tests, dry runs) — nothing to re-read
+        cfg.extras = updated
+        return
+    try:
+        from django.db import transaction
+        with transaction.atomic():
+            row = (cfg.__class__._default_manager
+                   .select_for_update().filter(pk=pk).first())
+            if row is None:
+                cfg.extras = updated
+                return
+            merged = dict(getattr(row, "extras", None) or {})
+            merged.update(updates)
+            row.extras = merged
+            row.save(update_fields=["extras", "updated_at"])
+        # The rest of the tick reads the operator's current values, not the
+        # snapshot this process started with.
+        cfg.extras = merged
     except Exception:  # a heartbeat must never break a tick
-        logger.debug("[safety] could not persist extras for config %s", cfg.id)
+        cfg.extras = updated
+        logger.debug("[safety] could not persist extras for config %s",
+                     getattr(cfg, "id", "?"))
 
 
 # ── shadow mode ─────────────────────────────────────────────────────────
@@ -129,6 +182,9 @@ class CircuitBreakers:
     def __init__(self, cfg):
         self.cfg = cfg
         self.extras = _extras(cfg)
+        # Breakers that raised on the last check_all(). See its docstring:
+        # not empty is not the same as not tripped.
+        self.blind: list = []
 
     def _closed_trades(self, limit: int = 20):
         from bot_program.models import AssetBotTrade
@@ -137,8 +193,8 @@ class CircuitBreakers:
                     .order_by("-closed_at")[:limit])
 
     def check_consecutive_losses(self) -> tuple:
-        max_streak = int(self.extras.get("max_loss_streak",
-                                          DEFAULT_MAX_LOSS_STREAK))
+        max_streak = int(_knob(self.cfg, self.extras, "max_loss_streak",
+                               DEFAULT_MAX_LOSS_STREAK))
         if max_streak <= 0:
             return True, ""
         streak = 0
@@ -154,8 +210,8 @@ class CircuitBreakers:
 
     def check_drawdown_from_peak(self) -> tuple:
         """Halt when cumulative realised P&L has fallen far from its peak."""
-        max_dd = float(self.extras.get("max_drawdown_pct",
-                                        DEFAULT_MAX_DRAWDOWN_PCT))
+        max_dd = _knob(self.cfg, self.extras, "max_drawdown_pct",
+                       DEFAULT_MAX_DRAWDOWN_PCT)
         if max_dd <= 0:
             return True, ""
         from bot_program.models import AssetBotTrade
@@ -180,15 +236,42 @@ class CircuitBreakers:
         return True, ""
 
     def check_all(self) -> tuple:
-        """(allowed, reasons)."""
+        """(allowed, reasons), with `self.blind` naming what could not run.
+
+        A breaker that could not run is NOT a breaker that cleared — but it
+        is not a halt either, and the difference is deliberate. Both breakers
+        here query AssetBotTrade, so the thing that makes one raise is almost
+        always the database, and the database is shared: halting on it stops
+        every config in the fleet on a transient hiccup. That is the trade
+        `risk_gate.preflight` already weighed for the book limits and settled
+        the same way, and a safety layer that fails in one direction here and
+        the other there is a layer nobody can reason about under pressure.
+
+        What was actually wrong was the SILENCE. The old handler swallowed
+        the exception and continued, so can_open_new received (True, []) —
+        byte-identical to both breakers passing — and the bot kept opening
+        positions with nothing watching its drawdown while /health/ and the
+        headband showed it as fine. `self.blind` is that state made
+        answerable rather than inferred, the way preflight's `failed_open`
+        is: the caller reports it in the heartbeat instead of printing the
+        most reassuring note it has.
+
+        The most likely cause is gone besides — a typo in a threshold no
+        longer raises, it falls back to the shipped default with the breaker
+        still armed (see `_knob`).
+        """
         reasons = []
+        self.blind = []
         for check in (self.check_consecutive_losses,
                       self.check_drawdown_from_peak):
+            name = getattr(check, "__name__", str(check))
             try:
                 ok, reason = check()
             except Exception as e:
-                logger.warning("[safety] %s failed for config %s: %s",
-                               check.__name__, self.cfg.id, e)
+                logger.error("[safety] %s could not be evaluated for config "
+                             "%s: %s — entries are NOT gated by it this pass",
+                             name, getattr(self.cfg, "id", "?"), e)
+                self.blind.append(f"{name} could not be evaluated: {e}")
                 continue
             if not ok:
                 reasons.append(reason)

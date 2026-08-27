@@ -379,6 +379,41 @@ def market_quotes(request):
     return redirect(f"{target}?{query}" if query else target)
 
 
+def calendar_source_state() -> dict:
+    """What the calendar's ingest last did, in words the page can print.
+
+    An empty calendar has three completely different causes and rendered as
+    one sentence: nothing to report this fortnight, no API key, or the
+    provider refusing the request. The component row already records which —
+    `task_gate` writes `not configured: no_api_key` for the credential case
+    and an error for the rest — and no screen was reading it, so the page
+    said "Scraper will populate this automatically" in all three.
+
+    Never raises: a missing component row means the ingest has not run on
+    this deployment yet, which is its own honest answer.
+    """
+    import os
+
+    state = {"configured": bool(os.environ.get("FMP_API_KEY", "").strip()),
+             "enabled": True, "status": "", "message": "", "last_run": None}
+    try:
+        from core.models import PlatformComponent
+        row = PlatformComponent.objects.filter(key="scraper_calendar").first()
+        if row is not None:
+            state["status"] = row.last_status or ""
+            state["message"] = row.last_message or ""
+            state["last_run"] = row.last_run_at
+            # The fourth cause, and on a fresh install the most common one:
+            # PlatformComponent.is_enabled defaults to False and the seeder
+            # does not set it, so the beat fires, the gate refuses, and the
+            # page said "scheduled every 30 minutes" about a task that has
+            # never been allowed to run.
+            state["enabled"] = bool(row.is_enabled)
+    except Exception:  # noqa: BLE001 - a page must not 500 on its own status
+        pass
+    return state
+
+
 @login_required
 def economic_calendar(request):
     from market_data.models import EconomicEvent
@@ -418,6 +453,9 @@ def economic_calendar(request):
     total_week = len([e for e in upcoming if e.datetime <= week_ahead])
     total_month = len(upcoming)
 
+    # Why the table is empty, when it is. See calendar_source_state.
+    source_state = calendar_source_state()
+
     # Countries with most events
     country_counts = defaultdict(int)
     for e in upcoming:
@@ -434,6 +472,7 @@ def economic_calendar(request):
         "total_month": total_month,
         "top_countries": top_countries,
         "today": now.date().isoformat(),
+        "calendar_source": source_state,
     }
     return render(request, "dashboard/economic_calendar.html", ctx)
 
@@ -3548,6 +3587,9 @@ def admin_bulk_toggle(request):
     return redirect("admin_dashboard")
 
 
+from core.price_format import price_decimals  # noqa: E402
+
+
 def _chart_positions(user, instrument):
     """The open bets on THIS instrument that belong on this operator's
     chart, flattened to one JSON-safe shape the chart widget can draw
@@ -3556,9 +3598,18 @@ def _chart_positions(user, instrument):
     Two sources, one vocabulary: legacy Positions on the user's books
     (the same set the risk gate scans — shared limits book plus the
     per-user `<username>_main`) and AssetBotTrades whose config the user
-    owns, OPEN or CLOSE_PENDING (still exposure at the broker). Anything
-    outside those books is another operator's money and never reaches
-    the page. Prices go out as floats and opened_at as epoch seconds
+    owns, OPEN or CLOSE_PENDING (still exposure at the broker).
+
+    The bot half is scoped to this operator by `config__user`. The legacy
+    half is NOT, and cannot be: the shared limits book carries no user at
+    all, by design — it is where `/setup/`'s holdings form and the eToro
+    sync write, and the risk gate counts those against everyone's ceiling
+    for the same reason. On a single-operator deployment, which is what
+    this platform is, that shared book IS the operator's. On a multi-tenant
+    one it would show them each other's hand-entered holdings, and the fix
+    would be to give Position rows an owner rather than to filter here —
+    filtering here would hide the operator's OWN setup-form positions,
+    which is the worse of the two errors. Prices go out as floats and opened_at as epoch seconds
     because lightweight-charts snaps markers to bar times, and a Decimal
     or an ISO string would need a second parse in the browser.
     """
@@ -3716,6 +3767,13 @@ def instrument_detail(request, symbol):
         "market": market,
         "price_data_json": json.dumps(price_data),
         "chart_positions": chart_positions,
+        # The chart cannot tell forex from a share — it receives a symbol
+        # and numbers. Deciding here, where the asset class is known, is
+        # what stops a crosshair marker disagreeing with the hero price
+        # one card above it.
+        "quote_decimals": price_decimals(
+            getattr(getattr(instrument, "live_quote", None), "last", None),
+            instrument.asset_class, instrument.symbol),
         # The SAME list the chart draws from, handed to the template as
         # rows. Not a second queryset: a table and the price lines above
         # it built from separate reads drift the moment one of them gains
@@ -5074,6 +5132,22 @@ def chart_data_api(request):
 
     symbol    = request.GET.get("symbol", "").strip().upper()
     timeframe = request.GET.get("timeframe", "1d").strip().lower()
+    # The operator's open bets and the signals' entries, on the SAME response
+    # as the bars they are drawn over.
+    #
+    # They used to reach the chart once, baked into the page as a json_script
+    # block and read at boot — so a position opened FROM the instrument page
+    # was invisible on the tape above the button that opened it until a
+    # reload, and a position a bot opened was invisible indefinitely. The
+    # widget already refetches this endpoint every sixty seconds and already
+    # rebuilds every line and marker from scratch on each paint; the only
+    # thing missing was fresh data in the reply. A second endpoint and a
+    # second poller would have been a second clock to keep in step.
+    #
+    # Opt-in, because this endpoint also serves charts with no operator
+    # context, and a user-scoped payload must never become the default shape
+    # of a response something might cache.
+    overlays = request.GET.get("overlays") == "1"
 
     if not symbol:
         return JsonResponse({"error": "symbol required", "bars": []})
@@ -5083,6 +5157,30 @@ def chart_data_api(request):
     except Instrument.DoesNotExist:
         return JsonResponse({"error": f"Symbol '{symbol}' not found", "bars": []})
 
+    extra = {}
+    if overlays:
+        # The SAME two functions instrument_detail calls, deliberately: a
+        # second queryset built for the refresh is how the tape and the
+        # table under it start disagreeing about an entry or a stop.
+        from signals.models import Signal
+        try:
+            sigs = list(Signal.objects.filter(instrument=instrument)
+                        .order_by("-created_at")[:10])
+            extra = {"positions": _chart_positions(request.user, instrument),
+                     "signals": _chart_signal_marks(sigs)}
+        except Exception as e:  # noqa: BLE001 — the BARS are the payload;
+            # an overlay that cannot be built must not cost the operator
+            # their chart.
+            logger.warning("[chart_data_api] overlays failed for %s: %s",
+                           symbol, e)
+            # An ABSENT key means "not asked for", and the widget correctly
+            # leaves what is on screen alone when it sees one. A failure has
+            # to be distinguishable from that: without this the chart would
+            # go on showing a stop line for a position that closed an hour
+            # ago, refreshing every sixty seconds, with nothing anywhere
+            # saying the overlay had stopped updating.
+            extra = {"overlays_error": str(e)[:200]}
+
     # The UI sends "1min"/"5min"/"15min" (never bare "1m", which has
     # always meant ONE MONTH here — the legacy range value keeps working).
     interval = {"1min": "1m", "5min": "5m", "15min": "15m",
@@ -5090,20 +5188,32 @@ def chart_data_api(request):
     if interval:
         bars = _intraday_chart_bars(instrument, interval)
         if not bars:
+            # The overlay rides even here: the positions are real whether or
+            # not this venue can serve minute bars, and dropping them would
+            # erase the lines the chart is already showing.
             return JsonResponse({
                 "symbol": symbol, "timeframe": timeframe, "bars": [],
-                "error": f"No intraday source for {symbol} at {timeframe}"})
+                "error": f"No intraday source for {symbol} at {timeframe}",
+                **extra})
         return JsonResponse({"symbol": symbol, "timeframe": timeframe,
-                             "bars": bars})
+                             "bars": bars, **extra})
 
     # UI timeframe -> how far back to look. These views draw daily candles.
-    DAYS_BACK = {"1d": 90, "1w": 365, "1m": 30, "1mo": 30,
-                 "3m": 90, "1y": 365}
+    # An indicator can only be as honest as its window. SMA50 needs
+    # fifty daily closes before it draws anything at all, and at the old
+    # 90-day cap it consumed more than half the chart — while SMA200,
+    # which the toolbar offers, could never render a single point and
+    # read as a broken button. These are the depths that let every
+    # offered overlay say something true; the series are small and the
+    # rows already exist.
+    DAYS_BACK = {"1d": 420, "1w": 730, "1m": 60, "1mo": 60,
+                 "3m": 180, "1y": 730}
     days_back = DAYS_BACK.get(timeframe, 90)
     since = timezone.now() - timedelta(days=days_back)
 
     bars = _daily_chart_bars(instrument, since=since)
-    return JsonResponse({"symbol": symbol, "timeframe": timeframe, "bars": bars})
+    return JsonResponse({"symbol": symbol, "timeframe": timeframe,
+                         "bars": bars, **extra})
 
 
 # ── Dashboard Preset APIs ───────────────────────────────────────────────────

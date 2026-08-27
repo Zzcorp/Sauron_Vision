@@ -13,7 +13,7 @@ Optional page data (json_script blocks the widget picks up when present):
 {% endcomment %}
 {% load static %}
 
-{% with chart_id=chart_id|default:"sv-chart-widget" symbol=symbol|default:"" height=height|default:"400" timeframe=timeframe|default:"1d" %}
+{% with chart_id=chart_id|default:"sv-chart-widget" symbol=symbol|default:"" height=height|default:"400" timeframe=timeframe|default:"1d" decimals=decimals|default:"" %}
 
 <style>
 /* ── Chart Widget Styles (scoped) ─────────────────────────────────────── */
@@ -145,17 +145,56 @@ Optional page data (json_script blocks the widget picks up when present):
     flex: 1 1 auto;
     min-height: 0;
 }
-/* The RSI pane is a second chart under the first, sharing its time scale.
-   Hidden until the RSI toggle asks for it; the main body shrinks to make
-   room (see layout() in the script) rather than the card growing. */
-.sv-chart-rsi {
+/* Sub-panes are further charts under the first, sharing its time scale.
+   RSI and MACD are not overlays: they have their own vertical scale, and
+   drawing them on the price axis would be nonsense. Each one that opens
+   shrinks the main body (see layout()) rather than growing the card, so
+   the chart never pushes the page around under the operator. */
+.sv-chart-panes {
+    width: 100%;
+    flex: 0 0 auto;
+}
+.sv-chart-pane {
     width: 100%;
     height: 0;
-    flex: 0 0 auto;
     border-top: 1px solid var(--border, #1a2e1a);
-    display: none;
 }
-.sv-chart-rsi.on { display: block; }
+.sv-chart-pane-label {
+    position: absolute;
+    top: 4px;
+    left: 8px;
+    font-family: var(--font-mono, monospace);
+    font-size: 9px;
+    letter-spacing: 1px;
+    color: var(--text-muted, #5a7a5a);
+    pointer-events: none;
+    z-index: 4;
+}
+/* The measure readout. Sits over the chart because it describes what the
+   pointer just drew there — a strip below would move the eye off the two
+   points being compared. */
+.sv-chart-measure {
+    position: absolute;
+    top: 44px;
+    right: 10px;
+    display: none;
+    padding: 4px 8px;
+    font-family: var(--font-mono, monospace);
+    font-size: 10px;
+    line-height: 1.6;
+    color: var(--text-primary, #d8ecd8);
+    background: var(--bg-elevated, rgba(12, 20, 14, 0.92));
+    border: 1px solid var(--border, #1a2e1a);
+    border-radius: 3px;
+    pointer-events: none;
+    z-index: 6;
+    white-space: nowrap;
+}
+.sv-chart-measure.on { display: block; }
+.sv-chart-measure .sv-m-r { color: var(--accent-gold, #d8b45a); }
+.sv-chart-measure .sv-m-up { color: var(--accent, #00e868); }
+.sv-chart-measure .sv-m-dn { color: var(--danger, #ff4d4d); }
+.sv-chart-measure .sv-m-dim { color: var(--text-muted, #5a7a5a); }
 .sv-chart-legend {
     position: absolute;
     top: 44px;
@@ -286,6 +325,8 @@ Optional page data (json_script blocks the widget picks up when present):
             <button class="sv-ind-btn" data-ind="bb" title="Bollinger Bands 20, 2σ">BB</button>
             <button class="sv-ind-btn" data-ind="vwap" title="Volume-weighted average price, session-anchored (intraday only)">VWAP</button>
             <button class="sv-ind-btn" data-ind="rsi" title="RSI 14 in its own pane">RSI</button>
+            <button class="sv-ind-btn" data-ind="macd" title="MACD 12/26/9 in its own pane">MACD</button>
+            <button class="sv-ind-btn" data-ind="volume" title="Volume histogram">VOL</button>
             <button class="sv-ind-btn active" data-ind="positions" title="Open positions, stops, targets and signal entries on the tape">POSITIONS</button>
         </div>
 
@@ -315,6 +356,7 @@ Optional page data (json_script blocks the widget picks up when present):
             <button class="sv-chart-btn" data-tool="crosshair" title="Crosshair">&#8982;</button>
             <button class="sv-chart-btn" data-tool="hline" title="H-Line">&#8213;</button>
             <button class="sv-chart-btn" data-tool="trendline" title="Trend Line">&#8599;</button>
+            <button class="sv-chart-btn" data-tool="measure" title="Measure: two clicks report the move, the bar count and its size in R">&#8596;R</button>
             <button class="sv-chart-btn" data-tool="clear" title="Clear drawings">&#10005;</button>
         </div>
     </div>
@@ -322,8 +364,11 @@ Optional page data (json_script blocks the widget picks up when present):
     <!-- Chart canvas -->
     <div class="sv-chart-body" id="{{ chart_id }}" style="height: calc({{ height }}px - 36px);"></div>
 
-    <!-- RSI pane (synchronised time scale) -->
-    <div class="sv-chart-rsi" id="{{ chart_id }}-rsi"></div>
+    <!-- Sub-panes (synchronised time scale), created on demand -->
+    <div class="sv-chart-panes" id="{{ chart_id }}-panes"></div>
+
+    <!-- Measure readout -->
+    <div class="sv-chart-measure" id="{{ chart_id }}-measure" aria-live="off"></div>
 
     <!-- OHLCV legend overlay -->
     <div class="sv-chart-legend" id="{{ chart_id }}-legend"></div>
@@ -370,13 +415,14 @@ Optional page data (json_script blocks the widget picks up when present):
     var INIT_TF      = '{{ timeframe }}';
     var CHART_HEIGHT = parseInt('{{ height }}', 10) || 400;
     var TOOLBAR_H    = 36;
-    var RSI_H        = 90;
+    var PANE_LABEL_H = 0;   /* labels float over the pane, costing no rows */
     var INTRADAY     = ['1min', '5min', '15min', '1h', '4h'];
     var TF_SECONDS   = { '1min': 60, '5min': 300, '15min': 900, '1h': 3600, '4h': 14400 };
 
     var container   = document.getElementById(CHART_ID + '-container');
     var canvasEl    = document.getElementById(CHART_ID);
-    var rsiEl       = document.getElementById(CHART_ID + '-rsi');
+    var paneHost    = document.getElementById(CHART_ID + '-panes');
+    var measureEl   = document.getElementById(CHART_ID + '-measure');
     var legendEl    = document.getElementById(CHART_ID + '-legend');
     var countdownEl = document.getElementById(CHART_ID + '-countdown');
     var loadingEl   = document.getElementById(CHART_ID + '-loading');
@@ -394,6 +440,10 @@ Optional page data (json_script blocks the widget picks up when present):
         try { var v = JSON.parse(el.textContent); return Array.isArray(v) ? v : []; }
         catch (e) { return []; }
     }
+    /* The page's copy is the FIRST paint, not the only one — every load
+       replaces these from the response (see loadData). Reassigned, never
+       captured: applyPositions and riskPerUnit read these bindings, so a
+       local copy taken anywhere would freeze the tape at page load again. */
     var POSITIONS = pageJson('-positions');
     var SIGNALS   = pageJson('-signals');
 
@@ -462,14 +512,39 @@ Optional page data (json_script blocks the widget picks up when present):
     }
     function indicatorTone(key, c) {
         return { sma20: c.gold, sma50: c.blue, ema20: c.purple,
-                 bb: c.alpha(c.blue, 0.7), vwap: c.gold, rsi: c.purple }[key] || c.accent;
+                 bb: c.alpha(c.blue, 0.7), vwap: c.gold, rsi: c.purple,
+                 macd: c.blue, signal: c.gold,
+                 volume: c.accentDim }[key] || c.accent;
     }
 
-    // ── Persisted preferences (per symbol) ──────────────────────────────
-    /* localStorage can throw (private mode, blocked site data) and can be
+    // ── Persisted preferences (per instrument) ──────────────────────────
+    /* An operator sets a chart up ONCE per instrument — Heikin-Ashi and a
+       log scale on gold, five-minute candles with RSI on EURUSD — and
+       expects to find each of them as they left it. That is the whole
+       contract of this block.
+
+       The key names BOTH the surface and the instrument. It used to be
+       the prefix plus the symbol alone, which collided two ways: the
+       widget is documented as includable without a symbol, and every
+       symbol-less chart in the browser profile then shared the literal
+       key 'sv-chart:'; and two charts of the SAME symbol on one page —
+       a main tape and a rail thumbnail, which legitimately want
+       different heights and types — shared one record too.
+
+       A widget with no symbol can never load data and now never writes
+       either: it would only be writing a record no instrument owns.
+
+       Last write wins across tabs, deliberately. Re-reading storage on
+       every save would not fix a stale second tab either (both loaded at
+       boot), and a live re-read would yank the chart out from under
+       whoever is reading it. These are view preferences; the cost of the
+       rare collision is a redrawn line, not money.
+
+       localStorage can throw (private mode, blocked site data) and can be
        empty; both mean "the defaults", never an error the operator sees. */
-    var PREF_KEY = 'sv-chart:' + SYMBOL;
+    var PREF_KEY = 'sv-chart:' + CHART_ID + ':' + SYMBOL;
     function loadPrefs() {
+        if (!SYMBOL) return {};
         try {
             var raw = window.localStorage.getItem(PREF_KEY);
             var p = raw ? JSON.parse(raw) : null;
@@ -477,9 +552,45 @@ Optional page data (json_script blocks the widget picks up when present):
         } catch (e) { return {}; }
     }
     function savePrefs() {
+        if (!SYMBOL) return;
+        /* The drawings are re-serialised on the way out and kept in
+           `savedDrawings`, which is what redraws them after every load.
+           One source of truth: reading the blob back off localStorage
+           each time would make a chart with storage blocked lose lines it
+           is still displaying. */
+        savedDrawings = serialiseDrawings();
         try {
             window.localStorage.setItem(PREF_KEY, JSON.stringify({
                 type: chartType, log: logScale, indicators: activeInds,
+                /* The timeframe is the setting an operator changes most and
+                   the one that was never kept: they picked 5min, walked
+                   away, came back to a daily chart, picked 5min again.
+                   Every visit. */
+                tf: currentTf,
+                /* Drawings, split by what their anchors mean.
+
+                   A horizontal line is a PRICE, and a price is the same
+                   number on every timeframe — 1.0850 is 1.0850 whether the
+                   chart shows minutes or months. Those are kept once per
+                   instrument.
+
+                   A trendline is anchored to two BAR TIMES, and bar times
+                   belong to the timeframe: the daily series carries
+                   'YYYY-MM-DD' strings and the intraday series epoch
+                   seconds. Restoring a daily trendline onto a 5-minute
+                   chart does not draw a shallower version of the same line
+                   — it draws a line through two points the series does not
+                   contain. So they are stored PER TIMEFRAME and only ever
+                   restored onto the one they were drawn on.
+
+                   Not persisted, deliberately: the viewport (a zoom saved
+                   on Friday frames a window the market has since left, and
+                   loadData already preserves it across refreshes), the
+                   fullscreen/tall view state (restoring a page into
+                   fullscreen nobody asked for), the active drawing tool, a
+                   half-placed trendline and a half-taken measurement. Those
+                   are intent in flight, not preference. */
+                drawings: savedDrawings,
             }));
         } catch (e) { /* no storage: the session keeps its state in memory */ }
     }
@@ -487,26 +598,175 @@ Optional page data (json_script blocks the widget picks up when present):
     // ── State ────────────────────────────────────────────────────────────
     var prefs        = loadPrefs();
     var chart        = null;
-    var rsiChart     = null;
-    var rsiSeries    = null;
+    var panes        = {};     // key -> { el, chart, series, values }
     var mainSeries   = null;   // candlestick | heikin | line | area
     var volumeSeries = null;
     var chartType    = (['candlestick', 'heikin', 'line', 'area'].indexOf(prefs.type) !== -1) ? prefs.type : 'candlestick';
     var logScale     = !!prefs.log;
     var activeInds   = (prefs.indicators && typeof prefs.indicators === 'object')
-                       ? prefs.indicators : { positions: true };
+                       ? prefs.indicators : { positions: true, volume: true };
     if (activeInds.positions === undefined) activeInds.positions = true;
+    /* Volume was always drawn and had no button. An operator reading a
+       thin forex tape wants it gone; one reading equities wants it. It
+       defaults ON so nothing changes for anyone who never touches it —
+       `undefined` means "never had the choice", not "chose no". */
+    if (activeInds.volume === undefined) activeInds.volume = true;
     var currentTf    = INIT_TF;
     var activeTool   = 'crosshair';
     var drawingPts   = [];
     var drawings     = [];
+    var measureFrom  = null;   // first click of a measurement, or null
+    var measureLine  = null;
     var lastBars     = [];     // the bars the overlays are computed from
     var indSeries    = {};     // key -> [line series] on the main chart
     var posLines     = [];     // price lines belonging to positions
     var syncing      = false;  // guard against range ping-pong between panes
     var countdownTimer = null;
 
+    /* The operator's own lines on this instrument, as data rather than as
+       chart handles — a lightweight-charts price line cannot be asked what
+       price it was made from, so a drawing that did not carry its own
+       numbers could never be written down. `drawings` is the live
+       rendering of this; this is the truth it is rendered from. */
+    var savedDrawings = (prefs.drawings && typeof prefs.drawings === 'object')
+        ? prefs.drawings : { hlines: [], trendlines: {} };
+
     function isIntraday(tf) { return INTRADAY.indexOf(tf) !== -1; }
+
+    /* The frames this toolbar actually offers, read off the buttons rather
+       than listed a second time here — a hardcoded copy is how a frame gets
+       removed from the UI and stays reachable through a stale preference. */
+    function offeredTimeframes() {
+        var out = [];
+        container.querySelectorAll('.sv-tf-btn').forEach(function (b) {
+            if (b.dataset.tf) out.push(b.dataset.tf);
+        });
+        return out;
+    }
+    /* The remembered frame beats the include's default — but only while the
+       toolbar still offers it, so a value stored by an older build cannot
+       leave the chart on a frame nobody can switch back from. */
+    if (prefs.tf && offeredTimeframes().indexOf(prefs.tf) !== -1) {
+        currentTf = prefs.tf;
+    }
+
+    // ── Drawings, across visits ─────────────────────────────────────────
+    /* Price lines and trendlines are the operator's own reading of THIS
+       instrument. They cost a deliberate act to place and a page reload
+       threw every one of them away. */
+    function serialiseDrawings() {
+        var out = { hlines: [], trendlines: {} };
+        drawings.forEach(function (d) {
+            if (d.type === 'hline' && typeof d.price === 'number') {
+                out.hlines.push(d.price);
+            } else if (d.type === 'trendline' && d.points && d.tf) {
+                (out.trendlines[d.tf] = out.trendlines[d.tf] || [])
+                    .push(d.points);
+            }
+        });
+        /* Carry forward the lines belonging to the OTHER timeframes, which
+           are not on the chart right now and so are not in `drawings` —
+           without this, switching to 5min and back would erase every
+           trendline drawn on the daily. */
+        Object.keys(savedDrawings.trendlines || {}).forEach(function (tf) {
+            if (tf !== currentTf) {
+                out.trendlines[tf] = savedDrawings.trendlines[tf];
+            }
+        });
+        /* ...and carry forward this frame's own lines that are stored but
+           NOT currently drawn, because restoreDrawings dropped them for
+           having anchors outside the loaded window. Dropping one from the
+           SCREEN is honest — a line redrawn onto the edge of the window is
+           not the line the operator drew. Dropping it from STORAGE is not:
+           on a rolling intraday window the first bar advances every minute,
+           so a line drawn near the left edge would be silently deleted by
+           the next background refresh, seconds after it was made. It comes
+           back when its range does. */
+        var drawn = {};
+        drawings.forEach(function (d) {
+            if (d.type === 'trendline' && d.points) {
+                drawn[JSON.stringify(d.points)] = true;
+            }
+        });
+        ((savedDrawings.trendlines || {})[currentTf] || []).forEach(
+            function (pts) {
+                if (!drawn[JSON.stringify(pts)]) {
+                    (out.trendlines[currentTf] =
+                        out.trendlines[currentTf] || []).push(pts);
+                }
+            });
+        /* Bounded: a chart somebody has been drawing on for a year must not
+           grow a blob big enough to trip the storage quota and take the
+           REST of the settings down with it. */
+        out.hlines = out.hlines.slice(-40);
+        Object.keys(out.trendlines).forEach(function (tf) {
+            out.trendlines[tf] = (out.trendlines[tf] || []).slice(-40);
+        });
+        return out;
+    }
+
+    /* Re-drawn after every load, because setData wipes markers and a
+       removed series takes its price lines with it — the same reason
+       applyOverlays exists at all. Wipes first, so a background refresh
+       cannot stack a second copy of every line on the first. */
+    function restoreDrawings() {
+        if (!mainSeries || !chart) return;
+        var c = getThemeColors();
+
+        drawings.forEach(function (d) {
+            try { if (d.priceLine) mainSeries.removePriceLine(d.priceLine); }
+            catch (e) {}
+            try { if (d.lineSeries) chart.removeSeries(d.lineSeries); }
+            catch (e) {}
+        });
+        drawings = [];
+
+        (savedDrawings.hlines || []).forEach(function (price) {
+            if (typeof price !== 'number' || !isFinite(price)) return;
+            try {
+                drawings.push({
+                    type: 'hline', price: price,
+                    priceLine: mainSeries.createPriceLine({
+                        price: price, color: c.accent, lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dashed,
+                        axisLabelVisible: true, title: 'H',
+                    }),
+                });
+            } catch (e) { /* a level this series will not take is not drawn */ }
+        });
+
+        var first = lastBars.length ? barEpoch(lastBars[0].time) : NaN;
+        var last = lastBars.length
+            ? barEpoch(lastBars[lastBars.length - 1].time) : NaN;
+        ((savedDrawings.trendlines || {})[currentTf] || []).forEach(
+            function (pts) {
+                if (!Array.isArray(pts) || pts.length !== 2) return;
+                /* A trendline whose anchors have scrolled out of the loaded
+                   range is DROPPED, not clamped: a line redrawn onto
+                   whatever happens to sit at the edge of the window is not
+                   the line the operator drew, and nothing on screen would
+                   distinguish the two. It is still in storage, and comes
+                   back when the range does. */
+                var ok = pts.every(function (p) {
+                    var e = barEpoch(p.time);
+                    return isFinite(e) && e >= first && e <= last;
+                });
+                if (!ok) return;
+                try {
+                    var ls = chart.addLineSeries({
+                        color: c.accent, lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Solid,
+                        lastValueVisible: false, priceLineVisible: false,
+                    });
+                    ls.setData([
+                        { time: pts[0].time, value: pts[0].price },
+                        { time: pts[1].time, value: pts[1].price },
+                    ]);
+                    drawings.push({ type: 'trendline', lineSeries: ls,
+                                    tf: currentTf, points: pts });
+                } catch (e) { /* a shape this series cannot take is skipped */ }
+            });
+    }
 
     // ── Layout ───────────────────────────────────────────────────────────
     /* One place decides the pane heights: the toolbar takes 36px, the RSI
@@ -607,15 +867,21 @@ Optional page data (json_script blocks the widget picks up when present):
         }
         var total = inFs || viewState === 'tall'
             ? container.clientHeight : CHART_HEIGHT;
-        var rsiOn = !!activeInds.rsi;
-        var rsiH = rsiOn ? RSI_H : 0;
-        var bodyH = Math.max(120, total - TOOLBAR_H - rsiH);
+        var open = openPanes();
+        var panesH = open.reduce(function (t, k) {
+            return t + PANE_SPECS[k].height;
+        }, 0);
+        var bodyH = Math.max(120, total - TOOLBAR_H - panesH);
         canvasEl.style.height = bodyH + 'px';
-        rsiEl.style.height = rsiH + 'px';
-        rsiEl.classList.toggle('on', rsiOn);
         var w = container.offsetWidth || 600;
         if (chart) chart.applyOptions({ width: w, height: bodyH });
-        if (rsiChart && rsiOn) rsiChart.applyOptions({ width: w, height: rsiH });
+        Object.keys(panes).forEach(function (k) {
+            var h = PANE_SPECS[k].height;
+            panes[k].el.style.height = h + 'px';
+            try { panes[k].chart.applyOptions({ width: w, height: h }); }
+            catch (e) {}
+        });
+        alignPriceScales();
     }
 
     // ── Initialise chart ─────────────────────────────────────────────────
@@ -661,6 +927,7 @@ Optional page data (json_script blocks the widget picks up when present):
             scaleMargins: { top: 0.8, bottom: 0 },
         });
         chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+        volumeSeries.applyOptions({ visible: !!activeInds.volume });
 
         applyLogScale();
 
@@ -670,55 +937,249 @@ Optional page data (json_script blocks the widget picks up when present):
         // Click handler for drawing tools
         chart.subscribeClick(onChartClick);
 
-        /* The RSI pane follows the main chart's viewport and vice versa:
-           a zoom on either moves both. The guard stops the echo — each
-           setVisibleLogicalRange fires the other pane's subscriber. */
+        /* Every pane follows the main chart's viewport and vice versa:
+           a zoom anywhere moves all of them. */
         chart.timeScale().subscribeVisibleLogicalRangeChange(function (range) {
-            if (syncing || !rsiChart || !range) return;
-            syncing = true;
-            try { rsiChart.timeScale().setVisibleLogicalRange(range); } catch (e) {}
-            syncing = false;
+            propagateRange('main', range);
         });
 
-        if (activeInds.rsi) ensureRsiPane();
+        openPanes().forEach(ensurePane);
         paintToolbarState();
         layout();
     }
 
-    function ensureRsiPane() {
-        if (rsiChart) return;
-        var c = getThemeColors();
-        rsiEl.classList.add('on');
-        rsiEl.style.height = RSI_H + 'px';
-        var opts = baseOptions(c, RSI_H);
-        opts.timeScale.visible = false; /* one time axis for both panes */
-        rsiChart = LightweightCharts.createChart(rsiEl, opts);
-        rsiSeries = rsiChart.addLineSeries({
-            color: indicatorTone('rsi', c), lineWidth: 1,
-            priceLineVisible: false, lastValueVisible: true,
-            priceFormat: { type: 'price', precision: 1, minMove: 0.1 },
-            autoscaleInfoProvider: function () {
-                return { priceRange: { minValue: 0, maxValue: 100 } };
+    /* ── Sub-pane registry ───────────────────────────────────────────
+       An indicator with its own vertical scale needs its own chart, and
+       every one of those needs the same five things: a div, a chart
+       sharing the main time scale, series, a repaint from new bars, and
+       a legend reading at the crosshair. Written once here and declared
+       per indicator below, so adding the next one is a table entry
+       rather than a second copy of the plumbing that would drift from
+       the first — and it was already drifting: the RSI pane's height,
+       creation, sync, teardown and legend lived in five different
+       places. */
+    var PANE_SPECS = {
+        rsi: {
+            height: 90,
+            label: 'RSI 14',
+            build: function (pc, c) {
+                var s = pc.addLineSeries({
+                    color: indicatorTone('rsi', c), lineWidth: 1,
+                    priceLineVisible: false, lastValueVisible: true,
+                    priceFormat: { type: 'price', precision: 1, minMove: 0.1 },
+                    autoscaleInfoProvider: function () {
+                        return { priceRange: { minValue: 0, maxValue: 100 } };
+                    },
+                });
+                /* 30/70 are the overbought/oversold guides the reading is
+                   judged against; without them the pane is a squiggle
+                   with no scale. */
+                s.createPriceLine({ price: 70, color: c.redDim, lineWidth: 1,
+                    lineStyle: LightweightCharts.LineStyle.Dashed,
+                    axisLabelVisible: true, title: '' });
+                s.createPriceLine({ price: 30, color: c.accentDim, lineWidth: 1,
+                    lineStyle: LightweightCharts.LineStyle.Dashed,
+                    axisLabelVisible: true, title: '' });
+                return { rsi: s };
             },
+            paint: function (S, bars) {
+                var d = rsi(bars, 14);
+                S.rsi.setData(d);
+                return { rsi: d };
+            },
+            legend: function (V, epoch, c) {
+                var v = valueAt(V.rsi, epoch);
+                if (v === null) return '';
+                return tone('RSI ' + v.toFixed(1), indicatorTone('rsi', c));
+            },
+        },
+        macd: {
+            height: 100,
+            label: 'MACD 12/26/9',
+            build: function (pc, c) {
+                /* The histogram is added FIRST so the two lines draw over
+                   it rather than under. */
+                var h = pc.addHistogramSeries({
+                    priceLineVisible: false, lastValueVisible: false,
+                    priceFormat: { type: 'price', precision: 5, minMove: 0.00001 },
+                });
+                var m = pc.addLineSeries({
+                    color: indicatorTone('macd', c), lineWidth: 1,
+                    priceLineVisible: false, lastValueVisible: true,
+                    priceFormat: { type: 'price', precision: 5, minMove: 0.00001 },
+                });
+                var g = pc.addLineSeries({
+                    color: indicatorTone('signal', c), lineWidth: 1,
+                    priceLineVisible: false, lastValueVisible: false,
+                    priceFormat: { type: 'price', precision: 5, minMove: 0.00001 },
+                });
+                /* Zero is the whole reading: MACD above it is momentum
+                   one way, below it the other, and the cross is the
+                   event. A pane without the line is a shape with no
+                   anchor. */
+                m.createPriceLine({ price: 0, color: c.border, lineWidth: 1,
+                    lineStyle: LightweightCharts.LineStyle.Dotted,
+                    axisLabelVisible: false, title: '' });
+                return { hist: h, macd: m, signal: g };
+            },
+            paint: function (S, bars) {
+                var c = getThemeColors();
+                var out = macd(bars, 12, 26, 9);
+                S.macd.setData(out.macd);
+                S.signal.setData(out.signal);
+                S.hist.setData(out.hist.map(function (p) {
+                    return { time: p.time, value: p.value,
+                             color: p.value >= 0 ? c.accentDim : c.redDim };
+                }));
+                return out;
+            },
+            legend: function (V, epoch, c) {
+                var m = valueAt(V.macd, epoch), g = valueAt(V.signal, epoch);
+                if (m === null) return '';
+                var out = tone('MACD ' + m.toFixed(5), indicatorTone('macd', c));
+                if (g !== null) {
+                    out += tone('SIG ' + g.toFixed(5), indicatorTone('signal', c));
+                }
+                return out;
+            },
+        },
+    };
+
+    function tone(text, colour) {
+        return '<span class="sv-ind-val" style="color:' + colour + ';">' +
+               text + '</span>';
+    }
+
+    /* The reading AT a bar, or null before the indicator has warmed up.
+       Scanned from the end because the crosshair is almost always near
+       the right edge of a freshly loaded chart. */
+    function valueAt(series, epoch) {
+        if (!series || !series.length || !isFinite(epoch)) return null;
+        for (var i = series.length - 1; i >= 0; i--) {
+            if (barEpoch(series[i].time) === epoch) {
+                return typeof series[i].value === 'number'
+                    ? series[i].value : null;
+            }
+        }
+        return null;
+    }
+
+    function openPanes() {
+        return Object.keys(PANE_SPECS).filter(function (k) {
+            return !!activeInds[k];
         });
-        /* 30/70 are the overbought/oversold guides the reading is judged
-           against; without them the pane is a squiggle with no scale. */
-        rsiSeries.createPriceLine({ price: 70, color: c.redDim, lineWidth: 1,
-            lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
-        rsiSeries.createPriceLine({ price: 30, color: c.accentDim, lineWidth: 1,
-            lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: '' });
-        rsiChart.timeScale().subscribeVisibleLogicalRangeChange(function (range) {
-            if (syncing || !chart || !range) return;
-            syncing = true;
-            try { chart.timeScale().setVisibleLogicalRange(range); } catch (e) {}
-            syncing = false;
+    }
+
+    function ensurePane(key) {
+        if (panes[key]) return panes[key];
+        var spec = PANE_SPECS[key];
+        var c = getThemeColors();
+
+        var el = document.createElement('div');
+        el.className = 'sv-chart-pane';
+        el.id = CHART_ID + '-pane-' + key;
+        el.style.height = spec.height + 'px';
+        paneHost.appendChild(el);
+
+        var opts = baseOptions(c, spec.height);
+        opts.timeScale.visible = false; /* one time axis for every pane */
+        var pc = LightweightCharts.createChart(el, opts);
+        var series = spec.build(pc, c);
+
+        /* A pane with no name is a squiggle: two of them and the
+           operator has to guess which is which. */
+        el.style.position = 'relative';
+        var lab = document.createElement('div');
+        lab.className = 'sv-chart-pane-label';
+        lab.textContent = spec.label;
+        el.appendChild(lab);
+
+        pc.timeScale().subscribeVisibleLogicalRangeChange(function (range) {
+            propagateRange(key, range);
         });
-        /* A crosshair on the RSI pane should light the main legend too;
-           the main chart's own crosshair drives the legend directly. */
-        rsiChart.subscribeCrosshairMove(function (param) {
+        /* A crosshair on a pane should light the main legend too; the
+           main chart's own crosshair drives it directly. */
+        pc.subscribeCrosshairMove(function (param) {
             if (!param || !param.time || !chart) return;
-            try { chart.setCrosshairPosition(NaN, param.time, mainSeries); } catch (e) {}
+            try { chart.setCrosshairPosition(NaN, param.time, mainSeries); }
+            catch (e) {}
         });
+
+        panes[key] = { el: el, chart: pc, series: series, values: {} };
+        orderPanes();
+        /* Born mid-session: it must land on the viewport the operator is
+           already looking at, not at the far end of the history. */
+        try {
+            var r = chart && chart.timeScale().getVisibleLogicalRange();
+            if (r) pc.timeScale().setVisibleLogicalRange(r);
+        } catch (e) {}
+        return panes[key];
+    }
+
+    function destroyPane(key) {
+        var p = panes[key];
+        if (!p) return;
+        try { p.chart.remove(); } catch (e) {}
+        try { p.el.parentNode.removeChild(p.el); } catch (e) {}
+        delete panes[key];
+    }
+
+    /* Stable top-to-bottom order whatever sequence the toggles were
+       pressed in: a pane that jumps position when an unrelated one opens
+       is a pane the operator has to re-find. */
+    function orderPanes() {
+        Object.keys(PANE_SPECS).forEach(function (k) {
+            if (panes[k]) paneHost.appendChild(panes[k].el);
+        });
+    }
+
+    /* Every chart here is a separate canvas, so their price scales are
+       only as wide as their own labels — and two panes whose axes differ
+       by ten pixels put the same bar at two different x positions. The
+       widest wins and the rest are padded to it. */
+    function alignPriceScales() {
+        var charts = [];
+        if (chart) charts.push(chart);
+        Object.keys(panes).forEach(function (k) { charts.push(panes[k].chart); });
+        /* Released FIRST, then re-measured. `width()` reports the width
+           the scale currently has, which INCLUDES whatever minimumWidth was
+           applied last time — so a Math.max over those values only ever
+           grows. Closing the MACD pane, whose 5-decimal labels are the
+           widest on the page, used to leave the main chart's axis padded to
+           that width for the life of the tab. */
+        charts.forEach(function (ch) {
+            try { ch.priceScale('right').applyOptions({ minimumWidth: 0 }); }
+            catch (e) {}
+        });
+        if (charts.length < 2) return;
+        var widest = 0;
+        charts.forEach(function (ch) {
+            try { widest = Math.max(widest, ch.priceScale('right').width()); }
+            catch (e) {}
+        });
+        if (!widest) return;
+        charts.forEach(function (ch) {
+            try { ch.priceScale('right').applyOptions({ minimumWidth: widest }); }
+            catch (e) {}
+        });
+    }
+
+    /* One zoom, every pane. The guard stops the echo — each
+       setVisibleLogicalRange fires the other panes' subscribers. */
+    function propagateRange(from, range) {
+        if (syncing || !range) return;
+        syncing = true;
+        try {
+            if (from !== 'main' && chart) {
+                try { chart.timeScale().setVisibleLogicalRange(range); }
+                catch (e) {}
+            }
+            Object.keys(panes).forEach(function (k) {
+                if (k === from) return;
+                try { panes[k].chart.timeScale().setVisibleLogicalRange(range); }
+                catch (e) {}
+            });
+        } finally { syncing = false; }
     }
 
     // ── Add/replace main series ──────────────────────────────────────────
@@ -865,6 +1326,53 @@ Optional page data (json_script blocks the widget picks up when present):
         return out;
     }
 
+    /* MACD, from the same closes the overlays use. Written over
+       {time,value} points rather than bars because the signal line is an
+       EMA of the MACD line, not of price — the one place this is easy to
+       get wrong, and the reason `emaPoints` exists separately from the
+       `ema(bars, n)` above. */
+    function emaPoints(points, n) {
+        var out = [], k = 2 / (n + 1), prev = null;
+        for (var i = 0; i < points.length; i++) {
+            if (prev === null) {
+                if (i < n - 1) continue;
+                var sum = 0;
+                for (var j = i - n + 1; j <= i; j++) sum += points[j].value;
+                prev = sum / n;
+            } else {
+                prev = points[i].value * k + prev * (1 - k);
+            }
+            out.push({ time: points[i].time, value: prev });
+        }
+        return out;
+    }
+    function macd(bars, fast, slow, signalN) {
+        var f = ema(bars, fast), sl = ema(bars, slow);
+        /* The two EMAs warm up at different bars, so they are joined on
+           time rather than index — off-by-one here would shift the whole
+           histogram by (slow - fast) bars and every cross with it. */
+        var byTime = {};
+        f.forEach(function (p) { byTime[barEpoch(p.time)] = p.value; });
+        var line = [];
+        sl.forEach(function (p) {
+            var fv = byTime[barEpoch(p.time)];
+            if (typeof fv === 'number') {
+                line.push({ time: p.time, value: fv - p.value });
+            }
+        });
+        var sig = emaPoints(line, signalN);
+        var sigByTime = {};
+        sig.forEach(function (p) { sigByTime[barEpoch(p.time)] = p.value; });
+        var hist = [];
+        line.forEach(function (p) {
+            var sv = sigByTime[barEpoch(p.time)];
+            if (typeof sv === 'number') {
+                hist.push({ time: p.time, value: p.value - sv });
+            }
+        });
+        return { macd: line, signal: sig, hist: hist };
+    }
+
     // ── Overlays: indicators, positions, signals ─────────────────────────
     /* setData on the main series wipes its markers and a removed series
        takes its price lines with it, so everything drawn ON TOP of the
@@ -902,14 +1410,18 @@ Optional page data (json_script blocks the widget picks up when present):
         }
         if (activeInds.vwap && intraday) line('vwap', vwap(bars), 1, LightweightCharts.LineStyle.Dashed);
 
-        if (activeInds.rsi) {
-            ensureRsiPane();
-            rsiSeries.setData(rsi(bars, 14));
-        } else if (rsiChart) {
-            try { rsiChart.remove(); } catch (e) {}
-            rsiChart = null; rsiSeries = null;
-            rsiEl.classList.remove('on');
+        if (volumeSeries) {
+            volumeSeries.applyOptions({ visible: !!activeInds.volume });
         }
+
+        Object.keys(PANE_SPECS).forEach(function (key) {
+            if (activeInds[key]) {
+                var p = ensurePane(key);
+                p.values = PANE_SPECS[key].paint(p.series, bars) || {};
+            } else {
+                destroyPane(key);
+            }
+        });
     }
 
     /* A marker must sit on a bar the series actually has; opened_at is a
@@ -940,9 +1452,33 @@ Optional page data (json_script blocks the widget picks up when present):
         if (barEpoch(bars[lo].time) === epoch) return bars[lo].time;
         return bars[Math.max(0, lo - 1)].time;
     }
+    /* The count the SERVER decided, passed in by the including page —
+       it is the only side that knows the asset class, and forex needs
+       five decimals (three on a JPY cross) where a share needs two.
+       Falls back to the same magnitude ladder core/price_format uses,
+       which is right for everything except forex.
+
+       This function used to answer `v >= 100 ? 2 : 4` on its own, so a
+       $50 share printed 50.2500 on a crosshair marker while the hero
+       price one card above it printed 50.25 — the same number, two
+       shapes, on one screen. */
+    var DECIMALS = (function () {
+        var n = parseInt('{{ decimals }}', 10);
+        return (isFinite(n) && n >= 0 && n <= 10) ? n : null;
+    })();
+
+    function priceDecimals(v) {
+        if (DECIMALS !== null) return DECIMALS;
+        var a = Math.abs(v);
+        if (a >= 1) return 2;
+        if (a >= 0.01) return 4;
+        if (a >= 0.0001) return 6;
+        return 8;
+    }
+
     function fmtPrice(v) {
         if (typeof v !== 'number' || !isFinite(v)) return '—';
-        return v >= 100 ? v.toFixed(2) : v.toFixed(4);
+        return v.toFixed(priceDecimals(v));
     }
 
     function applyPositions(bars) {
@@ -960,7 +1496,7 @@ Optional page data (json_script blocks the widget picks up when present):
                         price: p.entry, color: tone, lineWidth: 2,
                         lineStyle: LightweightCharts.LineStyle.Solid,
                         axisLabelVisible: true,
-                        title: (isLong ? 'LONG ' : 'SHORT ') + (typeof p.qty === 'number' ? +p.qty.toFixed(4) : ''),
+                        title: (isLong ? 'LONG ' : 'SHORT ') + (typeof p.qty === 'number' ? +p.qty.toFixed(priceDecimals(0)) : ''),
                     }));
                 }
                 if (typeof p.stop === 'number') {
@@ -1007,6 +1543,9 @@ Optional page data (json_script blocks the widget picks up when present):
         lastBars = bars;
         applyIndicators(bars);
         applyPositions(bars);
+        /* After lastBars is set: the trendline restore asks the loaded
+           range whether its anchors are still on the chart. */
+        restoreDrawings();
         layout();
     }
 
@@ -1027,7 +1566,8 @@ Optional page data (json_script blocks the widget picks up when present):
         }
         var c   = getThemeColors();
         var bar = param.seriesData.get(mainSeries);
-        var vol = volumeSeries ? param.seriesData.get(volumeSeries) : null;
+        var vol = (volumeSeries && activeInds.volume)
+            ? param.seriesData.get(volumeSeries) : null;
         if (!bar) { legendEl.textContent = ''; return; }
 
         var intraday = isIntraday(currentTf);
@@ -1041,16 +1581,16 @@ Optional page data (json_script blocks the widget picks up when present):
         if (chartType === 'candlestick' || chartType === 'heikin') {
             html =
                 '<span style="color:var(--text-muted,#5a7a5a);">' + d + (chartType === 'heikin' ? ' HA' : '') + '</span>&nbsp; ' +
-                'O <b>' + bar.open.toFixed(4) + '</b>&nbsp; ' +
-                'H <b style="color:' + c.accent + ';">' + bar.high.toFixed(4) + '</b>&nbsp; ' +
-                'L <b style="color:' + c.red + ';">' + bar.low.toFixed(4) + '</b>&nbsp; ' +
-                'C <b>' + bar.close.toFixed(4) + '</b>' +
+                'O <b>' + bar.open.toFixed(priceDecimals(0)) + '</b>&nbsp; ' +
+                'H <b style="color:' + c.accent + ';">' + bar.high.toFixed(priceDecimals(0)) + '</b>&nbsp; ' +
+                'L <b style="color:' + c.red + ';">' + bar.low.toFixed(priceDecimals(0)) + '</b>&nbsp; ' +
+                'C <b>' + bar.close.toFixed(priceDecimals(0)) + '</b>' +
                 (vol ? '&nbsp; V <span style="color:var(--text-muted,#5a7a5a);">' + Number(vol.value).toLocaleString() + '</span>' : '');
         } else {
             var val = bar.value !== undefined ? bar.value : bar.close;
             html =
                 '<span style="color:var(--text-muted,#5a7a5a);">' + d + '</span>&nbsp; ' +
-                '<b style="color:' + c.accent + ';">' + (val ? val.toFixed(4) : '—') + '</b>' +
+                '<b style="color:' + c.accent + ';">' + (val ? val.toFixed(priceDecimals(0)) : '—') + '</b>' +
                 (vol ? '&nbsp; V <span style="color:var(--text-muted,#5a7a5a);">' + Number(vol.value).toLocaleString() + '</span>' : '');
         }
         /* Active overlays read at the same bar. BB reports its three
@@ -1061,21 +1601,21 @@ Optional page data (json_script blocks the widget picks up when present):
         Object.keys(indSeries).forEach(function (key) {
             var vals = indSeries[key].map(function (s) {
                 var pt = param.seriesData.get(s);
-                return pt && typeof pt.value === 'number' ? pt.value.toFixed(4) : null;
+                return pt && typeof pt.value === 'number' ? pt.value.toFixed(priceDecimals(0)) : null;
             }).filter(function (v) { return v !== null; });
             if (!vals.length) return;
             html += '<span class="sv-ind-val" style="color:' + indicatorTone(key, c) + ';">' +
                     LABELS[key] + ' ' + vals.join('/') + '</span>';
         });
-        if (rsiSeries) {
-            var rv = null;
-            try { var arr = rsiSeries.data(); var te = barEpoch(param.time);
-                  for (var i = arr.length - 1; i >= 0; i--) { if (barEpoch(arr[i].time) === te) { rv = arr[i].value; break; } }
-            } catch (e) {}
-            if (typeof rv === 'number') {
-                html += '<span class="sv-ind-val" style="color:' + indicatorTone('rsi', c) + ';">RSI ' + rv.toFixed(1) + '</span>';
-            }
-        }
+        /* Each open pane reads itself at the same bar, from the values
+           its own paint() computed — not from a second pass over the
+           bars, which is how a legend ends up disagreeing with the line
+           drawn right below it. */
+        var epoch = barEpoch(param.time);
+        Object.keys(panes).forEach(function (key) {
+            try { html += PANE_SPECS[key].legend(panes[key].values, epoch, c); }
+            catch (e) {}
+        });
         legendEl.innerHTML = html;
     }
 
@@ -1099,11 +1639,107 @@ Optional page data (json_script blocks the widget picks up when present):
     }
 
     // ── Click / drawing tools ────────────────────────────────────────────
+    /* The risk this instrument is actually running, per unit: the
+       distance from entry to stop on an open position. It is what "R"
+       means on this desk, so the measure tool asks the position rather
+       than inventing a denominator — and answers null when there is no
+       stop to measure against, which prints as a dash rather than a
+       number nothing backs. */
+    function riskPerUnit() {
+        for (var i = 0; i < POSITIONS.length; i++) {
+            var p = POSITIONS[i];
+            if (typeof p.entry === 'number' && typeof p.stop === 'number') {
+                var r = Math.abs(p.entry - p.stop);
+                if (r > 0) return r;
+            }
+        }
+        return null;
+    }
+
+    function clearMeasure() {
+        measureFrom = null;
+        if (measureLine) {
+            try { chart.removeSeries(measureLine); } catch (e) {}
+            measureLine = null;
+        }
+        measureEl.classList.remove('on');
+        measureEl.innerHTML = '';
+    }
+
+    function barsBetween(t1, t2) {
+        var a = barEpoch(t1), b = barEpoch(t2), i1 = -1, i2 = -1;
+        for (var i = 0; i < lastBars.length; i++) {
+            var e = barEpoch(lastBars[i].time);
+            if (e === a) i1 = i;
+            if (e === b) i2 = i;
+        }
+        return (i1 >= 0 && i2 >= 0) ? Math.abs(i2 - i1) : null;
+    }
+
+    function showMeasure(from, to) {
+        var c = getThemeColors();
+        var d = to.price - from.price;
+        var pct = from.price ? (d / from.price) * 100 : 0;
+        var risk = riskPerUnit();
+        var bars = barsBetween(from.time, to.time);
+        var cls = d >= 0 ? 'sv-m-up' : 'sv-m-dn';
+        var sign = d >= 0 ? '+' : '';
+
+        var html = '<span class="' + cls + '">' + sign +
+                   d.toFixed(priceDecimals(0)) + '</span> ' +
+                   '<span class="' + cls + '">(' + sign +
+                   pct.toFixed(2) + '%)</span>';
+        if (bars !== null) {
+            html += ' <span class="sv-m-dim">&middot; ' + bars +
+                    (bars === 1 ? ' bar' : ' bars') + '</span>';
+        }
+        if (risk) {
+            html += ' <span class="sv-m-r">&middot; ' +
+                    (Math.abs(d) / risk).toFixed(2) + 'R</span>';
+        } else {
+            html += ' <span class="sv-m-dim" title="No open position with a ' +
+                    'stop on this instrument, so there is no R to measure ' +
+                    'against">&middot; —R</span>';
+        }
+        measureEl.innerHTML = html;
+        measureEl.classList.add('on');
+
+        if (measureLine) { try { chart.removeSeries(measureLine); } catch (e) {} }
+        measureLine = chart.addLineSeries({
+            color: c.gold, lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Dashed,
+            lastValueVisible: false, priceLineVisible: false,
+            crosshairMarkerVisible: false,
+        });
+        var pts = [from, to].sort(function (a, b) {
+            return barEpoch(a.time) - barEpoch(b.time);
+        });
+        measureLine.setData([
+            { time: pts[0].time, value: pts[0].price },
+            { time: pts[1].time, value: pts[1].price },
+        ]);
+    }
+
     function onChartClick(param) {
         if (activeTool === 'crosshair' || !param.time || !mainSeries) return;
         var c     = getThemeColors();
         var price = mainSeries.coordinateToPrice(param.point.y);
         if (price === null) return;
+
+        if (activeTool === 'measure') {
+            if (measureFrom === null) {
+                clearMeasure();
+                measureFrom = { time: param.time, price: price };
+                measureEl.innerHTML = '<span class="sv-m-dim">measuring from ' +
+                                      fmtPrice(price) + ' — click again</span>';
+                measureEl.classList.add('on');
+            } else {
+                var from = measureFrom;
+                measureFrom = null;
+                showMeasure(from, { time: param.time, price: price });
+            }
+            return;
+        }
 
         if (activeTool === 'hline') {
             var pl = mainSeries.createPriceLine({
@@ -1111,7 +1747,8 @@ Optional page data (json_script blocks the widget picks up when present):
                 lineStyle: LightweightCharts.LineStyle.Dashed,
                 axisLabelVisible: true, title: 'H',
             });
-            drawings.push({ type: 'hline', priceLine: pl });
+            drawings.push({ type: 'hline', priceLine: pl, price: price });
+            savePrefs();
 
         } else if (activeTool === 'trendline') {
             drawingPts.push({ time: param.time, price: price });
@@ -1127,7 +1764,12 @@ Optional page data (json_script blocks the widget picks up when present):
                     { time: pts[0].time, value: pts[0].price },
                     { time: pts[1].time, value: pts[1].price },
                 ]);
-                drawings.push({ type: 'trendline', lineSeries: ls });
+                drawings.push({ type: 'trendline', lineSeries: ls,
+                                tf: currentTf, points: [
+                                    { time: pts[0].time, price: pts[0].price },
+                                    { time: pts[1].time, price: pts[1].price },
+                                ] });
+                savePrefs();
             }
         }
     }
@@ -1135,6 +1777,10 @@ Optional page data (json_script blocks the widget picks up when present):
     function setActiveTool(tool) {
         activeTool = tool;
         drawingPts = [];
+        /* Leaving the tool abandons a half-taken measurement rather than
+           leaving one anchor armed to pair with an unrelated click made
+           minutes later. */
+        if (tool !== 'measure') measureFrom = null;
         container.querySelectorAll('.sv-chart-btn').forEach(function(b) {
             b.classList.toggle('active', b.dataset.tool === tool);
         });
@@ -1149,6 +1795,18 @@ Optional page data (json_script blocks the widget picks up when present):
                 });
                 drawings = [];
                 drawingPts = [];
+                clearMeasure();
+                /* CLEAR means gone, not gone until the next reload — and it
+                   clears THIS timeframe's trendlines plus the price lines,
+                   which is what was on screen when the operator pressed it.
+                   serialiseDrawings carries the other frames' lines through
+                   untouched; a button the operator can see the effect of
+                   must not also delete things they cannot. */
+                savedDrawings.hlines = [];
+                if (savedDrawings.trendlines) {
+                    delete savedDrawings.trendlines[currentTf];
+                }
+                savePrefs();
                 setActiveTool('crosshair');
             } else {
                 setActiveTool(tool);
@@ -1178,7 +1836,12 @@ Optional page data (json_script blocks the widget picks up when present):
         }
         var seq = ++loadSeq;
 
-        fetch('/api/chart-data/?symbol=' + encodeURIComponent(SYMBOL) + '&timeframe=' + encodeURIComponent(tf))
+        /* overlays=1 asks the same response to carry the operator's open
+           positions and the signals' entry marks. The chart already
+           rebuilds every line and marker from scratch on each paint, so
+           fresh data in this reply is the whole of what "live positions"
+           needs — no second endpoint, no second clock. */
+        fetch('/api/chart-data/?symbol=' + encodeURIComponent(SYMBOL) + '&timeframe=' + encodeURIComponent(tf) + '&overlays=1')
             .then(function(r) {
                 if (r.status === 423) {
                     if (window.svIdleLock) window.svIdleLock.engage(false);
@@ -1189,12 +1852,53 @@ Optional page data (json_script blocks the widget picks up when present):
             .then(function(json) {
                 if (seq !== loadSeq) return; /* a newer request owns the paint */
                 loadingEl.style.display = 'none';
+
+                /* The overlay is adopted here, AFTER the sequence guard and
+                   BEFORE the two early returns below.
+
+                   After the guard, because the sixty-second poll and a
+                   fill-triggered refresh overlap: a slow in-flight response
+                   from before the fill has its bars correctly discarded,
+                   and would otherwise still overwrite the fresh positions
+                   with the stale ones on its way past.
+
+                   Before the early returns, because a position is real
+                   whether or not this venue could serve bars this second.
+                   A minute-bar outage must not also erase the stop line the
+                   operator is watching.
+
+                   Array.isArray, never truthiness: an EMPTY array is the
+                   correct answer when the last position closed, and it has
+                   to clear the lines. A MISSING key means this response was
+                   not asked for overlays — leave what is on screen alone. */
+                var overlayFresh = false;
+                if (json.overlays_error) {
+                    /* Asked for, and the server could not build it. The
+                       lines on screen are now of unknown age; saying so
+                       once in the console beats a silent freeze, and the
+                       existing ones stay rather than blanking a position
+                       the operator is managing. */
+                    if (window.console && console.warn) {
+                        console.warn('[sv-chart] overlay not refreshed: '
+                                     + json.overlays_error);
+                    }
+                } else {
+                    if (Array.isArray(json.positions)) {
+                        POSITIONS = json.positions; overlayFresh = true;
+                    }
+                    if (Array.isArray(json.signals)) {
+                        SIGNALS = json.signals; overlayFresh = true;
+                    }
+                }
+
                 if (json.error) {
+                    if (overlayFresh && hasData) applyPositions(lastBars);
                     if (!quiet || !hasData) showError(json.error);
                     return;
                 }
                 var bars = json.bars || [];
                 if (!bars.length) {
+                    if (overlayFresh && hasData) applyPositions(lastBars);
                     if (!quiet || !hasData) showError('No data available for ' + SYMBOL);
                     return;
                 }
@@ -1205,6 +1909,7 @@ Optional page data (json_script blocks the widget picks up when present):
                 }
                 mainSeries.setData(seriesData(bars));
                 var vc = getThemeColors();
+                volumeSeries.applyOptions({ visible: !!activeInds.volume });
                 volumeSeries.setData(bars.map(function(b) {
                     return {
                         time:  b.time,
@@ -1241,6 +1946,13 @@ Optional page data (json_script blocks the widget picks up when present):
     // ── Toolbar state ────────────────────────────────────────────────────
     function paintToolbarState() {
         var c = getThemeColors();
+        /* The frame the chart is ACTUALLY showing. The template marks the
+           include's default active in the HTML, so a restored preference
+           would otherwise leave the chart on 5min with the 1d button lit —
+           the toolbar lying about the tape beside it. */
+        container.querySelectorAll('.sv-tf-btn').forEach(function(b) {
+            b.classList.toggle('active', b.dataset.tf === currentTf);
+        });
         container.querySelectorAll('.sv-type-btn').forEach(function(b) {
             b.classList.toggle('active', b.dataset.type === chartType);
         });
@@ -1248,7 +1960,12 @@ Optional page data (json_script blocks the widget picks up when present):
             var key = b.dataset.ind;
             b.classList.toggle('active', !!activeInds[key]);
             b.setAttribute('aria-pressed', activeInds[key] ? 'true' : 'false');
-            if (key !== 'positions' && key !== 'rsi') b.style.setProperty('--sv-ind-tone', indicatorTone(key, c));
+            /* Panes colour themselves inside their own box, and
+               POSITIONS is not a line — a tone strip under those buttons
+               would promise a colour that appears nowhere. */
+            if (key !== 'positions' && !PANE_SPECS[key]) {
+                b.style.setProperty('--sv-ind-tone', indicatorTone(key, c));
+            }
         });
         var logBtn = container.querySelector('.sv-ctl-btn[data-ctl="log"]');
         if (logBtn) { logBtn.classList.toggle('active', logScale); logBtn.setAttribute('aria-pressed', logScale ? 'true' : 'false'); }
@@ -1264,10 +1981,25 @@ Optional page data (json_script blocks the widget picks up when present):
     container.querySelectorAll('.sv-tf-btn').forEach(function(btn) {
         btn.addEventListener('click', function() {
             var tf = btn.dataset.tf;
+            /* Saved BEFORE currentTf moves, and ONLY here.
+
+               serialiseDrawings buckets the on-screen trendlines under the
+               frame they were drawn on, so this save has to happen while
+               `currentTf` still names the frame being LEFT. A second save
+               after the switch looked harmless and was not: at that instant
+               `drawings` still held the old frame's lines and the new
+               frame's had not loaded, and serialiseDrawings' carry-forward
+               deliberately skips `currentTf` — so it wrote an empty bucket
+               over the incoming frame's trendlines and deleted them.
+
+               The new frame's own save comes from the load that follows,
+               through the drawing handlers, or from the next preference
+               change. Nothing needs a save between the two. */
+            savePrefs();
             currentTf = tf;
-            container.querySelectorAll('.sv-tf-btn').forEach(function(b) { b.classList.remove('active'); });
-            btn.classList.add('active');
+            clearMeasure();   /* its readout describes the frame just left */
             loadData(tf);
+            paintToolbarState();
         });
     });
 
@@ -1275,6 +2007,10 @@ Optional page data (json_script blocks the widget picks up when present):
     container.querySelectorAll('.sv-type-btn').forEach(function(btn) {
         btn.addEventListener('click', function() {
             var type = btn.dataset.type;
+            /* The measurement was taken against the old series. Heikin-Ashi
+               candles are averages, so the same two clicks describe a
+               different move once the series changes underneath them. */
+            clearMeasure();
             addSeries(type);
             paintToolbarState();
             savePrefs();
@@ -1459,7 +2195,7 @@ Optional page data (json_script blocks the widget picks up when present):
     }
     window.addEventListener('resize', relayout);
     // Bounded against feeding itself: layout() writes heights on canvasEl
-    // and rsiEl and a width through applyOptions, none of which changes
+    // and the pane divs, and a width through applyOptions, none of which changes
     // the OBSERVED container's box — and the 150ms debounce absorbs any
     // echo that a future change introduces.
     if (window.ResizeObserver) {

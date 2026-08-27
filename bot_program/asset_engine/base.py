@@ -377,7 +377,18 @@ class AssetBot(ABC):
             self._note_stop_rules_inert(trade)
             return False
 
-        ids = (trade.metadata or {}).get("protective_order_ids") or []
+        meta_now = trade.metadata or {}
+        # A trade-level handle wins: on OANDA the stop is not a standalone
+        # order at all, and the trade id is the only thing that can move it.
+        # Then a NAMED stop leg, where the venue told us which one it is.
+        # The flat list is the last resort, and it is a list precisely
+        # because it does not say which id is which — which is why the
+        # venue client must refuse a leg that is not a stop rather than
+        # move whatever it is handed.
+        handle = (meta_now.get("protective_trade_id")
+                  or meta_now.get("protective_stop_id"))
+        ids = [handle] if handle else (
+            meta_now.get("protective_order_ids") or [])
         if not ids:
             self._note_stop_rules_inert(trade)
             return False
@@ -1012,10 +1023,16 @@ class AssetBot(ABC):
         # Circuit breakers: stop opening when the recent record says
         # something is wrong. Never force-closes — an automated system that
         # starts closing on a heuristic is worse than one that just stops.
-        allowed, reasons = CircuitBreakers(self.cfg).check_all()
+        breakers = CircuitBreakers(self.cfg)
+        allowed, reasons = breakers.check_all()
         if not allowed:
             notify_circuit_breaker(self.cfg, reasons)
             return (False, "circuit breaker: " + "; ".join(reasons))
+        # A breaker that could not run did not clear — it stood aside, for
+        # the same reason preflight does (see check_all). Carried to the
+        # heartbeat so the note the operator reads says which of the two
+        # kinds of "ok" this is.
+        self._breakers_blind = "; ".join(breakers.blind)
 
         # The operator's own numbers from /setup/ — MAX DAILY LOSS and MAX
         # TOTAL EXPOSURE — measured across BOTH position books. Reported ahead
@@ -1080,9 +1097,10 @@ class AssetBot(ABC):
                                self.asset_class, e)
             return (False,
                     f"daily loss limit hit ({realized:.2f} {self.cfg.base_currency})")
-        blind = getattr(self, "_book_gate_blind", "")
-        if blind:
-            return (True, f"ok (book limits UNCHECKED: {blind})")
+        unchecked = [b for b in (getattr(self, "_breakers_blind", ""),
+                                 getattr(self, "_book_gate_blind", "")) if b]
+        if unchecked:
+            return (True, "ok (UNCHECKED: " + "; ".join(unchecked) + ")")
         return (True, "ok")
 
     # ── per-symbol scan ─────────────────────────────────────────────────
@@ -1318,15 +1336,41 @@ class AssetBot(ABC):
             # divided the risk budget by; the portfolio book is a separate
             # number no bot consults, so measuring against it refused every
             # entry on any account whose pool exceeds its recorded book.
+        notional = qty * price * self._value_per_unit(symbol)
         cap = single_position_state(
             limits_book(), asset_class=self.asset_class,
-            notional=qty * price * self._value_per_unit(symbol),
+            notional=notional,
             capital_base=float(self.cfg.capital or 0),
             base_label="bot pool")
         if not cap["ok"]:
             logger.info("[%s_bot] %s refused by the book's single-position "
                         "limit: %s", self.asset_class, symbol, cap["reason"])
             return self._skip(symbol, skips.GATE_BLOCKED, cap["reason"])
+
+        # NOT a per-ticket total-exposure pre-check here, deliberately.
+        #
+        # `exposure_state` now accepts `adding=` so a caller can ask "would
+        # THIS position put me over?" rather than only "am I already over?",
+        # which closes a real gap: a book at 99,500 of a 100,000 ceiling
+        # clears `preflight` in can_open_new, this scan opens at the
+        # single-position cap, and the pass ends at 119.5% of a limit
+        # nothing refused.
+        #
+        # But the denominator that gate uses is the BOOK's value, and the
+        # comment on the cap above records what happens when a bot entry is
+        # measured against it: sizing divides the risk budget by
+        # `AssetBotConfig.capital`, so on any account whose pool exceeds its
+        # recorded book value, a book-denominated ceiling refuses every
+        # entry. That is why the single-position check passes
+        # `capital_base=self.cfg.capital` with `base_label="bot pool"`.
+        # Adding a book-denominated total here would reintroduce exactly
+        # the bug that comment exists to prevent.
+        #
+        # The gap is real and the fix belongs where the book IS the right
+        # denominator — the manual ticket path, where the operator's own
+        # capital is what is being spent. Bounding a config's total against
+        # its OWN pool is a different limit that does not exist yet, and
+        # inventing one on a live money path is not tonight's change.
 
         # ONE EXPRESSION PER BET, and a leg cap per currency theme — the
         # two holes every money limit above walks past. EURGBP BUY under
@@ -1470,6 +1514,20 @@ class AssetBot(ABC):
                 if protective_ids or res.get("protectedOnFill"):
                     entry_meta["protected"] = True
                     entry_meta["protective_order_ids"] = protective_ids
+                    # Venues where protection rides the TRADE rather than
+                    # standalone orders (OANDA) report the trade instead.
+                    # It is the handle for moving the stop later, and it
+                    # is offered exactly once — in the fill.
+                    trade_handle = res.get("protectiveTradeId")
+                    if trade_handle:
+                        entry_meta["protective_trade_id"] = str(trade_handle)
+                    # Venues that name their legs (Alpaca) say which one is
+                    # the stop. Recorded so the stop rules move THAT one
+                    # rather than walking a flat list and taking whichever
+                    # answers first — which on a long bracket is the target.
+                    stop_leg = res.get("protectiveStopId")
+                    if stop_leg:
+                        entry_meta["protective_stop_id"] = str(stop_leg)
             except Exception as e:
                 logger.error("[%s_bot] live order failed for %s: %s",
                              self.asset_class, symbol, e)

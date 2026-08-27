@@ -266,7 +266,57 @@ class OANDATrader:
             # SL/TP ride on the trade itself; closing the trade cancels them,
             # so there are no standalone order ids to track.
             out["protectiveOrders"] = []
+            # ...but the TRADE is the handle for moving them later, and it
+            # is reported once, here, in the fill. Kept under its own key
+            # rather than in protectiveOrders because those ids are what
+            # the flatten path CANCELS, and a trade id sent to
+            # /orders/{id}/cancel is a 404 dressed as a tidy False.
+            opened = (fill.get("tradeOpened") or {}).get("tradeID")
+            if opened:
+                out["protectiveTradeId"] = str(opened)
         return out
+
+    def modify_protective(self, trade_id: str, new_price: float) -> dict:
+        """Move the stop that rides OANDA trade `trade_id`.
+
+        v20 attaches SL/TP to the TRADE, so there is no standalone order
+        to re-place — the whole thing is one PUT that REPLACES the
+        trade's dependent orders. That is the atomic shape this needs
+        anyway: the position is never momentarily unprotected, and there
+        is never a second stop resting beside the first.
+
+        The identifier is therefore a TRADE id, not an order id. Sending
+        an order id here quietly moves nothing.
+        """
+        digits = 3 if "_JPY" in str(trade_id) else 5   # overwritten below
+        try:
+            # The instrument decides the precision, and the trade knows
+            # its instrument — asking is cheaper than being wrong by a
+            # digit on a stop.
+            info = self._sess().get(
+                f"{self.base}/v3/accounts/{self.account_id}/trades/{trade_id}",
+                timeout=self.timeout)
+            instr = ""
+            if info.status_code == 200:
+                instr = ((info.json().get("trade") or {}).get("instrument")
+                         or "")
+            digits = 3 if instr.endswith("_JPY") else 5
+
+            r = self._sess().put(
+                f"{self.base}/v3/accounts/{self.account_id}"
+                f"/trades/{trade_id}/orders",
+                json={"stopLoss": {"price": f"{float(new_price):.{digits}f}",
+                                   "timeInForce": "GTC"}},
+                timeout=self.timeout)
+            if r.status_code in (200, 201):
+                return {"ok": True, "reason": "",
+                        "price": round(float(new_price), digits)}
+            return {"ok": False, "price": None,
+                    "reason": f"OANDA refused ({r.status_code}): "
+                              f"{r.text[:160]}"}
+        except Exception as e:  # noqa: BLE001
+            log.error("OANDA modify_protective(%s) failed: %s", trade_id, e)
+            return {"ok": False, "reason": str(e), "price": None}
 
     def cancel_order(self, order_id: str) -> bool:
         """Cancel a pending order. OANDA's on-fill SL/TP are attached to the

@@ -163,3 +163,107 @@ class NoSurfaceStillHardcodesFourTests(SimpleTestCase):
         shell = (base / "templates" / "base.html").read_text(encoding="utf-8")
         rail = shell.split('class="wl-item')[1][:600]
         self.assertNotIn("floatformat:4", rail)
+
+
+class TheChartSharesThePlatformsPrecisionTests(TestCase):
+    """`fmtPrice` answered `v >= 100 ? 2 : 4` on its own, so a $50 share
+    printed 50.2500 on a crosshair marker while the hero price one card
+    above it printed 50.25 — the same number, two shapes, one screen.
+    """
+
+    def setUp(self):
+        from instruments.models import Instrument
+        from market_data.models import LiveQuote
+        self.user = User.objects.create_user("cpx_u", password="x")
+        self.client.force_login(self.user)
+        self.inst = Instrument.objects.create(
+            symbol="EURUSD", name="Euro", asset_class="forex", is_active=True)
+        LiveQuote.objects.create(instrument=self.inst,
+                                 last=Decimal("1.08425"), source="oanda")
+
+    def test_the_page_hands_the_chart_its_decision(self):
+        body = self.client.get("/instruments/EURUSD/").content.decode()
+        self.assertIn("var DECIMALS", body)
+
+    def test_forex_reaches_the_chart_as_five(self):
+        """The chart cannot work this out — it receives a symbol and
+        numbers, and five decimals is a forex fact."""
+        from django.test import Client
+        body = self.client.get("/instruments/EURUSD/").content.decode()
+        seg = body.split("var DECIMALS")[1][:200]
+        self.assertIn("parseInt('5'", seg)
+
+    def test_the_widget_no_longer_decides_alone(self):
+        from pathlib import Path
+
+        from django.conf import settings
+        src = (Path(settings.BASE_DIR) / "templates" / "_partials"
+               / "chart_widget.html").read_text(encoding="utf-8")
+        self.assertNotIn("v >= 100 ? v.toFixed(2) : v.toFixed(4)", src)
+        self.assertIn("priceDecimals(", src)
+
+    def test_it_still_answers_without_a_hint(self):
+        """A page that includes the widget without the parameter must
+        still print something sane."""
+        from pathlib import Path
+
+        from django.conf import settings
+        src = (Path(settings.BASE_DIR) / "templates" / "_partials"
+               / "chart_widget.html").read_text(encoding="utf-8")
+        seg = src.split("function priceDecimals")[1][:300]
+        self.assertIn("if (a >= 1) return 2;", seg)
+
+
+class TheChartGetsEnoughHistoryToBeHonestTests(SimpleTestCase):
+    """SMA200 is on the toolbar. At the old 90-day cap it could never
+    draw a single point and read as a broken button."""
+
+    def test_the_daily_window_can_carry_a_long_average(self):
+        from pathlib import Path
+
+        from django.conf import settings
+        src = (Path(settings.BASE_DIR) / "dashboard" / "views.py").read_text(
+            encoding="utf-8")
+        seg = src.split("DAYS_BACK = {")[1][:200]
+        self.assertIn('"1d": 420', seg)
+
+    def test_every_offered_window_grew(self):
+        from pathlib import Path
+
+        from django.conf import settings
+        src = (Path(settings.BASE_DIR) / "dashboard" / "views.py").read_text(
+            encoding="utf-8")
+        seg = src.split("DAYS_BACK = {")[1][:200]
+        self.assertNotIn('"1d": 90', seg)
+
+
+class TheHeaderIsTwoRowsNotFourTests(TestCase):
+    """Title / metadata / actions / book, stacked, each pushing the chart
+    — the thing the page exists for — further below the fold."""
+
+    def setUp(self):
+        from instruments.models import Instrument
+        from market_data.models import LiveQuote
+        self.user = User.objects.create_user("hdr_u", password="x")
+        self.client.force_login(self.user)
+        inst = Instrument.objects.create(
+            symbol="BRNUSD", name="Brent Crude Oil", asset_class="commodity",
+            is_active=True)
+        LiveQuote.objects.create(instrument=inst, last=Decimal("82.45"),
+                                 bid=Decimal("82.43"), ask=Decimal("82.47"),
+                                 source="ibkr")
+
+    def test_the_metadata_rides_the_title_row(self):
+        body = self.client.get("/instruments/BRNUSD/").content.decode()
+        self.assertIn("detail-meta-inline", body)
+
+    def test_the_book_sits_beside_the_buttons(self):
+        body = self.client.get("/instruments/BRNUSD/").content.decode()
+        self.assertIn("dtl-quote-inline", body)
+
+    def test_the_live_price_spans_keep_their_names(self):
+        """sv-instrument-live.js holds references to these two by class;
+        renaming them freezes the hero price under a live market badge."""
+        body = self.client.get("/instruments/BRNUSD/").content.decode()
+        self.assertIn('class="dtl-last"', body)
+        self.assertIn("dtl-chg", body)

@@ -1,8 +1,23 @@
 {% extends "base.html" %}
 {% block title %}Economic Calendar — Sauron Vision{% endblock %}
-{% block page_title %}ECONOMIC CALENDAR{% endblock %}
+{% comment %}
+EARNINGS, not "economic". The only writer of EconomicEvent anywhere in this
+codebase is scraping/scrapers/earnings_calendar.py, which stamps
+title="<SYMBOL> Earnings", country="US", impact="high", source="fmp". There
+is no FOMC, CPI, NFP or rate-decision ingestion — no module produces one.
+A page headed ECONOMIC CALENDAR with Forecast/Previous/Actual columns is
+therefore promising a macro feed that structurally cannot arrive, and an
+operator reading an empty table concluded the platform was broken rather
+than that it had never covered macro at all. The title says what the
+pipeline can actually deliver; the note under it says what it cannot.
+{% endcomment %}
+{% block page_title %}EARNINGS CALENDAR{% endblock %}
 
 {% block content %}
+<p class="cal-scope-note">
+    US issuer earnings dates, from FMP. Macro releases — FOMC, CPI, NFP —
+    have no source on this platform and do not appear here.
+</p>
 <div class="oc-strip" style="margin-bottom:18px;">
     <div class="oc-strip-cell">
         <span class="oc-strip-label">THIS WEEK</span>
@@ -29,10 +44,18 @@
         <span class="oc-strip-value">{{ top_countries|length }}</span>
         <span class="oc-strip-sub">distinct issuers</span>
     </div>
+    {% comment %}
+    It said DAILY / "fetched 06:00 UTC". The beat runs it every 30 minutes
+    (config/celery.py), and a cell stating a schedule the platform does not
+    keep is how an operator concludes the data is a day old when it is not —
+    or waits until tomorrow for a fix that would have landed in half an hour.
+    {% endcomment %}
     <div class="oc-strip-cell">
-        <span class="oc-strip-label">REFRESH</span>
-        <span class="oc-strip-value">DAILY</span>
-        <span class="oc-strip-sub">fetched 06:00 UTC</span>
+        <span class="oc-strip-label">SOURCE</span>
+        <span class="oc-strip-value{% if not calendar_source.configured %} down{% endif %}">
+            {% if calendar_source.configured %}FMP{% else %}OFF{% endif %}</span>
+        <span class="oc-strip-sub">
+            {% if calendar_source.configured %}every 30 min{% else %}no API key{% endif %}</span>
     </div>
 </div>
 
@@ -120,9 +143,48 @@
     </table>
     </div>
     {% else %}
+    {% comment %}
+    Three different failures used to print one reassuring sentence —
+    "Scraper will populate this automatically" — which is a promise the
+    platform cannot keep with no API key, and which is why this page was
+    reported broken three times without the cause ever surfacing. The
+    component row knows which of the three it is; this says so.
+    {% endcomment %}
     <div class="empty-state">
         <div class="empty-icon">&#9671;</div>
-        <p>NO ECONOMIC EVENTS — Scraper will populate this automatically</p>
+        {% if not calendar_source.configured %}
+        <p>NOT CONFIGURED — no <code>FMP_API_KEY</code> is set</p>
+        <p class="empty-sub">Nothing fetches this calendar without one. The
+           earnings blackout in the stock bot cannot fire without this data
+           either.</p>
+        {% elif not calendar_source.enabled %}
+        <p>SWITCHED OFF — the calendar scraper is disabled</p>
+        <p class="empty-sub">The beat fires every 30 minutes and the gate
+           refuses it. Turn <code>scraper_calendar</code> back on from the
+           platform controls.</p>
+        {% elif calendar_source.status == "error" %}
+        <p>THE SOURCE REFUSED THE LAST REQUEST</p>
+        <p class="empty-sub">{{ calendar_source.message|default:"no detail recorded" }}
+           {% if calendar_source.last_run %}· last tried {{ calendar_source.last_run|timesince }} ago{% endif %}</p>
+        {% elif calendar_source.status == "warning" %}
+        {% comment %}
+        `judge_result` writes "warning" for the two outcomes that actually
+        explain an empty table — "not configured: no_api_key" (the worker's
+        environment lacks the key even though the web container has it) and
+        "handled N rows and stored none". Branching only on "error" printed
+        "the fetch succeeded" over both of them.
+        {% endcomment %}
+        <p>THE LAST FETCH DID NOT DELIVER</p>
+        <p class="empty-sub">{{ calendar_source.message|default:"no detail recorded" }}
+           {% if calendar_source.last_run %}· last tried {{ calendar_source.last_run|timesince }} ago{% endif %}</p>
+        {% elif calendar_source.last_run %}
+        <p>NO EARNINGS IN THE WINDOW</p>
+        <p class="empty-sub">The fetch succeeded {{ calendar_source.last_run|timesince }} ago
+           and returned nothing for the next fortnight.</p>
+        {% else %}
+        <p>THE FETCH HAS NOT RUN YET ON THIS DEPLOYMENT</p>
+        <p class="empty-sub">It is scheduled every 30 minutes.</p>
+        {% endif %}
     </div>
     {% endif %}
 </div>

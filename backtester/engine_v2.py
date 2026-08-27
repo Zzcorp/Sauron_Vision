@@ -284,6 +284,10 @@ class BacktestEngineV2:
                     decision = decide(
                         sym, ohlcv, ob, self.weights,
                         entry_min=self.entry_min, exit_max=self.exit_max,
+                        # The bar being decided. Without it the news leg
+                        # reads today's headlines for every historical bar,
+                        # which is lookahead, not noise.
+                        as_of=ts,
                     )
                 except Exception as e:
                     logger.debug("decide() failed for %s at %s: %s", sym, ts, e)

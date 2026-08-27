@@ -154,11 +154,19 @@ class DailyLossGateTests(TestCase):
 
     def test_it_unions_both_position_books(self):
         """Half the loss in AssetBotTrade, half in the legacy Position book.
-        Either alone is inside the limit; together they are not."""
+        Either alone is inside the limit; together they are not.
+
+        Both halves LIVE, explicitly. `AssetBotTrade.paper` defaults True and
+        Position rows are always counted as live, so the default fixture would
+        put the two halves on opposite VENUES — which the gate deliberately
+        never adds (see `realized_since`). Two books on one venue is what this
+        test is about; the venue split has its own tests.
+        """
         from portfolio.models import Position
         from portfolio.risk_gate import daily_loss_state
         pf = _book(current_value=Decimal("10000"), max_daily_loss_pct=3.0)
-        _closed_trade(_config(self.user), -200)
+        trade = _closed_trade(_config(self.user), -200)
+        type(trade).objects.filter(pk=trade.pk).update(paper=False)
 
         inst = _instrument("LEGACY", "stock")
         pos = Position.objects.create(

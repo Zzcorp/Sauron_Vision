@@ -206,6 +206,26 @@ class AlpacaTrader:
         legs = [str(leg.get("id")) for leg in (data.get("legs") or [])
                 if leg.get("id")]
 
+        def _stop_leg(payload):
+            """The id of the STOP leg specifically, by its declared type.
+
+            `protective_order_ids` is a flat list that does not say which id
+            is which, and the stop-rule caller walks it asking each leg in
+            turn to move to the stop price, taking the first that answers
+            OK. Alpaca returns a bracket's legs take-profit first, so on a
+            long AAPL bracket with the target at 220 and the stop at 190, a
+            break-even move to 202 would PATCH the TARGET down to 202 —
+            selling the position at the first tick and calling it a
+            take-profit. Naming the leg here, where its type is on the
+            record, is what stops the caller having to guess.
+            """
+            for leg in (payload.get("legs") or []):
+                if "stop" in str(leg.get("type", "")).lower() and leg.get("id"):
+                    return str(leg["id"])
+            return ""
+
+        stop_leg = _stop_leg(data)
+
         # Market orders return 'accepted' with a null fill price; poll briefly
         # so the recorded entry is the REAL fill, not the pre-order ticker.
         if not data.get("filled_avg_price") and data.get("id"):
@@ -214,6 +234,7 @@ class AlpacaTrader:
                 legs = legs or [str(leg.get("id"))
                                 for leg in (polled.get("legs") or [])
                                 if leg.get("id")]
+                stop_leg = stop_leg or _stop_leg(polled)
                 data = polled
         out = {
             "orderId": str(data.get("id", "")),
@@ -230,6 +251,8 @@ class AlpacaTrader:
         if bracket:
             out["protectedOnFill"] = True
             out["protectiveOrders"] = legs
+            if stop_leg:
+                out["protectiveStopId"] = stop_leg
         return out
 
     def _await_fill(self, order_id: str, attempts: int = 5,
@@ -260,6 +283,55 @@ class AlpacaTrader:
                     "canceled", "expired", "rejected"):
                 return last
         return last
+
+    def modify_protective(self, order_id: str, new_price: float) -> dict:
+        """Move a resting bracket leg with PATCH — a REPLACE, in place.
+
+        Alpaca keeps the leg alive through the change, so the position
+        is never briefly unprotected and there is never a second stop
+        resting beside the first. Cancel-and-repost would risk both.
+
+        Which field carries the price depends on the leg: a stop order
+        answers to stop_price, a limit to limit_price. It is read off
+        the resting order rather than assumed, because the row's
+        `protective_order_ids` is a flat list that does not record which
+        id is the stop and which the target.
+        """
+        try:
+            got = self._sess().get(
+                f"{self.trading_base}/v2/orders/{order_id}",
+                timeout=self.timeout)
+            if got.status_code == 404:
+                return {"ok": False, "price": None,
+                        "reason": f"leg {order_id} is gone — already filled "
+                                  f"or cancelled"}
+            got.raise_for_status()
+            kind = str((got.json() or {}).get("type", "")).lower()
+
+            if "stop" not in kind:
+                # A REFUSAL, not a best effort. Every caller of this method
+                # is moving a STOP, and the id list it walks holds the
+                # take-profit leg too — on a long bracket Alpaca returns
+                # that one first. Accepting it here PATCHed the target down
+                # to the stop price, which sells the position at the next
+                # tick and books it as a take-profit. Answering False lets
+                # the caller's loop walk on to the leg it actually wanted.
+                return {"ok": False, "price": None,
+                        "reason": f"leg {order_id} is a {kind or 'unknown'} "
+                                  f"order, not a stop — refusing to move it"}
+            body = {"stop_price": str(new_price)}
+
+            r = self._sess().patch(
+                f"{self.trading_base}/v2/orders/{order_id}",
+                json=body, timeout=self.timeout)
+            if r.status_code in (200, 201):
+                return {"ok": True, "reason": "", "price": float(new_price)}
+            return {"ok": False, "price": None,
+                    "reason": f"Alpaca refused ({r.status_code}): "
+                              f"{r.text[:160]}"}
+        except Exception as e:  # noqa: BLE001
+            log.error("Alpaca modify_protective(%s) failed: %s", order_id, e)
+            return {"ok": False, "reason": str(e), "price": None}
 
     def cancel_order(self, order_id: str) -> bool:
         """Cancel a resting order (e.g. a bracket leg). True when accepted."""

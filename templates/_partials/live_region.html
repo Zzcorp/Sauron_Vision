@@ -237,6 +237,29 @@ Why it is shaped this way
         if (timer) return;
         timer = setTimeout(function () { timer = null; refresh(); }, DEBOUNCE_MS);
     }
+    /* sv-level-edit.js asks for exactly this after a stop or target is
+       accepted, and it was calling a name nothing defined — so every level
+       save fell through to its `location.reload()` fallback and threw the
+       operator's scroll position, their chart and their zoom away to
+       repaint two cells.
+
+       Not `schedule` itself: `refresh()` returns without fetching when one
+       is already in flight, and the periodic sweep runs every 20 seconds.
+       A sweep issued a second BEFORE the save carries the pre-edit stop, so
+       a plain schedule() could be swallowed by it and leave the operator
+       looking at the old number with no retry — the one thing the reload it
+       replaced always got right. This retries until a fetch actually
+       starts, bounded so a permanently stuck sweep cannot spin. */
+    window.svLiveRefresh = function () {
+        var tries = 0;
+        (function attempt() {
+            if (inFlight && ++tries < 12) {
+                setTimeout(attempt, 250);
+                return;
+            }
+            schedule();
+        })();
+    };
 
     document.addEventListener('mouseout', function () {
         if (!deferred) return;

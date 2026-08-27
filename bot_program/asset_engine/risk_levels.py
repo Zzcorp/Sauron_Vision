@@ -31,6 +31,32 @@ DEFAULT_ATR_PERIOD = 14
 MIN_STOP_FRACTION = 0.002   # 0.2%
 MAX_STOP_FRACTION = 0.25    # 25%
 
+# ...but "a fraction of the entry price" means very different things on
+# different instruments, and one band for all of them was calibrated for
+# equities. A 1.5xATR stop on EURUSD is about 0.30% of price in an ordinary
+# session and about 0.15% in a quiet one — so the quiet half of the week fell
+# THROUGH the 0.2% floor and the pair silently took the percentage fallback
+# instead: `stop_loss_pct` defaults to 1.5%, which on EURUSD is 163 pips.
+# Five times the stop the setup was built around, on a trade the operator was
+# told was volatility-normalised, with only an INFO line to say so. The low-
+# volatility crosses (EURGBP, EURCHF) sat under the floor most of the time,
+# and the same floor refused an operator's own 20-pip stop outright.
+#
+# Per class, therefore. Every class except forex keeps today's exact numbers,
+# because nothing was wrong with them and this is a correction, not a re-tune.
+# Forex: 0.03% is about three pips on a major — under that a stop is inside
+# the spread — and 3% is about 325 pips, past which it is not a stop on a
+# major currency, it is a position held to conviction.
+STOP_FRACTION_BANDS = {
+    "forex": (0.0003, 0.03),
+}
+
+
+def stop_band(asset_class: str) -> tuple:
+    """(min, max) sane stop fraction for this asset class."""
+    return STOP_FRACTION_BANDS.get(asset_class or "",
+                                   (MIN_STOP_FRACTION, MAX_STOP_FRACTION))
+
 # Round-trip cost assumptions per asset class, as a fraction of notional.
 # Deliberately conservative: it is cheaper to skip a marginal trade than to
 # discover the cost after paying it.
@@ -97,11 +123,12 @@ def stop_and_target(cfg, symbol: str, price: float, direction: str) -> tuple:
 
     atr = atr_for(symbol, extras.get("atr_timeframe", "4h")) if use_atr else None
     meta = {"levels_source": "pct"}
+    lo, hi = stop_band(getattr(cfg, "asset_class", ""))
 
     if atr and price > 0:
         stop_distance = atr * stop_mult
         fraction = stop_distance / price
-        if MIN_STOP_FRACTION <= fraction <= MAX_STOP_FRACTION:
+        if lo <= fraction <= hi:
             target_distance = atr * target_mult
             meta = {"levels_source": "atr", "atr": round(atr, 8),
                     "atr_stop_mult": stop_mult, "atr_target_mult": target_mult,
@@ -109,10 +136,20 @@ def stop_and_target(cfg, symbol: str, price: float, direction: str) -> tuple:
             if direction == "BUY":
                 return price - stop_distance, price + target_distance, meta
             return price + stop_distance, price - target_distance, meta
-        logger.info("[risk_levels] %s ATR stop %.4f%% outside sane band — "
-                    "falling back to configured percentages",
-                    symbol, fraction * 100)
+        # WARNING, not INFO. The fallback is not a smaller version of the
+        # ATR stop — it is a different trade, sized off a percentage nobody
+        # chose for this instrument, and the only trace it used to leave was
+        # a line nobody reads at INFO.
+        logger.warning("[risk_levels] %s: a %.4f%% ATR stop is outside the "
+                       "%.3f%%-%.1f%% band for %s — falling back to the "
+                       "configured %.2f%% percentage, which is a DIFFERENT "
+                       "stop, not a clamped one",
+                       symbol, fraction * 100, lo * 100, hi * 100,
+                       getattr(cfg, "asset_class", "?") or "?",
+                       float(getattr(cfg, "stop_loss_pct", 0) or 0))
         meta["levels_fallback_reason"] = "atr_out_of_band"
+        meta["atr_stop_fraction"] = round(fraction, 6)
+        meta["stop_band"] = [lo, hi]
 
     sl_pct = cfg.stop_loss_pct / 100.0
     tp_pct = cfg.take_profit_pct / 100.0

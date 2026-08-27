@@ -89,6 +89,49 @@
     if (chart && chart.refresh) chart.refresh();
   }
 
+  /* ── Positions on the tape, without a reload ──────────────────────
+     The chart's overlay now rides the chart-data response (overlays=1),
+     so "redraw the positions" and "resync this chart" are the same act:
+     chart.refresh(). What was missing was anything to say WHEN.
+
+     Two triggers, on purpose. `sv:position-changed` is the fast local
+     path — it fires the instant this page's own execute response lands,
+     so the lines are there before the operator has finished reading the
+     confirmation. `sv:eye-event` is the cross-surface path: a fill from
+     the signals rail, from another tab, or from a bot moves this page
+     too, which the local event alone would never cover.
+
+     Debounced, because the response and the WebSocket push arrive
+     milliseconds apart and would otherwise buy two identical fetches.
+     Deliberately WITHOUT the document.hidden guard the periodic loops
+     carry: a one-shot answer to something that just happened is not a
+     clock, and an operator returning to the tab must not find a chart
+     that skipped the fill they just made. */
+  var syncTimer = null;
+  function syncPositions() {
+    if (syncTimer) return;
+    syncTimer = setTimeout(function () {
+      syncTimer = null;
+      var c = window.svCharts && window.svCharts['instrument-main-chart'];
+      if (c && c.refresh) c.refresh();
+    }, 250);
+  }
+  document.addEventListener('sv:position-changed', syncPositions);
+  document.addEventListener('sv:eye-event', function (e) {
+    var m = (e && e.detail) || {};
+    var kind = m.kind || m.event_type || m.type;
+    if (kind !== 'fill_open' && kind !== 'fill_close'
+        && kind !== 'close_pending') return;
+    /* Another instrument's fill changes nothing on this tape. When the
+       payload does not name a symbol, refresh anyway — a wasted fetch is
+       cheaper than a missing line. */
+    var sym = m.symbol || (m.data && m.data.symbol);
+    if (sym && String(sym).toUpperCase() !== String(symbol).toUpperCase()) {
+      return;
+    }
+    syncPositions();
+  });
+
   setInterval(quoteTick, QUOTE_MS);
   setInterval(chartTick, CHART_MS);
   setTimeout(quoteTick, 1500);

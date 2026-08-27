@@ -129,7 +129,18 @@ def check_economic_calendar():
     # "success" and graded as a mere warning ("ran and produced nothing") —
     # the same verdict a quiet calendar earns. An error the source reported
     # has to reach task_gate as an error.
-    status = "error" if result.get("error") else result.get("status", "success")
+    # A run that SKIPPED is not a run that succeeded. The no-credential
+    # path returns {"skipped": "no_api_key"} and no status, so the default
+    # below graded it "success" — while `task_gate`, reading the same dict,
+    # wrote "warning" to the component row. One run, two verdicts, and the
+    # return value was the dishonest one: anything reading the task's own
+    # result saw a healthy calendar that had never fetched anything.
+    if result.get("error"):
+        status = "error"
+    elif result.get("skipped"):
+        status = "warning"
+    else:
+        status = result.get("status", "success")
     return {**result, "status": status}
 
 

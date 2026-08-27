@@ -230,7 +230,16 @@ def _move_broker_stop(user, trade, stop):
         return False, ("this broker cannot modify a resting order yet — "
                        "close and re-open to change a broker-held stop")
 
-    ids = (trade.metadata or {}).get("protective_order_ids") or []
+    meta = trade.metadata or {}
+    # The same precedence the bot's own stop rules use (asset_engine/base.py):
+    # a trade-level handle first, because on OANDA the SL/TP ride the TRADE
+    # and `protective_order_ids` is deliberately empty — so this function saw
+    # nothing to move and every operator edit on an OANDA position failed with
+    # "no protective leg". Then a NAMED stop leg, where the venue said which
+    # one it is. The flat list last, because it does not say — and on Alpaca
+    # its first entry is the TAKE-PROFIT.
+    handle = meta.get("protective_trade_id") or meta.get("protective_stop_id")
+    ids = [handle] if handle else (meta.get("protective_order_ids") or [])
     if not ids:
         return False, "the row records no resting protective orders"
 

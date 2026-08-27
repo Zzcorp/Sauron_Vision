@@ -546,3 +546,160 @@ class ABrokerHeldStopIsManagedAtTheBrokerTests(TestCase):
         client = self._client()
         self._run(bot, client)
         client.modify_protective.assert_not_called()
+
+
+class EveryVenueCanMoveItsOwnStopTests(TestCase):
+    """Three brokers, three mechanisms, one interface.
+
+    IBKR re-places the leg with the same order id. Alpaca PATCHes the
+    leg. OANDA has no standalone order at all — SL/TP ride the TRADE, so
+    one PUT replaces the trade's dependent orders. All three are atomic:
+    the position is never briefly unprotected, and there is never a
+    second stop resting beside the first.
+    """
+
+    def _oanda(self, put_status=200, instrument="EUR_USD"):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from bot_program.engine.oanda_client import OANDATrader
+        t = OANDATrader("k", "101-1")
+        sess = MagicMock()
+        sess.get.return_value = SimpleNamespace(
+            status_code=200, text="",
+            json=lambda: {"trade": {"instrument": instrument}})
+        sess.put.return_value = SimpleNamespace(status_code=put_status,
+                                                text="refused")
+        t._session = sess
+        return t, sess
+
+    def test_oanda_moves_the_trades_own_stop(self):
+        t, sess = self._oanda()
+        res = t.modify_protective("777", 1.0800)
+        self.assertTrue(res["ok"], res)
+        url, kw = sess.put.call_args[0][0], sess.put.call_args[1]
+        self.assertIn("/trades/777/orders", url)
+        self.assertIn("stopLoss", kw["json"])
+
+    def test_oanda_uses_the_instruments_own_precision(self):
+        """A JPY cross is quoted to three decimals; five would be a digit
+        the venue does not take."""
+        t, sess = self._oanda(instrument="USD_JPY")
+        t.modify_protective("777", 148.325)
+        self.assertEqual(sess.put.call_args[1]["json"]["stopLoss"]["price"],
+                         "148.325")
+
+    def test_oanda_reports_a_refusal_rather_than_claiming_success(self):
+        t, _ = self._oanda(put_status=400)
+        res = t.modify_protective("777", 1.08)
+        self.assertFalse(res["ok"])
+        self.assertIn("refused", res["reason"])
+
+    def _alpaca(self, kind="stop", patch_status=200, get_status=200):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from bot_program.engine.alpaca_client import AlpacaTrader
+        t = AlpacaTrader("k", "s")
+        sess = MagicMock()
+        sess.get.return_value = SimpleNamespace(
+            status_code=get_status, text="", raise_for_status=lambda: None,
+            json=lambda: {"type": kind})
+        sess.patch.return_value = SimpleNamespace(status_code=patch_status,
+                                                  text="refused")
+        t._session = sess
+        return t, sess
+
+    def test_alpaca_patches_a_stop_leg_on_its_stop_price(self):
+        t, sess = self._alpaca(kind="stop")
+        res = t.modify_protective("abc", 95.5)
+        self.assertTrue(res["ok"], res)
+        self.assertIn("stop_price", sess.patch.call_args[1]["json"])
+
+    def test_alpaca_refuses_to_move_a_take_profit_leg(self):
+        """`protective_order_ids` is a flat list that does not say which id
+        is which, and the caller walks it asking each leg in turn to move to
+        the STOP price, taking the first that answers OK. Alpaca returns a
+        bracket's legs take-profit first — so accepting a limit leg here
+        PATCHed the target down to the stop price, selling the position at
+        the next tick and booking it as a take-profit. Answering False lets
+        the caller's loop walk on to the leg it actually wanted."""
+        t, sess = self._alpaca(kind="limit")
+        res = t.modify_protective("abc", 98.0)
+        self.assertFalse(res["ok"])
+        self.assertIn("not a stop", res["reason"])
+        sess.patch.assert_not_called()
+
+    def test_alpaca_names_its_stop_leg_at_entry(self):
+        """Better than refusing the wrong leg: knowing the right one. The
+        bracket's POST response declares each leg's type, so the id can be
+        recorded where it is unambiguous rather than guessed later."""
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from bot_program.engine.alpaca_client import AlpacaTrader
+        t = AlpacaTrader("k", "s")
+        sess = MagicMock()
+        sess.post.return_value = SimpleNamespace(
+            status_code=200, text="", raise_for_status=lambda: None,
+            json=lambda: {"id": "parent", "filled_qty": "10",
+                          "filled_avg_price": "200", "status": "filled",
+                          "legs": [{"id": "tp1", "type": "limit"},
+                                   {"id": "sl1", "type": "stop"}]})
+        t._session = sess
+        out = t.market_order("AAPL", "BUY", 10, stop_loss=190,
+                             take_profit=220)
+        self.assertEqual(out.get("protectiveStopId"), "sl1")
+        self.assertEqual(out["protectiveOrders"], ["tp1", "sl1"])
+
+    def test_alpaca_refuses_anything_that_is_not_a_stop(self):
+        """The row's leg list does not record which id is which, so the type
+        is read off the resting order — and anything that is not a stop is
+        named and refused rather than moved. It used to accept a LIMIT leg
+        and PATCH its limit_price, which on a long bracket meant walking the
+        id list, hitting the take-profit first, and pulling the target down
+        to the stop price."""
+        t, _ = self._alpaca(kind="trailing_thing")
+        res = t.modify_protective("abc", 95.5)
+        self.assertFalse(res["ok"])
+        self.assertIn("not a stop", res["reason"])
+
+    def test_a_leg_already_gone_is_an_answer_not_an_error(self):
+        t, _ = self._alpaca(get_status=404)
+        res = t.modify_protective("abc", 95.5)
+        self.assertFalse(res["ok"])
+        self.assertIn("gone", res["reason"])
+
+
+class TheTradeHandleIsRecordedAtEntryTests(TestCase):
+    """OANDA reports its trade id exactly once — in the fill. Without
+    capturing it there is nothing that can move the stop later."""
+
+    def test_oanda_reports_the_trade_it_opened(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from bot_program.engine.oanda_client import OANDATrader
+        t = OANDATrader("k", "101-1")
+        sess = MagicMock()
+        sess.post.return_value = SimpleNamespace(
+            status_code=201, text="", raise_for_status=lambda: None,
+            json=lambda: {"orderFillTransaction": {
+                "id": "11", "units": "1000", "price": "1.0850",
+                "tradeOpened": {"tradeID": "9001"}}})
+        t._session = sess
+        out = t.market_order("EURUSD", "BUY", 1000,
+                             stop_loss=1.08, take_profit=1.09)
+        self.assertEqual(out.get("protectiveTradeId"), "9001")
+
+    def test_the_engine_stores_it_beside_the_leg_ids(self):
+        """Not IN them: those ids are what the flatten path CANCELS, and
+        a trade id sent to an order-cancel endpoint is a 404 dressed as
+        a tidy False."""
+        from pathlib import Path
+
+        from django.conf import settings
+        src = (Path(settings.BASE_DIR) / "bot_program" / "asset_engine"
+               / "base.py").read_text(encoding="utf-8")
+        self.assertIn('entry_meta["protective_trade_id"]', src)
+        self.assertIn('meta_now.get("protective_trade_id")', src)

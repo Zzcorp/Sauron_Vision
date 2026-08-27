@@ -321,13 +321,34 @@ def _risk_appetite(cfg) -> dict:
                    f"row, an ordinary run, would cost "
                    f"{ten * 100:.0f}% of it"),
         # Only when the coupling is about to change the operator's trade.
+        # Shown when the coupling would actually change the operator's
+        # trade — that is, when the forced floor is wider than the band this
+        # asset class is judged by. The old test was a flat `floor > 0.03`,
+        # three percent, which on forex is the entire CEILING: a 0.5% forced
+        # floor on EURUSD silently widens a 20-pip stop to 54 pips and said
+        # nothing, because 0.5% is under 3%. The comparison has to be
+        # against the class, not against a number borrowed from equities.
         "stop_floor_note": (
             f"a {f * 100:.2f}% risk budget against a "
             f"{cap * 100:.0f}% notional cap forces any stop wider than "
-            f"{floor * 100:.2f}% — tighter stops get WIDENED to it. Raise "
+            f"{floor * 100:.3f}% — tighter stops get WIDENED to it. Raise "
             f"extras['max_notional_fraction'] to keep your own stops."
-            if floor > 0.03 else ""),
+            if floor > _floor_note_threshold(cls) else ""),
     }
+
+def _floor_note_threshold(asset_class: str) -> float:
+    """Above this forced floor, the operator has to be told.
+
+    Twice the class's own sane-stop minimum: at that point the coupling is
+    no longer a rounding detail, it is placing a stop the operator did not
+    choose and would notice.
+    """
+    try:
+        from bot_program.asset_engine.risk_levels import stop_band
+        return stop_band(asset_class)[0] * 2.0
+    except Exception:  # noqa: BLE001
+        return 0.03
+
 
 def _manual_rule_advisory() -> dict:
     """What the brain currently thinks of hand-taken entries.
@@ -524,10 +545,13 @@ def validate_stop_override(cfg, *, asset_class, raw, entry, side):
              stopped ABOVE its entry is not a tight stop, it is a position
              the very next tick closes at a guaranteed loss — the same
              refusal _preview already makes for a stale signal's levels.
-      band   MIN/MAX_STOP_FRACTION, the window risk_levels sanctions for
-             an ATR stop. Outside it a level is a fat finger or a bad
+      band   The window risk_levels sanctions for an ATR stop ON THIS
+             ASSET CLASS. Outside it a level is a fat finger or a bad
              feed, not a regime: 0.05% on a stock is inside the spread,
-             and 60% is not a stop at all.
+             and 60% is not a stop at all. Per class because the equity
+             band refused ordinary forex stops — a 20-pip stop on EURUSD
+             is 0.18%, under the 0.2% floor, and it is the most normal
+             stop in that market.
 
     Notably NOT applied: sizing.apply_stop_floor, which widens a stop that
     is too tight for the notional cap. Widening is right when the machine
@@ -536,8 +560,9 @@ def validate_stop_override(cfg, *, asset_class, raw, entry, side):
     consequence lands on the size instead, where judge_qty refuses it with
     the arithmetic and the operator can decide which of the two to give.
     """
-    from bot_program.asset_engine.risk_levels import (MAX_STOP_FRACTION,
-                                                      MIN_STOP_FRACTION)
+    from bot_program.asset_engine.risk_levels import stop_band
+
+    lo, hi = stop_band(asset_class)
 
     if isinstance(raw, bool):
         return None, "The stop must be a number"
@@ -561,16 +586,18 @@ def validate_stop_override(cfg, *, asset_class, raw, entry, side):
                       f"already stopped out")
 
     fraction = abs(entry - stop) / entry
-    if fraction < MIN_STOP_FRACTION:
+    if fraction < lo:
         return None, (
             f"A {fraction * 100:.3f}% stop is inside the "
-            f"{MIN_STOP_FRACTION * 100:.1f}% floor this platform trades — "
-            f"that distance is spread and noise, not a level.")
-    if fraction > MAX_STOP_FRACTION:
+            f"{lo * 100:.3f}% floor this platform trades on "
+            f"{asset_class or 'this class'} — that distance is spread and "
+            f"noise, not a level.")
+    if fraction > hi:
         return None, (
             f"A {fraction * 100:.1f}% stop is past the "
-            f"{MAX_STOP_FRACTION * 100:.0f}% ceiling this platform trades — "
-            f"at that distance the level is not doing any work.")
+            f"{hi * 100:.1f}% ceiling this platform trades on "
+            f"{asset_class or 'this class'} — at that distance the level is "
+            f"not doing any work.")
     return stop, None
 
 
@@ -676,9 +703,8 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     """
     from bot_program.asset_engine.base import make_bot
     from bot_program.asset_engine.risk_levels import (
-        DEFAULT_MIN_EDGE_RATIO, DEFAULT_MIN_NET_RR, MAX_STOP_FRACTION,
-        MIN_STOP_FRACTION, paper_fill_price, round_trip_cost_fraction,
-        stop_and_target)
+        DEFAULT_MIN_EDGE_RATIO, DEFAULT_MIN_NET_RR, paper_fill_price,
+        round_trip_cost_fraction, stop_and_target, stop_band)
     from bot_program.asset_engine.sizing import size_position
 
     cls = EXECUTABLE_CLASS.get(inst.asset_class)
@@ -735,11 +761,27 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     if signal is not None:
         stop = float(signal.suggested_stop or 0) or None
         target = float(signal.suggested_target or 0) or None
+    levels_note = ""
     if stop is None or target is None:
         eng_stop, eng_target, _meta = stop_and_target(
             cfg, inst.symbol, price, side)
         stop = stop or eng_stop
         target = target or eng_target
+        # A percentage stop and an ATR stop look identical on the ticket —
+        # two numbers — and they are not the same promise. One is this
+        # instrument's own volatility; the other is a default that was never
+        # asked whether it suits this instrument. The operator is about to
+        # risk money on the difference, so the ticket says which it is.
+        if _meta.get("levels_source") == "pct":
+            why = _meta.get("levels_fallback_reason")
+            levels_note = (
+                f"These levels are the configured "
+                f"{float(getattr(cfg, 'stop_loss_pct', 0) or 0):.2f}% / "
+                f"{float(getattr(cfg, 'take_profit_pct', 0) or 0):.2f}% "
+                f"percentages, not this instrument's own volatility"
+                + (f" — its ATR stop fell outside the sane band for {cls}"
+                   if why == "atr_out_of_band" else " — no ATR was available")
+                + ". Check the stop before sending.")
 
     # Levels must bracket the CURRENT mark. A signal whose stop or target
     # the price has already crossed is stale — taking it would open a
@@ -903,10 +945,22 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         except (TypeError, ValueError):
             return float(default)
 
+    band_lo, band_hi = stop_band(cls)
     levels = {
         "fill": round(paper_fill_price(cfg, inst.symbol, price, side), 8),
-        "min_stop_fraction": MIN_STOP_FRACTION,
-        "max_stop_fraction": MAX_STOP_FRACTION,
+        # The band THIS class is judged by. Publishing the equity numbers to
+        # a forex ticket told the operator their perfectly ordinary 20-pip
+        # stop was below the floor, which it no longer is.
+        "min_stop_fraction": band_lo,
+        "max_stop_fraction": band_hi,
+        # The band, spelled for a human. The browser printed its own
+        # `(minF * 100).toFixed(1)`, which renders the forex floor of
+        # 0.0003 as "0.0%" — a refusal quoting a limit of zero.
+        "min_stop_pct_text": f"{band_lo * 100:.3f}",
+        "max_stop_pct_text": f"{band_hi * 100:.1f}",
+        "asset_class": cls,
+        # Empty unless these levels are percentages wearing an ATR's clothes.
+        "levels_note": levels_note,
         "cost_fraction": round_trip_cost_fraction(cfg, inst.symbol),
         "cost_filter": bool(extras.get("use_cost_filter", True)),
         "min_edge_ratio": _extra_num("min_edge_ratio", DEFAULT_MIN_EDGE_RATIO),

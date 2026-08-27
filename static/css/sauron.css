@@ -413,6 +413,25 @@
 
         .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
         .empty-state .empty-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.3; }
+        /* The line under an empty state that says WHY it is empty. Smaller
+           and dimmer than the headline, because the headline is the verdict
+           and this is the evidence. */
+        .empty-state .empty-sub {
+            margin-top: 8px; font-size: 11px; line-height: 1.7;
+            max-width: 52ch; margin-left: auto; margin-right: auto;
+            color: var(--text-secondary);
+        }
+        .empty-state code {
+            font-family: var(--font-mono, monospace);
+            color: var(--accent-gold); font-size: 11px;
+        }
+        /* A page saying what it does and does not cover, above the numbers.
+           A reader who does not know the scope reads an empty table as a
+           broken platform. */
+        .cal-scope-note {
+            margin: 0 0 14px; font-size: 11px; line-height: 1.7;
+            color: var(--text-muted); max-width: 78ch;
+        }
         .empty-state p { font-family: var(--font-mono); font-size: 13px; letter-spacing: 1px; }
 
         .fade-in { animation: fadeIn 0.4s ease forwards; }
@@ -2465,6 +2484,23 @@
         .lsp-green { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
         .lsp-yellow { background: var(--accent-gold); box-shadow: 0 0 8px var(--accent-gold); }
         .lsp-red { background: var(--accent-red); box-shadow: 0 0 8px var(--accent-red); }
+        /* The states the old three could not express. Every one of these
+           used to render as `lsp-<something>` with no rule behind it — an
+           8px transparent dot, which is to say an invisible status.
+
+           None of them glow. The glow is what draws the eye across the
+           topbar, and it is reserved for the states that want an operator
+           to act: a feed nobody configured, or one whose market is shut,
+           has nothing to report and must not compete with one that does. */
+        .lsp-off { background: var(--text-muted); opacity: 0.45; }
+        .lsp-idle { background: var(--text-secondary); opacity: 0.6; }
+        .lsp-yielding { background: var(--accent-dim); opacity: 0.7; }
+        /* Configured, switched on, and has NEVER once delivered. The one
+           new state that does glow, because it is the one that means a
+           thing the operator turned on has never worked. */
+        .lsp-never { background: var(--accent-gold); box-shadow: 0 0 8px var(--accent-gold); }
+        .lsp-unregistered { background: var(--accent-purple, var(--text-secondary)); }
+        .lsp-row { cursor: default; }
         .lsp-label { color: var(--text-secondary); letter-spacing: 1px; font-weight: 600; }
         .lsp-dropdown {
             display: none; position: absolute; top: calc(100% + 8px); right: 0;

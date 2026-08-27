@@ -1773,6 +1773,12 @@
          tick and not the fill was never below the entry. */
       var fill = Number(L.fill);
       if (!isFinite(fill) || fill <= 0) fill = entry;
+      /* When the ticket's stop and target are the config's PERCENTAGES
+         rather than the instrument's own volatility, the operator is about
+         to risk money on a difference the two numbers do not show. The
+         server computes the sentence; without this it was computed, sent,
+         and dropped on the floor. */
+      var levelsNote = L.levels_note || '';
 
       /* An older preview (a cached tab meeting a new server, or the
          reverse) has none of the per-unit numbers. Rather than render a
@@ -1885,14 +1891,23 @@
            loss. Those are worth blocking whoever proposed them. */
         var f = Math.abs(fill - stopVal) / fill;
         var minF = Number(L.min_stop_fraction), maxF = Number(L.max_stop_fraction);
+        /* The band is per asset class now, and forex sits an order of
+           magnitude below the equity one. `(minF * 100).toFixed(1)` renders
+           a 0.0003 floor as "0.0%" — a refusal quoting a limit of zero,
+           against a server message that names 0.030% and the class it
+           applies to. The server ships both numbers spelled out so the two
+           sides cannot drift again. */
+        var minTxt = L.min_stop_pct_text || (minF * 100).toFixed(3);
+        var maxTxt = L.max_stop_pct_text || (maxF * 100).toFixed(1);
+        var cls = L.asset_class ? (' on ' + L.asset_class) : '';
         if (stopMoved() && f < minF) {
           return 'A ' + (f * 100).toFixed(3) + '% stop is inside the ' +
-                 (minF * 100).toFixed(1) + '% floor this platform trades — ' +
+                 minTxt + '% floor this platform trades' + cls + ' — ' +
                  'that distance is spread and noise, not a level.';
         }
         if (stopMoved() && f > maxF) {
           return 'A ' + (f * 100).toFixed(1) + '% stop is past the ' +
-                 (maxF * 100).toFixed(0) + '% ceiling this platform trades.';
+                 maxTxt + '% ceiling this platform trades' + cls + '.';
         }
         /* The cost filter every bot entry passes — asked ONLY of levels
            the operator moved. The engine's own levels already respect it,
@@ -2415,6 +2430,21 @@
           /* The decision is made — retire the card while the alert is
              up, so the rail reflects it the moment the operator looks. */
           if (onSuccess) { try { onSuccess(res); } catch (e) { /* UI only */ } }
+          /* ...and tell the page. Dispatched from tradeFlow rather than
+             from svTakeTrade / svTakeTradeAsset, so the signal path and the
+             asset path are covered by one line that a third entry point
+             cannot forget to add.
+
+             Safe to fire here: execute_asset_trade closes its atomic block
+             before it builds this response, so by the time this listener
+             runs the row is durable. Hanging it off the PREVIEW response
+             instead — or off the dialog's confirm — would refetch before
+             the write and draw nothing, which looks exactly like the bug
+             never being fixed. */
+          try {
+            document.dispatchEvent(new CustomEvent('sv:position-changed',
+                                                   { detail: res }));
+          } catch (e) { /* UI only */ }
           var yours = (res.overrides || []);
           SV.overlay.alert({
             title: 'Position open',
@@ -3707,14 +3737,32 @@ window.svWheelMarquee = function (frame, track) {
 
     lastOk = Date.now();
     var srcs=d.sources||[];
-    var hasGreen=srcs.some(s=>s.state==='green');
-    var hasYellow=srcs.some(s=>s.state==='yellow');
-    var hasRed=srcs.some(s=>s.state==='red');
-    dot.className='lsp-dot '+(hasRed?'lsp-red':hasYellow?'lsp-yellow':hasGreen?'lsp-green':'lsp-flat');
-    label.textContent=hasGreen?'LIVE':hasYellow?'DELAYED':'OFFLINE';
+    /* The pill is decided by the SERVER now. It used to be derived here
+       with a pessimistic dot (any red wins) and an optimistic label (any
+       green wins), so one green feed among five red ones painted a red dot
+       beside the word LIVE. The server also knows which feeds are merely
+       off or idle and must not colour the pill at all. */
+    dot.className='lsp-dot lsp-'+(d.pill_state||'flat');
+    label.textContent=(d.pill||'offline').toUpperCase();
     if(!srcs.length){body.innerHTML='<div class="lsp-empty">No live data sources.<br>See <a href="/getting-started/" style="color:var(--accent);text-decoration:none;">Getting Started</a> to configure.</div>';return;}
+    /* Escaped: `source` and `note` are free-form strings from the
+       database and a registry file, and this is innerHTML. */
+    function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+    /* A feed that has never spoken has no age to report, and "— ago" reads
+       as a formatting bug. Each state says the true thing instead. */
+    function when(s){
+      if(s.state==='off')   return 'off';
+      if(s.state==='never') return 'never';
+      if(s.state==='idle')  return 'idle';
+      if(s.state==='yielding') return 'yielding';
+      return fmt(s.age_seconds)+' ago';
+    }
     body.innerHTML=srcs.map(function(s){
-      return '<div class="lsp-row"><span class="lsp-dot lsp-'+s.state+'"></span><span class="lsp-src">'+s.source+'</span><span class="lsp-age">'+fmt(s.age_seconds)+' ago</span></div>';
+      return '<div class="lsp-row" title="'+esc(s.note)+'">'+
+        '<span class="lsp-dot lsp-'+esc(s.state)+'"></span>'+
+        '<span class="lsp-src">'+esc(s.label||s.source)+'</span>'+
+        '<span class="lsp-age">'+esc(when(s))+'</span></div>';
     }).join('');
   }
 
