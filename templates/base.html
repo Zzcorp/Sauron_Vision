@@ -1023,6 +1023,34 @@
                     <div class="ip-dropdown" style="min-width:340px;">
                         <div class="ip-dd-head">RECENT NEWS</div>
                         <div data-sv-live="hb-news-detail">
+                        {% comment %}
+                        A day of sentiment above the headlines it summarises.
+                        Five headlines say what happened; they do not say
+                        whether the day has been getting better or worse,
+                        which is the one thing a glance at this cell should
+                        answer. One bucket an hour, and only articles the
+                        analyst actually scored — an unscored row averaged in
+                        as neutral would make a bad hour read as calm.
+                        {% endcomment %}
+                        {% if panel_news_sentiment %}
+                        <div class="hb-news-sent">
+                            <div class="hb-news-sent-head">
+                                <span class="hb-news-sent-k">SENTIMENT · 24H</span>
+                                <span class="hb-news-sent-v hb-trend-{{ panel_news_sentiment.trend }}">
+                                    {% if panel_news_sentiment.mean is not None %}{% if panel_news_sentiment.mean >= 0 %}+{% endif %}{{ panel_news_sentiment.mean|floatformat:2 }}{% else %}&mdash;{% endif %}
+                                    <small>{{ panel_news_sentiment.n }} scored</small>
+                                </span>
+                            </div>
+                            <div class="pop-spark hb-news-spark"
+                                 data-points="{% for v in panel_news_sentiment.points %}{{ v|floatformat:4 }}{% if not forloop.last %},{% endif %}{% endfor %}"
+                                 data-min="{{ panel_news_sentiment.min|floatformat:4 }}"
+                                 data-max="{{ panel_news_sentiment.max|floatformat:4 }}"
+                                 data-up="{% if panel_news_sentiment.trend == 'down' %}0{% else %}1{% endif %}"
+                                 data-w="300" data-h="30">
+                                <svg viewBox="0 0 300 30" preserveAspectRatio="none"><path d=""/></svg>
+                            </div>
+                        </div>
+                        {% endif %}
                         {% comment %}hb-news-row + data-nw-*: the dwell
                         engine (SV.dwell, the ONE hover-card system) shows
                         the article's summary, sentiment and age after a

@@ -1,3 +1,4 @@
+{% load sauron_tags %}
 {% comment %}
 The signal rail's cards. Lives as a partial for one reason: the
 signal_rail_partial view re-renders it when the dashboard WebSocket
@@ -73,6 +74,32 @@ partial swap for free — there is no client-side state to reapply.
                         <span class="sr-pop-taken-head">ALREADY TAKEN{% if s.acted.by == "manual" %} · BY HAND{% else %} · BY THE ENGINE{% endif %}</span>
                         <span class="sr-pop-taken-body">{{ s.acted.side }} {{ s.acted.qty|floatformat:"-4" }} {{ s.instrument.symbol }} · {{ s.acted.venue }} · position #{{ s.acted.trade_id }}</span>
                         <span class="sr-pop-taken-body">rule {{ s.acted.rule|default:"—" }} · opened {{ s.acted.opened_at|timesince|default:"—" }} ago</span>
+                        {% comment %}
+                        What the position is DOING, not merely that it
+                        exists. The banner already stopped the operator
+                        double-stacking; these three lines are what they
+                        would otherwise open two more pages to learn —
+                        where it got in, where its stop is, whether that
+                        stop survives the platform being down, and whether
+                        the bet is currently working.
+                        {% endcomment %}
+                        <span class="sr-pop-taken-body">
+                            in {% px s.acted.entry s.instrument.asset_class s.instrument.symbol %}
+                            · stop {% px s.acted.stop s.instrument.asset_class s.instrument.symbol %}
+                            · target {% px s.acted.target s.instrument.asset_class s.instrument.symbol %}
+                        </span>
+                        <span class="sr-pop-taken-body">
+                            {% if s.acted.pnl is None %}
+                                <span class="sv-unknown" title="No quote for this instrument — the P&amp;L is unmeasured, not zero">P&amp;L &mdash;</span>
+                            {% else %}
+                                <span class="{% if s.acted.pnl >= 0 %}up{% else %}down{% endif %}">P&amp;L {% if s.acted.pnl >= 0 %}+{% endif %}{{ s.acted.pnl|floatformat:2 }}</span>
+                            {% endif %}
+                            {% if s.acted.protected %}
+                                · <span class="up" title="Stop and target rest AT THE BROKER — this position survives the platform being down">BRACKET</span>
+                            {% else %}
+                                · <span title="The stop is managed by the bot loop — it needs this platform running">bot-managed stop</span>
+                            {% endif %}
+                        </span>
                     </div>
                     {% endif %}
                     {% if s.title %}
@@ -83,10 +110,22 @@ partial swap for free — there is no client-side state to reapply.
                         <div><span class="sr-pop-k">score</span><span class="sr-pop-v">{{ s.score|floatformat:2 }}</span></div>
                         <div><span class="sr-pop-k">rule</span><span class="sr-pop-v">{{ s.rule_name|default:"—"|truncatechars:18 }}</span></div>
                         <div><span class="sr-pop-k">when</span><span class="sr-pop-v">{{ s.created_at|date:"M d H:i" }}</span></div>
-                        <div><span class="sr-pop-k">entry</span><span class="sr-pop-v">{{ s.suggested_entry|default:"—" }}</span></div>
-                        <div><span class="sr-pop-k">R:R</span><span class="sr-pop-v">{{ s.risk_reward_ratio|default:"—" }}</span></div>
-                        <div><span class="sr-pop-k">stop</span><span class="sr-pop-v down">{{ s.suggested_stop|default:"—" }}</span></div>
-                        <div><span class="sr-pop-k">target</span><span class="sr-pop-v up">{{ s.suggested_target|default:"—" }}</span></div>
+                        {% comment %}
+                        These are decimal_places=8 columns and were printed
+                        RAW, so a suggested entry of 82.45 rendered as
+                        82.45000000 and a forex level carried three digits
+                        past what the venue quotes. {% px %} is the one
+                        convention — see core/price_format.
+                        {% endcomment %}
+                        <div><span class="sr-pop-k">entry</span><span class="sr-pop-v">{% px s.suggested_entry s.instrument.asset_class s.instrument.symbol %}</span></div>
+                        <div><span class="sr-pop-k">R:R</span><span class="sr-pop-v">{% if s.risk_reward_ratio %}{{ s.risk_reward_ratio|floatformat:2 }}{% else %}&mdash;{% endif %}</span></div>
+                        <div><span class="sr-pop-k">stop</span><span class="sr-pop-v down">{% px s.suggested_stop s.instrument.asset_class s.instrument.symbol %}</span></div>
+                        <div><span class="sr-pop-k">target</span><span class="sr-pop-v up">{% px s.suggested_target s.instrument.asset_class s.instrument.symbol %}</span></div>
+                        {% comment %}The mark the levels above are measured
+                        against. Without it the operator has to guess whether
+                        a suggested entry is still reachable.{% endcomment %}
+                        <div><span class="sr-pop-k">mark</span><span class="sr-pop-v">{% px s.instrument.live_quote.last s.instrument.asset_class s.instrument.symbol %}</span></div>
+                        <div><span class="sr-pop-k">age</span><span class="sr-pop-v">{{ s.created_at|timesince }}</span></div>
                     </div>
                     {% comment %}Reaction row (take trade / pass) — primary
                     decisions. TAKE TRADE only for directional signals: a

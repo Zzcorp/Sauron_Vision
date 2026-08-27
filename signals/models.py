@@ -149,7 +149,34 @@ class Signal(models.Model):
             "rule": trade.rule_name or "",
             "trade_id": trade.pk,
             "opened_at": trade.opened_at,
+            "entry": float(trade.entry_price) if trade.entry_price else None,
+            "stop": float(trade.stop_loss) if trade.stop_loss else None,
+            "target": float(trade.take_profit) if trade.take_profit else None,
+            # The stop RESTS AT THE BROKER for a bracketed position, which
+            # is the difference between "protected while the platform is
+            # down" and "protected only while it is up". The card should
+            # not make an operator open another page to learn which.
+            "protected": bool((trade.metadata or {}).get("protected")),
+            # Live money on the bet, or None. None rather than 0.0: a
+            # position whose instrument has no quote has an UNKNOWN P&L,
+            # and a zero there reads as flat.
+            "pnl": self._acted_pnl(trade),
         }
+
+    def _acted_pnl(self, trade):
+        """Unrealised money on an open trade at the current mark."""
+        try:
+            from portfolio.services import value_per_unit
+            quote = getattr(self.instrument, "live_quote", None)
+            mark = float(quote.last) if quote and quote.last else None
+            entry = float(trade.entry_price) if trade.entry_price else None
+            qty = float(trade.qty) if trade.qty else None
+            if not (mark and entry and qty):
+                return None
+            move = (mark - entry) if trade.side == "BUY" else (entry - mark)
+            return move * qty * value_per_unit(trade)
+        except Exception:  # noqa: BLE001 — a card must not 500 the rail
+            return None
 from .models_smc import SmcSignal  # noqa: F401
 from .models_control import (  # noqa: F401
     RuleControl, RuleAction, MetaAllocation, PromotionEvent, RuleMutation,

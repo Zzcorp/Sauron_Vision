@@ -505,6 +505,21 @@
              * the CLOSE button — owns the pointer until it is released. */
             inst.held = true;
             inst.cancelLeave();
+            /* SELF-RELEASING. The window pointerup and pointercancel above
+             * are the intended clears, and both can be missed: a release
+             * outside the browser window delivers neither reliably for a
+             * mouse. A latch cleared only by an event that can go missing
+             * is a latch that eventually sticks — and a stuck one leaves
+             * the card unclosable AND, now that the sweep asks about it,
+             * holds that region's updates for the rest of the session.
+             * No drag on a card lasts thirty seconds. */
+            if (inst.heldTimer) clearTimeout(inst.heldTimer);
+            inst.heldTimer = setTimeout(function () {
+                inst.heldTimer = null;
+                if (!inst.held) return;
+                inst.held = false;
+                inst.scheduleLeave();
+            }, 30000);
         });
 
         pop.addEventListener("pointerleave", function (e) {
@@ -568,6 +583,29 @@
             for (var i = 0; i < openPopups.length; i++) {
                 var p = openPopups[i];
                 if (p && p.matches && p.matches(':hover')) return true;
+            }
+            return false;
+        },
+        /* WHICH region is being read, not merely whether one is.
+         *
+         * `engaged()` is a page-wide answer, and the live sweep used it to
+         * decide whether to defer EVERY region — so one open card froze
+         * the whole headband, the bottom panel and every strip on screen
+         * until the pointer moved off it. That is the whole-page deferral
+         * the sweep's own comment says was removed.
+         *
+         * A card is a body child, so no region's `:hover` can see it; the
+         * link back is the anchor row the card was opened from. True only
+         * when an OPEN, hovered card is anchored inside `node`. */
+        anchoredIn: function (node) {
+            if (!node || !node.contains) return false;
+            for (var i = 0; i < instances.length; i++) {
+                var inst = instances[i];
+                if (!inst || !inst.row || !inst.pop) continue;
+                if (inst.pop.style.display !== 'block') continue;
+                if (!node.contains(inst.row)) continue;
+                if (inst.pop.matches && inst.pop.matches(':hover')) return true;
+                if (inst.held) return true;
             }
             return false;
         }

@@ -111,6 +111,76 @@ def _r_multiple(entry, stop, mark, sign):
     return (mark - entry) * sign / risk
 
 
+def _news_sentiment_24h(NewsArticle, hours=24):
+    """Mean scored sentiment per hour for the last day, oldest first.
+
+    Five headlines tell an operator what happened; they do not say
+    whether the day has been getting better or worse, which is the one
+    thing a glance at a news cell should answer. This is the smallest
+    honest version of that: one bucket an hour, the mean of the articles
+    the analyst pass actually scored.
+
+    UNSCORED ARTICLES ARE NOT ZEROS. `ai_sentiment_score` is null until
+    the analyst reaches a row, and averaging a null in as neutral would
+    drag every bucket toward the middle and make a genuinely negative
+    hour look calm — the analyst's backlog would read as equanimity. An
+    hour with nothing scored returns None and the sparkline carries the
+    previous value across rather than drawing a hole at zero.
+
+    Returns {"points": [...], "n": int, "mean": float|None, "trend": str}
+    or None when the window holds nothing to draw.
+    """
+    from django.db.models import Avg
+    from django.db.models.functions import TruncHour
+    from django.utils import timezone as tz
+
+    since = tz.now() - tz.timedelta(hours=hours)
+    try:
+        rows = (NewsArticle.objects
+                .filter(published_at__gte=since,
+                        ai_sentiment_score__isnull=False)
+                .annotate(bucket=TruncHour("published_at"))
+                .values("bucket")
+                .annotate(mean=Avg("ai_sentiment_score"), n=Count("id"))
+                .order_by("bucket"))
+        by_hour = {r["bucket"]: (r["mean"], r["n"]) for r in rows}
+    except Exception:  # noqa: BLE001 — a headband cell must not 500 a page
+        return None
+    if not by_hour:
+        return None
+
+    start = (tz.now() - tz.timedelta(hours=hours - 1)).replace(
+        minute=0, second=0, microsecond=0)
+    points, total, scored = [], 0.0, 0
+    last = None
+    for i in range(hours):
+        slot = start + tz.timedelta(hours=i)
+        hit = by_hour.get(slot)
+        if hit and hit[0] is not None:
+            last = float(hit[0])
+            total += last * hit[1]
+            scored += hit[1]
+        # Carry the previous reading across a quiet hour rather than
+        # drawing a zero nobody measured. A leading gap stays absent.
+        if last is not None:
+            points.append(round(last, 4))
+
+    if not points:
+        return None
+    mean = (total / scored) if scored else None
+    trend = "flat"
+    if len(points) >= 2:
+        half = max(1, len(points) // 2)
+        early = sum(points[:half]) / half
+        late = sum(points[half:]) / max(1, len(points) - half)
+        if late - early > 0.05:
+            trend = "up"
+        elif early - late > 0.05:
+            trend = "down"
+    return {"points": points, "n": scored, "mean": mean, "trend": trend,
+            "min": min(points), "max": max(points)}
+
+
 def _bot_tick_cadence_seconds():
     """How often the multi-asset bot tick is SCHEDULED to run, in seconds.
 
@@ -1183,6 +1253,7 @@ def sauron_context(request):
         # what just happened.
         ctx["panel_recent_signals"] = list(Signal.objects.filter(is_active=True).select_related("instrument").order_by("-created_at")[:5])
         ctx["panel_recent_news"] = list(NewsArticle.objects.order_by("-published_at")[:5])
+        ctx["panel_news_sentiment"] = _news_sentiment_24h(NewsArticle)
         # Matching the count above filter for filter: the rules the engine
         # runs, newest stage movement first, each labelled with the stage it
         # sits at — the thing an operator wants from this dropdown ("what is

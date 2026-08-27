@@ -7036,3 +7036,21 @@ body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
     .gate-iris.is-wrong, .gate-iris.is-open, .gate-key .gate-ripple,
     .il-overlay.il-out .gate-iris { animation: none; }
 }
+
+/* ── News cell: a day of sentiment above the headlines ──────────────── */
+/* Tokens only — everything past the CARD CONTAINMENT marker is scanned
+   for hex literals by two suites, and a colour hard-coded here would be
+   the dark theme's answer printed onto the light one. */
+.hb-news-sent { padding: 8px 10px 10px; border-bottom: 1px solid var(--border); }
+.hb-news-sent-head { display: flex; align-items: baseline;
+    justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.hb-news-sent-k { font-family: var(--font-mono); font-size: 8.5px;
+    letter-spacing: .14em; color: var(--text-muted); }
+.hb-news-sent-v { font-family: var(--font-mono); font-size: 12px;
+    font-weight: 600; font-variant-numeric: tabular-nums; }
+.hb-news-sent-v small { font-weight: 400; font-size: 8.5px;
+    color: var(--text-muted); margin-left: 5px; }
+.hb-trend-up { color: var(--accent); }
+.hb-trend-down { color: var(--accent-red); }
+.hb-trend-flat { color: var(--text-muted); }
+.hb-news-spark { height: 30px; }

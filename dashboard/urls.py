@@ -78,6 +78,7 @@ from .views_forensics import forensics_list, forensics_detail
 from .views_bot_charts import bot_charts
 from .views_allocator import allocator_dashboard
 from .views_eye import eye_dashboard, eye_partial
+from signals.tradingview_webhook import tradingview_webhook
 from .views_eye_drilldown import eye_gate_events, eye_fills, eye_exposure
 from .views_command import (
     command_center, command_tab_live, command_tab_portfolio,
@@ -204,6 +205,13 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     # ── Admin HQ Console: broker credentials ─────────────────
     path("admin-dashboard/brokers/oanda/save/", save_oanda_credentials, name="hq_save_oanda"),
     path("admin-dashboard/brokers/alpaca/save/", save_alpaca_credentials, name="hq_save_alpaca"),
+    # TradingView alerts arrive as SIGNALS, never as orders — they join
+    # the same queue every internal rule writes into and are gated by the
+    # same book. Unauthenticated by design (TradingView cannot send
+    # headers); the shared secret travels in the body and the view is
+    # closed when none is configured.
+    path("api/webhook/tradingview/", tradingview_webhook,
+         name="tradingview_webhook"),
     path("admin-dashboard/brokers/ibkr/save/", save_ibkr_credentials, name="hq_save_ibkr"),
     # Verification without writing: re-saving the form to re-check a
     # socket also rewrites the routing overrides from the checkboxes.

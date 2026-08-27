@@ -104,6 +104,20 @@ Why it is shaped this way
                   && window.SV.popup.engaged());
     }
 
+    /* Is an open card being READ off this particular region?
+     *
+     * The page-wide `engaged()` answer was used to defer every region at
+     * once, so reading one hover card froze the entire headband — the
+     * whole-page deferral the note below says was removed. Falls back to
+     * the page-wide answer only when the engine is too old to scope it,
+     * which is the safe direction: a stale cell beats one that changes
+     * under the operator's eyes. */
+    function readingFrom(node) {
+        var P = window.SV && window.SV.popup;
+        if (P && P.anchoredIn) return !!P.anchoredIn(node);
+        return engaged();
+    }
+
     function finishSwap(before) {
         pulse(before);
         /* A swap writes the server's raw chip ('●') and stamp back into
@@ -142,7 +156,6 @@ Why it is shaped this way
 
     function apply(html) {
         var doc = new DOMParser().parseFromString(html, 'text/html');
-        var busy = engaged();
         var before = snapshot();
         var swapped = false, carried = [];
         Array.prototype.forEach.call(
@@ -162,7 +175,7 @@ Why it is shaped this way
                rest of the page stays live; the old whole-page deferral let
                a pointer resting anywhere freeze every region on screen,
                the headband included. */
-            if (busy || (node.matches && node.matches(':hover'))) {
+            if (readingFrom(node) || (node.matches && node.matches(':hover'))) {
                 held = held || {};
                 held[name] = fresh.innerHTML;
                 deferred = true;
