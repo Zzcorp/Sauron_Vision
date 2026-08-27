@@ -3559,12 +3559,36 @@ def _chart_positions(user, instrument):
     from bot_program.models import AssetBotTrade
     from portfolio.models import Position
     from portfolio.risk_gate import _position_books
+    from portfolio.services import value_per_unit
 
     def _f(v):
         return float(v) if v is not None else None
 
     def _epoch(dt):
         return int(dt.timestamp()) if dt else None
+
+    # The live mark, read ONCE. The panel below the chart and the price
+    # lines drawn on it come from this one list, so a row and the tape it
+    # sits under can never disagree about an entry or a stop — which is
+    # the whole reason the table does not build its own queryset.
+    mark = None
+    try:
+        lq = getattr(instrument, "live_quote", None)
+        mark = float(lq.last) if lq and lq.last else None
+    except Exception:  # noqa: BLE001 - a panel must not 500 the page
+        mark = None
+
+    def _pnl(side, entry, qty, per_unit=1.0):
+        """Unrealised money at the current mark, or None when unknowable.
+
+        None rather than 0.0: a position whose instrument has no quote has
+        an UNKNOWN P&L, and a zero printed in that cell reads as "flat"
+        when the truth is "nobody measured it".
+        """
+        if mark is None or entry in (None, 0) or qty in (None, 0):
+            return None, None
+        move = (mark - entry) if side == "long" else (entry - mark)
+        return move * qty * per_unit, (move / entry * 100.0)
 
     out = []
     for pos in (Position.objects
@@ -3574,24 +3598,39 @@ def _chart_positions(user, instrument):
         side = ("long" if str(pos.direction or "").lower() in ("long", "buy")
                 else "short")
         via = getattr(pos.strategy, "name", "") or "book"
+        # The stored figure, not a recomputed one: the hourly re-pricer
+        # writes it and every other surface reads it, so recomputing here
+        # is how this page ends up disagreeing with the positions list.
+        pnl = _f(pos.unrealized_pnl)
         out.append({
             "id": f"book-{pos.pk}", "source": "book", "side": side,
             "entry": _f(pos.entry_price), "stop": _f(pos.stop_loss),
             "tp": _f(pos.take_profit), "qty": _f(pos.quantity),
             "opened_at": _epoch(pos.opened_at),
             "label": f"{side.upper()} {via}",
+            "via": via, "paper": False, "protected": False,
+            "pnl": pnl, "pnl_pct": _f(pos.unrealized_pnl_pct),
+            "mark": mark,
         })
     for t in AssetBotTrade.objects.filter(
             config__user=user, symbol=instrument.symbol,
             status__in=("OPEN", "CLOSE_PENDING")):
         side = "long" if t.side == "BUY" else "short"
         tag = t.rule_name or "bot"
+        # value_per_unit is the platform's ONE derivation of money per
+        # price point — an options row without it is denominated 100x
+        # away from the same number printed elsewhere on the screen.
+        pnl, pnl_pct = _pnl(side, _f(t.entry_price), _f(t.qty),
+                            value_per_unit(t))
         out.append({
             "id": f"bot-{t.pk}", "source": "bot", "side": side,
             "entry": _f(t.entry_price), "stop": _f(t.stop_loss),
             "tp": _f(t.take_profit), "qty": _f(t.qty),
             "opened_at": _epoch(t.opened_at),
             "label": f"{side.upper()} {tag}" + ("" if t.paper else " LIVE"),
+            "via": tag, "paper": bool(t.paper),
+            "protected": bool((t.metadata or {}).get("protected")),
+            "pnl": pnl, "pnl_pct": pnl_pct, "mark": mark,
         })
     return out
 
@@ -3671,6 +3710,11 @@ def instrument_detail(request, symbol):
         "market": market,
         "price_data_json": json.dumps(price_data),
         "chart_positions": chart_positions,
+        # The SAME list the chart draws from, handed to the template as
+        # rows. Not a second queryset: a table and the price lines above
+        # it built from separate reads drift the moment one of them gains
+        # a filter the other does not.
+        "chart_positions_rows": chart_positions,
         "chart_signals": chart_signals,
     })
 

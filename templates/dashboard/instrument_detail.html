@@ -82,6 +82,27 @@
     {% endif %}
 </div>
 <style>
+    .ipos-count { font-family:var(--font-mono); font-size:11px; color:var(--text-muted); }
+    .ipos-table { width:100%; border-collapse:collapse; font-family:var(--font-mono); font-size:12px; }
+    .ipos-table th { text-align:left; font-size:9.5px; letter-spacing:.14em; color:var(--text-muted);
+        font-weight:500; padding:8px 12px; border-bottom:1px solid var(--border); }
+    .ipos-table td { padding:9px 12px; border-bottom:1px solid var(--border); }
+    .ipos-table tr:last-child td { border-bottom:0; }
+    .ipos-table .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .ipos-side { font-weight:600; font-size:11px; letter-spacing:.06em; }
+    .ipos-side--long { color:var(--accent); }
+    .ipos-side--short { color:var(--accent-red); }
+    .ipos-via { color:var(--text-muted); }
+    .ipos-stop { color:var(--accent-red); }
+    .ipos-tp { color:var(--accent); }
+    .ipos-tag { font-size:8.5px; letter-spacing:.1em; padding:1px 4px; margin-left:5px;
+        border:1px solid var(--border); border-radius:2px; color:var(--text-muted); }
+    .ipos-tag--ok { color:var(--accent); border-color:var(--accent); }
+    .ipos-pnl { font-weight:600; }
+    .ipos-pnl.up { color:var(--accent); }
+    .ipos-pnl.down { color:var(--accent-red); }
+    .ipos-pnl small { display:block; font-weight:400; font-size:10px; opacity:.75; }
+
     .dtl-quote { display:flex; gap:22px; flex-wrap:wrap; margin-top:14px;
         padding-top:12px; border-top:1px solid var(--border); }
     .dq-cell { display:flex; flex-direction:column; gap:2px; }
@@ -140,6 +161,63 @@ feed produces a first price. paintQuote null-guards the hero spans.{% endcomment
     {{ chart_signals|json_script:"instrument-main-chart-signals" }}
     {% include "_partials/chart_widget.html" with chart_id="instrument-main-chart" symbol=instrument.symbol height="420" timeframe="1d" %}
 </div>
+
+{% comment %}
+Open bets on THIS instrument, directly under the tape that draws them.
+Same payload as the chart's price lines (chart_positions), so a row and
+the line above it can never disagree about an entry or a stop — which is
+exactly what a second queryset built for a table would eventually do.
+{% endcomment %}
+{% if chart_positions_rows %}
+<div class="card fade-in-up delay-2" style="margin-bottom:20px;">
+    <div class="card-header">
+        <span class="card-title">Open positions — {{ instrument.symbol }}</span>
+        <span class="ipos-count">{{ chart_positions_rows|length }}</span>
+    </div>
+    <div class="table-wrapper">
+        <table class="ipos-table">
+            <thead>
+                <tr>
+                    <th>SIDE</th><th>VIA</th><th class="num">QTY</th>
+                    <th class="num">ENTRY</th><th class="num">STOP</th>
+                    <th class="num">TARGET</th><th class="num">P&amp;L</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for p in chart_positions_rows %}
+                <tr>
+                    <td><span class="ipos-side ipos-side--{{ p.side }}">{{ p.side|upper }}</span></td>
+                    <td class="ipos-via">
+                        {{ p.via|default:"—" }}
+                        {% if p.paper %}<span class="ipos-tag">PAPER</span>{% endif %}
+                        {% if p.protected %}<span class="ipos-tag ipos-tag--ok" title="Stop and target rest at the broker — this position survives the platform being down">BRACKET</span>{% endif %}
+                    </td>
+                    <td class="num">{{ p.qty|floatformat:"-4" }}</td>
+                    <td class="num">{% px p.entry instrument.asset_class instrument.symbol %}</td>
+                    <td class="num ipos-stop">{% px p.stop instrument.asset_class instrument.symbol %}</td>
+                    <td class="num ipos-tp">{% px p.tp instrument.asset_class instrument.symbol %}</td>
+                    {% comment %}
+                    A dash, not a zero. A position whose instrument has no
+                    quote has an UNKNOWN P&L, and a 0.00 in that cell reads
+                    as flat when the truth is that nobody measured it.
+                    {% endcomment %}
+                    <td class="num">
+                        {% if p.pnl is None %}
+                            <span class="sv-unknown" title="No quote for this instrument — the P&amp;L on this row is unmeasured, not zero">&mdash;</span>
+                        {% else %}
+                            <span class="ipos-pnl {% if p.pnl >= 0 %}up{% else %}down{% endif %}">
+                                {% if p.pnl >= 0 %}+{% endif %}{{ p.pnl|floatformat:2 }}
+                                {% if p.pnl_pct is not None %}<small>{% if p.pnl_pct >= 0 %}+{% endif %}{{ p.pnl_pct|floatformat:2 }}%</small>{% endif %}
+                            </span>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
 
 <div class="grid grid-2" style="margin-bottom:20px;">
     <!-- Latest Quote -->

@@ -174,3 +174,58 @@ class TheStripsScrollSidewaysOnAWheelTests(TestCase):
             encoding="utf-8")
         seg = shell.split("function svWheelScrollsSideways")[1][:900]
         self.assertIn("Math.abs(e.deltaX) > Math.abs(e.deltaY)", seg)
+
+
+class BothMarqueeStripsAnswerTheWheelTests(TestCase):
+    """The ticker and the data headband are CSS marquees moved by
+    `transform`, not scroll containers, so the sideways scroller used on
+    the bottom panel does nothing to them. They need their own driver —
+    and both were subtly broken in their own way: the ticker snapped
+    back after 1.5s, undoing the operator's positioning while they were
+    still reading it, and the data headband moved twelve pixels per
+    wheel notch, which is working and indistinguishable from broken.
+    """
+
+    def _shell(self):
+        from pathlib import Path
+
+        from django.conf import settings
+        return (Path(settings.BASE_DIR) / "templates" / "base.html").read_text(
+            encoding="utf-8")
+
+    def test_both_strips_use_the_shared_driver(self):
+        shell = self._shell()
+        self.assertIn("window.svWheelMarquee(ticker,", shell)
+        self.assertIn("window.svWheelMarquee(dhFrame, dhTrack)", shell)
+
+    def test_the_ticker_no_longer_snaps_back(self):
+        """A timeout that undoes the operator's scroll is why this felt
+        broken rather than absent."""
+        shell = self._shell()
+        self.assertNotIn("ticker._rt = setTimeout", shell)
+
+    def test_the_headband_no_longer_moves_twelve_pixels(self):
+        shell = self._shell()
+        self.assertNotIn("dhStep(e.deltaY > 0 ? -3 : 3)", shell)
+
+    def test_the_move_is_proportional_to_the_gesture(self):
+        seg = self._shell().split("window.svWheelMarquee = function")[1][:1400]
+        self.assertIn("Math.abs(e.deltaX) > Math.abs(e.deltaY)", seg)
+        self.assertIn("offset - delta", seg)
+
+    def test_it_lets_go_at_the_ends(self):
+        """At either end the wheel belongs to the page, not to a strip
+        38 pixels tall."""
+        seg = self._shell().split("window.svWheelMarquee = function")[1][:1400]
+        self.assertIn("if (next === offset) return;", seg)
+
+    def test_leaving_the_strip_hands_it_back_to_the_marquee(self):
+        seg = self._shell().split("window.svWheelMarquee = function")[1][:1400]
+        self.assertIn("mouseleave", seg)
+        self.assertIn("animationPlayState = ''", seg)
+
+    def test_the_arrow_buttons_keep_their_own_crawl(self):
+        """dhStep was written for a slow crawl on arrow hover — that is
+        what it is good at, and it keeps that job."""
+        shell = self._shell()
+        self.assertIn("setInterval(function(){ dhStep(dir); }, 16)", shell)

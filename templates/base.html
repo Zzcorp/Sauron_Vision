@@ -3063,25 +3063,61 @@ function toggleSidebar() {
 
 <script>
 // Ticker mouse wheel scroll
+/* Wheel control for the two MARQUEE strips.
+
+   These are not scroll containers — the ticker and the data headband are
+   CSS keyframe animations moved by `transform`, with `overflow:hidden`
+   on the frame — so `scrollLeft` does nothing to them and the sideways
+   scroller used on the bottom panel is the wrong tool. They need their
+   own driver, and both were subtly broken in their own way:
+
+     - The ticker moved a fixed 60px and then SNAPPED BACK after 1.5s,
+       so any deliberate positioning undid itself while the operator was
+       still reading the headline they had scrolled to.
+     - The data headband moved 4px per unit and was called with ±3, so a
+       wheel notch shifted it twelve pixels. Technically working, and
+       indistinguishable from nothing happening.
+
+   Now: the wheel moves the track PROPORTIONALLY to the gesture, and the
+   strip stays exactly where it was put for as long as the pointer is
+   over it. Both frames already pause their animation on hover, so this
+   simply gives the paused strip a position. Leaving the strip hands it
+   back to the marquee, which is a rule the operator can predict — and
+   it means there is no timeout deciding to move the page under them. */
+window.svWheelMarquee = function (frame, track) {
+    if (!frame || !track || frame._svMarquee) return;
+    frame._svMarquee = true;
+    var offset = 0;
+
+    function release() {
+        offset = 0;
+        track.style.transform = '';
+        track.style.animationPlayState = '';
+    }
+
+    frame.addEventListener('wheel', function (e) {
+        /* The track is rendered twice so the loop is seamless, so half
+           its width is one full pass — past that and the operator is
+           scrolling into the duplicate. */
+        var max = track.scrollWidth / 2;
+        if (max <= 0) return;
+        var delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+        if (!delta) return;
+        var next = Math.min(0, Math.max(-max, offset - delta));
+        if (next === offset) return;   /* at an end — let the page have it */
+        offset = next;
+        track.style.animationPlayState = 'paused';
+        track.style.transform = 'translateX(' + offset + 'px)';
+        e.preventDefault();
+    }, { passive: false });
+
+    frame.addEventListener('mouseleave', release);
+};
+
 (function() {
     var ticker = document.getElementById('tickerBar');
     if (ticker) {
-        ticker.addEventListener('wheel', function(e) {
-            e.preventDefault();
-            var track = ticker.querySelector('.ticker-track');
-            if (track) {
-                track.style.animationPlayState = 'paused';
-                var m = getComputedStyle(track).transform;
-                var current = m !== 'none' ? parseFloat(m.split(',')[4]) || 0 : 0;
-                var delta = e.deltaY > 0 ? -60 : 60;
-                track.style.transform = 'translateX(' + (current + delta) + 'px)';
-                clearTimeout(ticker._rt);
-                ticker._rt = setTimeout(function() {
-                    track.style.transform = '';
-                    track.style.animationPlayState = '';
-                }, 1500);
-            }
-        });
+        window.svWheelMarquee(ticker, ticker.querySelector('.ticker-track'));
     }
 })();
 /* The notification panel's outside-click handler used to live here. It is now
@@ -3901,15 +3937,15 @@ function toggleSidebar() {
         dhManual = false; dhOffset = 0;
       }
     });
-    /* Mouse wheel scroll for data headband */
-    document.querySelector('.data-headband')?.addEventListener('wheel', function(e){
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-        dhStep(e.deltaX > 0 ? -1 : 1);
-      } else {
-        dhStep(e.deltaY > 0 ? -3 : 3);
-      }
-      e.preventDefault();
-    }, {passive: false});
+    /* Mouse wheel for the data headband — the same driver as the ticker.
+       This used to call dhStep(±3), and dhStep moves 4px per unit, so a
+       wheel notch shifted the strip TWELVE PIXELS: working, and
+       indistinguishable from broken. The shared driver moves with the
+       gesture and leaves the strip where the operator put it until the
+       pointer leaves. The arrow buttons keep dhStep, which is what it
+       was written for — a slow crawl on hover. */
+    var dhFrame = document.querySelector('.data-headband');
+    if (dhFrame && window.svWheelMarquee) window.svWheelMarquee(dhFrame, dhTrack);
   }
 
   // Ticker popups (portal to body) — hover-friendly

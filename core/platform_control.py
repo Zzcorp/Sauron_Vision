@@ -45,9 +45,18 @@ class PlatformComponent(models.Model):
         all reported a clean green run, which is the single reason nobody
         noticed the earnings blackout had never once fired.
         """
+        from core.secret_scrub import scrub
+
         self.last_run_at = timezone.now()
         self.last_status = status or ("success" if success else "error")
-        self.last_message = message[:500]
+        # SCRUBBED, and here rather than at each call site because this is
+        # the one place every ingest outcome passes through.
+        # `raise_for_status()` builds its message from the full url,
+        # query string included, so one 403 on a call authenticated by
+        # `?apikey=...` put a live key on the health page, in this column,
+        # and in every log line that echoed it. A hundred callers cannot
+        # each be trusted to remember; this one can.
+        self.last_message = scrub(message)[:500]
         self.run_count += 1
         # A warning is not a crash: it should not inflate the error rate the
         # health page uses to decide whether a component is broken.

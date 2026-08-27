@@ -40,6 +40,15 @@ Optional page data (json_script blocks the widget picks up when present):
     height: 100vh !important;
 }
 .sv-candle-container:fullscreen { height: 100vh !important; }
+/* TALL sets no height at all. layout() writes an inline pixel height it
+   measured from the live box, which is what keeps this state honest when
+   a headband is collapsed — and what keeps it out of an !important fight
+   with the inline height the include renders and with .sv-chart-fs above.
+   The class exists so the card can shed the furniture that costs rows. */
+.sv-candle-container.sv-chart-tall {
+    border-color: var(--accent, #00e868);
+    box-shadow: 0 0 0 1px var(--accent, #00e868) inset;
+}
 .sv-chart-toolbar {
     display: flex;
     align-items: center;
@@ -276,6 +285,11 @@ Optional page data (json_script blocks the widget picks up when present):
                     <path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/>
                 </svg>
             </button>
+            <button class="sv-ctl-btn" data-ctl="tall" title="Expand — fills the working area, headbands stay visible (Esc to leave)" aria-label="Expand" aria-pressed="false">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M8 2v12M5 5L8 2l3 3M5 11l3 3 3-3"/>
+                </svg>
+            </button>
             <button class="sv-ctl-btn" data-ctl="fullscreen" title="Fullscreen (Esc to leave)" aria-label="Fullscreen">
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <rect x="2" y="2" width="12" height="12" rx="1"/><path d="M6 2v12M2 6h12"/>
@@ -415,7 +429,15 @@ Optional page data (json_script blocks the widget picks up when present):
             redDim:       alpha(red, 0.25),
             accent:       accent,
             red:          red,
-            gold:         token('--accent-gold', '#d8b020'),
+            /* The INK, falling back to the glow. Light mode deliberately
+               does not redefine --accent-gold; it defines --accent-gold-ink
+               (#8a6a00) because the dark theme's #d8b020 fails contrast on
+               white — and SMA20 and VWAP both take gold, so the widget was
+               printing the glow onto a white chart. Reading the ink token
+               keeps ONE palette rather than a hand-written isDark ternary,
+               which is the thing the note above this function warns about. */
+            gold:         token('--accent-gold-ink',
+                                token('--accent-gold', '#d8b020')),
             blue:         token('--accent-blue', '#30a0e8'),
             purple:       token('--accent-purple', '#8840d0'),
             bg:           token('--bg-void', isDark ? '#030806' : '#f0f2f0'),
@@ -477,8 +499,44 @@ Optional page data (json_script blocks the widget picks up when present):
     /* One place decides the pane heights: the toolbar takes 36px, the RSI
        pane 90px when on, the main chart the rest. Fullscreen changes the
        total, so both charts are re-sized from the container's live box. */
+    /* TALL: as big as the chart can be with every headband still visible.
+
+       Measured, not calculated from CSS variables. The container's own
+       top already accounts for whatever sits above it — both headbands,
+       one of them collapsed, or neither — so reading its box is correct
+       in every combination without a single hardcoded offset. The only
+       thing below it that must be cleared is the fixed info panel, and
+       that reports its own height (and `display:none` on the dashboard,
+       where it is hidden). The signals rail is fixed-right and the
+       content area is already sized around it, so the WIDTH needs
+       nothing: the ResizeObserver added above catches the rail opening.
+
+       No CSS height and therefore no `!important` fight with the
+       inline height the include renders, or with .sv-chart-fs. */
+    function tallHeight() {
+        var top = container.getBoundingClientRect().top;
+        var panel = document.querySelector('.info-panel-wrap');
+        var below = 0;
+        if (panel && getComputedStyle(panel).display !== 'none') {
+            below = panel.offsetHeight || 0;
+        }
+        return Math.max(320, Math.round(window.innerHeight - top - below - 14));
+    }
+
     function layout() {
-        var total = container.classList.contains('sv-chart-fs') || document.fullscreenElement === container
+        var inFs = container.classList.contains('sv-chart-fs')
+                   || document.fullscreenElement === container;
+        /* ONE state decides the height. Fullscreen outranks tall when
+           both somehow apply, rather than letting CSS source order pick
+           and produce a chart sized for the wrong one. */
+        if (inFs) {
+            container.style.height = '';
+        } else if (viewState === 'tall') {
+            container.style.height = tallHeight() + 'px';
+        } else {
+            container.style.height = CHART_HEIGHT + 'px';
+        }
+        var total = inFs || viewState === 'tall'
             ? container.clientHeight : CHART_HEIGHT;
         var rsiOn = !!activeInds.rsi;
         var rsiH = rsiOn ? RSI_H : 0;
@@ -1125,6 +1183,12 @@ Optional page data (json_script blocks the widget picks up when present):
         });
         var logBtn = container.querySelector('.sv-ctl-btn[data-ctl="log"]');
         if (logBtn) { logBtn.classList.toggle('active', logScale); logBtn.setAttribute('aria-pressed', logScale ? 'true' : 'false'); }
+        var tallBtn = container.querySelector('.sv-ctl-btn[data-ctl="tall"]');
+        if (tallBtn) {
+            var on = viewState === 'tall';
+            tallBtn.classList.toggle('active', on);
+            tallBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
     }
 
     // ── Timeframe buttons ─────────────────────────────────────────────────
@@ -1167,6 +1231,30 @@ Optional page data (json_script blocks the widget picks up when present):
     });
 
     // ── View controls ─────────────────────────────────────────────────────
+    /* 'normal' | 'tall' | 'fs'. One variable, and the classes are derived
+       from it — two independent booleans is how a chart ends up wearing
+       both classes and sized for neither. */
+    var viewState = 'normal';
+
+    function setViewState(next) {
+        viewState = next;
+        container.classList.toggle('sv-chart-tall', next === 'tall');
+        layout();
+        paintToolbarState();
+        if (chart) chart.timeScale().fitContent();
+    }
+
+    function toggleTall() {
+        /* The veil owns the screen when the session is locked, and a
+           chart that grows underneath it is a chart the operator cannot
+           dismiss. Same guard the fullscreen path takes. */
+        if (window.svIdleLock && window.svIdleLock.isLocked
+            && window.svIdleLock.isLocked()) return;
+        if (document.fullscreenElement === container
+            || container.classList.contains('sv-chart-fs')) return;
+        setViewState(viewState === 'tall' ? 'normal' : 'tall');
+    }
+
     function toggleFullscreen() {
         /* Fullscreen outranks the idle veil (top layer beats z-index), so
            a locked session must not be able to open one. */
@@ -1178,9 +1266,14 @@ Optional page data (json_script blocks the widget picks up when present):
                 document.exitFullscreen().catch(function () {});
             }
             container.classList.remove('sv-chart-fs');
-            layout();
+            /* Back to whichever state the operator was in before, not
+               always to normal: going fullscreen from tall and pressing
+               Esc should return the chart they had. */
+            setViewState(viewState);
             return;
         }
+        /* Leaving tall on the way in keeps the two from both applying. */
+        container.classList.remove('sv-chart-tall');
         var req = container.requestFullscreen ? container.requestFullscreen() : Promise.reject();
         Promise.resolve(req).then(function () {
             container.classList.add('sv-chart-fs');
@@ -1192,7 +1285,13 @@ Optional page data (json_script blocks the widget picks up when present):
         });
     }
     document.addEventListener('fullscreenchange', function () {
-        if (document.fullscreenElement !== container) container.classList.remove('sv-chart-fs');
+        if (document.fullscreenElement !== container) {
+            container.classList.remove('sv-chart-fs');
+            /* Esc from the browser chrome lands here, not in the toggle,
+               so the remembered state has to be re-applied from here too. */
+            setViewState(viewState);
+            return;
+        }
         layout();
     });
     container.querySelectorAll('.sv-ctl-btn').forEach(function(btn) {
@@ -1205,6 +1304,8 @@ Optional page data (json_script blocks the widget picks up when present):
                 savePrefs();
             } else if (ctl === 'fit') {
                 if (chart) chart.timeScale().fitContent();
+            } else if (ctl === 'tall') {
+                toggleTall();
             } else if (ctl === 'fullscreen') {
                 toggleFullscreen();
             }
@@ -1222,7 +1323,16 @@ Optional page data (json_script blocks the widget picks up when present):
         try { container.focus({ preventScroll: true }); } catch (e) {}
     });
     container.addEventListener('mouseleave', function () {
-        if (d.activeElement === container) { try { container.blur(); } catch (e) {} }
+        /* `document`, not `d`. There is no `d` in this closure — the only
+           two are function-locals inside vwap() and onCrosshair() — so
+           this threw a ReferenceError on EVERY mouseleave and the blur
+           never ran. The container kept focus after the pointer left and
+           went on eating ArrowLeft/ArrowRight/+/-, which is why the page
+           stopped scrolling with the keyboard once you had touched the
+           chart. */
+        if (document.activeElement === container) {
+            try { container.blur(); } catch (e) {}
+        }
     });
     container.addEventListener('mouseenter', function () {
         if (document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
@@ -1230,6 +1340,14 @@ Optional page data (json_script blocks the widget picks up when present):
     });
     container.addEventListener('keydown', function (ev) {
         if (!chart) return;
+        /* Esc leaves the tall state. Fullscreen gets its Esc from the
+           browser itself; this one has no such affordance, and a chart
+           filling the working area with no obvious way back is a trap. */
+        if (ev.key === 'Escape' && viewState === 'tall') {
+            setViewState('normal');
+            ev.preventDefault();
+            return;
+        }
         var ts = chart.timeScale();
         var range;
         try { range = ts.getVisibleLogicalRange(); } catch (e) { range = null; }
@@ -1257,13 +1375,27 @@ Optional page data (json_script blocks the widget picks up when present):
     });
 
     // ── Auto-resize ───────────────────────────────────────────────────────
+    // The WINDOW is the wrong thing to watch. Two things resize this chart
+    // without the window changing at all: the signals rail opening or
+    // closing (it is fixed-right and the content area is sized around it),
+    // and a headband being collapsed. Both left the canvas at its old
+    // width until something unrelated triggered a reflow. A container
+    // observer sees its own box, which is the box that actually matters.
     var resizeTimer;
-    window.addEventListener('resize', function() {
+    function relayout() {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(function() {
             if (chart && container.offsetWidth > 0) layout();
         }, 150);
-    });
+    }
+    window.addEventListener('resize', relayout);
+    // Bounded against feeding itself: layout() writes heights on canvasEl
+    // and rsiEl and a width through applyOptions, none of which changes
+    // the OBSERVED container's box — and the 150ms debounce absorbs any
+    // echo that a future change introduces.
+    if (window.ResizeObserver) {
+        try { new ResizeObserver(relayout).observe(container); } catch (e) {}
+    }
 
     // ── Bootstrap ─────────────────────────────────────────────────────────
     function bootstrap() {
