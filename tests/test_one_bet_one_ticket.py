@@ -251,15 +251,34 @@ class ThemeStateTests(TestCase):
         self.assertTrue(state["ok"])
         self.assertIn("no theme-leg cap", state["reason"])
 
-    def test_only_forex_is_counted(self):
-        """A ticker does not name its theme; pretending it does would make
-        the gate lie. Equities pass with the reason stated."""
+    def test_equities_are_not_counted(self):
+        """A TICKER does not name its theme; pretending it does would make
+        the gate lie. Equities pass with the reason stated.
+
+        Commodities used to be excluded by the same rule and are not any
+        more — see `tests/test_commodity_themes.py`. The distinction is not
+        forex-versus-everything, it is whether the SYMBOL names the theme:
+        EURUSD names its currencies and BRNUSD names its complex, while
+        AAPL says nothing about technology. The 2026-08-28 briefing
+        measured what the over-broad exclusion cost — eight of eleven
+        positions commodities, six long, three energy legs expressing one
+        view, every leg clearing every money limit.
+        """
         from portfolio.risk_gate import theme_state
         _book(max_theme_legs=1)
         state = theme_state(self.user, symbol="AAPL", side="BUY",
                             asset_class="stock")
         self.assertTrue(state["ok"])
-        self.assertIn("forex only", state["reason"])
+        self.assertIn("does not name its sector", state["reason"])
+
+    def test_commodities_are_counted_now(self):
+        """The other half of the same rule, held here beside its sibling so
+        a future reader sees both at once."""
+        from portfolio.risk_gate import theme_state
+        _book(max_theme_legs=1)
+        state = theme_state(self.user, symbol="BRNUSD", side="BUY",
+                            asset_class="commodity")
+        self.assertNotIn("does not name its sector", state["reason"])
 
     def test_a_close_that_has_not_filled_still_crowds(self):
         """CLOSE_PENDING is exposure everywhere on this platform — a
@@ -462,7 +481,9 @@ class ManualPathTests(TestCase):
         self.assertNotIn("error", out)
         self.assertIn("theme", out)
         self.assertTrue(out["theme"]["ok"])
-        self.assertIn("forex only", out["theme"]["reason"])
+        # This fixture is an equity, and a ticker still does not name its
+        # sector. The commodity path has its own coverage.
+        self.assertIn("does not name its sector", out["theme"]["reason"])
 
     def test_a_taken_trade_records_the_theme_state_at_entry(self):
         """Same rule as its siblings: an override nobody recorded cannot

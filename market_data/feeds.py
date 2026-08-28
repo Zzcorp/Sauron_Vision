@@ -92,11 +92,18 @@ FEEDS = (
      "superseded_by": "binance_ws",
      "note": "Keyless crypto marks — yields to the websocket stream"},
 
+    # Capped at twenty calls a day and it SKIPS any symbol a streamer
+    # already owns — "spending one of the 20 daily calls on a print that
+    # precedence will refuse is the budget subsidising a worse feed"
+    # (market_data/tasks.py). So on a healthy install with the OANDA
+    # stream up, this feed writing nothing is the budget being spent
+    # correctly, not a fault. `superseded_by` is what lets it report
+    # `yielding` instead of the alarming `never`.
     {"key": "alpha_vantage", "label": "Alpha Vantage", "kind": "poller",
      "requires": ("ALPHA_VANTAGE_API_KEY",),
-     "window": Window.FOREX, "ages": _SLOW_POLL,
+     "window": Window.FOREX, "ages": _FALLBACK,
      "superseded_by": "oanda_stream",
-     "note": "Forex marks, on a request budget"},
+     "note": "Forex marks on a 20/day budget — quiet while OANDA streams"},
 
     # ── brokers ──────────────────────────────────────────────────────
     {"key": "etoro", "label": "eToro", "kind": "broker",

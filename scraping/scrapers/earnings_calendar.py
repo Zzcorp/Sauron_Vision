@@ -106,6 +106,26 @@ def _persist_earnings(rows):
     return stored
 
 
+#: Where to ask, in order. FMP retired the v3 path: a key issued on any
+#: of their current plans gets a flat 403 there, which is exactly what this
+#: deployment saw —
+#:
+#:   403 Client Error: Forbidden for url:
+#:   .../api/v3/earning_calendar?from=...&to=...&apikey=***
+#:
+#: `stable` is the current one. v3 stays as a fallback because a key issued
+#: on an older plan may still be entitled to it and nothing else, and
+#: dropping it would break a working deployment to fix a broken one.
+#:
+#: Tried in order, and the first that returns a LIST wins — status alone is
+#: not enough, because FMP answers a plan violation with HTTP 200 and an
+#: object carrying "Error Message".
+FMP_CALENDAR_ENDPOINTS = (
+    ("stable", "https://financialmodelingprep.com/stable/earnings-calendar"),
+    ("v3", "https://financialmodelingprep.com/api/v3/earning_calendar"),
+)
+
+
 def fetch_earnings_calendar_fmp(days_ahead=14):
     """Fetch upcoming earnings from Financial Modeling Prep and store them.
 
@@ -126,30 +146,53 @@ def fetch_earnings_calendar_fmp(days_ahead=14):
     today = timezone.now().date()
     future = today + timedelta(days=days_ahead)
 
-    try:
-        resp = requests.get(
-            "https://financialmodelingprep.com/api/v3/earning_calendar",
-            params={"from": today.isoformat(), "to": future.isoformat(),
-                    "apikey": api_key},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        logger.error("FMP earnings calendar error: %s", e)
-        return {"parsed": 0, "stored": 0, "error": str(e)}
+    data, used, failures = None, "", []
+    for label, url in FMP_CALENDAR_ENDPOINTS:
+        try:
+            resp = requests.get(
+                url,
+                params={"from": today.isoformat(), "to": future.isoformat(),
+                        "apikey": api_key},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as e:  # noqa: BLE001 — try the next one
+            failures.append(f"{label}: {e}")
+            continue
+        if isinstance(payload, list):
+            data, used = payload, label
+            break
+        # FMP answers a plan violation with 200 and an object carrying
+        # "Error Message", so a status check alone calls it a success and
+        # the parse below then finds no rows — a refusal that reads as an
+        # empty week.
+        note = ""
+        if isinstance(payload, dict):
+            note = str(payload.get("Error Message")
+                       or payload.get("message") or "")[:200]
+        failures.append(f"{label}: {note or 'unexpected payload'}")
 
-    if not isinstance(data, list):
-        logger.error("FMP earnings calendar returned %s, not a list", type(data).__name__)
-        return {"parsed": 0, "stored": 0, "error": "unexpected payload"}
+    if data is None:
+        detail = " | ".join(failures) or "no endpoint answered"
+        logger.error("FMP earnings calendar error: %s", detail)
+        return {"parsed": 0, "stored": 0, "error": detail}
+    if used != FMP_CALENDAR_ENDPOINTS[0][0]:
+        logger.warning("FMP earnings calendar answered on %s after %s "
+                       "refused — this key is on a legacy plan",
+                       used, "; ".join(failures) or "nothing")
 
     rows = [{
         "symbol": item.get("symbol", ""),
         "date": item.get("date", ""),
         "eps_estimated": item.get("epsEstimated"),
-        "eps_actual": item.get("eps"),
+        # `stable` renamed the ACTUALS: eps -> epsActual, revenue ->
+        # revenueActual. The estimates kept their names. Reading both
+        # spellings is what lets one parser serve either plan, and it is
+        # cheaper than a second parser that drifts from this one.
+        "eps_actual": item.get("epsActual", item.get("eps")),
         "revenue_estimated": item.get("revenueEstimated"),
-        "revenue_actual": item.get("revenue"),
+        "revenue_actual": item.get("revenueActual", item.get("revenue")),
         "time": item.get("time", ""),
     } for item in data]
 

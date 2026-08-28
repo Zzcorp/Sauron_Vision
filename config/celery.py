@@ -59,6 +59,18 @@ app.conf.task_routes = {
 # ============================================================
 app.conf.beat_schedule = {
 
+    # ── The daily "what is quietly broken" digest ──────────────────
+    # PlatformComponent has recorded every task's outcome since the day it
+    # was written and nothing ever sent it anywhere: the unconfigured
+    # calendar, the never-started OANDA streamer and the empty Finnhub key
+    # were all written down for months and were each found by a human
+    # opening a page. 07:00 UTC, before the European session, and silent on
+    # a healthy platform.
+    "component-digest": {
+        "task": "core.tasks.send_component_digest_task",
+        "schedule": crontab(hour=7, minute=0),
+    },
+
     # ── PHASE 37: Sauron's Mind synthesizer ───────────────────
     # Hourly, not half-hourly: the world does not change materially every
     # 30 minutes, and this is the largest recurring AI cost in the system.

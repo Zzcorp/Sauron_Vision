@@ -357,7 +357,8 @@ the broker, and the bot that would have honoured their stops switched off.
         <div class="card-header"><span class="card-title">Add / Update OANDA Credentials</span></div>
         <form method="post" action="{% url 'hq_save_oanda' %}" style="padding:16px;display:grid;gap:10px;">
             {% csrf_token %}
-            <input type="text" name="target_username" placeholder="Username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <p class="hq-cred-note">These credentials PLACE ORDERS. The matching keys in <code>.env</code> are a separate job — they feed the price stream. Setting one does not set the other.</p>
+            <input type="text" name="target_username" placeholder="Sauron login username (not your broker login)" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="text" name="oanda_api_key" placeholder="OANDA API key" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="text" name="oanda_account_id" placeholder="OANDA account ID (e.g. 101-001-1234567-001)" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="practice" checked> Practice (demo) endpoint</label>
@@ -369,7 +370,8 @@ the broker, and the bot that would have honoured their stops switched off.
         <div class="card-header"><span class="card-title">Add / Update Alpaca Credentials</span></div>
         <form method="post" action="{% url 'hq_save_alpaca' %}" style="padding:16px;display:grid;gap:10px;">
             {% csrf_token %}
-            <input type="text" name="target_username" placeholder="Username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <p class="hq-cred-note">These credentials PLACE ORDERS. The matching keys in <code>.env</code> are a separate job — they feed the price stream. Setting one does not set the other.</p>
+            <input type="text" name="target_username" placeholder="Sauron login username (not your broker login)" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="text" name="alpaca_api_key" placeholder="Alpaca API key" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="text" name="alpaca_api_secret" placeholder="Alpaca API secret" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="paper" checked> Paper trading endpoint</label>
@@ -383,6 +385,25 @@ the broker, and the bot that would have honoured their stops switched off.
     <div class="card fade-in-up ib-card">
         <div class="card-header"><span class="card-title">Add / Update Interactive Brokers Connection</span></div>
         <form method="post" action="{% url 'hq_save_ibkr' %}" id="ibkrForm" style="padding:16px;display:grid;gap:10px;">
+            {% comment %}
+            This field defaulted to 127.0.0.1, which is wrong for every
+            containerised deployment and right for none of them: inside the
+            web container 127.0.0.1 IS the web container, so the socket
+            always timed out and the error looked exactly like bad
+            credentials. Two setups, two answers, both stated here rather
+            than in a runbook nobody has open at the moment they are
+            filling in the form.
+            {% endcomment %}
+            <p class="hq-cred-note">
+                <b>Host</b> — <code>ibgateway</code> if you run the bundled
+                Gateway container (<code>--profile ibkr</code>);
+                <code>host.docker.internal</code> if TWS or Gateway runs on
+                the server itself. Never <code>127.0.0.1</code>: inside the
+                container that is the container.
+                Then in Gateway → API → Settings, add the Docker subnet to
+                <b>Trusted IPs</b> or untick “localhost only”, or the socket
+                refuses the connection and it reads as a bad password.
+            </p>
             {% csrf_token %}
             <p class="ib-note">
                 IBKR speaks over a socket, not an API key: <strong>TWS or IB Gateway
@@ -390,9 +411,9 @@ the broker, and the bot that would have honoured their stops switched off.
                 these details connects to nothing on its own — the port below is
                 what selects which account an order would reach.
             </p>
-            <input type="text" name="target_username" placeholder="Username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="text" name="target_username" placeholder="Sauron login username (not your broker login)" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="text" name="ibkr_account_id" placeholder="IBKR account ID (e.g. DU1234567 paper / U1234567 live)" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
-            <input type="text" name="ibkr_host" value="127.0.0.1" placeholder="Host running TWS / Gateway" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="text" name="ibkr_host" value="ibgateway" placeholder="ibgateway | host.docker.internal | an IP" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
 
             {# A select, not a free number. The port IS the paper/live switch, #}
             {# and a typo of one digit is the difference between a simulated #}

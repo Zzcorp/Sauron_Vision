@@ -1102,6 +1102,63 @@ THEME_CURRENCIES = frozenset({
 # EURUSD is long EUR / short USD when bought. Anything whose halves are
 # not both known currencies (a metal, an odd length, a venue suffix) has
 # no currency legs to count.
+#: Commodity complexes, by the symbols this catalogue actually carries.
+#:
+#: The theme gate was forex-only on a stated principle: currencies are the
+#: one theme vocabulary a symbol names, and "pretending a ticker names its
+#: theme would make this gate lie". That is exactly right for equities —
+#: AAPL does not say technology — and exactly wrong for commodities, where
+#: BRNUSD, WTIUSD and NGUSD each name their complex as plainly as EURUSD
+#: names its currencies.
+#:
+#: The 2026-08-28 briefing is the evidence: eight of eleven open positions
+#: were commodities, six long, and "BRN/WTI/NG is one energy bet wearing
+#: three tickets" — the EUR problem this gate was built for, in the one
+#: asset class it declined to cover. Every leg cleared every money limit,
+#: because every money limit judges a symbol and a complex is not a symbol.
+#:
+#: Enumerated rather than inferred, and that is the point: this is the same
+#: grouping `seed_bots.py` already uses for its starter fleet, so a symbol
+#: whose complex is not written here is not GUESSED at — it simply does not
+#: participate, which keeps the gate honest about what it knows.
+COMMODITY_THEMES: dict[str, str] = {
+    # energy
+    "WTIUSD": "energy", "BRNUSD": "energy", "NGUSD": "energy",
+    "GASUSD": "energy", "HOUSD": "energy",
+    # precious and industrial metals
+    "XAUUSD": "precious", "XAGUSD": "precious",
+    "XPTUSD": "precious", "XPDUSD": "precious",
+    "HGUSD": "industrial_metals",
+    # grains and softs
+    "WHEATUSD": "grains", "CORNUSD": "grains", "SOYUSD": "grains",
+    "COFFEEUSD": "softs", "SUGARUSD": "softs",
+    "COCOAUSD": "softs", "COTTONUSD": "softs",
+}
+
+
+def _commodity_legs(symbol: str, side: str) -> dict:
+    """{complex: +1 long | -1 short} for a commodity this file knows.
+
+    One complex per symbol, unlike a currency pair's two legs: a long
+    Brent expresses long energy and nothing else.
+    """
+    complex_name = COMMODITY_THEMES.get(str(symbol or "").strip().upper())
+    if not complex_name:
+        return {}
+    long_side = str(side or "").upper() in ("BUY", "LONG")
+    return {complex_name: 1 if long_side else -1}
+
+
+def _theme_legs(symbol: str, side: str, asset_class: str) -> dict:
+    """The themes this ticket expresses, whatever kind of thing it is."""
+    cls = str(asset_class or "").lower()
+    if cls == "forex":
+        return _currency_legs(symbol, side)
+    if cls == "commodity":
+        return _commodity_legs(symbol, side)
+    return {}
+
+
 def _currency_legs(symbol: str, side: str) -> dict:
     s = str(symbol or "").strip().upper()
     if len(s) != 6 or not s.isalpha():
@@ -1125,25 +1182,35 @@ def theme_state(user, *, symbol: str, side: str, asset_class: str,
     long EURUSD and long USDJPY disagree about USD and do not stack), and
     refuses when the crowd is already at `max_theme_legs`.
 
-    Forex only: currencies are the one theme vocabulary the symbol itself
-    states. Sector crowding in equities is real too, but pretending a
-    ticker names its theme would make this gate lie, and 0 on the card
-    turns the whole gate off.
+    Forex AND commodities: both are asset classes whose symbols NAME
+    their theme. Currencies are stated by the pair; complexes are stated
+    by the ticker and enumerated in `COMMODITY_THEMES`. Equities are still
+    excluded — AAPL does not say technology, and pretending a ticker names
+    its sector would make this gate lie. `0` on the card turns it off.
+
+    Commodities were excluded too until the 2026-08-28 briefing measured
+    the cost: eight of eleven open positions commodities, six long, and
+    three energy legs expressing one view. Every one cleared every money
+    limit, because every money limit judges a symbol.
     """
     pf = portfolio if portfolio is not None else limits_book()
     cap = _limit_pct(pf, "max_theme_legs")
     state = {"ok": True, "cap": cap, "currency": None, "n": 0,
              "tickets": [], "reason": ""}
 
-    if str(asset_class or "").lower() != "forex":
-        state["reason"] = "theme legs are counted for forex only"
+    cls = str(asset_class or "").lower()
+    if cls not in ("forex", "commodity"):
+        state["reason"] = ("theme legs are counted for forex and "
+                           "commodities — a ticker does not name its sector")
         return state
     if cap is None:
         state["reason"] = "no theme-leg cap set on the book"
         return state
-    candidate = _currency_legs(symbol, side)
+    candidate = _theme_legs(symbol, side, cls)
     if not candidate:
-        state["reason"] = f"{symbol} does not parse as a currency pair"
+        state["reason"] = (
+            f"{symbol} does not parse as a currency pair" if cls == "forex"
+            else f"{symbol} is not in the commodity complex map")
         return state
 
     from bot_program.models import AssetBotTrade
@@ -1152,8 +1219,8 @@ def theme_state(user, *, symbol: str, side: str, asset_class: str,
     counts: dict[str, int] = {}
     tickets: dict[str, list[str]] = {}
 
-    def _tally(sym, trade_side, label):
-        legs = _currency_legs(sym, trade_side)
+    def _tally(sym, trade_side, label, tally_class=None):
+        legs = _theme_legs(sym, trade_side, tally_class or cls)
         for ccy, sign in legs.items():
             if candidate.get(ccy) == sign:
                 counts[ccy] = counts.get(ccy, 0) + 1
@@ -1163,20 +1230,25 @@ def theme_state(user, *, symbol: str, side: str, asset_class: str,
                 # pair, same side, under another rule) is still one
                 # ticket in each crowd — that is what it does to risk.
 
+    # Scoped to the candidate's OWN class. A long EUR leg and a long
+    # energy leg are not the same crowd, and counting them together would
+    # refuse a perfectly diversified book.
     for trade in AssetBotTrade.objects.filter(
-            config__user=user, asset_class="forex",
+            config__user=user, asset_class=cls,
             status__in=("OPEN", "CLOSE_PENDING")).select_related("config"):
         _tally(trade.symbol, trade.side,
                trade.rule_name or trade.config.name or "bot")
     for pos in Position.objects.filter(
             portfolio_id__in=_position_books(user, portfolio),
             closed_at__isnull=True,
-            instrument__asset_class="forex").select_related("instrument"):
+            instrument__asset_class=cls).select_related("instrument"):
         _tally(pos.instrument.symbol, pos.direction,
                getattr(pos.strategy, "name", "") or "position")
 
     if not counts:
-        state["reason"] = "no open ticket shares a directional currency"
+        state["reason"] = ("no open ticket shares a directional currency"
+                           if cls == "forex"
+                           else "no open ticket shares this complex")
         return state
 
     worst = max(counts, key=lambda c: counts[c])
@@ -1185,11 +1257,14 @@ def theme_state(user, *, symbol: str, side: str, asset_class: str,
     state["tickets"] = tickets[worst]
     if counts[worst] >= cap:
         direction = ("long" if candidate[worst] > 0 else "short")
+        theme_word = "currency" if cls == "forex" else "commodity"
+        mover = (worst if cls == "forex"
+                 else f"{worst.replace('_', ' ')} complex")
         state["ok"] = False
         state["reason"] = (
             f"{counts[worst]} open ticket(s) already express {direction} "
-            f"{worst} ({', '.join(tickets[worst])}) — the book caps one "
-            f"currency theme at {cap:g} leg(s); one {worst} repricing "
+            f"{mover} ({', '.join(tickets[worst])}) — the book caps one "
+            f"{theme_word} theme at {cap:g} leg(s); one {mover} repricing "
             f"marks them all at once")
         return state
     state["reason"] = (f"{counts[worst]} of {cap:g} allowed leg(s) share "
