@@ -23,7 +23,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from django.utils import timezone
@@ -393,7 +393,7 @@ class AssetBot(ABC):
             self._note_stop_rules_inert(trade)
             return False
 
-        moved, note = False, "no leg matched"
+        moved, note, accepted = False, "no leg matched", None
         for oid in ids:
             try:
                 res = mover(str(oid), float(candidate))
@@ -402,6 +402,7 @@ class AssetBot(ABC):
                 continue
             if res and res.get("ok"):
                 moved, note = True, str(res.get("price"))
+                accepted = res.get("price")
                 break
             note = (res or {}).get("reason") or note
 
@@ -413,21 +414,35 @@ class AssetBot(ABC):
                 self.asset_class, trade.symbol, why, candidate, note)
             return False
 
-        # The venue accepted it, so the row may now say so.
+        # The venue accepted it, so the row may now say so — and it says
+        # what the VENUE took, not what we asked for. A stop is snapped onto
+        # the contract's minTick before it is sent (0.05 on many options,
+        # 0.25 on ES), so the accepted price can differ from `candidate` by
+        # up to a tick. Recording the request left the row, the forensics
+        # timeline and the operator's "protected at" reading describing a
+        # level that rests nowhere — and it biased the ratchet, because
+        # `is_improvement` compares the next candidate against this field.
+        resting = candidate
+        if accepted is not None:
+            try:
+                resting = Decimal(str(accepted))
+            except (TypeError, ValueError, InvalidOperation):
+                resting = candidate      # keep the request rather than none
         meta = dict(trade.metadata or {})
         moves = list(meta.get("stop_moves") or [])
-        moves.append({"to": str(candidate), "at": str(price),
-                      "why": why + ":broker"})
+        moves.append({"to": str(resting), "asked": str(candidate),
+                      "at": str(price), "why": why + ":broker"})
         meta["stop_moves"] = moves[-20:]
         if why == "breakeven":
             meta["breakeven_armed"] = True
         # A leg that MOVED is proof the rules are not inert after all.
         meta.pop("stop_rules_inert", None)
-        trade.stop_loss = candidate
+        trade.stop_loss = resting
         trade.metadata = meta
         trade.save(update_fields=["stop_loss", "metadata"])
-        logger.info("[%s_bot] %s %s moved the BROKER stop to %s at mark %s",
-                    self.asset_class, trade.symbol, why, candidate, price)
+        logger.info("[%s_bot] %s %s moved the BROKER stop to %s (asked %s) "
+                    "at mark %s", self.asset_class, trade.symbol, why,
+                    resting, candidate, price)
         return True
 
     def _note_stop_rules_inert(self, trade) -> None:
@@ -1014,11 +1029,50 @@ class AssetBot(ABC):
 
     # ── gating ───────────────────────────────────────────────────────────
 
+    def _still_armed(self) -> bool:
+        """Is this config STILL enabled, according to the database?
+
+        `execute_kill_switch` disables every config, flattens every open row
+        and hands back a result an operator reads as "everything is closed".
+        A tick already running holds `self.cfg` in memory from before that
+        sweep and never asks again — and can_open_new checked the breakers,
+        the book, the concurrency count and the 24h loss without once
+        reading `enabled`. So the surviving tick kept opening at the broker
+        for each remaining symbol, AFTER the flatten pass had walked past
+        them.
+
+        Nothing manages what it opens, either: the runner refuses a disabled
+        config, so bot-side trailing and the time stop never run on those
+        units. Only the entry bracket protects them.
+
+        Fails OPEN on a database error, deliberately and loudly: the same
+        posture `preflight` takes, because halting the whole fleet on a
+        transient hiccup is the worse failure. A disarm is a deliberate act
+        that will still be true on the next tick; a dropped connection is
+        not.
+        """
+        from bot_program.models import AssetBotConfig
+        try:
+            still = (AssetBotConfig.objects
+                     .filter(pk=self.cfg.pk)
+                     .values_list("enabled", flat=True)
+                     .first())
+        except Exception as e:  # noqa: BLE001 — see the docstring
+            logger.warning("[%s_bot] %s: could not re-read `enabled` (%s) — "
+                           "continuing this pass", self.asset_class,
+                           self.cfg.name, e)
+            return True
+        return bool(still)
+
     def can_open_new(self) -> tuple[bool, str]:
         from bot_program.models import AssetBotTrade
         from bot_program.asset_engine.safety import (
             CircuitBreakers, notify_circuit_breaker,
         )
+
+        if not self._still_armed():
+            return (False, "config was disarmed mid-tick (kill switch or "
+                           "operator) — no entries this pass")
 
         # Circuit breakers: stop opening when the recent record says
         # something is wrong. Never force-closes — an automated system that
@@ -1327,6 +1381,51 @@ class AssetBot(ABC):
                         self.asset_class, symbol, corr["reason"])
 
         qty = self._round_qty(qty, price)
+
+        # THE CAP, ENFORCED WHERE THE FINAL QUANTITY EXISTS.
+        # `risk_fraction()` clamps to MAX_RISK_FRACTION and its docstring
+        # promised "no config value and no multiplier may exceed it". That
+        # was false here: size_position returns a qty risking exactly the
+        # capped fraction, and the allocator lane above then multiplies it
+        # by anything the meta-allocator wrote in [0.10, 3.00]. Nothing
+        # downstream re-checked risk. The hand-taken path, where a human is
+        # present to object, refuses on the final quantity; this path, where
+        # nobody is, did not.
+        #
+        # It is dormant only while every multiplier is <= 1.0, and they
+        # exceed 1.0 the day rules start clearing the promotion gate — so
+        # this lands BEFORE that, not after.
+        #
+        # REFUSE rather than clamp: a size the platform quietly shrank is a
+        # different trade from the one the lane asked for, and the operator
+        # should see that it wanted more than the ceiling allows.
+        try:
+            from bot_program.asset_engine.sizing import MAX_RISK_FRACTION
+            risk_ceiling = float(self.cfg.capital or 0) * MAX_RISK_FRACTION
+            per_unit_risk = abs(float(price) - float(sl))
+            realised_risk = qty * per_unit_risk * self._value_per_unit(symbol)
+        except Exception as e:  # noqa: BLE001 — see below
+            # A cap that cannot be computed must not silently pass the
+            # trade: this is arithmetic on values already in hand, so a
+            # failure here means something is wrong enough to stop.
+            logger.error("[%s_bot] %s: risk ceiling uncomputable (%s) — "
+                         "refusing the entry", self.asset_class, symbol, e)
+            return self._skip(symbol, skips.ERROR, f"risk ceiling: {e}")
+        # The 1e-9 slack is for float noise at exactly the cap, not
+        # tolerance — the same slack the manual path uses.
+        if (risk_ceiling > 0 and per_unit_risk > 0
+                and realised_risk > risk_ceiling + 1e-9):
+            logger.warning(
+                "[%s_bot] %s REFUSED: %.4f units risk $%.2f, past the $%.2f "
+                "ceiling (%.1f%% of the pool)", self.asset_class, symbol,
+                qty, realised_risk, risk_ceiling, MAX_RISK_FRACTION * 100)
+            return self._skip(
+                symbol, skips.GATE_BLOCKED,
+                f"sized to ${realised_risk:,.2f} of risk, past the "
+                f"${risk_ceiling:,.2f} ceiling "
+                f"({MAX_RISK_FRACTION * 100:.1f}% of the bot pool) — the "
+                f"allocator lane scaled past the cap")
+
         if qty <= 0:
             logger.info("[%s_bot] %s sized to zero (risk budget %.2f%% of "
                         "%s, stop %.3f%% away) — skipping", self.asset_class,
@@ -1469,7 +1568,16 @@ class AssetBot(ABC):
                 signal_id=decision.rule_name or "", intent="ENTRY",
                 bar_ts=bar_ts,
             )
+            if not self._still_armed():
+                return self._skip(symbol, skips.GATE_BLOCKED,
+                                  "config was disarmed mid-tick — refusing "
+                                  "to submit")
             try:
+                # The LAST read before real units move. can_open_new ran
+                # before this symbol's scan; a disarm landing between then
+                # and now would otherwise still reach the broker, and what
+                # it opened would go unmanaged — the runner refuses a
+                # disabled config, so no later tick trails or time-stops it.
                 # Brokers that support it attach SL/TP atomically (Alpaca
                 # bracket, OANDA on-fill, IBKR bracket) so the position is
                 # protected even when this worker is down. Clients without

@@ -656,7 +656,7 @@ class IBKRTrader:
                               symbol, refusal)
                     empty["raw"] = {"reason": refusal}
                     return empty
-            legs, child_trades = [], []
+            legs, child_trades, stop_leg_id = [], [], ""
             trade = None
             parent_id = 0
             for o in orders:
@@ -684,6 +684,17 @@ class IBKRTrader:
                                          "orderId", "") or "")
                     if leg_id:
                         legs.append(leg_id)
+                        # NAME the stop. `legs` is flat and in placement
+                        # order, and the target is placed first, so a caller
+                        # walking it blind reaches the wrong leg. Alpaca
+                        # reports `protectiveStopId` for exactly this reason
+                        # and the entry path already maps it onto the row as
+                        # `protective_stop_id`; IBKR simply never sent it.
+                        leg_kind = str(getattr(
+                            getattr(placed, "order", None),
+                            "orderType", "") or "").upper()
+                        if leg_kind.startswith("STP"):
+                            stop_leg_id = leg_id
             self._ib.sleep(1.0)
             filled_qty = float(trade.orderStatus.filled or 0)
             avg_px = float(trade.orderStatus.avgFillPrice or 0)
@@ -761,6 +772,8 @@ class IBKRTrader:
                 else:
                     out["protectedOnFill"] = True
                     out["protectiveOrders"] = legs
+                    if stop_leg_id:
+                        out["protectiveStopId"] = stop_leg_id
             return out
         except Exception as e:
             log.error("IBKR market_order(%s, %s, %s) failed: %s",
@@ -865,30 +878,104 @@ class IBKRTrader:
                 kind = str(getattr(order, "orderType", "") or "").upper()
                 contract = getattr(trade, "contract", None)
                 tick = self._min_tick_for(contract) if contract else 0.0
-                # WIDEN, never tighten, when snapping: a stop nudged the
-                # wrong way by a rounding step is a stop that fires
-                # earlier than the operator asked for.
-                px = self._snap_to_tick(float(new_price), tick) if tick \
-                    else float(new_price)
 
+                # The account is bound FIRST, before anything on the live
+                # order is touched. `openTrades()` hands back ib_insync's own
+                # objects, so a refusal that happened AFTER the write left
+                # this leg carrying a price nobody sent — and the next tick
+                # reads the same object back. Every refusal below now leaves
+                # the resting order exactly as it was found.
+                #
+                # A leg re-placed without an account lands on the session
+                # default, which is a stop resting against a book that does
+                # not hold the position.
+                refusal = self._bind_order_account(order)
+                if refusal:
+                    return {"ok": False, "reason": refusal, "price": None}
                 if "STP" in kind:
+                    # `widen` is KEYWORD-ONLY and has no default. This call
+                    # passed two positional arguments, so every invocation
+                    # raised TypeError, the outer except swallowed it, and
+                    # the method answered ok=False. Break-even and trailing
+                    # have never moved a stop on this venue — and the row was
+                    # not marked stop_rules_inert either, because that only
+                    # happens when a client exposes no mover at all. The
+                    # position read as managed while nothing managed it.
+                    #
+                    # WIDEN, never tighten: a stop nudged the wrong way by a
+                    # rounding step fires earlier than the operator asked
+                    # for. The leg's own action says which side we are on —
+                    # a long is closed by a SELL and its stop rests BELOW, so
+                    # it rounds down for more room; a short's rounds up.
+                    if not tick:
+                        return {"ok": False, "price": None,
+                                "reason": f"leg {wanted}: minTick unreadable "
+                                          f"— refusing to send an off-tick "
+                                          f"price TWS would reject, which "
+                                          f"leaves the position naked and "
+                                          f"still looking protected"}
+                    exit_action = str(
+                        getattr(order, "action", "") or "").upper()
+                    px = self._snap_to_tick(new_price, tick,
+                                            widen=(exit_action == "SELL"))
+                    if px is None:
+                        return {"ok": False, "price": None,
+                                "reason": f"leg {wanted}: {new_price} will "
+                                          f"not snap onto a {tick} tick"}
                     order.auxPrice = px
                 elif "LMT" in kind:
-                    order.lmtPrice = px
+                    # A REFUSAL, not a best effort — the rule Alpaca's client
+                    # already states for itself. Every caller of this method
+                    # is moving a STOP, and the id list they walk holds the
+                    # take-profit too: `protectiveOrders` is flat and ordered
+                    # by placement, and IBKR places the TARGET first
+                    # (bracketOrder yields parent, takeProfit, stopLoss), so
+                    # a blind walk reaches this leg first.
+                    #
+                    # Accepting it wrote the break-even price into lmtPrice:
+                    # a sell limit BELOW the mark on a long, filled on the
+                    # next tick and booked as a take-profit, while the stop
+                    # was never touched. Answering False lets the caller's
+                    # loop walk on to the leg it actually wanted.
+                    return {"ok": False, "price": None,
+                            "reason": f"leg {wanted} is a take-profit, not a "
+                                      f"stop — refusing to move it"}
                 else:
                     return {"ok": False, "price": None,
                             "reason": f"leg {wanted} is a {kind or 'unknown'} "
                                       f"order — refusing to guess which "
                                       f"field carries its price"}
 
-                # The account must survive a modification: a leg re-placed
-                # without it lands on the session default, which is a stop
-                # resting against a book that does not hold the position.
-                refusal = self._bind_order_account(order)
-                if refusal:
-                    return {"ok": False, "reason": refusal, "price": None}
-
-                self._ib.placeOrder(contract, order)
+                placed = self._ib.placeOrder(contract, order)
+                # placeOrder is NON-BLOCKING. Returning ok on the next line
+                # reported a success TWS had not agreed to: an off-tick 110
+                # where the market rule is coarser than minTick, a modify
+                # racing a fill, a leg dropped to Inactive — every rejection
+                # the refusals above were written to ANTICIPATE arrives
+                # asynchronously, and none of them were ever read. The gate
+                # refused on a predicted rejection and reported success on a
+                # real one.
+                #
+                # It is not merely a false report. base.py stamps
+                # `breakeven_armed` on ok=True, which disarms the rule for
+                # the life of the trade — so an unverified True leaves the
+                # stop at its original wide level while every surface says
+                # break-even, and no later tick tries again.
+                #
+                # The entry path already waits and PROVES the leg is resting
+                # before it will claim `protectedOnFill`. A move has to
+                # clear the same bar: the one second is what lets
+                # PendingSubmit — which ib_insync assigns locally the
+                # instant placeOrder is called, before TWS has said
+                # anything — resolve into an answer.
+                self._ib.sleep(1.0)
+                if not self._leg_is_resting(placed):
+                    why = (self._dead_order_reason(placed, 0)
+                           or "TWS did not accept the modification")
+                    log.error("IBKR leg %s (%s) REFUSED the move to %s: %s "
+                              "— the stop still rests where it was",
+                              wanted, kind, px, why)
+                    return {"ok": False, "reason": why, "price": None}
                 log.info("IBKR modified leg %s (%s) to %s", wanted, kind, px)
                 return {"ok": True, "reason": "", "price": px}
 

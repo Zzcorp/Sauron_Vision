@@ -123,8 +123,15 @@ def risk_fraction(cfg) -> float:
     """The fraction of equity to put at risk on one trade.
 
     Override per config with extras['risk_per_trade_pct'] (in percent, so
-    0.25 means 0.25%). Always clamped to MAX_RISK_FRACTION — no config value
-    and no multiplier may exceed it.
+    0.25 means 0.25%). Clamped to MAX_RISK_FRACTION.
+
+    THIS FUNCTION CANNOT SPEAK FOR MULTIPLIERS. It used to claim "no config
+    value and no multiplier may exceed it", which was false: the caller
+    sizes off this fraction and then scales the quantity by the allocator
+    multiplier, so the cap has to be re-checked on the FINAL quantity. Both
+    entry paths do that now — `scan_symbol` in asset_engine/base.py and
+    `options_bot`, mirroring `manual_trade._judge_qty` — and that check, not
+    this clamp, is what actually binds.
     """
     pct = _extras(cfg).get("risk_per_trade_pct")
     if pct is None:

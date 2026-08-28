@@ -225,30 +225,56 @@ class CircuitBreakers:
         return True, ""
 
     def check_drawdown_from_peak(self) -> tuple:
-        """Halt when cumulative realised P&L has fallen far from its peak."""
+        """Halt when cumulative realised P&L has fallen far from its peak.
+
+        PAPER AND LIVE ARE SEPARATE CURVES, judged separately, and either
+        can halt the config. Netting them let simulated profit raise the
+        peak and hide a live drawdown underneath it — and that is not a
+        corner case: while one rule is promoted platform-wide the actuator
+        forces most entries to paper at full nominal size, so the closes on
+        a LIVE config are mostly simulated. `risk_gate` already refuses to
+        net the two for the book; this is the same rule one layer down.
+
+        Separating them does not weaken the breaker. A strategy bleeding on
+        paper is still bleeding, and its curve can still halt the config —
+        what it can no longer do is cancel out the real one.
+
+        An unpriceable exit is EXCLUDED rather than counted as a scratch.
+        `float(pnl or 0)` scored a close nobody could price as break-even,
+        which is the fabrication the nullable column exists to prevent. The
+        count rides along in the reason so an operator can see how much of
+        the record the number was drawn from.
+        """
         max_dd = _knob(self.cfg, self.extras, "max_drawdown_pct",
                        DEFAULT_MAX_DRAWDOWN_PCT)
         if max_dd <= 0:
             return True, ""
         from bot_program.models import AssetBotTrade
 
-        trades = list(AssetBotTrade.objects
-                      .filter(config=self.cfg, status="CLOSED")
-                      .order_by("closed_at")
-                      .values_list("pnl", flat=True))
-        if len(trades) < 5:
-            return True, ""
-
+        rows = list(AssetBotTrade.objects
+                    .filter(config=self.cfg, status="CLOSED")
+                    .order_by("closed_at")
+                    .values_list("pnl", "paper"))
         capital = float(self.cfg.capital or 0) or 1.0
-        equity = capital
-        peak = capital
-        for pnl in trades:
-            equity += float(pnl or 0)
-            peak = max(peak, equity)
-        drawdown_pct = (peak - equity) / peak * 100 if peak > 0 else 0
-        if drawdown_pct >= max_dd:
-            return False, (f"drawdown {drawdown_pct:.1f}% from peak "
-                           f"(max {max_dd:.1f}%)")
+
+        # Live first: it is the curve made of money that actually moved, so
+        # it is the one whose breach should be named if both have drawn down.
+        for want_paper, label in ((False, "live"), (True, "paper")):
+            curve = [p for p, is_paper in rows if bool(is_paper) is want_paper]
+            measured = [p for p in curve if p is not None]
+            unmeasured = len(curve) - len(measured)
+            if len(measured) < 5:
+                continue
+            equity = peak = capital
+            for pnl in measured:
+                equity += float(pnl)
+                peak = max(peak, equity)
+            drawdown_pct = (peak - equity) / peak * 100 if peak > 0 else 0
+            if drawdown_pct >= max_dd:
+                note = (f", {unmeasured} unmeasured excluded"
+                        if unmeasured else "")
+                return False, (f"{label} drawdown {drawdown_pct:.1f}% from "
+                               f"peak (max {max_dd:.1f}%{note})")
         return True, ""
 
     def check_all(self) -> tuple:

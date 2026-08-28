@@ -153,6 +153,30 @@ def adjust_levels(user, trade, stop=None, target=None, clear_target=False):
         protected = bool((fresh.metadata or {}).get("protected"))
         broker_note = ""
 
+        if protected and (target is not None or clear_target):
+            # THE SAME RULE THIS MODULE STATES FOR THE STOP, applied to the
+            # target — which it was not. The target write below sits outside
+            # the protected check entirely, so raising a target on an Alpaca
+            # bracket, an IBKR bracket or an OANDA takeProfitOnFill returned
+            # ok=true, changed the row, wrote an audit entry claiming an
+            # "in-place" broker modification that never happened, and left
+            # the broker's original limit resting where it was. The position
+            # is then taken out at the OLD level. Clearing is worse: the row
+            # shows no target while the broker's still fills.
+            #
+            # Nothing bot-side covers the gap either — protected rows skip
+            # bot-side SL/TP management altogether, so the new number would
+            # be enforced by nothing, anywhere.
+            #
+            # A refusal is not the capability, and it is not meant to be.
+            # It is the difference between an operator who knows their
+            # target is unchanged and one who believes it moved.
+            return {"ok": False,
+                    "error": "This position's target rests at the broker "
+                             "and cannot be moved from here yet. Change it "
+                             "at the broker, or close the position. Nothing "
+                             "was changed."}
+
         if protected and stop is not None:
             # The broker leg FIRST. Moving only our copy would leave the
             # row claiming a stop the broker never heard of — the
@@ -188,7 +212,11 @@ def adjust_levels(user, trade, stop=None, target=None, clear_target=False):
             "target": (None if clear_target
                        else (str(target) if target is not None else None)),
             "widened": bool(widened),
-            "broker": broker_note or ("in-place" if protected else "bot"),
+            # "in-place" means a broker call RETURNED OK. Claiming it for
+            # any protected row recorded a modification that never happened
+            # — on a row-only edit `broker_note` is empty precisely because
+            # nothing was sent.
+            "broker": broker_note or ("row-only" if protected else "bot"),
         })
         meta["level_edits"] = moves[-20:]
         fresh.metadata = meta

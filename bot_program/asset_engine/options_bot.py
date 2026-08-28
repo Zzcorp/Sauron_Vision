@@ -383,7 +383,9 @@ class OptionsBot(AssetBot):
         # Contracts sized by RISK. entry and stop are premium per share while
         # P&L is premium x the multiplier, so the multiplier is exactly the
         # account-currency value of one point of price per contract.
-        from bot_program.asset_engine.sizing import risk_fraction, qty_for_risk
+        from bot_program.asset_engine.sizing import (
+            MAX_RISK_FRACTION, qty_for_risk, risk_fraction,
+        )
         cap = float(self.cfg.capital)
         multiplier = float(contract.multiplier or 100)
         f = risk_fraction(self.cfg)
@@ -425,6 +427,29 @@ class OptionsBot(AssetBot):
                         symbol, corr["reason"])
 
         n_contracts = int(raw)
+
+        # THE CAP, on the FINAL contract count — the same hole the stock
+        # path had. `risk_fraction()` clamps to MAX_RISK_FRACTION, and then
+        # the allocator multiplier scales `raw` afterwards with nothing
+        # re-checking. int() rounds DOWN, so this can only bind when the
+        # multiplier genuinely pushed the size past the ceiling.
+        #
+        # Refuse rather than clamp, and say by how much: a silently shrunk
+        # options position is a different trade from the one the lane asked
+        # for.
+        per_contract_risk = abs(float(premium) - float(sl)) * multiplier
+        risk_ceiling = cap * MAX_RISK_FRACTION
+        if (risk_ceiling > 0 and per_contract_risk > 0
+                and n_contracts * per_contract_risk > risk_ceiling + 1e-9):
+            logger.warning(
+                "[options_bot] %s strike %s REFUSED: %d contracts risk "
+                "$%.2f, past the $%.2f ceiling (%.1f%% of the $%s pool) — "
+                "the allocator lane scaled past the cap",
+                symbol, contract.strike, n_contracts,
+                n_contracts * per_contract_risk, risk_ceiling,
+                MAX_RISK_FRACTION * 100, cap)
+            return None
+
         if n_contracts <= 0:
             # Not a bug — arithmetic. One contract risks
             # |premium - stop| x multiplier; if that already exceeds the risk
@@ -563,6 +588,10 @@ class OptionsBot(AssetBot):
         paper = (self.cfg.mode == "paper") or bool(stage["force_paper"])
         order_id = ""
         if not paper:
+            if not self._still_armed():
+                return self._skip(symbol, skips.GATE_BLOCKED,
+                                  "config was disarmed mid-tick — refusing "
+                                  "to submit")
             try:
                 if hasattr(client, "market_order_option"):
                     res = client.market_order_option(
