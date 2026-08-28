@@ -211,9 +211,16 @@ def grade_bot_trade(trade) -> bool:
                     risk_dollars *= float(forex_usd_multiplier(trade))
                 except Exception:
                     pass
-            if risk_dollars > 0:
-                pnl = float(trade.pnl or 0)
-                trade.realized_r = round(pnl / risk_dollars, 4)
+            # An unmeasured exit cannot be graded. `float(trade.pnl or 0)`
+            # scored a trade whose result nobody knows as a scratch and fed
+            # that into realized_r — which the promotion gate, the
+            # meta-allocator and the track record all read as evidence.
+            #
+            # realized_r is simply left unset. The row still gets its
+            # outcome and its duration; what it does not get is an R
+            # multiple derived from a number that does not exist.
+            if risk_dollars > 0 and trade.pnl is not None:
+                trade.realized_r = round(float(trade.pnl) / risk_dollars, 4)
 
     trade.save(update_fields=["outcome", "realized_r", "duration_minutes"])
     return True

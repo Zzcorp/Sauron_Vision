@@ -359,7 +359,15 @@ def _trade_to_position(trade, instruments, quotes):
 
     if trade.status == "CLOSED":
         up.current_price = trade.exit_price
-        pnl = float(trade.pnl or 0)
+        # Unmeasured is not flat. `or 0` printed a confident 0.00 in the
+        # portfolio row for a close nothing could price; None is already how
+        # these three fields say "no number" — both branches below use it.
+        if trade.pnl is None:
+            up.unrealized_pnl = None
+            up.unrealized_pnl_pct = None
+            up.pnl_on_capital_pct = None
+            return up
+        pnl = float(trade.pnl)
         up.unrealized_pnl = pnl
         notional = abs(entry * qty * vpu)
         up.unrealized_pnl_pct = round(pnl / notional * 100, 2) if notional else None

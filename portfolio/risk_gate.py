@@ -544,18 +544,23 @@ def realized_since(user, portfolio, *, hours: int = DAILY_LOSS_WINDOW_HOURS,
             config__user=user, status="CLOSED",
             closed_at__gte=since,
             closed_at__lte=now).only("pnl", "paper", "metadata"):
-        # A row reconciliation had to close with no price available carries a
-        # fabricated 0.00 in a column that cannot hold NULL. Summing it would
-        # book a real stop-out as a scratch — invisible to this floor, which
-        # is the one number an operator trusts to stop the day.
-        if (trade.metadata or {}).get("exit_price_unavailable"):
+        # A row reconciliation could not price is UNMEASURED, and summing
+        # it would book a real stop-out as a scratch — invisible to this
+        # floor, which is the one number an operator trusts to stop the day.
+        #
+        # `pnl is None` is the fact now that the column can hold it. The
+        # metadata flag is still honoured because every row written before
+        # that migration carries the fabricated zero and the flag, and a
+        # backfill cannot recover a price nobody had.
+        if (trade.pnl is None
+                or (trade.metadata or {}).get("exit_price_unavailable")):
             unmeasured += 1
             continue
         if trade.paper:
-            paper += float(trade.pnl or 0)
+            paper += float(trade.pnl)
             paper_n += 1
             continue
-        live += float(trade.pnl or 0)
+        live += float(trade.pnl)
         live_n += 1
 
     for pos in Position.objects.filter(portfolio=portfolio,

@@ -198,14 +198,30 @@ class CircuitBreakers:
         if max_streak <= 0:
             return True, ""
         streak = 0
-        for trade in self._closed_trades(max_streak):
-            pnl = trade.pnl if trade.pnl is not None else Decimal("0")
-            if pnl < 0:
+        skipped = 0
+        # Twice the window, because unmeasured rows are stepped OVER rather
+        # than counted and a run of them would otherwise starve the count.
+        for trade in self._closed_trades(max_streak * 2):
+            if trade.pnl is None:
+                # Unmeasured is not a loss — and not a win either. Coercing
+                # it to Decimal("0") made it non-negative, so it fell to the
+                # `else` and BROKE the streak: three real losses with one
+                # unpriceable close among them read as a streak of one.
+                # Unpriceable exits cluster exactly when the broker link is
+                # sick, which is when a bot is most likely to be bleeding and
+                # this breaker most needs to fire.
+                skipped += 1
+                continue
+            if trade.pnl < 0:
                 streak += 1
             else:
                 break
+            if streak >= max_streak:
+                break
         if streak >= max_streak:
-            return False, f"{streak} consecutive losing trades (max {max_streak})"
+            note = f", {skipped} unmeasured skipped" if skipped else ""
+            return False, (f"{streak} consecutive losing trades "
+                           f"(max {max_streak}{note})")
         return True, ""
 
     def check_drawdown_from_peak(self) -> tuple:

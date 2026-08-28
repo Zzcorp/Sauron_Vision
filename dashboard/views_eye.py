@@ -341,10 +341,20 @@ def _pnl_24h(user) -> dict:
                 .filter(config__user=user, status="CLOSED",
                         closed_at__gte=since)
                 .values("asset_class")
-                .annotate(s=Sum("pnl"), n=Count("id")))
+                # Sum SKIPS NULLs, Count does not — so a class holding
+                # one unmeasured exit would divide a real total by a count
+                # that includes a trade contributing nothing to it. The
+                # measured count is the denominator that matches the sum;
+                # the other is kept so the page can say how many are not
+                # in the figure.
+                .annotate(s=Sum("pnl"), n=Count("id"),
+                          measured=Count("pnl")))
         for r in rows:
             v = r["s"] or Decimal("0")
-            by_class[r["asset_class"]] = {"pnl": v, "count": r["n"]}
+            by_class[r["asset_class"]] = {
+                "pnl": v, "count": r["n"],
+                "measured": r["measured"],
+                "unmeasured": r["n"] - r["measured"]}
             total += v
     except Exception:
         pass

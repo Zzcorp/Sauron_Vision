@@ -157,12 +157,38 @@ def _close_as_orphan(trade) -> None:
     # Best-effort exit price: use the broker's ticker, or fall back to
     # the trade's entry price (zero P&L) so we at least clear the row.
     from .engine.broker_router import client_for_symbol
-    from .pending_closes import EXIT_FILL_SOURCE_KEY, EXIT_SOURCE_MARK
+    from .pending_closes import (EXIT_FILL_SOURCE_KEY,
+                                 EXIT_SOURCE_BROKER, EXIT_SOURCE_MARK)
     from market_data.models import LiveQuote
 
     exit_price = trade.entry_price
     priced = False           # did anything but the entry price answer?
-    if trade.asset_class == "options":
+    measured = False         # ...and was it the BROKER'S OWN FILL?
+
+    # The broker first, because it is the only source that knows what
+    # actually happened. Stock and forex stops rest AT the broker, so for
+    # most of those trades this is the exit — a leg the platform never
+    # submitted and never saw print. Everything below this block is an
+    # estimate, correctly flagged as one, and `realized_r` is computed
+    # from whichever number lands here.
+    try:
+        from .engine.broker_router import client_for_symbol as _cfs
+        _client = _cfs(trade.config.user, trade.symbol, trade.config)
+        _fill = getattr(_client, "closing_fill", None)
+        got = _fill(trade) if callable(_fill) else None
+        if got and got.get("price"):
+            exit_price = Decimal(str(got["price"]))
+            priced = measured = True
+            logger.info("reconcile: #%s %s exit read FROM THE BROKER at %s "
+                        "(%s)", trade.id, trade.symbol, exit_price,
+                        got.get("source", "?"))
+    except Exception as e:  # noqa: BLE001 - an unreachable broker costs
+        logger.debug("reconcile: broker fill unavailable for #%s: %s",
+                     trade.id, e)          # this row an estimate, not a crash
+
+    if measured:
+        pass
+    elif trade.asset_class == "options":
         # trade.symbol is the UNDERLYING — its ticker/LiveQuote is the wrong
         # scale for a premium-denominated trade. Mark at the option's own
         # premium, or entry (zero P&L) when unknown.
@@ -220,24 +246,39 @@ def _close_as_orphan(trade) -> None:
     # bracket-protected stock and forex exit takes, so without the flag a
     # large share of the track record would silently be estimates.
     meta = dict(trade.metadata or {})
-    meta["exit_price_inferred"] = True
+    # INFERRED only when it really was. A fill read from the broker is a
+    # measurement, and flagging it as an estimate would understate the one
+    # part of the track record that is not one.
+    meta["exit_price_inferred"] = not measured
     if not priced:
-        # Nothing anywhere could price this exit, so the number booked above
-        # is the ENTRY price and the P&L is a fabricated zero. The row still
-        # closes — an orphan left open forever is its own failure — but it
-        # is marked, and `realized_since` excludes a marked row from the
-        # daily-loss sum instead of counting a real loss as a scratch.
+        # Nothing anywhere could price this exit. The row still closes — an
+        # orphan left open forever is its own failure — but its P&L is NULL
+        # rather than a zero derived from the entry price, because a
+        # stop-out that cost real money is not a scratch.
+        #
+        # The flag stays beside it. `pnl is None` is the fact; the flag is
+        # what lets a reader distinguish "reconciliation could not price
+        # this" from any other NULL a future writer might introduce, and
+        # what the rows written before this migration still carry.
         meta[UNPRICED_EXIT_KEY] = True
+        # trade.pnl, not the local: the assignment above has already run,
+        # and setting a name nothing reads afterwards is how a fix looks
+        # applied and is not.
+        trade.pnl = None
         logger.error("reconcile: #%s %s closed with NO price available — "
-                     "booked at entry and flagged UNMEASURED, not flat",
+                     "P&L recorded as UNMEASURED, not as flat",
                      trade.id, trade.symbol)
+    # Provenance, written ONCE and from what actually happened.
+    #
     # A CLOSE_PENDING row arrives here carrying `exit_fill_source: broker`
-    # from the partial close that stranded it. The price booked just above is
-    # NOT that fill — it is a ticker read taken now, for the whole quantity —
-    # so leaving the old value would put two contradictory provenance flags on
-    # one closed row and let a reader treat an estimate as a measurement.
-    # `mark` is what the exit vocabulary calls a price we had to assume.
-    meta[EXIT_FILL_SOURCE_KEY] = EXIT_SOURCE_MARK
+    # from the partial close that stranded it, and that stale value must not
+    # survive a price this function had to assume — two contradictory flags
+    # on one closed row let a reader treat an estimate as a measurement.
+    # But it is `broker` again, honestly, when the block at the top of this
+    # function actually read the fill: stamping `mark` unconditionally would
+    # have thrown away the one number here that is not an estimate.
+    meta[EXIT_FILL_SOURCE_KEY] = (EXIT_SOURCE_BROKER if measured
+                                  else EXIT_SOURCE_MARK)
     trade.metadata = meta
     trade.save(update_fields=["exit_price", "pnl", "status", "closed_at",
                                 "reason", "metadata"])

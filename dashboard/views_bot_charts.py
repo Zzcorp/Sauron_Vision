@@ -32,13 +32,28 @@ R_BUCKETS = [
 
 
 def _equity_series(trades, starting_capital: float) -> list:
-    """Cumulative equity after each closed trade."""
+    """Cumulative equity after each closed trade.
+
+    A trade whose exit could not be priced carries pnl NULL, and it is
+    skipped rather than stepped by zero: a flat step draws a line where the
+    truth is a gap, and — because this is a CUMULATIVE series — every point
+    after it inherits the error. The curve is then short by that trade
+    rather than wrong from it onward, and `unmeasured_count` lets the page
+    say so.
+    """
     equity = starting_capital
     points = [{"i": 0, "equity": round(equity, 2), "at": None}]
     for i, t in enumerate(trades, start=1):
-        equity += float(t.pnl or 0)
+        if t.pnl is None:
+            continue
+        equity += float(t.pnl)
         points.append({"i": i, "equity": round(equity, 2), "at": t.closed_at})
     return points
+
+
+def unmeasured_count(trades) -> int:
+    """How many closed trades have no price behind their P&L."""
+    return sum(1 for t in trades if t.pnl is None)
 
 
 def _sparkline_path(points, width=720, height=200, pad=8) -> dict:
@@ -84,7 +99,7 @@ def _r_histogram(trades) -> list:
 
 def _stats(trades, points) -> dict:
     rs = [float(t.realized_r) for t in trades if t.realized_r is not None]
-    pnls = [float(t.pnl or 0) for t in trades]
+    pnls = [float(t.pnl) for t in trades if t.pnl is not None]
     wins = [r for r in rs if r > 0]
     losses = [r for r in rs if r <= 0]
 

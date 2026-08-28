@@ -335,8 +335,18 @@ class ReconciliationTests(TestCase):
 
     def test_options_orphan_closed_at_premium_scale(self):
         """A genuinely-closed option (sec-typed feed, no OPT rows) is closed
-        at the entry premium (unknown current premium → zero P&L), never at
-        the underlying's stock price."""
+        at the entry premium, never at the underlying's stock price.
+
+        Its P&L is UNMEASURED, not zero. This test used to assert 0.00 —
+        "unknown current premium → zero P&L" — which is the fabrication the
+        nullable `pnl` column exists to remove, and options are where it
+        does the most damage: an option that expired worthless lost the
+        ENTIRE premium, and booking that as a scratch hides a total loss
+        from the daily-loss gate and files it in the track record as a
+        break-even.
+
+        The premium-scale assertion below is the one this test was really
+        about, and it is unchanged."""
         from bot_program.reconcile_asset import reconcile_user
 
         trade = self._open_options_trade()
@@ -353,7 +363,10 @@ class ReconciliationTests(TestCase):
         self.assertEqual(trade.status, "CLOSED")
         # Premium scale (entry 3.00), NOT the underlying's 190.
         self.assertEqual(trade.exit_price, Decimal("3.00"))
-        self.assertEqual(trade.pnl, Decimal("0.00"))
+        # Unmeasured. Nobody could price this exit, and an option that
+        # expired worthless lost the whole premium.
+        self.assertIsNone(trade.pnl)
+        self.assertTrue(trade.metadata.get("exit_price_unavailable"))
 
 
 class BeatScheduleTests(TestCase):

@@ -333,6 +333,61 @@ class AlpacaTrader:
             log.error("Alpaca modify_protective(%s) failed: %s", order_id, e)
             return {"ok": False, "reason": str(e), "price": None}
 
+    def closing_fill(self, trade) -> "dict | None":
+        """What the broker's OWN exit actually filled at, or None.
+
+        Stock and forex stops rest at the broker, so for most of those
+        trades the exit is a leg the platform never submitted and never saw
+        print. Reconciliation therefore booked a ticker read taken minutes
+        later and flagged it `exit_price_inferred` — which is honest, and
+        means a large share of the track record is estimates wearing the
+        same shape as measurements. `realized_r` is computed from that
+        number, and the promotion gate and the meta-allocator both read
+        `realized_r`.
+
+        The identifier this needs already exists on the row: the protective
+        handles recorded at entry. Nothing new has to be stored.
+
+        Returns {"price": float, "qty": float, "source": str} or None.
+        None means "the broker did not tell us", never a fabricated number
+        — the caller has its own ladder to fall down.
+        """
+        meta = getattr(trade, "metadata", None) or {}
+        # The NAMED stop first — `protective_order_ids` is a flat list that
+        # does not say which id is which, and on a long bracket Alpaca
+        # returns the take-profit first.
+        ids = [meta.get("protective_stop_id")] if meta.get(
+            "protective_stop_id") else list(
+                meta.get("protective_order_ids") or [])
+        for oid in [i for i in ids if i]:
+            try:
+                r = self._sess().get(
+                    f"{self.trading_base}/v2/orders/{oid}",
+                    timeout=self.timeout)
+                if r.status_code != 200:
+                    continue
+                o = r.json() or {}
+            except Exception as e:  # noqa: BLE001 - reconciliation must not
+                log.debug("closing_fill(%s): %s", oid, e)   # break on one leg
+                continue
+            # `filled` is the only status whose average price describes a
+            # trade that happened. A cancelled leg carries the price it was
+            # RESTING at, which is the level the position did not exit at.
+            if str(o.get("status", "")).lower() != "filled":
+                continue
+            price = o.get("filled_avg_price")
+            qty = o.get("filled_qty")
+            try:
+                price = float(price)
+            except (TypeError, ValueError):
+                continue
+            if price <= 0:
+                continue
+            return {"price": price,
+                    "qty": float(qty or 0) or None,
+                    "source": f"alpaca:order:{oid}"}
+        return None
+
     def cancel_order(self, order_id: str) -> bool:
         """Cancel a resting order (e.g. a bracket leg). True when accepted."""
         r = self._sess().delete(f"{self.trading_base}/v2/orders/{order_id}",

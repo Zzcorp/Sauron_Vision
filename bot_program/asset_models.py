@@ -270,8 +270,27 @@ class AssetBotTrade(models.Model):
     take_profit = models.DecimalField(max_digits=18, decimal_places=8, null=True, blank=True)
 
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="OPEN")
+    # NULL means UNMEASURED, and that is a different fact from zero.
+    #
+    # Stock and forex stops rest at the broker, so reconciliation is the
+    # exit path for most of those trades — and when nothing could price
+    # the exit it booked the ENTRY price, which is a pnl of exactly 0.00
+    # on a trade that may have cost real money. That zero is invisible to
+    # the 24h daily-loss gate, which is the number an operator trusts to
+    # stop the day, and it enters the promotion track record as a
+    # break-even trade that never happened.
+    #
+    # The column could not say so, so the fact rode in a metadata flag
+    # that every reader had to remember to check. It says so itself now:
+    # `Sum()` skips NULLs, `pnl__gt=0` excludes them, and arithmetic that
+    # would have coerced one to zero has to decide what it means instead.
+    #
+    # `default=0` stays for the OPEN case, which is not unmeasured — a
+    # position that has realised nothing has realised zero.
     pnl = models.DecimalField(max_digits=14, decimal_places=4, default=0,
-        help_text="Realized P&L in the config's base_currency.")
+        null=True, blank=True,
+        help_text="Realized P&L in the config's base_currency. NULL means "
+                  "the exit could not be priced — unmeasured, not zero.")
     composite_score = models.FloatField(default=0)
     reason = models.TextField(blank=True)
 

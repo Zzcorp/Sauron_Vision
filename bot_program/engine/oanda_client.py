@@ -318,6 +318,57 @@ class OANDATrader:
             log.error("OANDA modify_protective(%s) failed: %s", trade_id, e)
             return {"ok": False, "reason": str(e), "price": None}
 
+    def closing_fill(self, trade) -> "dict | None":
+        """What the broker's OWN exit actually filled at, or None.
+
+        Stock and forex stops rest at the broker, so for most of those
+        trades the exit is a leg the platform never submitted and never saw
+        print. Reconciliation therefore booked a ticker read taken minutes
+        later and flagged it `exit_price_inferred` — which is honest, and
+        means a large share of the track record is estimates wearing the
+        same shape as measurements. `realized_r` is computed from that
+        number, and the promotion gate and the meta-allocator both read
+        `realized_r`.
+
+        The identifier this needs already exists on the row: the protective
+        handles recorded at entry. Nothing new has to be stored.
+
+        Returns {"price": float, "qty": float, "source": str} or None.
+        None means "the broker did not tell us", never a fabricated number
+        — the caller has its own ladder to fall down.
+        """
+        meta = getattr(trade, "metadata", None) or {}
+        # On OANDA the SL/TP are not standalone orders — they ride the
+        # trade — so the trade id is the only handle, and a CLOSED trade
+        # reports the average price it closed at.
+        tid = meta.get("protective_trade_id")
+        if not tid:
+            return None
+        try:
+            r = self._sess().get(
+                f"{self.base}/v3/accounts/{self.account_id}/trades/{tid}",
+                timeout=self.timeout)
+            if r.status_code != 200:
+                return None
+            t = (r.json() or {}).get("trade") or {}
+        except Exception as e:  # noqa: BLE001
+            log.debug("closing_fill(%s): %s", tid, e)
+            return None
+        # OPEN means the stop has not fired; there is no exit to read.
+        if str(t.get("state", "")).upper() != "CLOSED":
+            return None
+        try:
+            price = float(t.get("averageClosePrice") or 0)
+        except (TypeError, ValueError):
+            return None
+        if price <= 0:
+            return None
+        try:
+            qty = abs(float(t.get("initialUnits") or 0)) or None
+        except (TypeError, ValueError):
+            qty = None
+        return {"price": price, "qty": qty, "source": f"oanda:trade:{tid}"}
+
     def cancel_order(self, order_id: str) -> bool:
         """Cancel a pending order. OANDA's on-fill SL/TP are attached to the
         trade (cancelled automatically when it closes), so this is only for

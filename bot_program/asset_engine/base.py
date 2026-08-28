@@ -1069,9 +1069,27 @@ class AssetBot(ABC):
 
         # 24h realized P&L vs daily-loss limit
         since = timezone.now() - timedelta(hours=24)
-        closed = AssetBotTrade.objects.filter(
-            config=self.cfg, status="CLOSED", closed_at__gte=since)
-        realized = sum((t.pnl for t in closed), Decimal(0))
+        closed = list(AssetBotTrade.objects.filter(
+            config=self.cfg, status="CLOSED", closed_at__gte=since))
+        # An exit reconciliation could not price carries pnl=None, and
+        # summing it raised TypeError right here — in the daily-loss gate,
+        # so one unpriceable close took the whole entry preflight down.
+        # Summing it AS zero would be worse than the crash: a real stop-out
+        # would read as a scratch against the one floor an operator trusts
+        # to stop the day.
+        #
+        # The measured rows are summed; the unmeasured ones are named. The
+        # limit still applies to what was measured — if that alone breaches,
+        # the bot halts — and where it does not, the gate reports itself
+        # blind rather than "ok", the same way an unreadable book does
+        # thirty lines above.
+        realized = sum((t.pnl for t in closed if t.pnl is not None),
+                       Decimal(0))
+        n_unmeasured = sum(1 for t in closed if t.pnl is None)
+        self._pnl_gate_blind = (
+            f"{n_unmeasured} of {len(closed)} closes in the last 24h could "
+            f"not be priced; realized is at least {realized:.2f}"
+        ) if n_unmeasured else ""
         limit = -self.cfg.capital * Decimal(str(self.cfg.max_daily_loss_pct / 100))
         if realized <= limit and self.cfg.halt_on_drawdown:
             # Phase-20: notify drawdown limit hit. Best-effort dedupe via the
@@ -1098,7 +1116,8 @@ class AssetBot(ABC):
             return (False,
                     f"daily loss limit hit ({realized:.2f} {self.cfg.base_currency})")
         unchecked = [b for b in (getattr(self, "_breakers_blind", ""),
-                                 getattr(self, "_book_gate_blind", "")) if b]
+                                 getattr(self, "_book_gate_blind", ""),
+                                 getattr(self, "_pnl_gate_blind", "")) if b]
         if unchecked:
             return (True, "ok (UNCHECKED: " + "; ".join(unchecked) + ")")
         return (True, "ok")
