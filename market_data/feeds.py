@@ -78,8 +78,15 @@ FEEDS = (
      "window": Window.US_EQUITY, "ages": _WS,
      "note": "US equity trade prints — silent outside the session"},
 
+    # IBKR has no API key: its credentials are a HOST, a PORT and a
+    # logged-in Gateway, and they live in an IBKRAccount row rather than
+    # the environment. Declared with no `requires`, `is_configured` was
+    # unconditionally true and the feed read as "switched on and never
+    # delivered" on every deployment that has never set IBKR up — the
+    # loudest state on the panel, for a thing nobody asked for.
     {"key": "ibkr", "label": "IBKR", "kind": "stream",
-     "requires": (), "window": Window.ALWAYS, "ages": _WS,
+     "requires": (), "requires_row": ("bot_program", "IBKRAccount"),
+     "window": Window.ALWAYS, "ages": _WS,
      "note": "Broker feed, when a gateway is connected"},
 
     # ── pollers ──────────────────────────────────────────────────────
@@ -134,18 +141,45 @@ BY_KEY = {f["key"]: f for f in FEEDS}
 
 
 def is_configured(feed: dict) -> bool:
-    """True when every credential this feed needs is present AND non-empty.
+    """True when everything this feed needs to run is present.
 
-    Non-empty matters: an `.env` carrying `FINNHUB_API_KEY=` with nothing
-    after it sets the variable, so a bare presence check would call the feed
-    configured and then report it red forever for failing to deliver on a
-    key it never had.
+    Non-empty env vars matter: an `.env` carrying `FINNHUB_API_KEY=` with
+    nothing after it sets the variable, so a bare presence check would call
+    the feed configured and then report it red forever for failing to
+    deliver on a key it never had.
+
+    And not every feed is configured by the ENVIRONMENT. IBKR has no API
+    key — it needs a host, a port and a logged-in Gateway, which live in an
+    IBKRAccount row. A feed declaring `requires_row` is switched on when at
+    least one such row exists.
     """
-    return all(os.environ.get(name, "").strip() for name in feed["requires"])
+    if not all(os.environ.get(name, "").strip()
+               for name in feed["requires"]):
+        return False
+    return not _missing_row(feed)
+
+
+def _missing_row(feed: dict) -> str:
+    """The model this feed needs a row of and has none of, or ""."""
+    spec = feed.get("requires_row")
+    if not spec:
+        return ""
+    app_label, model_name = spec
+    try:
+        from django.apps import apps
+        model = apps.get_model(app_label, model_name)
+        return "" if model.objects.exists() else model_name
+    except Exception:  # noqa: BLE001 — a health panel must never raise. An
+        # unreadable table is not evidence the feed is off, so say nothing.
+        return ""
 
 
 def missing_credentials(feed: dict) -> list:
-    return [n for n in feed["requires"] if not os.environ.get(n, "").strip()]
+    out = [n for n in feed["requires"] if not os.environ.get(n, "").strip()]
+    row = _missing_row(feed)
+    if row:
+        out.append(f"no {row} configured")
+    return out
 
 
 def window_is_open(window: str, now=None) -> bool:

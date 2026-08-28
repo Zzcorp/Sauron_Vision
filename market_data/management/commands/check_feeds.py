@@ -16,9 +16,10 @@ one that fails:
        but only if both were recreated after it changed.
     2. Does the vendor accept them?  One authenticated call, nothing
        written.
-    3. Is the market for this feed even open?  A silent OANDA at the
-       weekend is correct.
-    4. Has it ever written a quote, and how long ago?
+    3. What does the health panel make of it?  The verdict comes from
+       `market_data.feeds.state_for` — the SAME function the panel calls —
+       so the two can never disagree about whether a feed is healthy. The
+       command's own contribution is step 2, which the panel cannot do.
 
     manage.py check_feeds              # every declared feed
     manage.py check_feeds --feed oanda_stream
@@ -31,6 +32,10 @@ import os
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
+
+#: States that are the system working, not a fault to escalate. Imported
+#: rather than restated so this command and the panel cannot drift.
+from market_data.feeds import BENIGN_STATES as BENIGN
 
 OK = "  ok  "
 BAD = " FAIL "
@@ -87,8 +92,7 @@ class Command(BaseCommand):
             else:
                 self._line(SKIP, "vendor", detail)
 
-            self._market(feed, now)
-            self._delivery(feed, now)
+            self._verdict(feed, now)
 
     # ── one authenticated call, nothing written ──────────────────────
     def _probe(self, feed, timeout):
@@ -137,40 +141,62 @@ class Command(BaseCommand):
             return True, "the key is accepted"
         return False, f"answered {r.status_code}"
 
-    # ── is it even supposed to be speaking? ──────────────────────────
-    def _market(self, feed, now):
-        from market_data.feeds import Window, window_is_open
-        if feed["window"] == Window.ALWAYS:
-            self._line(OK, "market", "trades continuously")
-            return
-        if window_is_open(feed["window"], now):
-            self._line(OK, "market", "open right now")
-        else:
-            self._line(SKIP, "market",
-                       "CLOSED right now — silence here is correct, and "
-                       "the panel shows it as `idle` rather than a fault")
+    # ── the verdict, from the SAME function the panel uses ───────────
+    def _verdict(self, feed, now):
+        """Delivery and state, judged by `market_data.feeds.state_for`.
 
-    def _delivery(self, feed, now):
+        This used to reimplement the judgement, and the copy was wrong
+        within a day of being written: it reported "the market is open"
+        one line under a check that said CLOSED, called a feed that a
+        fresh stream legitimately outranks "has NEVER written", and told
+        an operator to go read the logs of a container that was behaving
+        correctly. A diagnostic that disagrees with the panel it is
+        diagnosing is worse than no diagnostic.
+
+        So the command owns only what the panel CANNOT do — reach the
+        vendor — and defers the verdict.
+        """
+        from django.db.models import Max
+
+        from market_data.feeds import BY_KEY, state_for
         from market_data.models import LiveQuote
+
         rows = LiveQuote.objects.filter(source=feed["key"])
         n = rows.count()
-        if not n:
-            self._line(BAD, "delivery", "has NEVER written a quote")
-            self._line(BAD, "verdict", self._never_advice(feed))
-            return
-        newest = rows.order_by("-updated_at").first()
-        age = (now - newest.updated_at).total_seconds()
-        warn = feed["ages"][0]
-        mark = OK if age < warn else BAD
-        self._line(mark, "delivery",
-                   f"{n} instrument(s), newest {int(age)}s ago "
-                   f"(fresh under {warn}s)")
-        if age >= warn:
-            self._line(BAD, "verdict",
-                       "Credentials work and the market is open, but the "
-                       "ticks stopped. Check the streamer container's logs.")
+        newest = rows.aggregate(m=Max("updated_at"))["m"]
+        age = (now - newest).total_seconds() if newest else None
+
+        def fresh(key):
+            spec = BY_KEY.get(key)
+            if not spec:
+                return False
+            stamp = (LiveQuote.objects.filter(source=key)
+                     .aggregate(m=Max("updated_at"))["m"])
+            return bool(stamp) and (now - stamp).total_seconds() < spec["ages"][0]
+
+        state, note = state_for(
+            feed, latest=newest, age_seconds=age,
+            superseder_ok=fresh(feed.get("superseded_by")), now=now)
+
+        if newest is None:
+            self._line(SKIP if state in BENIGN else BAD, "delivery",
+                       "has never written a quote")
+        else:
+            self._line(OK if state == "green" else SKIP if state in BENIGN
+                       else BAD, "delivery",
+                       f"{n} instrument(s), newest {int(age)}s ago "
+                       f"(fresh under {feed['ages'][0]}s)")
+
+        mark = OK if state == "green" else SKIP if state in BENIGN else BAD
+        self._line(mark, "verdict", f"{state.upper()} — {note}")
+        if state == "never":
+            self._line(BAD, "next", self._never_advice(feed))
 
     def _never_advice(self, feed) -> str:
+        if feed.get("requires_row"):
+            return ("This feed is configured by a database row, not an env "
+                    "var — set it up on /admin-dashboard/ and make sure the "
+                    "gateway it points at is running.")
         if feed["kind"] == "stream":
             svc = {"oanda_stream": "stream-oanda",
                    "finnhub_ws": "stream-finnhub",

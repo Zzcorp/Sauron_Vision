@@ -447,8 +447,23 @@
 
         .fade-in { animation: fadeIn 0.4s ease forwards; }
         .fade-in-up { opacity: 0; transform: translateY(12px); animation: fadeInUp 0.5s ease forwards; }
+        /* After the entry animation the element must hold NO transform,
+           or it stays a containing block for fixed descendants. */
+        .fade-in-up { animation-fill-mode: forwards; }
         @keyframes fadeIn { from{opacity:0;} to{opacity:1;} }
-        @keyframes fadeInUp { from{opacity:0;transform:translateY(14px);} to{opacity:1;transform:translateY(0);} }
+        /* Ends on `none`, not `translateY(0)`.
+           Both are visually identical and they are NOT equivalent: these
+           animations run with `forwards`, so the final keyframe's value
+           persists — and ANY transform other than `none` makes the element
+           a containing block for `position: fixed` descendants, and clips
+           them to its own overflow.
+           Every card on this platform carries one of these classes, so a
+           persistent translateY(0) quietly broke `position: fixed` inside
+           all of them. It surfaced when the chart's EXPAND control pinned
+           itself to what it believed was the viewport, landed inside the
+           card instead, and was clipped away by the card's overflow:hidden
+           — reported as "the graph just disappears". */
+        @keyframes fadeInUp { from{opacity:0;transform:translateY(14px);} to{opacity:1;transform:none;} }
         .delay-1{animation-delay:.05s} .delay-2{animation-delay:.1s} .delay-3{animation-delay:.15s}
         .delay-4{animation-delay:.2s} .delay-5{animation-delay:.25s} .delay-6{animation-delay:.3s}
 
@@ -462,7 +477,8 @@
         }
         @keyframes pageEnterUp {
             from { opacity: 0; transform: translateY(18px); }
-            to   { opacity: 1; transform: translateY(0); }
+            /* `none`, not translateY(0) — see the note on fadeInUp. */
+            to   { opacity: 1; transform: none; }
         }
         .page-content > *:nth-child(1)  { animation-delay: 0.04s; }
         .page-content > *:nth-child(2)  { animation-delay: 0.10s; }

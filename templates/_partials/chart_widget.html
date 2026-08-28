@@ -812,28 +812,58 @@ Optional page data (json_script blocks the widget picks up when present):
        means leaving the flow. */
     function tallBox() {
         var pad = 8;
+        var vh = window.innerHeight, vw = window.innerWidth;
+
+        /* Each inset is measured from a piece of page furniture, and each
+           one is only believed when that furniture is where the inset
+           assumes it is.
+
+           The top loop always had this guard; the other three did not, and
+           that is what made EXPAND blank the chart. `.info-panel-wrap` is
+           matched wherever it sits, so a copy of it near the top of the
+           page gives `innerHeight - panel.top` ~= the whole viewport —
+           a bottom inset that meets the top one, a box of zero height, and
+           a chart that vanishes rather than expands. The same hole exists
+           for a `.sidebar` that spans the width and a `.signals-rail`
+           parked on the left. */
         var top = 0;
         ['.topbar', '.ticker-bar', '.data-headband'].forEach(function (sel) {
             var r = visibleRect(sel);
-            /* Only the ones actually sitting at the top: the same class
-               could match something further down a future page. */
-            if (r && r.top < window.innerHeight * 0.5) {
-                top = Math.max(top, r.bottom);
-            }
+            if (r && r.top < vh * 0.5) top = Math.max(top, r.bottom);
         });
+
         var panel = visibleRect('.info-panel-wrap');
-        var bottom = panel ? Math.max(0, window.innerHeight - panel.top) : 0;
+        var bottom = (panel && panel.top > vh * 0.5)
+            ? Math.max(0, vh - panel.top) : 0;
+
         var side = visibleRect('.sidebar');
-        var left = side ? Math.max(0, side.right) : 0;
+        var left = (side && side.right < vw * 0.5)
+            ? Math.max(0, side.right) : 0;
+
         var rail = visibleRect('.signals-rail');
-        var right = rail ? Math.max(0, window.innerWidth - rail.left) : 0;
-        return {
-            top: Math.round(top + pad),
-            right: Math.round(right + pad),
-            bottom: Math.round(bottom + pad),
-            left: Math.round(left + pad)
+        var right = (rail && rail.left > vw * 0.5)
+            ? Math.max(0, vw - rail.left) : 0;
+
+        /* And a floor under the result, because a guard is a belief about
+           the page and this is a measurement of it. Whatever the furniture
+           turns out to be, an expanded chart that is smaller than the
+           collapsed one — or has no height at all — is never the answer;
+           dropping the insets and using the viewport is. */
+        var box = {
+            top: Math.round(top + pad), right: Math.round(right + pad),
+            bottom: Math.round(bottom + pad), left: Math.round(left + pad)
         };
+        if (vh - box.top - box.bottom < MIN_TALL_H ||
+            vw - box.left - box.right < MIN_TALL_W) {
+            return { top: pad, right: pad, bottom: pad, left: pad };
+        }
+        return box;
     }
+
+    /* Below these the pin is not expanding anything and something has
+       been mis-measured. */
+    var MIN_TALL_H = 240;
+    var MIN_TALL_W = 320;
 
     function clearPin() {
         ['position', 'top', 'right', 'bottom', 'left', 'width']
@@ -867,6 +897,12 @@ Optional page data (json_script blocks the widget picks up when present):
         }
         var total = inFs || viewState === 'tall'
             ? container.clientHeight : CHART_HEIGHT;
+        /* A pinned box that measured to nothing — a furniture selector that
+           matched something unexpected, a browser that has not reflowed —
+           must not become a zero-height chart. Falling back to the card's
+           own height leaves the operator with the chart they already had
+           rather than an empty rectangle. */
+        if (!(total > MIN_TALL_H)) total = CHART_HEIGHT;
         var open = openPanes();
         var panesH = open.reduce(function (t, k) {
             return t + PANE_SPECS[k].height;
