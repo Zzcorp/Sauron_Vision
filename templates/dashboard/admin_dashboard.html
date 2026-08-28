@@ -237,11 +237,93 @@ the broker, and the bot that would have honoured their stops switched off.
     </div>
 </div>
 
+<!-- ═══ ACCOUNTS ═══ -->
+{% comment %}
+One card per account, replacing a broker table that answered a different
+question. An operator asking "is this account set up?" wants capital, bots
+and brokers in one place; the table listed brokers and never mentioned a
+bot, so a user with a funded OANDA row and no fleet looked identical to one
+that was ready to trade.
+
+Hover reveals each broker's own detail — for IBKR the socket it will
+actually reach, which is the thing that decides which account an order
+lands in. Clicking an account opens its book.
+{% endcomment %}
+<div class="section-label fade-in-up">Accounts</div>
+<div class="hq-acct-grid fade-in-up">
+    {% for a in account_cards %}
+    <div class="hq-acct{% if a.any_live %} hq-acct--live{% endif %}">
+        <div class="hq-acct-head">
+            <a class="hq-acct-name" href="{% url 'hq_books' %}#book-{{ a.username }}">{{ a.username }}</a>
+            {% if a.is_superuser %}<span class="hq-tag">ADMIN</span>{% endif %}
+            {% if a.any_live %}<span class="hq-tag hq-tag--live" title="A connected broker on this account routes to real money">LIVE MONEY</span>{% endif %}
+        </div>
+        <div class="hq-acct-nums">
+            <div><span class="k">CAPITAL</span><span class="v">${{ a.capital|floatformat:0 }}</span></div>
+            <div><span class="k">BOTS ARMED</span><span class="v{% if a.bots and not a.bots_on %} dim{% endif %}">{{ a.bots_on }}<small>/{{ a.bots }}</small></span></div>
+        </div>
+        <div class="hq-acct-brokers">
+            {% for b in a.brokers %}
+            <span class="hq-brk{% if not b.connected %} hq-brk--off{% elif b.live %} hq-brk--live{% endif %}"
+                  title="{{ b.name }} · {{ b.env }}{% if b.detail %} · {{ b.detail }}{% endif %}{% if not b.connected %} · no credentials stored{% endif %}{% if b.disagrees %} · the paper flag disagrees with the port, and the PORT is what routes the order{% endif %}">
+                {{ b.name }}<small>{{ b.env }}</small>
+                {% if b.disagrees %}<em class="hq-brk-warn" title="The stored paper flag disagrees with the port. The PORT decides which account an order reaches.">!</em>{% endif %}
+            </span>
+            {% empty %}
+            <span class="hq-brk hq-brk--none" title="No broker credentials on this account — its bots run on the simulator">PAPER ONLY</span>
+            {% endfor %}
+        </div>
+        {% if not a.bots %}
+        <form method="post" action="{% url 'hq_seed_bots' %}" class="hq-acct-seed">
+            {% csrf_token %}
+            <input type="hidden" name="target_username" value="{{ a.username }}">
+            <button type="submit" class="btn btn-sm" title="Create the six starter paper configs for this account, left disabled">+ Give this account the starter fleet</button>
+        </form>
+        {% endif %}
+    </div>
+    {% empty %}
+    <div class="hq-acct hq-acct--empty">No accounts yet.</div>
+    {% endfor %}
+</div>
+
+<!-- ═══ SEED A FLEET ═══ -->
+{% comment %}
+`manage.py seed_bots --user <name> --activate` needed SSH and a container
+name, which is a step nobody can take from the account being onboarded.
+ARMING is a separate tick-box on purpose: creating six configs is
+reversible bookkeeping, arming them is what puts a bot on the five-minute
+tick with real sizing behind it, and those two acts should not share a
+button.
+{% endcomment %}
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Give an account the starter fleet</span></div>
+    <form method="post" action="{% url 'hq_seed_bots' %}" style="padding:16px;display:grid;gap:10px;max-width:520px;">
+        {% csrf_token %}
+        <p class="hq-cred-note">Six paper configs — FX majors, FX crosses, metals, energy, softs, megacaps. Idempotent: running it again refreshes rather than duplicates.</p>
+        <label class="hq-field-label">Account</label>
+        <select name="target_username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <option value="">— pick an account —</option>
+            {% for u in users %}<option value="{{ u.username }}">{{ u.username }}{% if u.is_superuser %} · admin{% endif %}</option>{% endfor %}
+        </select>
+        <label class="hq-check">
+            <input type="checkbox" name="activate">
+            Arm them immediately — the 5-minute tick starts scanning at once
+        </label>
+        <button type="submit" class="btn btn-primary btn-sm">Seed fleet</button>
+    </form>
+</div>
+
 <!-- ═══ ALL BOOKS ═══ -->
 <div class="section-label fade-in-up">All Books</div>
 <div class="card fade-in-up" style="margin-bottom:24px;">
     <div class="card-header"><span class="card-title">Every book, and what is held where</span>
         <a href="{% url 'hq_books' %}" class="btn btn-sm">⌂ Open overview</a></div>
+    <p class="hq-cred-note" style="padding:0 16px 16px;">
+        Paper and live pools as separate rows, currencies never summed into
+        one figure, and an unpriced leg counted rather than booked at zero.
+        Underneath: one symbol held in several real-money books, which is
+        one bet wearing several accounts.
+    </p>
 </div>
 
 <!-- ═══ INVESTOR ACCESS ═══ -->
@@ -358,7 +440,11 @@ the broker, and the bot that would have honoured their stops switched off.
         <form method="post" action="{% url 'hq_save_oanda' %}" style="padding:16px;display:grid;gap:10px;">
             {% csrf_token %}
             <p class="hq-cred-note">These credentials PLACE ORDERS. The matching keys in <code>.env</code> are a separate job — they feed the price stream. Setting one does not set the other.</p>
-            <input type="text" name="target_username" placeholder="Sauron login username (not your broker login)" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <label class="hq-field-label">Account these credentials belong to</label>
+            <select name="target_username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+                <option value="">— pick an account —</option>
+                {% for u in users %}<option value="{{ u.username }}">{{ u.username }}{% if u.is_superuser %} · admin{% endif %}</option>{% endfor %}
+            </select>
             <input type="text" name="oanda_api_key" placeholder="OANDA API key" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="text" name="oanda_account_id" placeholder="OANDA account ID (e.g. 101-001-1234567-001)" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="practice" checked> Practice (demo) endpoint</label>
@@ -371,7 +457,11 @@ the broker, and the bot that would have honoured their stops switched off.
         <form method="post" action="{% url 'hq_save_alpaca' %}" style="padding:16px;display:grid;gap:10px;">
             {% csrf_token %}
             <p class="hq-cred-note">These credentials PLACE ORDERS. The matching keys in <code>.env</code> are a separate job — they feed the price stream. Setting one does not set the other.</p>
-            <input type="text" name="target_username" placeholder="Sauron login username (not your broker login)" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <label class="hq-field-label">Account these credentials belong to</label>
+            <select name="target_username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+                <option value="">— pick an account —</option>
+                {% for u in users %}<option value="{{ u.username }}">{{ u.username }}{% if u.is_superuser %} · admin{% endif %}</option>{% endfor %}
+            </select>
             <input type="text" name="alpaca_api_key" placeholder="Alpaca API key" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="text" name="alpaca_api_secret" placeholder="Alpaca API secret" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="paper" checked> Paper trading endpoint</label>
@@ -411,7 +501,11 @@ the broker, and the bot that would have honoured their stops switched off.
                 these details connects to nothing on its own — the port below is
                 what selects which account an order would reach.
             </p>
-            <input type="text" name="target_username" placeholder="Sauron login username (not your broker login)" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <label class="hq-field-label">Account these credentials belong to</label>
+            <select name="target_username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+                <option value="">— pick an account —</option>
+                {% for u in users %}<option value="{{ u.username }}">{{ u.username }}{% if u.is_superuser %} · admin{% endif %}</option>{% endfor %}
+            </select>
             <input type="text" name="ibkr_account_id" placeholder="IBKR account ID (e.g. DU1234567 paper / U1234567 live)" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="text" name="ibkr_host" value="ibgateway" placeholder="ibgateway | host.docker.internal | an IP" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
 

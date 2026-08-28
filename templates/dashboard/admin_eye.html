@@ -69,6 +69,48 @@ a user's request down.
     </div>
 </div>
 
+{% comment %}
+Cards above the table, not instead of it. The table is the right shape for
+scanning ten accounts on nine columns; it is the wrong shape for the one
+question this page exists to answer first — WHERE CAN THIS ACCOUNT LOSE
+MONEY. The eye showed capital, bots and open trades and not one word about
+the venue, so an account wired to a live broker and one on the simulator
+rendered identically.
+
+Hover a broker chip for the socket an order would actually reach. Click an
+account for its book.
+{% endcomment %}
+<div class="section-label">Accounts — where each one can trade</div>
+<div class="hq-acct-grid">
+    {% for r in rows %}
+    <div class="hq-acct{% if r.any_live %} hq-acct--live{% endif %}">
+        <div class="hq-acct-head">
+            <a class="hq-acct-name" href="{% url 'hq_books' %}#book-{{ r.user.username }}">{{ r.user.username }}</a>
+            {% if r.online %}<span class="hq-tag" style="border-color:var(--accent);color:var(--accent);">ONLINE</span>{% endif %}
+            {% if r.any_live %}<span class="hq-tag hq-tag--live" title="A connected broker on this account routes to real money">LIVE MONEY</span>{% endif %}
+        </div>
+        <div class="hq-acct-nums">
+            <div><span class="k">CAPITAL</span><span class="v">${{ r.capital|floatformat:0 }}</span></div>
+            <div><span class="k">BOTS ARMED</span><span class="v{% if r.bots and not r.bots_on %} dim{% endif %}">{{ r.bots_on }}<small>/{{ r.bots }}</small></span></div>
+            <div><span class="k">OPEN</span><span class="v">{{ r.open_trades }}</span></div>
+            <div><span class="k">HAND-TAKEN</span><span class="v">{{ r.manual_taken }}</span></div>
+        </div>
+        <div class="hq-acct-brokers">
+            {% for b in r.brokers %}
+            <span class="hq-brk{% if not b.connected %} hq-brk--off{% elif b.live %} hq-brk--live{% endif %}"
+                  title="{{ b.name }} · {{ b.env }}{% if b.detail %} · {{ b.detail }}{% endif %}{% if not b.connected %} · no credentials stored{% endif %}{% if b.disagrees %} · the stored paper flag disagrees with the port, and the PORT is what routes the order{% endif %}">
+                {{ b.name }}<small>{{ b.env }}</small>{% if b.disagrees %}<em class="hq-brk-warn">!</em>{% endif %}
+            </span>
+            {% empty %}
+            <span class="hq-brk hq-brk--none" title="No broker credentials on this account — its bots run on the simulator">PAPER ONLY</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% empty %}
+    <div class="hq-acct hq-acct--empty">No accounts yet.</div>
+    {% endfor %}
+</div>
+
 <div class="card">
     <div class="card-header">
         <span class="card-title">USERS — online first</span>

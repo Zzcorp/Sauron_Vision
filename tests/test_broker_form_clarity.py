@@ -33,12 +33,25 @@ class TheUsernameFieldSaysWhichUsernameTests(TestCase):
         return self.client.get("/admin-dashboard/",
                                HTTP_HOST="127.0.0.1").content.decode()
 
-    def test_it_names_the_sauron_login(self):
-        """The handler does User.objects.get(username=...) — it is the
-        PLATFORM account, never the broker's."""
+    def test_it_does_not_ask_for_a_typed_username_at_all(self):
+        """Superseded, and by the better fix.
+
+        The first pass relabelled the text box "Sauron login username (not
+        your broker login)" — an answer to the question. A dropdown of the
+        real accounts REMOVES the question, and takes the typo class with
+        it: a trailing space in a typed name redirects with "no user named
+        'sauron '" and reads as the account being missing.
+
+        The label lives on the select now, so this asserts the mechanism
+        rather than the sentence."""
         body = self._page()
-        self.assertIn("Sauron login username", body)
-        self.assertIn("not your broker login", body)
+        self.assertIn("Account these credentials belong to", body)
+        self.assertIn('<select name="target_username"', body)
+        self.assertIn("— pick an account —", body)
+
+    def test_the_list_is_the_real_accounts(self):
+        User.objects.create_user("bf_trader", password="x")
+        self.assertIn('<option value="bf_trader">', self._page())
 
     def test_the_bare_username_placeholder_is_gone(self):
         body = self._page()

@@ -3433,6 +3433,21 @@ def admin_dashboard(request):
     # so the template can render dedicated sections without re-querying.
     from bot_program.models import (BinanceAccount, OANDAAccount,
                                     AlpacaAccount, IBKRAccount)
+    # Every user, with their bot fleet and every broker they hold — the
+    # spine of the account cards.
+    #
+    # Counted per user rather than per broker: an operator asking "is this
+    # account set up?" wants one card that answers it, and the old table
+    # answered a different question (which brokers exist) by a row per
+    # broker with no bots on it at all.
+    from django.db.models import Q as _Q
+    from bot_program.models import AssetBotConfig as _ABC
+    _fleet = {r["user"]: r for r in _ABC.objects.values("user").annotate(
+        bots=Count("id"),
+        bots_on=Count("id", filter=_Q(enabled=True)),
+        capital=Sum("capital"))}
+
+    account_cards = []
     broker_rows = []
     for u in User.objects.order_by("username"):
         binance = getattr(u, "binance_account", None)
@@ -3443,6 +3458,49 @@ def admin_dashboard(request):
         # it at all — the page said "no broker accounts configured yet"
         # over a configured account.
         ibkr = getattr(u, "ibkr_account", None)
+
+        fleet = _fleet.get(u.id) or {}
+        brokers = []
+        if binance:
+            brokers.append({"name": "Binance", "slug": "binance",
+                            "connected": bool(binance.api_key_enc),
+                            "env": "TESTNET" if binance.testnet else "LIVE",
+                            "live": not binance.testnet, "detail": ""})
+        if oanda:
+            brokers.append({"name": "OANDA", "slug": "oanda",
+                            "connected": bool(oanda.api_key_enc),
+                            "env": "PRACTICE" if oanda.practice else "LIVE",
+                            "live": not oanda.practice, "detail": ""})
+        if alpaca:
+            brokers.append({"name": "Alpaca", "slug": "alpaca",
+                            "connected": bool(alpaca.api_key_enc),
+                            "env": "PAPER" if alpaca.paper else "LIVE",
+                            "live": not alpaca.paper, "detail": ""})
+        if ibkr:
+            brokers.append({
+                "name": "IBKR", "slug": "ibkr",
+                "connected": bool(ibkr.account_id_enc),
+                # From the PORT, which is what actually selects the
+                # account — never the `paper` checkbox, which the model
+                # documents as informational.
+                "env": ibkr.env_label,
+                "live": ibkr.env == "live",
+                "detail": f"{ibkr.host}:{ibkr.port} · client {ibkr.client_id}",
+                "disagrees": ibkr.paper_flag_disagrees})
+
+        account_cards.append({
+            "user": u,
+            "username": u.username,
+            "is_superuser": u.is_superuser,
+            "bots": fleet.get("bots") or 0,
+            "bots_on": fleet.get("bots_on") or 0,
+            "capital": fleet.get("capital") or 0,
+            "brokers": brokers,
+            # The one number that decides whether this account can lose
+            # money without anyone having armed it deliberately.
+            "any_live": any(b["live"] and b["connected"] for b in brokers),
+        })
+
         if not (binance or oanda or alpaca or ibkr):
             continue
         broker_rows.append({
@@ -3475,6 +3533,7 @@ def admin_dashboard(request):
             } if ibkr else None,
         })
     context["broker_rows"] = broker_rows
+    context["account_cards"] = account_cards
 
     # Pull the AI-gate component out separately so the template can render a
     # prominent toggle (rather than buried inside the agent table).

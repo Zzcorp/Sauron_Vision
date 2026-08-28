@@ -3,6 +3,12 @@
 {% block page_title %}⌂ ALL BOOKS{% endblock %}
 
 {% block content %}
+<style>
+    /* The row an account card just linked to. Without it the jump lands
+       silently and the operator has to re-find the name they clicked. */
+    tr:target > td { background: var(--accent-wash, rgba(0,232,104,0.10)); }
+    tr:target > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+</style>
 <div class="section-label fade-in-up">Legacy books</div>
 <div class="card fade-in-up" style="margin-bottom:24px;">
     <div class="card-header"><span class="card-title">Portfolio books — shared Main and one per trader</span></div>
@@ -28,8 +34,19 @@
     <div class="table-wrapper"><table class="sv-perf-table">
         <thead><tr><th>Trader</th><th>Mode</th><th>Enabled pools</th><th>Open trades</th><th>Entry notional</th></tr></thead>
         <tbody>
+        {% comment %}
+        The id is what the account cards on /admin-dashboard/ and the eye
+        link into, so clicking an account lands on ITS row rather than the
+        top of a table it then has to be found in.
+
+        `ifchanged`, not one per row: this table is one row per (trader,
+        MODE, CURRENCY), so a user holding both a paper and a live book
+        gets several rows — and an id repeated down them is invalid HTML
+        that sends every link to whichever the browser saw first. The rows
+        are sorted by username, so the first of each run is the anchor.
+        {% endcomment %}
         {% for b in bot_books %}
-        <tr>
+        <tr{% ifchanged b.user %} id="book-{{ b.user }}"{% endifchanged %}>
             <td style="font-weight:600;">{{ b.user }}</td>
             <td style="font-family:var(--font-mono);font-size:10px;letter-spacing:1px;">{{ b.mode|upper }}</td>
             <td style="font-family:var(--font-mono);font-size:11px;">{{ b.currency }} {{ b.pool|floatformat:2 }}</td>

@@ -51,6 +51,7 @@ from .views_admin_hq import (
     run_nightly_cleanup, run_full_universe_scan, run_seed_components,
     run_seed_strategies,
     save_oanda_credentials, save_alpaca_credentials, save_ibkr_credentials,
+    hq_seed_bots,
     test_ibkr_connection,
     disconnect_broker,
     hq_apply_rule_action, hq_reject_rule_action, hq_rollback_rule_action,
@@ -207,6 +208,7 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("admin-dashboard/run/seed-strategies/", run_seed_strategies, name="hq_run_seed_strategies"),
 
     # ── Admin HQ Console: broker credentials ─────────────────
+    path("admin-dashboard/bots/seed/", hq_seed_bots, name="hq_seed_bots"),
     path("admin-dashboard/brokers/oanda/save/", save_oanda_credentials, name="hq_save_oanda"),
     path("admin-dashboard/brokers/alpaca/save/", save_alpaca_credentials, name="hq_save_alpaca"),
     # TradingView alerts arrive as SIGNALS, never as orders — they join

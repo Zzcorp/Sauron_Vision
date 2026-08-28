@@ -297,6 +297,54 @@ def run_seed_strategies(request):
 # ── broker credential forms ─────────────────────────────────────────────────
 
 @_admin_only
+def hq_seed_bots(request):
+    """Give a user the starter fleet, from the page instead of a shell.
+
+    This was `manage.py seed_bots --user <name> --activate`, which meant
+    every new operator needed SSH and a container name to get their bots —
+    a step nobody can take from the account they are being onboarded into.
+
+    Idempotent, exactly as the command is: seeded configs are namespaced
+    `starter_`, so pressing it twice refreshes rather than duplicates.
+
+    ACTIVATE is opt-in and separate on purpose. Creating six configs is
+    reversible bookkeeping; arming them is what puts a bot on the 5-minute
+    tick with real sizing behind it, and those two acts should not share a
+    button.
+    """
+    from django.contrib.auth.models import User
+    from bot_program.management.commands.seed_bots import seed_bots
+
+    target_username = request.POST.get("target_username", "").strip()
+    activate = request.POST.get("activate") == "on"
+
+    if not target_username:
+        messages.error(request, "Seed bots: pick a user.")
+        return redirect("admin_dashboard")
+    user = User.objects.filter(username=target_username).first()
+    if user is None:
+        messages.error(request, f"Seed bots: no user named {target_username!r}.")
+        return redirect("admin_dashboard")
+
+    out = seed_bots(user, activate=activate)
+    n = out["created"] + out["updated"]
+    msg = (f"Seeded {n} paper bot config(s) for {user.username} — "
+           f"{out['created']} created, {out['updated']} updated, "
+           f"{'ARMED' if activate else 'left disabled'}.")
+    # A symbol with no Instrument row is dropped from its config silently
+    # by seed_bots. Silently is how a fleet ends up quietly trading twelve
+    # pairs when the operator configured thirteen.
+    if out["missing_symbols"]:
+        messages.warning(
+            request,
+            "These symbols have no Instrument row and were left out of "
+            "their config — run seed_instruments, then seed again: "
+            + ", ".join(out["missing_symbols"]))
+    messages.success(request, msg)
+    return redirect("admin_dashboard")
+
+
+@_admin_only
 def save_oanda_credentials(request):
     """Create or update OANDAAccount for a target user.
 
@@ -1491,9 +1539,45 @@ def admin_eye(request):
     for u in User.objects.order_by("-date_joined"):
         p = presences.get(u.id)
         cap = cap_by_user.get(u.id) or {}
+        # The brokers this account can actually reach, and where an order
+        # would land. The eye showed capital, bots and open trades but not
+        # ONE word about the venue — so an account trading real money and
+        # one trading the simulator rendered identically, which is the
+        # single distinction this page most needs to make.
+        brokers = []
+        for slug, name, acct in (
+                ("binance", "Binance", getattr(u, "binance_account", None)),
+                ("oanda", "OANDA", getattr(u, "oanda_account", None)),
+                ("alpaca", "Alpaca", getattr(u, "alpaca_account", None)),
+                ("ibkr", "IBKR", getattr(u, "ibkr_account", None))):
+            if acct is None:
+                continue
+            if slug == "ibkr":
+                env, live = acct.env_label, acct.env == "live"
+                detail = (f"{acct.host}:{acct.port} · client "
+                          f"{acct.client_id}")
+                connected = bool(acct.account_id_enc)
+                disagrees = acct.paper_flag_disagrees
+            else:
+                sim = (getattr(acct, "testnet", None)
+                       if slug == "binance" else
+                       getattr(acct, "practice", None)
+                       if slug == "oanda" else acct.paper)
+                env = ("TESTNET" if slug == "binance" and sim else
+                       "PRACTICE" if slug == "oanda" and sim else
+                       "PAPER" if sim else "LIVE")
+                live, detail, disagrees = not sim, "", False
+                connected = bool(acct.api_key_enc)
+            brokers.append({"slug": slug, "name": name, "env": env,
+                            "live": live, "detail": detail,
+                            "connected": connected,
+                            "disagrees": disagrees})
+
         rows.append({
             "user": u,
             "presence": p,
+            "brokers": brokers,
+            "any_live": any(b["live"] and b["connected"] for b in brokers),
             "online": bool(p and p.last_seen >= online_cutoff),
             # cached_only: the render path NEVER does a network lookup —
             # a page of N users during a geo outage must not serially
