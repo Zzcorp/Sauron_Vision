@@ -59,7 +59,14 @@ BOT_KINDS = {
 #     wants confirmed were the first ones to go quiet.
 #   * the in-app row is not typed "bot" (see _ROW_TYPE), so the bell stops
 #     filing a deliberate click under "Bot Event".
-OPERATOR_KINDS = {"manual_fill_open"}
+OPERATOR_KINDS = {
+    "manual_fill_open",
+    # A position the BROKER holds that no row claims. Operator-side
+    # deliberately: it is not the bot reporting what it did, it is the
+    # platform admitting to something it did not know about, and there
+    # is no "stop telling me" preference that should silence it.
+    "unclaimed_position",
+}
 
 # The in-app row's type, per kind — "bot" for everything not listed, because
 # every BOT_KINDS row IS the program acting.
@@ -436,6 +443,27 @@ def notify_drawdown_warning(user, *, asset_class: str, config_name: str,
         body=(f"{asset_class.upper()} · realized 24h P&L {realized_pnl} "
               f"≤ limit {limit}. New entries halted."),
         url="/risk/",
+    )
+
+
+def notify_unclaimed_position(user, *, symbols: list, venue: str) -> bool:
+    """A position the broker holds that no row in this platform claims.
+
+    Deliberately a notification and NOT an auto-close. The operator may
+    have opened it by hand at the broker, and an automated system that
+    starts flattening positions it does not recognise is far more
+    dangerous than one that reports them.
+    """
+    listed = ", ".join(sorted(symbols)[:6])
+    more = f" (+{len(symbols) - 6} more)" if len(symbols) > 6 else ""
+    return dispatch_notification(
+        user, "unclaimed_position",
+        title=f"▲ {len(symbols)} position(s) at {venue} that no row claims",
+        body=(f"{listed}{more}. These are invisible to every exposure and "
+              f"daily-loss gate, carry no bot-side stop, and the kill "
+              f"switch cannot flatten them — it walks database rows. "
+              f"Check the broker."),
+        url="/positions/",
     )
 
 

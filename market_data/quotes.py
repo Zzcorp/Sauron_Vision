@@ -33,6 +33,7 @@ SOURCE_PRIORITY = {
     "alpaca": 70,
     "oanda": 70,           # broker REST
     "binance": 70,
+    "etoro": 70,           # the broker's own rate for a position it holds
     "coingecko": 40,
     "alpha_vantage": 30,
     "twelve_data": 30,

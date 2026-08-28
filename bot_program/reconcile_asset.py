@@ -331,18 +331,124 @@ def _close_as_orphan(trade) -> None:
                        trade.id, e)
 
 
+def reconcile_unknown_positions(user) -> dict:
+    """Positions the BROKER holds that no AssetBotTrade row claims.
+
+    Reconciliation has only ever walked rows and asked the broker about
+    each one. The other direction was never swept, so a position the broker
+    holds that no row claims is invisible platform-wide: uncounted by every
+    exposure and daily-loss gate, carrying no bot-side stop, and untouched
+    by the kill switch — whose "flatten everything" iterates AssetBotTrade
+    rows and never once asks the broker whether it is actually flat.
+
+    The entry path manufactures exactly this state. If `market_order`
+    reaches the broker but the response is lost — a read timeout on
+    Alpaca's POST, a socket drop during _await_fill, a TWS disconnect after
+    placeOrder — base.py logs and returns None, writing no row. The units
+    are real and nothing here knows.
+
+    REPORTS, never closes. The operator may have opened the position by
+    hand at the broker, and an automated system that flattens what it does
+    not recognise is worse than one that says so. This is the same posture
+    the circuit breakers take.
+
+    Returns {checked, unclaimed, broker_unavailable, errors, symbols}.
+    """
+    from .models import AssetBotConfig, AssetBotTrade
+    from .engine.broker_router import client_for_symbol
+
+    out = {"checked": 0, "unclaimed": 0, "broker_unavailable": 0,
+           "errors": 0, "symbols": []}
+
+    # Every symbol this user's rows currently claim, in one query. Options
+    # are claimed under their OCC symbol, which is what the broker reports.
+    claimed = set()
+    for sym in (AssetBotTrade.objects
+                .filter(config__user=user,
+                        status__in=("OPEN", "CLOSE_PENDING"), paper=False)
+                .values_list("symbol", flat=True)):
+        if sym:
+            claimed.add(str(sym).upper())
+
+    configs = (AssetBotConfig.objects
+               .filter(user=user, enabled=True)
+               .exclude(mode="paper"))
+    seen_clients = set()
+    for cfg in configs:
+        symbols = list(cfg.symbols or [])
+        if not symbols:
+            continue
+        try:
+            client = client_for_symbol(user, symbols[0], cfg)
+        except Exception as e:  # noqa: BLE001 — one venue must not stop the rest
+            logger.warning("unknown-position sweep: no client for %s: %s",
+                           cfg.name, e)
+            out["errors"] += 1
+            continue
+
+        venue = type(client).__name__
+        # One read per venue, not per config: several configs routinely
+        # route to the same broker.
+        key = (cfg.asset_class, venue)
+        if key in seen_clients:
+            continue
+        seen_clients.add(key)
+        out["checked"] += 1
+
+        state = _broker_open_symbols(client, asset_class=cfg.asset_class)
+        if state is None:
+            # UNREADABLE is not EMPTY. Treating an unreachable broker as
+            # "no positions" would report a clean sweep of a book nobody
+            # could see, which is the reassuring answer.
+            out["broker_unavailable"] += 1
+            logger.warning("unknown-position sweep: %s state unreadable — "
+                           "not reporting a clean sweep of a book nobody "
+                           "could read", venue)
+            continue
+
+        held = {str(x).upper() for x in (state.get("symbols") or set())}
+        unclaimed = sorted(held - claimed)
+        if not unclaimed:
+            continue
+
+        out["unclaimed"] += len(unclaimed)
+        out["symbols"].extend(unclaimed)
+        logger.error("unknown-position sweep: %s holds %d position(s) no "
+                     "row claims: %s", venue, len(unclaimed),
+                     ", ".join(unclaimed[:8]))
+        try:
+            from bot_program.notifications import notify_unclaimed_position
+            notify_unclaimed_position(user, symbols=unclaimed, venue=venue)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("unknown-position sweep: alert failed: %s", e)
+            out["errors"] += 1
+
+    return out
+
+
 def reconcile_all_users() -> dict:
     """Walk every user with at least one open live AssetBotTrade."""
     from django.contrib.auth.models import User
     from .models import AssetBotTrade
 
-    user_ids = sorted(set(
+    from .models import AssetBotConfig
+
+    # Users with open ROWS, plus users with a live CONFIG. The second set
+    # is the point of the unknown-position sweep: a user whose only broker
+    # position is one no row claims has no open rows at all, so the
+    # row-driven query would skip them entirely — which is precisely the
+    # case that sweep exists to find.
+    user_ids = set(
         AssetBotTrade.objects
         .filter(status__in=("OPEN", "CLOSE_PENDING"), paper=False)
-        .values_list("config__user_id", flat=True)
-    ))
+        .values_list("config__user_id", flat=True))
+    user_ids |= set(AssetBotConfig.objects
+                    .filter(enabled=True).exclude(mode="paper")
+                    .values_list("user_id", flat=True))
+    user_ids = sorted(uid for uid in user_ids if uid)
     totals = {"users": 0, "checked": 0, "closed_as_orphan": 0,
-               "broker_unavailable": 0, "errors": 0}
+               "broker_unavailable": 0, "errors": 0,
+               "unclaimed": 0}
     for uid in user_ids:
         try:
             u = User.objects.get(id=uid)
@@ -356,5 +462,17 @@ def reconcile_all_users() -> dict:
                 totals[k] += r.get(k, 0)
         except Exception as e:
             logger.warning("reconcile_all_users: user=%s failed: %s", uid, e)
+            totals["errors"] += 1
+
+        # The other direction. Separately guarded: a failure here must not
+        # cost the row-driven reconciliation that already succeeded.
+        try:
+            u2 = reconcile_unknown_positions(u)
+            totals["unclaimed"] += u2.get("unclaimed", 0)
+            totals["broker_unavailable"] += u2.get("broker_unavailable", 0)
+            totals["errors"] += u2.get("errors", 0)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("unknown-position sweep: user=%s failed: %s",
+                           uid, e)
             totals["errors"] += 1
     return totals

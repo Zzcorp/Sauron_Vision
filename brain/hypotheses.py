@@ -307,10 +307,22 @@ def _resolve_rule_avg_r_threshold(hyp):
                       "was decided at creation, not by evidence")
     if not rule:
         return None, "ungradeable: no rule_name in resolution_criteria"
-    rows = bot_performance_summary(rule_name=rule, days=window, min_n=1)
+    # ONLY TRADES THAT CLOSED AFTER THE CLAIM WAS POSTED can grade it.
+    # Passing `days=window` alone measured a 7-day window of which ~156 of
+    # 168 hours were data the model had already read in its own snapshot
+    # BEFORE writing the hypothesis — so agent_trust_score, the platform's
+    # only objective number about its own brain, was scoring "did the agent
+    # restate the last fortnight" and reporting it as "did the agent
+    # predict". The harm ran the flattering way: a decay claim minted after
+    # reading a negative record resolved true on that same record.
+    #
+    # `since` already exists in the signature; nothing needed building.
+    since = max(hyp.created_at, timezone.now() - timedelta(days=window))
+    rows = bot_performance_summary(rule_name=rule, since=since, min_n=1)
     if not rows:
-        return None, (f"ungradeable: no graded trades for '{rule}' in the "
-                      f"last {window}d")
+        return None, (f"ungradeable: no trades for '{rule}' closed since the "
+                      f"claim was posted — a forecast cannot be graded on "
+                      f"the record that produced it")
     # bot_performance_summary buckets per (rule, asset_class); a rule that
     # trades two classes returns two rows. Pool them n-weighted — grading off
     # rows[0] would score whichever bucket happened to be built first.

@@ -145,11 +145,23 @@ def _quote_universe(asset_class: str, limit: int) -> list:
 def fetch_live_quotes(self, watchlist_only=True):
     """Tier 1: Fetch live quotes using yfinance (free, no key needed)."""
     from instruments.models import Instrument
-    from core.market_calendar import is_any_market_open
+    from core.market_calendar import is_us_market_open
     from market_data.adapters.yfinance_adapter import save_quote_to_db
 
-    if not is_any_market_open():
-        return {"status": "skipped", "reason": "markets_closed"}
+    # THE US SESSION, not "any market anywhere". This task polls stocks and
+    # ETFs only (see `quote_targets` below), and `is_any_market_open` ORs in
+    # forex — which is open from Sunday evening to Friday evening. So at
+    # 03:00 UTC on a Tuesday, with the NYSE shut, it polled Yahoo for every
+    # stock, got back the PREVIOUS SESSION'S CLOSE, and wrote it.
+    #
+    # The damage is not the stale price, which is honest enough overnight.
+    # It is that `LiveQuote.updated_at` is `auto_now` — OUR write time, not
+    # the venue's print time — so re-writing the same fossil every 60
+    # seconds kept the row looking permanently fresh, and the 900-second
+    # staleness gate could never fire for a stock. A mark nothing can flag
+    # as stale is one a bot will trade on.
+    if not is_us_market_open():
+        return {"status": "skipped", "reason": "us_session_closed"}
 
     from signals.universe import quote_targets
 
@@ -309,8 +321,23 @@ def fetch_commodity_quotes():
     lowest-priority source on the platform, and a five-minute poll must not
     overwrite a live broker tick with a fifteen-minute-delayed print.
     """
+    from core.market_calendar import is_weekend
     from market_data.public_feed import YF_UNAVAILABLE, yf_symbol
     from market_data.quotes import write_quote
+
+    # THE WEEKEND, not the US session. These are CME Globex futures proxies
+    # (ZC=F, CL=F) that trade nearly around the clock on weekdays, so
+    # gating them on the equity session would freeze every commodity mark
+    # through most of its actual trading day — the opposite mistake, and a
+    # worse one, because a bot would then be deciding on a stale price
+    # while the contract moved.
+    #
+    # What the weekend fixes is the same fossil-refresh bug the stock
+    # poller had: Friday's close rewritten every five minutes until Sunday,
+    # keeping `updated_at` fresh so nothing downstream can tell the mark is
+    # two days old.
+    if is_weekend():
+        return {"status": "skipped", "reason": "weekend"}
 
     targets = [i for i in _quote_universe("commodity", limit=20)
                if i.symbol not in YF_UNAVAILABLE]

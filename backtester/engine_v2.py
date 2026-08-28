@@ -82,8 +82,14 @@ class BacktestEngineV2:
         self.impact_bps = impact_bps
         self.funding_apr = funding_apr
         self.is_futures = is_futures
+        # `sauron_signals` was never a key decide() emits — it writes
+        # `parts["sauron_sig"]`, and the composite reads
+        # `weights.get(k, 0)`, so the live 0.25 weight on that leg was
+        # silently ZERO in every run of the one command this platform
+        # offers for "backtest what the bot actually does". The names match
+        # AssetBotConfig.normalized_weights(), which is the live source.
         self.weights = weights or {
-            "technical": 0.30, "sauron_signals": 0.25, "news": 0.15,
+            "technical": 0.30, "sauron_sig": 0.25, "news": 0.15,
             "liquidity": 0.15, "macro": 0.10, "sentiment": 0.05,
         }
         self.entry_min = entry_min

@@ -213,12 +213,20 @@ def _score_news(symbol: str, as_of=None) -> tuple[float, list[str]]:
         _log.warning("news leg failed for %s: %s", symbol, e)
         return (0, [])
 
-def _score_macro() -> tuple[float, list[str]]:
-    """Placeholder macro regime score from ai_agents memory if any."""
-    return (0, [])
+def _score_macro() -> tuple:
+    """Unimplemented. Returns None — "did not look" — not 0.
 
-def _score_sentiment(symbol: str) -> tuple[float, list[str]]:
-    return (0, [])
+    0.0 means "looked, and it is neutral", and these two legs returning it
+    kept 15% of the normalized weight in the denominator while contributing
+    nothing to the numerator. An operator who set entry_score_min = 0.60
+    got a bot that in fact required 0.706 of full saturation, silently and
+    permanently, on a path that places real market orders.
+    """
+    return (None, [])
+
+def _score_sentiment(symbol: str) -> tuple:
+    """Unimplemented. See _score_macro."""
+    return (None, [])
 
 # ── Compose ─────────────────────────────────────────────────
 def decide(symbol: str, ohlcv: list[list], order_book: dict, weights: dict,
@@ -240,7 +248,14 @@ def decide(symbol: str, ohlcv: list[list], order_book: dict, weights: dict,
     parts["macro"], r      = _score_macro();                  reasons += r
     parts["sentiment"], r  = _score_sentiment(symbol);        reasons += r
 
-    composite = sum(parts[k] * weights.get(k, 0) for k in parts)
+    # Only the legs that REPORTED are weighted, and the denominator shrinks
+    # with them. A leg returning None did not look; its weight leaves with
+    # it, so the composite is a score out of what was actually measured and
+    # `entry_score_min` means what the operator set it to.
+    reported = {k: v for k, v in parts.items() if v is not None}
+    live_weight = sum(weights.get(k, 0) for k in reported)
+    composite = (sum(reported[k] * weights.get(k, 0) for k in reported)
+                 / live_weight) if live_weight > 0 else 0.0
     composite = max(-1, min(1, composite))
     conf = min(1.0, abs(composite) + 0.2)
 

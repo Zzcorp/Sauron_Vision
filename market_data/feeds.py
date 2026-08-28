@@ -322,3 +322,73 @@ def state_for(feed: dict, *, latest, age_seconds, superseder_ok=False,
 #: configured, one whose market is shut, and one a better feed is
 #: outranking are all the system working, not faults to escalate.
 BENIGN_STATES = ("off", "idle", "yielding")
+
+def feed_states(now=None) -> list:
+    """Every declared feed's current state, plus any undeclared writer.
+
+    THE THIRD COPY OF THIS LOOP is what made it worth extracting. The
+    digest walked `FEEDS` and caught a feed that has never written; the
+    health page grouped by the sources that HAVE written, so a feed in
+    `never` contributed no row and was invisible. The digest therefore
+    mailed "NOT DELIVERING: OANDA (stream)" with a link to a page whose
+    Quote feeds row read "ok — 3 sources fresh". The alarm and the page an
+    operator opens to confirm it disagreed, and the page looked
+    authoritative.
+
+    Returns one dict per feed:
+        {source, label, kind, configured, state, note, age_seconds, latest}
+
+    Declared feeds first, in registry order, then undeclared strays — the
+    operator reads the same list in the same order every time, which is
+    what makes a changed dot noticeable.
+    """
+    from django.db.models import Max
+    from django.utils import timezone
+
+    from market_data.models import LiveQuote
+
+    now = now or timezone.now()
+    seen = {}
+    for row in (LiveQuote.objects.values("source")
+                .annotate(latest=Max("updated_at"))):
+        key = (row["source"] or "").strip()
+        if key:
+            seen[key] = row["latest"]
+
+    def _fresh(key):
+        """Is the feed named by `key` delivering right now?"""
+        spec, stamp = BY_KEY.get(key), seen.get(key)
+        if not spec or stamp is None:
+            return False
+        return (now - stamp).total_seconds() < spec["ages"][0]
+
+    out = []
+    for feed in FEEDS:
+        latest = seen.get(feed["key"])
+        age = (now - latest).total_seconds() if latest else None
+        state, note = state_for(
+            feed, latest=latest, age_seconds=age,
+            superseder_ok=_fresh(feed.get("superseded_by")), now=now)
+        out.append({
+            "source": feed["key"], "label": feed["label"],
+            "kind": feed["kind"], "configured": is_configured(feed),
+            "state": state, "note": note, "age_seconds": age,
+            "latest": latest,
+        })
+
+    # A source string in the database that this file does not declare.
+    # Reported rather than dropped: it means the platform grew a writer the
+    # registry has not caught up with, and hiding it is how the registry
+    # stays behind. It is a gap in the REGISTRY, not a platform fault.
+    for key, latest in sorted(seen.items()):
+        if key in BY_KEY:
+            continue
+        age = (now - latest).total_seconds() if latest else None
+        out.append({
+            "source": key, "label": key, "kind": "unknown",
+            "configured": True, "state": "unregistered",
+            "note": "writing quotes but not declared in market_data/feeds.py",
+            "age_seconds": age, "latest": latest,
+        })
+    return out
+

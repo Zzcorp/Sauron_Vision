@@ -107,7 +107,25 @@ def _judge(train: dict, test: dict) -> tuple:
         return False, (f"out-of-sample expectancy {test_exp} is not positive")
 
     train_exp = train.get("expectancy")
-    if train_exp and train_exp > 0:
+    train_n = train.get("n") or 0
+
+    # `if train_exp and train_exp > 0:` let a None fall straight through to
+    # the approving return below — so MIN_RETENTION, the ENTIRE overfitting
+    # half of this gate, was silently skipped whenever the in-sample window
+    # produced no trades, and the sentence handed to the operator said
+    # nothing about the comparison that had not happened.
+    #
+    # A rule whose training half is empty therefore cleared the strictest
+    # gate on the ladder by producing NO EVIDENCE AT ALL — and a news-legged
+    # rule whose train window predates the news corpus is exactly that case.
+    # This is a gate: it refuses when it cannot run.
+    if train_exp is None or train_n < MIN_TEST_SAMPLES:
+        return False, (f"in-sample window produced {train_n} trades "
+                       f"(need {MIN_TEST_SAMPLES}) — the overfitting check "
+                       f"could not run, so this is unproven rather than "
+                       f"passed")
+
+    if train_exp > 0:
         retention = test_exp / train_exp
         if retention < MIN_RETENTION:
             return False, (f"out-of-sample expectancy kept only "
@@ -116,14 +134,31 @@ def _judge(train: dict, test: dict) -> tuple:
                            f"looks overfitted")
         return True, (f"out-of-sample {test_exp:.2f}R over {n} trades, "
                       f"{retention:.0%} of in-sample")
-    return True, f"out-of-sample {test_exp:.2f}R over {n} trades"
+
+    # In-sample made nothing, out-of-sample made money. Not overfitting —
+    # there was no in-sample edge to overfit TO — but the operator should
+    # read that rather than a retention figure that would divide by it.
+    return True, (f"out-of-sample {test_exp:.2f}R over {n} trades; in-sample "
+                  f"was {train_exp:.2f}R, so there was no in-sample edge to "
+                  f"overfit to")
 
 
-def gate_promotion(rule_name: str, target_stage: str) -> tuple:
+def gate_promotion(rule_name: str, target_stage: str,
+                   *, caller: str = "manual") -> tuple:
     """(allowed, reason) — may this rule advance to `target_stage`?
 
     Only live stages are gated; research -> paper is how a rule earns the
     record that makes a backtest meaningful in the first place.
+
+    `caller` separates the two very different questions being asked here.
+    A HUMAN clicking promote has read the record and is accepting the risk,
+    and refusing them on missing evidence would make the button useless.
+    The AUTOMATIC sweep has no such reader: it walks every RuleControl row
+    on a schedule, and exactly one rule is registered with an evaluator, so
+    the other fourteen — the seeded setups, whose control rows sit at
+    `research` today and therefore reach this gate FIRST — each promoted
+    themselves to live capital with "no backtest evidence available" as
+    their written justification.
     """
     if target_stage not in LIVE_STAGES:
         return True, "no evidence required below live"
@@ -133,6 +168,15 @@ def gate_promotion(rule_name: str, target_stage: str) -> tuple:
         # Absence of evidence is recorded, not treated as evidence.
         logger.info("[promotion_evidence] %s -> %s without backtest evidence: %s",
                     rule_name, target_stage, result["reason"])
+        if caller == "auto":
+            logger.warning(
+                "[promotion_evidence] REFUSED auto-promotion %s -> %s: no "
+                "evaluator registered, so there is nothing to promote on",
+                rule_name, target_stage)
+            return False, (f"no evaluator registered for {rule_name} — "
+                           f"automatic promotion to live requires "
+                           f"out-of-sample evidence; an operator may still "
+                           f"promote it by hand")
         return True, f"no backtest evidence available ({result['reason']})"
     if not result["passed"]:
         return False, f"walk-forward gate: {result['reason']}"

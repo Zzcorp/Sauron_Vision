@@ -35,65 +35,20 @@ def live_health(request):
     try:
         now = timezone.now()
 
-        # One pass over the table: freshest write per source, and whether
-        # that source currently OWNS any row. `LiveQuote` is one row per
-        # instrument, so owning none while having written before is the
-        # signature of a feed that is running and being outranked.
-        seen = {}
-        for row in (LiveQuote.objects.values("source")
-                    .annotate(latest=Max("updated_at"))):
-            key = (row["source"] or "").strip()
-            if key:
-                seen[key] = row["latest"]
+        # ONE verdict, shared with the digest and the health page. Three
+        # copies of this loop existed and had already drifted: the digest
+        # walked the registry (so a never-delivering feed was caught) while
+        # the health page grouped by rows that had been written (so it was
+        # not), and the digest mailed an alarm linking to a page that said
+        # everything was fine.
+        from market_data.feeds import feed_states
 
-        from market_data.feeds import state_for
-
-        def _fresh(key):
-            """Is the feed named by `key` delivering right now?"""
-            spec = BY_KEY.get(key)
-            stamp = seen.get(key)
-            if not spec or stamp is None:
-                return False
-            return (now - stamp).total_seconds() < spec["ages"][0]
-
-        sources = []
-        for feed in FEEDS:
-            latest = seen.get(feed["key"])
-            age = (now - latest).total_seconds() if latest else None
-            state, note = state_for(
-                feed, latest=latest, age_seconds=age,
-                superseder_ok=_fresh(feed.get("superseded_by")), now=now)
-            sources.append({
-                "source": feed["key"],
-                "label": feed["label"],
-                "kind": feed["kind"],
-                "configured": is_configured(feed),
-                "state": state,
-                "note": note,
-                "age_seconds": age,
-                "latest": latest.isoformat() if latest else None,
-            })
-
-        # A source string in the database that feeds.py does not declare.
-        # Reported rather than dropped: it means this platform grew a writer
-        # the registry has not caught up with, and silently hiding it is how
-        # the registry stays behind.
-        for key, latest in sorted(seen.items()):
-            if key in BY_KEY:
-                continue
-            age = (now - latest).total_seconds() if latest else None
-            sources.append({
-                "source": key, "label": key, "kind": "unknown",
-                "configured": True, "state": "unregistered",
-                "note": "writing quotes but not declared in market_data/feeds.py",
-                "age_seconds": age,
-                "latest": latest.isoformat() if latest else None,
-            })
-        # An undeclared source is a gap in the REGISTRY, not a fault in the
-        # platform, and it is writing quotes — which is more than several
-        # declared feeds manage. Counting it against the pill would let one
-        # stale stray hold the top bar amber forever with nothing an
-        # operator could do about it but edit a Python file.
+        sources = [{
+            "source": r["source"], "label": r["label"], "kind": r["kind"],
+            "configured": r["configured"], "state": r["state"],
+            "note": r["note"], "age_seconds": r["age_seconds"],
+            "latest": r["latest"].isoformat() if r["latest"] else None,
+        } for r in feed_states(now)]
 
         # Declared order first, then the strays — the operator reads the
         # same list in the same order every time, which is what makes a

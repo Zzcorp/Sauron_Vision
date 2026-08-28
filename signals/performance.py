@@ -76,15 +76,22 @@ def _compute_realized_r(signal, close_price):
 
     R = (close - entry) / risk   for bullish
     R = (entry - close) / risk   for bearish
-    where risk = abs(entry - stop). Returns 0.0 if risk is undefined.
+    where risk = abs(entry - stop).
+
+    Returns None when risk is undefined. It returned 0.0, which is the
+    doctrine failure verbatim: a rule that measured NOTHING scored
+    identically to a rule that broke even. Three consumers read this column
+    as evidence — the promotion ladder, the meta-allocator's inverse-vol
+    weights and the decay detector — and `realized_r` is nullable precisely
+    so it can say "ungraded". The bot-side grader already abstains this way.
     """
     entry = signal.suggested_entry if signal.suggested_entry is not None else signal.price_at_signal
     stop = signal.suggested_stop
     if entry is None or stop is None:
-        return 0.0
+        return None
     risk = abs(Decimal(entry) - Decimal(stop))
     if risk == 0:
-        return 0.0
+        return None
     move = Decimal(close_price) - Decimal(entry)
     if signal.direction == "bearish":
         move = -move
@@ -150,8 +157,16 @@ def _close_signal(signal, outcome, close_price, now):
     if outcome == "stopped_out":
         signal.realized_r = -1.0
     elif outcome == "hit_target":
-        signal.realized_r = float(signal.risk_reward_ratio) if signal.risk_reward_ratio \
-            else _compute_realized_r(signal, close_price)
+        # The worst of the three. A signal that HIT ITS TARGET with no
+        # recorded risk_reward_ratio fell through to _compute_realized_r,
+        # which had no stop to measure against and returned a confident
+        # 0.0 — a rule that WORKED, filed in the track record as a scratch.
+        # It is left ungraded now: the row still carries its outcome, its
+        # close and its duration; what it does not carry is an R multiple
+        # derived from a risk nobody recorded.
+        signal.realized_r = (float(signal.risk_reward_ratio)
+                             if signal.risk_reward_ratio
+                             else _compute_realized_r(signal, close_price))
     else:
         signal.realized_r = _compute_realized_r(signal, close_price)
     signal.time_to_outcome_seconds = int((now - signal.created_at).total_seconds())

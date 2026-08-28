@@ -108,14 +108,20 @@ def sync_etoro_positions():
         # positions counted as UNPRICED: the book value went unmeasured, the
         # nightly snapshot was skipped, the equity curve stopped and the risk
         # denominator froze — on the real-money book, silently.
+        # Through write_quote, not around it. `not in (None, "")` ADMITS A
+        # LITERAL 0, and this wrote Decimal("0") straight into LiveQuote —
+        # the exact case write_quote refuses, because "a 0 written into
+        # LiveQuote reads downstream as a real price of zero". This row
+        # values the REAL-MONEY book, per the comment above.
+        #
+        # A False return means the price was unusable or a better source
+        # holds the row; either way the position stays honestly UNPRICED
+        # rather than being marked at zero.
         current_rate = pos.get("currentRate")
         if current_rate not in (None, ""):
-            try:
-                LiveQuote.objects.update_or_create(
-                    instrument=instrument,
-                    defaults={"last": Decimal(str(current_rate)),
-                              "source": "etoro"})
-            except (InvalidOperation, TypeError, ValueError):
+            from market_data.quotes import write_quote
+            if not write_quote(instrument.symbol, last=current_rate,
+                               source="etoro", instrument=instrument):
                 logger.warning(
                     "eToro sent an unusable currentRate for %s (%r); the "
                     "position is recorded but stays unpriced.",

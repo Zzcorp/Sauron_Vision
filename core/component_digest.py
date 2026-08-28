@@ -123,36 +123,18 @@ def _feed_faults(now) -> list:
     the system working as designed.
     """
     try:
-        from django.db.models import Max
-
-        from market_data.feeds import FEEDS, state_for
-        from market_data.models import LiveQuote
-
-        seen = {}
-        for row in (LiveQuote.objects.values("source")
-                    .annotate(latest=Max("updated_at"))):
-            key = (row["source"] or "").strip()
-            if key:
-                seen[key] = row["latest"]
-
-        def fresh(key):
-            from market_data.feeds import BY_KEY
-            spec, stamp = BY_KEY.get(key), seen.get(key)
-            if not spec or stamp is None:
-                return False
-            return (now - stamp).total_seconds() < spec["ages"][0]
+        # The SAME verdict the health page renders — see
+        # market_data.feeds.feed_states. When these were separate loops the
+        # digest could report a feed as dead and the page it links to
+        # reported it as fine, which is worse than either being wrong alone.
+        from market_data.feeds import feed_states
 
         bad = []
-        for feed in FEEDS:
-            latest = seen.get(feed["key"])
-            age = (now - latest).total_seconds() if latest else None
-            state, note = state_for(
-                feed, latest=latest, age_seconds=age,
-                superseder_ok=fresh(feed.get("superseded_by")), now=now)
-            if state in ("never", "red"):
-                bad.append({"key": feed["key"], "name": feed["label"],
-                            "state": state, "message": note,
-                            "last_run": latest, "errors": 0})
+        for row in feed_states(now):
+            if row["state"] in ("never", "red"):
+                bad.append({"key": row["source"], "name": row["label"],
+                            "state": row["state"], "message": row["note"],
+                            "last_run": row["latest"], "errors": 0})
         return bad
     except Exception as e:  # noqa: BLE001
         logger.warning("[digest] feeds unreadable: %s", e)

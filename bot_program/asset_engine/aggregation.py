@@ -224,6 +224,25 @@ def weighted_consensus(bullish, bearish, *, asset_class: str = "",
                                         venue=venue)
         return weights[rule]
 
+    # WHICH RULES ARE THE SAME THING. The platform already measures this —
+    # Pearson on daily realized R, "rules that LOOK different but TRADE the
+    # same factor in practice" — and routed the answer only to an LLM
+    # narrator. It never reached the moment the money moves.
+    #
+    # Read once per call, not per side: it is a cached map, and asking
+    # twice would only make the two sides disagree if the cache turned over
+    # between them.
+    try:
+        from bot_program.asset_engine.rule_clusters import (
+            cluster_map, independent_sources,
+        )
+        _cluster_map, _cluster_stale = cluster_map()
+    except Exception:  # noqa: BLE001 — an unknown must not veto an entry
+        _cluster_map, _cluster_stale = {}, True
+
+        def independent_sources(names, **kw):
+            return len({str(n) for n in names if n})
+
     def side_weight(signals):
         total, best, best_rule = 0.0, 0.0, ""
         rules = set()
@@ -234,10 +253,17 @@ def weighted_consensus(bullish, bearish, *, asset_class: str = "",
             rules.add(rule)
             if contribution > best:
                 best, best_rule = contribution, rule
-        return total, best_rule, len(rules)
+        # `len(rules)` counted NAMES. An operator who raises
+        # min_signals_for_entry to 2 is buying independent confirmation,
+        # and two readings of one dataset satisfied that quorum between
+        # them — while the reason string on the trade reported the
+        # headcount as though it were evidence count.
+        sources = independent_sources(rules, mapping=_cluster_map,
+                                      stale=_cluster_stale)
+        return total, best_rule, sources, len(rules)
 
-    bull_weight, bull_rule, bull_rules = side_weight(bullish)
-    bear_weight, bear_rule, bear_rules = side_weight(bearish)
+    bull_weight, bull_rule, bull_rules, bull_names = side_weight(bullish)
+    bear_weight, bear_rule, bear_rules, bear_names = side_weight(bearish)
     net = bull_weight - bear_weight
 
     if net >= min_net_weight:
@@ -246,7 +272,11 @@ def weighted_consensus(bullish, bearish, *, asset_class: str = "",
                     "score": 0.0, "rule_name": "",
                     "detail": (f"bull evidence {net:+.2f} clears "
                                f"{min_net_weight:.2f} but only {bull_rules} "
-                               f"rule(s) agree, need {min_signals}")}
+                               f"independent source(s) agree, need "
+                               f"{min_signals}"
+                               + (f" ({bull_names} rules, some reading the "
+                                  f"same data)"
+                                  if bull_names > bull_rules else ""))}
         weighted_score = bull_weight / max(len(bullish), 1)
         return {"direction": "BUY", "net_weight": round(net, 4),
                 "score": min(1.0, round(weighted_score, 4)),
@@ -258,7 +288,11 @@ def weighted_consensus(bullish, bearish, *, asset_class: str = "",
                     "score": 0.0, "rule_name": "",
                     "detail": (f"bear evidence {-net:+.2f} clears "
                                f"{min_net_weight:.2f} but only {bear_rules} "
-                               f"rule(s) agree, need {min_signals}")}
+                               f"independent source(s) agree, need "
+                               f"{min_signals}"
+                               + (f" ({bear_names} rules, some reading the "
+                                  f"same data)"
+                                  if bear_names > bear_rules else ""))}
         weighted_score = bear_weight / max(len(bearish), 1)
         return {"direction": "SELL", "net_weight": round(-net, 4),
                 "score": min(1.0, round(weighted_score, 4)),

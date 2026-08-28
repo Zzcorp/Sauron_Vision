@@ -156,28 +156,188 @@ def check_bot_bars(user) -> dict:
                   f"all {len(symbols)} bot symbols have fresh 4h bars")
 
 
-def check_quote_freshness() -> dict:
-    """Per-source LiveQuote freshness — a frozen streamer is invisible
-    otherwise."""
-    from market_data.models import LiveQuote
+def check_capital_truth(user) -> dict:
+    """Does the pool every risk limit divides by match the account?
 
-    rows = (LiveQuote.objects.values("source")
-            .annotate(latest=Max("updated_at")))
-    fresh, stale = [], []
-    for row in rows:
-        src = (row["source"] or "unknown").strip() or "unknown"
-        age = _age(row["latest"])
-        (stale if age is None or age > QUOTE_STALE_SECONDS else fresh).append(
-            f"{src} {_fmt_age(age)}")
-    if not fresh and not stale:
-        return _check("quotes", "Quote feeds", "warn", "no quotes at all")
-    if stale:
-        return _check("quotes", "Quote feeds", "warn",
-                      f"{len(fresh)} fresh · stale: " + ", ".join(sorted(stale)[:4]),
-                      "Paper marks and alerts skip stale quotes, but check the "
-                      "streamer/poller for that source")
-    return _check("quotes", "Quote feeds", "ok",
-                  f"{len(fresh)} sources fresh: " + ", ".join(sorted(fresh)[:4]))
+    `AssetBotConfig.capital` is the denominator of the whole per-config
+    risk stack — the risk budget, the daily-loss floor, the drawdown
+    curve's starting equity, and the base both single-position checks
+    measure against. It is written straight from a form POST with no
+    reference to any account, and arming live checks only the PIN.
+
+    The direction of the error is the point. A pool declared LARGER than
+    the broker's equity makes every limit looser than it reads: a "2%
+    daily loss" on a declared 100,000 against a real 20,000 is a 10% daily
+    loss. That is the dangerous way, and it is the easy mistake — the pool
+    is a plan, the account is what funded it.
+    """
+    from bot_program.capital_truth import TOLERANCE_PCT, capital_mismatches
+
+    try:
+        rows = capital_mismatches(user)
+    except Exception as e:  # noqa: BLE001 — a broken check is not a verdict
+        return _check("capital", "Bot pool vs account", "warn",
+                      f"could not compare: {e}")
+
+    if not rows:
+        return _check("capital", "Bot pool vs account", "ok",
+                      f"declared pools agree with broker equity "
+                      f"(within {TOLERANCE_PCT:.0f}%)", configured=False)
+
+    over = [r for r in rows if r["direction"] == "over"]
+    worst = max(rows, key=lambda r: r["ratio"] or 0)
+    if over:
+        return _check(
+            "capital", "Bot pool vs account", "fail",
+            f"{len(over)} pool(s) larger than the account — "
+            f"{worst['config']} declares {worst['declared']:,.0f} against "
+            f"{worst['actual']:,.0f} ({worst['ratio']}x)",
+            "Every risk limit is a percentage of the declared pool, so it "
+            "is currently looser than you set it. Fix it on /setup/.")
+    return _check(
+        "capital", "Bot pool vs account", "warn",
+        f"{len(rows)} pool(s) smaller than the account — "
+        f"{worst['config']} declares {worst['declared']:,.0f} against "
+        f"{worst['actual']:,.0f}",
+        "Limits are tighter than you set them, which is the safe "
+        "direction — but the numbers still disagree.")
+
+
+def check_component_staleness() -> dict:
+    """Are the scheduled components still turning?
+
+    The health page had eight checks and not one read whether the schedule
+    was still running. The only thing that reports a stopped component is
+    the daily digest — and `render_digest` returns (None, None) when all is
+    well, so SILENCE is its healthy signal. A wedged beat, a dead
+    worker-fast and a failed Telegram send therefore all produce a message
+    an operator cannot tell from a good day.
+
+    The failure correlates, which is what makes it worth a check of its
+    own: a stopped worker is exactly the condition that both generates
+    faults and suppresses the report about them. A dead beat is a total
+    silent stall — bots stop deciding, stranded-close retries stop firing,
+    and open positions sit unmanaged behind whatever the broker holds.
+
+    Lateness is judged against each component's OWN cadence, reusing
+    `views_topology._component_state`. One 48-hour rule would read the four
+    weekly components as stale five days out of seven while they ran
+    perfectly.
+    """
+    from core.platform_control import PlatformComponent
+    from dashboard.views_topology import _component_state
+
+    rows = list(PlatformComponent.objects.filter(is_enabled=True))
+    if not rows:
+        return _check("beat", "Scheduled components", "ok",
+                      "no components enabled", configured=False)
+
+    broken, stale, never, live = [], [], [], []
+    for comp in rows:
+        try:
+            state, _note = _component_state(comp)
+        except Exception as e:  # noqa: BLE001 — one bad row is not a verdict
+            broken.append(f"{comp.key} (unreadable: {e})")
+            continue
+        if state == "broken":
+            broken.append(comp.key)
+        elif state == "stale":
+            stale.append(comp.key)
+        elif state == "idle":
+            never.append(comp.key)
+        elif state == "live":
+            live.append(comp.key)
+
+    if broken or stale:
+        bad = broken + stale
+        return _check(
+            "beat", "Scheduled components", "fail",
+            f"{len(bad)} not running to schedule: " + ", ".join(bad[:5]),
+            "Check the beat and worker containers — a stopped scheduler "
+            "also stops the digest that would have told you")
+    if never and not live:
+        # Nothing has ever run. An install that was never started, not a
+        # platform that stalled — and saying FAIL here trains an operator
+        # to ignore the colour.
+        return _check(
+            "beat", "Scheduled components", "warn",
+            f"{len(never)} enabled, none has ever run", "Start the beat "
+            "and worker containers", configured=False)
+    if never:
+        return _check(
+            "beat", "Scheduled components", "warn",
+            f"{len(live)} on schedule · never run: " + ", ".join(never[:5]))
+    return _check("beat", "Scheduled components", "ok",
+                  f"{len(live)} running to their own cadence")
+
+
+def check_quote_freshness() -> dict:
+    """Per-feed delivery, from the SAME verdict the digest sends.
+
+    This grouped by the sources that had WRITTEN, so a declared feed that
+    has never delivered contributed no row and could not be missed — and
+    there was no `fail` branch at all, so no quote condition whatever could
+    turn this page red. The digest, meanwhile, walks the registry, detects
+    exactly that case, and mails the operator a link to this page. They
+    clicked it and read "ok — 3 sources fresh".
+
+    Two surfaces disagreeing is worse than one being blind, because the
+    page is the one that looks authoritative.
+    """
+    from market_data.feeds import BENIGN_STATES, feed_states
+
+    rows = feed_states()
+    if not rows:
+        return _check("quotes", "Quote feeds", "warn", "no feeds declared")
+
+    dead = [r for r in rows if r["state"] in ("never", "red")]
+    strays = [r for r in rows if r["state"] == "unregistered"]
+    live = [r for r in rows if r["state"] == "green"]
+    benign = [r for r in rows if r["state"] in BENIGN_STATES]
+
+    hint = ("Run `python manage.py check_feeds` — it names the credential "
+            "or the container behind each one")
+    stray_note = (" · undeclared writer: "
+                  + ", ".join(r["source"] for r in strays[:3])) if strays else ""
+
+    # Has any DECLARED feed ever written a quote? That is what separates a
+    # platform that regressed from one that has not been started. `benign`
+    # is no use for this — an unconfigured feed reads `off`, which is a
+    # perfectly healthy state for a platform that has never run at all.
+    ever_delivered = [r for r in rows
+                      if r["state"] != "unregistered" and r["latest"]]
+
+    if dead and ever_delivered:
+        # Some feeds deliver and others never have, or stopped: that is a
+        # regression, and it is what the digest mails about.
+        return _check(
+            "quotes", "Quote feeds", "fail",
+            f"{len(dead)} not delivering: "
+            + ", ".join(f"{r['label']} ({r['state']})" for r in dead[:4])
+            + stray_note, hint)
+
+    if dead:
+        # NOTHING has ever delivered. A platform that has not been started
+        # is not a platform that broke, and `configured=False` is this
+        # page's way of saying "this verdict is about an absence". Screaming
+        # FAIL at a fresh install trains an operator to ignore the colour,
+        # which costs them the one time it means something.
+        return _check(
+            "quotes", "Quote feeds", "warn",
+            "no declared feed has delivered yet" + stray_note, hint,
+            configured=False)
+
+    if strays:
+        return _check(
+            "quotes", "Quote feeds", "warn",
+            f"{len(live)} delivering{stray_note}",
+            "A source is writing quotes that market_data/feeds.py does not "
+            "declare — the registry is behind, not the platform")
+
+    return _check(
+        "quotes", "Quote feeds", "ok",
+        f"{len(live)} delivering"
+        + (f" · {len(benign)} idle or off" if benign else ""))
 
 
 def check_close_pending(user) -> dict:
@@ -328,8 +488,10 @@ def system_health(request):
         (check_close_pending, True, False),
         (check_live_mode_readiness, True, False),
         (check_bot_heartbeats, True, False),
+        (check_capital_truth, True, False),
         (check_beat_registration, False, True),
         (check_quote_freshness, False, True),
+        (check_component_staleness, False, True),
         (check_signal_flow, False, True),
         (check_ai_models, False, True),
     ]

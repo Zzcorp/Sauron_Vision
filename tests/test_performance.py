@@ -63,10 +63,18 @@ class ComputeRealizedRTests(TestCase):
         # Closed at target → (100 - 90) / 5 = 2.0R
         self.assertEqual(_compute_realized_r(sig, Decimal("90")), 2.0)
 
-    def test_zero_risk_returns_zero(self):
+    def test_zero_risk_is_ungraded_rather_than_scored_zero(self):
+        """Entry 100, stop 100, closed at 110: the signal moved ten points
+        in its favour and the old code called that 0.0R — a rule that
+        WORKED, filed in the track record as a break-even.
+
+        There is no risk to divide by, so there is no R multiple. The
+        promotion ladder, the meta-allocator inverse-vol weights and the
+        decay detector all read this column as evidence, and
+        `realized_r` is nullable exactly so it can say "ungraded"."""
         from signals.performance import _compute_realized_r
         sig = _make_signal(direction="bullish", entry="100", stop="100", target="110")
-        self.assertEqual(_compute_realized_r(sig, Decimal("110")), 0.0)
+        self.assertIsNone(_compute_realized_r(sig, Decimal("110")))
 
 
 class UpdateExtremesTests(TestCase):

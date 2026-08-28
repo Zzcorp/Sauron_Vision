@@ -47,6 +47,37 @@ def _seed_signals(rule_name: str, rs: list[float], days_ago_start: int = 0):
         )
 
 
+def _seed_fills(rule_name: str, rs: list, *, paper: bool = True,
+                days_ago_start: int = 0):
+    """Seed graded BOT TRADES — what a broker actually filled.
+
+    The promotion ladder used to read `Signal` for every stage, so the
+    paper rung could be cleared without a single fill existing anywhere.
+    It reads the trade ledger now, and a test that seeds only signals is
+    testing the platform's predictions, not its execution.
+    """
+    from django.contrib.auth.models import User
+    from bot_program.models import AssetBotConfig, AssetBotTrade
+    user, _ = User.objects.get_or_create(username="promo_fill_user")
+    cfg, _ = AssetBotConfig.objects.get_or_create(
+        user=user, name=f"PF_{rule_name}",
+        defaults=dict(asset_class="stock", mode="paper", symbols=["PFX"],
+                      capital=Decimal("10000"), enabled=True))
+    for i, r in enumerate(rs):
+        closed = timezone.now() - timedelta(days=days_ago_start + i,
+                                            hours=1)
+        t = AssetBotTrade.objects.create(
+            config=cfg, asset_class="stock", symbol="PFX", side="BUY",
+            qty=Decimal("10"), entry_price=Decimal("100"),
+            stop_loss=Decimal("95"), exit_price=Decimal("110"),
+            pnl=Decimal(str(round(r * 50, 4))), status="CLOSED",
+            paper=paper, rule_name=rule_name,
+            outcome="hit_target" if r > 0 else "stopped_out",
+            realized_r=r,
+            opened_at=closed - timedelta(hours=2))
+        AssetBotTrade.objects.filter(pk=t.pk).update(closed_at=closed)
+
+
 def _set_stage(rule_name: str, stage: str, *, baseline=None, entered_days_ago=None):
     from signals.models import RuleControl
     ctrl, _ = RuleControl.objects.get_or_create(
@@ -106,7 +137,29 @@ class EligibilityTests(TestCase):
         _set_stage("rD", "paper", baseline=1.0, entered_days_ago=35)
         # 25 closed, expectancy ≈ 1.5 (≥ 70% of baseline 1.0)
         _seed_signals("rD", [2.0] * 20 + [-1.0] * 5, days_ago_start=0)
+        # …and the PAPER FILLS the stage exists to require. Signals are
+        # what the platform predicted; these are what a venue executed.
+        _seed_fills("rD", [2.0] * 20 + [-1.0] * 5)
         self.assertEqual(is_eligible_for_promotion("rD"), "live_small")
+
+    def test_paper_to_live_small_refuses_on_signals_alone(self):
+        """The whole point of the stage. Before the venue leg this rule
+        promoted itself to LIVE CAPITAL on a signal table it had never
+        traded — three date windows of one measurement, reported as
+        research, paper and live expectancy."""
+        from signals.promotion_pipeline import is_eligible_for_promotion
+        _set_stage("rD2", "paper", baseline=1.0, entered_days_ago=35)
+        _seed_signals("rD2", [2.0] * 20 + [-1.0] * 5, days_ago_start=0)
+        self.assertIsNone(is_eligible_for_promotion("rD2"))
+
+    def test_losing_paper_fills_block_promotion(self):
+        """Good predictions, bad execution — the gap the paper stage is
+        supposed to find."""
+        from signals.promotion_pipeline import is_eligible_for_promotion
+        _set_stage("rD3", "paper", baseline=1.0, entered_days_ago=35)
+        _seed_signals("rD3", [2.0] * 20 + [-1.0] * 5, days_ago_start=0)
+        _seed_fills("rD3", [-1.0] * 25)
+        self.assertIsNone(is_eligible_for_promotion("rD3"))
 
     def test_live_full_returns_none(self):
         from signals.promotion_pipeline import is_eligible_for_promotion

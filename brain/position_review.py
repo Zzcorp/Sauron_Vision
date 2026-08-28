@@ -492,6 +492,29 @@ def _rule_state(pos: dict) -> dict:
     return state
 
 
+def _macro_calendar_has_ever_run() -> bool:
+    """Has anything ever written a macro event?
+
+    `_imminent_events` derives {EUR, USD} from EURUSD and queries
+    `currency_affected`, with a comment noting that "the currency carries
+    the macro print that moves an FX leg". A repo-wide search finds exactly
+    ONE non-test writer of EconomicEvent — the earnings scraper — and it
+    stores the equity TICKER in that column. The field holds "AAPL", never
+    "USD", so the forex branch cannot match a row, ever.
+
+    An empty list from that query renders as "checked, nothing imminent",
+    which is the reassuring answer to a question nobody asked. It ships on
+    every forex position through NFP, CPI and FOMC.
+    """
+    from market_data.models import EconomicEvent
+    try:
+        return EconomicEvent.objects.filter(
+            currency_affected__in=("USD", "EUR", "GBP", "JPY", "CHF",
+                                   "CAD", "AUD", "NZD")).exists()
+    except Exception:  # noqa: BLE001 — a blind marker must never raise
+        return False
+
+
 def _imminent_events(pos: dict) -> list[dict]:
     """High-impact calendar entries inside EVENT_HORIZON_HOURS for this symbol.
 
@@ -525,6 +548,25 @@ def _imminent_events(pos: dict) -> list[dict]:
                 .values("title", "datetime", "impact", "currency_affected"))
     for r in rows:
         r["datetime"] = r["datetime"].isoformat() if r["datetime"] else None
+
+    # BLIND, not clear. On a forex position the currency branch is the only
+    # one that can match, and no macro source has ever written a row it
+    # could match — the sole non-test writer of this table is the earnings
+    # scraper, which stores the equity TICKER in `currency_affected`. So an
+    # empty list here has been rendering as "checked, nothing imminent" on
+    # every forex position, through NFP, CPI and FOMC.
+    #
+    # Naming the absence costs an hour and is the doctrine fix; sourcing a
+    # real macro calendar is the separate, larger job.
+    if not rows and currencies and not _macro_calendar_has_ever_run():
+        return [{
+            "title": "NO MACRO CALENDAR SOURCE HAS EVER RUN",
+            "datetime": None, "impact": EVENT_IMPACT,
+            "currency_affected": "/".join(sorted(currencies)),
+            "blind": True,
+            "note": ("event risk on this pair is UNCHECKED, not clear — "
+                     "nothing has ever written a macro event"),
+        }]
     return rows
 
 

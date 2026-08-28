@@ -139,6 +139,37 @@ def _stats_since(rule_name: str, since=None, days_window: Optional[int] = None) 
     }
 
 
+def _venue_stats(rule_name: str, venue: str, since) -> dict:
+    """What the rule actually did ON THAT VENUE, from the TRADE ledger.
+
+    `_stats_since` reads `Signal` and nothing else — no venue, no
+    AssetBotTrade, no `paper` flag — and both the paper and the live branch
+    called it. The header advertises "paper expectancy >= 0.7x research
+    expectancy" and "live_small >= 0.7x paper": three names for ONE
+    measurement over three date windows of the same table. An operator
+    reading "promoted: paper expectancy retained 0.9x of research"
+    reasonably concludes execution was validated on a venue. Nothing had
+    been executed anywhere.
+
+    The signal table records what the platform PREDICTED. The trade ledger
+    records what a broker FILLED, with slippage, partial fills and the
+    spread in it. A stage whose whole purpose is "prove it on a real venue
+    before real money" has to read the second one.
+    """
+    from bot_program.bot_grading import bot_performance_summary
+    rows = bot_performance_summary(rule_name=rule_name, since=since,
+                                   venue=venue, min_n=1) or []
+    n = sum(int(r.get("n") or 0) for r in rows)
+    if n <= 0:
+        return {"n": 0, "expectancy": None}
+    # Trade-weighted across asset classes: a rule that took 40 forex trades
+    # and 2 stock trades is mostly a forex rule, and averaging the two rows
+    # evenly would let the small one swing the verdict.
+    weighted = sum(float(r.get("expectancy") or 0.0) * int(r.get("n") or 0)
+                   for r in rows)
+    return {"n": n, "expectancy": weighted / n}
+
+
 def _next_stage(stage: str) -> Optional[str]:
     try:
         i = STAGE_ORDER.index(stage)
@@ -194,6 +225,23 @@ def is_eligible_for_promotion(rule_name: str) -> Optional[str]:
     elif stage == "paper":
         if days_in_stage < PROMO_PAPER_TO_LIVE_SMALL_MIN_DAYS:
             return None
+        # THE VENUE LEG, asked FIRST. This is the promotion that puts real
+        # money behind a rule, and until now nothing in it had ever opened
+        # the trade ledger.
+        from bot_program.bot_grading import VENUE_PAPER
+        fills = _venue_stats(rule_name, VENUE_PAPER, entered)
+        if fills["n"] < PROMO_PAPER_TO_LIVE_SMALL_MIN_N:
+            logger.info("[promotion] %s stays in paper: %d paper FILLS "
+                        "since entering the stage (need %d) — signal-side "
+                        "expectancy is not execution evidence",
+                        rule_name, fills["n"],
+                        PROMO_PAPER_TO_LIVE_SMALL_MIN_N)
+            return None
+        if fills["expectancy"] is None or fills["expectancy"] < 0:
+            logger.info("[promotion] %s stays in paper: paper fills came to "
+                        "%s expectancy", rule_name, fills["expectancy"])
+            return None
+
         s = _stats_since(rule_name, since=entered)
         if s["n"] < PROMO_PAPER_TO_LIVE_SMALL_MIN_N:
             return None
@@ -209,6 +257,19 @@ def is_eligible_for_promotion(rule_name: str) -> Optional[str]:
     elif stage == "live_small":
         if days_in_stage < PROMO_LIVE_SMALL_TO_FULL_MIN_DAYS:
             return None
+        # Same rule one rung up: full size is earned on LIVE fills, not on
+        # the signal table read over a third date window.
+        from bot_program.bot_grading import VENUE_LIVE
+        fills = _venue_stats(rule_name, VENUE_LIVE, entered)
+        if fills["n"] < PROMO_LIVE_SMALL_TO_FULL_MIN_N:
+            logger.info("[promotion] %s stays at live_small: %d live FILLS "
+                        "since entering the stage (need %d)",
+                        rule_name, fills["n"],
+                        PROMO_LIVE_SMALL_TO_FULL_MIN_N)
+            return None
+        if fills["expectancy"] is None or fills["expectancy"] < 0:
+            return None
+
         s = _stats_since(rule_name, since=entered)
         if s["n"] < PROMO_LIVE_SMALL_TO_FULL_MIN_N:
             return None
@@ -240,7 +301,11 @@ def is_due_for_demotion(rule_name: str) -> Optional[str]:
     if stage == "paper":
         # Demote PAPER → RESEARCH if expectancy goes negative across last 30d.
         s = _stats_since(rule_name, days_window=DEMOTE_PAPER_WINDOW_DAYS)
-        if s["n"] >= DEMOTE_MIN_N and (s["expectancy"] or 99) < 0:
+        # `or 99` conflated 0.0 with None: a rule sitting at exactly zero
+        # expectancy read as "no data" and could never be demoted, which is
+        # the one reading that keeps a dead rule on live capital.
+        _exp = s["expectancy"]
+        if s["n"] >= DEMOTE_MIN_N and _exp is not None and _exp < 0:
             return target
         return None
 
@@ -251,7 +316,8 @@ def is_due_for_demotion(rule_name: str) -> Optional[str]:
     baseline = ctrl.stage_baseline_expectancy
     if baseline is None or baseline <= 0:
         return None
-    if (s["expectancy"] or 99) < baseline * DEMOTE_DEGRADATION_RATIO:
+    _exp = s["expectancy"]
+    if _exp is not None and _exp < baseline * DEMOTE_DEGRADATION_RATIO:
         return target
     return None
 
@@ -362,7 +428,8 @@ def auto_evaluate_all_rules() -> dict:
                 # Before risking real money, require out-of-sample evidence
                 # from the backtester that already drives the same decide().
                 from signals.promotion_evidence import gate_promotion
-                allowed, why = gate_promotion(ctrl.rule_name, target)
+                allowed, why = gate_promotion(ctrl.rule_name, target,
+                                              caller="auto")
                 if not allowed:
                     logger.info("[promotion] %s held at %s — %s",
                                 ctrl.rule_name, ctrl.promotion_stage, why)

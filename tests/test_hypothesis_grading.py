@@ -272,7 +272,26 @@ class RuleAvgRGradingTests(TestCase):
             [], {"kind": "rule_avg_r", "rule_name": "rule_x",
                  "comparator": ">=", "threshold": 0.0})
         self.assertEqual(h.outcome, Hypothesis.OUTCOME_UNRESOLVABLE)
-        self.assertIn("no graded trades", h.resolution_notes)
+        self.assertIn("closed since the claim was posted",
+                      h.resolution_notes)
+
+    def test_the_window_is_measured_from_the_claim_not_from_now(self):
+        """A 7-day window passed as `days` covered ~156 of 168 hours the
+        model had ALREADY READ before writing the claim, so the score
+        measured "did the agent restate the last fortnight"."""
+        from brain.hypotheses import resolve_due
+        _due_hypothesis(criteria={"kind": "rule_avg_r",
+                                  "rule_name": "rule_x",
+                                  "comparator": ">=", "threshold": 0.0})
+        # Its own patch, not _resolve_with's — that helper opens one on the
+        # same target, which would shadow this one and leave it uncalled.
+        with patch("bot_program.bot_grading.bot_performance_summary",
+                   return_value=_perf_rows()) as m:
+            resolve_due()
+        self.assertTrue(m.called)
+        self.assertIn("since", m.call_args.kwargs,
+                      "graded on a window, not on the post-claim record")
+        self.assertIsNotNone(m.call_args.kwargs["since"])
 
     def test_missing_rule_name_is_unresolvable(self):
         from brain.knowledge_models import Hypothesis

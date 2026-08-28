@@ -131,18 +131,19 @@ def save_quote_to_db(symbol):
     except Instrument.DoesNotExist:
         return None
 
-    obj, _ = LiveQuote.objects.update_or_create(
-        instrument=instrument,
-        defaults={
-            "last": quote["last"],
-            "bid": quote.get("last"),  # AV doesn't give bid/ask for stocks
-            "ask": quote.get("last"),
-            "change_pct": quote["change_pct"],
-            "volume": quote["volume"],
-            "source": "alpha_vantage",
-        }
-    )
-    return obj
+    # Through write_quote so SOURCE_PRIORITY applies. Alpha Vantage sits at
+    # 30 — below every broker and every stream — and writing straight into
+    # LiveQuote let the slowest source on the platform overwrite a live tick.
+    # write_quote also refuses a zero, which this path passed through.
+    from market_data.quotes import write_quote
+    if not write_quote(symbol, last=quote["last"], source="alpha_vantage",
+                       instrument=instrument,
+                       bid=quote.get("last"),   # AV gives no bid/ask here
+                       ask=quote.get("last"),
+                       change_pct=quote["change_pct"],
+                       volume=quote["volume"]):
+        return None
+    return LiveQuote.objects.filter(instrument=instrument).first()
 
 
 def save_history_to_db(symbol, outputsize="compact"):

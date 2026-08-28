@@ -123,7 +123,11 @@ class CommodityCatalogueTests(TestCase):
     def test_softs_resolve_through_the_shared_map(self):
         inst = _instrument("CORNUSD", "commodity")
         fake = _fake_yf(price=459.0)
-        with patch.dict("sys.modules", {"yfinance": fake}):
+        # Pinned to a weekday: this asserts the SYMBOL MAP, and letting a
+        # Saturday test run turn it red would be the calendar grading the
+        # mapping.
+        with patch.dict("sys.modules", {"yfinance": fake}), \
+                patch("core.market_calendar.is_weekend", return_value=False):
             from market_data.tasks import fetch_commodity_quotes
             result = fetch_commodity_quotes.__wrapped__.__wrapped__()
         fake.Ticker.assert_any_call("ZC=F")
@@ -137,7 +141,11 @@ class CommodityCatalogueTests(TestCase):
         NaN closes — confident garbage, worse than no data."""
         _instrument("ZINCUSD", "commodity")
         fake = _fake_yf()
-        with patch.dict("sys.modules", {"yfinance": fake}):
+        # Pinned to a weekday: this asserts the SYMBOL MAP, and letting a
+        # Saturday test run turn it red would be the calendar grading the
+        # mapping.
+        with patch.dict("sys.modules", {"yfinance": fake}), \
+                patch("core.market_calendar.is_weekend", return_value=False):
             from market_data.tasks import fetch_commodity_quotes
             fetch_commodity_quotes.__wrapped__.__wrapped__()
         fake.Ticker.assert_not_called()

@@ -142,16 +142,21 @@ def refresh_ibkr_data_for_user(user_id: int, *,
                 if last > 0:
                     bid_str = tk.get("bid") or "0"
                     ask_str = tk.get("ask") or "0"
-                    LiveQuote.objects.update_or_create(
-                        instrument=inst,
-                        defaults={
-                            "last": last,
-                            "bid": Decimal(str(bid_str)) if bid_str and float(bid_str) > 0 else None,
-                            "ask": Decimal(str(ask_str)) if ask_str and float(ask_str) > 0 else None,
-                            "source": "ibkr",
-                        },
-                    )
-                    quotes_updated += 1
+                    # Through write_quote so SOURCE_PRIORITY applies. This
+                    # is an HOURLY refresh writing straight into LiveQuote,
+                    # so it overwrote whatever a real-time stream had just
+                    # put there — finnhub_ws, oanda_stream, binance_ws all
+                    # outrank an hourly REST read, and precedence is the
+                    # thing that stops the slowest writer winning.
+                    from market_data.quotes import write_quote
+                    if write_quote(
+                            inst.symbol, last=last, source="ibkr",
+                            instrument=inst,
+                            bid=(Decimal(str(bid_str))
+                                 if bid_str and float(bid_str) > 0 else None),
+                            ask=(Decimal(str(ask_str))
+                                 if ask_str and float(ask_str) > 0 else None)):
+                        quotes_updated += 1
             except Exception as e:
                 logger.warning("IBKR ticker(%s) failed: %s", symbol, e)
                 errors += 1
