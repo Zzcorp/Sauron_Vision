@@ -656,7 +656,7 @@ class IBKRTrader:
                               symbol, refusal)
                     empty["raw"] = {"reason": refusal}
                     return empty
-            legs, child_trades, stop_leg_id = [], [], ""
+            legs, child_trades, stop_leg_id, target_leg_id = [], [], "", ""
             trade = None
             parent_id = 0
             for o in orders:
@@ -695,6 +695,8 @@ class IBKRTrader:
                             "orderType", "") or "").upper()
                         if leg_kind.startswith("STP"):
                             stop_leg_id = leg_id
+                        elif leg_kind.startswith("LMT"):
+                            target_leg_id = leg_id
             self._ib.sleep(1.0)
             filled_qty = float(trade.orderStatus.filled or 0)
             avg_px = float(trade.orderStatus.avgFillPrice or 0)
@@ -774,6 +776,8 @@ class IBKRTrader:
                     out["protectiveOrders"] = legs
                     if stop_leg_id:
                         out["protectiveStopId"] = stop_leg_id
+                    if target_leg_id:
+                        out["protectiveTargetId"] = target_leg_id
             return out
         except Exception as e:
             log.error("IBKR market_order(%s, %s, %s) failed: %s",
@@ -984,6 +988,84 @@ class IBKRTrader:
                               f"already filled or cancelled"}
         except Exception as e:  # noqa: BLE001
             log.error("IBKR modify_protective(%s) failed: %s", order_id, e)
+            return {"ok": False, "reason": str(e), "price": None}
+
+    def modify_target(self, order_id: str, new_price: float) -> dict:
+        """Move the resting TAKE-PROFIT leg to `new_price`.
+
+        The sibling of modify_protective, and deliberately separate. That
+        method refuses a limit leg because every one of its callers is
+        moving a stop, and a mover that could be talked into either would
+        put the two back in one code path — which is the bug it exists to
+        prevent.
+
+        Snapping is mirrored, not shared: a target rounds AWAY from the
+        position too, so it is never quoted better than the venue will
+        actually give.
+        """
+        empty = {"ok": False, "reason": "ibkr_unavailable", "price": None}
+        if not self._connect():
+            return empty
+        try:
+            wanted = str(order_id)
+            for trade in (self._ib.openTrades() or []):
+                order = getattr(trade, "order", None)
+                oid = str(getattr(order, "orderId", "") or "")
+                if oid != wanted or order is None:
+                    continue
+
+                kind = str(getattr(order, "orderType", "") or "").upper()
+                contract = getattr(trade, "contract", None)
+                tick = self._min_tick_for(contract) if contract else 0.0
+
+                refusal = self._bind_order_account(order)
+                if refusal:
+                    return {"ok": False, "reason": refusal, "price": None}
+
+                if "STP" in kind:
+                    return {"ok": False, "price": None,
+                            "reason": f"leg {wanted} is a stop, not a "
+                                      f"take-profit — refusing to move it"}
+                if "LMT" not in kind:
+                    return {"ok": False, "price": None,
+                            "reason": f"leg {wanted} is a {kind or 'unknown'} "
+                                      f"order — refusing to guess which "
+                                      f"field carries its price"}
+                if not tick:
+                    return {"ok": False, "price": None,
+                            "reason": f"leg {wanted}: minTick unreadable — "
+                                      f"refusing to send an off-tick price "
+                                      f"TWS would reject"}
+                # A long's target sits ABOVE and rounds up; a short's sits
+                # below and rounds down. Either way away from the position,
+                # so the quoted level is one the venue will honour.
+                exit_action = str(getattr(order, "action", "") or "").upper()
+                px = self._snap_to_tick(new_price, tick,
+                                        widen=(exit_action != "SELL"))
+                if px is None:
+                    return {"ok": False, "price": None,
+                            "reason": f"leg {wanted}: {new_price} will not "
+                                      f"snap onto a {tick} tick"}
+                order.lmtPrice = px
+
+                placed = self._ib.placeOrder(contract, order)
+                # placeOrder is non-blocking — the same reason the stop
+                # mover waits before it will claim anything.
+                self._ib.sleep(1.0)
+                if not self._leg_is_resting(placed):
+                    why = (self._dead_order_reason(placed, 0)
+                           or "TWS did not accept the modification")
+                    log.error("IBKR leg %s REFUSED the target move to %s: "
+                              "%s", wanted, px, why)
+                    return {"ok": False, "reason": why, "price": None}
+                log.info("IBKR modified target leg %s to %s", wanted, px)
+                return {"ok": True, "reason": "", "price": px}
+
+            return {"ok": False, "price": None,
+                    "reason": f"leg {wanted} is not among the open orders — "
+                              f"already filled or cancelled"}
+        except Exception as e:  # noqa: BLE001
+            log.error("IBKR modify_target(%s) failed: %s", order_id, e)
             return {"ok": False, "reason": str(e), "price": None}
 
     # ── options-specific surface ──────────────────────────────────────────

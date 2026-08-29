@@ -84,8 +84,12 @@ class IndexQuoteTaskTests(TestCase):
     def test_index_levels_go_out_in_yahoo_spelling_and_through_the_writer(self):
         inst = _instrument("SPX500", "index")
         fake = _fake_yf(price=7785.76)
+        # Pinned to a weekday: this asserts the Yahoo SPELLING, and a
+        # Saturday test run would otherwise have the calendar grading the
+        # symbol map.
         with patch("core.market_calendar.is_any_market_open",
                    return_value=True), \
+             patch("core.market_calendar.is_weekend", return_value=False), \
              patch.dict("sys.modules", {"yfinance": fake}):
             from market_data.tasks import fetch_index_quotes
             result = fetch_index_quotes.__wrapped__.__wrapped__()
@@ -95,6 +99,17 @@ class IndexQuoteTaskTests(TestCase):
         quote = LiveQuote.objects.get(instrument=inst)
         self.assertEqual(quote.source, "yfinance")
         self.assertEqual(quote.last, Decimal("7785.76"))
+
+    def test_the_weekend_is_a_skip_even_when_a_market_reads_open(self):
+        """Nothing in this universe trades at the weekend, and polling
+        anyway rewrites Friday's close with a fresh `updated_at` — which
+        stops the mark being flaggable as stale rather than merely old."""
+        with patch("core.market_calendar.is_any_market_open",
+                   return_value=True), \
+             patch("core.market_calendar.is_weekend", return_value=True):
+            from market_data.tasks import fetch_index_quotes
+            result = fetch_index_quotes.__wrapped__.__wrapped__()
+        self.assertEqual(result["reason"], "weekend")
 
     def test_closed_markets_are_an_intentional_skip(self):
         with patch("core.market_calendar.is_any_market_open",

@@ -376,10 +376,26 @@ def fetch_index_quotes():
     the dashboard's index strip rendered em-dashes forever. Indices have no
     bot class, so nothing here feeds execution — this is measurement.
     """
-    from core.market_calendar import is_any_market_open
+    from core.market_calendar import is_any_market_open, is_weekend
     from market_data.public_feed import yf_symbol
     from market_data.quotes import write_quote
 
+    # `is_any_market_open` is defensible here in a way it was not for
+    # stocks: this universe really is global — SPX500, DAX40, Nikkei — so
+    # there is no single session to key on, and no bot trades an index, so
+    # nothing here feeds execution.
+    #
+    # The WEEKEND is different. Nothing in this universe trades then, and
+    # polling anyway rewrites Friday's close every pass with a fresh
+    # `updated_at`, which is the fossil-refresh bug: the mark stops being
+    # flaggable as stale rather than merely being old.
+    #
+    # KNOWN REMAINDER: a DAX level re-stamped at 20:00 UTC while only US
+    # markets are open has the same shape on a smaller scale. Fixing it
+    # properly needs a per-index market map, which is a bigger change than
+    # this measurement surface justifies today.
+    if is_weekend():
+        return {"status": "skipped", "reason": "weekend"}
     if not is_any_market_open():
         return {"status": "skipped", "reason": "markets_closed"}
 

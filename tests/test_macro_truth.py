@@ -149,11 +149,42 @@ class CalendarTaskStatusTests(TestCase):
                 key=key, defaults={"name": key, "category": category,
                                    "is_enabled": True})
 
-    def _run(self, scraper_result):
+    def _run(self, scraper_result, macro_result=None):
+        """Both halves, because the task now fetches both.
+
+        Leaving the macro half unmocked let a real, keyless call decide the
+        verdict of a test about the earnings contract — the task would
+        report `warning` for a reason the test never mentioned.
+        """
         from scraping.tasks import check_economic_calendar
         with patch("scraping.scrapers.earnings_calendar."
-                   "fetch_earnings_calendar_fmp", return_value=scraper_result):
+                   "fetch_earnings_calendar_fmp",
+                   return_value=scraper_result), \
+                patch("scraping.scrapers.macro_calendar."
+                      "fetch_macro_calendar_fmp",
+                      return_value=macro_result or {"parsed": 3, "stored": 3}):
             return check_economic_calendar()
+
+    def test_a_macro_failure_is_not_averaged_away_by_a_good_earnings_run(self):
+        """The macro half failing still leaves every forex position's
+        event-risk check blind, so it must not vanish into a green run."""
+        out = self._run({"parsed": 12, "stored": 12},
+                        macro_result={"parsed": 0, "stored": 0,
+                                      "error": "403 Forbidden"})
+        self.assertEqual(out["status"], "error")
+        self.assertIn("macro", out["error"])
+
+    def test_a_macro_skip_is_reported_too(self):
+        out = self._run({"parsed": 12, "stored": 12},
+                        macro_result={"parsed": 0, "stored": 0,
+                                      "skipped": "no_api_key"})
+        self.assertEqual(out["status"], "warning")
+
+    def test_the_macro_counts_travel_with_the_result(self):
+        out = self._run({"parsed": 12, "stored": 12},
+                        macro_result={"parsed": 5, "stored": 4})
+        self.assertEqual(out["macro_parsed"], 5)
+        self.assertEqual(out["macro_stored"], 4)
 
     def test_a_scraper_error_grades_as_an_error_not_a_warning(self):
         from core.task_gate import judge_result

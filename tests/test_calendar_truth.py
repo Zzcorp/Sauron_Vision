@@ -160,9 +160,21 @@ class ThePageIsHonestAboutItsScopeTests(TestCase):
         self.user = User.objects.create_user("cal_scope_u", password="x")
         self.client.force_login(self.user)
 
-    def test_the_only_writer_is_the_earnings_scraper(self):
-        """The claim the rename rests on. If a macro ingest is ever added,
-        this test fails and the title should change back."""
+    def test_the_writers_are_the_two_calendar_scrapers(self):
+        """This fired exactly as designed.
+
+        It used to assert `earnings_calendar.py` was the ONLY writer, with
+        a docstring saying that if a macro ingest were ever added the test
+        should fail and the page title change back. A macro ingest was
+        added, it failed, and the title changed — the page now reads
+        ECONOMIC CALENDAR and its scope note follows the DATA rather than
+        the code, because a scraper that exists is not a scraper that has
+        delivered.
+
+        The tripwire is kept, widened to exactly two: a THIRD writer would
+        mean some other module is stamping rows into this table under its
+        own conventions, and the page's claim about its own scope would go
+        stale again without anyone noticing."""
         import subprocess
         root = Path(settings.BASE_DIR)
         hits = []
@@ -179,15 +191,38 @@ class ThePageIsHonestAboutItsScopeTests(TestCase):
             if "EconomicEvent.objects.create" in text or \
                "EconomicEvent.objects.update_or_create" in text:
                 hits.append(path.name)
-        self.assertEqual(sorted(hits), ["earnings_calendar.py"], hits)
+        self.assertEqual(sorted(hits),
+                         ["earnings_calendar.py", "macro_calendar.py"], hits)
 
     def test_the_title_says_what_the_pipeline_delivers(self):
-        self.assertIn("EARNINGS CALENDAR", page_source())
+        self.assertIn("ECONOMIC CALENDAR", page_source())
 
     def test_the_page_says_what_it_does_not_cover(self):
-        body = self.client.get("/calendar/").content.decode()
-        self.assertIn("FOMC", body)
-        self.assertIn("no source", body.lower())
+        """With no macro row written, the page must still say macro does
+        not appear — a scraper that EXISTS is not a scraper that has
+        DELIVERED, and promising coverage on the strength of the code
+        would replace one false claim with another."""
+        # Whitespace-normalised: the sentence wraps in the template, so a
+        # raw substring check would be asserting the line breaks rather
+        # than the claim.
+        body = " ".join(
+            self.client.get("/calendar/").content.decode().lower().split())
+        self.assertIn("fomc", body)
+        self.assertIn("never delivered", body)
+
+    def test_and_stops_saying_so_once_macro_actually_arrives(self):
+        """The claim follows the data in both directions, or the note
+        becomes the next stale thing on the page."""
+        from django.utils import timezone
+        from market_data.models import EconomicEvent
+        EconomicEvent.objects.create(
+            source="fmp_macro", title="Non-Farm Payrolls", country="US",
+            datetime=timezone.now(), impact="high",
+            currency_affected="USD")
+        body = " ".join(
+            self.client.get("/calendar/").content.decode().lower().split())
+        self.assertNotIn("never delivered", body)
+        self.assertIn("macro releases", body)
 
     def test_the_refresh_cell_states_the_real_cadence(self):
         """It said DAILY / 'fetched 06:00 UTC'. The beat runs it every 30
@@ -231,8 +266,12 @@ class OneRunOneVerdictTests(TestCase):
 
     def test_a_real_fetch_still_reports_success(self):
         from scraping.tasks import check_economic_calendar
-        with patch("scraping.scrapers.earnings_calendar.fetch_earnings_calendar_fmp",
-                   return_value={"parsed": 12, "stored": 12}):
+        with patch("scraping.scrapers.earnings_calendar."
+                   "fetch_earnings_calendar_fmp",
+                   return_value={"parsed": 12, "stored": 12}), \
+                patch("scraping.scrapers.macro_calendar."
+                      "fetch_macro_calendar_fmp",
+                      return_value={"parsed": 3, "stored": 3}):
             out = check_economic_calendar()
         self.assertEqual(out["status"], "success")
 

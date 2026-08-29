@@ -1169,9 +1169,36 @@ class AssetBot(ABC):
                                self.asset_class, e)
             return (False,
                     f"daily loss limit hit ({realized:.2f} {self.cfg.base_currency})")
+        # The POOL this config sizes from, against the account that funds
+        # it. Every limit above is a percentage of `cfg.capital`, which is
+        # a number typed into a form — so a pool declared larger than the
+        # broker's equity makes all of them looser than they read, and the
+        # heartbeat is where an operator looks when they wonder why.
+        #
+        # Cached for 15 minutes inside capital_truth, so this is not a
+        # broker round trip per tick. Never gates: it says so and lets the
+        # operator decide, which is the same posture as the other two
+        # blind notes here.
+        self._pool_note = ""
+        try:
+            from bot_program.capital_truth import broker_equity
+            equity = broker_equity(self.user, self.cfg)
+            declared = float(self.cfg.capital or 0)
+            if equity and declared > 0:
+                drift = abs(declared - equity) / equity * 100.0
+                if drift > 5.0 and declared > equity:
+                    self._pool_note = (
+                        f"pool declares {declared:,.0f} against "
+                        f"{equity:,.0f} at the broker, so every limit here "
+                        f"is {declared / equity:.1f}x looser than it reads")
+        except Exception as e:  # noqa: BLE001 — a note must never gate
+            logger.debug("[%s_bot] pool check unavailable: %s",
+                         self.asset_class, e)
+
         unchecked = [b for b in (getattr(self, "_breakers_blind", ""),
                                  getattr(self, "_book_gate_blind", ""),
-                                 getattr(self, "_pnl_gate_blind", "")) if b]
+                                 getattr(self, "_pnl_gate_blind", ""),
+                                 getattr(self, "_pool_note", "")) if b]
         if unchecked:
             return (True, "ok (UNCHECKED: " + "; ".join(unchecked) + ")")
         return (True, "ok")
@@ -1652,6 +1679,9 @@ class AssetBot(ABC):
                     # the stop. Recorded so the stop rules move THAT one
                     # rather than walking a flat list and taking whichever
                     # answers first — which on a long bracket is the target.
+                    target_leg = res.get("protectiveTargetId")
+                    if target_leg:
+                        entry_meta["protective_target_id"] = str(target_leg)
                     stop_leg = res.get("protectiveStopId")
                     if stop_leg:
                         entry_meta["protective_stop_id"] = str(stop_leg)

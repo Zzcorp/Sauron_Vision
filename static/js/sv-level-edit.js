@@ -71,11 +71,11 @@
         if (brokerHeld) {
             var warn = d.createElement("div");
             warn.className = "lvl-warn";
-            warn.textContent = "This position rests AT THE BROKER. The "
-                + "STOP moves there first — if the broker refuses, "
-                + "nothing changes and the old level still protects you. "
-                + "The TARGET cannot be moved from here yet: change it at "
-                + "the broker, or close the position.";
+            warn.textContent = "This position rests AT THE BROKER. "
+                + "Both levels move THERE first — if the broker "
+                + "refuses, nothing is written here and the old levels "
+                + "still stand. Clearing a target is not supported yet: "
+                + "remove it at the broker, or close the position.";
             dlg.appendChild(warn);
         }
 

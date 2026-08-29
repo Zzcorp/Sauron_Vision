@@ -1,22 +1,35 @@
 {% extends "base.html" %}
 {% block title %}Economic Calendar — Sauron Vision{% endblock %}
 {% comment %}
-EARNINGS, not "economic". The only writer of EconomicEvent anywhere in this
-codebase is scraping/scrapers/earnings_calendar.py, which stamps
-title="<SYMBOL> Earnings", country="US", impact="high", source="fmp". There
-is no FOMC, CPI, NFP or rate-decision ingestion — no module produces one.
-A page headed ECONOMIC CALENDAR with Forecast/Previous/Actual columns is
-therefore promising a macro feed that structurally cannot arrive, and an
-operator reading an empty table concluded the platform was broken rather
-than that it had never covered macro at all. The title says what the
-pipeline can actually deliver; the note under it says what it cannot.
+The title used to read EARNINGS CALENDAR, and the note under it said macro
+had no source — both true at the time, and deliberately so: a page headed
+ECONOMIC CALENDAR over a table that structurally could not contain FOMC or
+CPI made an operator conclude the platform was broken rather than that it
+had never covered macro at all.
+
+scraping/scrapers/macro_calendar.py now writes the macro half under
+source="fmp_macro". That makes the old note false — but "we cover macro"
+would be equally false until the scraper has actually delivered, because it
+needs a working FMP key and the endpoint may refuse a legacy plan.
+
+So the claim follows the DATA. `macro_delivered` is a row check, not a
+feature flag, and the note below says whichever of the two things is
+currently true.
 {% endcomment %}
-{% block page_title %}EARNINGS CALENDAR{% endblock %}
+{% block page_title %}ECONOMIC CALENDAR{% endblock %}
 
 {% block content %}
 <p class="cal-scope-note">
-    US issuer earnings dates, from FMP. Macro releases — FOMC, CPI, NFP —
-    have no source on this platform and do not appear here.
+    {% if calendar_source.macro_delivered %}
+        US issuer earnings dates and macro releases — FOMC, CPI, NFP —
+        from FMP.
+    {% else %}
+        US issuer earnings dates, from FMP. The macro source has never
+        delivered a row, so releases like FOMC, CPI and NFP do not appear
+        here yet — run <code>python manage.py fetch_macro_calendar</code>,
+        which will say whether the key is missing, the plan refuses the
+        endpoint, or the fortnight is genuinely quiet.
+    {% endif %}
 </p>
 <div class="oc-strip" style="margin-bottom:18px;">
     <div class="oc-strip-cell">

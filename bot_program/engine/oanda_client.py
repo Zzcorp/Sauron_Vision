@@ -318,6 +318,51 @@ class OANDATrader:
             log.error("OANDA modify_protective(%s) failed: %s", trade_id, e)
             return {"ok": False, "reason": str(e), "price": None}
 
+    def modify_target(self, trade_id: str, new_price: float) -> dict:
+        """Move the resting TAKE-PROFIT to `new_price`.
+
+        The sibling of modify_protective, and deliberately a separate
+        method rather than a flag on it. Every caller of that one is
+        moving a STOP, which is why it REFUSES a limit leg — a mover that
+        could be talked into either would put the two back in one code
+        path, and the bug it exists to prevent is exactly a stop request
+        landing on a target.
+
+        Only `takeProfit` is sent. The stop path above sends only
+        `stopLoss` and does not disturb the target, so the symmetric call
+        is safe by the same reading of the create-replace-cancel-dependent
+        endpoint: an omitted dependent order is left alone, and only an
+        explicit null cancels it.
+
+        Returns {"ok": bool, "reason": str, "price": float|None}.
+        """
+        try:
+            info = self._sess().get(
+                f"{self.base}/v3/accounts/{self.account_id}/trades/{trade_id}",
+                timeout=self.timeout)
+            instr = ""
+            if info.status_code == 200:
+                instr = ((info.json().get("trade") or {}).get("instrument")
+                         or "")
+            digits = 3 if instr.endswith("_JPY") else 5
+
+            r = self._sess().put(
+                f"{self.base}/v3/accounts/{self.account_id}"
+                f"/trades/{trade_id}/orders",
+                json={"takeProfit": {
+                    "price": f"{float(new_price):.{digits}f}",
+                    "timeInForce": "GTC"}},
+                timeout=self.timeout)
+            if r.status_code in (200, 201):
+                return {"ok": True, "reason": "",
+                        "price": round(float(new_price), digits)}
+            return {"ok": False, "price": None,
+                    "reason": f"OANDA refused ({r.status_code}): "
+                              f"{r.text[:160]}"}
+        except Exception as e:  # noqa: BLE001
+            log.error("OANDA modify_target(%s) failed: %s", trade_id, e)
+            return {"ok": False, "reason": str(e), "price": None}
+
     def closing_fill(self, trade) -> "dict | None":
         """What the broker's OWN exit actually filled at, or None.
 

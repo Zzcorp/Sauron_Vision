@@ -120,9 +120,41 @@ def fetch_social_sentiment():
 @shared_task
 @guarded_task("scraper_calendar")
 def check_economic_calendar():
-    """Tier 2: Fetch earnings calendar from FMP."""
+    """Tier 2: Fetch the earnings AND macro calendars from FMP.
+
+    Both, under one component, because both ARE the economic calendar and
+    a second component would need its own registry entry, topology node,
+    system-map edge and beat schedule to say the same thing.
+
+    They were not both here before, and the macro half is why every forex
+    position's event-risk read rendered a confident empty list through NFP,
+    CPI and FOMC: the earnings scraper is the only thing that ever wrote
+    `EconomicEvent`, and it stores the equity TICKER in
+    `currency_affected`, so the currency branch could never match a row.
+
+    The two write under different `source` values and cannot overwrite each
+    other. A failure in either is reported: the macro half failing while
+    earnings succeed still leaves the FX check blind, so it must not be
+    averaged away into a green run.
+    """
     from scraping.scrapers.earnings_calendar import fetch_earnings_calendar_fmp
+    from scraping.scrapers.macro_calendar import fetch_macro_calendar_fmp
+
     result = fetch_earnings_calendar_fmp(days_ahead=14)
+    macro = fetch_macro_calendar_fmp(days_ahead=14)
+    result = {
+        **result,
+        "macro_parsed": macro.get("parsed", 0),
+        "macro_stored": macro.get("stored", 0),
+    }
+    # The macro half's verdict is carried, not merged: an `error` from
+    # either has to reach task_gate as an error, and a `skipped` from
+    # either is a run that did not do its job.
+    if macro.get("error"):
+        result["error"] = " | ".join(
+            x for x in (result.get("error"), f"macro: {macro['error']}") if x)
+    if macro.get("skipped") and not result.get("error"):
+        result["skipped"] = result.get("skipped") or macro["skipped"]
     # The scraper's word goes LAST. This used to read {"status": "success",
     # **result}: the scraper's failure paths return an `error` key and no
     # status, so a 403, a timeout or a DNS failure kept the hardcoded

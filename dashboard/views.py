@@ -455,6 +455,13 @@ def economic_calendar(request):
 
     # Why the table is empty, when it is. See calendar_source_state.
     source_state = calendar_source_state()
+    # Whether the MACRO half has ever delivered. A page that promises FOMC
+    # coverage because a scraper now exists would replace one false claim
+    # with another: the scraper needs a working FMP key, and until it has
+    # written a row the honest answer is still "macro does not appear
+    # here". Asked of the data, not of the code.
+    source_state["macro_delivered"] = EconomicEvent.objects.filter(
+        source="fmp_macro").exists()
 
     # Countries with most events
     country_counts = defaultdict(int)

@@ -224,7 +224,21 @@ class AlpacaTrader:
                     return str(leg["id"])
             return ""
 
+        def _target_leg(payload):
+            """The id of the TAKE-PROFIT leg, by the same reasoning.
+
+            `stop` is excluded explicitly: Alpaca's `stop_limit` type
+            contains both words, and matching on "limit" alone would hand
+            the target mover a stop.
+            """
+            for leg in (payload.get("legs") or []):
+                kind = str(leg.get("type", "")).lower()
+                if "limit" in kind and "stop" not in kind and leg.get("id"):
+                    return str(leg["id"])
+            return ""
+
         stop_leg = _stop_leg(data)
+        target_leg = _target_leg(data)
 
         # Market orders return 'accepted' with a null fill price; poll briefly
         # so the recorded entry is the REAL fill, not the pre-order ticker.
@@ -235,6 +249,7 @@ class AlpacaTrader:
                                 for leg in (polled.get("legs") or [])
                                 if leg.get("id")]
                 stop_leg = stop_leg or _stop_leg(polled)
+                target_leg = target_leg or _target_leg(polled)
                 data = polled
         out = {
             "orderId": str(data.get("id", "")),
@@ -253,6 +268,8 @@ class AlpacaTrader:
             out["protectiveOrders"] = legs
             if stop_leg:
                 out["protectiveStopId"] = stop_leg
+            if target_leg:
+                out["protectiveTargetId"] = target_leg
         return out
 
     def _await_fill(self, order_id: str, attempts: int = 5,
@@ -331,6 +348,49 @@ class AlpacaTrader:
                               f"{r.text[:160]}"}
         except Exception as e:  # noqa: BLE001
             log.error("Alpaca modify_protective(%s) failed: %s", order_id, e)
+            return {"ok": False, "reason": str(e), "price": None}
+
+    def modify_target(self, order_id: str, new_price: float) -> dict:
+        """Move the resting TAKE-PROFIT to `new_price`.
+
+        The sibling of modify_protective, and deliberately a separate
+        method rather than a flag on it. Every caller of that one is
+        moving a STOP, which is why it REFUSES a limit leg — a mover that
+        could be talked into either would put the two back in one code
+        path, and the bug it exists to prevent is exactly a stop request
+        landing on a target.
+
+        Returns {"ok": bool, "reason": str, "price": float|None}.
+        """
+        try:
+            got = self._sess().get(
+                f"{self.trading_base}/v2/orders/{order_id}",
+                timeout=self.timeout)
+            if got.status_code == 404:
+                return {"ok": False, "price": None,
+                        "reason": f"leg {order_id} is gone — already filled "
+                                  f"or cancelled"}
+            got.raise_for_status()
+            kind = str((got.json() or {}).get("type", "")).lower()
+
+            # The mirror of modify_protective's refusal. A stop moved to a
+            # target price is a stop that fires immediately.
+            if "limit" not in kind or "stop" in kind:
+                return {"ok": False, "price": None,
+                        "reason": f"leg {order_id} is a {kind or 'unknown'} "
+                                  f"order, not a take-profit — refusing to "
+                                  f"move it"}
+
+            r = self._sess().patch(
+                f"{self.trading_base}/v2/orders/{order_id}",
+                json={"limit_price": str(new_price)}, timeout=self.timeout)
+            if r.status_code in (200, 204):
+                return {"ok": True, "reason": "", "price": float(new_price)}
+            return {"ok": False, "price": None,
+                    "reason": f"Alpaca refused ({r.status_code}): "
+                              f"{r.text[:160]}"}
+        except Exception as e:  # noqa: BLE001
+            log.error("Alpaca modify_target(%s) failed: %s", order_id, e)
             return {"ok": False, "reason": str(e), "price": None}
 
     def closing_fill(self, trade) -> "dict | None":

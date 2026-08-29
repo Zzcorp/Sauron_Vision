@@ -153,42 +153,69 @@ def adjust_levels(user, trade, stop=None, target=None, clear_target=False):
         protected = bool((fresh.metadata or {}).get("protected"))
         broker_note = ""
 
-        if protected and (target is not None or clear_target):
-            # THE SAME RULE THIS MODULE STATES FOR THE STOP, applied to the
-            # target — which it was not. The target write below sits outside
-            # the protected check entirely, so raising a target on an Alpaca
-            # bracket, an IBKR bracket or an OANDA takeProfitOnFill returned
-            # ok=true, changed the row, wrote an audit entry claiming an
-            # "in-place" broker modification that never happened, and left
-            # the broker's original limit resting where it was. The position
-            # is then taken out at the OLD level. Clearing is worse: the row
-            # shows no target while the broker's still fills.
+        # ORDER MATTERS, and so does admitting a partial. Each leg is a
+        # separate broker call, so if the first lands and the second is
+        # refused, something HAS changed at the venue — and the old message
+        # said "Nothing was changed", which would be a lie the operator
+        # acts on.
+        target_moved = False
+
+        if protected and target is not None:
+            # STAGE TWO. This was a flat refusal, honest while no client
+            # could move a target — no longer true. The leg moves at the
+            # BROKER first and the row is written only if that worked,
+            # exactly as the stop does.
+            moved, target_note = _move_broker_target(user, fresh, target)
+            if not moved:
+                return {"ok": False,
+                        "error": f"The target rests at the broker and could "
+                                 f"not be moved ({target_note}). Nothing "
+                                 f"was changed — the position still has its "
+                                 f"old target."}
+            target_moved = True
+            broker_note = (f"{broker_note}; {target_note}" if broker_note
+                           else target_note)
+
+        if protected and clear_target:
+            # REFUSED, deliberately, and this is not the same operation as
+            # moving one. Cancelling a dependent order is a different call
+            # from replacing it on every venue here — OANDA wants an
+            # explicit null, Alpaca a DELETE on the leg — and a
+            # half-implemented clear is the worst outcome available: the
+            # row would show no target while the broker's still fills.
             #
-            # Nothing bot-side covers the gap either — protected rows skip
-            # bot-side SL/TP management altogether, so the new number would
-            # be enforced by nothing, anywhere.
-            #
-            # A refusal is not the capability, and it is not meant to be.
-            # It is the difference between an operator who knows their
-            # target is unchanged and one who believes it moved.
+            # A refusal is not the capability and is not meant to be. It is
+            # the difference between an operator who knows their target is
+            # unchanged and one who believes it is gone.
             return {"ok": False,
                     "error": "This position's target rests at the broker "
-                             "and cannot be moved from here yet. Change it "
-                             "at the broker, or close the position. Nothing "
-                             "was changed."}
+                             "and clearing it from here is not supported "
+                             "yet. Remove it at the broker, or close the "
+                             "position. Nothing was changed."}
+
 
         if protected and stop is not None:
             # The broker leg FIRST. Moving only our copy would leave the
             # row claiming a stop the broker never heard of — the
             # operator would believe they were protected at a level that
             # does not exist anywhere but this database.
-            moved, broker_note = _move_broker_stop(user, fresh, stop)
+            moved, stop_note = _move_broker_stop(user, fresh, stop)
             if not moved:
+                # If the target already moved, the venue is NOT where it
+                # was, and the row has not been written — so the operator
+                # must be told which half landed or they will read this as
+                # "try again from scratch".
+                partial = (" The target WAS moved at the broker and the row "
+                           "was not updated to match — re-open this dialog "
+                           "and check both levels."
+                           if target_moved else
+                           " Nothing was changed — the position is still "
+                           "protected at its old level.")
                 return {"ok": False,
                         "error": f"The stop rests at the broker and could "
-                                 f"not be moved ({broker_note}). Nothing "
-                                 f"was changed — the position is still "
-                                 f"protected at its old level."}
+                                 f"not be moved ({stop_note})." + partial}
+            broker_note = (f"{broker_note}; {stop_note}" if broker_note
+                           else stop_note)
 
         fields = []
         if stop is not None:
@@ -244,19 +271,39 @@ def _now_iso():
 
 def _move_broker_stop(user, trade, stop):
     """Move the resting stop leg. Returns (moved, note)."""
+    return _move_broker_leg(user, trade, stop, leg="stop")
+
+
+def _move_broker_target(user, trade, target):
+    """Move the resting take-profit leg. Returns (moved, note)."""
+    return _move_broker_leg(user, trade, target, leg="target")
+
+
+def _move_broker_leg(user, trade, price, *, leg: str):
+    """Move one resting protective leg at the broker.
+
+    Both legs share this because they share the hard part — the handle
+    precedence — and NOT because they share a mover. Each venue exposes a
+    separate `modify_protective` / `modify_target`, and each refuses the
+    other's leg type, so a stop request can never land on a target however
+    the handles are ordered. That refusal is the whole safety property;
+    routing them through one function here does not weaken it.
+    """
     try:
         from bot_program.engine.broker_router import client_for_symbol
         client = client_for_symbol(user, trade.symbol, trade.config)
     except Exception as e:  # noqa: BLE001
         return False, f"broker unreachable: {e}"
 
-    mover = getattr(client, "modify_protective", None)
+    method = "modify_protective" if leg == "stop" else "modify_target"
+    mover = getattr(client, method, None)
     if not callable(mover):
         # Named rather than silently falling back to a row-only write:
         # this broker cannot move a resting order, and pretending
         # otherwise is how a row starts disagreeing with the venue.
-        return False, ("this broker cannot modify a resting order yet — "
-                       "close and re-open to change a broker-held stop")
+        return False, (f"this broker cannot modify a resting order yet "
+                       f"— close and re-open to change a broker-held "
+                       f"{leg}")
 
     meta = trade.metadata or {}
     # The same precedence the bot's own stop rules use (asset_engine/base.py):
@@ -266,7 +313,9 @@ def _move_broker_stop(user, trade, stop):
     # "no protective leg". Then a NAMED stop leg, where the venue said which
     # one it is. The flat list last, because it does not say — and on Alpaca
     # its first entry is the TAKE-PROFIT.
-    handle = meta.get("protective_trade_id") or meta.get("protective_stop_id")
+    named = ("protective_stop_id" if leg == "stop"
+             else "protective_target_id")
+    handle = meta.get("protective_trade_id") or meta.get(named)
     ids = [handle] if handle else (meta.get("protective_order_ids") or [])
     if not ids:
         return False, "the row records no resting protective orders"
@@ -274,7 +323,7 @@ def _move_broker_stop(user, trade, stop):
     last = "no leg matched"
     for oid in ids:
         try:
-            res = mover(str(oid), float(stop))
+            res = mover(str(oid), float(price))
         except Exception as e:  # noqa: BLE001
             last = str(e)
             continue
