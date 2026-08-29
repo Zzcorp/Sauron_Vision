@@ -27,8 +27,13 @@ class Command(BaseCommand):
                 "until FMP_API_KEY is set." % out["skipped"]))
             return
         if out.get("error"):
+            # Scrubbed explicitly: this goes to stderr, which never passes
+            # through a logging handler, and the string is built from
+            # `raise_for_status()` messages that carry the full URL —
+            # including the apikey that authenticated the call.
+            from core.secret_scrub import scrub
             self.stderr.write(self.style.ERROR(
-                "FAILED: %s" % out["error"]))
+                "FAILED: %s" % scrub(out["error"])))
             return
         self.stdout.write(self.style.SUCCESS(
             "parsed %s, stored %s high/low-impact events"

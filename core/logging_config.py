@@ -78,6 +78,13 @@ def build_logging_config(debug: bool = True) -> dict:
         "correlation_id": {
             "()": "core.middleware.CorrelationIdFilter",
         },
+        # On the HANDLER, so no logger anywhere can opt out by forgetting.
+        # `raise_for_status()` builds its message from the full URL with the
+        # query string, so any authenticated call that 4xxs writes its own
+        # key to the logs unless something strips it on the way out.
+        "secret_scrub": {
+            "()": "core.secret_scrub.SecretScrubFilter",
+        },
     }
 
     # ------------------------------------------------------------------
@@ -89,7 +96,7 @@ def build_logging_config(debug: bool = True) -> dict:
         "console": {
             "class": "logging.StreamHandler",
             "formatter": console_formatter,
-            "filters": ["correlation_id"],
+            "filters": ["correlation_id", "secret_scrub"],
         },
     }
 

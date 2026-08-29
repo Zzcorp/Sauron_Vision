@@ -104,3 +104,78 @@ class TheComponentRowNeverStoresOneTests(TestCase):
         c.mark_run(success=True, message="stored 42 rows")
         c.refresh_from_db()
         self.assertEqual(c.last_message, "stored 42 rows")
+
+
+class TheLogsAreScrubbedAtTheHandlerTests(SimpleTestCase):
+    """`scrub()` existed and was wired into exactly ONE place — the
+    component row's `last_message`. This module's docstring claimed it kept
+    keys out of "every log line that echoed it", and that was never true.
+
+    A fresh FMP key reached a terminal and the container's JSON logs within
+    minutes of being rotated, because the macro scraper logged a
+    `raise_for_status()` message and nothing stripped it. That is not a gap
+    any one caller can close: the author who forgets is the one who leaks.
+    So it lives on the HANDLER, where every record passes.
+    """
+
+    KEY = "0W9ruyQL8fX2YZi6On5iMXM6cwMK8gM3"      # shape only, rotated out
+    URL = ("https://financialmodelingprep.com/stable/economic-calendar"
+           "?from=2026-08-29&to=2026-09-12&apikey=" + KEY)
+
+    def _emit(self, *args):
+        import io
+        import logging
+        from core.secret_scrub import SecretScrubFilter
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        handler.addFilter(SecretScrubFilter())
+        log = logging.getLogger("scrub_probe_%d" % id(args))
+        log.handlers = [handler]
+        log.propagate = False
+        log.setLevel(logging.ERROR)
+        log.error(*args)
+        return buf.getvalue()
+
+    def test_a_key_in_the_message_is_redacted(self):
+        out = self._emit("FMP error: 402 for url: " + self.URL)
+        self.assertNotIn(self.KEY, out)
+        self.assertIn("apikey=***", out)
+
+    def test_a_key_in_an_INTERPOLATION_ARG_is_redacted(self):
+        """`logger.error("failed: %s", url)` keeps the key in `args` until
+        the formatter runs — scrubbing only `msg` would miss the commonest
+        shape in this codebase."""
+        out = self._emit("failed: %s", self.URL)
+        self.assertNotIn(self.KEY, out)
+
+    def test_a_key_inside_an_EXCEPTION_arg_is_redacted(self):
+        """The actual shape: `except Exception as e: log.error("...: %s", e)`
+        where the exception is a requests HTTPError carrying the full URL."""
+        out = self._emit("boom: %s", RuntimeError("403 for url: " + self.URL))
+        self.assertNotIn(self.KEY, out)
+
+    def test_the_rest_of_the_line_survives(self):
+        out = self._emit("FMP error: 402 Payment Required for url: " + self.URL)
+        self.assertIn("402", out)
+        self.assertIn("economic-calendar", out)
+
+    def test_the_filter_never_swallows_a_line_it_cannot_scrub(self):
+        """A logging filter that raises destroys the error it was meant to
+        protect, which is a worse outcome than the leak."""
+        import logging
+        from core.secret_scrub import SecretScrubFilter
+
+        class Awkward:
+            def __str__(self):
+                raise ValueError("unrenderable")
+
+        rec = logging.LogRecord("x", logging.ERROR, __file__, 1,
+                                "msg %s", (Awkward(),), None)
+        self.assertTrue(SecretScrubFilter().filter(rec))
+
+    def test_the_console_handler_actually_carries_the_filter(self):
+        """Wiring it and never attaching it would pass every test above."""
+        from core.logging_config import build_logging_config
+        cfg = build_logging_config(debug=False)
+        self.assertIn("secret_scrub", cfg["filters"])
+        self.assertIn("secret_scrub", cfg["handlers"]["console"]["filters"])

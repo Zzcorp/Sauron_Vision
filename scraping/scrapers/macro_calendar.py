@@ -161,7 +161,12 @@ def fetch_macro_calendar_fmp(days_ahead: int = 14) -> dict:
         failures.append(f"{label}: {note or 'unexpected payload'}")
 
     if data is None:
-        detail = " | ".join(failures) or "no endpoint answered"
+        # Scrubbed AT THE SOURCE as well as in the log filter. This
+        # string is returned to the caller, stored on the component row and
+        # rendered on the health page; defence in depth is cheap here and
+        # the cost of missing one surface is a published credential.
+        from core.secret_scrub import scrub
+        detail = scrub(" | ".join(failures) or "no endpoint answered")
         # ERROR, not warning. A macro calendar that cannot be read leaves
         # the FX event check blind, and the blind marker in position_review
         # only knows to fire because this table stays empty — so the reason

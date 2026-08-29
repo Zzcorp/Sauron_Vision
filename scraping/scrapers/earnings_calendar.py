@@ -174,7 +174,10 @@ def fetch_earnings_calendar_fmp(days_ahead=14):
         failures.append(f"{label}: {note or 'unexpected payload'}")
 
     if data is None:
-        detail = " | ".join(failures) or "no endpoint answered"
+        # Same reasoning as macro_calendar: this detail is returned and
+        # rendered, and it is built from raise_for_status() messages.
+        from core.secret_scrub import scrub
+        detail = scrub(" | ".join(failures) or "no endpoint answered")
         logger.error("FMP earnings calendar error: %s", detail)
         return {"parsed": 0, "stored": 0, "error": detail}
     if used != FMP_CALENDAR_ENDPOINTS[0][0]:

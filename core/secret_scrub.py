@@ -13,6 +13,7 @@ a credential, and any value the deployment itself declares secret. The
 first catches the case above for every vendor at once; the second
 catches a key pasted into a body or a header dump.
 """
+import logging
 import os
 import re
 
@@ -73,3 +74,46 @@ def scrub(text) -> str:
     except Exception:  # pragma: no cover - never lose the message
         return s
     return s
+
+
+class SecretScrubFilter(logging.Filter):
+    """Redact credentials from every log record, wherever it came from.
+
+    `scrub()` existed and was wired into exactly ONE place: the component
+    row's `last_message`. This module's own docstring claimed it kept keys
+    out of "every log line that echoed it", and that was never true — the
+    logs carried the full URL, query string and key the whole time, and a
+    `raise_for_status()` message reaches them by default.
+
+    That is not a gap one caller can close. A scraper author has to
+    remember to scrub, and the one who forgets is the one who leaks; the
+    macro calendar shipped without it and put a freshly-rotated key into a
+    terminal and the container's JSON logs within minutes of the rotation.
+
+    So it belongs on the HANDLER. A filter sees every record from every
+    logger, including third-party libraries that never heard of this
+    codebase, and it applies to `msg` and to the interpolation `args`
+    both — because `logger.error("failed: %s", exc)` keeps the key in
+    `args` until the formatter runs.
+
+    Never raises: a logging filter that throws takes down the log line it
+    was meant to protect, and losing the error is its own failure.
+    """
+
+    def filter(self, record):  # noqa: A003 - logging's own name
+        try:
+            if isinstance(record.msg, str) and record.msg:
+                record.msg = scrub(record.msg)
+            if record.args:
+                if isinstance(record.args, dict):
+                    record.args = {
+                        k: (scrub(v) if isinstance(v, str) else v)
+                        for k, v in record.args.items()}
+                else:
+                    record.args = tuple(
+                        scrub(a) if isinstance(a, str) else
+                        (scrub(str(a)) if isinstance(a, BaseException) else a)
+                        for a in record.args)
+        except Exception:  # noqa: BLE001 - see the docstring
+            pass
+        return True
