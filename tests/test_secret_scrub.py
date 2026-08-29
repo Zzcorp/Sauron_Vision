@@ -18,13 +18,21 @@ from django.test import SimpleTestCase, TestCase
 
 class TheKeyNeverReachesTheMessageTests(SimpleTestCase):
     def test_the_real_leak_is_redacted(self):
-        """The exact message that appeared on the health page."""
+        """The shape of the message that appeared on the health page.
+
+        The key here is SYNTHETIC. This test was first written with the
+        real one pasted in verbatim — "the exact message" — which put a
+        live credential into a public repository, in the very commit
+        that fixed the leak it came from. A fixture only has to have the
+        right SHAPE; it never has to be real, and a test that needs a
+        working secret to be meaningful is a test to rewrite.
+        """
         from core.secret_scrub import scrub
         msg = ("403 Client Error: Forbidden for url: "
                "https://financialmodelingprep.com/api/v3/earning_calendar"
-               "?from=2026-08-27&to=2026-09-10&apikey=jiXVeSMzuDSQuMzDRVoMLs19A5Co")
+               "?from=2026-08-27&to=2026-09-10&apikey=SYNTHETIC0KEY0FOR0THIS0TEST0")
         out = scrub(msg)
-        self.assertNotIn("jiXVeSMzuDSQuMzDRVoMLs19A5Co", out)
+        self.assertNotIn("SYNTHETIC0KEY0FOR0THIS0TEST0", out)
         self.assertIn("apikey=***", out)
 
     def test_the_rest_of_the_message_survives(self):
