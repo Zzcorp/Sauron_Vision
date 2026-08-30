@@ -7249,3 +7249,74 @@ body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
     color: var(--accent-gold-ink, var(--accent-gold)); }
 .lvl-err { font-size: 10px; margin-top: 8px; line-height: 1.4;
     color: var(--accent-red); }
+
+/* ── DEAL TICKET ────────────────────────────────────────────────────
+   The price belongs ON the button that trades at it. LONG lifts the
+   ASK and SHORT hits the BID, and the spread between them is the
+   first cost of the decision those two buttons take — which the page
+   already said in a comment while rendering the three numbers as
+   loose cells in a strip BESIDE the buttons, leaving the operator to
+   pair them up by eye at the moment of committing money.
+
+   One control: two sides that trade, one middle that prices them.
+   Tokens only past the CARD CONTAINMENT marker. */
+.sv-ticket {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--bg-card);
+    font-family: var(--font-mono);
+    vertical-align: middle;
+}
+.tk-side {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 104px;
+    padding: 5px 14px;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    transition: background .15s ease;
+}
+.tk-lbl { font-size: 9px; letter-spacing: .18em; }
+.tk-px  { font-size: 14px; font-weight: 700; line-height: 1.1; }
+.tk-long  .tk-lbl, .tk-long  .tk-px { color: var(--accent); }
+.tk-short .tk-lbl, .tk-short .tk-px { color: var(--accent-red); }
+.tk-long:hover  { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.tk-short:hover { background: color-mix(in srgb, var(--accent-red) 14%, transparent); }
+.tk-side:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tk-side[disabled] { cursor: default; opacity: .55; }
+.tk-side[disabled]:hover { background: transparent; }
+/* The middle is not a button — nothing trades at the spread. */
+.tk-mid {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 5px 12px;
+    background: var(--bg-void);
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+}
+.tk-k { font-size: 8.5px; letter-spacing: .16em; color: var(--text-muted); }
+.tk-v { font-size: 11px; color: var(--text-secondary); }
+/* A quote too old to trade on stops claiming a price. The buttons stay
+   visible and stay clickable — the ticket prices at execution, not off
+   this label — but they must not print a number nobody stands behind. */
+.sv-ticket.tk-stale .tk-px,
+.sv-ticket.tk-stale .tk-v { color: var(--text-muted); }
+.sv-ticket.tk-stale { border-style: dashed; }
+/* The compact variant, for the expanded chart where it overlays the
+   tape rather than sitting in a header. */
+.sv-ticket--sm .tk-side { min-width: 78px; padding: 3px 10px; }
+.sv-ticket--sm .tk-px   { font-size: 11.5px; }
+.sv-ticket--sm .tk-lbl  { font-size: 8px; }
+.sv-ticket--sm .tk-mid  { padding: 3px 8px; }
+.sv-ticket--sm .tk-k    { font-size: 7.5px; }
+.sv-ticket--sm .tk-v    { font-size: 9.5px; }

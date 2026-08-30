@@ -1,0 +1,44 @@
+{% load sauron_tags %}
+{% comment %}
+The deal ticket — SHORT at the bid, the spread, LONG at the ask.
+
+The price rides the button that trades at it. LONG lifts the ASK and
+SHORT hits the BID, so pairing them by eye was work the operator was
+doing at the exact moment they were committing money.
+
+Used in two places and identical in both: the instrument header, and an
+overlay on the expanded chart. `data-dq` are the live hooks — sv-
+instrument-live.js repaints EVERY one of them on the page, which is why
+two tickets can coexist without either going stale.
+
+  symbol   — required, the instrument symbol
+  quote    — the LiveQuote (may be None; the ticket degrades to em-dashes)
+  klass    — extra classes, e.g. "sv-ticket--sm"
+  decimals — how many places prices carry, for the live repaint
+
+A missing side renders the muted em-dash, never a zero: the house rule
+is that unknown is not a number, and it matters most here, where the
+number sits on a button that opens a position.
+{% endcomment %}
+<div class="sv-ticket {{ klass }}"
+     data-ticket="{{ symbol }}"
+     data-decimals="{{ decimals|default:'2' }}">
+    <button type="button" class="tk-side tk-short"
+            title="SHORT {{ symbol }} — hits the bid"
+            aria-label="Short {{ symbol }} at the bid"
+            onclick="window.svTakeTradeAsset && window.svTakeTradeAsset('{{ symbol|escapejs }}', 'SELL');">
+        <span class="tk-lbl">▼ SHORT</span>
+        <span class="tk-px" data-dq="bid">{% if quote.bid %}{% px quote.bid asset_class symbol %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
+    </button>
+    <span class="tk-mid">
+        <span class="tk-k">SPREAD</span>
+        <span class="tk-v" data-dq="spread">{% if quote.bid and quote.ask %}{% px quote.spread asset_class symbol %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
+    </span>
+    <button type="button" class="tk-side tk-long"
+            title="LONG {{ symbol }} — lifts the ask"
+            aria-label="Long {{ symbol }} at the ask"
+            onclick="window.svTakeTradeAsset && window.svTakeTradeAsset('{{ symbol|escapejs }}', 'BUY');">
+        <span class="tk-lbl">▲ LONG</span>
+        <span class="tk-px" data-dq="ask">{% if quote.ask %}{% px quote.ask asset_class symbol %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
+    </button>
+</div>

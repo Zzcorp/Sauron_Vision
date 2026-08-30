@@ -41,8 +41,60 @@
 
   var prevPrice = null; /* flash on VALUE change, never on format drift */
 
+  /* Beyond this a quote is a fossil, not a price. Same bound the signal
+     lifecycle uses for a LiveQuote before it falls back to bars. */
+  var STALE_S = 900;
+  var prevDq = {};
+
+  /* Bid, ask and spread. These carried `data-dq` hooks from the day they
+     were added and NOTHING ever wrote to them — server-rendered at first
+     paint and frozen for the life of the tab. Survivable while they sat
+     in a stats row; not survivable now that they ride the buttons that
+     trade on them, which is why the ticket refuses to print a number it
+     cannot stand behind.
+
+     querySelectorAll, not querySelector: the page carries TWO tickets —
+     the header's and the expanded chart's overlay — and a repaint that
+     found only the first would leave the other one lying. */
+  function paintDq(d) {
+    var stale = d.quote_age_seconds != null && d.quote_age_seconds > STALE_S;
+    document.querySelectorAll('.sv-ticket').forEach(function (tk) {
+      tk.classList.toggle('tk-stale', stale);
+    });
+    ['bid', 'ask', 'spread'].forEach(function (k) {
+      var raw = d[k];
+      var nodes = document.querySelectorAll('[data-dq="' + k + '"]');
+      if (!nodes.length) return;
+      nodes.forEach(function (el) {
+        if (raw == null || raw === '') {
+          /* The house rule, and it matters most here: unknown renders as
+             a muted em-dash, never as a zero. A 0.00 on a BUY button is
+             a price claim nobody made. */
+          el.innerHTML = '<span class="sv-unknown">—</span>';
+          return;
+        }
+        var dp = parseInt(
+          (el.closest('[data-decimals]') || {}).getAttribute
+            ? el.closest('[data-decimals]').getAttribute('data-decimals')
+            : '', 10);
+        var txt = isNaN(dp) ? String(raw) : Number(raw).toFixed(dp);
+        if (el.textContent !== txt) {
+          el.textContent = txt;
+          if (prevDq[k] != null && prevDq[k] !== txt) flash(el);
+        }
+      });
+      prevDq[k] = raw == null ? null : String(raw);
+    });
+  }
+
   function paintQuote(d) {
-    if (!d || d.error || d.price == null) return;
+    if (!d || d.error) return;
+    /* BEFORE the price guard below. A row can carry a bid and an ask with
+       no `last` — and the ticket trades off those two, so letting a
+       missing last suppress them would freeze the only numbers on the
+       buttons. */
+    paintDq(d);
+    if (d.price == null) return;
     var price = Number(d.price);
     /* toFixed matches the server's floatformat:4 byte for byte — the
        first poll must not rewrite an unchanged price into a different

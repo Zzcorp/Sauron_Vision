@@ -207,6 +207,40 @@ Optional page data (json_script blocks the widget picks up when present):
 .sv-chart-measure .sv-m-up { color: var(--accent, #00e868); }
 .sv-chart-measure .sv-m-dn { color: var(--danger, #ff4d4d); }
 .sv-chart-measure .sv-m-dim { color: var(--text-muted, #5a7a5a); }
+/* The deal ticket overlay — expanded states only. Hidden at normal size
+   because the instrument header carries its own two inches above; shown
+   once the card covers that header and there is nothing else on screen
+   to trade with. */
+.sv-chart-ticket {
+    display: none;
+    position: absolute;
+    top: calc(var(--sv-toolbar-h, 36px) + 8px);
+    right: 8px;
+    z-index: 6;
+    align-items: center;
+    gap: 8px;
+}
+.sv-candle-container.sv-chart-tall .sv-chart-ticket,
+.sv-candle-container.sv-chart-fs .sv-chart-ticket { display: flex; }
+/* Small, and deliberately quieter than the two sides — it asks a
+   question, it does not take a position. */
+.sv-chart-ask {
+    align-self: stretch;
+    padding: 3px 10px;
+    border: 1px solid var(--border, #1a2e1a);
+    border-radius: var(--radius-md, 6px);
+    background: var(--bg-card, #0a1a14);
+    color: var(--text-muted, #5a7a5a);
+    font-family: var(--font-mono, monospace);
+    font-size: 9px;
+    letter-spacing: .16em;
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+}
+.sv-chart-ask:hover {
+    color: var(--accent, #00e868);
+    border-color: var(--accent, #00e868);
+}
 .sv-chart-legend {
     position: absolute;
     top: calc(var(--sv-toolbar-h, 36px) + 8px);
@@ -372,6 +406,31 @@ Optional page data (json_script blocks the widget picks up when present):
             <button class="sv-chart-btn" data-tool="clear" title="Clear drawings">&#10005;</button>
         </div>
     </div>
+
+    {% if ticket %}
+    {% comment %}
+    The deal ticket, EXPANDED STATES ONLY. At normal size the instrument
+    header's own ticket is two inches away and a second one would be
+    clutter; expanded, the card covers the header and there is nothing on
+    screen to trade with — which is exactly when an operator has just
+    enlarged the chart to decide something.
+
+    An overlay rather than more toolbar: that toolbar already carries
+    forty controls and wraps to two rows, which is what was clipping the
+    time axis. Adding to it would buy the ticket by making the chart
+    worse.
+
+    It rides inside the container, so the portal takes it along, and it
+    sits BELOW the drawing surface in z-order but above the canvas.
+    {% endcomment %}
+    <div class="sv-chart-ticket">
+        {% include "_partials/deal_ticket.html" with symbol=symbol quote=quote asset_class=asset_class decimals=decimals klass="sv-ticket--sm" %}
+        <button type="button" class="sv-chart-ask"
+                data-ask-sauron="{{ symbol }}" data-ask-kind="instrument"
+                title="Ask Sauron about {{ symbol }}"
+                aria-label="Ask Sauron about {{ symbol }}">▸ ASK</button>
+    </div>
+    {% endif %}
 
     <!-- Chart canvas -->
     <div class="sv-chart-body" id="{{ chart_id }}" style="height: calc({{ height }}px - 36px);"></div>

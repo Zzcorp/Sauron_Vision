@@ -132,11 +132,26 @@ class BidAskSitsBesideTheButtonsThatUseItTests(TestCase):
         self.assertIn('data-dq="spread"', body)
         self.assertIn("0.04", body)
 
-    def test_a_quote_with_no_book_shows_no_row(self):
+    def test_a_quote_with_no_book_prices_nothing(self):
+        """The book moved ONTO the buttons, so the row can no longer be
+        hidden when there is no book — the buttons have to stay, because
+        an instrument with no quoted spread is still tradeable and the
+        ticket prices at execution, not off this label.
+
+        What must not happen is a fabricated number. The side renders the
+        muted em-dash, never a zero: a 0.00 on a BUY button is a price
+        claim nobody made."""
         from market_data.models import LiveQuote
         LiveQuote.objects.filter(instrument=self.inst).update(bid=None, ask=None)
         body = self.client.get("/instruments/BRNUSD/").content.decode()
-        self.assertNotIn('data-dq="bid"', body)
+        # The hook survives — it is what the live repaint writes into.
+        self.assertIn('data-dq="bid"', body)
+        head = body.split("dtl-actions")[1][:1600]
+        self.assertIn("sv-unknown", head)
+        self.assertNotIn(">0.00<", head)
+        # And both sides are still there to trade with.
+        self.assertIn("tk-short", head)
+        self.assertIn("tk-long", head)
 
     def test_the_spread_property_is_none_without_both_sides(self):
         from market_data.models import LiveQuote
@@ -257,9 +272,16 @@ class TheHeaderIsTwoRowsNotFourTests(TestCase):
         body = self.client.get("/instruments/BRNUSD/").content.decode()
         self.assertIn("detail-meta-inline", body)
 
-    def test_the_book_sits_beside_the_buttons(self):
+    def test_the_book_sits_on_the_buttons(self):
+        """It used to sit BESIDE them as a loose strip, which left the
+        operator pairing a side with its price by eye at the moment of
+        committing money. LONG carries the ask, SHORT carries the bid."""
         body = self.client.get("/instruments/BRNUSD/").content.decode()
-        self.assertIn("dtl-quote-inline", body)
+        self.assertIn("sv-ticket", body)
+        short = body.split("tk-short", 1)[1].split("</button>", 1)[0]
+        long_ = body.split("tk-long", 1)[1].split("</button>", 1)[0]
+        self.assertIn('data-dq="bid"', short)
+        self.assertIn('data-dq="ask"', long_)
 
     def test_the_live_price_spans_keep_their_names(self):
         """sv-instrument-live.js holds references to these two by class;

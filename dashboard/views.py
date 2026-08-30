@@ -4515,11 +4515,31 @@ def instrument_preview_api(request, symbol):
     price = None
     change_pct = 0
     volume = None
+    bid = ask = spread = None
+    age = None
     try:
         quote = inst.live_quote
         price = str(quote.last)
-        change_pct = float(quote.change_pct)
+        # `change_pct` is nullable and this used to be a bare float() inside
+        # the same try as the price — so a quote that had never been given a
+        # change threw here and the caller got NO PRICE at all, from a row
+        # that had one.
+        change_pct = float(quote.change_pct) if quote.change_pct is not None else 0
         volume = str(quote.volume) if quote.volume else None
+        # Bid, ask and the spread between them. The template has rendered
+        # these into `data-dq` hooks since e0f3959 and NOTHING has ever
+        # repainted them — they were frozen at page load, which was
+        # survivable while they sat in a stats row and is not now that they
+        # ride the buttons that trade on them.
+        bid = str(quote.bid) if quote.bid is not None else None
+        ask = str(quote.ask) if quote.ask is not None else None
+        if quote.bid is not None and quote.ask is not None:
+            spread = str(quote.spread)
+        # How old the row is, so the client can refuse to print a price it
+        # cannot stand behind onto a BUY button. Unmeasured is not zero and
+        # a fossil is not a quote.
+        if quote.updated_at:
+            age = int((timezone.now() - quote.updated_at).total_seconds())
     except Exception:
         pass
 
@@ -4534,6 +4554,10 @@ def instrument_preview_api(request, symbol):
         "price": price,
         "change_pct": change_pct,
         "volume": volume,
+        "bid": bid,
+        "ask": ask,
+        "spread": spread,
+        "quote_age_seconds": age,
         "active_signals": active_signals,
     })
 
