@@ -459,3 +459,112 @@ class TakeTradeEndpointTests(TestCase):
             data="{}", content_type="application/json",
             HTTP_HOST="127.0.0.1")
         self.assertEqual(resp.status_code, 302)
+
+
+class TheManualLaneAsksTheCostFilterTooTests(TestCase):
+    """Two lanes, one arithmetic, opposite answers.
+
+    Every BOT entry is cost-filtered — `base.py` skips it as COST_FILTER.
+    On the manual path `validate_levels` runs the same `passes_cost_filter`,
+    but ONLY `if level_overrides`, justified by a comment saying the
+    untouched defaults "come from machinery that already respects this
+    band". They do not. The signal branch copies `suggested_stop` and
+    `suggested_target` verbatim from whatever wrote the Signal, and
+    `stop_and_target` enforces a stop-DISTANCE band, never a cost ratio.
+
+    So a hand-taken ticket whose target sits inside its own round trip was
+    takeable, while the identical bot ticket was skipped. On FX — 2bp
+    assumed cost against daily ranges of 0.07-0.18% — that is the whole
+    difference between a winner and a scratch.
+
+    It WARNS. Refusing would change what the button takes today, and a
+    person scalping half the ATR on purpose is making a real choice.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user("cost_u", password="x")
+
+    def setUp(self):
+        self.inst = _quote("EURUSD", "1.1000", asset_class="forex")
+
+    def _preview_with(self, *, stop, target):
+        from bot_program.manual_trade import _preview
+        sig = _signal(self.inst, entry="1.1000", stop=stop, target=target)
+        return _preview(self.user, self.inst, "BUY", signal=sig)
+
+    def test_a_target_inside_the_round_trip_is_flagged(self):
+        # move 0.045% of notional against a 0.02% round trip clears the
+        # gross 2x edge test, but 1R is 0.18% — so net R:R collapses.
+        p = self._preview_with(stop="1.0980", target="1.1005")
+        if "error" in p:
+            self.skipTest(f"no forex preview in this environment: {p}")
+        self.assertFalse(p["cost_advisory"]["ok"])
+        self.assertIn("round trip", p["cost_advisory"]["reason"])
+
+    def test_but_it_is_a_warning_and_not_a_refusal(self):
+        """The whole posture of this lane. If this ever starts erroring,
+        the control has changed what the button takes."""
+        p = self._preview_with(stop="1.0980", target="1.1005")
+        if "cost_advisory" not in p:
+            self.skipTest(f"no forex preview in this environment: {p}")
+        self.assertNotIn("error", p)
+        self.assertGreater(p["qty"], 0)
+
+    def test_healthy_levels_pass_it(self):
+        p = self._preview_with(stop="1.0900", target="1.1300")
+        if "error" in p:
+            self.skipTest(f"no forex preview in this environment: {p}")
+        self.assertTrue(p["cost_advisory"]["ok"])
+        self.assertEqual(p["cost_advisory"]["reason"], "")
+
+    def test_the_verdict_is_recorded_on_the_trade(self):
+        """An override nobody recorded cannot be reviewed afterwards —
+        the same rule its siblings book_limit/concentration/theme follow."""
+        from bot_program.manual_trade import execute_take_trade
+        from bot_program.models import AssetBotTrade
+
+        sig = _signal(self.inst, entry="1.1000", stop="1.0980",
+                      target="1.1005")
+        res = execute_take_trade(self.user, sig)
+        if res.get("error"):
+            self.skipTest(f"no forex execution in this environment: {res}")
+        trade = AssetBotTrade.objects.get(pk=res["trade_id"])
+        self.assertIn("cost_at_entry", trade.metadata)
+        self.assertFalse(trade.metadata["cost_at_entry"]["ok"])
+        self.assertIn("round trip", trade.metadata["cost_at_entry"]["reason"])
+
+
+class CostAndThemeReachThePopupTests(TestCase):
+    """A verdict the server computes and the popup never renders is a
+    verdict nobody acts on — the same lesson as the level-editor <script>
+    that sat past the final {% endblock %} and was silently discarded."""
+
+    @staticmethod
+    def _base_html():
+        from pathlib import Path
+        from django.conf import settings
+        return (Path(settings.BASE_DIR) / "templates" / "base.html").read_text(
+            encoding="utf-8")
+
+    def test_the_cost_advisory_is_rendered(self):
+        html = self._base_html()
+        self.assertIn("p.cost_advisory", html)
+        self.assertIn("DOES NOT CLEAR", html)
+
+    def test_the_theme_count_is_shown_before_the_cap_bites(self):
+        """The cap only speaks on the leg that breaches it, so legs 1 and 2
+        met silence — and three tickets that net to one position never trip
+        it at all. `theme_state` has always returned the count and the
+        'N of 3 allowed leg(s)' reason on the ok path; nothing rendered it.
+        """
+        html = self._base_html()
+        self.assertIn("theme.n >= 1", html)
+
+    def test_the_under_cap_note_is_not_styled_as_a_warning(self):
+        """Styling a nothing-is-wrong-yet note as a warning trains the
+        operator straight past the real one above it."""
+        html = self._base_html()
+        seg = html.split("theme.n >= 1", 1)[1][:900]
+        self.assertIn('sz-note', seg)
+        self.assertNotIn('sz-warn', seg)

@@ -704,7 +704,8 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     from bot_program.asset_engine.base import make_bot
     from bot_program.asset_engine.risk_levels import (
         DEFAULT_MIN_EDGE_RATIO, DEFAULT_MIN_NET_RR, paper_fill_price,
-        round_trip_cost_fraction, stop_and_target, stop_band)
+        passes_cost_filter, round_trip_cost_fraction, stop_and_target,
+        stop_band)
     from bot_program.asset_engine.sizing import size_position
 
     cls = EXECUTABLE_CLASS.get(inst.asset_class)
@@ -793,6 +794,30 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
                          f"price (mark {price:g}, stop {stop:g}, target "
                          f"{target:g}) — this move has likely already "
                          f"played out"}
+
+    # The cost filter, asked of the DEFAULT levels — as information, never a
+    # refusal. `validate_levels` runs this same gate, but ONLY when a level
+    # was moved, on the stated reasoning that the untouched defaults "come
+    # from machinery that already respects this band". They do not: the
+    # signal branch copies `suggested_stop`/`suggested_target` verbatim from
+    # whatever wrote the Signal, and `stop_and_target` enforces a stop
+    # DISTANCE band, not a cost ratio. So a hand-taken ticket whose target
+    # sits inside its own round trip was takeable, while the identical BOT
+    # ticket was skipped at base.py's COST_FILTER — the two lanes disagreeing
+    # about the same arithmetic.
+    #
+    # It WARNS rather than refuses. Refusing would change what the button
+    # takes today, which is the one thing this control must not do; and on a
+    # hand-taken trade there is a human on the other end entitled to scalp
+    # half the ATR on purpose. It rides the popup next to book_advisory and
+    # theme, and `_execute` records it on the trade.
+    cost_ok, cost_why = passes_cost_filter(
+        cfg, inst.symbol, float(price), float(target), stop=float(stop))
+    cost_advisory = {
+        "ok": bool(cost_ok),
+        "reason": "" if cost_ok else cost_why,
+        "cost_fraction": round_trip_cost_fraction(cfg, inst.symbol),
+    }
 
     vpu = float(bot._value_per_unit(inst.symbol))
     sizing = size_position(cfg, asset_class=cls, entry=price, stop=stop,
@@ -1037,6 +1062,11 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         # The currency-theme crowd this ticket joins. A warning here and a
         # record at entry, never a manual refusal — see the note above.
         "theme": theme,
+        # Whether the DEFAULT levels clear their own round trip. The bot
+        # lane refuses this ticket; the manual lane says so and lets the
+        # operator decide. Only computed for untouched levels — a moved
+        # level is judged by `validate_levels`, which still refuses.
+        "cost_advisory": cost_advisory,
         # The brain's standing verdict on discretionary entries. Reported,
         # not enforced: pausing a RULE is the platform's call because nobody
         # is watching it, but a hand-taken trade has a human on the other
@@ -1465,6 +1495,17 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             # recorded cannot be reviewed afterwards.
             "theme_at_entry": {"ok": bool(theme_now["ok"]),
                                "reason": theme_now["reason"]},
+            # And whether the levels cleared their own round trip. The bot
+            # lane refuses this ticket outright; here it is the operator's
+            # call, so the call has to be reviewable. Reading a book of
+            # scratched winners later, this is the column that says which
+            # ones were takeable only by hand.
+            "cost_at_entry": {
+                "ok": bool((preview.get("cost_advisory") or {}).get("ok",
+                                                                    True)),
+                "reason": (preview.get("cost_advisory") or {}).get("reason",
+                                                                   ""),
+            },
         }
         if level_overrides:
             # Only when something moved: an untouched ticket keeps the exact

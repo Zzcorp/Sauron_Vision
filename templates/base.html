@@ -2073,6 +2073,26 @@
           'CROWDED</b>' + esc(theme.reason) +
           '<br>' + esc('You can still take it; your bots cannot. Taking it ' +
                        'is recorded as taken against the cap.') + '</div>';
+      } else if (theme.n >= 1 && theme.reason) {
+        /* UNDER the cap, but not alone. The cap only speaks on the leg that
+           breaches it, so the operator met silence at legs 1 and 2 and a
+           refusal at 3 — and three tickets that net to roughly one position
+           never trip it at all. A note, not a warning: nothing is wrong
+           yet, and styling it as a warning would train them past the real
+           one above. */
+        warnHtml += '<div class="sz-note">' + esc(theme.reason) + '</div>';
+      }
+
+      /* Whether the levels clear their own round trip. The BOT lane refuses
+         this exact ticket at base.py's COST_FILTER; by hand it is a warning,
+         because a person scalping half the ATR on purpose is making a real
+         choice and this control must not change what the button takes. */
+      var costAdv = p.cost_advisory || {};
+      if (costAdv.ok === false && costAdv.reason) {
+        warnHtml += '<div class="sz-warn sz-warn--book"><b>DOES NOT CLEAR ' +
+          'ITS COSTS</b>' + esc(costAdv.reason) +
+          '<br>' + esc('Your bots would skip this ticket. Taking it is ' +
+                       'recorded with the reason.') + '</div>';
       }
 
       /* And how hard this pool is set to swing. Not a warning about THIS
