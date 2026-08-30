@@ -1916,6 +1916,11 @@ def _render_portfolio(request, live_only):
                                if float(p.unrealized_pnl) < 0],
         })
 
+    # The broker's own reading, beside the platform figures — cached
+    # columns only, no broker I/O on a render path.
+    from bot_program.capital_truth import broker_view
+    context["broker"] = broker_view(request.user)
+
     return _live_page(request, "dashboard/portfolio_overview.html",
                       context, live_only)
 
@@ -2637,6 +2642,27 @@ def _render_positions(request, live_only):
             "monthly_max_display": "{:.2f}".format(monthly_max),
         })
 
+    # The AT-THE-BROKER panel: IBKR's own holdings, each row marked
+    # CLAIMED (a Sauron row exists for it) or UNCLAIMED (opened by hand
+    # in TWS, or an orphan). Display only — nothing here is imported
+    # into any book, because unified_open_positions concatenates
+    # Position and AssetBotTrade rows with no dedup key and an import
+    # would count every bot-opened position twice.
+    from bot_program.capital_truth import broker_view
+    from bot_program.models import AssetBotTrade
+    broker = broker_view(request.user)
+    if broker and broker.get("positions"):
+        claimed = {
+            str(s).upper()
+            for s in AssetBotTrade.objects.filter(
+                config__user=request.user,
+                status__in=("OPEN", "CLOSE_PENDING"), paper=False,
+            ).values_list("symbol", flat=True) if s
+        }
+        for row in broker["positions"]["rows"]:
+            row["claimed"] = str(row.get("symbol", "")).upper() in claimed
+    context["broker"] = broker
+
     return _live_page(request, "dashboard/positions_list.html",
                       context, live_only)
 
@@ -3258,9 +3284,15 @@ def setup(request):
     risk_single = single_position_state(limits, asset_class="stock",
                                         user=request.user, notional=0.0)
 
+    from bot_program.capital_truth import broker_view
+
     return render(request, "dashboard/setup.html", {
         "page_id": "setup",
         "portfolio": portfolio,
+        # Beside the Capital field, so the operator adopting the broker's
+        # number types it through the EXISTING writer — the one path that
+        # already updates every column the gates read. Cached, no I/O.
+        "broker": broker_view(request.user),
         # The Risk Limits card renders ITS values from this row, not from
         # `portfolio` — otherwise the card shows one book's numbers while
         # the gates enforce another's.

@@ -1,5 +1,9 @@
+import logging
+
 from celery import shared_task
 from core.task_gate import guarded_task
+
+logger = logging.getLogger(__name__)
 from .engine.runner import run_bot_tick
 from .engine.backtest import run_scenario
 from .models import BotConfig, BotScenario
@@ -285,3 +289,100 @@ def retry_pending_closes():
     """
     from .pending_closes import retry_all_pending_closes
     return retry_all_pending_closes()
+
+
+# ─── The broker's own reading ────────────────────────────────────────────
+
+@shared_task
+@guarded_task("broker_account_sync")
+def sync_broker_account() -> dict:
+    """Read each interfaced IBKR account's equity and holdings, cache them
+    on the IBKRAccount row. The ONLY writer of those columns.
+
+    Broker I/O lives here and nowhere else: never on a render path (a
+    page load must not race an operator or hold a worker on a socket) and
+    never on an entry path (capital_truth's docstring owns that refusal).
+    Pages read the cached columns plus their AGE — a stale reading with an
+    honest timestamp beats a fresh one fetched from inside a view.
+
+    Deliberately NOT gated behind pipeline_asset_bots and not hour-gated:
+    knowing what the account holds is not a bot function, and an ISA does
+    not stop existing when the bots are off or the market is closed.
+
+    Unreadable is UNMEASURED, not zero: on any failure the previous
+    reading is left standing with its age visible, and nothing is written.
+    The task then reports work-without-store, which task_gate grades as a
+    warning — a gateway that has been down all day should look yellow, not
+    green.
+    """
+    import asyncio
+
+    from django.utils import timezone
+
+    from .capital_truth import broker_backed
+    from .engine.ibkr_client import (IBKRTrader, is_ibkr_available,
+                                     purpose_client_id)
+    from .models import IBKRAccount
+
+    out = {"attempted": 0, "stored": 0, "unreachable": 0}
+    if not is_ibkr_available():
+        return {**out, "skipped": "ib_insync not installed"}
+
+    # ib_insync needs an event loop; celery prefork workers, like web
+    # worker threads, may not have one. Same guard _broker_ping uses.
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+    accounts = IBKRAccount.objects.exclude(account_id_enc="")
+    for acct in accounts:
+        user = acct.user
+        if broker_backed(user) is None:
+            continue
+        out["attempted"] += 1
+        client = None
+        try:
+            # The probe id, not the trade id: a sync that connected with
+            # the trading clientId would EVICT the live trader mid-tick —
+            # IBKR keeps one session per clientId and drops the earlier
+            # holder. And always disconnect: a held slot fails every
+            # later connection with error 326.
+            client = IBKRTrader(
+                host=acct.host, port=acct.port,
+                client_id=purpose_client_id(acct.client_id, "probe"),
+                account_id=acct.get_account_id() or "",
+                paper=bool(acct.paper))
+            reading = client.net_liquidation()
+            rows = client.broker_portfolio()
+        except Exception as e:  # noqa: BLE001 — one account must not stop the rest
+            logger.warning("broker sync: %s unreadable: %s", acct.label, e)
+            reading, rows = None, None
+        finally:
+            disconnect = getattr(client, "disconnect", None)
+            if callable(disconnect):
+                try:
+                    disconnect()
+                except Exception:  # noqa: BLE001
+                    pass
+
+        if reading is None and rows is None:
+            out["unreachable"] += 1
+            continue
+
+        now = timezone.now()
+        fields = []
+        if reading is not None:
+            value, currency = reading
+            acct.last_equity = value
+            acct.last_equity_currency = currency
+            acct.last_equity_at = now
+            fields += ["last_equity", "last_equity_currency",
+                       "last_equity_at"]
+        if rows is not None:
+            acct.broker_positions = rows
+            acct.broker_positions_at = now
+            fields += ["broker_positions", "broker_positions_at"]
+        acct.save(update_fields=fields)
+        out["stored"] += 1
+    return out

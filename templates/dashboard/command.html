@@ -12,7 +12,12 @@
 {# this file — the data-oc-hero name is the key it looks up in the JSON. #}
 <div class="oc-hero">
     <div class="oc-hero-left">
-        <div class="oc-hero-label">PORTFOLIO VALUE</div>
+        {% comment %}Once a broker figure exists on this page, the existing
+        number has to say WHICH book it is — an unlabelled value beside a
+        labelled one reads as the same fact twice, and these are different
+        facts: this is the platform's own book, the thing the risk gates
+        divide by; the line below is what IBKR reports holding.{% endcomment %}
+        <div class="oc-hero-label">PORTFOLIO VALUE{% if broker %} <span class="oc-hero-lbl-sub">· PLATFORM BOOK</span>{% endif %}</div>
         <div class="oc-hero-value" title="{{ hero.value_title }}">
             <span class="oc-hero-amount" data-oc-hero="value">{{ hero.value }}</span>
             <span class="oc-hero-ccy" data-oc-hero="currency">{{ hero.currency }}</span>
@@ -21,6 +26,11 @@
             <span data-oc-hero="delta" class="{{ hero.delta_tone }}">{{ hero.delta }}</span>
             <span class="oc-hero-delta-unit">· 24h</span>
         </div>
+        {% if broker %}
+        <div class="oc-hero-brokerline">
+            {% include "_partials/broker_account.html" %}
+        </div>
+        {% endif %}
     </div>
 
     <div class="oc-hero-mid">

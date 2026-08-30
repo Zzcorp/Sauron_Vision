@@ -187,6 +187,11 @@ DEFAULT_COMPONENTS = [
     {"key": "pipeline_asset_bots", "name": "Multi-Asset Bots (stocks/forex/commodities)",
      "description": "Phase-13 framework: per-(user, asset_class) bot configs that consume Phase-1 Signals and route trades through Phase-4 broker_router (Alpaca for stocks, OANDA for forex, paper-only for commodities). Crypto bot is unchanged.",
      "category": "pipeline"},
+
+    # ── Broker account sync ───────────────────────────────────
+    {"key": "broker_account_sync", "name": "Broker Account Sync (IBKR)",
+     "description": "Caches each interfaced IBKR account's NetLiquidation and holdings every 15 min — the source for every 'as the broker sees it' cell. Independent of pipeline_asset_bots (knowing what the account holds is not a bot function). Read-only; touches no gate denominator.",
+     "category": "pipeline"},
 ]
 
 

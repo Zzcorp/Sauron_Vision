@@ -137,3 +137,163 @@ def capital_mismatches(user) -> list:
             "direction": "over" if declared > actual else "under",
         })
     return out
+
+
+# ── The account itself, as the broker reports it ──────────────────────────
+#
+# Everything below is USER-scoped where everything above is CONFIG-scoped,
+# because the operator's question changed shape: not "does this bot's pool
+# match the account" but "what does the account actually hold". The
+# config-scoped helper cannot answer it — broker_equity(user, cfg) returns
+# None for a paper config and for a config with no symbols, so a funded ISA
+# with no bot armed on it is structurally unmeasurable through that path.
+
+
+def broker_backed(user):
+    """The IBKRAccount that makes this user's book broker-backed, or None.
+
+    INTERFACED is a durable configuration fact: an IBKRAccount row whose
+    account id decrypts to something non-empty. Deliberately NOT
+    `connected` — that is a boolean with no expiry meaning "a socket
+    answered once", and a gateway that restarts nightly for 2FA leaves it
+    True forever. Reachability is a different question and it is answered
+    by the AGE of the last reading, never by a stored flag.
+    """
+    acct = getattr(user, "ibkr_account", None)
+    if acct is None:
+        return None
+    try:
+        account_id = acct.get_account_id() or ""
+    except Exception:  # noqa: BLE001 — an undecryptable id is not backed
+        return None
+    return acct if account_id else None
+
+
+def account_equity(user):
+    """{"value", "currency", "at", "age_seconds"} from the LAST SYNC, or None.
+
+    Reads the cached columns only. Broker I/O lives in the
+    sync_broker_account beat task and nowhere else — a broker round trip
+    does not belong on a render path, and definitely not on an entry path.
+    None means no reading has ever landed; the caller renders an em-dash
+    and the AGE tells the operator whether the number can be believed.
+    """
+    from django.utils import timezone
+
+    acct = broker_backed(user)
+    if acct is None or acct.last_equity is None or acct.last_equity_at is None:
+        return None
+    value = float(acct.last_equity)
+    return {
+        "value": value,
+        # Pre-grouped here because the templates that render this do not
+        # all load humanize, and 52340.12 without separators misreads at
+        # a glance in exactly the way a money cell must not.
+        "value_text": f"{value:,.2f}",
+        "currency": acct.last_equity_currency or "",
+        "at": acct.last_equity_at,
+        "age_seconds": int(
+            (timezone.now() - acct.last_equity_at).total_seconds()),
+    }
+
+
+def broker_positions(user):
+    """{"rows", "at", "age_seconds"} from the last sync, or None.
+
+    The broker's OWN holdings, verbatim from broker_portfolio() — a
+    display snapshot, never imported into Position or AssetBotTrade.
+    """
+    from django.utils import timezone
+
+    acct = broker_backed(user)
+    if acct is None or acct.broker_positions is None \
+            or acct.broker_positions_at is None:
+        return None
+    return {
+        "rows": list(acct.broker_positions or []),
+        "at": acct.broker_positions_at,
+        "age_seconds": int(
+            (timezone.now() - acct.broker_positions_at).total_seconds()),
+    }
+
+
+def pool_oversubscription(user):
+    """Live pools summed per venue against that venue's equity, or [].
+
+    `capital_mismatches` above compares EACH config against the WHOLE
+    account, so three configs each declaring the full balance all read
+    "agrees" while the fleet is 3x oversubscribed — the exact dangerous
+    direction this module was written to catch, invisible to the check
+    whose entire value is being believed. This is the aggregate half.
+
+    Returns [{venue, declared_total, actual, ratio, configs}] for every
+    venue where the SUM of declared pools exceeds the broker's equity by
+    more than TOLERANCE_PCT.
+    """
+    from collections import defaultdict
+
+    from bot_program.models import AssetBotConfig
+
+    groups = defaultdict(lambda: {"declared": 0.0, "configs": [],
+                                  "actual": None})
+    configs = (AssetBotConfig.objects
+               .filter(user=user, enabled=True)
+               .exclude(mode="paper"))
+    for cfg in configs:
+        declared = float(getattr(cfg, "capital", 0) or 0)
+        if declared <= 0:
+            continue
+        symbols = list(getattr(cfg, "symbols", None) or [])
+        if not symbols:
+            continue
+        try:
+            from bot_program.engine.broker_router import client_for_symbol
+            client = client_for_symbol(user, symbols[0], cfg)
+        except Exception:  # noqa: BLE001
+            continue
+        venue = type(client).__name__
+        if venue == "PaperTrader":
+            continue
+        g = groups[venue]
+        g["declared"] += declared
+        g["configs"].append(cfg.name)
+        if g["actual"] is None:
+            g["actual"] = broker_equity(user, cfg)
+
+    out = []
+    for venue, g in groups.items():
+        actual = g["actual"]
+        if actual is None or len(g["configs"]) < 2:
+            # One config per venue is already covered by
+            # capital_mismatches; the aggregate only says something new
+            # when several pools draw on one account.
+            continue
+        drift = (g["declared"] - actual) / max(actual, 1e-9) * 100.0
+        if drift <= TOLERANCE_PCT:
+            continue
+        out.append({
+            "venue": venue,
+            "declared_total": round(g["declared"], 2),
+            "actual": round(actual, 2),
+            "ratio": round(g["declared"] / actual, 2),
+            "configs": sorted(g["configs"]),
+        })
+    return out
+
+
+def broker_view(user):
+    """Everything a broker-truth CELL needs, or None when not interfaced.
+
+    One builder so the Operations Center, the portfolio page, /setup/ and
+    the positions page cannot drift apart on what "interfaced" means or
+    which columns they read. Pure DB reads — safe on any render path.
+    """
+    acct = broker_backed(user)
+    if acct is None:
+        return None
+    return {
+        "label": acct.label,
+        "env": acct.env_label,
+        "equity": account_equity(user),
+        "positions": broker_positions(user),
+    }

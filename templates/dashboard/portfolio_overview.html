@@ -18,6 +18,16 @@ here: the em-dash rule for an unmeasured number then lives in one place rather
 than in nine template branches.
 {% endcomment %}
 
+{% if broker %}
+{% comment %}The broker's own reading, above the platform strip and
+clearly not of it — outside the live region on purpose: its value is
+written by the 15-min sync, and patching it on fill events would imply a
+freshness it does not have. The sv-age stamp is what keeps it
+honest.{% endcomment %}
+<div style="margin-bottom:12px;">
+    {% include "_partials/broker_account.html" %}
+</div>
+{% endif %}
 {# ── 1. Top stat strip — 9 cells ──────────────────────────────── #}
 <div class="oc-strip" data-sv-live="pf-strip">
     <div class="oc-strip-cell" title="{{ strip.value.title }}">

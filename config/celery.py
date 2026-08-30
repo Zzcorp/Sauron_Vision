@@ -386,6 +386,16 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute="*/15", hour="13-21"),
     },
 
+    # Every 15 min around the clock, NOT hour-gated like the reconcile
+    # above: an ISA does not stop existing when US equities close, and
+    # the read is one socket round trip per interfaced account. Gated by
+    # its own component (broker_account_sync), not pipeline_asset_bots —
+    # knowing what the account holds is not a bot function.
+    "sync-broker-account": {
+        "task": "bot_program.tasks.sync_broker_account",
+        "schedule": 900.0,
+    },
+
     # NB: there is deliberately no in-app "daily-postgres-backup" entry.
     # core.backups.run_postgres_backup shells out to pg_dump, which is not in
     # the application image (Dockerfile.prod installs libpq5, not the client

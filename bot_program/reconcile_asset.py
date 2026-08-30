@@ -423,6 +423,77 @@ def reconcile_unknown_positions(user) -> dict:
             logger.warning("unknown-position sweep: alert failed: %s", e)
             out["errors"] += 1
 
+    # THE ACCOUNT IS AN ENTRY POINT TOO, not just the config list. The
+    # loop above only builds a client when an enabled non-paper config
+    # with a NON-EMPTY symbol list routes to one — and TAKE TRADE's
+    # "manual" configs carry empty symbol lists by construction. So a
+    # funded ISA holding hand-bought stock, with no bot armed on it,
+    # got ZERO sweeps and this function returned a confident
+    # {unclaimed: 0} from a book nobody read — the signature failure,
+    # in the sweep that exists to catch it. An interfaced IBKR account
+    # is swept whether or not any config routes there.
+    if "IBKRTrader" not in {v for (_cls, v) in seen_clients}:
+        from .capital_truth import broker_backed
+        acct = broker_backed(user)
+        if acct is not None:
+            from .engine.ibkr_client import (IBKRTrader, is_ibkr_available,
+                                             purpose_client_id)
+            if is_ibkr_available():
+                client = None
+                try:
+                    # The probe id, never the trade id — a sweep that
+                    # connected with the trading clientId would evict the
+                    # live trader — and always disconnect: a held slot
+                    # fails every later connection with error 326.
+                    client = IBKRTrader(
+                        host=acct.host, port=acct.port,
+                        client_id=purpose_client_id(acct.client_id,
+                                                    "probe"),
+                        account_id=acct.get_account_id() or "",
+                        paper=bool(acct.paper))
+                    out["checked"] += 1
+                    state = _broker_open_symbols(client,
+                                                 asset_class="stock")
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("unknown-position sweep: account-entry "
+                                   "IBKR read failed: %s", e)
+                    state = None
+                    out["errors"] += 1
+                finally:
+                    disconnect = getattr(client, "disconnect", None)
+                    if callable(disconnect):
+                        try:
+                            disconnect()
+                        except Exception:  # noqa: BLE001
+                            pass
+                if state is None:
+                    out["broker_unavailable"] += 1
+                    logger.warning("unknown-position sweep: IBKR account "
+                                   "%s unreadable — not reporting a clean "
+                                   "sweep of a book nobody could read",
+                                   acct.label)
+                else:
+                    held = {str(x).upper()
+                            for x in (state.get("symbols") or set())}
+                    unclaimed = sorted(held - claimed)
+                    if unclaimed:
+                        out["unclaimed"] += len(unclaimed)
+                        out["symbols"].extend(unclaimed)
+                        logger.error(
+                            "unknown-position sweep: IBKR %s holds %d "
+                            "position(s) no row claims: %s", acct.label,
+                            len(unclaimed), ", ".join(unclaimed[:8]))
+                        try:
+                            from bot_program.notifications import (
+                                notify_unclaimed_position)
+                            notify_unclaimed_position(
+                                user, symbols=unclaimed,
+                                venue=f"IBKR {acct.label}")
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning("unknown-position sweep: alert "
+                                           "failed: %s", e)
+                            out["errors"] += 1
+
     return out
 
 
@@ -444,6 +515,15 @@ def reconcile_all_users() -> dict:
         .values_list("config__user_id", flat=True))
     user_ids |= set(AssetBotConfig.objects
                     .filter(enabled=True).exclude(mode="paper")
+                    .values_list("user_id", flat=True))
+    # And users with an INTERFACED BROKER ACCOUNT, config or no config.
+    # The two sets above both enter from Sauron's side of the ledger, so
+    # an operator whose ISA holds hand-bought stock but who has armed no
+    # bot was never selected at all — the same blind spot the account
+    # entry inside reconcile_unknown_positions closes, one level up.
+    from .models import IBKRAccount
+    user_ids |= set(IBKRAccount.objects
+                    .exclude(account_id_enc="")
                     .values_list("user_id", flat=True))
     user_ids = sorted(uid for uid in user_ids if uid)
     totals = {"users": 0, "checked": 0, "closed_as_orphan": 0,

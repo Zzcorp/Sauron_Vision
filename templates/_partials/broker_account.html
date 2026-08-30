@@ -1,0 +1,39 @@
+{% comment %}
+The broker's own reading of the interfaced account — BESIDE the platform
+figure, never instead of it.
+
+Context: `broker` from bot_program.capital_truth.broker_view(user), or
+None (in which case this renders nothing — a page with no interfaced
+account owes the operator no empty frame).
+
+Two prohibitions carry the whole design:
+  * Never substitute the platform's number for the broker's, or vice
+    versa. The gates divide by the platform book; this cell reports what
+    IBKR holds; collapsing them into one number is how an operator reads
+    "2% of 50,000" and gets halted at 2% of 10,000.
+  * Never print a cached equity without its age. The value is written by
+    the sync_broker_account beat, and a live gateway restarts daily for
+    2FA — a reading with an honest timestamp beats a fresh-looking one.
+
+Unknown renders as the muted em-dash, never 0 — an account whose gateway
+is down is unmeasured, not empty. The currency is the BROKER'S, carried
+with the reading; the book's symbol would be a lie in a different
+currency (a UK ISA is GBP, the book defaults to EUR, and this platform
+has no FX conversion anywhere by design).
+{% endcomment %}
+{% if broker %}
+<div class="bk-card" title="What IBKR reports for this account — written by the broker sync every 15 min, never by this page. The platform book beside it is what the risk gates divide by; the two are different facts and both are meant to be visible.">
+    <span class="bk-id">IBKR · {{ broker.label }} ·
+        <span class="bk-env{% if 'LIVE' in broker.env %} bk-env--live{% endif %}">{{ broker.env }}</span>
+    </span>
+    {% if broker.equity %}
+    <span class="bk-eq">{{ broker.equity.value_text }}
+        <span class="bk-ccy">{% if broker.equity.currency %}{{ broker.equity.currency }}{% else %}<span class="sv-unknown">?</span>{% endif %}</span>
+    </span>
+    <span class="bk-age sv-age" data-sv-at="{{ broker.equity.at|date:'c' }}">{{ broker.equity.at|timesince }} ago</span>
+    {% else %}
+    <span class="bk-eq"><span class="sv-unknown">—</span></span>
+    <span class="bk-age">no reading yet — the sync lands one within 15 min of the gateway answering</span>
+    {% endif %}
+</div>
+{% endif %}

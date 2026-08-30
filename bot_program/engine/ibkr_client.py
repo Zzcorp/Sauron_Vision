@@ -337,6 +337,129 @@ class IBKRTrader:
                     continue
         return 0.0
 
+    def account_values(self) -> "dict | None":
+        """{tag: (value, currency)} for THIS account, or None when unreadable.
+
+        Fixes two defects `account()` above still carries for its legacy
+        callers:
+
+        * It discards `v.currency` and overwrites on duplicate tags, so on
+          a multi-currency account NetLiquidation is whichever currency row
+          arrived LAST — nondeterministic, not merely unlabelled. Here the
+          currency travels with every value; a BASE row always wins its
+          tag, and otherwise the first row seen holds it, which is at least
+          deterministic.
+        * It passes account="" when no account id is stored, which spans
+          EVERY account under the login. The order path refuses exactly
+          that ambiguity (`_bind_order_account`); the balance path silently
+          resolved it — so a panel labelled with one account could show
+          another account's money. Refused here.
+
+        None means UNREADABLE — never {} and never zeros. A caller that
+        cannot tell "no reading" from "an empty account" will eventually
+        tell an operator their money is gone.
+        """
+        if not self.account_id:
+            log.warning("IBKR account_values(): no account id — a read "
+                        "scoped to no account spans every account under "
+                        "the login, refusing")
+            return None
+        if not self._connect():
+            return None
+        try:
+            vals = self._ib.accountValues(account=self.account_id)
+        except Exception as e:  # noqa: BLE001
+            log.warning("IBKR account_values() failed: %s", e)
+            return None
+        out: dict = {}
+        for v in vals:
+            tag = str(getattr(v, "tag", "") or "")
+            ccy = str(getattr(v, "currency", "") or "")
+            if not tag:
+                continue
+            if tag not in out or ccy == "BASE":
+                out[tag] = (str(getattr(v, "value", "") or ""), ccy)
+        return out or None
+
+    def net_liquidation(self) -> "tuple[float, str] | None":
+        """(equity, currency) for this account, or None when unreadable.
+
+        The currency is part of the reading, not decoration: a UK ISA is
+        GBP, the platform's book defaults to EUR, and this codebase has no
+        FX conversion anywhere by design — so a bare float here becomes a
+        number printed behind the wrong symbol somewhere downstream.
+        """
+        info = self.account_values()
+        if not info:
+            return None
+        for tag in ("NetLiquidation", "AvailableFunds", "TotalCashValue"):
+            row = info.get(tag)
+            if not row:
+                continue
+            value, ccy = row
+            try:
+                n = float(value)
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                return n, (ccy if ccy and ccy != "BASE" else "")
+        return None
+
+    def broker_portfolio(self) -> "list[dict] | None":
+        """The account's holdings AS THE BROKER VALUES THEM, or None.
+
+        `ib.portfolio()` rather than `ib.positions()`: this is the read
+        with marks on it — marketPrice, marketValue, averageCost,
+        unrealizedPNL, each row carrying its own currency — which is what
+        a portfolio VIEW needs and what `get_positions()` deliberately
+        does not fetch. `get_positions()` keeps its exact shape and its
+        raise-on-unreachable contract untouched: reconcile and the
+        close-retry path depend on both.
+
+        None means unreadable, and an empty account id is refused for the
+        same reason as `account_values()` — an unscoped read spans the
+        whole login. Symbols follow `get_positions()`'s convention so a
+        row here can be matched against AssetBotTrade.symbol: CASH pairs
+        are rebuilt ("EUR" -> "EURUSD"), everything else is the contract
+        symbol uppercased.
+        """
+        if not self.account_id:
+            log.warning("IBKR broker_portfolio(): no account id — refusing "
+                        "an unscoped read of the whole login")
+            return None
+        if not self._connect():
+            return None
+        try:
+            items = self._ib.portfolio()
+        except Exception as e:  # noqa: BLE001
+            log.warning("IBKR broker_portfolio() failed: %s", e)
+            return None
+        out = []
+        for it in items:
+            acct = str(getattr(it, "account", "") or "")
+            if acct and acct != self.account_id:
+                continue
+            qty = float(getattr(it, "position", 0) or 0)
+            if qty == 0:
+                continue
+            contract = getattr(it, "contract", None)
+            sec_type = str(getattr(contract, "secType", "") or "")
+            symbol = str(getattr(contract, "symbol", "") or "").upper()
+            if sec_type == "CASH":
+                symbol += str(getattr(contract, "currency", "") or "").upper()
+            out.append({
+                "symbol": symbol,
+                "sec_type": sec_type,
+                "qty": qty,
+                "side": "BUY" if qty > 0 else "SELL",
+                "avg_cost": float(getattr(it, "averageCost", 0) or 0),
+                "market_price": float(getattr(it, "marketPrice", 0) or 0),
+                "market_value": float(getattr(it, "marketValue", 0) or 0),
+                "unrealized_pnl": float(getattr(it, "unrealizedPNL", 0) or 0),
+                "currency": str(getattr(contract, "currency", "") or ""),
+            })
+        return out
+
     def get_positions(self) -> list[dict]:
         """Open positions via ib.positions() — Phase-33 reconciliation.
 

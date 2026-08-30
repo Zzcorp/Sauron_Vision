@@ -20,6 +20,19 @@
     <!-- Portfolio Capital -->
     <div class="card fade-in-up delay-1">
         <div class="card-header"><span class="card-title">◎ Portfolio Capital</span></div>
+        {% if broker %}
+        {% comment %}The broker's reading, right where the operator types
+        the book value — so adopting it goes through THIS form, the one
+        writer that already updates every column the gates read. Nothing
+        auto-adopts: that number is the denominator of every risk limit,
+        and moving it is the operator's act. Mind the currency — the
+        reading is the broker's own denomination, and this form's BASE
+        CURRENCY must be set to match before the number means the same
+        thing in both places.{% endcomment %}
+        <div style="margin-bottom:14px;">
+            {% include "_partials/broker_account.html" %}
+        </div>
+        {% endif %}
         <form method="post" action="{% url 'setup' %}">
             {% csrf_token %}
             <input type="hidden" name="action" value="update_capital">

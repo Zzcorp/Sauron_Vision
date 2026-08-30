@@ -7320,3 +7320,41 @@ body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
 .sv-ticket--sm .tk-mid  { padding: 3px 8px; }
 .sv-ticket--sm .tk-k    { font-size: 7.5px; }
 .sv-ticket--sm .tk-v    { font-size: 9.5px; }
+
+/* ── BROKER TRUTH ───────────────────────────────────────────────────
+   The IBKR account's own reading, rendered BESIDE the platform book and
+   never instead of it. Tokens only past the CARD CONTAINMENT marker. */
+.bk-card {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    font-family: var(--font-mono);
+}
+.bk-id { font-size: 9.5px; letter-spacing: .14em; color: var(--text-muted); white-space: nowrap; }
+.bk-env--live { color: var(--accent-red); font-weight: 700; }
+.bk-eq { font-size: 15px; font-weight: 600; color: var(--text-primary);
+    font-variant-numeric: tabular-nums; }
+.bk-ccy { font-size: 10px; color: var(--text-muted); }
+.bk-age { font-size: 9.5px; color: var(--text-muted); }
+/* The sub-label that names the EXISTING figure as the platform's own —
+   only rendered once a broker figure exists beside it to be confused
+   with. */
+.oc-hero-lbl-sub { font-size: 9px; letter-spacing: .12em; color: var(--text-muted); }
+.oc-hero-brokerline { margin-top: 8px; }
+/* The AT-THE-BROKER holdings table on /positions/. */
+.bkp-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12px; }
+.bkp-table th { text-align: left; font-size: 9.5px; letter-spacing: .14em;
+    color: var(--text-muted); font-weight: 500; padding: 8px 12px;
+    border-bottom: 1px solid var(--border); white-space: nowrap; }
+.bkp-table td { padding: 7px 12px; border-bottom: 1px solid var(--border);
+    font-variant-numeric: tabular-nums; }
+.bkp-up { color: var(--accent); }
+.bkp-down { color: var(--accent-red); }
+.bkp-claim { font-size: 9px; letter-spacing: .12em; padding: 2px 7px;
+    border-radius: 3px; border: 1px solid var(--border); color: var(--text-muted); }
+.bkp-claim--unclaimed { color: var(--accent-gold-ink, var(--accent-gold));
+    border-color: var(--accent-gold-ink, var(--accent-gold)); }

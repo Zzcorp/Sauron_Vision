@@ -406,10 +406,15 @@ def command_center(request):
     if tab not in ("live", "portfolio", "history", "bots"):
         tab = "live"
 
+    from bot_program.capital_truth import broker_view
+
     context = {
         "page_id": "command",
         "active_tab": tab,
         "tab_metrics": _tab_bar_metrics(request.user),
+        # The broker's own reading, rendered BESIDE the platform book —
+        # cached columns only, so this adds no broker I/O to the render.
+        "broker": broker_view(request.user),
         **_hero_context(request.user),
     }
     return render(request, "dashboard/command.html", context)

@@ -62,6 +62,60 @@ template branches, each a fresh chance to print a confident zero.
     </div>
 </div>
 
+{% if broker %}
+{% comment %}── At the broker — IBKR's own holdings, verbatim ─────────
+Display only: nothing here is imported into any book. CLAIMED means a
+Sauron row exists for the symbol; UNCLAIMED is a position opened by hand
+in TWS or an orphan — real exposure the platform did not open, which an
+ISA will legitimately carry. Outside the live regions on purpose: the
+rows are written by the 15-min broker sync, and the age stamp is the
+honest freshness claim.{% endcomment %}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header">
+        <span class="card-title">⌂ At the broker · IBKR {{ broker.label }} · {{ broker.env }}</span>
+        {% if broker.positions %}
+        <span class="bk-age sv-age" data-sv-at="{{ broker.positions.at|date:'c' }}">{{ broker.positions.at|timesince }} ago</span>
+        {% endif %}
+    </div>
+    {% if broker.positions %}
+    {% if broker.positions.rows %}
+    <div class="table-wrapper">
+        <table class="bkp-table">
+            <thead><tr>
+                <th>SYMBOL</th><th>TYPE</th><th>SIDE</th><th>QTY</th>
+                <th>AVG COST</th><th>MARK</th><th>VALUE</th>
+                <th>UNREAL P&L</th><th>CCY</th><th></th>
+            </tr></thead>
+            <tbody>
+            {% for row in broker.positions.rows %}
+            <tr>
+                <td>{{ row.symbol }}</td>
+                <td>{{ row.sec_type }}</td>
+                <td class="{% if row.side == 'BUY' %}bkp-up{% else %}bkp-down{% endif %}">{{ row.side }}</td>
+                <td>{{ row.qty|floatformat:"-4" }}</td>
+                <td>{{ row.avg_cost|floatformat:"-4" }}</td>
+                <td>{{ row.market_price|floatformat:"-4" }}</td>
+                <td>{{ row.market_value|floatformat:2 }}</td>
+                <td class="{% if row.unrealized_pnl >= 0 %}bkp-up{% else %}bkp-down{% endif %}">{{ row.unrealized_pnl|floatformat:2 }}</td>
+                <td>{{ row.currency }}</td>
+                <td>{% if row.claimed %}<span class="bkp-claim">CLAIMED</span>{% else %}<span class="bkp-claim bkp-claim--unclaimed" title="No Sauron row matches this symbol — opened by hand in TWS, or an orphan. Real exposure the platform did not open and does not manage.">UNCLAIMED</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);padding:4px 12px 12px;">The broker reports no holdings on this account.</p>
+    {% endif %}
+    {% else %}
+    <p style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);padding:4px 12px 12px;">
+        <span class="sv-unknown">—</span> no holdings reading yet. Unread is not empty:
+        the sync lands one within 15 minutes of the gateway answering.
+    </p>
+    {% endif %}
+</div>
+{% endif %}
+
 {# ── 2. Direction donut + asset-class breakdown + monthly P&L ─── #}
 {% include "_partials/capital_card.html" %}
 <div class="grid grid-3" style="gap:14px;margin-bottom:18px;">

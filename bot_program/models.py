@@ -161,6 +161,27 @@ class IBKRAccount(models.Model):
     last_balance_usd = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # The last BROKER reading, written only by the sync_broker_account
+    # beat task — never on a render or entry path. Nullable ON PURPOSE:
+    # NULL is "never measured", which `last_balance_usd` above cannot say
+    # (its default=0 renders an unmeasured account as an emptied one —
+    # the reason that column is dead and stays dead). The currency rides
+    # with the value because a UK ISA is GBP, the platform book defaults
+    # to EUR, and this platform has no FX conversion anywhere by design —
+    # an unlabelled equity becomes a number behind the wrong symbol.
+    last_equity = models.DecimalField(max_digits=18, decimal_places=2,
+                                      null=True, blank=True)
+    last_equity_currency = models.CharField(max_length=8, blank=True,
+                                            default="")
+    last_equity_at = models.DateTimeField(null=True, blank=True)
+    # The account's holdings as the broker values them (broker_portfolio()
+    # rows, verbatim). A DISPLAY snapshot only: nothing imports these into
+    # Position or AssetBotTrade — importing would double-count every
+    # bot-opened position, since unified_open_positions concatenates the
+    # two row sets with no dedup key.
+    broker_positions = models.JSONField(null=True, blank=True)
+    broker_positions_at = models.DateTimeField(null=True, blank=True)
+
     # The Gateway LOGIN. Sauron itself never authenticates to IBKR — it
     # connects to a socket that is already logged in — so these exist
     # only so IBC can sign the Gateway container in at boot. They live

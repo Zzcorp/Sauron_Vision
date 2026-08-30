@@ -88,6 +88,8 @@ WIRING = {
     "scraper_tradingview":  {"task": "scraping.tasks.fetch_tradingview_ideas", "layer": "ingest", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_sentiment_agg", "pipeline_opportunity_scanner"]},
     "scraper_calendar":     {"task": "scraping.tasks.check_economic_calendar", "layer": "ingest", "writes": ["EconomicEvent"], "feeds": ["execute_bots", "pipeline_opportunity_scanner"],
                              "note": "Needs FMP_API_KEY. While this table is empty the bot's earnings blackout cannot fire."},
+    "broker_account_sync":  {"task": "bot_program.tasks.sync_broker_account", "layer": "ingest", "writes": ["IBKRAccount.last_equity", "IBKRAccount.broker_positions"], "feeds": [],
+                             "note": "The broker's own NetLiquidation and holdings, cached every 15 min for the 'as IBKR sees it' cells. Feeds pages, not components — deliberately: nothing downstream divides by it, because a display showing broker truth over gates using platform truth is the failure this platform is built to avoid."},
     "scraper_sec":          {"task": "scraping.tasks.fetch_sec_filings", "cadence": 86400, "layer": "ingest", "writes": ["InstitutionalFiling"], "feeds": ["pipeline_opportunity_scanner"],
                              "note": "Form-4 issuers resolve to catalogue instruments through SEC's CIK map, so insider rows reach the evaluator. 13F rows stay filer-level (the holdings live in an attachment this scraper does not follow) and are unlinked by design."},
     "scraper_cot":          {"task": "scraping.tasks.fetch_cot_reports", "cadence": 604800, "layer": "ingest", "writes": ["COTReport"], "feeds": ["pipeline_opportunity_scanner"],
