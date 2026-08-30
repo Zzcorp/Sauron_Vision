@@ -346,22 +346,40 @@ class AssetBot(ABC):
             from bot_program.engine.trailing import (
                 breakeven_candidate, is_improvement, trail_candidate,
             )
-            candidate, why = None, ""
+            # BOTH rules are asked, every tick. The first version asked the
+            # trail only `if candidate is None`, which reads like "break-even
+            # takes precedence" but meant something far worse:
+            # `breakeven_candidate` returns a PRICE whenever R has passed the
+            # trigger and `breakeven_armed` is unset, and that flag is stamped
+            # only on a move the venue ACCEPTED (see below). So on a config
+            # carrying both knobs, once the trail had lifted the stop past
+            # entry+buffer the break-even price stopped being an improvement,
+            # the trail was never reached, and the broker stop never moved
+            # again — silently, for the life of the position, with no
+            # `stop_rules_inert` stamp and no warning. The bot-side path never
+            # had this: it runs both rules unconditionally.
+            options = []
             if breakeven_at_r > 0:
-                candidate = breakeven_candidate(
+                options.append(("breakeven", breakeven_candidate(
                     trade, price, breakeven_at_r,
-                    self._extras_float("breakeven_buffer_r"))
-                why = "breakeven"
-            if candidate is None and trail_pct > 0:
-                candidate = trail_candidate(
+                    self._extras_float("breakeven_buffer_r"))))
+            if trail_pct > 0:
+                options.append(("trail", trail_candidate(
                     trade, price, trail_pct,
-                    self._extras_float("trail_start_r"))
-                why = "trail"
+                    self._extras_float("trail_start_r"))))
             # Asked BEFORE anything reaches a broker: a leg modified and
             # then refused by our own tighten-only rule would be a round
             # trip that changed the venue and not the row.
-            if not is_improvement(trade, candidate, price):
+            viable = [(w, c) for w, c in options
+                      if c is not None and is_improvement(trade, c, price)]
+            if not viable:
                 return False
+            # The TIGHTER of the two, not the first one to answer. One broker
+            # round trip per tick, and a break-even price that sits below an
+            # already-trailed stop can never drag it back toward entry.
+            why, candidate = (max(viable, key=lambda wc: wc[1])
+                              if trade.side == "BUY"
+                              else min(viable, key=lambda wc: wc[1]))
         except Exception as e:  # noqa: BLE001 — a knob typo must not
             # take the exit block down with it; the trade would then run
             # unmanaged until reconciliation noticed.

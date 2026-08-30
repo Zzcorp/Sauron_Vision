@@ -703,3 +703,141 @@ class TheTradeHandleIsRecordedAtEntryTests(TestCase):
                / "base.py").read_text(encoding="utf-8")
         self.assertIn('entry_meta["protective_trade_id"]', src)
         self.assertIn('meta_now.get("protective_trade_id")', src)
+
+
+class BothStopRulesAreAskedEveryTickTests(TestCase):
+    """The veto that stopped a broker-held stop moving, for good.
+
+    `_manage_broker_stop` used to ask the trail only `if candidate is None`
+    — i.e. only when break-even had declined to answer. But
+    `breakeven_candidate` returns a PRICE whenever R has passed the trigger
+    and `metadata["breakeven_armed"]` is unset, and that flag is stamped
+    only on a move the venue ACCEPTED.
+
+    So on a config carrying BOTH knobs: the trail lifts the stop past
+    entry+buffer, the break-even price stops being an improvement, it is
+    still not None, the trail is never reached — and the broker stop never
+    moves again for the life of the position. Silently: no
+    `stop_rules_inert` stamp, no warning, and the bot-side path (which runs
+    both rules unconditionally) shows no such symptom.
+
+    Every pre-existing broker test set exactly one knob, so a green suite
+    could not see it.
+    """
+
+    def _bot_and_trade(self, extras, stop="98", side="BUY", entry="100",
+                       initial_stop=98.0, ids=("77",)):
+        from decimal import Decimal as D
+
+        from django.contrib.auth.models import User
+        from django.utils import timezone as tz
+
+        from bot_program.asset_engine.stock_bot import StockBot
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+
+        user = User.objects.create_user(f"both_{side}_{stop}", password="x")
+        cfg = AssetBotConfig.objects.create(
+            user=user, asset_class="stock", name="BOTH", mode="paper",
+            symbols=["AAPL"], capital=D("10000"), enabled=True, extras=extras)
+        trade = AssetBotTrade.objects.create(
+            config=cfg, asset_class="stock", symbol="AAPL", side=side,
+            qty=D("10"), entry_price=D(entry), stop_loss=D(stop),
+            take_profit=D("110") if side == "BUY" else D("90"),
+            status="OPEN", paper=True, opened_at=tz.now(),
+            metadata={"initial_stop_loss": initial_stop, "protected": True,
+                      "protective_order_ids": list(ids)})
+        return StockBot(cfg), trade
+
+    def _run(self, bot, client, mark):
+        from decimal import Decimal as D
+        from unittest.mock import patch
+
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                   return_value=client), \
+                patch.object(type(bot), "_is_paper_client",
+                             return_value=False), \
+                patch.object(type(bot), "_mark_price", return_value=D(mark)):
+            bot.manage_positions()
+
+    def _echo_client(self):
+        """Echoes the requested price back, the way a venue that accepted
+        it would — a fixed-price mock would hide which candidate we sent."""
+        from unittest.mock import MagicMock
+        c = MagicMock()
+        c.modify_protective.side_effect = (
+            lambda oid, price: {"ok": True, "price": price, "reason": ""})
+        return c
+
+    def _sent(self, client):
+        from decimal import Decimal as D
+        return D(str(client.modify_protective.call_args[0][1]))
+
+    def test_the_trail_still_runs_when_break_even_has_stopped_improving(self):
+        """THE REGRESSION. Stop already trailed to 102, so break-even's 100
+        is not an improvement — the trail must still be asked."""
+        from decimal import Decimal as D
+        bot, trade = self._bot_and_trade(
+            {"breakeven_at_r": 1.0, "trail_pct": 2.0}, stop="102")
+        client = self._echo_client()
+        self._run(bot, client, mark="106")
+
+        client.modify_protective.assert_called_once()
+        self.assertEqual(self._sent(client), D("103.88"))
+        trade.refresh_from_db()
+        self.assertEqual(trade.stop_loss, D("103.88"))
+
+    def test_the_tighter_of_the_two_wins_and_it_is_one_broker_call(self):
+        """Both viable at mark 106: break-even 100, trail 103.88."""
+        from decimal import Decimal as D
+        bot, trade = self._bot_and_trade(
+            {"breakeven_at_r": 1.0, "trail_pct": 2.0}, stop="98")
+        client = self._echo_client()
+        self._run(bot, client, mark="106")
+
+        client.modify_protective.assert_called_once()
+        self.assertEqual(self._sent(client), D("103.88"))
+        trade.refresh_from_db()
+        self.assertEqual(trade.metadata["stop_moves"][-1]["why"],
+                         "trail:broker")
+        self.assertNotIn("breakeven_armed", trade.metadata)
+
+    def test_break_even_wins_when_it_is_the_tighter_one(self):
+        """At mark 101 the trail would sit at 98.98; break-even is 100."""
+        from decimal import Decimal as D
+        bot, trade = self._bot_and_trade(
+            {"breakeven_at_r": 0.5, "trail_pct": 2.0}, stop="98")
+        client = self._echo_client()
+        self._run(bot, client, mark="101")
+
+        self.assertEqual(self._sent(client), D("100"))
+        trade.refresh_from_db()
+        self.assertTrue(trade.metadata.get("breakeven_armed"))
+
+    def test_a_short_takes_the_lower_of_the_two(self):
+        """Tighter is the OTHER direction on a SELL — break-even 100,
+        trail 95.88, and 95.88 is the tighter stop."""
+        from decimal import Decimal as D
+        bot, trade = self._bot_and_trade(
+            {"breakeven_at_r": 1.0, "trail_pct": 2.0},
+            stop="102", side="SELL", initial_stop=102.0)
+        client = self._echo_client()
+        self._run(bot, client, mark="94")
+
+        self.assertEqual(self._sent(client), D("95.88"))
+
+    def test_neither_improving_still_sends_nothing(self):
+        """The tighten-only rule is asked before the broker, not after."""
+        bot, trade = self._bot_and_trade(
+            {"breakeven_at_r": 1.0, "trail_pct": 2.0}, stop="105")
+        client = self._echo_client()
+        self._run(bot, client, mark="106")
+
+        client.modify_protective.assert_not_called()
+
+    def test_a_single_knob_is_unaffected(self):
+        """The path every pre-existing broker test exercises."""
+        from decimal import Decimal as D
+        bot, trade = self._bot_and_trade({"trail_pct": 2.0}, stop="98")
+        client = self._echo_client()
+        self._run(bot, client, mark="106")
+        self.assertEqual(self._sent(client), D("103.88"))
