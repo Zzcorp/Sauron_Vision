@@ -463,3 +463,80 @@ class TheWiringExistsTests(TestCase):
         self.assertEqual(entry["task"],
                          "bot_program.tasks.sync_broker_account")
         self.assertEqual(entry["schedule"], 900.0)
+
+
+class TheSocatPortsAreFirstClassTests(TestCase):
+    """The dockerised Gateway's ONLY working ports were unknown ports.
+
+    The gnzsnz/ib-gateway image binds the Gateway's own 4001/4002 to the
+    container's 127.0.0.1 and relays them out through socat as 4003
+    (live) and 4004 (paper). From the web container, ibgateway:4001
+    answers CONNECTION REFUSED forever — even after a perfect login —
+    which reads exactly like "Gateway is down" and is not. The runbook
+    taught 4001/4002 for weeks; the operator's first real Gateway proved
+    it wrong with a refused socket under a logged-in container.
+
+    Worse than the refusal: with 4003 unrecognised, `render_ibkr_env`
+    derived TRADING_MODE=paper from it — which would relaunch a LIVE
+    login in paper mode. The wrong direction to fail.
+    """
+
+    def test_4003_is_live_and_4004_is_paper(self):
+        from bot_program.models import IBKRAccount
+        u = _user("bk_socat")
+        acct = _acct(u, port=4003)
+        self.assertEqual(acct.env, "live")
+        self.assertTrue(acct.is_live)
+        self.assertTrue(acct.env_is_certain)
+        acct.port = 4004
+        self.assertEqual(acct.env, "paper")
+        self.assertFalse(acct.is_live)
+
+    def test_the_label_names_the_relay(self):
+        """An operator debugging a refused 4001 needs the label itself to
+        say the docker path is different."""
+        u = _user("bk_socatlbl")
+        acct = _acct(u, port=4003)
+        self.assertIn("socat", acct.env_label)
+        self.assertIn("LIVE", acct.env_label)
+
+    def test_render_ibkr_env_derives_live_from_4003(self):
+        """The one that costs real money if wrong: TRADING_MODE decides
+        which account the Gateway LOGS INTO."""
+        from io import StringIO
+
+        from django.core.management import call_command
+        u = _user("bk_render")
+        acct = _acct(u, port=4003)
+        acct.set_login("liveuser", "pw")
+        acct.save()
+        out = StringIO()
+        call_command("render_ibkr_env", stdout=out)
+        self.assertIn("IBKR_TRADING_MODE=live", out.getvalue())
+
+    def test_and_paper_from_4004(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+        u = _user("bk_render_p")
+        acct = _acct(u, port=4004)
+        acct.set_login("paperuser", "pw")
+        acct.save()
+        out = StringIO()
+        call_command("render_ibkr_env", stdout=out)
+        self.assertIn("IBKR_TRADING_MODE=paper", out.getvalue())
+
+    def test_the_runbook_teaches_the_relay_ports(self):
+        """The document that taught the wrong ports must now teach the
+        right ones, verify against them, and admit the correction."""
+        from pathlib import Path
+
+        from django.conf import settings
+        text = (Path(settings.BASE_DIR) / "deploy" / "RUNBOOK.md"
+                ).read_text(encoding="utf-8")
+        self.assertIn("4003", text)
+        self.assertIn("4004", text)
+        self.assertIn("socat", text)
+        self.assertIn("('ibgateway', 4004)", text)
+        self.assertNotIn("with port `4002`\nfor paper or `4001` for live",
+                         text)

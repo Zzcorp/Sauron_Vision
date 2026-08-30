@@ -215,13 +215,20 @@ and start the profile:
 ./deploy/dc --profile ibkr up -d
 ```
 
-The admin form's host field is then just `ibgateway`, with port `4002`
-for paper or `4001` for live. No bridge address to look up, no `ufw` rule
-for the docker subnet, no virtual display, no trusted-IP list. The image
-bundles IB Gateway with IBC, which performs the login the dialog would
-otherwise wait on forever. The socket is reachable from the compose
-network and from nowhere else — 4001/4002 accept unauthenticated,
-unencrypted orders, so they are deliberately never published to the host.
+The admin form's host field is then just `ibgateway`, with port **`4004`
+for paper or `4003` for live — NOT 4001/4002.** The image binds the
+Gateway's own API ports to the container's `127.0.0.1` and relays them
+out through socat: container port 4003 fronts the internal live 4001,
+4004 fronts the internal paper 4002. From another container, 4001/4002
+answer CONNECTION REFUSED forever — even after a perfect login — which
+looks exactly like "Gateway is down" and is not. (An earlier revision of
+this runbook said 4001/4002 here; the first real Gateway proved it
+wrong.) No bridge address to look up, no `ufw` rule for the docker
+subnet, no virtual display, no trusted-IP list. The image bundles IB
+Gateway with IBC, which performs the login the dialog would otherwise
+wait on forever. The socket is reachable from the compose network and
+from nowhere else — these ports accept unauthenticated, unencrypted
+orders, so they are deliberately never published to the host.
 
 **Or run Gateway on the box.** The host field is then
 `host.docker.internal` (the compose anchor declares it), or the compose
@@ -241,16 +248,19 @@ Either way, verify from inside the container before trusting the form —
 this is the only test that answers the question:
 
 ```bash
-./deploy/dc exec web python -c "import socket; socket.create_connection(('ibgateway', 4002), 5); print('reachable')"
+./deploy/dc exec web python -c "import socket; socket.create_connection(('ibgateway', 4004), 5); print('reachable')"
 ```
 
 **One session per IBKR username.** Logging into the IBKR portal or the
 mobile app with the same credentials kicks Gateway out mid-session. Use
 the paper username for Gateway and keep the live one for the portal.
 `TRADING_MODE` decides which account Gateway logs into and the PORT
-decides which one Sauron talks to — paper with 4002, live with 4001. Set
-one without the other and the socket never answers, which looks exactly
-like a network fault.
+decides which one Sauron talks to — paper with 4004, live with 4003 (the
+socat relays for the internal 4002/4001). Set one without the other and
+the socket never answers, which looks exactly like a network fault. A
+LIVE login also demands IB Key two-factor on the phone at every start and
+roughly daily after — IBC types the password but cannot answer 2FA, so an
+unattended live Gateway drops and re-prompts. Paper logs in headless.
 
 Symbols must match the seeded `Instrument.symbol` spelling exactly — `EURUSD`
 not `EUR_USD`, `BTCUSD` not `BTCUSDT`, `GOOGL` not `GOOG`. An unrecognised

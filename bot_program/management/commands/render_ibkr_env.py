@@ -94,7 +94,12 @@ class Command(BaseCommand):
                 continue
             seen[slot] = user
             p = acct.env_prefix
-            mode = "live" if acct.port in (7496, 4001) else "paper"
+            # The port decides, and the socat relay ports carry the
+            # same split: 4003 fronts the live 4001, 4004 the paper
+            # 4002. Deriving 4003 as "paper" would relaunch a LIVE
+            # login in paper mode - the wrong direction to fail.
+            mode = ("live" if acct.port in model.LIVE_PORTS
+                    else "paper")
             lines += [f"{p}_USERNAME={user}",
                       f"{p}_PASSWORD={pw}",
                       f"{p}_TRADING_MODE={mode}",

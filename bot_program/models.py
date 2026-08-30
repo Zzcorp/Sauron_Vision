@@ -125,6 +125,7 @@ class IBKRAccount(models.Model):
     Default ports:
         7497  TWS paper  | 7496  TWS live
         4002  Gateway paper | 4001  Gateway live
+        4004  docker Gateway paper (socat) | 4003  docker Gateway live (socat)
     """
 
     user = models.OneToOneField(User, on_delete=models.CASCADE,
@@ -133,7 +134,7 @@ class IBKRAccount(models.Model):
 
     host = models.CharField(max_length=120, default="127.0.0.1")
     port = models.IntegerField(default=7497,
-        help_text="7497=TWS paper, 7496=TWS live, 4002=Gateway paper, 4001=Gateway live.")
+        help_text="7497=TWS paper, 7496=TWS live, 4002=Gateway paper, 4001=Gateway live. DOCKERISED Gateway (the deploy stack): 4004=paper, 4003=live - the image relays through socat and refuses 4001/4002 from other containers.")
     client_id = models.IntegerField(default=1,
         help_text="BASE API client ID — must be UNIQUE per account and below "
                   "100. Sauron opens several sockets at once (trading, data "
@@ -261,8 +262,20 @@ class IBKRAccount(models.Model):
     #: The four ports IBKR ships. The socket you connect to IS the account
     #: you trade — there is no second switch inside the API — so these are
     #: the only fact on this model that decides whose money moves.
-    PAPER_PORTS = {7497: "TWS", 4002: "IB Gateway"}
-    LIVE_PORTS = {7496: "TWS", 4001: "IB Gateway"}
+    # 4003/4004 are the containerised Gateway's SOCAT relay ports, and for
+    # the dockerised deployment they are the ONLY ports that work. The
+    # gnzsnz/ib-gateway image binds the Gateway's own 4001/4002 to the
+    # container's 127.0.0.1 and relays them out through socat as
+    # 4003 (-> 4001, live) and 4004 (-> 4002, paper) — so from the web
+    # container, ibgateway:4001 answers CONNECTION REFUSED forever, even
+    # after a perfect login. This platform's runbook pointed at 4001/4002
+    # for weeks; the operator's first real Gateway proved it wrong.
+    # The relay preserves the live/paper split, so the port keeps deciding
+    # the environment — which is the property everything here rests on.
+    PAPER_PORTS = {7497: "TWS", 4002: "IB Gateway",
+                   4004: "IB Gateway (docker/socat)"}
+    LIVE_PORTS = {7496: "TWS", 4001: "IB Gateway",
+                  4003: "IB Gateway (docker/socat)"}
 
     @property
     def env(self) -> "str | None":
