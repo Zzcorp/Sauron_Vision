@@ -163,3 +163,96 @@ class BarFallbackTests(TestCase):
         _quote(sig.instrument, "104")      # fresh, mid-range: stays active
         self._bar(sig.instrument, 94)      # bar says stopped — must lose
         self.assertEqual(evaluate_signal_outcome(self._fresh(sig)), "active")
+
+
+class AgeIsAnswerableWithoutAPriceTests(TestCase):
+    """The signals that most needed expiring were the only ones that could not.
+
+    `evaluate_signal_outcome` returned None on "no usable price" THIRTY LINES
+    before it reached the age check, so a signal on an instrument that stops
+    being quoted and stops producing bars never expires. `_close_signal` is
+    the only writer of `is_active=False` for a Signal outside the sample-data
+    script, so the row stays active for the life of the database: it can
+    never be graded, which leaves its rule at a permanent neutral 1.0 in the
+    weighting — never decayed, never demoted — while the 300s lifecycle pass
+    re-walks it forever.
+
+    The ORDER of the two hunks is the whole risk. Moving the TTL up without
+    also guarding `_close_signal` against a None close price sends
+    `Decimal(None)` into `_compute_realized_r`, which raises TypeError BEFORE
+    the save — and `run_signal_lifecycle` counts that into `errors` and
+    returns a clean-looking dict. The row would stay active, the pass would
+    look healthy, and a test on `_close_signal` alone would still be green.
+    That is the same failure in a new place, so both hunks land together and
+    `test_the_expiry_does_not_raise` is the one that proves it.
+    """
+
+    def _signal(self, age_days):
+        from datetime import timedelta
+        from django.utils import timezone
+        from signals.models import Signal
+        sig = _make_signal(symbol="NOQUOTE", direction="bullish",
+                           entry="100", stop="95", target="110")
+        Signal.objects.filter(pk=sig.pk).update(
+            created_at=timezone.now() - timedelta(days=age_days))
+        return Signal.objects.select_related("instrument").get(pk=sig.pk)
+
+    def test_a_signal_past_its_ttl_expires_with_no_price_available(self):
+        from signals.performance import evaluate_signal_outcome
+        sig = self._signal(age_days=10)
+
+        self.assertEqual(evaluate_signal_outcome(sig), "expired")
+
+        sig.refresh_from_db()
+        self.assertFalse(sig.is_active)
+        self.assertIsNotNone(sig.expired_at)
+
+    def test_it_records_no_r_rather_than_a_flat_one(self):
+        """A fabricated 0.0 enters the decay tracker and the allocator as a
+        measurement nobody made. Unmeasured is not flat."""
+        from signals.performance import evaluate_signal_outcome
+        sig = self._signal(age_days=10)
+        evaluate_signal_outcome(sig)
+        sig.refresh_from_db()
+        self.assertIsNone(sig.realized_r)
+
+    def test_the_expiry_does_not_raise(self):
+        """THE HALF-LANDING GUARD. Without the `_close_signal` hunk this is
+        a TypeError, swallowed into the lifecycle pass's error count while
+        the row stays active and the pass reports clean."""
+        from signals.performance import evaluate_signal_outcome
+        sig = self._signal(age_days=10)
+        try:
+            evaluate_signal_outcome(sig)
+        except Exception as e:  # noqa: BLE001 — the point of the test
+            self.fail(f"expiry without a price raised {type(e).__name__}: {e}")
+        sig.refresh_from_db()
+        self.assertEqual(sig.outcome, "expired")
+
+    def test_the_lifecycle_pass_books_it_rather_than_counting_an_error(self):
+        """Driven through the real task, not the helper — the pass is where
+        a raise would have been converted into a clean-looking dict."""
+        from signals.tasks_lifecycle import run_signal_lifecycle
+        self._signal(age_days=10)
+        out = run_signal_lifecycle()
+        self.assertEqual(out.get("errors", 0), 0)
+
+    def test_a_signal_inside_its_ttl_is_still_left_alone(self):
+        """The path `test_a_bar_older_than_the_bound_does_not_resolve` and
+        test_data_quality already pin. If this changes, the hunk is wrong."""
+        from signals.performance import evaluate_signal_outcome
+        sig = self._signal(age_days=1)
+
+        self.assertIsNone(evaluate_signal_outcome(sig))
+
+        sig.refresh_from_db()
+        self.assertTrue(sig.is_active)
+
+    def test_a_priced_expiry_still_marks_to_market(self):
+        """The guard must not cost a real expiry its R."""
+        from signals.performance import evaluate_signal_outcome
+        sig = self._signal(age_days=10)
+        evaluate_signal_outcome(sig, current_price=Decimal("102"))
+        sig.refresh_from_db()
+        self.assertEqual(sig.outcome, "expired")
+        self.assertIsNotNone(sig.realized_r)

@@ -168,7 +168,16 @@ def _close_signal(signal, outcome, close_price, now):
                              if signal.risk_reward_ratio
                              else _compute_realized_r(signal, close_price))
     else:
-        signal.realized_r = _compute_realized_r(signal, close_price)
+        # An expiry with NO PRICE is unmeasured, not a scratch. The TTL now
+        # fires without one (see `evaluate_signal_outcome`), and
+        # `_compute_realized_r` would reach `Decimal(close_price)` on None
+        # and raise TypeError — before the save below, so the row would stay
+        # active while `run_signal_lifecycle` counted an error and returned a
+        # clean-looking dict. Same posture as `hit_target` above: the row
+        # keeps its outcome, its close and its duration; what it does not
+        # carry is an R multiple derived from a price nobody had.
+        signal.realized_r = (None if close_price is None
+                             else _compute_realized_r(signal, close_price))
     signal.time_to_outcome_seconds = int((now - signal.created_at).total_seconds())
     signal.save(update_fields=[
         "outcome", "is_active", "expired_at",
@@ -218,10 +227,30 @@ def evaluate_signal_outcome(signal, current_price=None):
     if current_price is None:
         current_price = _bar_close_fallback(signal.instrument)
 
+    now = timezone.now()
+
+    # AGE IS ANSWERABLE WITHOUT A PRICE, and it has to be answered here.
+    # The TTL check used to sit thirty lines below, behind this early
+    # return — so the signals on instruments nothing quotes any more, and
+    # whose bars have also stopped, were the ONLY ones that could never
+    # expire. `_close_signal` is the sole writer of `is_active=False` for a
+    # Signal outside the sample-data script, so a row that cannot reach it
+    # stays active for the life of the database: never graded, so its rule
+    # sits at a permanent neutral 1.0 in the weighting and can never be
+    # decayed or demoted, and the 300s lifecycle pass re-walks it forever.
+    #
+    # It closes UNGRADED — `realized_r` None, not 0.0. Unmeasured is not
+    # flat, and `_close_signal` is guarded for precisely this call: passing
+    # a None price into `_compute_realized_r` reaches `Decimal(None)` and
+    # raises TypeError, which the lifecycle pass counts and swallows. That
+    # would leave the row active while the pass reported a clean run, which
+    # is the failure this fix exists to remove, not to relocate.
     if current_price is None:
+        if (now - signal.created_at).days > SIGNAL_TTL_DAYS:
+            _close_signal(signal, "expired", None, now)
+            return "expired"
         return None
 
-    now = timezone.now()
     extremes_changed = _update_extremes(signal, current_price)
 
     cp = Decimal(current_price)
