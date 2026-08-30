@@ -423,10 +423,30 @@ def check_live_mode_readiness(user) -> dict:
     # page permanently red for a condition no credential can fix.
     PAPER_BY_DESIGN = {"commodity"}
 
-    broken, expected = [], []
-    for cfg in AssetBotConfig.objects.filter(user=user, enabled=True, mode="live"):
+    live_cfgs = list(
+        AssetBotConfig.objects.filter(user=user, enabled=True, mode="live"))
+    # NOTHING LIVE IS NOT THE SAME AS EVERYTHING READY. With no live
+    # configs this returned a confident "all live bots have a real broker
+    # route" over an EMPTY queryset — the state of every deployment that
+    # has not armed yet, and the row an operator reads at exactly the
+    # moment they are deciding whether it is safe to arm. It was the only
+    # check in this file that never passed `configured=False`; seven
+    # siblings already do, and the page has machinery for it.
+    if not live_cfgs:
+        return _check("live_ready", "Live broker credentials", "ok",
+                      "no bot is in live mode — nothing to verify yet",
+                      configured=False)
+
+    broken, expected, symbolless = [], [], []
+    for cfg in live_cfgs:
         if cfg.asset_class in PAPER_BY_DESIGN:
             expected.append(cfg.name)
+            continue
+        # A live config with an EMPTY symbol list never enters this loop,
+        # so it used to pass as verified while being incapable of opening
+        # anything. Silence from a loop that never ran is not a pass.
+        if not (cfg.symbols or []):
+            symbolless.append(cfg.name)
             continue
         # EVERY symbol, not just the first: one config can span venues, and
         # a per-symbol fallback is exactly the silent failure we're hunting.
@@ -441,7 +461,14 @@ def check_live_mode_readiness(user) -> dict:
                       "live bots falling back to paper: " + ", ".join(broken[:6]),
                       "Add or fix broker credentials — these bots refuse to "
                       "trade rather than record fake live fills")
-    detail = "all live bots have a real broker route"
+    if symbolless:
+        return _check("live_ready", "Live broker credentials", "warn",
+                      "live but scans nothing: " + ", ".join(symbolless[:6]),
+                      "These configs are armed for live and carry no "
+                      "symbols, so they can never open a position — give "
+                      "them a universe or take them out of live mode")
+    detail = f"{len(live_cfgs) - len(expected)} live bot(s) have a real "
+    detail += "broker route"
     if expected:
         detail += f" ({len(expected)} paper-only by asset class)"
     return _check("live_ready", "Live broker credentials", "ok", detail)

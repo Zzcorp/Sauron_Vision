@@ -624,13 +624,25 @@ def save_ibkr_credentials(request):
     # positions behind it.
     if ibkr_username or ibkr_password:
         suffix = "" if gateway_slot == 1 else str(gateway_slot)
+        # `--write` targets BASE_DIR.parent/.env — the repo root on the
+        # HOST. Inside the web container BASE_DIR is /app, so it resolves
+        # to /.env, and compose mounts nothing there: `env_file: ../.env`
+        # injects variables, it does not place the file. The command then
+        # refuses ("this command will not create one"), which is the right
+        # refusal but leaves an operator following this very message
+        # stuck. So the message asks for the form that works: print in the
+        # container, which can read the database, and paste on the host,
+        # which owns the file.
         messages.info(
             request,
             f"Gateway login stored for slot {gateway_slot} "
             f"({acct.gateway_host}). It reaches the container on its next "
-            f"start: run `manage.py render_ibkr_env --write`, then "
+            f"start. On the host: "
+            f"`./deploy/dc exec web python manage.py render_ibkr_env` "
+            f"prints the block — paste it into .env, then "
             f"`./deploy/dc --profile ibkr{suffix} up -d {acct.gateway_host}` "
-            f"when no position is open on it.")
+            f"when no position is open on it. (--write only works where "
+            f".env actually is, which is not inside the container.)")
 
     # The PORT decides, not the checkbox. The checkbox is documented on the
     # model as informational and the socket is what actually selects the
@@ -655,6 +667,22 @@ def save_ibkr_credentials(request):
             f"but port {port} is the {acct.env.upper()} socket, and the port "
             f"is what selects the account. Treating this connection as "
             f"{acct.env.upper()}.",
+        )
+    elif not paper:
+        # A LIVE route saved through this form produced NO message at all.
+        # `paper_flag_disagrees` cannot fire here — the form derives `paper`
+        # FROM the port, so the two can never contradict each other — and
+        # the unrecognised-port branch above only catches ports that are
+        # none of the four. So the one save that commits an operator to a
+        # funded account was the quietest of the three.
+        messages.warning(
+            request,
+            f"IBKR: port {port} is the LIVE {IBKRAccount.LIVE_PORTS[port]} "
+            f"socket — this connection points at a FUNDED account, not a "
+            f"paper one. Nothing trades on it until a bot config is set to "
+            f"live mode (which takes the PIN), but every order that config "
+            f"sends afterwards is real. Use "
+            f"{sorted(IBKRAccount.PAPER_PORTS)} for paper.",
         )
     if acct.connected:
         messages.success(

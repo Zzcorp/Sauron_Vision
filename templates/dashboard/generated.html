@@ -6,8 +6,8 @@
     {% if messages %}
     <div style="margin-bottom:18px;">
         {% for msg in messages %}
-        <div class="card" style="border-color:{% if msg.tags == 'success' %}var(--accent){% else %}var(--accent-red){% endif %};padding:12px 20px;margin-bottom:8px;">
-            <span style="font-family:var(--font-mono);font-size:13px;">{% if msg.tags == 'success' %}OK{% else %}ERR{% endif %} {{ msg }}</span>
+        <div class="card" style="border-color:{% if msg.tags == 'success' %}var(--accent){% elif msg.tags == 'error' %}var(--accent-red){% elif msg.tags == 'warning' %}var(--accent-gold-ink, var(--accent-gold)){% else %}var(--border){% endif %};padding:12px 20px;margin-bottom:8px;">
+            <span style="font-family:var(--font-mono);font-size:13px;">{% if msg.tags == 'success' %}OK{% elif msg.tags == 'error' %}ERR{% elif msg.tags == 'warning' %}WARN{% else %}NOTE{% endif %} {{ msg }}</span>
         </div>
         {% endfor %}
     </div>

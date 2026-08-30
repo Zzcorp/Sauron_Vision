@@ -295,3 +295,68 @@ class CotNodeTests(TestCase):
         first = self._cot_node()["why"]
         _cot(_instrument("SI"), timezone.now().date() - timedelta(days=3))
         self.assertNotEqual(first, self._cot_node()["why"])
+
+
+class LiveReadinessCannotPassOverAnEmptySetTests(TestCase):
+    """The row an operator reads at the moment they decide to arm.
+
+    `check_live_mode_readiness` filtered `mode="live"` and returned a
+    confident "all live bots have a real broker route" when there were
+    NONE — the state of every deployment that has not armed yet. It was
+    the only check in the file that never passed `configured=False`,
+    while seven siblings already did and the page has the machinery to
+    render the difference.
+
+    Silence from a loop that never ran is not a pass.
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        self.user = User.objects.create_user("lr_u", password="x")
+
+    def _cfg(self, mode="live", symbols=("AAPL",), asset_class="stock",
+             name="L"):
+        from decimal import Decimal
+        from bot_program.models import AssetBotConfig
+        return AssetBotConfig.objects.create(
+            user=self.user, asset_class=asset_class, name=name, mode=mode,
+            symbols=list(symbols), capital=Decimal("10000"), enabled=True)
+
+    def _row(self):
+        from dashboard.views_system_health import check_live_mode_readiness
+        return check_live_mode_readiness(self.user)
+
+    def test_no_live_config_is_unconfigured_not_verified(self):
+        row = self._row()
+        self.assertFalse(row["configured"])
+        self.assertIn("nothing to verify", row["detail"])
+
+    def test_a_paper_only_platform_does_not_claim_a_live_route(self):
+        self._cfg(mode="paper")
+        row = self._row()
+        self.assertFalse(row["configured"])
+
+    def test_a_live_config_with_no_symbols_is_a_warning(self):
+        """It is armed for live and can never open — the loop over its
+        symbols simply never ran, which used to read as verified."""
+        self._cfg(symbols=())
+        row = self._row()
+        self.assertEqual(row["state"], "warn")
+        self.assertIn("scans nothing", row["detail"])
+
+    def test_a_real_live_config_is_actually_checked(self):
+        self._cfg(symbols=("AAPL",))
+        row = self._row()
+        self.assertTrue(row["configured"])
+        self.assertIn(row["state"], ("ok", "fail"))
+
+    def test_the_ok_detail_counts_what_it_verified(self):
+        """'all live bots' over an empty set was the whole bug; a count
+        cannot lie the same way."""
+        from unittest.mock import patch
+        self._cfg(symbols=("AAPL",))
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                   return_value=object()):
+            row = self._row()
+        self.assertEqual(row["state"], "ok")
+        self.assertIn("1 live bot", row["detail"])
