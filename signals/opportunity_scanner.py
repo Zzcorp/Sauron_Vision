@@ -1788,23 +1788,54 @@ def _emit_match(setup, instrument, composite: float, conditions_out: list,
     risk_per = abs(entry - stop)
     rr = abs((target - entry) / risk_per) if risk_per > 0 else None
 
-    signal = Signal.objects.create(
-        instrument=instrument,
-        signal_type="composite",
-        direction=setup.direction,
-        urgency="medium",
-        title=f"{setup.name} matched on {instrument.symbol}",
-        description=setup.description or f"Setup '{setup.name}' triggered with score {composite:.2f}.",
-        rule_name=setup.name,
-        score=round(composite, 4),
-        sub_scores={"opportunity_setup": setup.name},
-        price_at_signal=Decimal(str(last_price)),
-        suggested_entry=Decimal(str(round(entry, 8))),
-        suggested_stop=Decimal(str(round(stop, 8))),
-        suggested_target=Decimal(str(round(target, 8))),
-        risk_reward_ratio=rr,
-    )
+    # ONE active Signal per (instrument, rule) — the same dedupe the rule
+    # engine has always applied (signals/tasks.py). Without it a setup that
+    # still matched on a later pass — the 09:00 beat, then an admin's Run Now
+    # — wrote a second identical row, and the bot's consensus sums evidence
+    # PER ROW: `aggregation.side_weight` adds each row's contribution while
+    # `rules` is a SET of names, so one setup's 0.80 counted twice for a net
+    # weight of 1.60 against a rule count of 1. A single setup could outvote
+    # a genuine opposing rule and turn a HOLD into a live BUY. decide()'s
+    # top-32 cut assumes the same invariant in as many words: "per-rule
+    # dedupe keeps the real row count near the rule count".
+    #
+    # The existing row is REUSED, not refreshed: price_at_signal and the
+    # levels are the basis grading measures R against, and rewriting them
+    # mid-life would re-anchor an outcome already in flight.
+    #
+    # `signal_type` is part of the lookup, not decoration. Setup names and
+    # rule names live in the same `rule_name` column, so a setup that shares
+    # a name with a rule-engine rule would otherwise adopt the rule engine's
+    # Signal and hang its OpportunityFlag on a row it did not write.
+    signal = (Signal.objects
+              .filter(instrument=instrument, rule_name=setup.name,
+                      signal_type="composite", is_active=True)
+              .order_by("-created_at").first())
+    if signal is None:
+        signal = Signal.objects.create(
+            instrument=instrument,
+            signal_type="composite",
+            direction=setup.direction,
+            urgency="medium",
+            title=f"{setup.name} matched on {instrument.symbol}",
+            description=setup.description or f"Setup '{setup.name}' triggered with score {composite:.2f}.",
+            rule_name=setup.name,
+            score=round(composite, 4),
+            sub_scores={"opportunity_setup": setup.name},
+            price_at_signal=Decimal(str(last_price)),
+            suggested_entry=Decimal(str(round(entry, 8))),
+            suggested_stop=Decimal(str(round(stop, 8))),
+            suggested_target=Decimal(str(round(target, 8))),
+            risk_reward_ratio=rr,
+        )
+    else:
+        logger.debug("[opportunity] %s x %s already has active signal %s — "
+                     "flagging against it instead of writing a duplicate",
+                     setup.name, instrument.symbol, signal.pk)
 
+    # The FLAG is still written every pass. A flag is a moment — it records
+    # that the setup matched on this date at this price, and
+    # `resolve_pending_flags` grades flags, not signals.
     flag = OpportunityFlag.objects.create(
         setup=setup, instrument=instrument, signal=signal,
         direction=setup.direction, score=round(composite, 4),
