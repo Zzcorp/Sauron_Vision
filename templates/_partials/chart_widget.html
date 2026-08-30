@@ -123,7 +123,11 @@ Optional page data (json_script blocks the widget picks up when present):
 .sv-chart-btn.active {
     color: var(--accent, #00e868);
     border-color: var(--accent, #00e868);
-    background: rgba(0, 232, 104, 0.08);
+    /* Mixed from the live token, not the dark theme's accent frozen
+       into an rgba(). Light mode sets --accent #00994d, so the literal
+       made a pressed chart button glow brighter than every other
+       active control on the page. */
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 /* An indicator button wears its series' tone once active, so the toolbar
    is the legend for the overlays: the operator matches a line to its
@@ -175,7 +179,7 @@ Optional page data (json_script blocks the widget picks up when present):
    points being compared. */
 .sv-chart-measure {
     position: absolute;
-    top: 44px;
+    top: calc(var(--sv-toolbar-h, 36px) + 8px);
     right: 10px;
     display: none;
     padding: 4px 8px;
@@ -183,7 +187,11 @@ Optional page data (json_script blocks the widget picks up when present):
     font-size: 10px;
     line-height: 1.6;
     color: var(--text-primary, #d8ecd8);
-    background: var(--bg-elevated, rgba(12, 20, 14, 0.92));
+    /* --bg-elevated is defined nowhere, so the hardcoded near-black
+       plate always won — and light mode paints --text-primary #1a2a1a
+       on it, which is black on black. The legend and countdown below
+       already learned this; the measure box was missed. */
+    background: var(--bg-card, #0a1a14);
     border: 1px solid var(--border, #1a2e1a);
     border-radius: 3px;
     pointer-events: none;
@@ -191,13 +199,17 @@ Optional page data (json_script blocks the widget picks up when present):
     white-space: nowrap;
 }
 .sv-chart-measure.on { display: block; }
-.sv-chart-measure .sv-m-r { color: var(--accent-gold, #d8b45a); }
+/* --accent-gold-ink, not --accent-gold: the glow gold fails contrast
+   on white at this size. The token is defined in BOTH themes (dark
+   aliases it back to --accent-gold), which is what this widget's own
+   JS already does when it picks a marker colour. */
+.sv-chart-measure .sv-m-r { color: var(--accent-gold-ink, #d8b45a); }
 .sv-chart-measure .sv-m-up { color: var(--accent, #00e868); }
 .sv-chart-measure .sv-m-dn { color: var(--danger, #ff4d4d); }
 .sv-chart-measure .sv-m-dim { color: var(--text-muted, #5a7a5a); }
 .sv-chart-legend {
     position: absolute;
-    top: 44px;
+    top: calc(var(--sv-toolbar-h, 36px) + 8px);
     left: 10px;
     font-family: var(--font-mono, monospace);
     font-size: 10px;
@@ -220,7 +232,7 @@ Optional page data (json_script blocks the widget picks up when present):
    a daily candle has no close the operator is waiting on. */
 .sv-chart-countdown {
     position: absolute;
-    top: 44px;
+    top: calc(var(--sv-toolbar-h, 36px) + 8px);
     right: 70px;
     font-family: var(--font-mono, monospace);
     font-size: 10px;
@@ -238,7 +250,7 @@ Optional page data (json_script blocks the widget picks up when present):
 .sv-chart-error-overlay {
     position: absolute;
     inset: 0;
-    top: 36px; /* below toolbar */
+    top: var(--sv-toolbar-h, 36px); /* below toolbar, measured */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -791,7 +803,20 @@ Optional page data (json_script blocks the widget picks up when present):
         if (!el) return null;
         var cs = window.getComputedStyle(el);
         if (cs.display === 'none' || cs.visibility === 'hidden') return null;
+        /* NEITHER headband hides itself with display or visibility. Both
+           use `transform: translateX(110%); opacity: 0; pointer-events:
+           none`, which leaves the box its full width, its full height and
+           its ORIGINAL top — so a collapsed band still charged its whole
+           inset, and collapsing both to win more chart won exactly
+           nothing. That is the precise case the measured approach was
+           written for. Opacity is the reliable tell, and a box shoved
+           off-screen by a transform is the other. */
+        if (parseFloat(cs.opacity) === 0) return null;
         var r = el.getBoundingClientRect();
+        if (r.bottom <= 0 || r.right <= 0
+            || r.top >= window.innerHeight || r.left >= window.innerWidth) {
+            return null;
+        }
         return (r.width > 0 && r.height > 0) ? r : null;
     }
 
@@ -870,9 +895,63 @@ Optional page data (json_script blocks the widget picks up when present):
             .forEach(function (prop) { container.style[prop] = ''; });
     }
 
+    /* ── The portal ───────────────────────────────────────────────────
+       `position: fixed` is only relative to the VIEWPORT while no
+       ancestor establishes a containing block. A `transform`, `filter`,
+       `backdrop-filter`, `will-change`, `perspective` or `contain` on any
+       ancestor captures it — and so does a transform animation that is
+       merely FILLING, whatever its final keyframe says.
+
+       This card sits inside `.card.fade-in-up` inside `.page-content > *`,
+       both of which ran filling transform animations, so the expand pin
+       landed inside a 420px card and was clipped away by that card's
+       `overflow: hidden`. Reported, twice, as "the graph disappears".
+
+       The CSS side of that is fixed. This is the part that keeps it
+       fixed: while the chart is pinned it is a child of <body>, so there
+       is no ancestor left to capture it. A future `contain: paint` on
+       some wrapper cannot silently re-break the chart, and neither can a
+       page that includes this widget somewhere we have not seen.
+
+       A placeholder holds the card's height while the chart is away, so
+       the page underneath does not jump when it leaves the flow. */
+    var portalHome = null, portalGap = null;
+
+    function portalOut() {
+        if (portalHome || !container.parentNode) return;
+        portalHome = container.parentNode;
+        portalGap = document.createElement('div');
+        portalGap.setAttribute('data-sv-chart-gap', '');
+        portalGap.style.height = container.offsetHeight + 'px';
+        portalHome.insertBefore(portalGap, container);
+        document.body.appendChild(container);
+    }
+
+    function portalBack() {
+        if (!portalHome) return;
+        /* Back to the exact slot, not appended — the card holds other
+           children (the JSON script tags the widget reads its positions
+           and signals from) and order is not decorative. */
+        try { portalHome.insertBefore(container, portalGap); } catch (e) {
+            portalHome.appendChild(container);
+        }
+        if (portalGap && portalGap.parentNode) portalGap.remove();
+        portalHome = portalGap = null;
+    }
+
     function layout() {
         var inFs = container.classList.contains('sv-chart-fs')
                    || document.fullscreenElement === container;
+        /* Portalled exactly when WE write the pin ourselves. Real
+           fullscreen needs no portal — the top layer is above every
+           containing block — but the `.sv-chart-fs` FALLBACK is an
+           ordinary `position: fixed` and is captured like any other. */
+        var weArePinning = (viewState === 'tall')
+            || (container.classList.contains('sv-chart-fs')
+                && document.fullscreenElement !== container);
+        /* Before measuring: moving the card changes the page's height,
+           and tallBox() reads the furniture against that page. */
+        if (weArePinning) portalOut(); else portalBack();
         /* ONE state decides the height. Fullscreen outranks tall when
            both somehow apply, rather than letting CSS source order pick
            and produce a chart sized for the wrong one. */
@@ -907,7 +986,24 @@ Optional page data (json_script blocks the widget picks up when present):
         var panesH = open.reduce(function (t, k) {
             return t + PANE_SPECS[k].height;
         }, 0);
-        var bodyH = Math.max(120, total - TOOLBAR_H - panesH);
+        /* MEASURED, not assumed. TOOLBAR_H is 36 — one row — but the
+           toolbar is `flex-wrap: wrap` and carries 40-odd controls, so it
+           takes two rows on any ordinary window and roughly 65px. Every
+           pixel of that difference was handed to lightweight-charts as
+           canvas height the box did not have, and `.sv-candle-container`
+           is `overflow: hidden`, so what got eaten was the bottom of the
+           chart — which is where the TIME AXIS lives.
+           It also explains a symptom that reads as an expand bug: the
+           tall state is nearly viewport-wide, so the toolbar UN-wraps
+           there and the axis reappears. The state that was wrong was the
+           normal one. The constant stays as the pre-measure fallback. */
+        var tbEl = container.querySelector('.sv-chart-toolbar');
+        var tbH = (tbEl && tbEl.offsetHeight) || TOOLBAR_H;
+        /* Published so the overlays that sit under the toolbar (measure
+           readout, legend, countdown) follow it instead of each carrying
+           their own copy of 36. */
+        container.style.setProperty('--sv-toolbar-h', tbH + 'px');
+        var bodyH = Math.max(120, total - tbH - panesH);
         canvasEl.style.height = bodyH + 'px';
         var w = container.offsetWidth || 600;
         if (chart) chart.applyOptions({ width: w, height: bodyH });
@@ -2079,10 +2175,27 @@ Optional page data (json_script blocks the widget picks up when present):
 
     function setViewState(next) {
         viewState = next;
+        /* The operator's zoom survives the resize. `fitContent()` here
+           refit the whole series on every expand and every collapse, so
+           anyone who had zoomed into a few days lost it the moment they
+           made the chart bigger to look at those days more closely —
+           expanding threw away the reason for expanding. The logical
+           range is captured before the box changes and restored after,
+           the same way the quiet refresh already preserves it. */
+        var keepRange = null;
+        if (chart) {
+            try { keepRange = chart.timeScale().getVisibleLogicalRange(); }
+            catch (e) { keepRange = null; }
+        }
         container.classList.toggle('sv-chart-tall', next === 'tall');
         layout();
         paintToolbarState();
-        if (chart) chart.timeScale().fitContent();
+        if (chart) {
+            try {
+                if (keepRange) chart.timeScale().setVisibleLogicalRange(keepRange);
+                else chart.timeScale().fitContent();
+            } catch (e) { try { chart.timeScale().fitContent(); } catch (e2) {} }
+        }
     }
 
     function toggleTall() {
@@ -2237,6 +2350,25 @@ Optional page data (json_script blocks the widget picks up when present):
     if (window.ResizeObserver) {
         try { new ResizeObserver(relayout).observe(container); } catch (e) {}
     }
+    /* The observer above cannot see the furniture move while the chart is
+       PINNED. A pinned card's box is four inline insets, and once portalled
+       it is a child of <body> — so the margin change that opens the signals
+       rail (`body:has(.signals-rail.open) .main-content`) never reaches it,
+       and neither does the sidebar minifying, a headband collapsing, or the
+       info panel sliding away. The tall box would then keep the geometry it
+       was born with while the page moved underneath, and at z-index 1200 the
+       stale box wins the overlap — the chart paints over the rail it is
+       supposed to sit beside.
+
+       Every one of those moves is a CSS transition, and the rail toggle is a
+       bare inline onclick that fires no event of its own, so `transitionend`
+       is the one signal common to all of them. The existing 150ms debounce
+       absorbs the burst a multi-property transition sends. */
+    document.addEventListener('transitionend', function (ev) {
+        if (viewState !== 'tall') return;
+        if (ev.target === container || container.contains(ev.target)) return;
+        relayout();
+    });
 
     // ── Bootstrap ─────────────────────────────────────────────────────────
     function bootstrap() {

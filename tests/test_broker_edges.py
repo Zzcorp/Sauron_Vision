@@ -319,11 +319,25 @@ class TheTallStateFillsTheWorkingAreaTests(SimpleTestCase):
             self.assertIn(sel, seg, sel)
 
     def test_a_hidden_headband_takes_no_space(self):
-        """visibleRect returns null for display:none, so a collapsed
-        strip does not reserve a gap the chart cannot use."""
-        seg = self._src().split("function visibleRect")[1][:500]
+        """A collapsed strip must not reserve a gap the chart cannot use.
+
+        `display`/`visibility` are the easy half and NEITHER headband uses
+        them: `.data-headband.collapsed` and `.ticker-bar.collapsed` both
+        hide with `transform: translateX(110%); opacity: 0`, which leaves
+        the box its full height and its original top. So this test used to
+        assert a mechanism that could not fire on the two elements it was
+        written about, and 48px of dead space survived under the topbar in
+        exactly the case tallBox() measures for.
+        """
+        seg = self._src().split("function visibleRect")[1]
+        end = seg.find("\n    function ")
+        if end > 0:
+            seg = seg[:end]
         self.assertIn("display === 'none'", seg)
         self.assertIn("visibility === 'hidden'", seg)
+        # The half that actually applies to the real headbands.
+        self.assertIn("parseFloat(cs.opacity) === 0", seg)
+        self.assertIn("r.left >= window.innerWidth", seg)
 
     def test_the_pin_is_cleared_on_the_way_out(self):
         """A container left fixed after leaving the state would float
@@ -336,7 +350,14 @@ class TheTallStateFillsTheWorkingAreaTests(SimpleTestCase):
 
     def test_fullscreen_clears_the_pin_too(self):
         """Both states set a height; only one may own the container."""
-        seg = self._src().split("function layout()")[1][:900]
+        # The whole function body, not a byte count — this assertion
+        # broke when the portal was added above it, purely because the
+        # slice was too short. A window is not a scope.
+        src = self._src()
+        seg = src.split("function layout()")[1]
+        end = seg.find("\n    function ")
+        if end > 0:
+            seg = seg[:end]
         self.assertIn("if (inFs) {", seg)
         self.assertIn("clearPin();", seg)
 
