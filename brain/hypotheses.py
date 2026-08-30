@@ -102,7 +102,7 @@ class UnmeasurableClaim(ValueError):
     resolver is not a bet, it is noise wearing a deadline."""
 
 
-def _validate_criteria(criteria: dict) -> None:
+def _validate_criteria(criteria: dict, horizon_hours: int = 24) -> None:
     """Raise UnmeasurableClaim unless a registered resolver could, given
     evidence, actually grade these criteria.
 
@@ -156,9 +156,117 @@ def _validate_criteria(criteria: dict) -> None:
                         f"an integer — the resolver would crash on it "
                         f"every pass, forever")
 
+        # SHAPE IS NOT MEASURABILITY. Every check above asks whether the
+        # resolver could PARSE this claim. None of them asks whether the
+        # named rule can produce a trade to grade it against — and a claim
+        # about a rule that cannot trade before its own deadline is
+        # unresolvable at birth.
+        #
+        # The cost is not the trust score: `agent_trust_score` excludes
+        # UNRESOLVABLE deliberately and correctly, because those are OUR
+        # blind spots rather than the agent's misses. The cost is that the
+        # agent spends its whole forecasting budget on claims that can
+        # never grade, and so never builds a record at all — thirty-plus
+        # of them is how sauron_mind reached a fortnight of decay
+        # forecasts about golden_cross while golden_cross emitted zero
+        # signals and zero trades.
+        _refuse_if_the_rule_cannot_trade(criteria, horizon_hours)
+
     elif kind == "anomaly_persists":
         if not criteria.get("anomaly_key"):
             raise UnmeasurableClaim("anomaly_persists needs an anomaly_key")
+
+
+def _refuse_if_the_rule_cannot_trade(criteria: dict,
+                                     horizon_hours: int) -> None:
+    """Refuse a rule_avg_r claim whose rule is silenced past its deadline.
+
+    Read from the platform's OWN ENFORCEMENT STATE, never from a guess
+    about the market. A quiet rule may fire tomorrow and a forecast about
+    it is legitimate; a rule the platform has switched off cannot, and
+    saying so is a fact we already hold rather than a prediction.
+
+    TWO conditions, and BOTH must hold, because either alone has a
+    legitimate counterexample:
+
+      1. PAUSED with no return before the deadline — so no NEW entry can
+         open inside the window. A `paused_until` in the future but
+         BEFORE the deadline is fine: the rule resumes in time.
+      2. NO OPEN POSITION on the rule — because a pause stops entries,
+         NOT EXITS. A paused rule holding an open trade will produce a
+         closed trade when that trade closes, and the resolver counts
+         trades closed since the claim was posted. The position reviewer
+         posts precisely into this case: it flags `rule_decayed` on an
+         open position and bets on that rule's forward R, which is a
+         perfectly gradeable claim about a paused rule.
+
+    Together they are an impossibility proof rather than a forecast: no
+    entry can open and nothing is open to close, so the window holds zero
+    closed trades by construction. Either half on its own is a guess.
+
+    RESEARCH STAGE IS DELIBERATELY NOT REFUSED, and the reason is worth
+    keeping. `stage_policy` does define research as "no orders at all",
+    so a research rule genuinely cannot produce a trade — but research is
+    the ENTRY RUNG OF A LADDER the platform expects to climb, not a
+    decision to stop. Every RuleControl is created at that stage
+    (`promotion_pipeline` seeds `promotion_stage: "research"`), and the
+    generator posts a BIRTH HYPOTHESIS for each new rule immediately
+    after. Refusing those would mean no rule ever gets a birth
+    hypothesis, and `demoter` kills generated rules whose birth
+    hypothesis is REFUTED — so the gate would have quietly disabled the
+    only thing that culls bad generated rules. A pause is a decision; a
+    stage is a position on a ladder.
+
+    Fails OPEN in both unknown cases. A control layer we cannot read is
+    our outage, and blocking an agent's forecast on our own outage is the
+    same mistake in the other direction; and a rule with no RuleControl
+    row is unknown to the control layer, which is not the same thing as
+    known-and-silenced — refusing there would reject every claim about a
+    newly registered rule.
+    """
+    rule = criteria.get("rule_name")
+    try:
+        from signals.models_control import RuleControl  # noqa: F401
+        rc = RuleControl.objects.filter(rule_name=rule).first()
+    except Exception:  # noqa: BLE001 — see the docstring: fail open
+        return
+    if rc is None:
+        return
+
+    try:
+        still_paused = not rc.is_effectively_active()
+    except Exception:  # noqa: BLE001 — fail open
+        return
+    if not still_paused:
+        return
+
+    deadline = timezone.now() + timedelta(hours=max(1, int(horizon_hours)))
+    returns_in_time = (rc.paused_until is not None
+                       and rc.paused_until < deadline)
+    if returns_in_time:
+        return
+
+    # A PAUSE STOPS ENTRIES, NOT EXITS. An open position on this rule will
+    # close, and the resolver counts trades closed since the claim was
+    # posted — so a paused rule holding one is entirely gradeable. The
+    # position reviewer posts exactly here: it flags `rule_decayed` on an
+    # open position and bets on that rule's forward R.
+    try:
+        from bot_program.models import AssetBotTrade
+        has_open = AssetBotTrade.objects.filter(
+            rule_name=rule, status__in=("OPEN", "CLOSE_PENDING")).exists()
+    except Exception:  # noqa: BLE001 — fail open
+        return
+    if has_open:
+        return
+
+    when = ("with no scheduled return" if rc.paused_until is None
+            else f"until {rc.paused_until:%Y-%m-%d %H:%M}, after the deadline")
+    raise UnmeasurableClaim(
+        f"rule_avg_r names '{rule}', which is PAUSED {when} and holds no "
+        f"open position — no entry can open and nothing is open to close, "
+        f"so the window holds zero closed trades by construction and the "
+        f"claim is unresolvable at birth")
 
 
 # ── Posting + voting ──────────────────────────────────────────────────────
@@ -184,7 +292,7 @@ def post_hypothesis(*,
 
     criteria = dict(resolution_criteria or {})
     try:
-        _validate_criteria(criteria)
+        _validate_criteria(criteria, horizon_hours=horizon_hours)
     except UnmeasurableClaim as exc:
         logger.warning("[hypothesis] refused unmeasurable claim from "
                        "%s: %s (claim: %.120s)",
