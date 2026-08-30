@@ -492,25 +492,43 @@ def _rule_state(pos: dict) -> dict:
     return state
 
 
-def _macro_calendar_has_ever_run() -> bool:
-    """Has anything ever written a macro event?
+#: The macro writers. `source="fmp"` is the EARNINGS half, which stores an
+#: equity TICKER in `currency_affected` and can never match a forex leg; only
+#: these sources store a real currency. A new macro scraper (FRED releases,
+#: BLS) belongs in this tuple and nowhere else.
+MACRO_SOURCES = ("fmp_macro",)
 
-    `_imminent_events` derives {EUR, USD} from EURUSD and queries
-    `currency_affected`, with a comment noting that "the currency carries
-    the macro print that moves an FX leg". A repo-wide search finds exactly
-    ONE non-test writer of EconomicEvent — the earnings scraper — and it
-    stores the equity TICKER in that column. The field holds "AAPL", never
-    "USD", so the forex branch cannot match a row, ever.
 
-    An empty list from that query renders as "checked, nothing imminent",
-    which is the reassuring answer to a question nobody asked. It ships on
-    every forex position through NFP, CPI and FOMC.
+def _macro_calendar_covers_the_horizon() -> bool:
+    """Does a macro source cover the window `_imminent_events` asks about?
+
+    NOT "has one ever run". That was the first version of this check, and an
+    unbounded `.exists()` disarms the blind marker PERMANENTLY on the first
+    successful fetch. FMP answers 402 on this account's plan, so the realistic
+    sequence is: the key works for a while, rows land, the plan lapses, those
+    rows age out of EVENT_HORIZON_HOURS — and `.exists()` keeps returning True
+    over the fossils while event risk silently reverts to "checked, nothing
+    imminent". That is the exact failure this marker was written to prevent,
+    reintroduced by its own disarm condition.
+
+    Coverage, not recency, is the honest question. A scraper that ran ten days
+    ago but fetched fourteen days ahead DOES cover the next 24h, and marking
+    that blind would be a false alarm; a table whose newest macro row is three
+    weeks old covers nothing. So: does any macro row sit at or beyond the far
+    edge of the horizon? If yes, the source reached past where we are looking
+    and an empty result is a real "nothing scheduled".
+
+    Deliberately conservative at the margin: a fetch that returned only rows
+    inside the next 24h reads blind. Saying UNCHECKED when we did check is the
+    safe direction, and it is also a true statement about coverage.
     """
     from market_data.models import EconomicEvent
     try:
         return EconomicEvent.objects.filter(
-            currency_affected__in=("USD", "EUR", "GBP", "JPY", "CHF",
-                                   "CAD", "AUD", "NZD")).exists()
+            source__in=MACRO_SOURCES,
+            datetime__gte=timezone.now() + timedelta(
+                hours=EVENT_HORIZON_HOURS),
+        ).exists()
     except Exception:  # noqa: BLE001 — a blind marker must never raise
         return False
 
@@ -558,14 +576,14 @@ def _imminent_events(pos: dict) -> list[dict]:
     #
     # Naming the absence costs an hour and is the doctrine fix; sourcing a
     # real macro calendar is the separate, larger job.
-    if not rows and currencies and not _macro_calendar_has_ever_run():
+    if not rows and currencies and not _macro_calendar_covers_the_horizon():
         return [{
-            "title": "NO MACRO CALENDAR SOURCE HAS EVER RUN",
+            "title": "NO MACRO CALENDAR COVERS THE NEXT 24H",
             "datetime": None, "impact": EVENT_IMPACT,
             "currency_affected": "/".join(sorted(currencies)),
             "blind": True,
             "note": ("event risk on this pair is UNCHECKED, not clear — "
-                     "nothing has ever written a macro event"),
+                     "no macro source reaches past the event horizon"),
         }]
     return rows
 

@@ -400,3 +400,44 @@ class CalendarEventInstrumentLinkTests(TestCase):
         self._event("AAPL Earnings", currency_affected="AAPL",
                     datetime=timezone.now() - timedelta(days=20))
         self.assertFalse(self._eval("AAPL", impact="high")["matched"])
+
+
+class TheMacroHalfCanLowerTheGradeTests(TestCase):
+    """`judge_result` sums the two halves, so it could not see this.
+
+    `check_economic_calendar` fetches earnings AND macro and returns one
+    dict. Its counts reach `core.task_gate.judge_result` as `parsed`/`stored`
+    (the earnings half) plus `macro_parsed`/`macro_stored` — and the macro
+    pair is in neither WORK_KEYS nor DONE_KEYS, so it was invisible to the
+    verdict. Even nested, the sum would hide it: "handled N rows and stored
+    none" only fires when the COMBINED done is zero, so an earnings half
+    storing normally masks a macro half that kept nothing at all.
+    """
+
+    def _run(self, macro):
+        from scraping import tasks
+        earnings = {"parsed": 10, "stored": 10, "status": "success"}
+        with patch("scraping.scrapers.earnings_calendar."
+                   "fetch_earnings_calendar_fmp", return_value=earnings), \
+             patch("scraping.scrapers.macro_calendar."
+                   "fetch_macro_calendar_fmp", return_value=macro):
+            return tasks.check_economic_calendar.__wrapped__.__wrapped__()
+
+    def test_parsed_rows_that_stored_none_is_a_warning(self):
+        out = self._run({"parsed": 200, "stored": 0})
+        self.assertEqual(out["status"], "warning")
+        self.assertIn("stored none", out["skipped"])
+
+    def test_a_healthy_macro_half_stays_success(self):
+        out = self._run({"parsed": 200, "stored": 200})
+        self.assertEqual(out["status"], "success")
+
+    def test_a_genuinely_empty_fortnight_is_not_a_warning(self):
+        """Parsed nothing and stored nothing is a quiet calendar, not a
+        drop — the distinction the whole scraper is built around."""
+        out = self._run({"parsed": 0, "stored": 0})
+        self.assertEqual(out["status"], "success")
+
+    def test_an_error_still_outranks_it(self):
+        out = self._run({"parsed": 200, "stored": 0, "error": "402"})
+        self.assertEqual(out["status"], "error")

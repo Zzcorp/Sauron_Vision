@@ -195,3 +195,75 @@ class TheForexBlindMarkerClearsOnceASourceRunsTests(TestCase):
         rows = _imminent_events({"symbol": "EURUSD", "asset_class": "forex"})
         self.assertFalse(any(r.get("blind") for r in rows))
         self.assertEqual(rows[0]["title"], "Non-Farm Payrolls")
+
+
+class AStaleCalendarIsStillBlindTests(TestCase):
+    """The disarm condition that would have reintroduced the bug.
+
+    The first version of the guard asked "has a macro source EVER written a
+    row". FMP answers 402 on this account's plan, so the realistic sequence
+    is: the key works, rows land, the plan lapses, the rows age out of the
+    24h horizon — and an unbounded `.exists()` keeps returning True over the
+    fossils. Event risk then reads "checked, nothing imminent" off a table
+    that has not been updated in a month, which is the precise lie the blind
+    marker exists to prevent.
+
+    So the question is COVERAGE, not history: does a macro row reach past
+    the far edge of the horizon we are querying?
+    """
+
+    def _forex(self):
+        return {"symbol": "EURUSD", "asset_class": "forex"}
+
+    def _macro(self, when, source="fmp_macro", impact="high",
+               title="Non-Farm Payrolls", currency="USD"):
+        from market_data.models import EconomicEvent
+        return EconomicEvent.objects.create(
+            source=source, title=title, currency_affected=currency,
+            impact=impact, datetime=when)
+
+    def test_a_calendar_three_weeks_stale_still_reads_blind(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        from brain.position_review import _imminent_events
+
+        self._macro(timezone.now() - timedelta(days=21))
+        rows = _imminent_events(self._forex())
+        self.assertTrue(rows[0].get("blind"),
+                        "a fossil row disarmed the marker")
+
+    def test_a_row_reaching_past_the_horizon_disarms_it(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        from brain.position_review import _imminent_events
+
+        # Beyond EVENT_HORIZON_HOURS, so it does not itself appear in the
+        # 24h window — it is evidence of COVERAGE, not an imminent event.
+        self._macro(timezone.now() + timedelta(days=5))
+        rows = _imminent_events(self._forex())
+        self.assertEqual(rows, [],
+                         "coverage exists, so an empty window is honest")
+
+    def test_the_earnings_half_never_disarms_it(self):
+        """`source="fmp"` stores an equity TICKER in currency_affected.
+
+        It is the writer whose column shape started this whole problem, so
+        it must not be able to answer for the macro half.
+        """
+        from django.utils import timezone
+        from datetime import timedelta
+        from brain.position_review import _imminent_events
+
+        self._macro(timezone.now() + timedelta(days=5),
+                    source="fmp", title="AAPL earnings", currency="AAPL")
+        rows = _imminent_events(self._forex())
+        self.assertTrue(rows[0].get("blind"),
+                        "the earnings scraper answered for the macro half")
+
+    def test_the_marker_names_the_horizon_it_could_not_cover(self):
+        from brain.position_review import _imminent_events
+
+        rows = _imminent_events(self._forex())
+        self.assertIn("EUR", rows[0]["currency_affected"])
+        self.assertIn("USD", rows[0]["currency_affected"])
+        self.assertIn("UNCHECKED", rows[0]["note"])

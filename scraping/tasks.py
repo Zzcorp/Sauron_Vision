@@ -155,6 +155,19 @@ def check_economic_calendar():
             x for x in (result.get("error"), f"macro: {macro['error']}") if x)
     if macro.get("skipped") and not result.get("error"):
         result["skipped"] = result.get("skipped") or macro["skipped"]
+    # A macro half that PARSED rows and stored NONE has to reach the verdict
+    # on its own. `task_gate.judge_result` sums the counts it finds across the
+    # result and its sub-dicts, so its "handled N rows and stored none"
+    # warning can only fire when BOTH halves are empty — an earnings half
+    # storing normally masks a macro half that kept nothing. The keys
+    # macro_parsed/macro_stored are in neither WORK_KEYS nor DONE_KEYS, so
+    # today the macro half cannot lower the grade at all.
+    macro_dropped = ((macro.get("parsed") or 0) > 0
+                     and not (macro.get("stored") or 0))
+    if macro_dropped and not result.get("error"):
+        result["skipped"] = (
+            result.get("skipped")
+            or f"macro parsed {macro.get('parsed')} rows and stored none")
     # The scraper's word goes LAST. This used to read {"status": "success",
     # **result}: the scraper's failure paths return an `error` key and no
     # status, so a 403, a timeout or a DNS failure kept the hardcoded
