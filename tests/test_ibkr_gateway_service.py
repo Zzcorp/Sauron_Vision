@@ -186,3 +186,45 @@ class ConcurrentSocketsDoNotEvictEachOtherTests(SimpleTestCase):
                 continue
             self.assertIn("purpose_client_id(", src, rel)
             self.assertNotIn("client_id=acct.client_id", src, rel)
+
+
+class TheSecondFactorPrefersThePushTests(SimpleTestCase):
+    """A live login demands a second factor roughly daily, and a TYPED
+    code means VNC, a phone, and a human — every day. IB Key push is the
+    only kind the automation can wait out on its own, but enrolling it
+    ADDS a device: IBKR then shows a selection list at login, and an
+    unattended Gateway would sit at that list forever. IBC's
+    SecondFactorDevice answers the list — the value must spell the device
+    exactly as the list does — and the relogin pair turns a missed push
+    into another push instead of a dead login. With one device enrolled
+    there is no list, so the default is inert for SMS-only accounts.
+    """
+
+    def test_every_slot_auto_selects_the_push_device(self):
+        raw = COMPOSE.read_text(encoding="utf-8")
+        self.assertEqual(raw.count("TWOFA_DEVICE: ${IBKR_TWOFA_DEVICE:-IB Key}"),
+                         len(OneSlotPerLoginTests.SLOTS))
+
+    def test_a_missed_push_prompts_again_instead_of_giving_up(self):
+        """`RELOGIN_AFTER_TWOFA_TIMEOUT` must be the quoted string — bare
+        yes is a YAML boolean and reaches IBC as \"true\", which it does
+        not recognise."""
+        raw = COMPOSE.read_text(encoding="utf-8")
+        self.assertEqual(raw.count('RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"'),
+                         len(OneSlotPerLoginTests.SLOTS))
+        self.assertEqual(raw.count("TWOFA_TIMEOUT_ACTION: restart"),
+                         len(OneSlotPerLoginTests.SLOTS))
+
+    def test_the_override_is_documented_in_both_env_examples(self):
+        for f in (".env.example", ".env.production.example"):
+            text = (REPO / f).read_text(encoding="utf-8")
+            self.assertIn("IBKR_TWOFA_DEVICE=", text, f)
+
+    def test_the_runbook_walks_the_activation(self):
+        """Auto-selection is worthless while only SMS is enrolled — the
+        operator has to activate IB Key on their phone first, and keep
+        SMS as the backup."""
+        text = (REPO / "deploy" / "RUNBOOK.md").read_text(encoding="utf-8")
+        self.assertIn("Switching to the push", text)
+        self.assertIn("KEEP SMS", text)
+        self.assertIn("IBKR_TWOFA_DEVICE", text)

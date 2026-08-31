@@ -249,6 +249,16 @@ services:
       # an SSH tunnel to this container's compose-network IP - nothing
       # is published to the host (see .env.production.example).
       VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:-}
+      # Second factor: when the account has SEVERAL 2FA devices enrolled,
+      # IBKR shows a selection list at login and IBC picks this one — the
+      # value must spell the device exactly as the list does ("IB Key" is
+      # the push you tap to approve). With ONE device enrolled there is no
+      # list and this is ignored, so the default is safe for SMS-only
+      # accounts. A missed push re-prompts instead of giving up: that pair
+      # of settings is what makes the ~daily live re-login unattended.
+      TWOFA_DEVICE: ${IBKR_TWOFA_DEVICE:-IB Key}
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
 
   ibgateway-2:
     <<: *ibgateway
@@ -263,6 +273,9 @@ services:
       # an SSH tunnel to this container's compose-network IP - nothing
       # is published to the host (see .env.production.example).
       VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:-}
+      TWOFA_DEVICE: ${IBKR_TWOFA_DEVICE:-IB Key}
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
 
   ibgateway-3:
     <<: *ibgateway
@@ -277,6 +290,9 @@ services:
       # an SSH tunnel to this container's compose-network IP - nothing
       # is published to the host (see .env.production.example).
       VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:-}
+      TWOFA_DEVICE: ${IBKR_TWOFA_DEVICE:-IB Key}
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
 
   ibgateway-4:
     <<: *ibgateway
@@ -291,6 +307,9 @@ services:
       # an SSH tunnel to this container's compose-network IP - nothing
       # is published to the host (see .env.production.example).
       VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:-}
+      TWOFA_DEVICE: ${IBKR_TWOFA_DEVICE:-IB Key}
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
 
   ibgateway-5:
     <<: *ibgateway
@@ -305,6 +324,9 @@ services:
       # an SSH tunnel to this container's compose-network IP - nothing
       # is published to the host (see .env.production.example).
       VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:-}
+      TWOFA_DEVICE: ${IBKR_TWOFA_DEVICE:-IB Key}
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
 
   # ── Nightly offsite backup — runs by default, deliberately ─────────────
   # A dump that lives on the same disk as the database is not a backup.

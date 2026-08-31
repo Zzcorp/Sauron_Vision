@@ -290,6 +290,20 @@ daily after. Which kind decides whether this can run unattended:
 * **Paper** — a separate paper username has NO second factor and logs in
   headless. Prove the whole chain on 4004 first.
 
+**Switching to the push, start to finish.** Activate IB Key in the IBKR
+Mobile app: log in there (this kicks a running Gateway — fine, you are
+about to re-login anyway), Menu → Two-Factor Authentication / Secure
+Login System → activate IB Key, and follow its verification. KEEP SMS
+enrolled as the backup — losing the phone must not mean losing the
+account. With both devices enrolled, the Gateway's login shows a device
+list, and the stack auto-selects `IBKR_TWOFA_DEVICE` (default `IB Key` —
+override in `.env` only if IBKR spells your device differently; the value
+must match the list exactly). A missed push re-prompts rather than giving
+up (`RELOGIN_AFTER_TWOFA_TIMEOUT`), so the ~daily live re-login becomes:
+phone buzzes, you tap approve, done — no VNC, nothing typed. Then
+recreate the slot (`./deploy/ibkr-apply`, or `--force-recreate` if the
+login is unchanged) and watch for the push.
+
 **When the Gateway hangs behind a dialog.** IB Gateway 10.45 shows a
 generic notice box titled just "Gateway" for anything the server wants a
 human to read: a login refusal, an account action, or a marketing
