@@ -637,12 +637,12 @@ def save_ibkr_credentials(request):
             request,
             f"Gateway login stored for slot {gateway_slot} "
             f"({acct.gateway_host}). It reaches the container on its next "
-            f"start. On the host: "
-            f"`./deploy/dc exec web python manage.py render_ibkr_env` "
-            f"prints the block — paste it into .env, then "
-            f"`./deploy/dc --profile ibkr{suffix} up -d {acct.gateway_host}` "
-            f"when no position is open on it. (--write only works where "
-            f".env actually is, which is not inside the container.)")
+            f"start — on the host, run `./deploy/ibkr-apply"
+            f"{'' if gateway_slot == 1 else f' --slot {gateway_slot}'}`: "
+            f"one command that renders the login, updates .env safely and "
+            f"recreates the container. It warns before dropping a session "
+            f"that may hold positions. (The old copy-paste flow is retired "
+            f"— it is how a password once lost a character.)")
 
     # The PORT decides, not the checkbox. The checkbox is documented on the
     # model as informational and the socket is what actually selects the
