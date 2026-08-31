@@ -514,10 +514,18 @@ button.
             {# fill and a real one — so each option says which it is. #}
             <label class="ib-field-label" for="ibkrPort">Socket — this decides which account trades</label>
             <select id="ibkrPort" name="ibkr_port" class="ib-port-select" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
-                <option value="7497" selected>7497 — TWS · PAPER (simulated money)</option>
-                <option value="4002">4002 — IB Gateway · PAPER (simulated money)</option>
+                {% comment %}4004/4003 first: the deploy stack's own Gateway
+                container answers ONLY on these — the gnzsnz image binds its
+                4001/4002 to the container's localhost and relays them out
+                through socat, so from the web container the classic Gateway
+                ports refuse forever. The classic four stay for TWS on the
+                box or a Gateway outside compose.{% endcomment %}
+                <option value="4004" selected>4004 — dockerised Gateway · PAPER (simulated money)</option>
+                <option value="4003">4003 — dockerised Gateway · LIVE (your real funds)</option>
+                <option value="7497">7497 — TWS · PAPER (simulated money)</option>
+                <option value="4002">4002 — IB Gateway direct · PAPER (refused by the docker stack)</option>
                 <option value="7496">7496 — TWS · LIVE (your real funds)</option>
-                <option value="4001">4001 — IB Gateway · LIVE (your real funds)</option>
+                <option value="4001">4001 — IB Gateway direct · LIVE (refused by the docker stack)</option>
             </select>
             <p class="ib-live-warning" id="ibLiveWarning" hidden>
                 This is a <strong>LIVE</strong> socket. Orders routed here move real
@@ -580,7 +588,13 @@ button.
     var warning = document.getElementById("ibLiveWarning");
     if (!form || !select || !warning) return;
 
-    var LIVE_PORTS = { "7496": "TWS", "4001": "IB Gateway" };
+    /* Mirrors IBKRAccount.LIVE_PORTS — 4003 is the dockerised Gateway's
+       socat relay for the internal live 4001, and it moves real money
+       exactly the same. Leaving it out of this map would show a LIVE
+       socket with no live warning, which is the one direction this
+       dialog must never be wrong in. */
+    var LIVE_PORTS = { "7496": "TWS", "4001": "IB Gateway",
+                       "4003": "dockerised IB Gateway" };
 
     function selectedLiveVenue() {
         return LIVE_PORTS[String(select.value)] || null;

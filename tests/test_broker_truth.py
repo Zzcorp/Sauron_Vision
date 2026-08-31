@@ -540,3 +540,41 @@ class TheSocatPortsAreFirstClassTests(TestCase):
         self.assertIn("('ibgateway', 4004)", text)
         self.assertNotIn("with port `4002`\nfor paper or `4001` for live",
                          text)
+
+
+class TheFormCanActuallySelectTheWorkingPortTests(TestCase):
+    """The backend learned 4003/4004 and the form's dropdown did not —
+    so the operator, told to switch to 4003, would have found no such
+    option. A fix the UI cannot reach is not a fix.
+
+    And 4003 must be in the page's own LIVE map: it moves real money
+    exactly like 4001, and a LIVE socket selectable without the live
+    warning is the one direction that dialog must never be wrong in.
+    """
+
+    def _page(self):
+        from pathlib import Path
+
+        from django.conf import settings
+        return (Path(settings.BASE_DIR) / "templates" / "dashboard"
+                / "admin_dashboard.html").read_text(encoding="utf-8")
+
+    def test_the_socat_ports_are_options(self):
+        page = self._page()
+        self.assertIn('value="4003"', page)
+        self.assertIn('value="4004"', page)
+
+    def test_the_paper_relay_is_the_default(self):
+        """The deploy stack's own Gateway answers only on the relay, and
+        paper is the safe default everywhere else on this platform."""
+        page = self._page()
+        sel = page.split('id="ibkrPort"', 1)[1].split("</select>", 1)[0]
+        first = sel.split("<option", 2)[1]
+        self.assertIn('value="4004"', first)
+        self.assertIn("selected", first)
+
+    def test_4003_triggers_the_live_warning(self):
+        page = self._page()
+        js_map = page.split("var LIVE_PORTS", 1)[1].split(";", 1)[0]
+        self.assertIn('"4003"', js_map)
+        self.assertNotIn('"4004"', js_map)
