@@ -53,3 +53,6 @@ celerybeat.pid
 
 # Operator screenshots dropped locally — never ship into the public static root
 static/screen/
+.env.bak
+.env.tmp
+.env.lock

@@ -629,3 +629,27 @@ def notify_staff(*, title: str, body: str = "", url: str = "",
             logger.warning("notify_staff: dispatch failed for %s: %s", u.id, e)
     return {"n_staff": len(staff), "n_delivered": n_delivered,
             "n_skipped_cooldown": 0}
+
+
+def notify_broker_unreachable(user, *, label: str, host: str, port: int,
+                              misses: int) -> bool:
+    """The interfaced broker has not answered for several syncs running.
+
+    Filed under system_health because that is what it is. The operator's
+    first real Gateway sat behind a notice dialog IBC could not read for
+    three hours while `ps` said "Up 3 hours" — a container that is up is
+    not a Gateway that is logged in, and nothing on the platform said so.
+    The sync task is the one thing that asks every 15 minutes, so it is
+    the one thing that can.
+    """
+    return dispatch_notification(
+        user, "system_health",
+        title=f"▲ {label}: broker unreachable for {misses} syncs running",
+        body=(f"{host}:{port} has not answered the account sync since "
+              f"{misses * 15} minutes ago. A Gateway container that is up "
+              f"is not one that is logged in — check `dc ps` for "
+              f"(unhealthy) and `dc logs ibgateway` for a 'Gateway' dialog "
+              f"IBC could not read. Equity and holdings on every page are "
+              f"showing their last reading with its age, not a live one."),
+        url="/system-health/",
+    )

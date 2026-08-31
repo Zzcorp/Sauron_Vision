@@ -28,6 +28,31 @@ BEGIN = "# >>> sauron: IBKR gateway logins (managed — edit in the UI)"
 END = "# <<< sauron: IBKR gateway logins"
 
 
+
+def _env_quote(value: str) -> str:
+    """A .env value compose will hand to the container BYTE FOR BYTE.
+
+    The first version wrote `IBKR_PASSWORD=<raw>`. Compose interpolates
+    .env values: `$` starts a variable reference, so a password holding
+    `$` reached the Gateway with a chunk missing; `#` and a space can end
+    the value early. The Gateway then answered "Invalid username or
+    password" — inside an HTML notice box IBC cannot read, so the failure
+    surfaced as a silent three-hour hang rather than a message.
+
+    Single quotes are the fix: compose takes a single-quoted .env value
+    literally, no interpolation, no escapes. A value that itself holds a
+    single quote cannot be single-quoted, so it falls back to double
+    quotes with the three characters compose treats specially there
+    escaped (`\\` `"` and `$` -> `$$`).
+    """
+    value = str(value or "")
+    if "'" not in value:
+        return f"'{value}'"
+    escaped = (value.replace("\\", "\\\\")
+                    .replace('"', '\\"')
+                    .replace("$", "$$"))
+    return f'"{escaped}"'
+
 class Command(BaseCommand):
     help = "Render IBKR Gateway logins from the database into .env."
 
@@ -43,7 +68,7 @@ class Command(BaseCommand):
         block = self._render(IBKRAccount)
         if not opts["write"]:
             self.stdout.write(block)
-            self.stdout.write(self.style.WARNING(
+            self.stderr.write(self.style.WARNING(
                 "\nNothing written. Re-run with --write, then restart the "
                 "slots you changed."))
             return
@@ -100,8 +125,8 @@ class Command(BaseCommand):
             # login in paper mode - the wrong direction to fail.
             mode = ("live" if acct.port in model.LIVE_PORTS
                     else "paper")
-            lines += [f"{p}_USERNAME={user}",
-                      f"{p}_PASSWORD={pw}",
+            lines += [f"{p}_USERNAME={_env_quote(user)}",
+                      f"{p}_PASSWORD={_env_quote(pw)}",
                       f"{p}_TRADING_MODE={mode}",
                       ""]
         if not seen:

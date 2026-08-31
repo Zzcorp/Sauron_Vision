@@ -94,8 +94,12 @@ class RenderingWritesWhatComposeReadsTests(TestCase):
         y.set_login("bravo", "pw2")
         y.save()
         out = self._render()
-        self.assertIn("IBKR_USERNAME=alpha", out)
-        self.assertIn("IBKR2_USERNAME=bravo", out)
+        # Quoted since the $$ incident: compose expands $ in UNQUOTED
+        # .env values at read time, so an operator's password containing
+        # $$ reached the Gateway one $ short and was refused behind a
+        # dialog IBC cannot read. Single quotes make the value literal.
+        self.assertIn("IBKR_USERNAME='alpha'", out)
+        self.assertIn("IBKR2_USERNAME='bravo'", out)
 
     def test_the_mode_follows_the_port(self):
         """paper with 4002, live with 4001 — a mismatch is a socket that
@@ -142,7 +146,7 @@ class RenderingWritesWhatComposeReadsTests(TestCase):
                 call_command("render_ibkr_env", "--write", f"--env={env}",
                              stdout=StringIO(), stderr=StringIO())
             text = env.read_text(encoding="utf-8")
-        self.assertEqual(text.count("IBKR_USERNAME=alpha"), 1)
+        self.assertEqual(text.count("IBKR_USERNAME='alpha'"), 1)
         self.assertIn("SECRET_KEY=x", text)
 
 

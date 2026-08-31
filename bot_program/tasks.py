@@ -368,7 +368,9 @@ def sync_broker_account() -> dict:
 
         if reading is None and rows is None:
             out["unreachable"] += 1
+            _note_broker_miss(acct, user)
             continue
+        _clear_broker_miss(acct)
 
         now = timezone.now()
         fields = []
@@ -386,3 +388,40 @@ def sync_broker_account() -> dict:
         acct.save(update_fields=fields)
         out["stored"] += 1
     return out
+
+
+# ── The stall alert ───────────────────────────────────────────────────────
+# Three consecutive misses (45 minutes) before a word is said, and then one
+# word per six hours: a live Gateway restarts for 2FA roughly daily, and an
+# alert that fires on every single blip is an alert the operator mutes.
+BROKER_MISS_ALERT_AFTER = 3
+BROKER_MISS_ALERT_COOLDOWN = 6 * 3600
+
+
+def _note_broker_miss(acct, user) -> None:
+    from django.core.cache import cache
+
+    from .notifications import notify_broker_unreachable
+
+    key = f"broker_sync:miss:{acct.pk}"
+    misses = int(cache.get(key) or 0) + 1
+    cache.set(key, misses, 24 * 3600)
+    if misses < BROKER_MISS_ALERT_AFTER:
+        return
+    gate = f"broker_sync:alerted:{acct.pk}"
+    if cache.get(gate):
+        return
+    try:
+        notify_broker_unreachable(user, label=acct.label, host=acct.host,
+                                  port=acct.port, misses=misses)
+        cache.set(gate, 1, BROKER_MISS_ALERT_COOLDOWN)
+    except Exception as e:  # noqa: BLE001 — an alert must never fail the sync
+        logger.warning("broker sync: stall alert failed for %s: %s",
+                       acct.label, e)
+
+
+def _clear_broker_miss(acct) -> None:
+    from django.core.cache import cache
+
+    cache.delete(f"broker_sync:miss:{acct.pk}")
+    cache.delete(f"broker_sync:alerted:{acct.pk}")

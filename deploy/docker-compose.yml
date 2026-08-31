@@ -25,6 +25,23 @@ name: sauron
 x-ibgateway: &ibgateway
   image: ghcr.io/gnzsnz/ib-gateway:stable
   restart: unless-stopped
+  # A Gateway that is UP is not a Gateway that is LOGGED IN. IB Gateway 10.45
+  # shows a generic "Gateway"-titled notice box for server replies, account
+  # notices and marketing interstitials; the IBC automation inside this image
+  # cannot read its HTML body and, by design, leaves it on screen with no
+  # timeout (open IBC defects #360/#382, maintainer-confirmed 2026-08). The
+  # first real Gateway on this platform sat behind one for three hours while
+  # `ps` said "Up 3 hours". The API listener only appears after login, so
+  # probing it is the honest liveness test: `ps` now says (unhealthy) for
+  # exactly that state. socat is in the image; the internal ports are the
+  # Gateway's own 4001/4002 (the relays 4003/4004 accept a TCP connect even
+  # while the Gateway behind them is stuck, which is why they are not probed).
+  healthcheck:
+    test: ["CMD-SHELL", "socat -T2 - TCP:127.0.0.1:4001,connect-timeout=2 </dev/null || socat -T2 - TCP:127.0.0.1:4002,connect-timeout=2 </dev/null"]
+    interval: 60s
+    timeout: 5s
+    retries: 3
+    start_period: 240s
 
 x-django: &django
   build:
@@ -228,6 +245,10 @@ services:
       TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
       READ_ONLY_API: "no"
       TIME_ZONE: ${TZ:-UTC}
+      # Blank keeps VNC off. Set it to SEE the Gateway's screen through
+      # an SSH tunnel to this container's compose-network IP - nothing
+      # is published to the host (see .env.production.example).
+      VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:-}
 
   ibgateway-2:
     <<: *ibgateway
@@ -238,6 +259,10 @@ services:
       TRADING_MODE: ${IBKR2_TRADING_MODE:-paper}
       READ_ONLY_API: "no"
       TIME_ZONE: ${TZ:-UTC}
+      # Blank keeps VNC off. Set it to SEE the Gateway's screen through
+      # an SSH tunnel to this container's compose-network IP - nothing
+      # is published to the host (see .env.production.example).
+      VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:-}
 
   ibgateway-3:
     <<: *ibgateway
@@ -248,6 +273,10 @@ services:
       TRADING_MODE: ${IBKR3_TRADING_MODE:-paper}
       READ_ONLY_API: "no"
       TIME_ZONE: ${TZ:-UTC}
+      # Blank keeps VNC off. Set it to SEE the Gateway's screen through
+      # an SSH tunnel to this container's compose-network IP - nothing
+      # is published to the host (see .env.production.example).
+      VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:-}
 
   ibgateway-4:
     <<: *ibgateway
@@ -258,6 +287,10 @@ services:
       TRADING_MODE: ${IBKR4_TRADING_MODE:-paper}
       READ_ONLY_API: "no"
       TIME_ZONE: ${TZ:-UTC}
+      # Blank keeps VNC off. Set it to SEE the Gateway's screen through
+      # an SSH tunnel to this container's compose-network IP - nothing
+      # is published to the host (see .env.production.example).
+      VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:-}
 
   ibgateway-5:
     <<: *ibgateway
@@ -268,6 +301,10 @@ services:
       TRADING_MODE: ${IBKR5_TRADING_MODE:-paper}
       READ_ONLY_API: "no"
       TIME_ZONE: ${TZ:-UTC}
+      # Blank keeps VNC off. Set it to SEE the Gateway's screen through
+      # an SSH tunnel to this container's compose-network IP - nothing
+      # is published to the host (see .env.production.example).
+      VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:-}
 
   # ── Nightly offsite backup — runs by default, deliberately ─────────────
   # A dump that lives on the same disk as the database is not a backup.

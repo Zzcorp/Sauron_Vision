@@ -1,0 +1,185 @@
+#!/usr/bin/env sh
+# Apply the IBKR Gateway login(s) stored in the UI to the running stack —
+# one command, no copy-paste.
+#
+#   ./deploy/ibkr-apply             render -> splice into .env -> recreate slot 1
+#   ./deploy/ibkr-apply --no-restart
+#   ./deploy/ibkr-apply --slot 2    a second login's container (ibgateway-2)
+#
+# WHY. The login lives encrypted in the database (the UI); the Gateway
+# container reads it from .env at boot; and the two sit on opposite sides
+# of a container boundary. The old answer — "print it in the container,
+# paste it into .env by hand" — is how a password containing `$$` reached
+# the Gateway one `$` short and was refused behind a dialog nobody could
+# see, for three hours.
+#
+# This script survived an adversarial review that found two blockers in
+# its first draft, so several of its choices look paranoid on purpose:
+#   * only the marker-delimited span of the render output is spliced —
+#     the command's human trailer once rode into .env and broke every
+#     later compose invocation on the box;
+#   * it REFUSES credential lines that are not single-quoted — compose
+#     expands $ in unquoted values at READ time, so an unquoted splice
+#     reintroduces the exact bug this file exists to end;
+#   * the rewrite is atomic (write-aside + rename), the credential temp
+#     file lives in RAM and dies on HUP/INT/TERM too, the backup is
+#     chmod 600, and no failure path ever prints a password.
+set -eu
+umask 077
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+root=$(CDPATH= cd -- "$here/.." && pwd)
+envfile="$root/.env"
+slot=1
+restart=yes
+
+usage() {
+    cat <<'USAGE'
+ibkr-apply — apply the IBKR login(s) stored in the UI to the stack.
+  ./deploy/ibkr-apply              render -> .env -> recreate ibgateway
+  ./deploy/ibkr-apply --slot N     slot N's container (N = 1..5)
+  ./deploy/ibkr-apply --no-restart splice .env only
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --no-restart) restart=no ;;
+        --slot) shift || true; slot="${1:-}" ;;
+        --slot=*) slot="${1#--slot=}" ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
+    esac
+    shift || true
+done
+case "$slot" in 1|2|3|4|5) ;; *)
+    echo "--slot must be 1..5 (got: '${slot}')" >&2; exit 2 ;;
+esac
+if [ "$slot" = 1 ]; then svc=ibgateway; prof=ibkr; prefix=IBKR
+else svc="ibgateway-$slot"; prof="ibkr$slot"; prefix="IBKR$slot"; fi
+
+if [ ! -f "$envfile" ]; then
+    echo "No .env at $envfile — the stack has not been set up yet." >&2
+    exit 1
+fi
+
+# One writer at a time — two concurrent runs interleaving an atomic
+# rename would still be last-wins on the whole file.
+lockdir="$envfile.lock"
+if ! mkdir "$lockdir" 2>/dev/null; then
+    echo "another ibkr-apply is running (or crashed leaving $lockdir)" >&2
+    exit 1
+fi
+tmp=$(mktemp -p "${XDG_RUNTIME_DIR:-/dev/shm}" 2>/dev/null || mktemp)
+cleanup() { rm -f "$tmp"; rmdir "$lockdir" 2>/dev/null || true; }
+trap cleanup EXIT
+trap 'cleanup; trap - EXIT; exit 1' HUP INT TERM
+
+# Render inside the container (-T: no TTY). Captured to a RAM-backed file:
+# never an argument (arguments show in ps), never through a shell
+# expansion. stderr passes through so the command's own warnings are seen.
+if ! "$here/dc" exec -T web python manage.py render_ibkr_env > "$tmp"; then
+    echo "render_ibkr_env failed — is the web container up?" >&2
+    exit 1
+fi
+
+# The requested slot must have a real, QUOTED login before .env is
+# touched. Empty output, "no logins stored", a slot conflict, or an old
+# renderer that still emits unquoted values must all refuse here — an
+# unguarded splice once replaced working credentials with an empty block.
+# Values are never printed; shape only.
+if ! grep -Eq "^${prefix}_USERNAME='.+'" "$tmp" \
+   || ! grep -Eq "^${prefix}_PASSWORD='.+'" "$tmp"; then
+    if ! grep -Eq "^${prefix}_USERNAME=" "$tmp"; then
+        echo "no stored login rendered for slot $slot (${prefix}_*)." >&2
+        echo "Store the Gateway username+password in the UI first, or" >&2
+        echo "check 'dc exec web python manage.py render_ibkr_env' output" >&2
+        echo "yourself — this script will not splice an empty login over" >&2
+        echo "a working one." >&2
+    else
+        echo "slot $slot rendered UNQUOTED credential lines. That is the" >&2
+        echo "\$\$-eating bug this script refuses to reintroduce — update" >&2
+        echo "the platform (render_ibkr_env must single-quote values) and" >&2
+        echo "re-run." >&2
+    fi
+    exit 1
+fi
+
+cp -p "$envfile" "$envfile.bak"
+chmod 600 "$envfile.bak"
+
+# Splice ONLY the marker-delimited span, atomically. The markers are
+# derived from the render output itself (never passed through argv, where
+# a legacy locale once decoded the em-dash differently and turned replace
+# into append). Duplicate blocks in .env — the hand-paste era leaves them
+# — are healed: first begin-marker through last end-marker is replaced.
+python3 -X utf8 - "$envfile" "$tmp" <<'PY'
+import os, sys
+
+path, blockfile = sys.argv[1], sys.argv[2]
+raw = open(blockfile, encoding="utf-8").read().splitlines(keepends=True)
+starts = [i for i, l in enumerate(raw) if l.startswith("# >>> sauron:")]
+ends = [i for i, l in enumerate(raw) if l.startswith("# <<< sauron:")]
+if len(starts) != 1 or len(ends) != 1 or ends[0] < starts[0]:
+    sys.exit("render output carried no single well-ordered managed block")
+begin_line, end_line = raw[starts[0]], raw[ends[0]].rstrip("\n")
+block = "".join(raw[starts[0]:ends[0]]) + end_line + "\n"
+
+text = open(path, encoding="utf-8").read()
+lines = text.splitlines(keepends=True)
+b = [i for i, l in enumerate(lines) if l.startswith("# >>> sauron:")]
+e = [i for i, l in enumerate(lines) if l.startswith("# <<< sauron:")]
+if b and e and e[-1] >= b[0]:
+    head = "".join(lines[:b[0]])
+    tail = "".join(lines[e[-1] + 1:]).lstrip("\n")
+    out = head + block + ("\n" + tail if tail else "")
+else:
+    out = text.rstrip("\n") + "\n\n" + block
+
+aside = path + ".tmp"
+fd = os.open(aside, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+    fh.write(out)
+    fh.flush()
+    os.fsync(fh.fileno())
+os.replace(aside, path)
+PY
+
+chmod 600 "$envfile"
+echo "applied to $envfile (previous version: .env.bak, mode 600)"
+
+mode=$(sed -n "s/^${prefix}_TRADING_MODE=//p" "$tmp" | head -1)
+if [ "$restart" = yes ]; then
+    echo ""
+    echo "About to RECREATE $svc — this drops its current session. If this"
+    echo "Gateway holds open positions, their broker-side brackets survive"
+    echo "but nothing manages them until it is back. Ctrl-C now to abort."
+    sleep 5
+    if ! "$here/dc" --profile "$prof" up -d --force-recreate "$svc"; then
+        echo "recreate FAILED. .env was already updated; the previous" >&2
+        echo "version is .env.bak (restore: cp -p .env.bak .env)." >&2
+        exit 1
+    fi
+    echo ""
+    if [ "$mode" = live ]; then
+        cat <<MSG
+$svc is starting a LIVE login (form port must be 4003).
+  * IBKR will demand your second factor. An IB Key PUSH: approve it on
+    your phone within ~3 minutes. A CODE: nothing can type it for you —
+    see RUNBOOK "Second factor" (switch to push, or use VNC).
+  * Watch:  ./deploy/dc --profile $prof logs -f $svc
+  * Then press TEST IBKR in the UI; then enable broker_account_sync.
+MSG
+    else
+        cat <<MSG
+$svc is starting a PAPER login (form port must be 4004) — no second
+factor; it logs in on its own.
+  * Watch:  ./deploy/dc --profile $prof logs -f $svc
+  * In ~2 minutes press TEST IBKR in the UI; then enable
+    broker_account_sync — the account's numbers appear within 15 min.
+MSG
+    fi
+else
+    echo "not restarted (--no-restart). Apply it later with:"
+    echo "  ./deploy/dc --profile $prof up -d --force-recreate $svc"
+fi

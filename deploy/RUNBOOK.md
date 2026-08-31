@@ -262,6 +262,73 @@ LIVE login also demands IB Key two-factor on the phone at every start and
 roughly daily after — IBC types the password but cannot answer 2FA, so an
 unattended live Gateway drops and re-prompts. Paper logs in headless.
 
+**Apply a stored login in one command.** The login lives encrypted in the
+database (the UI); the Gateway reads it from `.env` at boot. Do not paste
+between the two by hand — that is how a password with `$$` in it lost a
+character. From the repo root:
+
+```bash
+./deploy/ibkr-apply              # render -> splice into .env -> recreate the gateway
+./deploy/ibkr-apply --slot 2     # a second login's container
+```
+
+It keeps `.env.bak`, locks `.env` to 600, and RECREATES the container
+(`restart` keeps the old environment; only recreate re-reads `.env`). Run
+it again whenever you change the login in the UI.
+
+**Second factor.** IBKR will demand one on every LIVE login and roughly
+daily after. Which kind decides whether this can run unattended:
+
+* **IB Key push** (IBKR Mobile app, notification mode) — a push you tap
+  to approve. The automation waits for it and retries if you miss it.
+  This is the one to have: Client Portal → Settings → Security → Secure
+  Login System → IB Key.
+* **A code** (SMS, code card, or IB Key in challenge mode) — a number you
+  must TYPE into the Gateway's own window, which nothing on the platform
+  can reach. It will sit at the code prompt every login. Either switch the
+  account to push, or type it by hand through VNC (`IBKR_VNC_PASSWORD`).
+* **Paper** — a separate paper username has NO second factor and logs in
+  headless. Prove the whole chain on 4004 first.
+
+**When the Gateway hangs behind a dialog.** IB Gateway 10.45 shows a
+generic notice box titled just "Gateway" for anything the server wants a
+human to read: a login refusal, an account action, or a marketing
+interstitial. The IBC automation inside the image cannot read that box's
+HTML body and — by design — leaves it on screen with no timeout (open IBC
+defects #360 and #382, maintainer-confirmed August 2026). The tell in
+`dc logs ibgateway`:
+
+```
+IBC: detected dialog entitled: Gateway; event=Opened
+IBC: GATEWAY
+                                   <- blank: the body IBC could not read
+IBC: detected dialog entitled: Gateway; event=Focused
+                                   <- then nothing, for hours
+```
+
+`dc ps` shows the container **(unhealthy)** in this state — the healthcheck
+probes the Gateway's internal API port, which only listens after login, so
+"Up 3 hours (unhealthy)" means stalled, not running. No IB Key push arrives
+because the server never reached the 2FA step. In order:
+
+1. `./deploy/dc --profile ibkr restart ibgateway` — the interstitial
+   variant is non-deterministic and a restart usually logs in clean.
+2. If it recurs, read what the server actually said — the Gateway's own
+   log keeps the message IBC could not:
+   `docker exec sauron-ibgateway-1 grep -a -i -E "Authorization failed|Connection to server failed|FailReason|AdsManager|asskey" /home/ibgateway/Jts/launcher.log | tail`
+   An `Authorization failed: <html>…` line names the reason (account
+   action, version, passkey). `AdsManager … 1200x1000` with no failure
+   line is the interstitial.
+3. To see and dismiss the dialog by eye, set `IBKR_VNC_PASSWORD` in `.env`,
+   `./deploy/dc --profile ibkr up -d --force-recreate ibgateway`, and
+   tunnel to the container's compose-network IP as described beside that
+   variable — nothing is published to the host.
+
+A LIVE login additionally needs IB Key two-factor on the phone at every
+start and roughly daily after; IBC types the password but cannot answer
+the phone. Paper (4004) logs in headless, which is why it proves the
+whole chain first.
+
 Symbols must match the seeded `Instrument.symbol` spelling exactly — `EURUSD`
 not `EUR_USD`, `BTCUSD` not `BTCUSDT`, `GOOGL` not `GOOG`. An unrecognised
 symbol produces zero bars forever *and* is routed to Binance as crypto.

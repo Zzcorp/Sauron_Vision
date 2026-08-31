@@ -126,7 +126,11 @@ class TheFormExistsTests(SimpleTestCase):
         import re
         block = self.html.split('id="ibkrPort"', 1)[1].split("</select>", 1)[0]
         options = re.findall(r"<option[^>]*>([^<]+)</option>", block)
-        self.assertEqual(len(options), 4)
+        # Six, not four: the dockerised Gateway's socat relay ports (4003
+        # live, 4004 paper) joined the classic four when the operator's
+        # first real Gateway proved 4001/4002 refuse from the compose
+        # network. Every one of them still has to say which money it is.
+        self.assertEqual(len(options), 6)
         for text in options:
             self.assertTrue(
                 "PAPER" in text or "LIVE" in text,

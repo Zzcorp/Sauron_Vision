@@ -541,6 +541,19 @@ button.
             checkbox never costs a retyped password.
             {% endcomment %}
             <label class="ib-field-label" for="ibkrUser">Gateway login — signs the container in, applied on its next start</label>
+            {% comment %}The server's refusal for a malformed username is
+            "Example user name: trader777" — buried in a dialog IBC cannot
+            read, so the operator's first live Gateway hung for hours on a
+            mistake this line now prevents at the point of typing.{% endcomment %}
+            <p style="margin:0;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);line-height:1.5;">
+                Username = the handle you type on the <em>IBKR website</em> login
+                (like <code>trader777</code>) — <strong>not</strong> your email,
+                <strong>not</strong> the U-number. A PAPER account has its own,
+                different username. Passwords with <code>$ # ' "</code> are safe —
+                the platform quotes them. LIVE logins also demand your second
+                factor: an IB Key <em>push</em> works unattended; a <em>code</em>
+                cannot be typed for you (see the runbook).
+            </p>
             <input id="ibkrUser" type="text" name="ibkr_username" autocomplete="off" placeholder="IBKR username (blank = keep stored)" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="password" name="ibkr_password" autocomplete="new-password" placeholder="IBKR password (blank = keep stored)" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
 
