@@ -43,6 +43,77 @@ six scrapers could sit green with zero rows between them.
     </div>
 </div>
 
+<!-- Manual lane — the venue behind YOUR OWN LONG/SHORT clicks -->
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div style="font-family:var(--font-display);font-size:14px;font-weight:700;letter-spacing:2px;margin-bottom:4px;">MANUAL LANE — TAKE TRADE VENUE</div>
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-bottom:12px;">
+        Where a hand-taken LONG/SHORT executes, per asset class. Arming LIVE means the
+        chart buttons move <strong>real funds</strong> at the broker — it takes your trading PIN here,
+        and again on every ticket. It refuses a route with no live broker behind it, and a
+        pool larger than the broker's own reading of the account. Standing down is one click.
+    </div>
+    <div class="table-wrapper"><table style="width:100%;font-family:var(--font-mono);font-size:12px;">
+        <thead><tr style="text-align:left;color:var(--text-muted);">
+            <th style="padding:4px 8px;">CLASS</th><th style="padding:4px 8px;">VENUE</th>
+            <th style="padding:4px 8px;">POOL</th><th style="padding:4px 8px;">CHANGE</th>
+        </tr></thead>
+        <tbody>
+        {% for lane in manual_lanes %}
+        <tr>
+            <td style="padding:4px 8px;">{{ lane.asset_class|upper }}</td>
+            <td style="padding:4px 8px;">
+                {% if lane.mode == 'live' %}<span style="color:var(--accent-red);font-weight:700;">● LIVE</span>
+                {% else %}<span style="color:var(--text-muted);">◌ paper</span>{% endif %}
+            </td>
+            <td style="padding:4px 8px;">${{ lane.capital|floatformat:2 }}</td>
+            <td style="padding:4px 8px;white-space:nowrap;">
+                {% if lane.mode == 'live' %}
+                <button type="button" class="btn" data-lane-disarm="{{ lane.asset_class }}" style="font-size:11px;padding:4px 10px;">BACK TO PAPER</button>
+                {% else %}
+                <input type="password" placeholder="PIN" data-lane-pin="{{ lane.asset_class }}" style="width:70px;font-size:11px;padding:4px 6px;" autocomplete="off">
+                <input type="number" placeholder="pool $ (optional)" data-lane-capital="{{ lane.asset_class }}" style="width:130px;font-size:11px;padding:4px 6px;" step="any" min="0">
+                <button type="button" class="btn btn-danger" data-lane-arm="{{ lane.asset_class }}" style="font-size:11px;padding:4px 10px;">ARM LIVE</button>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    <div data-lane-msg style="font-family:var(--font-mono);font-size:11px;margin-top:8px;color:var(--text-muted);"></div>
+</div>
+<script>
+(function () {
+  var msg = document.querySelector('[data-lane-msg]');
+  if (!msg) return;
+  function post(body) {
+    fetch('{% url "take_trade_arm" %}', {
+      method: 'POST', credentials: 'same-origin',
+      headers: {'X-CSRFToken': (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '',
+                'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (res.error) { msg.textContent = 'ERR ' + res.error; msg.style.color = 'var(--accent-red)'; return; }
+      window.location.reload();
+    }).catch(function (e) { msg.textContent = 'ERR ' + e; msg.style.color = 'var(--accent-red)'; });
+  }
+  document.querySelectorAll('[data-lane-arm]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var cls = btn.getAttribute('data-lane-arm');
+      var pinEl = document.querySelector('[data-lane-pin="' + cls + '"]');
+      var capEl = document.querySelector('[data-lane-capital="' + cls + '"]');
+      var body = {asset_class: cls, mode: 'live', pin: pinEl ? pinEl.value : ''};
+      if (capEl && capEl.value) body.capital = Number(capEl.value);
+      post(body);
+    });
+  });
+  document.querySelectorAll('[data-lane-disarm]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      post({asset_class: btn.getAttribute('data-lane-disarm'), mode: 'paper'});
+    });
+  });
+})();
+</script>
+
 {% comment %}
 The real kill switch. execute_kill_switch and its endpoint both existed and
 were reachable from no template, while the only red button on the platform

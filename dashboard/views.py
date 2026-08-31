@@ -3641,6 +3641,17 @@ def admin_dashboard(request):
     except Exception:  # noqa: BLE001
         investor_accesses = []
     context["investor_accesses"] = investor_accesses
+
+    # The manual lane's venue per class — the card that arms TAKE TRADE
+    # live. The ACTING user's own lanes: arming moves their money and
+    # nobody else's, which is why this is not keyed on a target user the
+    # way the broker credential forms are.
+    from bot_program.manual_trade import EXECUTABLE_CLASS, manual_config_for
+    context["manual_lanes"] = [
+        {"asset_class": cls, "mode": lane.mode, "capital": float(lane.capital)}
+        for cls in sorted(set(EXECUTABLE_CLASS.values()))
+        for lane in [manual_config_for(request.user, cls)]
+    ]
     return render(request, "dashboard/admin_dashboard.html", context)
 
 
@@ -3900,9 +3911,10 @@ def take_trade_preview(request, signal_id):
 def take_trade_execute(request, signal_id):
     """POST — execute the trade previewed above, at the operator's terms:
     the positions THEY chose to close for capital (close_ids), the size,
-    the stop and the target they chose instead of the platform's. Paper
-    venue only in this wave; the live path adds the PIN and the
-    pending-close machinery.
+    the stop and the target they chose instead of the platform's. The
+    venue follows the manual config: paper by default, LIVE when the
+    operator has armed it — and a live ticket carries the trading PIN in
+    the same body, verified here, the verdict handed down.
 
     Every one of those arrives as a number in a request body, so every one
     of them is a claim rather than a fact. manual_trade re-derives the size
@@ -3921,11 +3933,15 @@ def take_trade_execute(request, signal_id):
     body, err = _parse_trade_body(request)
     if err:
         return JsonResponse({"error": err}, status=400)
+    from dashboard.views_close import _pin_ok as _trading_pin_ok
     return JsonResponse(execute_take_trade(request.user, signal,
                                            body["close_ids"],
                                            qty=body["qty"],
                                            stop=body["stop"],
-                                           target=body["target"]))
+                                           target=body["target"],
+                                           pin_ok=_trading_pin_ok(
+                                               request,
+                                               {"pin": body["pin"]})))
 
 
 def _parse_trade_body(request):
@@ -3989,6 +4005,10 @@ def _parse_trade_body(request):
 
     return {"close_ids": close_ids,
             "side": str(body.get("side", "")).upper(),
+            # The trading PIN rides the same body on a LIVE ticket. Its
+            # VERDICT is computed in the view — this only carries the
+            # string, and an absent PIN is simply one that cannot verify.
+            "pin": str(body.get("pin", "") or ""),
             **parsed}, None
 
 
@@ -4270,10 +4290,10 @@ def asset_trade_preview(request, symbol):
 
 @login_required
 def asset_trade_execute(request, symbol):
-    """POST {side, close_ids, qty, stop, target} — execute the signal-less
-    trade previewed above. Same paper venue, same funding-close chain, same
-    pre-trade controls and the same server-side re-derivation of all of
-    them."""
+    """POST {side, close_ids, qty, stop, target, pin?} — execute the
+    signal-less trade previewed above. The venue follows the manual
+    config (paper by default, LIVE when armed); same pre-trade controls
+    and the same server-side re-derivation of all of them either way."""
     from django.http import HttpResponseNotAllowed, JsonResponse
     from bot_program.manual_trade import execute_asset_trade
     from instruments.models import Instrument
@@ -4284,11 +4304,50 @@ def asset_trade_execute(request, symbol):
     body, err = _parse_trade_body(request)
     if err:
         return JsonResponse({"error": err}, status=400)
+    from dashboard.views_close import _pin_ok as _trading_pin_ok
     return JsonResponse(execute_asset_trade(request.user, inst, body["side"],
                                             body["close_ids"],
                                             qty=body["qty"],
                                             stop=body["stop"],
-                                            target=body["target"]))
+                                            target=body["target"],
+                                            pin_ok=_trading_pin_ok(
+                                                request,
+                                                {"pin": body["pin"]})))
+
+
+@login_required
+def take_trade_arm(request):
+    """POST {asset_class, mode, pin?, capital?} — arm or disarm the manual
+    lane for ONE asset class, the operator's own.
+
+    Arming live is the moment a button on a chart starts moving real
+    money, so it is its own deliberate act with its own ceremony — the
+    trading PIN, a route that must resolve to a real live broker, and a
+    pool that must not exceed the broker's own last reading of the
+    account. Disarming is frictionless, like every stop-things action.
+    The view only parses shape and computes the PIN verdict; every money
+    question is answered in manual_trade.arm_manual_lane.
+    """
+    from django.http import HttpResponseNotAllowed, JsonResponse
+    from bot_program.manual_trade import arm_manual_lane
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    import json as _json
+    try:
+        body = _json.loads(request.body.decode() or "{}")
+    except ValueError:
+        return JsonResponse({"error": "Body must be JSON"}, status=400)
+    if not isinstance(body, dict):
+        return JsonResponse({"error": "Body must be a JSON object"},
+                            status=400)
+    from dashboard.views_close import _pin_ok as _trading_pin_ok
+    return JsonResponse(arm_manual_lane(
+        request.user,
+        asset_class=str(body.get("asset_class", "") or ""),
+        mode=str(body.get("mode", "") or ""),
+        capital=body.get("capital"),
+        pin_ok=_trading_pin_ok(request, body)))
 
 
 @login_required

@@ -1806,8 +1806,13 @@
       });
       /* Only when capital is short: closing positions is not part of this
          decision otherwise, and offering it would invite an unrelated
-         liquidation from a confirm popup. */
-      var funding = !p.sufficient && closable.length > 0;
+         liquidation from a confirm popup.
+
+         And never on the LIVE ticket — a live close can finish minutes
+         later (CLOSE_PENDING), so the execute path refuses close_ids
+         outright there. Offering the checkboxes would offer a refusal. */
+      var live = p.venue === 'live';
+      var funding = !p.sufficient && closable.length > 0 && !live;
       var sel = {};
       closable.forEach(function (c) {
         sel[c.trade_id] = funding ? !!c.proposed : false;
@@ -2180,9 +2185,23 @@
           '</fieldset>'
         : '';
 
-      var title = held.length ? 'Add to this position?' : 'Take this trade?';
+      /* The PIN is collected HERE and verified by the SERVER — the same
+         split the close dialog uses. The field only exists on a live
+         ticket; its presence is driven by the preview's venue, which the
+         server re-derives under the execution lock either way. */
+      var pinHtml = live
+        ? '<fieldset class="sz-block sz-pin"><legend>Trading PIN</legend>' +
+            '<label class="sz-f"><span>Required — real funds</span>' +
+            '<input type="password" inputmode="numeric" autocomplete="off" ' +
+              'data-role="pin" placeholder="PIN"></label>' +
+          '</fieldset>'
+        : '';
+
+      var title = live
+        ? (held.length ? 'Add to this LIVE position?' : 'Take this trade with REAL funds?')
+        : (held.length ? 'Add to this position?' : 'Take this trade?');
       var host = document.createElement('div');
-      host.className = 'sv-dialog sz-dialog' + (funding ? ' sv-dialog--danger' : '');
+      host.className = 'sv-dialog sz-dialog' + ((funding || live) ? ' sv-dialog--danger' : '');
       host.setAttribute('data-sv-overlay', 'dialog');
       host.setAttribute('aria-labelledby', 'svSizeTitle');
       host.innerHTML =
@@ -2192,14 +2211,16 @@
         '</div>' +
         '<div class="sv-dialog-body">' +
           '<p class="sv-dialog-msg">' + esc(
-            (funding
+            (live
+              ? 'Executes immediately on the LIVE venue — REAL funds move at the broker, with the stop and target sent as a broker-side bracket.'
+              : funding
               ? 'Capital is short. Choose what may be closed to fund this — one chain, paper venue.'
               : 'Executes immediately on the paper venue.') +
             (p.managed === false ? ''
               : ' The 5-minute tick manages the stop and target from here.')) + '</p>' +
           warnHtml +
           '<div class="sv-dialog-facts">' + factsHtml + '</div>' +
-          fundHtml + lvlHtml + sizeHtml +
+          fundHtml + lvlHtml + sizeHtml + pinHtml +
         '</div>' +
         '<div class="sv-dialog-foot">' +
           '<button type="button" class="sv-dialog-btn" data-role="cancel">Cancel</button>' +
@@ -2222,6 +2243,7 @@
       var cap = host.querySelector('[data-role="cap"]');
       var reset = host.querySelector('[data-role="reset"]');
       var lvlReset = host.querySelector('[data-role="lvlreset"]');
+      var pinIn = host.querySelector('[data-role="pin"]');
       var settled = false;
 
       function render(q, lvlWhy, sizeWhy) {
@@ -2296,10 +2318,13 @@
         var n = chosenCount();
         okBtn.textContent = n
           ? ('CLOSE ' + n + ' + TAKE')
-          : (held.length ? 'ADD' : 'TAKE TRADE');
-        okBtn.classList.toggle('is-danger', n > 0);
-        host.classList.toggle('sv-dialog--danger', n > 0);
-        okBtn.disabled = !!(lvlWhy || sizeWhy);
+          : (live ? 'TAKE LIVE TRADE' : (held.length ? 'ADD' : 'TAKE TRADE'));
+        okBtn.classList.toggle('is-danger', n > 0 || live);
+        host.classList.toggle('sv-dialog--danger', n > 0 || live);
+        /* A live OK without a PIN is a refusal the server would make —
+           the button says so first. */
+        okBtn.disabled = !!(lvlWhy || sizeWhy) ||
+                         !!(live && pinIn && !pinIn.value);
         host.classList.toggle('is-over', !!sizeWhy);
         host.classList.toggle('is-lvl-over', !!lvlWhy);
         if (reset) reset.disabled = !qtyTouched;
@@ -2358,6 +2383,7 @@
           recompute();
         });
       });
+      if (pinIn) pinIn.addEventListener('input', function () { recompute(); });
       recompute();
 
       function finish(v) {
@@ -2390,7 +2416,8 @@
           qty: (sizable && !atAuto) ? qtyVal : null,
           stop: stopMoved() ? stopVal : null,
           target: targetMoved() ? targetVal : null,
-          close_ids: ids
+          close_ids: ids,
+          pin: pinIn ? pinIn.value : null
         });
       });
       host.querySelector('[data-role="cancel"]')
@@ -2430,6 +2457,7 @@
         if (choice.qty !== null) body.qty = choice.qty;
         if (choice.stop !== null) body.stop = choice.stop;
         if (choice.target !== null) body.target = choice.target;
+        if (choice.pin) body.pin = choice.pin;
         fetch(executeUrl, {
           method: 'POST', credentials: 'same-origin',
           headers: { 'X-CSRFToken': csrf(), 'Content-Type': 'application/json' },
@@ -2476,6 +2504,10 @@
               (yours.indexOf('stop') !== -1 || yours.indexOf('target') !== -1
                 ? '  ·  your levels: stop ' + lvl(res.stop) + ' → target ' + lvl(res.target)
                 : '') +
+              (res.venue === 'live' ? '  ·  LIVE — real funds' : '') +
+              /* The one honest degradation, said where the operator is
+                 looking: entry in, bracket not resting. */
+              (res.protection_note ? '  ·  ⚠ ' + res.protection_note : '') +
               (res.closed && res.closed.length
                 ? ' — closed first: ' + res.closed.join(', ') : '')
           });

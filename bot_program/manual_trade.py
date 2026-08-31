@@ -11,11 +11,16 @@ is enabled with an EMPTY symbols list: the 5-minute tick manages its open
 positions (stops, targets, trailing) every pass, but the entry scan has
 nothing to scan, so the config can never open a trade on its own.
 
-Wave 1 executes on the PAPER venue only — the rehearsal stage for the
-IBKR wiring. That also keeps the close-to-fund chain synchronous: paper
-closes finalize immediately, so "close these, then open" completes
-inside one request. The live version routes the same calls through the
-broker router and needs the pending-close state machine plus the PIN.
+Wave 1 executed on the PAPER venue only. Wave 2 adds the LIVE ticket:
+a manual config an operator has deliberately armed to live mode routes
+its opens through the broker router — ONE market_order call carrying
+the stop and target as a broker-side bracket, the account pinned to
+every leg — and books the row from the broker's own fill. The live
+ceremony is refuse-first: the trading PIN on every ticket, no funding
+closes (a live close can finish minutes later, and capital that may
+arrive is not capital), no entry while nothing would manage it, and a
+broker that cannot be reached is a refusal — never a silent paper
+fallback wearing a live label.
 
 Safety posture (each learned from adversarial review of the first cut):
   * A disabled manual config is a DELIBERATE state — the kill switch or
@@ -174,9 +179,13 @@ def _config_error(cfg):
         return ("A bot config named 'manual' with its own symbols already "
                 "exists for this class — rename that bot; TAKE TRADE "
                 "reserves the name for its managed-but-never-trades config")
-    if getattr(cfg, "mode", "paper") != "paper":
-        return ("The manual config for this class is set to live mode — "
-                "TAKE TRADE executes on the paper venue only in this wave")
+    if getattr(cfg, "mode", "paper") not in ("paper", "live"):
+        # Since wave 2 both venues are legitimate here — but only these
+        # two words are. An unrecognised mode is a config nothing can
+        # reason about, so it trades nowhere until an operator fixes it.
+        return (f"The manual config for this class has an unrecognised "
+                f"mode {cfg.mode!r} — only 'paper' and 'live' exist. "
+                f"Fix the config before taking trades through it")
     if not cfg.enabled:
         return ("The manual config for this class is disabled — the kill "
                 "switch or an operator turned it off. Re-enable it in the "
@@ -756,6 +765,21 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         return {"error": f"No usable price mark for {inst.symbol} — the "
                          f"quote feeds have nothing fresh"}
 
+    # A LIVE ticket must route to a live broker or not exist. The router
+    # never returns None — it substitutes PaperTrader for every missing
+    # credential — so the one honest check is the client's own type. The
+    # dialog must not offer what execute will refuse, and execute re-runs
+    # this same preview under its lock, so the refusal holds there too.
+    live = (getattr(cfg, "mode", "paper") == "live")
+    if live:
+        from bot_program.asset_engine.base import AssetBot
+        if AssetBot._is_paper_client(_client):
+            return {"error": (f"LIVE route unavailable — {cls} orders have "
+                              f"no live broker to go to (credentials "
+                              f"missing, broker library absent, or the "
+                              f"account is disconnected). Refusing rather "
+                              f"than pretending: nothing was sent")}
+
     # The signal's own levels when it has them; the engine's ATR levels
     # otherwise, so an unlevelled signal degrades instead of blocking.
     stop = target = None
@@ -1032,7 +1056,10 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         # something else entirely.
         "closable": closable,
         "managed": _tick_manages(),
-        "venue": "paper",
+        "venue": "live" if live else "paper",
+        # The dialog's cue to collect the trading PIN — the same
+        # live-only asymmetry the close path wears (requires_pin there).
+        "requires_pin": live,
         # Sizing bounds — the override control's whole vocabulary.
         "asset_class": cls,
         "value_per_unit": vpu,
@@ -1115,9 +1142,15 @@ def preview_asset_trade(user, inst, side) -> dict:
 
 def _execute(user, inst, side, close_ids=None, signal=None,
              qty_override=None, stop_override=None,
-             target_override=None) -> dict:
+             target_override=None, pin_ok=False) -> dict:
     """Close the funding positions (if any), then open the trade. Paper is
     synchronous, so the whole chain settles before this returns.
+
+    `pin_ok` is the view's verdict on the trading PIN (the view owns the
+    check, same split as manual_close.execute_close). It is demanded only
+    when the manual config is LIVE, and it is asked twice — before
+    anything irreversible and again under the lock, where the config's
+    mode is re-read.
 
     The three overrides are the operator's answers from the confirm step,
     and None means "the platform's answer" for each independently. All
@@ -1206,6 +1239,34 @@ def _execute(user, inst, side, close_ids=None, signal=None,
     if dup is not None:
         return {"error": _dup_error(dup)}
 
+    # ── The LIVE ceremony — all of it before anything irreversible ──────
+    if getattr(cfg, "mode", "paper") == "live":
+        if close_ids:
+            # A live close can be accepted and unfilled (CLOSE_PENDING)
+            # minutes later; the synchronous close-to-fund chain below
+            # presumes closes are DONE when the open runs. Capital that
+            # may arrive is not capital — the live ticket does not offer
+            # the chain at all rather than offering it dishonestly.
+            return {"error": ("Funding closes are not offered on a LIVE "
+                              "ticket — a live close can finish minutes "
+                              "later, after this order would already be "
+                              "working. Close positions from the positions "
+                              "page first; nothing was closed and nothing "
+                              "was sent")}
+        if not _tick_manages():
+            # If the broker refuses the bracket, the 5-minute tick is the
+            # only thing standing between a live position and an unbounded
+            # loss. With the platform switches off there would be NOTHING.
+            return {"error": ("Nothing would manage a LIVE position right "
+                              "now — the platform master or the asset-bot "
+                              "pipeline is switched off. Turn them on "
+                              "before risking real funds")}
+        if not pin_ok:
+            return {"error": ("This is a LIVE order — real funds move. "
+                              "Enter your trading PIN to confirm (no PIN "
+                              "set means no live trading; set one in "
+                              "Profile)")}
+
     # CONCENTRATION — before anything is liquidated, and measured on the book
     # as it will stand AFTER the closes the operator picked.
     #
@@ -1289,6 +1350,15 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         if dup is not None:
             return {"error": _dup_error(dup), "closed": closed}
 
+        # The PIN, re-asked against the mode the LOCK read — the config
+        # could have been armed between the cheap guard and here, and a
+        # ticket that started paper must not finish live unconfirmed.
+        live = (getattr(cfg, "mode", "paper") == "live")
+        if live and not pin_ok:
+            return {"error": ("This is a LIVE order — real funds move. "
+                              "Enter your trading PIN to confirm"),
+                    "closed": closed}
+
         # Fresh preview under the lock — it sees the post-close book, and
         # no competing execute can insert between this read and the create.
         # The one thing it deliberately does NOT see is this request's own
@@ -1328,7 +1398,13 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         # Fill FIRST, size from the fill — the bot entry path's ordering.
         # Sizing off the free raw mark and then filling adversely overshoots
         # the risk budget by half the round-trip cost every time.
-        fill = paper_fill_price(cfg, inst.symbol, preview["entry"], side)
+        #
+        # LIVE works from the raw mark instead: the adverse model prices
+        # only the rehearsal — the broker will report the real fill, and
+        # the row is booked from THAT below, exactly like a bot entry.
+        fill = (float(preview["entry"]) if live
+                else paper_fill_price(cfg, inst.symbol, preview["entry"],
+                                      side))
         # No `or 1.0` fallback here: ForexBot returns 0.0 as its deliberate
         # no-fresh-rate sentinel ("size to zero rather than to a wrong
         # number"), and flattening it to 1.0 would size at the wrong rate
@@ -1466,7 +1542,7 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             "risk_dollars": risk_dollars,
             "notional_fraction": notional_fraction,
             "capital_use": capital_use,
-            "paper_fill": True, "market_price": preview["entry"],
+            "market_price": preview["entry"],
             "funding_closes": closed,
             # Which size this was, so the ledger can tell an operator's
             # judgement apart from the engine's arithmetic later.
@@ -1518,47 +1594,152 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             meta["operator_overrides"] = level_overrides
             meta["engine_stop"] = preview["stop"]
             meta["engine_target"] = float(preview["target"])
+        if not live:
+            meta["paper_fill"] = True
 
-        trade = AssetBotTrade.objects.create(
-            config=cfg, asset_class=cfg.asset_class, symbol=inst.symbol,
-            side=side, qty=Decimal(str(qty)),
-            entry_price=Decimal(str(round(fill, 8))),
-            stop_loss=Decimal(str(stop)),
-            take_profit=Decimal(str(round(target, 8))),
-            status="OPEN", paper=True, rule_name=MANUAL_RULE,
-            composite_score=float(getattr(signal, "score", 0) or 0),
-            reason=(f"TAKE TRADE · signal #{signal.id} · "
-                    f"{signal.rule_name or ''}" if signal is not None
-                    else f"TAKE TRADE · manual {side} from instrument view"),
-            metadata=meta,
-        )
+        def _book_row(fill_price, booked_qty, is_paper, extra_meta=None):
+            """The trade row plus the bookkeeping that must live and die
+            with it — the audit entry and the tax lot (the audit log must
+            not get closes with no opens; the tax-lot ledger must not
+            consume OTHER trades' lots), and the watchlist star that keeps
+            quotes flowing so the position stays closeable. Runs inside
+            whichever transaction its venue uses: paper's own lock here,
+            or the live path's booking transaction after the broker
+            answered."""
+            m = dict(meta)
+            if extra_meta:
+                m.update(extra_meta)
+            row = AssetBotTrade.objects.create(
+                config=cfg, asset_class=cfg.asset_class, symbol=inst.symbol,
+                side=side, qty=Decimal(str(booked_qty)),
+                entry_price=Decimal(str(round(fill_price, 8))),
+                stop_loss=Decimal(str(stop)),
+                take_profit=Decimal(str(round(target, 8))),
+                status="OPEN", paper=is_paper, rule_name=MANUAL_RULE,
+                composite_score=float(getattr(signal, "score", 0) or 0),
+                reason=(f"TAKE TRADE · signal #{signal.id} · "
+                        f"{signal.rule_name or ''}" if signal is not None
+                        else f"TAKE TRADE · manual {side} from instrument "
+                             f"view"),
+                metadata=m,
+            )
+            try:
+                from bot_program.audit import record_trade_open
+                record_trade_open(user, trade=row)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[take-trade] audit record_trade_open "
+                               "failed: %s", e)
+            try:
+                from bot_program.tax_lots import open_lot
+                open_lot(row)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[take-trade] tax_lots.open_lot failed: %s", e)
+            try:
+                if not inst.is_watchlist:
+                    inst.is_watchlist = True
+                    inst.save(update_fields=["is_watchlist"])
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[take-trade] watchlist star failed: %s", e)
+            return row
 
-        # DB-side bookkeeping lives inside the transaction — the audit
-        # entry and the tax lot must exist exactly when the trade row does.
-        # Without them the audit log gets closes with no opens and the
-        # tax-lot ledger consumes OTHER trades' lots when this one closes.
-        try:
-            from bot_program.audit import record_trade_open
-            record_trade_open(user, trade=trade)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("[take-trade] audit record_trade_open failed: %s", e)
-        try:
-            from bot_program.tax_lots import open_lot
-            open_lot(trade)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("[take-trade] tax_lots.open_lot failed: %s", e)
+        if not live:
+            trade = _book_row(fill, qty, True)
 
-        # Star the instrument: the star is what keeps quotes and bars
-        # flowing for off-fleet symbols. Without it a stock/ETF manual
-        # position on an unstarred symbol loses its mark within hours and
-        # becomes permanently unmanageable — unclosable even by the
-        # funding path.
+    if live:
+        # ── The broker leg, OUTSIDE any transaction ─────────────────────
+        # Holding the config's row lock across a network call would stall
+        # every ticket in the class behind one slow socket; the bots place
+        # orders with no lock at all. What replaces the lock here is a
+        # short cache claim — the server half of the double-click guard,
+        # because the broker enforces no idempotency key of its own.
+        from django.core.cache import cache
+        from bot_program.asset_engine.base import AssetBot
+        from bot_program.engine.broker_router import client_for_symbol
+        from bot_program.engine.idempotency import make_client_order_id
+        from django.utils import timezone as _tz
+
+        claim = f"manual_open:{cfg.pk}:{inst.symbol}:{side}"
+        if not cache.add(claim, 1, 120):
+            return {"error": ("An identical LIVE order is already in "
+                              "flight — wait for it to finish before "
+                              "sending another")}
         try:
-            if not inst.is_watchlist:
-                inst.is_watchlist = True
-                inst.save(update_fields=["is_watchlist"])
-        except Exception as e:  # noqa: BLE001
-            logger.warning("[take-trade] watchlist star failed: %s", e)
+            # Validation ran under the lock a moment ago; the one thing
+            # that can have changed since is a competing author, so ask
+            # the duplicate question once more before money moves.
+            dup = _dup()
+            if dup is not None:
+                return {"error": _dup_error(dup)}
+            client = client_for_symbol(user, inst.symbol, cfg)
+            if AssetBot._is_paper_client(client):
+                # The router substitutes PaperTrader for every missing
+                # credential, and a paper fill wearing a live label is
+                # the one lie this lane exists to never tell.
+                return {"error": (f"LIVE route unavailable — {cls} orders "
+                                  f"have no live broker to go to. Nothing "
+                                  f"was sent")}
+            client_order_id = make_client_order_id(
+                cfg.id, inst.symbol,
+                signal_id=(str(signal.id) if signal is not None
+                           else "manual"),
+                intent="ENTRY", bar_ts=_tz.now().strftime("%Y%m%d%H%M"))
+            try:
+                res = client.market_order(
+                    inst.symbol, side, float(qty),
+                    client_order_id=client_order_id,
+                    stop_loss=float(stop), take_profit=float(target))
+            except Exception as e:  # noqa: BLE001
+                logger.error("[take-trade] LIVE order errored for %s %s: %s",
+                             side, inst.symbol, e)
+                return {"error": (f"The live order errored before an answer "
+                                  f"arrived ({e}). The order MAY have "
+                                  f"reached the broker — check the "
+                                  f"positions page and the broker before "
+                                  f"retrying")}
+
+            status = (res.get("status") or "").upper()
+            try:
+                fill_qty = float(res.get("executedQty") or 0)
+            except (TypeError, ValueError):
+                fill_qty = 0.0
+            # The bots' refusal set, refusal only when NOTHING printed —
+            # a partial fill is real units that must get a row.
+            if status in ("REJECTED", "DUPLICATE", "CANCELLED", "CANCELED",
+                          "INACTIVE", "EXPIRED") and fill_qty <= 0:
+                why = str((res.get("raw") or {}).get("reason") or status)
+                return {"error": (f"The broker refused the order ({why}) — "
+                                  f"nothing opened")}
+
+            fill_px = float(res.get("avgPrice") or 0)
+            booked_px = fill_px if fill_px > 0 else fill
+            extra = {
+                "fill_source": "broker" if fill_px > 0 else "ticker",
+                "client_order_id": client_order_id,
+            }
+            # Broker-side protection bookkeeping, PROVEN not assumed —
+            # "protected" rows are managed by moving the resting broker
+            # leg, never by a second bot-side close.
+            protective_ids = [str(x) for x in
+                              (res.get("protectiveOrders") or [])]
+            if protective_ids or res.get("protectedOnFill"):
+                extra["protected"] = True
+                extra["protective_order_ids"] = protective_ids
+                for res_key, meta_key in (
+                        ("protectiveTradeId", "protective_trade_id"),
+                        ("protectiveTargetId", "protective_target_id"),
+                        ("protectiveStopId", "protective_stop_id")):
+                    handle = res.get(res_key)
+                    if handle:
+                        extra[meta_key] = str(handle)
+
+            with transaction.atomic():
+                trade = _book_row(booked_px,
+                                  fill_qty if fill_qty > 0 else qty,
+                                  False, extra)
+            if fill_qty > 0:
+                qty = fill_qty
+        finally:
+            cache.delete(claim)
 
     # External side effects AFTER the commit — the row is durable now.
     try:
@@ -1571,7 +1752,7 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         notify_manual_fill_open(
             user, asset_class=cfg.asset_class, symbol=inst.symbol,
             side=side, qty=trade.qty, entry_price=trade.entry_price,
-            trade_id=trade.id)
+            trade_id=trade.id, live=live)
     except Exception as e:  # noqa: BLE001
         logger.warning("[take-trade] open notification failed: %s", e)
     try:
@@ -1589,27 +1770,39 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 closed or "none",
                 f"; operator levels: {', '.join(level_overrides)}"
                 if level_overrides else "")
-    return {"ok": True, "trade_id": trade.id, "symbol": inst.symbol,
-            "side": side, "qty": float(qty),
-            "entry": float(trade.entry_price),
-            "stop": float(trade.stop_loss),
-            "target": float(trade.take_profit),
-            "risk_dollars": risk_dollars,
-            "sized_by": "operator" if overridden else "risk_budget",
-            # What the operator moved, so the confirmation can name it back
-            # to them rather than claiming the platform's own defaults.
-            "overrides": (["qty"] if overridden else []) + level_overrides,
-            "managed": preview.get("managed", False),
-            "closed": closed}
+    out = {"ok": True, "trade_id": trade.id, "symbol": inst.symbol,
+           "side": side, "qty": float(qty),
+           "entry": float(trade.entry_price),
+           "stop": float(trade.stop_loss),
+           "target": float(trade.take_profit),
+           "risk_dollars": risk_dollars,
+           "sized_by": "operator" if overridden else "risk_budget",
+           # What the operator moved, so the confirmation can name it back
+           # to them rather than claiming the platform's own defaults.
+           "overrides": (["qty"] if overridden else []) + level_overrides,
+           "managed": preview.get("managed", False),
+           "venue": "live" if live else "paper",
+           "closed": closed}
+    if live and not (trade.metadata or {}).get("protected"):
+        # The one honest degradation: the entry went in, the bracket did
+        # not rest. The operator must hear it from the confirmation, not
+        # discover it when a stop fails to fire.
+        out["protection_note"] = ("The broker did not confirm the "
+                                  "protective bracket — the 5-minute tick "
+                                  "owns the stop and target for this "
+                                  "position")
+    return out
 
 
 def execute_take_trade(user, signal, close_ids=None, qty=None, stop=None,
-                       target=None) -> dict:
+                       target=None, pin_ok=False) -> dict:
     """Execute a signal's TAKE TRADE.
 
     Every keyword None is "the platform's answer": the risk-derived size,
     the signal's own stop and target. Each is independent — a hand-placed
     stop with an automatic size is the ordinary case, not an exotic one.
+    `pin_ok` is the view's verdict on the trading PIN, demanded only when
+    the manual config is LIVE.
     """
     if signal.direction not in ("bullish", "bearish"):
         return {"error": f"'{signal.direction}' signals carry no trade "
@@ -1618,13 +1811,146 @@ def execute_take_trade(user, signal, close_ids=None, qty=None, stop=None,
     side = "BUY" if signal.direction == "bullish" else "SELL"
     return _execute(user, signal.instrument, side, close_ids=close_ids,
                     signal=signal, qty_override=qty, stop_override=stop,
-                    target_override=target)
+                    target_override=target, pin_ok=pin_ok)
 
 
 def execute_asset_trade(user, inst, side, close_ids=None, qty=None, stop=None,
-                        target=None) -> dict:
+                        target=None, pin_ok=False) -> dict:
     """Execute a signal-less LONG/SHORT from an instrument popup."""
     if side not in ("BUY", "SELL"):
         return {"error": f"Unknown side {side!r}"}
     return _execute(user, inst, side, close_ids=close_ids, qty_override=qty,
-                    stop_override=stop, target_override=target)
+                    stop_override=stop, target_override=target,
+                    pin_ok=pin_ok)
+
+
+# ── Arming — the moment a chart button can move real funds ──────────────
+
+# How stale the broker's own reading of the account may be before it stops
+# counting as knowledge. A live gateway refreshes every 15 minutes; a
+# reading a day old means the sync is down, and an arming decision judged
+# against it would be judged against a memory.
+ARM_EQUITY_MAX_AGE_SECONDS = 24 * 3600
+
+
+def arm_manual_lane(user, *, asset_class, mode, capital=None,
+                    pin_ok=False) -> dict:
+    """Arm (live) or stand down (paper) the manual lane for one class.
+
+    Arming live is refuse-first, because everything after it trusts it:
+      * the trading PIN (`pin_ok` is the view's verdict);
+      * the class's route must resolve to a REAL live broker client —
+        the router's silent PaperTrader fallback is exactly what must
+        never be armed;
+      * on a broker-backed route, the manual pool must not exceed the
+        broker's own last reading of the account (cached column only —
+        no broker I/O here): a pool larger than the money makes every
+        limit looser than it reads, on real funds.
+
+    Standing down is frictionless — stopping must never be gated.
+    `capital` (optional) retypes the pool in the same PIN-confirmed act,
+    so "size the pool to the real account" and "arm" are one decision.
+    """
+    from bot_program.models import AssetBotConfig  # noqa: F401 — save path
+
+    cls = str(asset_class or "")
+    if cls not in set(EXECUTABLE_CLASS.values()):
+        return {"error": f"Unknown asset class {cls!r} — the manual lane "
+                         f"covers stock, forex, commodity and crypto"}
+    if mode not in ("paper", "live"):
+        return {"error": f"Unknown mode {mode!r} — only paper and live "
+                         f"exist"}
+
+    cfg = manual_config_for(user, cls)
+    if cfg.symbols:
+        return {"error": ("A bot config named 'manual' with its own "
+                          "symbols already exists for this class — rename "
+                          "that bot first")}
+
+    fields = []
+    if capital is not None:
+        try:
+            cap = float(capital)
+        except (TypeError, ValueError):
+            return {"error": "capital must be a number"}
+        if isinstance(capital, bool) or not math.isfinite(cap) or cap <= 0:
+            return {"error": "capital must be a positive, finite number"}
+        cfg.capital = Decimal(str(round(cap, 2)))
+        fields.append("capital")
+
+    if mode == "live":
+        if not pin_ok:
+            return {"error": ("Arming the manual lane LIVE takes the "
+                              "trading PIN — real funds would move on the "
+                              "next click. Set a PIN in Profile if you "
+                              "have none")}
+
+        # The route must resolve NOW, to a live client. Route with any
+        # instrument of the class — the symbol only picks the venue.
+        from instruments.models import Instrument
+        inst_classes = [k for k, v in EXECUTABLE_CLASS.items() if v == cls]
+        probe = (Instrument.objects
+                 .filter(asset_class__in=inst_classes, is_active=True)
+                 .order_by("symbol").first())
+        if probe is None:
+            return {"error": f"No active {cls} instrument exists to route "
+                             f"through — nothing to arm"}
+        from bot_program.asset_engine.base import AssetBot
+        from bot_program.engine.broker_router import client_for_symbol
+        prior_mode, cfg.mode = cfg.mode, "live"  # in memory only, for routing
+        try:
+            client = client_for_symbol(user, probe.symbol, cfg)
+        finally:
+            cfg.mode = prior_mode
+        if AssetBot._is_paper_client(client):
+            return {"error": (f"LIVE route unavailable — {cls} orders "
+                              f"would fall back to the paper simulator "
+                              f"(credentials missing, broker library "
+                              f"absent, or the account disconnected). "
+                              f"Nothing was armed")}
+
+        # On a broker-backed route, the pool is measured against the
+        # broker's own cached reading — written only by the sync beat,
+        # never fetched here.
+        if type(client).__name__ == "IBKRTrader":
+            from bot_program.capital_truth import broker_backed
+            acct = broker_backed(user)
+            reading = getattr(acct, "last_equity", None) if acct else None
+            read_at = getattr(acct, "last_equity_at", None) if acct else None
+            if reading is None or read_at is None:
+                return {"error": ("The broker's own reading of the account "
+                                  "has not arrived yet — enable "
+                                  "broker_account_sync and let it store an "
+                                  "equity figure before arming real funds")}
+            from django.utils import timezone as _tz
+            age = (_tz.now() - read_at).total_seconds()
+            if age > ARM_EQUITY_MAX_AGE_SECONDS:
+                return {"error": (f"The broker's last account reading is "
+                                  f"{int(age // 3600)}h old — the sync is "
+                                  f"not running. Fix that first; arming "
+                                  f"against a memory is not arming against "
+                                  f"an account")}
+            if float(cfg.capital) > float(reading):
+                return {"error": (f"The {cls} manual pool is "
+                                  f"${float(cfg.capital):,.2f} but the "
+                                  f"broker reads the account at "
+                                  f"{float(reading):,.2f} "
+                                  f"{acct.last_equity_currency or ''} — a "
+                                  f"pool larger than the money makes every "
+                                  f"limit looser than it reads. Re-run "
+                                  f"with a capital no larger than the "
+                                  f"account")}
+
+    cfg.mode = mode
+    fields.append("mode")
+    cfg.save(update_fields=fields)
+    logger.info("[take-trade] %s manual lane %s -> %s (capital %s)",
+                user.username, cls, mode, cfg.capital)
+    try:
+        from bot_program.notifications import notify_manual_lane_mode
+        notify_manual_lane_mode(user, asset_class=cls, mode=mode,
+                                capital=float(cfg.capital))
+    except Exception as e:  # noqa: BLE001 — the record must not block the act
+        logger.warning("[take-trade] lane-mode notification failed: %s", e)
+    return {"ok": True, "asset_class": cls, "mode": mode,
+            "capital": float(cfg.capital)}

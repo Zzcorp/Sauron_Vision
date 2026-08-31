@@ -66,6 +66,11 @@ OPERATOR_KINDS = {
     # platform admitting to something it did not know about, and there
     # is no "stop telling me" preference that should silence it.
     "unclaimed_position",
+    # The manual lane changed venue — armed live or stood down. The
+    # operator did it themselves, PIN in hand, and the record of WHEN a
+    # chart button started being able to move real funds must never be
+    # gated behind a bot-chatter preference.
+    "manual_lane_mode",
 }
 
 # The in-app row's type, per kind — "bot" for everything not listed, because
@@ -355,7 +360,8 @@ def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
 
 
 def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
-                             qty, entry_price, trade_id=None) -> bool:
+                             qty, entry_price, trade_id=None,
+                             live: bool = False) -> bool:
     """The OPERATOR opened this position by hand — TAKE TRADE, not a bot.
 
     Same shape as `notify_bot_fill_open` minus `rule_name`, and the omission
@@ -364,12 +370,19 @@ def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
     the operator's own click look like a rule that fired. The title says "by
     hand" in words instead, so the attribution survives the external channels
     that strip the mark (see _plain_title).
+
+    `live` marks the venue in both title and body: since the LIVE manual
+    ticket exists, a fill notification that cannot say which venue the
+    money moved on tells the operator half a fact.
     """
     from alerts.links import page_url
     return dispatch_notification(
         user, "manual_fill_open",
-        title=f"▸ {symbol} {side} opened by hand",
-        body=f"{asset_class.upper()} · qty {qty} @ {entry_price} · TAKE TRADE",
+        title=(f"▸ {symbol} {side} opened by hand"
+               + (" · LIVE" if live else "")),
+        body=(f"{asset_class.upper()} · qty {qty} @ {entry_price} · "
+              f"TAKE TRADE"
+              + (" · LIVE — real funds" if live else "")),
         # Forensics renders any of this user's trades, and a hand-taken one
         # has a story too: the levels it opened with, the signal it was taken
         # from, its audit trail and lifecycle. The FALLBACK differs from the
@@ -377,6 +390,27 @@ def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
         # not where a trade the operator took themselves lives. /positions/
         # is their own book, which is.
         url=page_url("forensics_detail", trade_id) or "/positions/",
+    )
+
+
+def notify_manual_lane_mode(user, *, asset_class: str, mode: str,
+                            capital=None) -> bool:
+    """The manual lane's venue changed — the operator armed it live or
+    stood it down. A durable record, because the moment a LONG/SHORT
+    button starts moving real funds is the single most consequential
+    click this platform offers."""
+    live = (mode == "live")
+    return dispatch_notification(
+        user, "manual_lane_mode",
+        title=(f"◆ Manual lane ARMED LIVE — {asset_class}" if live
+               else f"◇ Manual lane back to paper — {asset_class}"),
+        body=((f"TAKE TRADE on {asset_class} instruments now moves REAL "
+               f"funds at the broker"
+               + (f" · pool ${float(capital):,.2f}" if capital else ""))
+              if live else
+              f"TAKE TRADE on {asset_class} instruments is back on the "
+              f"paper venue — rehearsal money only"),
+        url="/positions/",
     )
 
 
