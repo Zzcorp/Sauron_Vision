@@ -779,6 +779,10 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
                               f"missing, broker library absent, or the "
                               f"account is disconnected). Refusing rather "
                               f"than pretending: nothing was sent")}
+        from bot_program.capital_truth import tracking_freeze_reason
+        frozen = tracking_freeze_reason(user, cfg)
+        if frozen:
+            return {"error": f"LIVE entries are frozen — {frozen}"}
 
     # The signal's own levels when it has them; the engine's ATR levels
     # otherwise, so an unlevelled signal degrades instead of blocking.
@@ -1266,6 +1270,10 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                               "Enter your trading PIN to confirm (no PIN "
                               "set means no live trading; set one in "
                               "Profile)")}
+        from bot_program.capital_truth import tracking_freeze_reason
+        frozen = tracking_freeze_reason(user, cfg)
+        if frozen:
+            return {"error": f"LIVE entries are frozen — {frozen}"}
 
     # CONCENTRATION — before anything is liquidated, and measured on the book
     # as it will stand AFTER the closes the operator picked.
@@ -1834,7 +1842,7 @@ ARM_EQUITY_MAX_AGE_SECONDS = 24 * 3600
 
 
 def arm_manual_lane(user, *, asset_class, mode, capital=None,
-                    pin_ok=False) -> dict:
+                    pin_ok=False, track=None) -> dict:
     """Arm (live) or stand down (paper) the manual lane for one class.
 
     Arming live is refuse-first, because everything after it trusts it:
@@ -1847,11 +1855,19 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
         no broker I/O here): a pool larger than the money makes every
         limit looser than it reads, on real funds.
 
-    Standing down is frictionless — stopping must never be gated.
-    `capital` (optional) retypes the pool in the same PIN-confirmed act,
-    so "size the pool to the real account" and "arm" are one decision.
+    `track` (Phase B, operator-requested) opts the pool into FOLLOWING
+    the account: the sync beat retunes capital from the broker's own
+    reading, and entries freeze when the reading goes stale. True/False
+    sets it; None leaves it as it stands. Tracking demands an IBKR-routed
+    class (the reading IS the IBKR account), and at most ONE pool per
+    user may follow the account — two pools each claiming the same money
+    is the oversubscription this whole module exists to prevent.
+
+    Standing down is frictionless — stopping must never be gated — and
+    clears the tracking flag: a paper pool follows nothing.
+    `capital` (optional) retypes the pool in the same PIN-confirmed act.
     """
-    from bot_program.models import AssetBotConfig  # noqa: F401 — save path
+    from bot_program.models import AssetBotConfig
 
     cls = str(asset_class or "")
     if cls not in set(EXECUTABLE_CLASS.values()):
@@ -1866,6 +1882,9 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
         return {"error": ("A bot config named 'manual' with its own "
                           "symbols already exists for this class — rename "
                           "that bot first")}
+
+    prior_track = bool((cfg.extras or {}).get("capital_tracks_broker"))
+    want_track = prior_track if track is None else bool(track)
 
     fields = []
     if capital is not None:
@@ -1909,10 +1928,33 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
                               f"absent, or the account disconnected). "
                               f"Nothing was armed")}
 
+        routes_ibkr = (type(client).__name__ == "IBKRTrader")
+        if want_track and not routes_ibkr:
+            return {"error": (f"Following the account tracks the IBKR "
+                              f"reading, but {cls} orders route to "
+                              f"{type(client).__name__} — arm without "
+                              f"tracking, or route this class to IBKR "
+                              f"first")}
+        if want_track and not prior_track:
+            # At most ONE pool follows the account: two followers would
+            # each claim the same money in full.
+            others = [c for c in (AssetBotConfig.objects
+                                  .filter(user=user, enabled=True)
+                                  .exclude(pk=cfg.pk)
+                                  .exclude(mode="paper"))
+                      if (c.extras or {}).get("capital_tracks_broker")]
+            if others:
+                o = others[0]
+                return {"error": (f"'{o.name}' ({o.asset_class}) already "
+                                  f"follows the account — one pool follows "
+                                  f"it at a time, or two pools would each "
+                                  f"claim the same money. Stand that one "
+                                  f"down first")}
+
         # On a broker-backed route, the pool is measured against the
         # broker's own cached reading — written only by the sync beat,
         # never fetched here.
-        if type(client).__name__ == "IBKRTrader":
+        if routes_ibkr:
             from bot_program.capital_truth import broker_backed
             acct = broker_backed(user)
             reading = getattr(acct, "last_equity", None) if acct else None
@@ -1930,7 +1972,14 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
                                   f"not running. Fix that first; arming "
                                   f"against a memory is not arming against "
                                   f"an account")}
-            if float(cfg.capital) > float(reading):
+            if want_track:
+                # Following the account starts by BECOMING the account:
+                # the reading is the pool from this moment on, and the
+                # sync retunes it from here.
+                cfg.capital = Decimal(str(round(float(reading), 2)))
+                if "capital" not in fields:
+                    fields.append("capital")
+            elif float(cfg.capital) > float(reading):
                 return {"error": (f"The {cls} manual pool is "
                                   f"${float(cfg.capital):,.2f} but the "
                                   f"broker reads the account at "
@@ -1941,11 +1990,29 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
                                   f"with a capital no larger than the "
                                   f"account")}
 
+        ex = dict(cfg.extras or {})
+        if want_track:
+            ex["capital_tracks_broker"] = True
+        else:
+            ex.pop("capital_tracks_broker", None)
+        if ex != (cfg.extras or {}):
+            cfg.extras = ex
+            fields.append("extras")
+    else:
+        # A paper pool follows nothing — trailing the flag into a later
+        # re-arm would resurrect a decision nobody re-made.
+        ex = dict(cfg.extras or {})
+        if ex.pop("capital_tracks_broker", None):
+            cfg.extras = ex
+            fields.append("extras")
+        want_track = False
+
     cfg.mode = mode
     fields.append("mode")
     cfg.save(update_fields=fields)
-    logger.info("[take-trade] %s manual lane %s -> %s (capital %s)",
-                user.username, cls, mode, cfg.capital)
+    logger.info("[take-trade] %s manual lane %s -> %s (capital %s, "
+                "tracks_broker %s)", user.username, cls, mode, cfg.capital,
+                want_track)
     try:
         from bot_program.notifications import notify_manual_lane_mode
         notify_manual_lane_mode(user, asset_class=cls, mode=mode,
@@ -1953,4 +2020,4 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
     except Exception as e:  # noqa: BLE001 — the record must not block the act
         logger.warning("[take-trade] lane-mode notification failed: %s", e)
     return {"ok": True, "asset_class": cls, "mode": mode,
-            "capital": float(cfg.capital)}
+            "capital": float(cfg.capital), "tracks_broker": want_track}

@@ -454,3 +454,149 @@ class ArmingTheManualLaneTests(TestCase):
         with patch(ROUTER, return_value=self._ibkr_client()):
             out = self._arm(capital=450)
         self.assertIn("old", out["error"])
+
+
+class FundsTrackingTests(TestCase):
+    """Phase B, operator-requested: pools that FOLLOW the broker's own
+    reading — trade the funds actually available, not a typed number.
+    The sync beat is the only writer; stale readings freeze new entries;
+    at most one pool follows the account at a time."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user("lv_t", password="x")
+
+    def setUp(self):
+        cache.clear()
+        _quote("BTCUSD", 60000)
+        _components_on()
+
+    def _ibkr_backed(self, equity="500.00", age_seconds=0):
+        from datetime import timedelta as _td
+        from django.utils import timezone as _tz
+        from bot_program.models import IBKRAccount
+        acct = IBKRAccount.objects.create(
+            user=self.user, label="ISA", host="ibgateway", port=4003,
+            client_id=1)
+        acct.set_credentials("U28134395")
+        if equity is not None:
+            acct.last_equity = Decimal(equity)
+            acct.last_equity_currency = "EUR"
+            acct.last_equity_at = _tz.now() - _td(seconds=age_seconds)
+        acct.save()
+        return acct
+
+    def _ibkr_client(self):
+        return type("IBKRTrader", (), {})()
+
+    def _arm_tracking(self, **kw):
+        from bot_program.manual_trade import arm_manual_lane
+        args = dict(asset_class="crypto", mode="live", pin_ok=True,
+                    track=True)
+        args.update(kw)
+        return arm_manual_lane(self.user, **args)
+
+    def test_tracking_starts_by_becoming_the_account(self):
+        self._ibkr_backed(equity="500.00")
+        with patch(ROUTER, return_value=self._ibkr_client()):
+            out = self._arm_tracking()
+        self.assertTrue(out.get("ok"), out)
+        self.assertTrue(out["tracks_broker"])
+        self.assertEqual(out["capital"], 500.0)
+
+    def test_tracking_refuses_a_venue_that_is_not_the_account(self):
+        """The reading IS the IBKR account — a Binance-routed pool
+        following it would size one venue's orders by another's money."""
+        self._ibkr_backed(equity="500.00")
+        with patch(ROUTER, return_value=_fake_live_client()):
+            out = self._arm_tracking()
+        self.assertIn("error", out)
+        self.assertIn("route", out["error"])
+
+    def test_only_one_pool_may_follow_the_account(self):
+        """Two followers would each claim the same money in full."""
+        _instrument("EURUSD", "forex")
+        self._ibkr_backed(equity="500.00")
+        with patch(ROUTER, return_value=self._ibkr_client()):
+            first = self._arm_tracking()
+            self.assertTrue(first.get("ok"), first)
+            second = self._arm_tracking(asset_class="forex")
+        self.assertIn("error", second)
+        self.assertIn("already follows", second["error"])
+
+    def test_disarming_clears_the_tracking_flag(self):
+        self._ibkr_backed(equity="500.00")
+        from bot_program.manual_trade import (arm_manual_lane,
+                                              manual_config_for)
+        with patch(ROUTER, return_value=self._ibkr_client()):
+            self._arm_tracking()
+        out = arm_manual_lane(self.user, asset_class="crypto", mode="paper")
+        self.assertTrue(out.get("ok"), out)
+        cfg = manual_config_for(self.user, "crypto")
+        self.assertNotIn("capital_tracks_broker", cfg.extras or {})
+
+    def test_the_sync_retunes_a_tracking_pool(self):
+        self._ibkr_backed(equity="500.00")
+        with patch(ROUTER, return_value=self._ibkr_client()):
+            self._arm_tracking()
+        from bot_program.tasks import _follow_the_account
+        _follow_the_account(self.user, 612.34, "EUR")
+        from bot_program.manual_trade import manual_config_for
+        self.assertEqual(
+            float(manual_config_for(self.user, "crypto").capital), 612.34)
+
+    def test_the_sync_leaves_untracked_pools_alone(self):
+        self._ibkr_backed(equity="500.00")
+        from bot_program.manual_trade import arm_manual_lane
+        with patch(ROUTER, return_value=self._ibkr_client()):
+            out = arm_manual_lane(self.user, asset_class="crypto",
+                                  mode="live", pin_ok=True, capital=450,
+                                  track=False)
+            self.assertTrue(out.get("ok"), out)
+        from bot_program.tasks import _follow_the_account
+        _follow_the_account(self.user, 612.34, "EUR")
+        from bot_program.manual_trade import manual_config_for
+        self.assertEqual(
+            float(manual_config_for(self.user, "crypto").capital), 450.0)
+
+    def test_a_stale_reading_freezes_live_manual_entries(self):
+        self._ibkr_backed(equity="500.00")
+        with patch(ROUTER, return_value=self._ibkr_client()):
+            self._arm_tracking()
+        from datetime import timedelta as _td
+        from django.utils import timezone as _tz
+        acct = self.user.ibkr_account
+        acct.last_equity_at = _tz.now() - _td(hours=3)
+        acct.save(update_fields=["last_equity_at"])
+        from bot_program.manual_trade import execute_take_trade
+        with patch(ROUTER, return_value=_fake_live_client()):
+            out = execute_take_trade(
+                self.user, _signal(_instrument("BTCUSD")), pin_ok=True)
+        self.assertIn("error", out)
+        self.assertIn("frozen", out["error"])
+
+    def test_a_fresh_reading_does_not_freeze(self):
+        self._ibkr_backed(equity="500.00")
+        with patch(ROUTER, return_value=self._ibkr_client()):
+            self._arm_tracking()
+        from bot_program.capital_truth import tracking_freeze_reason
+        from bot_program.manual_trade import manual_config_for
+        self.assertIsNone(tracking_freeze_reason(
+            self.user, manual_config_for(self.user, "crypto")))
+
+    def test_bots_on_a_tracking_pool_freeze_on_a_stale_reading_too(self):
+        """The freeze is generic: any live config that follows the
+        account waits out a stale reading, bot or hand."""
+        self._ibkr_backed(equity="500.00", age_seconds=3 * 3600)
+        from bot_program.manual_trade import manual_config_for
+        cfg = manual_config_for(self.user, "crypto")
+        cfg.mode = "live"
+        cfg.enabled = True
+        ex = dict(cfg.extras or {})
+        ex["capital_tracks_broker"] = True
+        cfg.extras = ex
+        cfg.save()
+        from bot_program.asset_engine.base import make_bot
+        ok, why = make_bot(cfg).can_open_new()
+        self.assertFalse(ok)
+        self.assertIn("reading", why)

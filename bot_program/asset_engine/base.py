@@ -1092,6 +1092,16 @@ class AssetBot(ABC):
             return (False, "config was disarmed mid-tick (kill switch or "
                            "operator) — no entries this pass")
 
+        # A pool that follows the broker's account must not open on a
+        # stale reading of it. The operator asked for "the available
+        # funds" — funds nobody has read for an hour are not available,
+        # they are remembered. Exits and management are untouched.
+        if self.cfg.mode == "live":
+            from bot_program.capital_truth import tracking_freeze_reason
+            frozen = tracking_freeze_reason(self.user, self.cfg)
+            if frozen:
+                return (False, frozen)
+
         # Circuit breakers: stop opening when the recent record says
         # something is wrong. Never force-closes — an automated system that
         # starts closing on a heuristic is worse than one that just stops.

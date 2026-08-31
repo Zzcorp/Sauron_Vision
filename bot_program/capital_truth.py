@@ -281,6 +281,48 @@ def pool_oversubscription(user):
     return out
 
 
+# ── Pools that follow the account ────────────────────────────────────────
+#
+# extras["capital_tracks_broker"] marks a pool whose capital the
+# sync_broker_account beat keeps equal to the broker's own reading — the
+# operator's request that sizing use the funds actually available rather
+# than a number typed once. One narrow exception to this module's
+# measure-only charter: when such a pool's reading is stale, NEW entries
+# are refused, because the number being followed is no longer known.
+TRACKING_FRESH_SECONDS = 3600
+
+
+def tracks_broker(cfg) -> bool:
+    """Does this pool follow the broker's account reading?"""
+    try:
+        return bool((getattr(cfg, "extras", None) or {}).get(
+            "capital_tracks_broker"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def tracking_freeze_reason(user, cfg):
+    """Why an account-following pool must not OPEN right now, or None.
+
+    Pure DB reads (the cached columns) — safe on entry paths. Only opens
+    are affected: exits, stops and management keep running whatever the
+    reading's age, because an existing position must stay managed.
+    """
+    if not tracks_broker(cfg):
+        return None
+    reading = account_equity(user)
+    if reading is None:
+        return ("this pool follows the broker account and no reading has "
+                "landed yet — enable broker_account_sync and let it store "
+                "one")
+    if reading["age_seconds"] > TRACKING_FRESH_SECONDS:
+        hours = reading["age_seconds"] / 3600.0
+        return (f"this pool follows the broker account and the last "
+                f"reading is {hours:.1f}h old — new entries wait until a "
+                f"fresh reading lands (is the Gateway logged in?)")
+    return None
+
+
 def broker_view(user):
     """Everything a broker-truth CELL needs, or None when not interfaced.
 

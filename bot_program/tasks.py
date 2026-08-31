@@ -386,8 +386,45 @@ def sync_broker_account() -> dict:
             acct.broker_positions_at = now
             fields += ["broker_positions", "broker_positions_at"]
         acct.save(update_fields=fields)
+        if reading is not None:
+            _follow_the_account(user, value, currency)
         out["stored"] += 1
     return out
+
+
+def _follow_the_account(user, value, currency) -> None:
+    """Retune every pool that OPTED IN to follow the broker's reading.
+
+    Phase B, operator-requested: "trade on the available funds, not the
+    number I typed once." The opt-in lives in
+    extras["capital_tracks_broker"], and the ONLY writer is this sync —
+    the same beat that stored the reading, so the pool and the reading
+    can never quote two different syncs. The entry paths freeze an
+    opted-in pool when the reading goes stale
+    (capital_truth.tracking_freeze_reason): following an account nobody
+    can read is following a memory.
+    """
+    from decimal import Decimal
+
+    from .models import AssetBotConfig
+
+    try:
+        configs = (AssetBotConfig.objects
+                   .filter(user=user, enabled=True)
+                   .exclude(mode="paper"))
+        for cfg in configs:
+            if not (cfg.extras or {}).get("capital_tracks_broker"):
+                continue
+            new = Decimal(str(round(float(value), 2)))
+            if cfg.capital == new:
+                continue
+            old = cfg.capital
+            cfg.capital = new
+            cfg.save(update_fields=["capital"])
+            logger.info("broker sync: %s pool follows the account: "
+                        "%s -> %s %s", cfg.name, old, new, currency or "")
+    except Exception as e:  # noqa: BLE001 — the stored reading must stand
+        logger.warning("broker sync: pool-follow failed: %s", e)
 
 
 # ── The stall alert ───────────────────────────────────────────────────────

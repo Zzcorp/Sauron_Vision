@@ -3648,7 +3648,9 @@ def admin_dashboard(request):
     # way the broker credential forms are.
     from bot_program.manual_trade import EXECUTABLE_CLASS, manual_config_for
     context["manual_lanes"] = [
-        {"asset_class": cls, "mode": lane.mode, "capital": float(lane.capital)}
+        {"asset_class": cls, "mode": lane.mode,
+         "capital": float(lane.capital),
+         "tracks": bool((lane.extras or {}).get("capital_tracks_broker"))}
         for cls in sorted(set(EXECUTABLE_CLASS.values()))
         for lane in [manual_config_for(request.user, cls)]
     ]
@@ -4342,12 +4344,14 @@ def take_trade_arm(request):
         return JsonResponse({"error": "Body must be a JSON object"},
                             status=400)
     from dashboard.views_close import _pin_ok as _trading_pin_ok
+    track = body.get("track")
     return JsonResponse(arm_manual_lane(
         request.user,
         asset_class=str(body.get("asset_class", "") or ""),
         mode=str(body.get("mode", "") or ""),
         capital=body.get("capital"),
-        pin_ok=_trading_pin_ok(request, body)))
+        pin_ok=_trading_pin_ok(request, body),
+        track=(bool(track) if track is not None else None)))
 
 
 @login_required
