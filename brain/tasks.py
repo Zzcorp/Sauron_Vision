@@ -11,9 +11,16 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(name="brain.tasks.run_sauron_mind")
-@spend_guard(tier="balanced", estimated_usd=0.15)
+# tier="deep", because that is what it SPENDS. SauronMindAgent's
+# default_tier is "deep" (Opus), and this guard's tier string is what
+# spend.can_spend keys DEEP_TIER_SHARE off — so declaring "balanced" here
+# exempted the single largest deep-tier spender in the platform from the
+# reserve that exists to contain deep-tier spend, and let it eat the budget
+# the critic and the strategist were being held back for.
+@spend_guard(tier="deep", estimated_usd=0.15)
 def run_sauron_mind() -> dict:
-    """Beat task — every 30min. Runs one synthesis cycle."""
+    """Beat task — hourly. Runs one synthesis cycle, unless the bars behind
+    its regime probes are stale (see synthesizer.MIN_FRESH_PROBES)."""
     from .synthesizer import synthesize_now
     return synthesize_now()
 
@@ -72,7 +79,10 @@ def run_auto_demoter() -> dict:
 
 
 @shared_task(name="brain.tasks.run_earnings_reviewer")
-@spend_guard(tier="balanced", estimated_usd=0.2)
+# tier="deep" for the same reason as run_sauron_mind above: EarningsReviewer
+# declares default_tier "deep", so a "balanced" guard here spent Opus money
+# outside the deep reserve.
+@spend_guard(tier="deep", estimated_usd=0.2)
 def run_earnings_reviewer() -> dict:
     """Beat task — every 4h. Walks recent earnings events for held symbols
     and dispatches the EarningsReviewerAgent (Opus 4.7) to produce a deep

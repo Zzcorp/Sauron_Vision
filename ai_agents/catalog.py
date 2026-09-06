@@ -47,7 +47,15 @@ MODELS = {
     "claude-sonnet-5": {
         "label": "Claude Sonnet 5",
         "tier_hint": "balanced",
-        "pricing": {"input": 3.0, "output": 15.0},
+        # $2/$10, NOT $3/$15 — that is Sonnet 4.6's rate, twenty lines down,
+        # and it was copied up here when this entry was added. Every balanced
+        # tier call is the workhorse of this platform, so the error was not
+        # academic: cost_usd on each of those AgentTask rows read 50% high,
+        # spend.spent_today() inherited it, and AI_DAILY_BUDGET_USD therefore
+        # stopped work at roughly two thirds of the money the operator had
+        # actually authorised. The ledger exists to be believed; a price is
+        # the one number in it that cannot be derived from anything else.
+        "pricing": {"input": 2.0, "output": 10.0},
         "context": 1_000_000,
         "thinking": True,
         "effort": True,

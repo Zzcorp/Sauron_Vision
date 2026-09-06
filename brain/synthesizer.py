@@ -32,6 +32,23 @@ logger = logging.getLogger(__name__)
 # closes in 14 days" while the query looked at 30 is worse than no note.
 TRACK_RECORD_WINDOW_DAYS = 14
 
+# A regime probe older than this is describing a market that has traded
+# since. 30h clears a normal weekend gap on the 4h frame this deployment
+# actually holds (Friday's last close is ~10-14h old on a Saturday morning
+# read, and ~58h by Sunday night) while catching the case that matters: a
+# bar writer that stopped during the week. Deliberately generous — the goal
+# is to refuse a synthesis run on a DEAD feed, not to go quiet every
+# weekend, and a weekend read is still labelled stale on each probe so the
+# model discounts it without the run being skipped.
+STALE_PROBE_HOURS = 30.0
+
+# Below this many FRESH probes the synthesis is skipped rather than run.
+# One fresh instrument is not a regime read, and the model has no way to
+# know that the eight numbers in front of it all came from the same dead
+# frame — it produced "eight instruments, all coin flips" with total
+# confidence off exactly that input.
+MIN_FRESH_PROBES = 2
+
 
 def _no_track_record_reason() -> str:
     """Why there is no realized-R evidence — in the terms an operator acts on.
@@ -269,19 +286,38 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
             # (The realized-vol headband cell hit this exact trap first.)
             closes = []
             probe_tf = None
+            newest = None
             for tf in ("1d", "4h", "1h"):
                 rows = list(PriceData.objects
                             .filter(instrument=inst, timeframe=tf)
                             .order_by("-timestamp")
-                            .values_list("close", flat=True)[:150])
+                            .values_list("close", "timestamp")[:150])
                 if len(rows) >= 30:
-                    closes = [float(c) for c in reversed(rows)]
+                    closes = [float(c) for c, _ts in reversed(rows)]
+                    newest = rows[0][1]
                     probe_tf = tf
                     break
             if not closes:
                 continue
             h = hurst_exponent(closes, max_lag=20)
             sigma = garch_lite_forecast(closes)
+            # HOW OLD THE LAST BAR IS, on every probe. A Hurst exponent
+            # computed over a frozen frame is not wrong arithmetic — it is
+            # arithmetic about a week that has already ended, and it reads
+            # exactly like a live measurement. When the bar writer stopped
+            # for a day and a half, the brain went on publishing hourly
+            # regime reads off Thursday's closes, flipped its own label
+            # three times in 24h on data that had not moved, and told the
+            # operator to "trade the Hurst number" — a number describing a
+            # market that had traded a full session since. A price with no
+            # age beside it is the same lie this platform removes everywhere
+            # else; the model can discount a number it knows is stale, and
+            # the freshness gate below refuses the whole synthesis when
+            # every probe is.
+            age_h = None
+            if newest is not None:
+                age_h = round(
+                    (timezone.now() - newest).total_seconds() / 3600.0, 1)
             regime_probes.append({
                 "symbol": inst.symbol,
                 "asset_class": inst.asset_class,
@@ -290,8 +326,14 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
                 "regime": hurst_regime_label(h),
                 "vol_forecast_pct": round(sigma * 100, 3) if sigma is not None else None,
                 "n_closes": len(closes),
+                "last_bar_age_hours": age_h,
+                "stale": bool(age_h is not None
+                              and age_h > STALE_PROBE_HOURS),
             })
         snap["regime_probes"] = regime_probes
+        fresh = [p for p in regime_probes if not p.get("stale")]
+        snap["regime_probes_fresh"] = len(fresh)
+        snap["regime_probes_stale"] = len(regime_probes) - len(fresh)
     except Exception:
         snap["regime_probes"] = []
 
@@ -715,6 +757,42 @@ def synthesize_now() -> dict:
 
     snapshot = _build_world_snapshot()
     obs_ids = [o["id"] for o in snapshot.get("observations", [])]
+
+    # THE FEED GATE. This is the most expensive recurring call in the
+    # platform and it fires hourly off the clock alone — so when the bar
+    # writer stopped, it went on paying Opus rates to publish confident
+    # hourly regime reads off a frame that had not moved since Thursday.
+    # Twenty-four of those a day, each one wrong in a way no reader could
+    # see, and each one posting predictions that then graded ungradeable
+    # (no closed trades either) until the brain's own trust score reached
+    # zero. The anomaly scanner already refuses to run on stale quotes for
+    # exactly this reason; the same rule belongs here, where the money is.
+    #
+    # NOT an error and NOT a failure row: a skip. An error row feeds the
+    # consecutive-failure alert, which would page the operator about the
+    # brain when the fault is in the feed — and `health` already reports a
+    # brain with no fresh report.
+    probes = snapshot.get("regime_probes") or []
+    fresh = snapshot.get("regime_probes_fresh")
+    if probes and fresh is not None and fresh < MIN_FRESH_PROBES:
+        oldest = max((p.get("last_bar_age_hours") or 0) for p in probes)
+        reason = (f"every regime probe is stale ({fresh} fresh of "
+                  f"{len(probes)}, oldest {oldest:.0f}h) — the bar feed has "
+                  f"stopped, so a synthesis here would read a frozen frame "
+                  f"as a live market")
+        logger.warning("[brain] synthesis SKIPPED: %s", reason)
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title="⚠ Sauron's Mind is not synthesising: the bars are stale",
+                body=(f"{reason}. No LLM call was made and no report was "
+                      f"written. Fix the bar feed (manage.py why_no_trade "
+                      f"names the blocker) and synthesis resumes on its own."),
+                url="/health/", cooldown_hours=6)
+        except Exception as e:  # noqa: BLE001 — never block the skip
+            logger.debug("[brain] stale-probe alert failed: %s", e)
+        return {"ok": True, "status": "skipped", "reason": reason,
+                "probes": len(probes), "fresh": fresh}
 
     try:
         agent = SauronMindAgent()
