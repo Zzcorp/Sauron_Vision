@@ -33,6 +33,26 @@ from ai_agents.base_agent import BaseAgent
 logger = logging.getLogger(__name__)
 
 
+# How old the NEWEST BrainReport may be before a briefing built on it is a
+# briefing about a market that has since traded. The brain synthesises on the
+# half hour, so at 06:00 UTC the newest report is normally well under an hour
+# old; 12h is therefore not a tolerance, it is a diagnosis — the brain has
+# stopped. Generous on purpose: a single missed beat, a redeploy, or a worker
+# restart must not silence the operator's daily briefing.
+STALE_BRAIN_HISTORY_HOURS = 12.0
+
+
+def _age_hours(ts) -> Optional[float]:
+    """Hours since `ts`, or None. Rounded to 0.1h — the same unit the regime
+    probes report, so a reader comparing the two is comparing like with like."""
+    if ts is None:
+        return None
+    try:
+        return round((timezone.now() - ts).total_seconds() / 3600.0, 1)
+    except Exception:  # noqa: BLE001 — an unusable timestamp is not a 500
+        return None
+
+
 # ── Snapshot for the strategist ──────────────────────────────────────────
 
 def _build_strategist_snapshot() -> dict:
@@ -51,9 +71,23 @@ def _build_strategist_snapshot() -> dict:
                                     "portfolio_health_score", "top_concerns",
                                     "theme_pressures", "rule_status_overlay",
                                     "narrative_md", "created_at"))
+    # HOW OLD each one is, and how old the freshest one is. The slice above
+    # carries no time floor — it is "the last 6 reports", not "the last 3
+    # hours", and the difference is invisible until the brain stops. Then the
+    # same six rows keep being served, ageing a day at a time, while the
+    # briefing built on them opens with "Today". On 2026-09-05 and again on
+    # 09-06 the briefing quoted a Hurst range of 0.446–0.544: identical to
+    # three decimals at both ends across two trading days, because the bar
+    # feed had frozen and the brain was re-reading one window. The strategist
+    # cannot discount an input whose age it is never told.
     for r in recent_reports:
+        r["age_hours"] = _age_hours(r["created_at"])
         r["created_at"] = r["created_at"].isoformat()
     snap["recent_brain_reports"] = recent_reports
+    newest_age = recent_reports[0]["age_hours"] if recent_reports else None
+    snap["brain_history_age_hours"] = newest_age
+    snap["brain_history_stale"] = bool(
+        newest_age is not None and newest_age > STALE_BRAIN_HISTORY_HOURS)
 
     # Current knowledge graph.
     current_nodes = list(KnowledgeNode.objects
@@ -61,7 +95,13 @@ def _build_strategist_snapshot() -> dict:
                           .values("kind", "key", "version", "payload",
                                    "confidence", "source_agents",
                                    "created_at"))
+    # Age here too, for the same reason. "Current" means un-superseded, which
+    # is not the same as recent: a regime node stays current forever if
+    # nothing ever supersedes it, and the rule and concentration facts the
+    # briefing reasons about are read from these nodes rather than measured
+    # live.
     for n in current_nodes:
+        n["age_hours"] = _age_hours(n["created_at"])
         n["created_at"] = n["created_at"].isoformat()
     snap["knowledge_graph"] = current_nodes
 
@@ -138,6 +178,14 @@ class StrategistAgent(BaseAgent):
             "- Recently resolved hypotheses (what we got right or wrong)\n"
             "- Per-agent trust scores (which agents to weight)\n"
             "- Pending hypotheses (open bets the system has placed)\n\n"
+            "EVERY brain report and knowledge node carries `age_hours`, and "
+            "the snapshot carries `brain_history_age_hours` for the freshest "
+            "report. Read them. You measure nothing yourself — every number "
+            "you have was computed when its row was written, so an 8h-old "
+            "regime read is an 8h-old regime read and must be narrated as "
+            "one. Never present a figure from an aged row as the current "
+            "tape, and if the freshest input is hours rather than minutes "
+            "old, say so in the outlook and lower your confidences.\n\n"
             "Your job:\n"
             "1. Outlook — narrate the *current* read in plain English. If "
             "regime shifted, say so. If the brain has been wrong (low trust "
@@ -273,6 +321,46 @@ def _emit_idea_hypotheses(briefing, ideas: list) -> int:
 def run_strategist_now() -> dict:
     """Run one strategist briefing. Always returns a dict; never raises."""
     snapshot = _build_strategist_snapshot()
+
+    # THE HISTORY GATE — the second half of the feed gate in synthesizer.py.
+    #
+    # Everything numeric in a briefing is second-hand: the Hurst range, the
+    # vol forecasts, the rule R-multiples and even the list of open positions
+    # all arrive through BrainReports and KnowledgeNodes rather than being
+    # measured here. So a briefing is exactly as current as the newest brain
+    # report behind it, and nothing checked that. The result was a daily Opus
+    # call — a real one, fresh token counts every morning — that re-read one
+    # frozen window and opened with "Today".
+    #
+    # This gate is required BECAUSE of the feed gate, not merely alongside it.
+    # Silencing the brain on a dead feed leaves these six rows in place to age
+    # indefinitely, so without this the fix would have converted "confident
+    # nonsense hourly" into "last week's nonsense, once a day, for $0.20".
+    #
+    # A skip, not an error row: an error row is a claim about the strategist,
+    # and the strategist is working perfectly — it is being fed a corpse.
+    if snapshot.get("brain_history_stale"):
+        age = snapshot.get("brain_history_age_hours")
+        reason = (f"the newest brain report is {age:.0f}h old (limit "
+                  f"{STALE_BRAIN_HISTORY_HOURS:.0f}h) — the brain has stopped "
+                  f"synthesising, so a briefing here would read its last "
+                  f"frozen window as today's tape")
+        logger.warning("[strategist] briefing SKIPPED: %s", reason)
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title="⚠ No strategist briefing: the brain has gone quiet",
+                body=(f"{reason}. No LLM call was made and no briefing was "
+                      f"written. The brain stops on its own when the bars are "
+                      f"stale, so fix the feed first (manage.py check_feeds "
+                      f"names the blocker) and the briefing returns by "
+                      f"itself."),
+                url="/health/", cooldown_hours=12)
+        except Exception as e:  # noqa: BLE001 — never block the skip
+            logger.debug("[strategist] stale-history alert failed: %s", e)
+        return {"ok": True, "status": "skipped", "reason": reason,
+                "brain_history_age_hours": age}
+
     try:
         agent = StrategistAgent()
         system_prompt = agent.get_system_prompt()

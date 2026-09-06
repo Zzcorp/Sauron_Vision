@@ -45,8 +45,24 @@ class Command(BaseCommand):
 
         # ── 1. the switches, in the order they gate each other ──────────
         w("\n1. MASTER SWITCHES — any False stops everything below it")
+        # "scraper_prices" used to close this tuple and is not a component.
+        # No task is gated on it, it is absent from DEFAULT_COMPONENTS, and
+        # the only occurrence of the string anywhere in the tree was this
+        # line — so it reported NO ROW on every healthy deployment, ranked
+        # itself blocker #1, and prescribed `manage.py seed_components`,
+        # which cannot create a key the defaults do not contain. A diagnostic
+        # that invents its own top blocker is worse than none: this one exists
+        # to save the operator the nine-place hunt, and instead it spent that
+        # time on a phantom while the real fault (a stream dead four days,
+        # every bar frozen) sat further down the same page.
+        #
+        # The genuine writers of live marks are these four, one per asset
+        # class, each independently able to no-op forever on a missing row —
+        # and for these the seed_components advice below is true.
         for key in ("platform_master", "pipeline_asset_bots",
-                    "pipeline_signals", "scraper_prices"):
+                    "pipeline_signals", "scraper_live_quotes",
+                    "scraper_forex", "scraper_commodities",
+                    "scraper_indices"):
             row = PlatformComponent.objects.filter(key=key).first()
             try:
                 on = is_component_enabled(key)

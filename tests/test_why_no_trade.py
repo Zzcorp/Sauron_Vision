@@ -151,3 +151,50 @@ class TheManualConfigIsNotABlockerTests(TestCase):
         _config(name="starter_fx", symbols=())
         out = _run()
         self.assertIn("ENABLED WITH NO SYMBOLS", out)
+
+
+class EveryKeyItChecksIsARealComponentTests(TestCase):
+    """The remedy the command prints must be able to work.
+
+    `scraper_prices` sat at the end of the master-switch tuple and was not a
+    component: absent from DEFAULT_COMPONENTS, no task gated on it, and the
+    only occurrence of the string in the whole tree was that one line. So on
+    a perfectly seeded deployment it reported NO ROW, ranked itself blocker
+    #1, and prescribed `seed_components` — which cannot create a key the
+    defaults do not contain. The operator ran it, nothing changed, and the
+    real fault (a quote stream dead four days) sat further down the same page.
+
+    Pinned behaviourally rather than by reading the tuple: the invariant that
+    matters is not which keys are listed, it is that running the prescribed
+    command clears every row complaint the command can raise.
+    """
+
+    def test_seeding_the_components_clears_every_no_row_complaint(self):
+        from core.platform_control import seed_components
+        seed_components()
+        out = _run()
+        self.assertNotIn("NO ROW", out)
+        self.assertNotIn("no PlatformComponent row", out)
+
+    def test_the_phantom_key_is_gone(self):
+        """A named regression pin. The string is cheap to reintroduce by
+        copy-paste and impossible to notice: it fails open, as a blocker."""
+        self.assertNotIn("scraper_prices", _run())
+
+    def test_the_real_writers_of_live_marks_are_checked(self):
+        """Dropping the phantom must not drop the question it was reaching
+        for — a missing quote-writer row is genuinely silent and genuinely
+        starves the signal pipeline."""
+        out = _run()
+        for key in ("scraper_live_quotes", "scraper_forex",
+                    "scraper_commodities", "scraper_indices"):
+            self.assertIn(key, out)
+
+    def test_a_genuinely_missing_writer_row_is_still_named_a_blocker(self):
+        """The guard must not swallow the case the tuple exists for."""
+        from core.platform_control import PlatformComponent, seed_components
+        seed_components()
+        PlatformComponent.objects.filter(key="scraper_forex").delete()
+        out = _run()
+        self.assertIn("NO ROW", out)
+        self.assertIn("scraper_forex", out)
