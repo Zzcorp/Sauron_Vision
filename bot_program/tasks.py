@@ -100,7 +100,10 @@ def refresh_option_chains_for_user(user_id: int) -> dict:
             inst = Instrument.objects.filter(symbol=symbol).first()
             if inst is None:
                 continue
-            client = client_for_symbol(user, symbol, configs[0])
+            # A chain refresh is a pure market-data read: it must not
+            # hold the exclusive trading session (see ibkr_sessions).
+            client = client_for_symbol(user, symbol, configs[0],
+                                       purpose="data")
             if not hasattr(client, "option_chain"):
                 continue  # paper / non-IBKR — chain refresh isn't supported
 
@@ -320,8 +323,8 @@ def sync_broker_account() -> dict:
     from django.utils import timezone
 
     from .capital_truth import broker_backed
-    from .engine.ibkr_client import (IBKRTrader, is_ibkr_available,
-                                     purpose_client_id)
+    from .engine.ibkr_client import is_ibkr_available
+    from .engine.ibkr_sessions import acquire_trader
     from .models import IBKRAccount
 
     out = {"attempted": 0, "stored": 0, "unreachable": 0}
@@ -343,16 +346,19 @@ def sync_broker_account() -> dict:
         out["attempted"] += 1
         client = None
         try:
-            # The probe id, not the trade id: a sync that connected with
-            # the trading clientId would EVICT the live trader mid-tick —
-            # IBKR keeps one session per clientId and drops the earlier
-            # holder. And always disconnect: a held slot fails every
-            # later connection with error 326.
-            client = IBKRTrader(
-                host=acct.host, port=acct.port,
-                client_id=purpose_client_id(acct.client_id, "probe"),
+            # The probe id, not the trade id: IBKR keeps one session per
+            # clientId and REFUSES a second connection on it (error 326),
+            # so a sync on the trading id would fail whenever the trader
+            # held the socket — or hold it against the trader. The session
+            # comes from ibkr_sessions, which leases this process its own
+            # slot; disconnecting below closes the socket and leaves the
+            # slot to this process for the next pass.
+            client = acquire_trader(
+                acct.host, acct.port, acct.client_id, "probe",
                 account_id=acct.get_account_id() or "",
                 paper=bool(acct.paper))
+            if client is None:
+                raise RuntimeError("no free IBKR clientId slot")
             reading = client.net_liquidation()
             rows = client.broker_portfolio()
         except Exception as e:  # noqa: BLE001 — one account must not stop the rest

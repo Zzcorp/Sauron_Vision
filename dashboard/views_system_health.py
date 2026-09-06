@@ -452,7 +452,13 @@ def check_live_mode_readiness(user) -> dict:
         # a per-symbol fallback is exactly the silent failure we're hunting.
         for symbol in (cfg.symbols or []):
             try:
-                if isinstance(client_for_symbol(user, symbol, cfg), PaperTrader):
+                # purpose="data": this only TYPE-CHECKS the route. Taking
+                # the exclusive trading session to render a page would
+                # starve the tick of the one clientId that can place,
+                # read or cancel an order.
+                if isinstance(client_for_symbol(user, symbol, cfg,
+                                                purpose="data"),
+                              PaperTrader):
                     broken.append(f"{cfg.name}/{symbol}")
             except Exception:
                 broken.append(f"{cfg.name}/{symbol}")

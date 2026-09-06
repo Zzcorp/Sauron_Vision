@@ -748,6 +748,63 @@ def _alert_stranded(trade, attempts: int, error: str) -> None:
         logger.warning("stranded-position alert failed for #%s: %s", trade.id, e)
 
 
+#: How long a close may keep losing the trading session before the operator
+#: is told. Not an attempt counter — a stall detector: the drain is supposed
+#: to win the session within a tick or two, and if it never does, something
+#: is holding it that should not be.
+SESSION_BUSY_ALERT_AFTER_MINUTES = 45
+
+
+def _note_session_busy(trade) -> None:
+    """Record a pass that could not even ask, and escalate a long stall.
+
+    Deliberately NOT `_after_failed_attempt`: nothing was sent, so this
+    must not move the row toward `_give_up`. It still has to be visible —
+    a drain that can never take the session is as stuck as one the broker
+    refuses, and silence there is the failure mode this whole module
+    exists to prevent.
+    """
+    from django.utils import timezone as _tz
+
+    meta = dict(trade.metadata or {})
+    first = meta.get("close_session_busy_since")
+    now = _tz.now()
+    if not first:
+        meta["close_session_busy_since"] = now.isoformat()
+    meta["close_session_busy_at"] = now.isoformat()
+    meta["close_session_busy_passes"] = int(
+        meta.get("close_session_busy_passes") or 0) + 1
+    trade.metadata = meta
+    trade.save(update_fields=["metadata"])
+
+    try:
+        from datetime import datetime as _dt
+        stalled_min = ((now - _dt.fromisoformat(first)).total_seconds() / 60.0
+                       if first else 0.0)
+    except (TypeError, ValueError):
+        stalled_min = 0.0
+    if stalled_min < SESSION_BUSY_ALERT_AFTER_MINUTES:
+        return
+    if meta.get("close_session_busy_alerted"):
+        return
+    try:
+        from bot_program.notifications import notify_staff
+        notify_staff(
+            title=f"⚠ {trade.symbol}: close blocked by a busy IBKR session",
+            body=(f"Trade #{trade.id} has been CLOSE_PENDING for "
+                  f"{int(stalled_min)} minutes without a single close being "
+                  f"ATTEMPTED: every pass lost the exclusive IBKR trading "
+                  f"session to another process. The position is still open "
+                  f"at the broker. Check that no process is holding the "
+                  f"session (a stuck tick, a stale lease)."),
+            url="/positions/")
+        meta["close_session_busy_alerted"] = True
+        trade.metadata = meta
+        trade.save(update_fields=["metadata"])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("session-busy alert failed for #%s: %s", trade.id, e)
+
+
 def _after_failed_attempt(trade, error: str) -> int:
     """Attempt bookkeeping and escalation, shared by a REJECTED close and a
     partly-filled one.
@@ -982,6 +1039,22 @@ def retry_trade_close(trade) -> bool:
     # different thing entirely — PaperTrader IS its venue — and the sweep
     # never sends one here anyway.)
     if not trade.paper and is_paper_client(client):
+        from bot_program.engine.broker_router import session_busy
+        if session_busy(client):
+            # The IBKR trading session is EXCLUSIVE (one clientId, because
+            # an order is visible only to the session that placed it), and
+            # another process — usually the bot tick — is holding it. The
+            # broker is fine and nothing was asked of it, so this is not an
+            # attempt: counting it would spend the abandon budget on a local
+            # lock and eventually flip a perfectly closable position to
+            # ERROR with "close it by hand", which would be false. The row
+            # stays CLOSE_PENDING and the next pass tries again.
+            logger.warning(
+                "close retry #%s for %s: the IBKR trading session is held by "
+                "another process — nothing sent, NOT counted as an attempt",
+                trade.id, trade.symbol)
+            _note_session_busy(trade)
+            return False
         msg = ("broker unavailable (PaperTrader fallback) — no close was "
                "sent and the position is still open at the broker")
         logger.error("close retry #%s for %s: %s", trade.id, trade.symbol, msg)

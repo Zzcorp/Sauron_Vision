@@ -65,6 +65,11 @@ def _broker_ping(build_client, label: str) -> bool:
     client = None
     try:
         client = build_client()
+        if client is None:
+            # ibkr_sessions found no free clientId slot: nothing answered
+            # because nothing was asked, and that is a failed check.
+            logger.warning("[hq] %s credential verification: no client", label)
+            return False
         return bool(client.ping())
     except Exception as e:  # noqa: BLE001
         logger.warning("[hq] %s credential verification errored: %s", label, e)
@@ -481,13 +486,14 @@ def test_ibkr_connection(request):
             f"Re-save the credentials to reconnect.")
         return redirect("admin_dashboard")
 
-    from bot_program.engine.ibkr_client import IBKRTrader, purpose_client_id
-    # A probe from the web container must not evict a running trader.
+    from bot_program.engine.ibkr_sessions import acquire_trader
+    # The probe session on this request's own clientId slot: a probe from
+    # the web container must neither collide with a worker's socket nor
+    # hold one against it (ibkr_sessions closes it when the request ends).
     reachable = _broker_ping(
-        lambda: IBKRTrader(host=acct.host, port=acct.port,
-                           client_id=purpose_client_id(acct.client_id, "probe"),
-                           account_id=account_id,
-                           paper=acct.paper), "IBKR")
+        lambda: acquire_trader(acct.host, acct.port, acct.client_id, "probe",
+                               account_id=account_id, paper=acct.paper),
+        "IBKR")
 
     acct.connected = reachable
     fields = ["connected"]
@@ -607,11 +613,10 @@ def save_ibkr_credentials(request):
     # IBKR's ping() proves the TWS/Gateway socket answers — NOT that the
     # account id is valid (that is all ib_insync exposes cheaply). The
     # message says which of the two was checked.
-    from bot_program.engine.ibkr_client import IBKRTrader, purpose_client_id
+    from bot_program.engine.ibkr_sessions import acquire_trader
     acct.connected = _broker_ping(
-        lambda: IBKRTrader(host=host, port=port,
-                           client_id=purpose_client_id(client_id, "probe"),
-                           account_id=account_id, paper=paper), "IBKR")
+        lambda: acquire_trader(host, port, client_id, "probe",
+                               account_id=account_id, paper=paper), "IBKR")
     if acct.connected:
         from django.utils import timezone
         acct.last_sync = timezone.now()

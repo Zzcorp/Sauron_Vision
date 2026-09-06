@@ -69,7 +69,10 @@ def broker_equity(user, cfg):
 
     try:
         from bot_program.engine.broker_router import client_for_symbol
-        client = client_for_symbol(user, symbols[0], cfg)
+        # An equity read is account-scoped, so it takes a DATA session:
+        # this runs on the entry path and must never hold the one
+        # clientId that can place or cancel an order.
+        client = client_for_symbol(user, symbols[0], cfg, purpose="data")
     except Exception as e:  # noqa: BLE001 — an unknown must not raise
         logger.debug("capital_truth: no client for %s: %s",
                      getattr(cfg, "name", "?"), e)
@@ -248,7 +251,8 @@ def pool_oversubscription(user):
             continue
         try:
             from bot_program.engine.broker_router import client_for_symbol
-            client = client_for_symbol(user, symbols[0], cfg)
+            client = client_for_symbol(user, symbols[0], cfg,
+                                       purpose="data")
         except Exception:  # noqa: BLE001
             continue
         venue = type(client).__name__

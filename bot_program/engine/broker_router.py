@@ -18,6 +18,20 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 
+# Stamped on a PaperTrader handed back because the exclusive IBKR trading
+# session was held by ANOTHER process — not because credentials are missing.
+# Nothing reached the broker, so a caller with a bounded retry budget must
+# not spend one, and no message may tell the operator their connection is
+# broken. `session_busy()` is how a caller asks.
+SESSION_BUSY = "ibkr_session_busy"
+
+
+def session_busy(client) -> bool:
+    """True when this client is a stand-in for a session another process
+    holds — i.e. nothing was sent and nothing is wrong with the broker."""
+    return getattr(client, "_sv_unavailable", "") == SESSION_BUSY
+
+
 # ── helpers ─────────────────────────────────────────────────────────────────
 
 def _instrument_for(symbol: str):
@@ -49,9 +63,14 @@ def _paper_client(cfg) -> "PaperTrader":
     return PaperTrader(cfg)
 
 
-def _ibkr_client_for(user, cfg):
-    """Return an IBKRTrader instance for `user`. Falls back to paper if IBKR
-    is unavailable (no creds, no `ib_insync`, or ping fails)."""
+def _ibkr_client_for(user, cfg, purpose: str = "trade"):
+    """The IBKRTrader this process shares for `user` and `purpose`.
+
+    Falls back to paper when IBKR is unavailable: no IBKRAccount, no
+    `ib_insync`, no stored account id, or no free clientId slot. The
+    session itself comes from ibkr_sessions — one per process and purpose,
+    reused across ticks — never a fresh socket per call.
+    """
     try:
         from bot_program.models import IBKRAccount
         acct = getattr(user, "ibkr_account", None)
@@ -76,12 +95,26 @@ def _ibkr_client_for(user, cfg):
             # socket is the funded one.
             log.info("[router] IBKR account has no id (disconnected?) — paper")
             return _paper_client(cfg)
-        from bot_program.engine.ibkr_client import purpose_client_id
-        return IBKRTrader(
-            host=acct.host, port=acct.port,
-            client_id=purpose_client_id(acct.client_id, "trade"),
-            account_id=account_id, paper=acct.paper,
-        )
+        from .ibkr_sessions import acquire_trader
+        trader = acquire_trader(acct.host, acct.port, acct.client_id, purpose,
+                                account_id=account_id, paper=acct.paper)
+        if trader is None:
+            # BUSY, not misconfigured. Another process holds the exclusive
+            # trading session; the broker itself is fine and nothing was
+            # asked of it. The distinction matters downstream: a close that
+            # was never ATTEMPTED must not count toward an abandon budget,
+            # and the operator must not be told their credentials are
+            # broken. The marker rides on the PaperTrader because that is
+            # what every caller receives.
+            log.error("[router] the IBKR %s session is held by another "
+                      "process — paper (nothing was sent)", purpose)
+            paper = _paper_client(cfg)
+            try:
+                paper._sv_unavailable = SESSION_BUSY
+            except Exception:  # noqa: BLE001
+                pass
+            return paper
+        return trader
     except Exception as e:
         log.warning("[router] IBKR client construction failed (%s) — paper", e)
         return _paper_client(cfg)
@@ -98,12 +131,16 @@ def _ibkr_overrides(user, asset_class: str) -> bool:
 
 # ── public ─────────────────────────────────────────────────────────────────
 
-def client_for_symbol(user, symbol: str, cfg=None):
+def client_for_symbol(user, symbol: str, cfg=None, purpose: str = "trade"):
     """Return a broker client capable of trading `symbol` for `user`.
 
     Always returns *some* client — falls back to PaperTrader rather than None,
     so callers don't need to null-check on every loop. PaperTrader honours the
     same duck-typed interface as the live brokers.
+
+    `purpose` matters to IBKR only: "trade" is the session orders go
+    through; a caller that only reads bars passes "data" so the bar writer
+    and the trader never share a clientId (see ibkr_sessions).
     """
     # Paper mode short-circuits — never reach live brokers.
     if cfg is not None and getattr(cfg, "mode", "paper") == "paper":
@@ -117,7 +154,7 @@ def client_for_symbol(user, symbol: str, cfg=None):
     # Options + CFDs always go through IBKR by default — no other wired broker
     # handles either at scale.
     if asset_class in ("options", "cfd") or _ibkr_overrides(user, asset_class):
-        return _ibkr_client_for(user, cfg)
+        return _ibkr_client_for(user, cfg, purpose)
 
     broker = _broker_for_asset_class(asset_class)
 

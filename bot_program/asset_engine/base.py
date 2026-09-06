@@ -131,6 +131,165 @@ def time_stop_status(position, *, config=None, now=None) -> dict:
     }
 
 
+def is_entry_working(trade) -> bool:
+    """True when this row is an ORDER at the broker, not yet a position.
+
+    Every consumer that treats an OPEN row as exposure has to ask: a
+    working entry has no position to reconcile against, none to flatten,
+    and no mark to book. Reconciliation in particular MUST skip these —
+    it walks OPEN rows, finds no position at the broker, and closes them
+    as orphans while cancelling their protective legs, which is precisely
+    how an unfilled parent goes on to fill naked.
+    """
+    return bool((getattr(trade, "metadata", None) or {}).get("entry_working"))
+
+
+def cancel_working_entry(trade, client, *, reason: str,
+                         cancel_parent: bool = True) -> bool:
+    """Withdraw an unfilled entry and mark the row CANCELED. Nothing traded.
+
+    Returns False and leaves the row WORKING when the withdrawal cannot be
+    confirmed: an order we could not cancel may still fill, and a CANCELED
+    row over a live order is the same lie as a CLOSED row over a live
+    position. `cancel_parent=False` is for a broker that has already
+    reported the order dead.
+    """
+    from bot_program.models import AssetBotTrade   # noqa: F401 — doc of type
+
+    meta = dict(trade.metadata or {})
+    if cancel_parent and not trade.broker_order_id:
+        # NO ID, NO WITHDRAWAL. Falling through here would cancel the
+        # protective legs and stamp the row CANCELED — "nothing traded" —
+        # over a parent that is still queued at the broker and about to
+        # fill NAKED, into a row nothing walks any more. The row stays
+        # WORKING instead, which every caller already reports honestly
+        # ("it may still fill — cancel it at the broker").
+        logger.error("[entry] %s: asked to withdraw a working entry with no "
+                     "broker order id — the parent can neither be cancelled "
+                     "nor read, so the row stays WORKING; cancel it at the "
+                     "broker", trade.symbol)
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title=f"⚠ {trade.symbol}: queued order cannot be withdrawn",
+                body=(f"Trade #{trade.id} is a WORKING entry with no broker "
+                      f"order id, so the platform cannot cancel it or read "
+                      f"its state. It may still fill. Cancel it at the "
+                      f"broker. ({reason})"),
+                url="/positions/")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[entry] no-order-id alert failed: %s", e)
+        return False
+    if cancel_parent and trade.broker_order_id:
+        cancel = getattr(client, "cancel_order", None)
+        if not callable(cancel):
+            logger.error("[entry] %s: cannot withdraw working order %s — this "
+                         "broker client has no cancel_order; the row stays "
+                         "WORKING", trade.symbol, trade.broker_order_id)
+            return False
+        try:
+            sent = cancel(trade.broker_order_id)
+        except Exception as e:  # noqa: BLE001
+            logger.error("[entry] %s: withdrawing working order %s failed "
+                         "(%s) — the row stays WORKING; it may still fill",
+                         trade.symbol, trade.broker_order_id, e)
+            return False
+        if sent is False:
+            # The broker could not find the order to cancel. That is not
+            # proof it is gone: an order is visible only to the clientId
+            # that placed it, so this is equally "the wrong session asked".
+            logger.error("[entry] %s: the broker did not confirm cancelling "
+                         "order %s (it may be filled, or placed on another "
+                         "session) — the row stays WORKING",
+                         trade.symbol, trade.broker_order_id)
+            return False
+        # PROVE it is dead. This row is about to record that nothing was
+        # traded, so nothing short of the broker saying the order is dead
+        # will do: an unreadable socket, an exception, an id the session
+        # cannot see, all mean "we do not know", and marking a live
+        # full-size market order CANCELED is the same lie as marking a
+        # live position CLOSED.
+        status_fn = getattr(client, "order_status", None)
+        if not callable(status_fn):
+            logger.error("[entry] %s: no way to confirm order %s is dead — "
+                         "the row stays WORKING", trade.symbol,
+                         trade.broker_order_id)
+            return False
+        try:
+            st = status_fn(trade.broker_order_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[entry] %s: post-cancel read failed (%s) — the "
+                           "row stays WORKING", trade.symbol, e)
+            return False
+        if st is None:
+            logger.error("[entry] %s: the broker could not be read after the "
+                         "cancel — the row stays WORKING rather than claiming "
+                         "an order nobody confirmed dead", trade.symbol)
+            return False
+        state = str(st.get("state") or "")
+        if float(st.get("filled") or 0) > 0:
+            logger.error("[entry] %s: order %s filled while being withdrawn "
+                         "— leaving the row WORKING for the next poll to "
+                         "book", trade.symbol, trade.broker_order_id)
+            return False
+        if state != "dead":
+            logger.error("[entry] %s: order %s reads %r after the cancel, not "
+                         "dead — the row stays WORKING",
+                         trade.symbol, trade.broker_order_id,
+                         state or "unknown")
+            return False
+
+    # The children go too. TWS cancels a bracket's children with its
+    # parent, but a leg that outlives it is a resting order against a
+    # position that never opened — and since these legs became GTC it
+    # rests for days rather than dying at the session close.
+    cancel = getattr(client, "cancel_order", None)
+    leaked = []
+    for oid in (meta.get("protective_order_ids") or []):
+        try:
+            if callable(cancel) and cancel(str(oid)):
+                continue
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[entry] %s: leg %s may still rest at the broker "
+                           "(%s)", trade.symbol, oid, e)
+        leaked.append(str(oid))
+    if leaked:
+        # The row is still marked CANCELED below — nothing traded, which is
+        # true — but the leak is recorded and said out loud, because a
+        # resting exit against a flat book OPENS a position when it fires.
+        meta["protective_legs_unconfirmed"] = True
+        logger.error("[entry] %s: leg(s) %s were NOT confirmed cancelled and "
+                     "are GTC — cancel them at the broker; a resting exit "
+                     "against a flat book opens a position",
+                     trade.symbol, ", ".join(leaked))
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title=f"⚠ {trade.symbol}: protective leg may still rest",
+                body=(f"The entry order was withdrawn ({reason}) but leg(s) "
+                      f"{', '.join(leaked)} were not confirmed cancelled. "
+                      f"They are good-till-cancelled: if one fires against a "
+                      f"flat book it OPENS a position. Cancel them at the "
+                      f"broker."),
+                url="/positions/")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[entry] leaked-leg alert failed: %s", e)
+
+    meta.pop("entry_working", None)
+    meta["entry_withdrawn_at"] = timezone.now().isoformat()
+    meta["entry_withdrawn_reason"] = reason
+    trade.metadata = meta
+    trade.status = "CANCELED"
+    trade.closed_at = timezone.now()
+    trade.reason = (f"{trade.reason}\nentry withdrawn: {reason}").strip()[:1000]
+    # pnl stays 0 and outcome stays blank ON PURPOSE: nothing traded, so
+    # there is nothing to grade. A CANCELED row is not a scratch trade.
+    trade.save(update_fields=["metadata", "status", "closed_at", "reason"])
+    logger.warning("[entry] %s: working entry withdrawn (%s) — nothing traded",
+                   trade.symbol, reason)
+    return True
+
+
 @dataclass
 class BotDecision:
     direction: str  # "BUY" | "SELL" | "HOLD"
@@ -206,6 +365,9 @@ class AssetBot(ABC):
         from bot_program.engine.broker_router import client_for_symbol
 
         closed = 0
+        # Broker snapshots (resting orders, positions) read once per tick
+        # and shared across every protected row on the same client.
+        self._tick_broker_cache = {}
         for trade in AssetBotTrade.objects.filter(config=self.cfg, status="OPEN"):
             try:
                 protected = bool((trade.metadata or {}).get("protected"))
@@ -222,6 +384,12 @@ class AssetBot(ABC):
                         "[%s_bot] LIVE trade %s cannot be managed: broker "
                         "unavailable (PaperTrader fallback) — leaving OPEN",
                         self.asset_class, trade.symbol)
+                    continue
+
+                # A WORKING entry is an order, not a position: nothing to
+                # mark, stop or time out yet. Ask the broker where it stands.
+                if (trade.metadata or {}).get("entry_working"):
+                    self._poll_working_entry(trade, client)
                     continue
 
                 price = self._mark_price(trade, client)
@@ -246,6 +414,17 @@ class AssetBot(ABC):
                 ts = self._time_stop_status(trade)
                 if ts["approaching"]:
                     self._warn_time_stop_near(trade, ts)
+
+                # `protected` is a claim about the BROKER, and the broker is
+                # asked whether it still holds. A stop leg that expired,
+                # was cancelled at TWS, or was never accepted leaves the row
+                # saying protected while nothing rests — and protected rows
+                # skip every check below. When the leg is gone and the
+                # position is still held, the row is un-protected here and
+                # bot-side management takes the position back this tick.
+                if protected and not trade.paper and \
+                        self._protection_vanished(trade, client):
+                    protected = False
 
                 # Past here the broker owns SL/TP for protected trades
                 # (bracket or on-fill orders). Managing those here too would
@@ -319,6 +498,594 @@ class AssetBot(ABC):
                            "treating as %s", self.asset_class, self.cfg.id,
                            key, raw, default)
             return float(default)
+
+    # How long a WORKING entry may stay unfilled before the bot withdraws
+    # it. IBKR queues a market order sent outside regular hours for the
+    # next open, so one overnight is normal; an order still working after
+    # a full session is a halted symbol, a dead route, or a book that
+    # never opened — none of which the thesis that placed it foresaw.
+    ENTRY_WORKING_MAX_HOURS = 26
+
+    def _working_entry_age_hours(self, trade) -> float:
+        since = (trade.metadata or {}).get("entry_working_since")
+        try:
+            from datetime import datetime as _dt
+            started = _dt.fromisoformat(since) if since else trade.opened_at
+        except (TypeError, ValueError):
+            started = trade.opened_at
+        if started is None:
+            return 0.0
+        return (timezone.now() - started).total_seconds() / 3600.0
+
+    def _poll_working_entry(self, trade, client) -> None:
+        """Ask the broker where a WORKING entry stands, and act on it.
+
+        filled           -> the row becomes a position, priced from the fill
+        dead, 0 filled   -> the row is CANCELED, nothing traded
+        working          -> wait, unless it has outlived ENTRY_WORKING_MAX_HOURS
+        unknown          -> the account's position decides; flat and old
+                            means withdraw
+        unreadable       -> wait; "could not ask" is not an answer
+        """
+        meta = trade.metadata or {}
+        status_fn = getattr(client, "order_status", None)
+        if not callable(status_fn):
+            logger.error("[%s_bot] %s: entry %s is WORKING but this broker "
+                         "client cannot report an order's state — the row "
+                         "stays pending; check the broker by hand",
+                         self.asset_class, trade.symbol, trade.broker_order_id)
+            return
+        try:
+            st = status_fn(trade.broker_order_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] %s: order_status failed: %s",
+                           self.asset_class, trade.symbol, e)
+            return
+        if st is None:
+            return
+        state = str(st.get("state") or "unknown")
+        filled = float(st.get("filled") or 0)
+        requested = float(meta.get("qty_requested") or trade.qty)
+
+        if state == "filled" or (filled > 0 and state == "dead"):
+            self._finish_working_entry(
+                trade, client, qty=filled or requested,
+                price=float(st.get("avgPrice") or 0), source="broker")
+            return
+        if state == "dead":
+            cancel_working_entry(
+                trade, client,
+                reason=f"broker reported {st.get('status') or 'cancelled'} "
+                       f"with nothing filled",
+                cancel_parent=False)
+            return
+        if state == "working" and filled > 0:
+            # Part of it printed and the rest is still working. The
+            # remainder is withdrawn — the legs were sized for the whole
+            # order and would over-cover — and what filled becomes the
+            # position.
+            # Proven, exactly as cancel_working_entry proves it: an
+            # unconfirmed withdrawal leaves the rest to fill into a row
+            # that claims only the part that printed, and those units are
+            # invisible to a reconciliation that walks rows.
+            cancel = getattr(client, "cancel_order", None)
+            if not callable(cancel):
+                logger.error("[%s_bot] %s: partly filled (%s of %s) and this "
+                             "client cannot withdraw the remainder — leaving "
+                             "the row WORKING", self.asset_class,
+                             trade.symbol, filled, requested)
+                return
+            try:
+                sent = cancel(trade.broker_order_id)
+            except Exception as e:  # noqa: BLE001
+                logger.error("[%s_bot] %s: could not withdraw the unfilled "
+                             "remainder of %s (%s) — leaving the row WORKING",
+                             self.asset_class, trade.symbol,
+                             trade.broker_order_id, e)
+                return
+            after = None
+            try:
+                after = status_fn(trade.broker_order_id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[%s_bot] %s: post-cancel read failed: %s",
+                               self.asset_class, trade.symbol, e)
+            if sent is False or after is None or \
+                    str((after or {}).get("state") or "") == "working":
+                logger.error("[%s_bot] %s: the remainder of %s was not "
+                             "confirmed withdrawn — leaving the row WORKING "
+                             "rather than booking a partial the account may "
+                             "exceed", self.asset_class, trade.symbol,
+                             trade.broker_order_id)
+                return
+            # Book what actually printed, which the post-cancel read knows
+            # better than the pre-cancel one: units can print during it.
+            final_filled = float((after or {}).get("filled") or 0) or filled
+            final_px = float((after or {}).get("avgPrice") or 0) or \
+                float(st.get("avgPrice") or 0)
+            self._finish_working_entry(
+                trade, client, qty=final_filled, price=final_px,
+                source="broker")
+            return
+        if state == "unknown":
+            # The broker does not recognise the id. Two causes it cannot
+            # separate: the order belongs to another clientId, or this
+            # session lost its trade table in a restart. The ACCOUNT can
+            # still settle it — but only when the position is attributable
+            # to this row. An account total that another row or a
+            # hand-bought lot also claims proves nothing, and booking it
+            # would put units on this row that belong to someone else.
+            positions = self._broker_snapshot(client, "positions")
+            if positions is None:
+                return
+            held = self._broker_still_holds(trade, positions)
+            if held is True:
+                pos_fn = getattr(client, "position_avg_cost", None)
+                pos = (pos_fn(trade.symbol,
+                              sec_types=self._SEC_TYPES.get(trade.asset_class))
+                       if callable(pos_fn) else None)
+                if pos:
+                    self._finish_working_entry(
+                        trade, client,
+                        qty=min(requested, float(pos.get("qty") or 0)
+                                or requested),
+                        price=float(pos.get("avg_cost") or 0),
+                        source="position")
+                    return
+            # Not attributable, or flat. Flat is NOT proof the order never
+            # filled: the entry may have filled and its GTC stop may have
+            # closed the position again while nothing was watching. So the
+            # row is never withdrawn on this evidence — it waits, visibly,
+            # and the operator is told once.
+            self._warn_working_entry_unresolved(trade, held)
+            return
+        if self._working_entry_age_hours(trade) > self.ENTRY_WORKING_MAX_HOURS:
+            cancel_working_entry(
+                trade, client,
+                reason=f"still working after {self.ENTRY_WORKING_MAX_HOURS}h",
+                cancel_parent=True)
+
+    # How often to repeat the "this queued order cannot be resolved" alert.
+    # Once is not enough: nothing else resolves such a row, it holds a
+    # concurrency slot, and a single email at 03:00 is a message nobody
+    # sees. Daily, until a human acts.
+    UNRESOLVED_REALERT_HOURS = 24
+
+    def _warn_working_entry_unresolved(self, trade, held) -> None:
+        """Say — and keep saying — that a working entry cannot be resolved."""
+        meta = dict(trade.metadata or {})
+        last = meta.get("entry_unresolved_notified_at")
+        if last:
+            try:
+                from datetime import datetime as _dt
+                age_h = ((timezone.now() - _dt.fromisoformat(last))
+                         .total_seconds() / 3600.0)
+                if age_h < self.UNRESOLVED_REALERT_HOURS:
+                    return
+            except (TypeError, ValueError):
+                pass
+        elif meta.get("entry_unresolved_notified"):
+            # A row stamped by the earlier once-only version: re-alert now
+            # and start keeping the timestamp.
+            pass
+        detail = ("the broker does not recognise the order and the account's "
+                  "position cannot be attributed to this row"
+                  if held is None else
+                  "the broker does not recognise the order and the account "
+                  "holds no matching position — it may never have filled, or "
+                  "it may have filled and already been stopped out")
+        logger.error("[%s_bot] %s: working entry %s unresolved — %s",
+                     self.asset_class, trade.symbol, trade.broker_order_id,
+                     detail)
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title=f"⚠ {trade.symbol}: queued entry cannot be resolved",
+                body=(f"{self.asset_class.upper()} order "
+                      f"{trade.broker_order_id}: {detail}. The row is left "
+                      f"WORKING and is NOT withdrawn — check the broker's "
+                      f"orders and executions for it."),
+                url="/positions/")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] unresolved-entry alert failed: %s",
+                           self.asset_class, e)
+        meta["entry_unresolved_notified"] = True
+        meta["entry_unresolved_notified_at"] = timezone.now().isoformat()
+        trade.metadata = meta
+        trade.save(update_fields=["metadata"])
+
+    def _finish_working_entry(self, trade, client, *, qty: float, price: float,
+                              source: str) -> None:
+        """A WORKING entry filled: the row becomes a position.
+
+        Size and price come from the broker. Protection is claimed only if
+        the stop leg is seen resting NOW — a partial fill withdraws the legs
+        (they would over-cover) and hands the position to bot-side
+        management, exactly as market_order does at placement.
+        """
+        meta = dict(trade.metadata or {})
+        requested = float(meta.get("qty_requested") or trade.qty)
+        legs = [str(x) for x in (meta.get("protective_order_ids") or [])]
+        partial = 0 < qty < requested * 0.999
+        if qty > 0:
+            trade.qty = Decimal(str(round(qty, 8)))
+        if price > 0:
+            trade.entry_price = Decimal(str(price))
+            meta["fill_source"] = source
+        else:
+            meta["fill_source"] = "ticker"      # the pre-order price stands
+        meta.pop("entry_working", None)
+        meta["entry_filled_at"] = timezone.now().isoformat()
+
+        protected = False
+        if legs:
+            if partial:
+                # The legs were sized for the WHOLE order, so on a partial
+                # fill they over-cover: one would close what filled and
+                # OPEN the remainder the other way. They come down — and an
+                # unconfirmed cancel is recorded as unconfirmed, because
+                # since these legs became GTC a leaked one rests for days.
+                cancel = getattr(client, "cancel_order", None)
+                unconfirmed = []
+                for oid in legs:
+                    try:
+                        if callable(cancel) and cancel(str(oid)):
+                            continue
+                    except Exception as e:  # noqa: BLE001
+                        logger.error("[%s_bot] %s: leg %s may still rest "
+                                     "after a partial fill (%s)",
+                                     self.asset_class, trade.symbol, oid, e)
+                    unconfirmed.append(str(oid))
+                if unconfirmed:
+                    meta["protective_legs_unconfirmed"] = True
+                    logger.error(
+                        "[%s_bot] %s: leg(s) %s were NOT confirmed cancelled "
+                        "after a partial fill — they are GTC and over-cover "
+                        "the position; cancel them at the broker",
+                        self.asset_class, trade.symbol,
+                        ", ".join(unconfirmed))
+                meta["protection_note"] = (
+                    f"filled {qty} of {requested}; protective legs withdrawn "
+                    f"(they would over-cover) — bot-side management"
+                    + (f"; NOT CONFIRMED: {', '.join(unconfirmed)}"
+                       if unconfirmed else ""))
+            else:
+                resting = self._broker_snapshot(client, "resting")
+                stop_id = meta.get("protective_stop_id")
+                want = [str(stop_id)] if stop_id else legs
+                if resting is None:
+                    # COULD NOT LOOK is not proof, here as everywhere else
+                    # (_protection_vanished refuses on exactly this). And
+                    # of the two ways to be wrong, only one is unbounded:
+                    # saying protected=False while a GTC leg really is
+                    # resting arms bot-side exits beside it, and _close_trade
+                    # goes to market BEFORE stripping legs — two exits, and
+                    # the account ends up reversed with no row describing
+                    # it. Saying protected=True when the legs never armed
+                    # leaves the position to the broker for one tick, and
+                    # the NEXT tick's _protection_vanished is the function
+                    # whose whole job is to catch precisely that and hand it
+                    # back to bot-side management. So: assume the bracket
+                    # armed (which is what a bracket does on a fill), say
+                    # so on the row, and let the detector correct it.
+                    protected = True
+                    meta["protection_note"] = (
+                        "the broker's resting orders were unreadable at the "
+                        "fill — assuming the bracket armed; the next tick's "
+                        "vanished-stop check confirms or corrects it")
+                    logger.warning(
+                        "[%s_bot] %s: could not read resting orders at the "
+                        "fill — leaving the broker in charge for this tick",
+                        self.asset_class, trade.symbol)
+                elif any(i in resting for i in want):
+                    protected = True
+                else:
+                    meta["protection_note"] = (
+                        "stop leg not seen resting at fill — bot-side "
+                        "management")
+                    # A leg that IS resting while the stop is not would sit
+                    # armed beside bot-side exits. Take it down first, and
+                    # keep the broker in charge if it will not come down —
+                    # the same rule _protection_vanished applies.
+                    others = [oid for oid in legs if oid in resting]
+                    cancel = getattr(client, "cancel_order", None)
+                    stuck = []
+                    for oid in others:
+                        try:
+                            if callable(cancel) and cancel(str(oid)):
+                                continue
+                        except Exception as e:  # noqa: BLE001
+                            logger.error("[%s_bot] %s: cancelling leg %s at "
+                                         "the fill failed: %s",
+                                         self.asset_class, trade.symbol,
+                                         oid, e)
+                        stuck.append(str(oid))
+                    if stuck:
+                        protected = True
+                        meta["protective_legs_unconfirmed"] = True
+                        meta["protection_note"] = (
+                            f"the stop leg did not arm but leg(s) "
+                            f"{', '.join(stuck)} rest and could not be "
+                            f"cancelled — the broker keeps this position; "
+                            f"cancel them at the broker")
+                        logger.error(
+                            "[%s_bot] %s: leg(s) %s rest and would not "
+                            "cancel — NOT arming bot-side exits beside them",
+                            self.asset_class, trade.symbol,
+                            ", ".join(stuck))
+        meta["protected"] = protected
+        trade.metadata = meta
+        trade.save(update_fields=["qty", "entry_price", "metadata"])
+        logger.info("[%s_bot] %s: WORKING entry filled — qty %s @ %s (%s), "
+                    "protected=%s", self.asset_class, trade.symbol, trade.qty,
+                    trade.entry_price, source, protected)
+        # The cost basis is opened HERE, on the real fill, for the real size
+        # at the real price — the entry path skips it for a working row
+        # precisely so no lot exists for units nobody owns yet.
+        try:
+            from bot_program.tax_lots import open_lot
+            open_lot(trade)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] tax_lots.open_lot failed: %s",
+                           self.asset_class, e)
+        # WHO placed it decides which voice announces it. A manual config is
+        # an ordinary enabled AssetBotConfig, so its WORKING rows are polled
+        # here too — and announcing a hand-placed order's fill as a bot event
+        # puts it behind the bot-alert preference. An operator who muted the
+        # fleet's chatter would then have "nothing has filled yet" as the
+        # last thing they were ever told about their own live order.
+        try:
+            from bot_program.manual_trade import MANUAL_RULE as _MANUAL
+        except Exception:  # noqa: BLE001
+            _MANUAL = "manual_take"
+        is_manual = str(trade.rule_name or "") == _MANUAL
+        try:
+            if is_manual:
+                from bot_program.notifications import notify_manual_fill_open
+                notify_manual_fill_open(
+                    self.user, asset_class=self.asset_class,
+                    symbol=trade.symbol, side=trade.side, qty=trade.qty,
+                    entry_price=trade.entry_price, trade_id=trade.id,
+                    live=not trade.paper)
+            else:
+                from bot_program.notifications import notify_bot_fill_open
+                notify_bot_fill_open(
+                    self.user, asset_class=self.asset_class,
+                    symbol=trade.symbol, side=trade.side, qty=trade.qty,
+                    entry_price=trade.entry_price,
+                    rule_name=trade.rule_name, trade_id=trade.id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] fill notification failed: %s",
+                           self.asset_class, e)
+
+    def _broker_snapshot(self, client, what: str):
+        """`what` in {"resting", "positions"} from this tick's cache.
+
+        None means the broker could not be asked. The cache lives for one
+        manage_positions pass, so a fleet of protected rows costs one
+        openTrades() and one positions() read, not one pair per row.
+        """
+        cache = getattr(self, "_tick_broker_cache", None)
+        if cache is None:
+            cache = self._tick_broker_cache = {}
+        key = (what, id(client))
+        if key in cache:
+            return cache[key]
+        value = None
+        try:
+            if what == "resting":
+                fn = getattr(client, "resting_order_ids", None)
+                value = fn() if callable(fn) else None
+            elif what == "positions":
+                fn = getattr(client, "get_positions", None)
+                value = fn() if callable(fn) else None
+        except Exception as e:  # noqa: BLE001 — unreachable reads as unknown
+            logger.warning("[%s_bot] broker %s snapshot failed: %s",
+                           self.asset_class, what, e)
+            value = None
+        cache[key] = value
+        return value
+
+    # The broker's secType for each asset class we route to IBKR. A position
+    # is only this row's if the instrument type matches too: IBKR reports an
+    # OPTION position under its UNDERLYING symbol, so an AAPL call answers a
+    # symbol-only test for an AAPL stock row.
+    _SEC_TYPES = {"stock": ("STK",), "etf": ("STK",), "index": ("IND", "STK"),
+                  "forex": ("CASH",), "options": ("OPT",),
+                  "commodity": ("FUT", "CMDTY", "STK"), "cfd": ("CFD",)}
+
+    def _broker_still_holds(self, trade, positions) -> "Optional[bool]":
+        """Does the broker still hold THIS row's position?
+
+        True / False, or None for "held by the account but not attributable
+        to this row" — which is not a yes and must never be treated as one.
+        Attribution fails when another OPEN row of this user, or a lot the
+        operator bought by hand, claims units of the same symbol: the
+        account total cannot then say whose they are.
+        """
+        # OPTIONS CANNOT BE ATTRIBUTED FROM A POSITION LIST. IBKR reports
+        # every option position under its UNDERLYING symbol, and the list
+        # carries no strike, expiry or right — so a different strike, a
+        # different expiry, one leg of a spread or a hand-bought lot all
+        # answer to the same (symbol, OPT, side) test. There is no honest
+        # yes available here, and a wrong yes books a phantom whose close
+        # sells contracts the account does not hold.
+        if trade.asset_class == "options":
+            return None
+
+        want_sym = trade.symbol.upper()
+        want_types = self._SEC_TYPES.get(trade.asset_class)
+        mine = [p for p in positions
+                if str(p.get("symbol", "")).upper() == want_sym
+                and (not want_types or not p.get("sec_type")
+                     or str(p.get("sec_type", "")).upper() in want_types)]
+        if not mine:
+            return False
+        # Side matters: a SELL row is not held by a long position, and
+        # closing it would double the long rather than flatten a short.
+        same_side = [p for p in mine
+                     if not p.get("side")
+                     or str(p.get("side", "")).upper() == trade.side.upper()]
+        if not same_side:
+            return False
+        try:
+            held_qty = sum(float(p.get("qty") or 0) for p in same_side)
+        except (TypeError, ValueError):
+            return None
+        if held_qty <= 0:
+            return False
+
+        try:
+            want_qty = float(trade.qty)
+        except (TypeError, ValueError):
+            return None
+
+        from bot_program.models import AssetBotTrade
+        others = (AssetBotTrade.objects
+                  .filter(config__user=self.user, symbol=trade.symbol,
+                          side=trade.side, paper=False,
+                          asset_class=trade.asset_class,
+                          status__in=("OPEN", "CLOSE_PENDING"))
+                  .exclude(pk=trade.pk))
+        try:
+            # A WORKING row holds NOTHING at the broker: its full requested
+            # quantity sits on the row while the order is still queued.
+            # Counting it as a claim would make attribution impossible for
+            # every real position beside it — the vanished-stop net would
+            # never fire again. Rows of another asset class are excluded in
+            # the query above for the same reason: a CFD on AAPL and a
+            # share of AAPL are different positions at the broker.
+            claimed = sum(float(t.qty) for t in others
+                          if not is_entry_working(t))
+        except (TypeError, ValueError):
+            return None
+        # The broker's size must cover what this row claims — otherwise
+        # "the account holds one of the hundred shares this row says it
+        # owns" would read as "this row's position is still on", and the
+        # bot-side close that follows sells ninety-nine it does not have.
+        if held_qty + 1e-9 < want_qty + claimed:
+            if held_qty + 1e-9 >= want_qty and claimed <= 0:
+                return True
+            return None
+        return True
+
+    def _protection_vanished(self, trade, client) -> bool:
+        """True when the row's stop leg no longer rests at the broker while
+        the position is still held — and un-protect the row when it is.
+
+        Three answers are deliberately "no": a venue that cannot list its
+        resting orders (PaperTrader, OANDA's on-fill stops), a snapshot
+        that could not be read (never turn "could not look" into "gone"),
+        and a position the broker no longer holds either (the stop FILLED;
+        reconciliation finalises that row, and taking it back here would
+        book a second exit). Only a held position with no stop is ours.
+        """
+        if not callable(getattr(client, "resting_order_ids", None)):
+            return False
+        meta = trade.metadata or {}
+        stop_id = meta.get("protective_stop_id")
+        ids = ([str(stop_id)] if stop_id
+               else [str(x) for x in (meta.get("protective_order_ids") or [])])
+        if not ids:
+            return False
+
+        resting = self._broker_snapshot(client, "resting")
+        if resting is None:
+            return False
+        if any(oid in resting for oid in ids):
+            return False
+        positions = self._broker_snapshot(client, "positions")
+        if positions is None:
+            return False
+        held = self._broker_still_holds(trade, positions)
+        if held is None:
+            # Held by the account, but not attributable to THIS row (another
+            # row or a hand-bought lot claims the same symbol). Un-protecting
+            # would hand bot-side SL/TP a position it may not own, and its
+            # close would sell someone else's units.
+            logger.warning("[%s_bot] %s: the stop leg is gone but the "
+                           "broker's position cannot be attributed to this "
+                           "row — leaving it protected and alerting instead",
+                           self.asset_class, trade.symbol)
+            self._notify_protection_vanished(
+                trade, "the broker's stop leg is gone and the position "
+                       "could not be attributed to this row — check the "
+                       "broker's open orders by hand")
+            return False
+        if not held:
+            return False
+
+        reason = (f"stop leg {ids[0]} no longer rests at the broker while "
+                  f"the position is still held")
+        logger.error("[%s_bot] %s: %s — un-protecting the row; bot-side "
+                     "SL/TP management resumes this tick",
+                     self.asset_class, trade.symbol, reason)
+        # The SURVIVING leg comes down first. Bot-side SL/TP is driven off
+        # the same trade.stop_loss / trade.take_profit the resting leg sits
+        # at, and _close_trade goes to market BEFORE it strips the legs — so
+        # a target left armed beside a bot-side take-profit sells the
+        # position twice and leaves the account short. It is cancelled here,
+        # while the row is still marked protected, so a failure leaves the
+        # broker in charge rather than two exits racing.
+        surviving = [oid for oid in
+                     (meta.get("protective_order_ids") or []) if oid in resting]
+        cancel = getattr(client, "cancel_order", None)
+        unconfirmed = []
+        for oid in surviving:
+            try:
+                if callable(cancel) and cancel(str(oid)):
+                    continue
+            except Exception as e:  # noqa: BLE001
+                logger.error("[%s_bot] %s: cancelling the surviving leg %s "
+                             "failed: %s", self.asset_class, trade.symbol,
+                             oid, e)
+            unconfirmed.append(str(oid))
+        if unconfirmed:
+            logger.error("[%s_bot] %s: leg(s) %s still rest at the broker — "
+                         "leaving the row PROTECTED rather than running "
+                         "bot-side exits beside them",
+                         self.asset_class, trade.symbol,
+                         ", ".join(unconfirmed))
+            meta = dict(meta)
+            meta["protective_legs_unconfirmed"] = True
+            trade.metadata = meta
+            trade.save(update_fields=["metadata"])
+            self._notify_protection_vanished(
+                trade, f"the stop leg is gone but leg(s) "
+                       f"{', '.join(unconfirmed)} could not be cancelled — "
+                       f"cancel them at the broker before this position is "
+                       f"managed here")
+            return False
+
+        meta = dict(meta)
+        meta["protected"] = False
+        meta["protection_vanished_at"] = timezone.now().isoformat()
+        meta["protection_vanished_reason"] = reason
+        if surviving:
+            meta["protection_legs_cancelled"] = surviving
+        # The ids stay on the row: the close path cancels whatever is
+        # listed, and a leg this session could not see must still be tried.
+        trade.metadata = meta
+        trade.save(update_fields=["metadata"])
+        self._notify_protection_vanished(trade, reason)
+        return True
+
+    def _notify_protection_vanished(self, trade, reason: str) -> None:
+        """Tell the operator once per position that its broker stop is gone."""
+        meta = dict(trade.metadata or {})
+        if meta.get("protection_vanished_notified"):
+            return
+        try:
+            from bot_program.notifications import notify_protection_vanished
+            notify_protection_vanished(
+                self.user, asset_class=self.asset_class, symbol=trade.symbol,
+                side=trade.side, qty=trade.qty, stop_loss=trade.stop_loss,
+                reason=reason, trade_id=trade.id)
+            meta["protection_vanished_notified"] = True
+            trade.metadata = meta
+            trade.save(update_fields=["metadata"])
+        except Exception as e:  # noqa: BLE001 — never let an alert block exits
+            logger.warning("[%s_bot] protection-vanished notification failed: "
+                           "%s", self.asset_class, e)
 
     def _manage_broker_stop(self, trade, price, client) -> bool:
         """Run the stop rules against a position whose stop is AT THE BROKER.
@@ -707,7 +1474,22 @@ class AssetBot(ABC):
         ok = True
         for oid in ids:
             try:
-                cancel(oid)
+                # The RETURN VALUE counts, not just the absence of an
+                # exception. IBKR answers False (no raise) when the id is
+                # not among the orders this session can see — which covers
+                # both "already gone" and "still resting, placed by another
+                # session". Since the legs became GTC they no longer expire
+                # at the session close, so a leaked stop rests for days and
+                # fires against a flat book, opening a reverse position.
+                # "We could not tell" must therefore be recorded as not
+                # done; the caller stamps the row.
+                if cancel(oid) is False:
+                    ok = False
+                    logger.error(
+                        "[%s_bot] %s: the broker did not confirm cancelling "
+                        "leg %s — it may still be resting (GTC), and a "
+                        "resting exit against a flat book OPENS a position",
+                        self.asset_class, trade.symbol, oid)
             except Exception as e:
                 ok = False
                 logger.error("[%s_bot] cancel protective order %s failed: "
@@ -1326,8 +2108,12 @@ class AssetBot(ABC):
                 "[%s_bot] LIVE config %s fell back to PaperTrader for %s "
                 "(missing/invalid broker credentials?) — refusing to trade",
                 self.asset_class, self.cfg.id, symbol)
-            self._notify_paper_fallback(symbol)
+            from bot_program.engine.broker_router import session_busy
+            busy = session_busy(client)
+            self._notify_paper_fallback(symbol, busy=busy)
             return self._skip(symbol, skips.PAPER_FALLBACK,
+                              "the IBKR trading session is held by another "
+                              "process — nothing was sent" if busy else
                               "live config fell back to PaperTrader")
 
         try:
@@ -1713,6 +2499,22 @@ class AssetBot(ABC):
                     stop_leg = res.get("protectiveStopId")
                     if stop_leg:
                         entry_meta["protective_stop_id"] = str(stop_leg)
+                # WORKING: the broker accepted the order and has not filled
+                # it (a market order held outside regular hours, most
+                # often). That is not a position. The row is booked so the
+                # order has an owner — the duplicate guard sees it, the
+                # kill switch can withdraw it — but it says WORKING, claims
+                # no protection, and manage_positions polls the broker
+                # until it fills, dies or is cancelled. Booking it as OPEN
+                # at the pre-order ticker is what let reconcile strip its
+                # bracket and let it fill naked.
+                if res.get("working") and fill_qty <= 0:
+                    entry_meta["entry_working"] = True
+                    entry_meta["entry_working_since"] = timezone.now().isoformat()
+                    entry_meta["qty_requested"] = float(qty)
+                    entry_meta["fill_source"] = "pending"
+                    entry_meta["protected"] = False
+                    entry_meta["protected_on_fill_expected"] = bool(protective_ids)
             except Exception as e:
                 logger.error("[%s_bot] live order failed for %s: %s",
                              self.asset_class, symbol, e)
@@ -1733,18 +2535,25 @@ class AssetBot(ABC):
             metadata=entry_meta,
         )
 
-        # Phase-20: notify on open
-        try:
-            from bot_program.notifications import notify_bot_fill_open
-            notify_bot_fill_open(
-                self.user, asset_class=self.asset_class, symbol=symbol,
-                side=decision.direction, qty=trade.qty,
-                entry_price=trade.entry_price, rule_name=trade.rule_name,
-                trade_id=trade.id,
-            )
-        except Exception as e:
-            logger.warning("[%s_bot] open notification failed: %s",
-                           self.asset_class, e)
+        # Phase-20: notify on open — unless the entry is still WORKING at
+        # the broker. "Opened" is then a claim about the future; the poll
+        # announces the fill when the broker reports it.
+        if entry_meta.get("entry_working"):
+            logger.info("[%s_bot] %s entry is WORKING at the broker (order "
+                        "%s) — booked as pending, polling for the fill",
+                        self.asset_class, symbol, order_id)
+        else:
+            try:
+                from bot_program.notifications import notify_bot_fill_open
+                notify_bot_fill_open(
+                    self.user, asset_class=self.asset_class, symbol=symbol,
+                    side=decision.direction, qty=trade.qty,
+                    entry_price=trade.entry_price, rule_name=trade.rule_name,
+                    trade_id=trade.id,
+                )
+            except Exception as e:
+                logger.warning("[%s_bot] open notification failed: %s",
+                               self.asset_class, e)
 
         # Phase-28: append to immutable audit log.
         try:
@@ -1754,13 +2563,20 @@ class AssetBot(ABC):
             logger.warning("[%s_bot] audit record_trade_open failed: %s",
                            self.asset_class, e)
 
-        # Phase-27: open a tax lot for long entries.
-        try:
-            from bot_program.tax_lots import open_lot
-            open_lot(trade)
-        except Exception as e:
-            logger.warning("[%s_bot] tax_lots.open_lot failed: %s",
-                           self.asset_class, e)
+        # Phase-27: open a tax lot for long entries — but NOT for an order
+        # that has not filled. A lot is a cost basis for units the account
+        # owns, and close_lots_for consumes open lots FIFO by (user, symbol,
+        # class, venue) rather than by source trade: a lot minted for a
+        # queued order at the pre-order ticker would be consumed by the next
+        # real close, reporting a gain against shares nobody bought. The
+        # lot is opened when the fill is booked (_finish_working_entry).
+        if not entry_meta.get("entry_working"):
+            try:
+                from bot_program.tax_lots import open_lot
+                open_lot(trade)
+            except Exception as e:
+                logger.warning("[%s_bot] tax_lots.open_lot failed: %s",
+                               self.asset_class, e)
 
         # Phase-23: push the open event to the user's Eye WebSocket.
         try:
@@ -1785,8 +2601,15 @@ class AssetBot(ABC):
         from bot_program.engine.paper_trader import PaperTrader
         return isinstance(client, PaperTrader)
 
-    def _notify_paper_fallback(self, symbol: str):
-        """Best-effort alert, deduped to at most one per config per hour."""
+    def _notify_paper_fallback(self, symbol: str, *, busy: bool = False):
+        """Best-effort alert, deduped to at most one per config per hour.
+
+        `busy` distinguishes the two reasons the router hands back a
+        PaperTrader. A held IBKR trading session means nothing was asked of
+        the broker and nothing is wrong with it; saying "missing or invalid
+        credentials" there sends the operator to the HQ disconnect, which
+        really would put every live path on paper.
+        """
         try:
             from datetime import timedelta as _td
             from alerts.models import Notification as _N
@@ -1800,6 +2623,12 @@ class AssetBot(ABC):
                 _N.objects.create(
                     user=self.user, notification_type="bot", title=title,
                     body=(
+                        f"{self.asset_class} config '{self.cfg.name}' is in "
+                        f"LIVE mode but the exclusive IBKR trading session is "
+                        f"held by another process. NOTHING was sent and the "
+                        f"broker is fine; the entry on {symbol} was refused "
+                        f"and the next tick will try again."
+                        if busy else
                         f"{self.asset_class} config '{self.cfg.name}' is in LIVE "
                         f"mode but its broker is unavailable (missing or invalid "
                         f"credentials?). Entry on {symbol} was refused rather "

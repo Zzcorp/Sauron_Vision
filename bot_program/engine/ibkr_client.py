@@ -66,6 +66,7 @@ def _bar_millis(d) -> int:
     return 0
 
 import logging
+import time as _time
 from datetime import datetime, timezone as dt_tz
 from typing import Optional
 
@@ -92,17 +93,49 @@ BAR_SIZE_MAP = {
 }
 
 
-def purpose_client_id(base, purpose: str) -> int:
-    """A distinct clientId per (account, purpose).
+def purpose_client_id(base, purpose: str, slot: int = 0) -> int:
+    """A distinct clientId per (account, purpose, process slot).
 
-    See IBKRTrader.CLIENT_ID_PURPOSE_OFFSET. Bases must be distinct
-    across accounts and below 100, which the admin form documents.
+    See IBKRTrader.CLIENT_ID_PURPOSE_OFFSET and CLIENT_ID_SLOT_STRIDE. Bases
+    must be distinct across accounts and below 100, which the admin form
+    documents. `slot` is the process slot ibkr_sessions leases; 0 is the
+    id a single process has always used, so nothing an operator set changes.
     """
     try:
         n = int(base)
     except (TypeError, ValueError):
         n = 1
-    return n + IBKRTrader.CLIENT_ID_PURPOSE_OFFSET.get(purpose, 0)
+    n += IBKRTrader.CLIENT_ID_PURPOSE_OFFSET.get(purpose, 0)
+    if slot and purpose != "trade":
+        # NEVER for trading. An order is visible only to the clientId that
+        # placed it (ib_insync seeds its order table with reqOpenOrders,
+        # and openOrder documents that another client's orders arrive only
+        # for the Gateway's master id), so a per-process trading id would
+        # make every stored orderId unreadable from a sibling process —
+        # and the readers cannot tell "not mine" from "gone". The trading
+        # session is exclusive instead; see bot_program/engine/
+        # ibkr_sessions.py.
+        n += IBKRTrader.CLIENT_ID_SLOT_STRIDE * int(slot)
+    return n
+
+
+def _ensure_event_loop() -> None:
+    """Give this thread an asyncio loop if it has none.
+
+    ib_insync drives its socket from the thread's event loop. A Celery
+    prefork child and a Django request thread both start without one, and
+    without this the very first connect raised before any socket I/O —
+    the failure the HQ ping and the sync beat each had to guard against
+    on their own. One place now.
+    """
+    import asyncio
+    import warnings
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
 
 def is_ibkr_available() -> bool:
@@ -193,6 +226,15 @@ class IBKRTrader:
         self.timeout = timeout
         self._ib = None  # lazily-instantiated IB() instance
         self._connected = False
+        # After a failed connect, do not try again before this monotonic
+        # instant. A Gateway that is down answers every attempt with the
+        # full timeout, and manage_positions asks once per open trade —
+        # without a backoff one tick could spend its whole five minutes
+        # waiting on a socket that will not open.
+        self._next_connect_at = 0.0
+
+    # How long a failed connect silences further attempts on this trader.
+    CONNECT_BACKOFF_S = 30.0
 
     # ── connection management ─────────────────────────────────────────────
 
@@ -200,30 +242,71 @@ class IBKRTrader:
     def available() -> bool:
         return _IB_AVAILABLE
 
+    def is_connected(self) -> bool:
+        """True iff an API session is up right now — asks the socket, not
+        the flag. A Gateway restart leaves the flag True and the socket dead."""
+        if self._ib is None or not self._connected:
+            return False
+        try:
+            return bool(self._ib.isConnected())
+        except Exception:  # noqa: BLE001
+            return False
+
     def _connect(self) -> bool:
-        """Try to connect to TWS/IB Gateway. Returns True on success."""
+        """Connect to TWS/IB Gateway, or reuse the session already open.
+
+        Returns True on success. Reconnects when the Gateway has dropped
+        the session (its nightly restart, a re-login, an operator kill);
+        backs off for CONNECT_BACKOFF_S after a failure.
+        """
         if not _IB_AVAILABLE:
             return False
         if self._ib is not None and self._connected:
-            return True
+            if self.is_connected():
+                return True
+            # The object says connected, the socket says otherwise.
+            log.warning("IBKR session to %s:%s clientId %s was dropped by the "
+                        "Gateway — reconnecting", self.host, self.port,
+                        self.client_id)
+            self.disconnect()
+        now = _time.monotonic()
+        if now < self._next_connect_at:
+            return False
         try:
+            _ensure_event_loop()
             ib = _ib.IB()
             ib.connect(self.host, self.port, clientId=self.client_id,
                        timeout=self.timeout, readonly=False)
             self._ib = ib
             self._connected = True
+            self._next_connect_at = 0.0
             return True
         except Exception as e:
-            log.warning("IBKR connect to %s:%s failed: %s", self.host, self.port, e)
+            log.warning("IBKR connect to %s:%s clientId %s failed: %s "
+                        "(next attempt in %.0fs)", self.host, self.port,
+                        self.client_id, e, self.CONNECT_BACKOFF_S)
             self._ib = None
             self._connected = False
+            self._next_connect_at = now + self.CONNECT_BACKOFF_S
             return False
 
     def disconnect(self) -> None:
-        if self._ib is not None and self._connected:
+        """Close the session and let the Gateway see it close.
+
+        ib_insync's disconnect shuts the socket's write side synchronously
+        (the FIN the Gateway needs to free this clientId) but closes the
+        descriptor from the event loop; one zero-length turn of the loop
+        finishes that instead of leaving it to the collector.
+        """
+        ib = self._ib
+        if ib is not None and self._connected:
             try:
-                self._ib.disconnect()
+                ib.disconnect()
             except Exception:
+                pass
+            try:
+                ib.sleep(0)
+            except Exception:  # noqa: BLE001 — a closed or foreign loop
                 pass
         self._ib = None
         self._connected = False
@@ -509,21 +592,28 @@ class IBKRTrader:
             if getattr(entry, "message", ""))
         return f"broker_rejected: {(notes or status)[:300]}"
 
-    # Every concurrent connection to one Gateway needs its OWN clientId:
-    # connect twice with the same one and IBKR EVICTS the earlier holder.
-    # Sauron opens sockets from at least three places at once — the
-    # trading router on a worker, the bar/quote feed on another worker,
-    # and an operator clicking "test connection" on the web container —
-    # and all three passed the configured id verbatim. So a routine bar
-    # refresh could drop the trader mid-tick, and a test-connection click
-    # could knock out a live session, in a way that reads as a flaky
-    # broker rather than as us.
+    # Every concurrent connection to one Gateway needs its OWN clientId.
+    # Connect twice with the same one and IBKR REFUSES the newcomer with
+    # error 326 — it does not evict the earlier holder, whatever older
+    # comments here said — and ib_insync reports that refusal as a plain
+    # connect timeout. Sauron opens sockets from at least three places at
+    # once — the trading router on a worker, the bar/quote feed on another
+    # worker, and an operator clicking "test connection" on the web
+    # container — and all three once passed the configured id verbatim.
+    # So a routine bar refresh could hold the id the trader needed, and a
+    # test-connection click could fail against a slot a worker held, in a
+    # way that read as a flaky broker rather than as us.
     #
-    # The configured number is now a BASE and keeps its old meaning for
+    # The configured number is a BASE and keeps its old meaning for
     # trading, so nothing an operator already set has to change. Purposes
     # are spaced 100 apart, which leaves room for bases 1..99 — far more
-    # accounts than the five Gateway slots compose ships.
+    # accounts than the five Gateway slots compose ships. On top of that,
+    # ibkr_sessions leases each PROCESS a slot and shifts the whole band
+    # by CLIENT_ID_SLOT_STRIDE per slot, so the two prefork children and
+    # the web workers hold different ids at the same time.
     CLIENT_ID_PURPOSE_OFFSET = {"trade": 0, "data": 100, "probe": 200}
+    CLIENT_ID_SLOT_STRIDE = 300     # wider than bases (<100) + purposes (<300)
+    CLIENT_ID_SLOTS = 8             # concurrent processes per Gateway
 
     def _bind_order_account(self, order) -> "Optional[str]":
         """Stamp `order.account` with this trader's account, or name the
@@ -673,10 +763,12 @@ class IBKRTrader:
             sl_order.parentId = parent_id
             sl_order.ocaGroup, sl_order.ocaType = oca, 1
             sl_order.transmit = True
+            self._protection_outlives_the_session([tp_order, sl_order])
             return [parent, tp_order, sl_order]
         orders = list(bracket)
         if not orders:
             return None
+        self._protection_outlives_the_session(orders[1:])
         # The helper builds a LIMIT parent, so it carries an lmtPrice —
         # here that price is None (we passed limitPrice=None) and TWS
         # rejects a market order that still carries a limit field. Clear
@@ -692,6 +784,267 @@ class IBKRTrader:
             o.transmit = False
         orders[-1].transmit = True
         return orders
+
+    # Time-in-force for the protective legs. ib_insync leaves Order.tif
+    # empty and TWS reads empty as DAY — so the stop and the target that
+    # rested all afternoon EXPIRED at the session close while the row went
+    # on saying `protected`, and protected rows skip every bot-side SL/TP
+    # check. Every shipped default holds positions for days (see
+    # asset_models.DEFAULT_MAX_HOLD_HOURS): from the first close onward
+    # the position was naked and nothing was watching. Good-till-cancelled
+    # is what OANDA and Alpaca already give the same legs.
+    PROTECTIVE_LEG_TIF = "GTC"
+
+    def _protection_outlives_the_session(self, legs) -> None:
+        """Stamp the protective legs GTC; the parent keeps its own tif."""
+        for leg in legs:
+            try:
+                leg.tif = self.PROTECTIVE_LEG_TIF
+            except Exception:  # noqa: BLE001 — a frozen stand-in is fine
+                pass
+
+    # States ib_insync reports for an order TWS is still working.
+    _WORKING_STATES = ("PendingSubmit", "PreSubmitted", "Submitted",
+                       "ApiPending")
+    # `Inactive` is IBKR's word for an order it accepted and then refused or
+    # parked (margin 201, an off-tick price, an order held outside RTH it
+    # will not release). ib_insync does NOT count it as done, so such an
+    # order sits in openTrades() indefinitely; treating that as "working"
+    # would have a refused order read as live forever.
+    _DEAD_STATES = ("Cancelled", "ApiCancelled", "Inactive")
+    # ib_insync writes this SYNCHRONOUSLY inside cancelOrder (ib.py:697-706)
+    # and it is not a done state, so the order stays in openTrades until TWS
+    # confirms. It is neither working nor dead: the cancel has been sent and
+    # the order can still fill in the race.
+    _CANCELLING_STATES = ("PendingCancel",)
+    # How long to wait for TWS to confirm a cancellation before answering.
+    CANCEL_CONFIRM_WAIT_S = 1.0
+
+    @classmethod
+    def _classify_order(cls, status: str, filled: float, *, in_open: bool) -> str:
+        """One place decides what a TWS order status means.
+
+        Both of order_status's sources need the same reading, and the two
+        drifting apart is how `Inactive` — a REFUSAL — came to read as
+        "working" from one table and "dead" from the other.
+
+        `in_open` says the order was still in openTrades(): from that table
+        an unrecognised status is a live order (it has not reached a done
+        state), while from the session's whole trade list it is genuinely
+        something this code does not model.
+        """
+        if filled > 0 and (status == "Filled" or status in cls._DEAD_STATES):
+            return "filled"
+        if status == "Filled":
+            return "filled"
+        if status in cls._DEAD_STATES:
+            return "dead"
+        if status in cls._CANCELLING_STATES:
+            return "cancelling"
+        if status in cls._WORKING_STATES:
+            return "working"
+        return "working" if in_open else "unknown"
+
+    def order_status(self, order_id: str) -> "Optional[dict]":
+        """Where one order stands now: working, filled, dead, or unknown.
+
+        Returns {"state", "status", "filled", "avgPrice", "remaining"} or
+        None when the socket could not be asked. Looks at the orders TWS is
+        working, then at this session's own trades (a fill or a cancel that
+        arrived since placement).
+
+        Then — and this is the source that makes a cross-tick fill
+        readable at all — the day's EXECUTIONS. The trading session is
+        released after every task, so the tick that polls a queued order is
+        always on a socket opened after the order was placed, and a filled
+        order is in neither of the tables above. `reqExecutions` re-fetches
+        the day's executions for this clientId, and ib_insync's decoder
+        DOES set `execution.orderId` (objects.Execution.orderId, decoded at
+        decoder.py:415) — unlike the completedOrder message, which carries
+        permId only and is therefore deliberately not consulted: a source
+        that can never match is worse than none, because it reads as having
+        been checked.
+
+        "unknown" means none of the three knew the id. It is a REAL answer
+        with two causes the API cannot separate: the order belongs to
+        another clientId (an order is visible only to the session that
+        placed it), or it is older than today's executions.
+        """
+        if not self._connect():
+            return None
+        wanted = str(order_id)
+
+        def _pick(trades):
+            for tr in trades or []:
+                oid = str(getattr(getattr(tr, "order", None), "orderId", "")
+                          or "")
+                if oid == wanted:
+                    return tr
+            return None
+
+        try:
+            tr = _pick(self._ib.openTrades())
+            if tr is not None:
+                st = tr.orderStatus
+                status = str(st.status or "")
+                filled = _num(st.filled)
+                # openTrades() filters only ib_insync's DoneStates
+                # (Filled / Cancelled / ApiCancelled), so being in it is not
+                # the same as being live: a refused order sits there as
+                # Inactive and a cancelled-but-unconfirmed one as
+                # PendingCancel. Classify by the status, not by membership.
+                state = self._classify_order(status, filled, in_open=True)
+                return {"state": state, "status": status, "filled": filled,
+                        "avgPrice": _num(st.avgFillPrice),
+                        "remaining": _num(st.remaining)}
+            for source in (self._ib.trades,):
+                try:
+                    tr = _pick(source())
+                except Exception as e:  # noqa: BLE001 — one source failing
+                    log.debug("IBKR order_status(%s): %s", wanted, e)
+                    tr = None
+                if tr is None:
+                    continue
+                st = tr.orderStatus
+                status = str(st.status or "")
+                filled = _num(st.filled)
+                state = self._classify_order(status, filled, in_open=False)
+                return {"state": state, "status": status, "filled": filled,
+                        "avgPrice": _num(st.avgFillPrice),
+                        "remaining": _num(st.remaining)}
+            # The day's executions: the only place a fill placed on an
+            # EARLIER socket of this same clientId can still be found.
+            ex = self._executions_for(wanted)
+            if ex is not None:
+                return ex
+            return {"state": "unknown", "status": "", "filled": 0.0,
+                    "avgPrice": 0.0, "remaining": 0.0}
+        except Exception as e:  # noqa: BLE001
+            log.error("IBKR order_status(%s) failed: %s", wanted, e)
+            return None
+
+    def _executions_for(self, order_id: str) -> "Optional[dict]":
+        """What this clientId's executions say about one order, or None.
+
+        Sums every execution carrying that orderId — a market order can
+        print in several — and returns the size-weighted average price, so
+        a partially filled parent reads as the units that actually printed
+        rather than as all or nothing. Covers today only, which is what
+        IBKR's execution report covers.
+
+        `reqExecutions` is asked rather than `fills()`: a session opened
+        after the order was placed has an empty fill table until it does,
+        and that is exactly the case this method exists for.
+        """
+        try:
+            flt = _ib.ExecutionFilter()
+            try:
+                fills = self._ib.reqExecutions(flt) or []
+            except Exception:  # noqa: BLE001 — older signatures take nothing
+                fills = self._ib.reqExecutions() or []
+            wanted = str(order_id)
+            shares = 0.0
+            notional = 0.0
+            for fill in fills:
+                execution = getattr(fill, "execution", None) or fill
+                if str(getattr(execution, "orderId", "") or "") != wanted:
+                    continue
+                q = _num(getattr(execution, "shares", 0))
+                p = _num(getattr(execution, "price", 0))
+                if q <= 0:
+                    continue
+                shares += q
+                notional += q * p
+            if shares <= 0:
+                return None
+            return {"state": "filled", "status": "Filled", "filled": shares,
+                    "avgPrice": (notional / shares) if shares else 0.0,
+                    "remaining": 0.0, "source": "executions"}
+        except Exception as e:  # noqa: BLE001
+            log.warning("IBKR executions lookup for %s failed: %s",
+                        order_id, e)
+            return None
+
+    def position_avg_cost(self, symbol: str,
+                          sec_types=None) -> "Optional[dict]":
+        """{"qty", "side", "avg_cost", "sec_type"} for the account's position
+        in `symbol`, {} when flat, None when unreadable.
+
+        `sec_types` restricts the match — pass ("STK",) for a stock row so
+        an option or future on the same underlying cannot answer for it.
+        IBKR reports an OPT position under its UNDERLYING symbol, so a
+        symbol-only match let an AAPL call answer for AAPL shares.
+
+        avg_cost is PER UNIT. IBKR's avgCost is per contract for anything
+        with a multiplier (options, futures) — price x multiplier — so it
+        is divided back out here rather than left for a caller to
+        remember; forgetting it once put a 250,000 entry price on a 5,000
+        future.
+        """
+        if not self._connect():
+            return None
+        try:
+            want = symbol.upper()
+            allowed = {str(s).upper() for s in (sec_types or ())}
+            for pos in self._ib.positions(self.account_id or ""):
+                qty = float(pos.position or 0)
+                if qty == 0:
+                    continue
+                contract = pos.contract
+                sec_type = str(getattr(contract, "secType", "") or "").upper()
+                sym = str(getattr(contract, "symbol", "")).upper()
+                if sec_type == "CASH":
+                    sym += str(getattr(contract, "currency", "")).upper()
+                if sym != want:
+                    continue
+                if allowed and sec_type and sec_type not in allowed:
+                    continue
+                avg = _num(getattr(pos, "avgCost", 0.0))
+                mult = 1.0
+                try:
+                    mult = float(str(getattr(contract, "multiplier", "") or 1)
+                                 or 1)
+                except (TypeError, ValueError):
+                    mult = 1.0
+                if mult > 1:
+                    avg = avg / mult
+                return {"qty": abs(qty),
+                        "side": "BUY" if qty > 0 else "SELL",
+                        "avg_cost": avg, "sec_type": sec_type,
+                        "multiplier": mult}
+            return {}
+        except Exception as e:  # noqa: BLE001
+            log.error("IBKR position_avg_cost(%s) failed: %s", symbol, e)
+            return None
+
+    def resting_order_ids(self) -> "Optional[set]":
+        """The orderIds TWS currently holds as working, or None if unreadable.
+
+        One openTrades() read, so a caller walking every protected row
+        pays for the snapshot once per tick. A leg missing from this set
+        is no longer protecting anything: it filled, was cancelled at TWS,
+        or expired. None means the socket could not be asked — and "could
+        not look" must never be read as "gone".
+        """
+        if not self._connect():
+            return None
+        try:
+            out = set()
+            for trade in (self._ib.openTrades() or []):
+                status = str(getattr(getattr(trade, "orderStatus", None),
+                                     "status", "") or "")
+                # A leg being cancelled is not resting protection either.
+                if status in self._DEAD_STATES or \
+                        status in self._CANCELLING_STATES:
+                    continue
+                oid = str(getattr(getattr(trade, "order", None),
+                                  "orderId", "") or "")
+                if oid:
+                    out.add(oid)
+            return out
+        except Exception as e:  # noqa: BLE001
+            log.error("IBKR resting_order_ids failed: %s", e)
+            return None
 
     @staticmethod
     def _leg_is_resting(trade) -> bool:
@@ -862,6 +1215,29 @@ class IBKRTrader:
                 "status": (trade.orderStatus.status or "PENDING").upper(),
                 "raw": trade.dict() if hasattr(trade, "dict") else {},
             }
+            if filled_qty <= 0:
+                # WORKING, not filled. A market order held outside regular
+                # hours, on a halted symbol, or simply not acked inside the
+                # second sits PreSubmitted/Submitted with nothing printed.
+                # That is not a position, and the engine used to book it as
+                # one: a full-size OPEN row at the pre-order ticker, marked
+                # protected because the children rested — and reconcile,
+                # seeing no position at the broker, then cancelled those
+                # children and let the parent fill naked. The answer is
+                # named for what it is; the entry path books a WORKING row
+                # and manage_positions polls the order until it fills, dies
+                # or is cancelled. The legs stay attached (they arm on the
+                # fill) and are reported for tracking, but protection is
+                # not claimed for a position that does not exist yet.
+                out["status"] = "WORKING"
+                out["working"] = True
+                if bracket is not None:
+                    out["protectiveOrders"] = legs
+                    if stop_leg_id:
+                        out["protectiveStopId"] = stop_leg_id
+                    if target_leg_id:
+                        out["protectiveTargetId"] = target_leg_id
+                return out
             if bracket is not None:
                 # PROVEN, not assumed. `protected` turns OFF bot-side
                 # SL/TP management, so claiming it for a leg TWS refused
@@ -957,7 +1333,34 @@ class IBKRTrader:
                 if oid != wanted:
                     continue
                 self._ib.cancelOrder(trade.order)
-                return True
+                # PROVE it, here, once — because every caller needs the same
+                # proof and none of them can get it on its own. ib_insync
+                # writes PendingCancel into the order SYNCHRONOUSLY inside
+                # cancelOrder (ib.py:697-706), and PendingCancel is not a
+                # done state, so an immediate re-read ALWAYS finds the order
+                # still open: a caller that read the status straight after
+                # this call could never see a confirmed cancellation, and
+                # every withdrawal would report failure. Give TWS its turn,
+                # then answer on what it says.
+                try:
+                    self._ib.sleep(self.CANCEL_CONFIRM_WAIT_S)
+                except Exception:  # noqa: BLE001 — a closed loop
+                    pass
+                after = self.order_status(wanted)
+                state = str((after or {}).get("state") or "")
+                if state in ("dead", "unknown"):
+                    # unknown = no longer in this session's tables at all,
+                    # which for an id we were just holding means gone.
+                    return True
+                if state == "filled":
+                    log.warning("IBKR cancel %s: it FILLED in the race — "
+                                "nothing was cancelled", wanted)
+                    return False
+                log.warning("IBKR cancel %s: TWS still reports %s after "
+                            "%.1fs — not confirmed",
+                            wanted, state or "no answer",
+                            self.CANCEL_CONFIRM_WAIT_S)
+                return False
             log.info("IBKR cancel %s: not among the open orders — already "
                      "filled or cancelled", wanted)
             return False
@@ -1310,7 +1713,8 @@ class IBKRTrader:
                 empty["orderId"] = str(trade.order.orderId or "")
                 empty["raw"] = {"reason": dead}
                 return empty
-            return {
+            filled_qty = float(trade.orderStatus.filled or 0)
+            out = {
                 "orderId": str(trade.order.orderId or ""),
                 "symbol": f"{underlying} {expiry} {strike}{right.upper()}",
                 "side": side,
@@ -1318,10 +1722,19 @@ class IBKRTrader:
                 # is not opt-in: options and CFDs route to IBKR
                 # unconditionally, and a thin option book is where a
                 # one-second unfilled market order is most likely of all.
-                "executedQty": str(float(trade.orderStatus.filled or 0)),
+                "executedQty": str(filled_qty),
                 "avgPrice": str(trade.orderStatus.avgFillPrice or 0),
                 "status": (trade.orderStatus.status or "PENDING").upper(),
             }
+            if filled_qty <= 0:
+                # WORKING, exactly as on the equity path — and the reason
+                # given there applies here MORE, not less: a thin option
+                # book is where an unfilled one-second market order is
+                # likeliest, so this is the path that produced the
+                # full-size phantom row most often.
+                out["status"] = "WORKING"
+                out["working"] = True
+            return out
         except Exception as e:
             log.error("IBKR market_order_option failed: %s", e)
             return empty

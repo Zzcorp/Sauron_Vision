@@ -144,6 +144,23 @@ def adjust_levels(user, trade, stop=None, target=None, clear_target=False):
                     "error": f"This position is {fresh.status.lower()} — "
                              f"its levels can no longer be changed."}
 
+        # A WORKING row is a queued ORDER, not a position. Its status is
+        # OPEN and it carries protected=False, so this function's own
+        # unprotected branch would write the new levels to the database and
+        # send NOTHING: the bracket children attached to the still-queued
+        # parent would keep their original prices, and on the fill the row
+        # would be stamped protected — turning bot-side management off over
+        # a stop the venue never received. The row, the position card and
+        # the R denominator would all read a level that rests nowhere.
+        from bot_program.asset_engine.base import is_entry_working
+        if is_entry_working(fresh):
+            return {"ok": False,
+                    "error": ("This entry order is still WORKING at the "
+                              "broker — nothing has filled yet, so there is "
+                              "no position whose levels can be moved. "
+                              "Withdraw the order and place it again with "
+                              "the levels you want.")}
+
         mark = _mark_for(fresh)
         problems = validate_levels(fresh, stop, target, mark)
         if problems:

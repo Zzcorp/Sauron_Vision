@@ -1605,7 +1605,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         if not live:
             meta["paper_fill"] = True
 
-        def _book_row(fill_price, booked_qty, is_paper, extra_meta=None):
+        def _book_row(fill_price, booked_qty, is_paper, extra_meta=None,
+                      broker_order_id=""):
             """The trade row plus the bookkeeping that must live and die
             with it — the audit entry and the tax lot (the audit log must
             not get closes with no opens; the tax-lot ledger must not
@@ -1624,6 +1625,13 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 stop_loss=Decimal(str(stop)),
                 take_profit=Decimal(str(round(target, 8))),
                 status="OPEN", paper=is_paper, rule_name=MANUAL_RULE,
+                # The broker's own id for the entry. The manual lane used to
+                # drop it, which left every hand-taken live row unable to be
+                # looked up, modified or WITHDRAWN at the broker — and a
+                # withdrawal with no id cancels the protective legs of a
+                # parent that then fills naked. The audit log and the
+                # positions page have been rendering "" for it all along.
+                broker_order_id=str(broker_order_id or ""),
                 composite_score=float(getattr(signal, "score", 0) or 0),
                 reason=(f"TAKE TRADE · signal #{signal.id} · "
                         f"{signal.rule_name or ''}" if signal is not None
@@ -1639,7 +1647,16 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                                "failed: %s", e)
             try:
                 from bot_program.tax_lots import open_lot
-                open_lot(row)
+                # NOT for an order that has not filled. A lot is a cost
+                # basis for units the account owns, and close_lots_for
+                # consumes open lots FIFO by symbol rather than by source
+                # trade — a lot minted for a queued order at the pre-order
+                # price would be consumed by the next real close and report
+                # a gain against shares nobody bought. The bot lane opens it
+                # on the fill (AssetBot._finish_working_entry) and so does
+                # this one, through that same poll.
+                if not (m or {}).get("entry_working"):
+                    open_lot(row)
             except Exception as e:  # noqa: BLE001
                 logger.warning("[take-trade] tax_lots.open_lot failed: %s", e)
             try:
@@ -1724,13 +1741,32 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 "fill_source": "broker" if fill_px > 0 else "ticker",
                 "client_order_id": client_order_id,
             }
+            # WORKING: the broker took the order and has not filled it —
+            # a market order sent outside regular hours, most often. The
+            # row is booked so the order has an owner, but it is not a
+            # position: no protection is claimed, and the bot tick polls
+            # it until it fills or is withdrawn (AssetBot
+            # ._poll_working_entry). Booking it as an open position at the
+            # pre-order price is what let reconciliation strip its bracket
+            # and leave the parent to fill naked.
+            working = bool(res.get("working")) and fill_qty <= 0
+            if working:
+                from django.utils import timezone as _tz
+                extra["entry_working"] = True
+                extra["entry_working_since"] = _tz.now().isoformat()
+                extra["qty_requested"] = float(qty)
+                extra["fill_source"] = "pending"
             # Broker-side protection bookkeeping, PROVEN not assumed —
             # "protected" rows are managed by moving the resting broker
-            # leg, never by a second bot-side close.
+            # leg, never by a second bot-side close. A WORKING entry claims
+            # nothing: its legs are attached to a parent that has not
+            # filled, so they arm later or not at all, and `protected`
+            # would turn off the management of a position that is about to
+            # exist.
             protective_ids = [str(x) for x in
                               (res.get("protectiveOrders") or [])]
             if protective_ids or res.get("protectedOnFill"):
-                extra["protected"] = True
+                extra["protected"] = not working
                 extra["protective_order_ids"] = protective_ids
                 for res_key, meta_key in (
                         ("protectiveTradeId", "protective_trade_id"),
@@ -1743,7 +1779,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             with transaction.atomic():
                 trade = _book_row(booked_px,
                                   fill_qty if fill_qty > 0 else qty,
-                                  False, extra)
+                                  False, extra,
+                                  broker_order_id=str(res.get("orderId") or ""))
             if fill_qty > 0:
                 qty = fill_qty
         finally:
@@ -1760,7 +1797,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         notify_manual_fill_open(
             user, asset_class=cfg.asset_class, symbol=inst.symbol,
             side=side, qty=trade.qty, entry_price=trade.entry_price,
-            trade_id=trade.id, live=live)
+            trade_id=trade.id, live=live,
+            working=bool((trade.metadata or {}).get("entry_working")))
     except Exception as e:  # noqa: BLE001
         logger.warning("[take-trade] open notification failed: %s", e)
     try:
@@ -1791,7 +1829,20 @@ def _execute(user, inst, side, close_ids=None, signal=None,
            "managed": preview.get("managed", False),
            "venue": "live" if live else "paper",
            "closed": closed}
-    if live and not (trade.metadata or {}).get("protected"):
+    if (trade.metadata or {}).get("entry_working"):
+        # Nothing filled: the broker is holding the order (a market order
+        # outside regular hours queues for the next open). Saying "opened"
+        # here would be a claim about the future, and the row says WORKING
+        # so no stop is assumed either.
+        from bot_program.asset_engine.base import AssetBot as _AB
+        out["working"] = True
+        out["protection_note"] = (
+            f"The broker accepted the order and has NOT filled it — no "
+            f"position is open yet. The 5-minute tick watches it and books "
+            f"the fill when it prints; it is withdrawn if it is still "
+            f"unfilled after {_AB.ENTRY_WORKING_MAX_HOURS}h. You can also "
+            f"withdraw it from the positions page.")
+    elif live and not (trade.metadata or {}).get("protected"):
         # The one honest degradation: the entry went in, the bracket did
         # not rest. The operator must hear it from the confirmation, not
         # discover it when a stop fails to fire.

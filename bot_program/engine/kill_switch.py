@@ -342,12 +342,42 @@ def _close_asset_trade(trade, now):
     # to catch this. Nothing was sent and nothing can be: refuse, so the
     # symbol lands in the sweep's `errors` channel, which is where the
     # operator reads "may still be OPEN at the broker".
+    from bot_program.engine.broker_router import session_busy
     from bot_program.pending_closes import is_paper_client
     if not trade.paper and is_paper_client(client):
+        if session_busy(client):
+            # BUSY, not broken. The IBKR trading session is exclusive (one
+            # clientId, because an order is visible only to the session
+            # that placed it) and another process is holding it. Telling
+            # the operator the broker is unavailable would point them at
+            # the HQ disconnect, which really would put every live path on
+            # paper. Say what is true, and name the retry.
+            raise RuntimeError(
+                f"live trade {trade.id} ({trade.symbol}) could not be "
+                f"flattened: the exclusive IBKR trading session is held by "
+                f"another process (a bot tick or a close in flight). NOTHING "
+                f"was sent and the broker is fine — press EMERGENCY FLATTEN "
+                f"again in a few seconds, or close it at the broker")
         raise RuntimeError(
             f"live trade {trade.id} ({trade.symbol}) routed to PaperTrader "
             f"(broker unavailable) — no close was sent and the position is "
             f"still open at the broker; close it manually")
+
+    # A WORKING entry is a queued ORDER, not a position. Flattening it would
+    # send a market order against a position that does not exist yet — and
+    # leave the queued parent to fill afterwards, opening a position DURING
+    # an emergency stop. Withdraw it instead; that is what "flatten" means
+    # for an order.
+    from bot_program.asset_engine.base import (cancel_working_entry,
+                                               is_entry_working)
+    if is_entry_working(trade):
+        if cancel_working_entry(trade, client,
+                                reason="EMERGENCY FLATTEN"):
+            return
+        raise RuntimeError(
+            f"trade {trade.id} ({trade.symbol}) is an unfilled entry that "
+            f"could not be withdrawn — it may still fill; cancel the order "
+            f"at the broker by hand")
 
     if is_options:
         # Premium-denominated trade: LiveQuote holds the UNDERLYING's price,

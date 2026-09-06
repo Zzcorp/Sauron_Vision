@@ -109,6 +109,15 @@ def reconcile_user(user) -> dict:
     cache: dict = {}
 
     for trade in qs:
+        # A WORKING entry is an ORDER, not a position: the broker correctly
+        # reports no position for it, and closing it as an orphan would
+        # cancel the protective legs of a parent that is still queued —
+        # which then fills naked, into a row this function just closed. The
+        # bot tick owns these rows (AssetBot._poll_working_entry).
+        from .asset_engine.base import is_entry_working
+        if is_entry_working(trade):
+            out["entry_working"] = out.get("entry_working", 0) + 1
+            continue
         out["checked"] += 1
         try:
             client = client_for_symbol(user, trade.symbol, trade.config)
@@ -363,12 +372,17 @@ def reconcile_unknown_positions(user) -> dict:
     # Every symbol this user's rows currently claim, in one query. Options
     # are claimed under their OCC symbol, which is what the broker reports.
     claimed = set()
-    for sym in (AssetBotTrade.objects
+    from .asset_engine.base import is_entry_working
+    for row in (AssetBotTrade.objects
                 .filter(config__user=user,
                         status__in=("OPEN", "CLOSE_PENDING"), paper=False)
-                .values_list("symbol", flat=True)):
-        if sym:
-            claimed.add(str(sym).upper())
+                .only("symbol", "metadata")):
+        # A WORKING row claims a symbol it holds NOTHING of: its order is
+        # still queued. Counting it here would mask the very position that
+        # order creates when it fills — the sweep exists to find units no
+        # row accounts for, and an unfilled order accounts for none.
+        if row.symbol and not is_entry_working(row):
+            claimed.add(str(row.symbol).upper())
 
     configs = (AssetBotConfig.objects
                .filter(user=user, enabled=True)
@@ -436,21 +450,24 @@ def reconcile_unknown_positions(user) -> dict:
         from .capital_truth import broker_backed
         acct = broker_backed(user)
         if acct is not None:
-            from .engine.ibkr_client import (IBKRTrader, is_ibkr_available,
-                                             purpose_client_id)
+            from .engine.ibkr_client import is_ibkr_available
+            from .engine.ibkr_sessions import acquire_trader
             if is_ibkr_available():
                 client = None
                 try:
-                    # The probe id, never the trade id — a sweep that
-                    # connected with the trading clientId would evict the
-                    # live trader — and always disconnect: a held slot
-                    # fails every later connection with error 326.
-                    client = IBKRTrader(
-                        host=acct.host, port=acct.port,
-                        client_id=purpose_client_id(acct.client_id,
-                                                    "probe"),
+                    # The probe id, never the trade id — IBKR refuses a
+                    # second connection on a held clientId (error 326), so
+                    # a sweep on the trading id would fail against the
+                    # trader or hold the id against it. The session comes
+                    # from ibkr_sessions on this process's own slot;
+                    # disconnecting below closes the socket and keeps the
+                    # slot for the next pass.
+                    client = acquire_trader(
+                        acct.host, acct.port, acct.client_id, "probe",
                         account_id=acct.get_account_id() or "",
                         paper=bool(acct.paper))
+                    if client is None:
+                        raise RuntimeError("no free IBKR clientId slot")
                     out["checked"] += 1
                     state = _broker_open_symbols(client,
                                                  asset_class="stock")

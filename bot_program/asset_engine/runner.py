@@ -44,6 +44,17 @@ def run_all_asset_bots() -> dict:
     summaries = []
     for cfg in AssetBotConfig.objects.filter(enabled=True):
         summaries.append(run_asset_bot_tick(cfg.id))
+        # Hand the exclusive IBKR trading session back BETWEEN configs. It
+        # is one clientId for the whole deployment — an order is visible
+        # only to the session that placed it — so holding it across a fleet
+        # of configs would keep the pending-close drain, a manual close and
+        # the kill switch waiting for minutes. Released per config, the
+        # longest anyone waits is one config's tick.
+        try:
+            from bot_program.engine.ibkr_sessions import release_trade_sessions
+            release_trade_sessions()
+        except Exception as e:  # noqa: BLE001 — never break the loop
+            logger.debug("[asset_bot] releasing the trade session: %s", e)
 
     return {
         "status": "ok",

@@ -147,10 +147,11 @@ class OneSlotPerLoginTests(SimpleTestCase):
 
 
 class ConcurrentSocketsDoNotEvictEachOtherTests(SimpleTestCase):
-    """IBKR evicts the earlier holder when two connections share a
+    """IBKR refuses the newcomer (error 326) when two connections share a
     clientId. Sauron opens sockets from the trading router, the data
     feed and the admin probe at once, and all three passed the
-    configured id verbatim — so a bar refresh could drop the trader.
+    configured id verbatim — so a bar refresh could hold the id the
+    trader needed, or fail against it.
     """
 
     def test_each_purpose_gets_a_distinct_id(self):

@@ -276,8 +276,9 @@ class TheSyncTaskIsTheOnlyWriterTests(TestCase):
         self.assertEqual(status, "warning")
 
     def test_it_connects_with_the_probe_id_and_disconnects(self):
-        """The trade clientId would EVICT the live trader; a held slot
-        fails every later connection with error 326."""
+        """A sync on the trade clientId would be refused while the trader
+        holds it, or hold it against the trader (IBKR answers a second
+        connection on a held id with error 326)."""
         from bot_program.engine.ibkr_client import purpose_client_id
         u = _user("bk_probe")
         acct = _acct(u)

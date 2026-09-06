@@ -71,6 +71,11 @@ OPERATOR_KINDS = {
     # chart button started being able to move real funds must never be
     # gated behind a bot-chatter preference.
     "manual_lane_mode",
+    # A live position whose broker-side stop is GONE while the position is
+    # still held. Operator-side because it is the one message that says
+    # real money is running without a stop; a muted bot feed must not
+    # mute it.
+    "protection_vanished",
 }
 
 # The in-app row's type, per kind — "bot" for everything not listed, because
@@ -361,7 +366,7 @@ def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
 
 def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
                              qty, entry_price, trade_id=None,
-                             live: bool = False) -> bool:
+                             live: bool = False, working: bool = False) -> bool:
     """The OPERATOR opened this position by hand — TAKE TRADE, not a bot.
 
     Same shape as `notify_bot_fill_open` minus `rule_name`, and the omission
@@ -374,8 +379,25 @@ def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
     `live` marks the venue in both title and body: since the LIVE manual
     ticket exists, a fill notification that cannot say which venue the
     money moved on tells the operator half a fact.
+
+    `working` is the case where the broker took the order and filled
+    NOTHING (a market order sent outside regular hours queues for the next
+    open). "Opened" would then be a claim about the future — and the price
+    shown would be the pre-order quote, not a fill — so the message says
+    queued instead, and names no price.
     """
     from alerts.links import page_url
+    if working:
+        return dispatch_notification(
+            user, "manual_fill_open",
+            title=(f"▸ {symbol} {side} QUEUED at the broker"
+                   + (" · LIVE" if live else "")),
+            body=(f"{asset_class.upper()} · qty {qty} · TAKE TRADE · the "
+                  f"order is working and nothing has filled — no position "
+                  f"is open yet"
+                  + (" · LIVE — real funds once it fills" if live else "")),
+            url=page_url("forensics_detail", trade_id) or "/positions/",
+        )
     return dispatch_notification(
         user, "manual_fill_open",
         title=(f"▸ {symbol} {side} opened by hand"
@@ -477,6 +499,23 @@ def notify_drawdown_warning(user, *, asset_class: str, config_name: str,
         body=(f"{asset_class.upper()} · realized 24h P&L {realized_pnl} "
               f"≤ limit {limit}. New entries halted."),
         url="/risk/",
+    )
+
+
+def notify_protection_vanished(user, *, asset_class: str, symbol: str,
+                               side: str, qty, stop_loss, reason: str,
+                               trade_id=None) -> bool:
+    """A live position's broker-side stop is gone while the position is
+    still held. Operator-kind on purpose: a muted bot feed must not mute
+    the one message that says real money is running without a stop."""
+    from alerts.links import page_url
+    return dispatch_notification(
+        user, "protection_vanished",
+        title=f"⚠ {symbol} is UNPROTECTED at the broker",
+        body=(f"{asset_class.upper()} · {side} qty {qty} · {reason}. "
+              f"Bot-side stop/target management has taken the position "
+              f"back at stop {stop_loss}; check the broker's open orders."),
+        url=page_url("forensics_detail", trade_id) or "/positions/",
     )
 
 

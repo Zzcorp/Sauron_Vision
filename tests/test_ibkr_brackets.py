@@ -327,13 +327,40 @@ class CancelOrderTests(TestCase):
         self.assertTrue(callable(getattr(IBKRTrader, "cancel_order", None)))
 
     def test_a_resting_leg_is_cancelled(self):
+        """`cancel_order` now PROVES the cancellation before answering True,
+        so the stub has to behave like TWS: the leg leaves the open orders
+        once the cancel is confirmed. (ib_insync writes PendingCancel
+        synchronously inside cancelOrder and that is not a done state, so a
+        stub whose openTrades never changes is a stub whose order was never
+        cancelled — and the honest answer for it is False.)"""
         t = _trader(account_id="DU111")
         t._ib = MagicMock()
         leg = _FakeOrder(orderId=77)
-        t._ib.openTrades.return_value = [SimpleNamespace(order=leg)]
+        resting = [SimpleNamespace(
+            order=leg,
+            orderStatus=SimpleNamespace(status="Submitted", filled=0,
+                                        avgFillPrice=0, remaining=0))]
+        t._ib.openTrades.side_effect = lambda: list(resting)
+        t._ib.trades.return_value = []
+        t._ib.cancelOrder.side_effect = lambda o: resting.clear()
         with patch.object(t, "_connect", return_value=True):
             self.assertTrue(t.cancel_order("77"))
         t._ib.cancelOrder.assert_called_once_with(leg)
+
+    def test_an_unconfirmed_cancel_is_not_reported_as_done(self):
+        """A leg the broker still reports as working must answer False: the
+        legs are GTC now, so a leaked one rests for days and, firing against
+        a flat book, OPENS a position."""
+        t = _trader(account_id="DU111")
+        t._ib = MagicMock()
+        leg = _FakeOrder(orderId=77)
+        t._ib.openTrades.return_value = [SimpleNamespace(
+            order=leg,
+            orderStatus=SimpleNamespace(status="Submitted", filled=0,
+                                        avgFillPrice=0, remaining=0))]
+        t._ib.trades.return_value = []
+        with patch.object(t, "_connect", return_value=True):
+            self.assertFalse(t.cancel_order("77"))
 
     def test_an_order_already_gone_is_not_an_error(self):
         """Filled or cancelled, the leg is no longer resting either way."""

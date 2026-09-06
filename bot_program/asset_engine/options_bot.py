@@ -587,6 +587,7 @@ class OptionsBot(AssetBot):
         # A paper-STAGE rule trades on the paper venue even in a live config.
         paper = (self.cfg.mode == "paper") or bool(stage["force_paper"])
         order_id = ""
+        working_meta: dict = {}
         if not paper:
             if not self._still_armed():
                 return self._skip(symbol, skips.GATE_BLOCKED,
@@ -614,13 +615,55 @@ class OptionsBot(AssetBot):
                 # whose later SL/TP close would SELL real contracts the
                 # account does not hold.
                 status = (res.get("status") or "").upper()
+                try:
+                    filled_contracts = float(res.get("executedQty") or 0)
+                except (TypeError, ValueError):
+                    filled_contracts = 0.0
+                # Refusal only when NOTHING printed — the rule the equity
+                # and manual paths already carry. A part-filled order that
+                # TWS then cancels has put REAL contracts in the account:
+                # returning None there left them with no row at all, so no
+                # stop, no expiry close and no reconciliation (which walks
+                # rows) could ever see them.
                 if status in ("REJECTED", "DUPLICATE", "CANCELLED",
-                              "CANCELED", "INACTIVE", "EXPIRED"):
+                              "CANCELED", "INACTIVE", "EXPIRED") \
+                        and filled_contracts <= 0:
                     logger.warning(
                         "[options_bot] live order refused for %s "
                         "(status=%s, reason=%s)", symbol, status,
                         (res.get("raw") or {}).get("reason", ""))
                     return None
+                # And the row records what actually printed, at the price it
+                # printed at — not the chain's mid for the size we asked for.
+                if filled_contracts > 0:
+                    if filled_contracts < n_contracts:
+                        logger.warning(
+                            "[options_bot] %s partially filled: %s of %s "
+                            "contracts — booking the real size",
+                            symbol, filled_contracts, n_contracts)
+                        n_contracts = int(filled_contracts)
+                    try:
+                        fill_px = float(res.get("avgPrice") or 0)
+                    except (TypeError, ValueError):
+                        fill_px = 0.0
+                    if fill_px > 0:
+                        premium = fill_px
+                        working_meta["fill_source"] = "broker"
+                # WORKING: the broker took the order and filled nothing.
+                # A thin option book is where that is likeliest of all, and
+                # booking it as a full-size position at the chain's mid is
+                # the phantom row reconciliation then closes as an orphan
+                # — leaving real contracts nothing claims. The row is
+                # marked pending and the tick polls it (AssetBot
+                # ._poll_working_entry).
+                if res.get("working") and float(res.get("executedQty") or 0) <= 0:
+                    working_meta = {
+                        "entry_working": True,
+                        "entry_working_since": timezone.now().isoformat(),
+                        "qty_requested": float(n_contracts),
+                        "fill_source": "pending",
+                        "protected": False,
+                    }
             except Exception as e:
                 logger.error("[options_bot] live order failed for %s: %s", symbol, e)
                 return None
@@ -652,6 +695,7 @@ class OptionsBot(AssetBot):
                 # the scale grade_bot_trade works in for options.
                 "initial_stop_loss": round(float(sl), 8),
                 "cost_check": cost_reason,
+                **working_meta,
             },
         )
         return {"trade_id": trade.id, "symbol": symbol,
@@ -702,6 +746,15 @@ class OptionsBot(AssetBot):
         for trade in AssetBotTrade.objects.filter(config=self.cfg, status__in=("OPEN", "CLOSE_PENDING")):
             try:
                 meta = trade.metadata or {}
+                # A WORKING row is a queued ORDER: nothing filled and the
+                # account holds no contracts. Force-closing it would send a
+                # SELL for contracts that were never bought — a naked short
+                # option, with assignment risk, booked as an exit. The base
+                # tick owns these rows (AssetBot._poll_working_entry) and
+                # withdraws the order when it is right to.
+                from bot_program.asset_engine.base import is_entry_working
+                if is_entry_working(trade):
+                    continue
                 exp_str = meta.get("expiry")
                 if not exp_str:
                     continue

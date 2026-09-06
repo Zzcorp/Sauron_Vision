@@ -40,12 +40,14 @@ def _client_for(user, symbol, cfg):
     from bot_program.engine.broker_router import client_for_symbol
     from bot_program.engine.paper_trader import PaperTrader
 
-    client = client_for_symbol(user, symbol, cfg)
+    # purpose="data": this writer only reads bars, and on IBKR it must not
+    # share the trader's clientId — see bot_program/engine/ibkr_sessions.
+    client = client_for_symbol(user, symbol, cfg, purpose="data")
     if isinstance(client, PaperTrader):
         # Paper configs short-circuit the router; retry with mode ignored so
         # market data still comes from the real venue when creds exist.
         if getattr(cfg, "mode", "paper") == "paper":
-            client = client_for_symbol(user, symbol, None)
+            client = client_for_symbol(user, symbol, None, purpose="data")
         if isinstance(client, PaperTrader):
             return _public_market_data_client(cfg)
     return client

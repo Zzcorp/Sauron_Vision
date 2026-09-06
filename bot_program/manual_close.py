@@ -188,6 +188,25 @@ def preview_close(user, trade) -> dict:
     """
     from bot_program.engine.broker_router import client_for_symbol
 
+    from bot_program.asset_engine.base import is_entry_working
+    if is_entry_working(trade):
+        # Not an error: the button becomes WITHDRAW ORDER. There is no
+        # position yet, so there is no mark, no P&L and no R to show — and
+        # rendering an exit price for one would invent a trade.
+        return {
+            "trade_id": trade.id, "symbol": trade.symbol, "side": trade.side,
+            "qty": float(trade.qty), "asset_class": trade.asset_class,
+            "entry": float(trade.entry_price), "mark": None, "pnl": None,
+            "r": None, "venue": "live" if not trade.paper else "paper",
+            "pending": False, "working": True,
+            "requires_pin": requires_pin(trade),
+            "action": "withdraw",
+            "note": (f"The entry order for {trade.symbol} is still WORKING "
+                     f"at the broker — nothing has filled. Withdrawing "
+                     f"cancels the order and its protective legs; no "
+                     f"position is opened and nothing is graded."),
+        }
+
     if trade.status == "CLOSE_PENDING":
         # Not an error: the button becomes RETRY CLOSE. The operator needs
         # to see that the position is still live at the broker.
@@ -342,6 +361,29 @@ def execute_close(user, trade, *, pin_ok: bool = False) -> dict:
         # it and knows how to ask the broker whether the position is still on.
         if trade.status == "CLOSE_PENDING":
             return _retry_pending(user, trade)
+
+        # An unfilled entry is withdrawn, not sold: there is no position to
+        # close, and a market order here would open the reverse one.
+        from bot_program.asset_engine.base import (cancel_working_entry,
+                                                   is_entry_working)
+        if is_entry_working(trade):
+            client = client_for_symbol(user, trade.symbol, trade.config)
+            if _live_broker_missing(trade, client):
+                return {"error": f"{trade.symbol}'s entry order is still "
+                                 f"working at the broker and the broker is "
+                                 f"unreachable — nothing was withdrawn; "
+                                 f"cancel the order at the broker",
+                        "still_open": True}
+            if cancel_working_entry(trade, client,
+                                    reason=f"withdrawn by {user.username}"):
+                return {"ok": True, "trade_id": trade.id,
+                        "symbol": trade.symbol, "side": trade.side,
+                        "qty": float(trade.qty), "exit": None, "pnl": 0.0,
+                        "r": None, "outcome": "", "withdrawn": True}
+            return {"error": f"{trade.symbol}'s entry order could not be "
+                             f"withdrawn — it may still fill. Cancel it at "
+                             f"the broker",
+                    "still_open": True}
 
         bot = _bot_for(trade)
         if bot is None:
