@@ -39,6 +39,9 @@ app.conf.task_routes = {
     # Tier 1-2: Fast queue (price fetching, news, signals)
     "market_data.tasks.*": {"queue": "fast"},
     "scraping.tasks.fetch_breaking_news": {"queue": "fast"},
+    # Network-bound: one live HTTP request per article, so it
+    # goes to slow rather than sitting in front of price ticks.
+    "scraping.tasks.fetch_news_bodies": {"queue": "slow"},
     "scraping.tasks.fetch_social_sentiment": {"queue": "fast"},
     "signals.tasks.run_signal_scan": {"queue": "fast"},
     "indicators.tasks.recalculate_watchlist_indicators": {"queue": "fast"},
@@ -174,6 +177,14 @@ app.conf.beat_schedule = {
     "fetch-breaking-news": {
         "task": "scraping.tasks.fetch_breaking_news",
         "schedule": 900.0,
+    },
+    # Bodies AFTER the feed pass and BEFORE the AI pass, at a cadence between
+    # the two, so an article usually has its text by the time sentiment is
+    # computed from it. Nothing enforces that ordering and nothing needs to:
+    # a body that lands late simply improves the next reading.
+    "fetch-news-bodies": {
+        "task": "scraping.tasks.fetch_news_bodies",
+        "schedule": 600.0,
     },
     "ai-process-new-news": {
         "task": "ai_agents.tasks.process_unanalyzed_news",

@@ -195,6 +195,16 @@ def fetch_rss_news(max_per_feed=10):
                     matched = _match_instruments(title + " " + summary, index)
                     if matched:
                         article.ai_affected_instruments.set(matched)
+                elif summary and not article.content_summary:
+                    # BACKFILL. `defaults` applies only on creation, so a row
+                    # first stored from a pass whose <description> was empty
+                    # kept an empty summary forever — even when the very next
+                    # pass of the same feed carried one. That empty string is
+                    # not cosmetic: `content_summary or raw_content[:2000]`
+                    # (ai_agents/tasks.py) is what the sentiment pass reads,
+                    # so it decided the article's score.
+                    NewsArticle.objects.filter(pk=article.pk).update(
+                        content_summary=summary)
 
         except Exception as e:
             feeds_dead.append(source_key)
@@ -265,6 +275,11 @@ def fetch_marketaux_news(tickers=None, limit=50):
             matched = _match_instruments(title + " " + summary, index)
             if matched:
                 row.ai_affected_instruments.set(matched)
+        elif summary and not row.content_summary:
+            # Same backfill as the RSS path above, for the same reason: a row
+            # this API first delivered without a description never got one.
+            NewsArticle.objects.filter(pk=row.pk).update(
+                content_summary=summary)
 
     logger.info("MarketAux: parsed=%s stored=%s", parsed, stored)
     return {"parsed": parsed, "stored": stored}
