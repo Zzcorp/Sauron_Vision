@@ -29,6 +29,29 @@ DEFAULT_MAX_DRAWDOWN_PCT = 10.0
 # A bot that hasn't ticked in this long is presumed dead by the health page.
 HEARTBEAT_STALE_SECONDS = 1800
 
+# ── breaker alert cadence ───────────────────────────────────────────────────
+#
+# A tripped breaker CANNOT clear itself. `check_consecutive_losses` only
+# breaks its streak when a winning trade closes, and the breaker forbids the
+# entries that would produce one — so "alert once an hour while tripped" means
+# "once an hour forever", and it is not a hypothetical. On 2026-09-06 the
+# operator had roughly a hundred of these queued from configs whose breakers
+# were blocking nothing, and in the same bell sat a quote stream that had been
+# silent for four days and a bar feed frozen since Thursday. Neither was seen.
+# The noise did not merely annoy; it is what hid the outage.
+#
+# With real money armed, a drowned alert is a drowned stop. So the cadence
+# decays: hourly while the news is still news, daily once it is a standing
+# condition the operator has evidently chosen to live with.
+BREAKER_ALERT_FAST_HOURS = 1
+BREAKER_ALERT_SLOW_HOURS = 24
+# After this many alerts about one breaker, hourly has failed to get a
+# decision and repeating it faster will not help.
+BREAKER_ALERT_FAST_COUNT = 24
+# How far back an episode is counted. A breaker quiet for longer than this has
+# genuinely cleared, so the next trip starts at the fast cadence again.
+BREAKER_ALERT_EPISODE_DAYS = 7
+
 
 def _extras(cfg) -> dict:
     return getattr(cfg, "extras", None) or {}
@@ -321,19 +344,51 @@ class CircuitBreakers:
 
 
 def notify_circuit_breaker(cfg, reasons: list) -> None:
-    """Alert once an hour while a breaker is tripped."""
+    """Alert while a breaker is tripped — hourly, then daily. See the cadence
+    constants at the top of this module for why it decays.
+
+    THE TITLE CARRIES THE ASSET CLASS. It used to be the config name alone,
+    and the de-dupe key is (user, type, title): this deployment runs SIX
+    configs called "manual", one per asset class, so they silenced each other.
+    A commodity trip suppressed a forex trip for the whole cooldown window,
+    and the bell said only "Circuit breaker: manual" — which of the six was
+    unanswerable from the notification the operator was given.
+    """
     try:
         from alerts.models import Notification
-        title = f"⊟ Circuit breaker: {cfg.name}"
-        recent = Notification.objects.filter(
+        title = f"⊟ Circuit breaker: {cfg.name} ({cfg.asset_class})"
+        now = timezone.now()
+        episode = Notification.objects.filter(
             user=cfg.user, notification_type="bot", title=title,
-            created_at__gte=timezone.now() - timedelta(hours=1)).exists()
-        if not recent:
-            Notification.objects.create(
-                user=cfg.user, notification_type="bot", title=title,
-                body=(f"{cfg.asset_class} bot '{cfg.name}' has stopped opening "
-                      f"new positions: {'; '.join(reasons)}. Existing positions "
-                      f"are left alone."),
-                url="/health/")
+            created_at__gte=now - timedelta(days=BREAKER_ALERT_EPISODE_DAYS))
+        sent = episode.count()
+        hours = (BREAKER_ALERT_FAST_HOURS if sent < BREAKER_ALERT_FAST_COUNT
+                 else BREAKER_ALERT_SLOW_HOURS)
+        newest = episode.order_by("-created_at").first()
+        if newest is not None and newest.created_at > now - timedelta(hours=hours):
+            return
+
+        # WHAT THIS BREAKER ACTUALLY STOPPED. `tick` evaluates can_open_new
+        # BEFORE the symbol loop, so a config with no symbols reaches here and
+        # reports a halt over a loop that had nothing to iterate — and the
+        # manual TAKE TRADE lane does not consult these breakers at all (it
+        # calls risk_gate.preflight directly). Telling that operator their bot
+        # "has stopped opening new positions" is false in both directions: it
+        # was never going to open one by scanning, and the way it DOES open
+        # one is untouched. The trip is still worth saying once — it is a
+        # verdict on the recent record — but as a verdict, not a halt.
+        if cfg.symbols:
+            body = (f"{cfg.asset_class} bot '{cfg.name}' has stopped opening "
+                    f"new positions: {'; '.join(reasons)}. Existing positions "
+                    f"are left alone.")
+        else:
+            body = (f"{cfg.asset_class} bot '{cfg.name}' tripped a breaker: "
+                    f"{'; '.join(reasons)}. It scans no symbols, so nothing "
+                    f"was going to open, and TAKE TRADE does not consult "
+                    f"these breakers — your manual entries are unaffected. "
+                    f"Read this as a verdict on the recent record, not a halt.")
+        Notification.objects.create(
+            user=cfg.user, notification_type="bot", title=title,
+            body=body, url="/health/")
     except Exception as e:
         logger.warning("[safety] breaker notification failed: %s", e)

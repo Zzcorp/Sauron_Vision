@@ -409,16 +409,36 @@ class IBKRTrader:
             return {}
 
     def balance_usdt(self) -> float:
-        """IBKR base currency may not be USD — best-effort read of NetLiquidation."""
-        info = self.account()
-        for tag in ("NetLiquidation", "AvailableFunds", "TotalCashValue"):
-            v = info.get(tag)
-            if v:
-                try:
-                    return float(v)
-                except (TypeError, ValueError):
-                    continue
-        return 0.0
+        """NetLiquidation as a bare float.
+
+        The name is a legacy of the crypto bot and has to stay: it is the
+        cross-broker duck type `capital_truth.broker_equity` looks for on
+        every client. What changed is where the number comes from.
+
+        This read used to go through `account()`, and `account_values()`
+        exists precisely because `account()` carries two defects for its
+        legacy callers — it discards `v.currency` and overwrites duplicate
+        tags, so on a multi-currency account NetLiquidation was whichever row
+        arrived LAST; and it passes account="" when no id is stored, which
+        spans EVERY account under the login. Both defects landed here, on the
+        one number that is the denominator of the entire per-config risk stack
+        (sizing divides by it, the daily-loss floor is a percentage of it, the
+        drawdown curve starts at it — see capital_truth's docstring). On a GBP
+        ISA sitting under a login with other accounts, that made every risk
+        limit a division by a figure of unknown currency from an unknown
+        account, and the module whose whole job is to catch a mis-declared
+        pool was the thing reading it.
+
+        `net_liquidation` already solved this — BASE wins its tag, otherwise
+        first-seen, and a read with no account id is refused rather than
+        broadened. Delegating is the whole fix.
+
+        Still 0.0 when unreadable, deliberately unchanged: `broker_equity`
+        maps <= 0 to "unmeasured", and an unmeasured pool the operator is
+        told about beats a confident number from the wrong account.
+        """
+        reading = self.net_liquidation()
+        return reading[0] if reading else 0.0
 
     def account_values(self) -> "dict | None":
         """{tag: (value, currency)} for THIS account, or None when unreadable.

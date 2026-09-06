@@ -139,8 +139,11 @@ class IBKRAccount(models.Model):
         help_text="BASE API client ID — must be UNIQUE per account and below "
                   "100. Sauron opens several sockets at once (trading, data "
                   "feed, connection test) and derives a distinct id for each "
-                  "from this number; IBKR evicts the earlier holder when two "
-                  "connections share one.")
+                  "from this number. When two connections ask for the SAME "
+                  "id, IBKR REFUSES the second (error 326) — it does not "
+                  "evict the first. So a collision looks like a broker that "
+                  "will not answer, never like a session that was stolen, "
+                  "and the trading id is held exclusively for that reason.")
     account_id_enc = models.TextField(blank=True)
 
     paper = models.BooleanField(default=True,

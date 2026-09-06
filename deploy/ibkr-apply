@@ -78,7 +78,7 @@ trap 'cleanup; trap - EXIT; exit 1' HUP INT TERM
 # Render inside the container (-T: no TTY). Captured to a RAM-backed file:
 # never an argument (arguments show in ps), never through a shell
 # expansion. stderr passes through so the command's own warnings are seen.
-if ! "$here/dc" exec -T web python manage.py render_ibkr_env > "$tmp"; then
+if ! "$here/dc" exec -T web python manage.py render_ibkr_env --quiet > "$tmp"; then
     echo "render_ibkr_env failed — is the web container up?" >&2
     exit 1
 fi

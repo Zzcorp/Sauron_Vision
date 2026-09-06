@@ -384,6 +384,13 @@ class AssetBot(ABC):
                         "[%s_bot] LIVE trade %s cannot be managed: broker "
                         "unavailable (PaperTrader fallback) — leaving OPEN",
                         self.asset_class, trade.symbol)
+                    # AND SAY SO. Refusing to manage is correct; doing it
+                    # silently is not. This branch used to be a log line and
+                    # nothing else, so a real position whose manager had been
+                    # switched off left no trace anywhere the operator looks.
+                    from bot_program.engine.broker_router import session_busy
+                    self._notify_unmanaged_live_position(
+                        trade, busy=session_busy(client))
                     continue
 
                 # A WORKING entry is an order, not a position: nothing to
@@ -2639,6 +2646,64 @@ class AssetBot(ABC):
         except Exception as e:
             logger.warning("[%s_bot] paper-fallback notification failed: %s",
                            self.asset_class, e)
+
+    def _notify_unmanaged_live_position(self, trade, *, busy: bool = False):
+        """A REAL position is open and its manager is switched off.
+
+        Strictly worse than the refused entry `_notify_paper_fallback`
+        reports: a refused entry costs an opportunity, this carries risk with
+        the thing that watches it turned off. And until now the only trace was
+        a `logger.error` — the code did the right thing (refuse to manage,
+        rather than stamp a row CLOSED off a PaperTrader's synthetic fill
+        while the real position is still open at the broker) and told nobody
+        who could act on it.
+
+        WHAT SURVIVES AND WHAT DOES NOT is the whole content of this alert,
+        because the honest answer is neither "you are fine" nor "you are
+        naked". The broker-side bracket survives: protective legs have been
+        GTC since 9e2bc10, so the stop and the target are still working
+        orders at IBKR and they outlive the session that placed them. What
+        stops is everything this platform adds on top — the time stop, the
+        trailing stop, the break-even move, and the check that notices a
+        protective leg has vanished. A missed 2FA push overnight is enough to
+        get here, and the operator needs it within the hour rather than at
+        the next morning's briefing.
+
+        Deduped per SYMBOL, not per config: two unmanaged positions are two
+        facts, and collapsing them would repeat the mistake the breaker alert
+        made by keying on the config name alone.
+        """
+        try:
+            from datetime import timedelta as _td
+            from alerts.models import Notification as _N
+            title = f"⚠ LIVE position unmanaged: {trade.symbol}"[:200]
+            recent = _N.objects.filter(
+                user=self.user, notification_type="bot", title=title,
+                created_at__gte=timezone.now() - _td(hours=1),
+            ).exists()
+            if recent:
+                return
+            why = ("the exclusive IBKR trading session is held by another "
+                   "process" if busy else
+                   "its broker is unreachable (is the Gateway logged in? a "
+                   "live account re-authenticates with 2FA most days)")
+            _N.objects.create(
+                user=self.user, notification_type="bot", title=title,
+                body=(
+                    f"A REAL {trade.symbol} position on '{self.cfg.name}' is "
+                    f"OPEN and is not being managed: {why}. Its broker-side "
+                    f"stop and target are GTC and still working at the "
+                    f"broker. What is NOT running: the time stop, the "
+                    f"trailing stop, the break-even move, and the check that "
+                    f"notices a protective leg has disappeared. Nothing was "
+                    f"closed and nothing was faked — the row is left OPEN on "
+                    f"purpose."
+                ),
+                url="/asset-bots/",
+            )
+        except Exception as e:  # noqa: BLE001 — an alert must not break a tick
+            logger.warning("[%s_bot] unmanaged-position notification failed: "
+                           "%s", self.asset_class, e)
 
     # ── default sizing ──────────────────────────────────────────────────
 
