@@ -219,11 +219,55 @@ class ThePortDecidesAndAnUnknownPortIsNotSafeTests(TestCase):
         self.assertIn("UNKNOWN PORT", out)
         self.assertIn("cannot tell paper from live", out)
 
-    def test_a_live_port_that_never_connected_is_a_blocker(self):
+    def test_a_live_port_with_no_reading_at_all_is_a_blocker(self):
         u = _user()
         _acct(u, port=4003)
         out = _run()
-        self.assertIn("did not connect", out)
+        self.assertIn("no equity reading has landed", out)
+        self.assertIn("at all", out)
+
+    def test_a_live_port_whose_reading_went_stale_is_a_blocker(self):
+        from bot_program.management.commands.preflight_live import (
+            BROKER_READING_STALE_HOURS)
+        u = _user()
+        _acct(u, port=4003, equity=500, currency="EUR",
+              equity_age_h=BROKER_READING_STALE_HOURS + 3)
+        out = _run()
+        self.assertIn("no equity reading has landed", out)
+        self.assertIn("Is the Gateway logged in?", out)
+
+    def test_a_FRESH_reading_clears_it_even_when_connected_is_False(self):
+        """THE BUG THIS COMMAND SHIPPED WITH, pinned.
+
+        `connected` is written only by the TEST IBKR button and a form save,
+        so it means "a socket answered once" with no expiry —
+        capital_truth.broker_backed refuses to use it for exactly this reason.
+        The first version made a stale False into blocker #1 on a Gateway that
+        IBC had just logged into live, that `docker ps` called healthy, and
+        whose equity reading printed two lines above the blocker was four
+        minutes old. A reading that arrived IS the proof the socket answered.
+        """
+        from bot_program.models import IBKRAccount
+        u = _user()
+        acct = _acct(u, port=4003, equity=500, currency="EUR",
+                     equity_age_h=0.05)
+        self.assertFalse(IBKRAccount.objects.get(pk=acct.pk).connected)
+        out = _run()
+        self.assertNotIn("no equity reading has landed", out)
+
+    def test_the_flag_is_shown_but_labelled_as_not_live_status(self):
+        u = _user()
+        _acct(u, port=4003, equity=500, currency="EUR", equity_age_h=0.05)
+        out = _run()
+        self.assertIn("last manual probe", out)
+        self.assertIn("not live status", out)
+
+    def test_a_PAPER_port_with_no_reading_is_not_a_blocker(self):
+        """Proving the chain on 4004 is the step before arming, not a fault."""
+        u = _user()
+        _acct(u, port=4004)
+        out = _run()
+        self.assertNotIn("no equity reading has landed", out)
 
 
 class TheQuietComponentIsNamedTests(TestCase):

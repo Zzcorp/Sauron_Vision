@@ -35,6 +35,14 @@ pass for a fresh one.
 from django.core.management.base import BaseCommand
 
 
+# How old the newest broker equity reading may be before a LIVE account is
+# considered unreachable. `broker_account_sync` runs every 15 minutes, so two
+# hours is eight missed passes — long enough to ride out a restart or a 2FA
+# re-login, short enough that a Gateway which died at the open is named before
+# the session is over.
+BROKER_READING_STALE_HOURS = 2.0
+
+
 def _age(dt, now):
     """Human age of a timestamp, or "never"."""
     if dt is None:
@@ -127,8 +135,11 @@ class Command(BaseCommand):
               f"(slot {acct.gateway_slot} -> {acct.gateway_host})")
             w(f"   client_id    {acct.client_id}")
             w(f"   login stored {acct.has_login}")
-            w(f"   connected    {acct.connected}  last_sync="
-              f"{_age(acct.last_sync, now)}")
+            # Labelled for what it is. Left bare it reads as live status, and
+            # it is not: nothing but the TEST IBKR button and a form save ever
+            # writes it. Section 3 answers reachability.
+            w(f"   last manual probe: {acct.connected}  at="
+              f"{_age(acct.last_sync, now)}  (not live status — see THE MONEY)")
 
             if not acct.env_is_certain:
                 # None is NOT paper. Everything that renders this must show
@@ -150,9 +161,6 @@ class Command(BaseCommand):
                     f"stack the Gateway is reachable as "
                     f"{acct.gateway_host!r} — 127.0.0.1 inside a worker "
                     f"container is the worker itself")
-            if acct.is_live and not acct.connected:
-                blockers.append(f"{user.username}: pointed at a LIVE port and "
-                                f"the last probe did not connect")
 
             # ── 3. the money, with its currency ─────────────────────────
             w(f"\n3. THE MONEY — {user.username}")
@@ -171,6 +179,32 @@ class Command(BaseCommand):
                         f"{user.username}: the equity reading carries no "
                         f"currency, and this platform converts nothing")
             w(f"   book currency   {book_ccy or '(unset)'}")
+
+            # REACHABILITY IS THE AGE OF THIS READING, NEVER THE `connected`
+            # FLAG. The flag is written only when somebody presses TEST IBKR
+            # or saves the credentials form, so it means "a socket answered
+            # once" and has no expiry — capital_truth.broker_backed says
+            # exactly that and refuses to use it, in both directions: it goes
+            # on reading True forever after a gateway dies, and it sits at
+            # False forever on a gateway nobody has pressed the button for.
+            #
+            # The first version of this command made a stale False into
+            # blocker #1 on a Gateway that IBC had just logged into live, that
+            # `docker ps` called healthy, and whose equity reading — printed
+            # two lines above the blocker — was four minutes old. The command
+            # contradicted itself on its own page. A reading that arrived is
+            # proof the socket answered; nothing else here is.
+            age_h = (None if reading is None
+                     else reading["age_seconds"] / 3600.0)
+            if acct.is_live and (age_h is None
+                                 or age_h > BROKER_READING_STALE_HOURS):
+                blockers.append(
+                    f"{user.username}: pointed at a LIVE port and no equity "
+                    f"reading has landed "
+                    + ("at all" if age_h is None else f"for {age_h:.1f}h")
+                    + f" (limit {BROKER_READING_STALE_HOURS:.0f}h) — the "
+                    f"broker is not answering, whatever the connected flag "
+                    f"says. Is the Gateway logged in?")
 
             # ── 4. the live configs ─────────────────────────────────────
             live = list(AssetBotConfig.objects.filter(
