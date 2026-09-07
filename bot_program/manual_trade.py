@@ -1969,7 +1969,27 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
         from bot_program.engine.broker_router import client_for_symbol
         prior_mode, cfg.mode = cfg.mode, "live"  # in memory only, for routing
         try:
-            client = client_for_symbol(user, probe.symbol, cfg)
+            # purpose="probe", NOT the default "trade". This asks a
+            # READINESS question — does the route reach a live broker — and
+            # the trade purpose is exclusive across the whole deployment on
+            # the operator's base clientId, because IBKR refuses a second
+            # connection on one id (error 326) and an order is visible only
+            # to the id that placed it.
+            #
+            # So arming used to RACE the bot tick for the one session that
+            # can place orders: acquire_trader waits TRADE_LEASE_WAIT_S and
+            # then gives up, the router substitutes PaperTrader, and the
+            # operator is told "LIVE route unavailable — credentials
+            # missing, broker library absent, or the account disconnected"
+            # when all three are fine and the real answer is "a worker is
+            # holding the socket for eight more seconds". It reproduced
+            # intermittently and looked exactly like a broken account.
+            #
+            # capital_truth already reached this conclusion for its own
+            # equity read: "this runs on the entry path and must never hold
+            # the one clientId that can place or cancel an order."
+            client = client_for_symbol(user, probe.symbol, cfg,
+                                       purpose="probe")
         finally:
             cfg.mode = prior_mode
         if AssetBot._is_paper_client(client):
@@ -2031,8 +2051,15 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
                 if "capital" not in fields:
                     fields.append("capital")
             elif float(cfg.capital) > float(reading):
+                # Each number carries ITS OWN currency. This printed a hard
+                # "$" on the pool and the real currency only on the reading,
+                # so a EUR account compared "$500.00" against "500.00 EUR"
+                # and the one message whose whole job is to make a mismatch
+                # visible was itself printing a number behind the wrong
+                # symbol.
                 return {"error": (f"The {cls} manual pool is "
-                                  f"${float(cfg.capital):,.2f} but the "
+                                  f"{float(cfg.capital):,.2f} "
+                                  f"{cfg.base_currency or '?'} but the "
                                   f"broker reads the account at "
                                   f"{float(reading):,.2f} "
                                   f"{acct.last_equity_currency or ''} — a "

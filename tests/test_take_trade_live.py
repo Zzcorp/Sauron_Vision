@@ -600,3 +600,90 @@ class FundsTrackingTests(TestCase):
         ok, why = make_bot(cfg).can_open_new()
         self.assertFalse(ok)
         self.assertIn("reading", why)
+
+
+class ArmingMustNotRaceTheBotForTheTradeSessionTests(TestCase):
+    """Arming asks a READINESS question, not an order question.
+
+    The trade purpose is exclusive across the whole deployment on the
+    operator's base clientId — IBKR refuses a second connection on one id
+    (error 326) and an order is visible only to the id that placed it. So an
+    arming probe that asked for `purpose="trade"` competed with the bot tick
+    for the one session that can place orders: `acquire_trader` waits
+    TRADE_LEASE_WAIT_S, gives up, the router substitutes PaperTrader, and the
+    operator is told
+
+        LIVE route unavailable — credentials missing, broker library absent,
+        or the account disconnected
+
+    while all three are fine and the real answer is "a worker is holding the
+    socket for eight more seconds". It reproduced intermittently and looked
+    exactly like a broken brokerage account — the operator had already moved
+    the IBKR row between users hunting it.
+
+    `capital_truth` reached the same conclusion for its equity read: "this
+    runs on the entry path and must never hold the one clientId that can
+    place or cancel an order."
+    """
+
+    def test_the_arming_probe_does_not_ask_for_the_trade_session(self):
+        import inspect
+
+        from bot_program import manual_trade
+        src = inspect.getsource(manual_trade.arm_manual_lane)
+        self.assertIn('purpose="probe"', src)
+
+    def test_the_real_order_path_still_uses_the_trade_session(self):
+        """The guard must not have loosened the path where money moves: an
+        order MUST go through the exclusive id, or the fill it produces is
+        invisible to every later cancel and reconcile."""
+        import inspect
+
+        from bot_program import manual_trade
+        src = inspect.getsource(manual_trade)
+        marker = "before money moves"
+        self.assertIn(marker, src)
+        after = src.split(marker, 1)[1][:600]
+        self.assertIn("client_for_symbol(user, inst.symbol, cfg)", after)
+        self.assertNotIn('purpose="probe"', after)
+
+
+class EveryPoolNumberCarriesItsCurrencyTests(TestCase):
+    """The card printed a hard "$" on every pool and in the input's own
+    placeholder, on a platform whose book defaults to EUR and which converts
+    nothing anywhere by design. An operator arming a EUR account read
+    "$500.00" and asked, correctly, which currency they were about to trade
+    in — the same lie `IBKRAccount.last_equity_currency` exists to prevent:
+    "an unlabelled equity becomes a number behind the wrong symbol somewhere
+    downstream."
+    """
+
+    def test_the_lane_context_carries_the_currency(self):
+        import inspect
+
+        from dashboard import views
+        src = inspect.getsource(views)
+        block = src.split('context["manual_lanes"]', 1)[1][:900]
+        self.assertIn('"currency"', block)
+        self.assertIn("base_currency", block)
+
+    def test_the_template_prints_no_hardcoded_dollar_on_the_pool(self):
+        from pathlib import Path
+
+        from django.conf import settings
+        html = (Path(settings.BASE_DIR) / "templates" / "dashboard"
+                / "admin_dashboard.html").read_text(encoding="utf-8")
+        self.assertNotIn("${{ lane.capital", html)
+        self.assertNotIn("pool $ (optional)", html)
+        self.assertIn("lane.currency", html)
+
+    def test_the_mismatch_error_labels_both_sides(self):
+        """It is the one message whose whole job is to make a currency
+        mismatch visible."""
+        import inspect
+
+        from bot_program import manual_trade
+        src = inspect.getsource(manual_trade.arm_manual_lane)
+        block = src.split("manual pool is", 1)[1][:400]
+        self.assertIn("cfg.base_currency", block)
+        self.assertIn("last_equity_currency", block)

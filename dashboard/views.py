@@ -3650,6 +3650,15 @@ def admin_dashboard(request):
     context["manual_lanes"] = [
         {"asset_class": cls, "mode": lane.mode,
          "capital": float(lane.capital),
+         # THE CURRENCY TRAVELS WITH THE NUMBER. The card printed a hard
+         # "$" in front of every pool and in the input's own placeholder,
+         # on a platform whose book defaults to EUR and which converts
+         # nothing anywhere by design. An operator arming a EUR account
+         # read "$500.00" and asked, correctly, which currency they were
+         # about to trade in. Same lie IBKRAccount.last_equity_currency
+         # exists to prevent: "an unlabelled equity becomes a number
+         # behind the wrong symbol somewhere downstream."
+         "currency": lane.base_currency or "",
          "tracks": bool((lane.extras or {}).get("capital_tracks_broker"))}
         for cls in sorted(set(EXECUTABLE_CLASS.values()))
         for lane in [manual_config_for(request.user, cls)]
