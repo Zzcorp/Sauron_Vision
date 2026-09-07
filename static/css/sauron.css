@@ -7305,6 +7305,19 @@ body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
     border-right: 1px solid var(--border);
 }
 .tk-k { font-size: 8.5px; letter-spacing: .16em; color: var(--text-muted); }
+/* THE VENUE, above the spread. The manual lane is armed per asset class, so
+   the LONG button here can move real money while the identical button on the
+   next instrument simulates. LIVE is the loud one on purpose: paper is the
+   safe default and needs no attention, real money does. */
+.tk-venue {
+    font-size: 8.5px; letter-spacing: .14em; font-weight: 600;
+    padding: 1px 5px; border-radius: 2px; line-height: 1.4;
+}
+.tk-venue--paper { color: var(--text-muted); border: 1px solid var(--border); }
+.tk-venue--live {
+    color: var(--accent-red); border: 1px solid var(--accent-red);
+    background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+}
 .tk-v { font-size: 11px; color: var(--text-secondary); }
 /* A quote too old to trade on stops claiming a price. The buttons stay
    visible and stay clickable — the ticket prices at execution, not off

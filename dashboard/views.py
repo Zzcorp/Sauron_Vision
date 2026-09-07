@@ -3877,10 +3877,31 @@ def instrument_detail(request, symbol):
     except Exception:
         market = None
 
+    # WHICH VENUE THIS TICKET TRADES AT, before the operator commits.
+    #
+    # The manual lane is armed PER ASSET CLASS, so on one deployment a LONG
+    # on GLDM moves real money while the identical button on GBPJPY is a
+    # simulation — and the ticket said nothing either way. The venue only
+    # appeared in the preview payload, i.e. after the click, and the operator
+    # took a forex position believing it was live. That is the same argument
+    # the ticket already makes about prices, in its own comment: pairing a
+    # button with the fact that governs it "was work the operator was doing
+    # that the markup should have been doing."
+    lane_mode = "paper"
+    try:
+        from bot_program.manual_trade import EXECUTABLE_CLASS, manual_config_for
+        cls = EXECUTABLE_CLASS.get(instrument.asset_class)
+        if cls and request.user.is_authenticated:
+            lane_mode = getattr(manual_config_for(request.user, cls),
+                                "mode", "paper")
+    except Exception:  # noqa: BLE001 — a badge must never 500 the page
+        lane_mode = "paper"
+
     return render(request, "dashboard/instrument_detail.html", {
         "page_id": "instruments",
         "instrument": instrument,
         "quote": quote,
+        "lane_mode": lane_mode,
         "technicals": technicals,
         "signals": signals,
         "news": news,

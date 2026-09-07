@@ -206,17 +206,27 @@ def _tick_manages() -> bool:
 
 
 def _mark_for(user, cfg, symbol):
-    """Current mark through the same client the trade will execute on."""
+    """(price, client, delayed) — the mark through the client that will execute.
+
+    `delayed` rides along because it changes what the number MEANS. An IBKR
+    account with no market-data subscription can only be served the free
+    delayed feed, roughly fifteen minutes behind. A market order still fills
+    at the real price, so the mark is not what gets traded — but the stop and
+    the target ARE derived from it, and a stop computed off a stale mark can
+    be born on the wrong side of the market. The operator has to see that
+    before they commit, not read it in a post-mortem.
+    """
     from bot_program.engine.broker_router import client_for_symbol
 
     client = client_for_symbol(user, symbol, cfg)
     try:
         tk = client.ticker(symbol) or {}
         price = float(tk.get("lastPrice", 0) or 0)
+        delayed = bool(tk.get("delayed"))
     except Exception as e:  # noqa: BLE001
         logger.warning("[take-trade] ticker(%s) failed: %s", symbol, e)
-        return None, client
-    return (price if price > 0 else None), client
+        return None, client, False
+    return (price if price > 0 else None), client, delayed
 
 
 def _trade_notional_usd(trade) -> float:
@@ -760,7 +770,7 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
 
     bot = make_bot(cfg)
 
-    price, _client = _mark_for(user, cfg, inst.symbol)
+    price, _client, mark_delayed = _mark_for(user, cfg, inst.symbol)
     if price is None:
         return {"error": f"No usable price mark for {inst.symbol} — the "
                          f"quote feeds have nothing fresh"}
@@ -1061,6 +1071,14 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         "closable": closable,
         "managed": _tick_manages(),
         "venue": "live" if live else "paper",
+        # WHETHER THE MARK IS DELAYED. Not decoration: every level in this
+        # payload — the stop, the target, the quantity that follows from the
+        # stop distance — is computed from that mark. On a delayed feed they
+        # are computed from a price roughly fifteen minutes old, while the
+        # market order itself will fill at the real one. That asymmetry is
+        # the whole hazard, and the operator must meet it in the dialog
+        # rather than in the trade's metadata afterwards.
+        "mark_delayed": bool(mark_delayed),
         # The dialog's cue to collect the trading PIN — the same
         # live-only asymmetry the close path wears (requires_pin there).
         "requires_pin": live,
@@ -1337,7 +1355,7 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         for trade in AssetBotTrade.objects.filter(
                 id__in=list(close_ids), config=cfg, status="OPEN"):
             t_bot = make_bot(trade.config)
-            price, client = _mark_for(user, trade.config, trade.symbol)
+            price, client, _delayed = _mark_for(user, trade.config, trade.symbol)
             if price is None:
                 return {"error": f"Cannot close {trade.symbol} — no "
                                  f"price mark; nothing was opened",

@@ -31,6 +31,17 @@ number sits on a button that opens a position.
         <span class="tk-px" data-dq="bid">{% if quote.bid %}{% px quote.bid asset_class symbol %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
     </button>
     <span class="tk-mid">
+        {% comment %}THE VENUE, on the ticket itself. The manual lane is armed
+        PER ASSET CLASS, so a LONG here can move real money while the identical
+        button on another instrument simulates — and this ticket used to say
+        nothing either way, the venue appearing only in the preview payload
+        after the click. An operator took a forex position believing it was
+        live. Same argument this file already makes about prices: pairing a
+        button with the fact that governs it is work the markup should do.
+        Rendered only when the caller passes `lane_mode`, so every other
+        include keeps its exact shape.{% endcomment %}
+        {% if lane_mode %}<span class="tk-venue tk-venue--{{ lane_mode }}"
+              title="{% if lane_mode == 'live' %}This ticket places REAL orders — the manual lane for this asset class is armed{% else %}Simulated — the manual lane for this asset class is in paper mode{% endif %}">{% if lane_mode == 'live' %}● LIVE{% else %}◌ paper{% endif %}</span>{% endif %}
         <span class="tk-k">SPREAD</span>
         <span class="tk-v" data-dq="spread">{% if quote.bid and quote.ask %}{% px quote.spread asset_class symbol %}{% else %}<span class="sv-unknown">—</span>{% endif %}</span>
     </span>

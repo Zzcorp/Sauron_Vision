@@ -386,11 +386,61 @@ class IBKRTrader:
             last = _num(getattr(t, "last", None))
             if last <= 0 and bid > 0 and ask > 0:
                 last = (bid + ask) / 2
+
+            # DELAYED, RATHER THAN NOTHING — AND SAID SO.
+            #
+            # An account with no market-data subscription gets error 10089
+            # ("Requested market data requires additional subscription for
+            # API. Delayed market data is available.") and every field comes
+            # back unset, so `last` is 0 and the manual lane refuses with "no
+            # usable price mark — the quote feeds have nothing fresh". Which
+            # is true and unhelpful: the operator has a funded, logged-in
+            # Gateway and a valid contract, and the data IS available one flag
+            # away. reqMarketDataType(3) asks for the free delayed feed.
+            #
+            # NEVER SILENTLY. A delayed mark is ~15 minutes old, and the
+            # levels derived from it — the stop and the target — are the part
+            # that matters: a market order still fills at the real price, but
+            # a stop computed off a stale mark can be born on the wrong side
+            # of the market. So the payload carries `delayed: True` and every
+            # reader is free to refuse it. This module's whole doctrine is
+            # that a number arrives with what it is; a price with no age
+            # beside it is the lie removed everywhere else here.
+            if last <= 0:
+                try:
+                    self._ib.reqMarketDataType(3)      # 3 = delayed
+                    t = self._ib.reqMktData(contract, "", False, False)
+                    self._ib.sleep(1.5)
+                    d_bid = _num(getattr(t, "bid", None))
+                    d_ask = _num(getattr(t, "ask", None))
+                    d_last = _num(getattr(t, "last", None))
+                    if d_last <= 0 and d_bid > 0 and d_ask > 0:
+                        d_last = (d_bid + d_ask) / 2
+                    if d_last > 0:
+                        log.info("IBKR ticker(%s): no real-time subscription "
+                                 "— using DELAYED mark %.4f", symbol, d_last)
+                        return {
+                            "lastPrice": str(d_last),
+                            "symbol": symbol,
+                            "bid": str(d_bid),
+                            "ask": str(d_ask),
+                            "delayed": True,
+                        }
+                finally:
+                    # Back to real time for every later call on this session,
+                    # so one unsubscribed symbol cannot quietly downgrade the
+                    # whole process.
+                    try:
+                        self._ib.reqMarketDataType(1)
+                    except Exception:  # noqa: BLE001
+                        pass
+
             return {
                 "lastPrice": str(last),
                 "symbol": symbol,
                 "bid": str(bid),
                 "ask": str(ask),
+                "delayed": False,
             }
         except Exception as e:
             log.warning("IBKR ticker(%s) failed: %s", symbol, e)
