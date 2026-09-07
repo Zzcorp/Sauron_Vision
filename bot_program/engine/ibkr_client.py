@@ -73,17 +73,66 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 
-# Try to import ib_insync, but never fail at import time. The platform must
-# work without it — we only need it when a user actually wires their IBKR
-# credentials AND TWS is running.
-try:  # pragma: no cover — import behaviour is environment-specific
-    import ib_insync as _ib  # type: ignore
-    _IB_AVAILABLE = True
-except Exception as _ib_import_err:  # pragma: no cover
-    _ib = None
-    _IB_AVAILABLE = False
-    log.info("ib_insync not installed (%s) — IBKRTrader will degrade to stubs.",
-             _ib_import_err)
+def _ensure_event_loop() -> None:
+    """Give this thread an asyncio loop if it has none.
+
+    ib_insync drives its socket from the thread's event loop. A Celery
+    prefork child and a Django request thread both start without one, and
+    without this the very first connect raised before any socket I/O —
+    the failure the HQ ping and the sync beat each had to guard against
+    on their own. One place now.
+
+    DEFINED ABOVE THE IMPORT ON PURPOSE. See `_try_import_ib`.
+    """
+    import asyncio
+    import warnings
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+
+def _try_import_ib():
+    """Import ib_insync with a loop already in place, or return None.
+
+    ib_insync calls `asyncio.get_event_loop()` AT IMPORT TIME, so the import
+    itself fails in a thread that has no loop — and it raises RuntimeError,
+    not ImportError. This module's import guard caught that and recorded
+    "ib_insync not installed", which was false and, worse, PERMANENT: the
+    flag was a module global set once, so the first unlucky thread poisoned
+    the entire process until it restarted.
+
+    That is what an operator hit for a whole afternoon. Daphne runs a sync
+    view in a ThreadPoolExecutor worker with no event loop; the manual-lane
+    arming button was the first thing in that web process to touch this
+    module; the import failed with
+
+        There is no current event loop in thread 'ThreadPoolExecutor-33_0'
+
+    and from then on every IBKR call from the web container degraded to a
+    stub. The button reported "LIVE route unavailable — credentials missing,
+    broker library absent, or the account disconnected" against a funded,
+    logged-in, healthy Gateway, with the library installed and working — and
+    a shell in the SAME container routed the same symbol to a live socket
+    seconds later, because `manage.py shell` runs on the main thread.
+    """
+    _ensure_event_loop()
+    try:  # pragma: no cover — import behaviour is environment-specific
+        import ib_insync as mod  # type: ignore
+        return mod
+    except Exception as err:  # pragma: no cover
+        log.info("ib_insync unavailable (%s) — IBKRTrader will degrade to "
+                 "stubs. This is RETRIED on the next is_ibkr_available().",
+                 err)
+        return None
+
+
+# Never fails at import time: the platform must work without ib_insync, since
+# it is only needed once a user has wired IBKR credentials AND TWS is running.
+_ib = _try_import_ib()
+_IB_AVAILABLE = _ib is not None
 
 
 # IB bar size codes — Binance kline interval → IBKR bar size string.
@@ -119,27 +168,24 @@ def purpose_client_id(base, purpose: str, slot: int = 0) -> int:
     return n
 
 
-def _ensure_event_loop() -> None:
-    """Give this thread an asyncio loop if it has none.
-
-    ib_insync drives its socket from the thread's event loop. A Celery
-    prefork child and a Django request thread both start without one, and
-    without this the very first connect raised before any socket I/O —
-    the failure the HQ ping and the sync beat each had to guard against
-    on their own. One place now.
-    """
-    import asyncio
-    import warnings
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            asyncio.get_event_loop()
-    except RuntimeError:
-        asyncio.set_event_loop(asyncio.new_event_loop())
-
-
 def is_ibkr_available() -> bool:
-    """True when `ib_insync` is importable. Does NOT check TWS connectivity."""
+    """True when `ib_insync` is importable. Does NOT check TWS connectivity.
+
+    RETRIES a failed import instead of trusting a flag set once, because the
+    thing that fails the import is a property of the CALLING THREAD, not of
+    the installation: no event loop, no import. The first thread to touch
+    this module in a Daphne process is a pool worker without one, and a
+    module global set at that moment condemned every later request — on any
+    thread, forever — to a paper stub.
+
+    Cheap: Python caches the module in sys.modules, so a retry after the loop
+    exists is a dict lookup, and a genuinely absent library re-raises the
+    same ImportError each time.
+    """
+    global _ib, _IB_AVAILABLE
+    if not _IB_AVAILABLE:
+        _ib = _try_import_ib()
+        _IB_AVAILABLE = _ib is not None
     return _IB_AVAILABLE
 
 
@@ -240,7 +286,7 @@ class IBKRTrader:
 
     @staticmethod
     def available() -> bool:
-        return _IB_AVAILABLE
+        return is_ibkr_available()
 
     def is_connected(self) -> bool:
         """True iff an API session is up right now — asks the socket, not
@@ -259,7 +305,7 @@ class IBKRTrader:
         the session (its nightly restart, a re-login, an operator kill);
         backs off for CONNECT_BACKOFF_S after a failure.
         """
-        if not _IB_AVAILABLE:
+        if not is_ibkr_available():
             return False
         if self._ib is not None and self._connected:
             if self.is_connected():
@@ -314,7 +360,7 @@ class IBKRTrader:
     # ── duck-typed broker interface ───────────────────────────────────────
 
     def ping(self) -> bool:
-        if not _IB_AVAILABLE:
+        if not is_ibkr_available():
             return False
         return self._connect() and bool(self._ib and self._ib.isConnected())
 
@@ -1768,7 +1814,7 @@ class IBKRTrader:
           1. Instrument.metadata["ibkr"] explicit sec_type → authoritative.
           2. Symbol-pattern heuristic — 6-letter alpha → Forex; else Stock SMART/USD.
         """
-        if not _IB_AVAILABLE:
+        if not is_ibkr_available():
             return None
 
         meta = _ibkr_meta_for(symbol)
