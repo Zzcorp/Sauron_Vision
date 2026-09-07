@@ -290,12 +290,27 @@ daily after. Which kind decides whether this can run unattended:
 * **Paper** — a separate paper username has NO second factor and logs in
   headless. Prove the whole chain on 4004 first.
 
-**Switching to the push, start to finish.** Activate IB Key in the IBKR
-Mobile app: log in there (this kicks a running Gateway — fine, you are
-about to re-login anyway), Menu → Two-Factor Authentication / Secure
-Login System → activate IB Key, and follow its verification. KEEP SMS
-enrolled as the backup — losing the phone must not mean losing the
-account. With both devices enrolled, the Gateway's login shows a device
+**Switching to the push, start to finish.** THERE IS NO SETTINGS MENU FOR
+THIS, which is the thing worth knowing: an earlier version of this file said
+"Menu → Two-Factor Authentication", an operator hunted for it, and it does
+not exist. Activation happens on the app's LOGIN SCREEN, or by QR code from
+the portal. Either route logs you into the app, which kicks a running
+Gateway — fine, you are about to re-login anyway.
+
+*From the app, no portal needed:* open IBKR Mobile → on the login screen tap
+**I Have an Account** → **Register Two-Factor** → username and password →
+Continue → pick the phone number → **Get Activation SMS** → enter the token
+that arrives → create a PIN (Android) or confirm with Face ID / passcode
+(iPhone) → Done.
+
+*From the portal:* log in at interactivebrokers.com/sso/Login → **user icon**
+→ Settings → Security → **Secure Login System** → the button reads
+**Complete**, not "IB Key" → scan the QR code it shows with the phone's
+camera → allow notifications → create the PIN.
+
+Notifications must be enabled for IBKR Mobile, and the phone must be able to
+receive an SMS: that is how the activation token arrives. KEEP SMS enrolled
+as the backup — losing the phone must not mean losing the account. With both devices enrolled, the Gateway's login shows a device
 list, and the stack auto-selects `IBKR_TWOFA_DEVICE` (default `IB Key` —
 override in `.env` only if IBKR spells your device differently; the value
 must match the list exactly). A missed push re-prompts rather than giving

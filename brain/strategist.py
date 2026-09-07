@@ -116,16 +116,60 @@ def _build_strategist_snapshot() -> dict:
     snap["recent_resolved_hypotheses"] = resolved
 
     # Per-agent trust scores so the Strategist can weight the graph properly.
-    agents = (Hypothesis.objects.values_list("source_agent", flat=True)
-              .distinct())
+    agents = [a for a in (Hypothesis.objects
+                          .values_list("source_agent", flat=True)
+                          .distinct()) if a]
     trust = {}
     for a in agents:
-        if not a:
-            continue
         score = agent_trust_score(a)
         if score is not None:
             trust[a] = score
     snap["agent_trust_scores"] = trust
+
+    # WHAT THE SCORE IS COMPUTED OVER. The number alone invites a causal
+    # story, and on 2026-09-07 the briefing told its operator that
+    # sauron_mind's 0.0 was "because every one of its last 30 hypotheses
+    # graded unresolvable, not wrong" — and therefore to trust the diagnosis
+    # and discount the confidence.
+    #
+    # The code says the opposite. `agent_trust_score` excludes UNRESOLVABLE
+    # and PENDING and returns None when nothing is left, and the loop above
+    # OMITS a None. So a printed 0.0 cannot come from unresolvable claims: it
+    # requires resolved ones with a Brier at or above 0.5 — confident misses
+    # on claims that did grade. The advice was exactly inverted, on a number
+    # the model had no way to interpret.
+    #
+    # It had both halves in front of it (a 0.0 here, thirty unresolvable rows
+    # in recent_resolved_hypotheses) and stitched a relation between them that
+    # does not exist. Same failure the age labels fixed for staleness: give a
+    # model a bare number and it will explain it.
+    basis = {}
+    for a in agents:
+        rows = (Hypothesis.objects.filter(source_agent=a)
+                .exclude(outcome=Hypothesis.OUTCOME_PENDING)
+                .values_list("outcome", flat=True))
+        counts = {}
+        for outcome in rows:
+            counts[outcome] = counts.get(outcome, 0) + 1
+        unresolvable = counts.get(Hypothesis.OUTCOME_UNRESOLVABLE, 0)
+        graded = sum(n for o, n in counts.items()
+                     if o != Hypothesis.OUTCOME_UNRESOLVABLE)
+        basis[a] = {
+            "graded_n": graded,
+            "unresolvable_n": unresolvable,
+            "pending_n": Hypothesis.objects.filter(
+                source_agent=a, outcome=Hypothesis.OUTCOME_PENDING).count(),
+            "in_trust_score": a in trust,
+        }
+    snap["agent_trust_basis"] = basis
+    snap["agent_trust_note"] = (
+        "agent_trust_scores is 1 - 2*Brier over GRADED claims only. "
+        "UNRESOLVABLE and PENDING are excluded, and an agent with nothing "
+        "graded is ABSENT from the map rather than scored 0. So a score of "
+        "0.0 means confident MISSES on claims that did resolve — it can "
+        "never mean 'unresolvable'. Read graded_n in agent_trust_basis "
+        "before explaining any score, and if graded_n is small say so "
+        "instead of drawing a conclusion from it.")
 
     # Active pending hypotheses (the open bets).
     pending = list(Hypothesis.objects
@@ -186,6 +230,13 @@ class StrategistAgent(BaseAgent):
             "one. Never present a figure from an aged row as the current "
             "tape, and if the freshest input is hours rather than minutes "
             "old, say so in the outlook and lower your confidences.\n\n"
+            "TRUST SCORES ARE NOT SELF-EXPLANATORY either. Read "
+            "`agent_trust_note` and `agent_trust_basis` before you say "
+            "anything about why an agent's score is what it is. A score of "
+            "0.0 is confident MISSES on claims that resolved; it is never "
+            "'unresolvable', because unresolvable claims are excluded and an "
+            "agent with nothing graded is absent from the map entirely. Do "
+            "NOT invent a cause for a number from other numbers near it.\n\n"
             "Your job:\n"
             "1. Outlook — narrate the *current* read in plain English. If "
             "regime shifted, say so. If the brain has been wrong (low trust "

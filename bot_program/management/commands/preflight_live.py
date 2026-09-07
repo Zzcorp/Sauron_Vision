@@ -267,22 +267,65 @@ class Command(BaseCommand):
                         blockers.append(f"config {cfg.id} ({cfg.name}) is LIVE "
                                         f"and enabled with no symbols")
 
-            # ── 5. fuel for the armed ones ──────────────────────────────
+            # ── 5. fuel AND whether one unit even fits ──────────────────
+            #
+            # CAN THIS POOL PLACE AN ORDER AT ALL. The pool-vs-account check
+            # above catches a pool that is too BIG. Nothing caught the other
+            # end, and the other end fails silently: sizing multiplies the
+            # pool by a risk fraction, divides by the stop distance, and a
+            # result under one unit becomes zero. `stock_bot._whole_units`
+            # says so in its own docstring — "int() truncation is why a live
+            # $10,000 config at 2% could not buy a $201 stock ... a zero qty
+            # exits the entry path with no log line."
+            #
+            # And before truncation there is the notional cap: 20% of the pool
+            # for everything except forex. A 500-unit pool can therefore hold
+            # at most 100 of notional, which forbids ONE share of any
+            # megacap — so an operator can arm a config, watch it tick
+            # forever, and never learn that the arithmetic settled it in
+            # advance. Checked here against the newest close, which is the
+            # same number sizing will see.
             armed = [c for c in live if c.enabled]
             if armed:
-                w(f"\n5. FUEL FOR ARMED LIVE CONFIGS — {user.username}")
+                w(f"\n5. FUEL AND SIZE FOR ARMED LIVE CONFIGS — "
+                  f"{user.username}")
+                from bot_program.asset_engine.sizing import (
+                    max_notional_fraction)
                 for cfg in armed:
+                    try:
+                        pool = float(cfg.capital or 0)
+                    except (TypeError, ValueError):
+                        pool = 0.0
+                    cap_frac = max_notional_fraction(cfg, cfg.asset_class)
+                    ceiling = pool * cap_frac
+                    w(f"   [{cfg.id}] {cfg.name} — pool {pool:,.0f}, notional "
+                      f"ceiling {ceiling:,.0f} ({cap_frac:.0%})")
                     for sym in list(cfg.symbols or [])[:per]:
-                        newest = (PriceData.objects
-                                  .filter(instrument__symbol=sym,
-                                          timeframe="4h")
-                                  .order_by("-timestamp")
-                                  .values_list("timestamp", flat=True)
-                                  .first())
-                        w(f"   {sym:<12} newest 4h bar {_age(newest, now)}")
+                        row = (PriceData.objects
+                               .filter(instrument__symbol=sym,
+                                       timeframe="4h")
+                               .order_by("-timestamp")
+                               .values("timestamp", "close")
+                               .first())
+                        newest = row["timestamp"] if row else None
+                        price = float(row["close"] or 0) if row else 0.0
+                        note = ""
+                        if price > 0 and ceiling > 0 and price > ceiling:
+                            note = (f"  ← ONE UNIT ({price:,.2f}) EXCEEDS THE "
+                                    f"CEILING")
+                        w(f"   {sym:<12} newest 4h bar {_age(newest, now)}"
+                          f"{note}")
                         if newest is None:
                             blockers.append(f"{sym} has no 4h bars — an armed "
                                             f"live bot cannot form a decision")
+                        elif note:
+                            blockers.append(
+                                f"config {cfg.id} ({cfg.name}): one unit of "
+                                f"{sym} costs {price:,.2f} and the notional "
+                                f"ceiling is {ceiling:,.0f} "
+                                f"({cap_frac:.0%} of a {pool:,.0f} pool) — "
+                                f"sizing rounds to zero and the bot will tick "
+                                f"forever without opening anything")
 
             # ── 6. the PIN ──────────────────────────────────────────────
             prof = getattr(user, "trader_profile", None)

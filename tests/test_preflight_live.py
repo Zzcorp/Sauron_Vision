@@ -344,6 +344,77 @@ class ArmedConfigsMustHaveFuelTests(TestCase):
         self.assertNotIn("has no 4h bars", out)
 
 
+class CanThisPoolEvenPlaceAnOrderTests(TestCase):
+    """The pool-vs-account check catches a pool that is too BIG. Nothing
+    caught the other end, and the other end fails SILENTLY.
+
+    Sizing multiplies the pool by a risk fraction, divides by the stop
+    distance, and a result under one unit becomes zero — `_whole_units` says
+    so itself: "int() truncation is why a live $10,000 config at 2% could not
+    buy a $201 stock ... a zero qty exits the entry path with no log line."
+    And before truncation there is the notional cap: 20% of the pool for
+    everything but forex. A 500-unit pool holds at most 100 of notional, which
+    forbids ONE share of any megacap.
+
+    So an operator can arm a config, watch it tick forever, and never learn
+    the arithmetic settled it in advance. That is the state this deployment
+    was in: a 500 EUR account against seven megacaps.
+    """
+
+    def _armed(self, *, capital, price, asset_class="stock", symbol="AAPL"):
+        u = _user()
+        _acct(u, equity=100000, currency="USD",
+              **{f"is_primary_for_{'stocks' if asset_class == 'stock' else asset_class}": True})
+        _pin(u)
+        cfg = _cfg(u, capital=str(capital), base_currency="USD",
+                   asset_class=asset_class, symbols=(symbol,))
+        inst = _bars(symbol, age_hours=1.0)
+        from market_data.models import PriceData
+        PriceData.objects.filter(instrument=inst, timeframe="4h").update(
+            close=price)
+        return u, cfg
+
+    def test_a_pool_too_small_for_one_share_is_a_blocker(self):
+        self._armed(capital=500, price=230)      # ceiling 100 < 230
+        out = _run()
+        self.assertIn("ONE UNIT", out)
+        self.assertIn("rounds to zero", out)
+        self.assertIn("tick forever", out)
+
+    def test_the_ceiling_and_the_price_are_both_named(self):
+        """An operator cannot act on "too small" — they need the two numbers
+        to decide whether to fund the account or pick cheaper symbols."""
+        self._armed(capital=500, price=230)
+        out = _run()
+        self.assertIn("230", out)
+        self.assertIn("100", out)
+        self.assertIn("20%", out)
+
+    def test_a_pool_that_can_afford_a_unit_is_not_flagged(self):
+        self._armed(capital=5000, price=230)     # ceiling 1000 > 230
+        out = _run()
+        self.assertNotIn("ONE UNIT", out)
+
+    def test_forex_is_judged_on_its_own_cap(self):
+        """20% notional on an FX major is an economically meaningless
+        constraint — sizing sets that cap to 4.0 and this must use the same
+        number rather than a second opinion about leverage."""
+        self._armed(capital=500, price=1.08, asset_class="forex",
+                    symbol="EURUSD")
+        out = _run()
+        self.assertNotIn("ONE UNIT", out)
+
+    def test_a_disarmed_config_is_not_size_checked(self):
+        u = _user()
+        _acct(u, equity=100000, currency="USD")
+        _pin(u)
+        _cfg(u, capital="500", base_currency="USD", symbols=("AAPL",),
+             enabled=False)
+        _bars("AAPL")
+        out = _run()
+        self.assertNotIn("ONE UNIT", out)
+
+
 class TheRoutingIsCheckedTests(TestCase):
 
     def test_a_live_config_whose_class_ibkr_does_not_serve_is_flagged(self):
