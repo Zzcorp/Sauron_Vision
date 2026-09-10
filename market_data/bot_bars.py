@@ -140,7 +140,8 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
     """Fetch and persist bars for every symbol on one bot config."""
     from instruments.models import Instrument
 
-    out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0}
+    out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0,
+           "fallback": 0}
     for symbol in (cfg.symbols or []):
         inst = Instrument.objects.filter(symbol=symbol).first()
         if inst is None:
@@ -168,6 +169,7 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
         out["symbols"] += 1
         fetch_symbol = _venue_symbol(client, symbol)
         for interval in intervals:
+            row_source = source
             try:
                 rows = client.klines(fetch_symbol, interval=interval,
                                      limit=limit)
@@ -175,11 +177,43 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                 logger.warning("[bars] klines(%s, %s) failed: %s",
                                symbol, interval, e)
                 out["errors"] += 1
-                continue
-            written, skipped = _upsert_rows(inst, interval, rows, source)
+                rows = []
+            if not rows and not getattr(client, "_sv_public_feed", False):
+                # THE VENUE IS MUTE, NOT THE MARKET. An execution venue
+                # that answers a bar request with nothing — a historical
+                # farm that never replies (the IBKR forex case that aged
+                # every pair's bars 36 hours), a pacing refusal, a symbol
+                # it will not serve history for — must not leave the bot
+                # blind when the same candles are one keyless request
+                # away. The rows are tagged as the public feed's, so a
+                # bar's provenance still says where it came from.
+                rows, row_source = _fallback_rows(cfg, symbol, interval,
+                                                  limit)
+                if rows:
+                    out["fallback"] += 1
+                    logger.warning("[bars] %s %s: %s returned no bars — "
+                                   "written from the public feed instead",
+                                   symbol, interval, source)
+            written, skipped = _upsert_rows(inst, interval, rows, row_source)
             out["bars"] += written
             out["skipped"] += skipped
     return out
+
+
+def _fallback_rows(cfg, symbol, interval, limit) -> "tuple[list, str]":
+    """Bars from the keyless feed when the venue gave none, or ([], '')."""
+    feed = _public_market_data_client(cfg)
+    if feed is None:
+        return [], ""
+    try:
+        rows = feed.klines(symbol, interval=interval, limit=limit) or []
+    except Exception as e:  # noqa: BLE001 — the fallback must not raise
+        logger.warning("[bars] public feed klines(%s, %s) failed: %s",
+                       symbol, interval, e)
+        return [], ""
+    tag = (type(feed).__name__.replace("Feed", "").replace("Client", "")
+           .lower() or "public") + "_public"
+    return rows, tag
 
 
 # Starred instruments beyond the fleet get bars too, capped per pass —

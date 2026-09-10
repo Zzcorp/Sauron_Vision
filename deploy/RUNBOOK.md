@@ -481,6 +481,16 @@ preset travels with the login; if the Gateway keeps reporting DAY after the
 change, the preset is not the only source and IBKR support is the next call.
 Until it is fixed, every live entry is booked unprotected and bot-managed.
 
+**Bars survive a mute venue.** Bars come from the venue a config fills on,
+and a venue can go quiet without an error — an IBKR historical request that
+never returns, a pacing refusal, a symbol it serves no history for. Every
+IBKR request is capped at half a minute, and a symbol the venue gave no bars
+for is written from the keyless public feed instead, tagged `*_public` so
+`/forensics/` still says where a candle came from. A fresh instrument starts
+with too little daily history for any evaluator; give it a year at once:
+`./deploy/dc exec web python manage.py backfill_bars --from-configs
+--intervals 1d,4h --bars 300`, then the indicator recalculation it prints.
+
 **Watch `/health/` and `/forensics/`** rather than tailing logs: the first
 answers "is the machine running", the second answers "why did it do that".
 

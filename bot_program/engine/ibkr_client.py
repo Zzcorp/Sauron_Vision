@@ -283,6 +283,17 @@ class IBKRTrader:
     # How long a failed connect silences further attempts on this trader.
     CONNECT_BACKOFF_S = 30.0
 
+    # How long a blocking request may wait for the Gateway's answer.
+    # ib_insync's default is 0 — wait FOREVER — and on 2026-09-10 a
+    # reqHistoricalData for EURUSD did exactly that: the Gateway was logged
+    # in, the socket was open, contracts qualified, and the historical
+    # request never came back. No error, no log line, a bar writer that
+    # simply stopped at the first forex symbol while the pairs' bars aged
+    # 36 hours in the middle of a trading week. A request the Gateway has
+    # not answered in half a minute is not going to be answered; raising
+    # turns the silence into a warning the caller can act on.
+    REQUEST_TIMEOUT_S = 30.0
+
     # ── connection management ─────────────────────────────────────────────
 
     @staticmethod
@@ -322,6 +333,7 @@ class IBKRTrader:
         try:
             _ensure_event_loop()
             ib = _ib.IB()
+            ib.RequestTimeout = self.REQUEST_TIMEOUT_S
             ib.connect(self.host, self.port, clientId=self.client_id,
                        timeout=self.timeout, readonly=False)
             self._ib = ib
