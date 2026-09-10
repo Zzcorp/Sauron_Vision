@@ -489,8 +489,10 @@ floor the account buys stocks and ETFs with settled cash **in the
 instrument's own currency**, and nothing else; convert at IBKR first
 (Client Portal → Transfer & Pay → Convert Currency). No forex, no CFDs, no
 futures until the account is funded past the floor. `preflight_live` reads
-the floor off the equity reading and names the configs and symbols it
-touches; leverage is not a setting that gets around it.
+the floor off the equity reading, blocks armed configs in margin classes,
+and lists the symbols quoted in another currency as worth reading — the
+reading is the base currency and cannot see cash already converted.
+Leverage is not a setting that gets around any of this.
 
 **Bars survive a mute venue.** Bars come from the venue a config fills on,
 and a venue can go quiet without an error — an IBKR historical request that

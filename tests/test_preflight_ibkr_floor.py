@@ -115,7 +115,9 @@ class TheFloorOnThePageTests(TestCase):
         self.assertIn("Error 201", out)
 
     def test_a_usd_etf_on_a_eur_account_needs_a_conversion_first(self):
-        """The GLDM case, named before the click."""
+        """The GLDM case, named before the click — as WORTH READING, not
+        a blocker: the equity reading is the base currency and cannot see
+        USD cash the operator may already have converted."""
         u = _user()
         _acct(u, equity=500, currency="EUR")
         _instrument("GLDM", "etf", "USD")
@@ -123,6 +125,9 @@ class TheFloorOnThePageTests(TestCase):
         out = _run()
         self.assertIn("GLDM (USD)", out)
         self.assertIn("Convert EUR", out)
+        self.assertIn("cannot see cash by currency", out)
+        worth = out.split("WORTH READING:")[1] if "WORTH READING:" in out else ""
+        self.assertIn("GLDM (USD)", worth)
 
     def test_same_currency_cash_buying_is_not_flagged(self):
         u = _user()

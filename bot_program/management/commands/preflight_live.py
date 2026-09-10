@@ -283,17 +283,23 @@ class Command(BaseCommand):
                     foreign = _foreign_currency_symbols(
                         live_all, reading["currency"])
                     if foreign:
+                        # WORTH READING, not a verdict: the equity reading
+                        # is the account's BASE currency and says nothing
+                        # about cash held in others. A EUR account that has
+                        # already converted 400 into USD buys GLDM outright,
+                        # and this command cannot see that from here.
                         shown = ", ".join(foreign[:8])
-                        blockers.append(
+                        warnings.append(
                             f"{user.username}: {shown} trade in a currency "
-                            f"the account does not hold "
-                            f"({reading['currency']}) — buying them borrows "
-                            f"that currency, a loan is margin, and IBKR "
-                            f"refuses margin under "
+                            f"other than the account's base "
+                            f"({reading['currency']}) — unless that cash is "
+                            f"already held, buying them borrows it, a loan "
+                            f"is margin, and IBKR refuses margin under "
                             f"{IBKR_MARGIN_FLOOR_USD:,.0f} USD (Error 201 on "
                             f"GLDM, 2026-09-10). Convert "
                             f"{reading['currency']} into the instrument's "
-                            f"currency at IBKR first")
+                            f"currency at IBKR first; this reading cannot "
+                            f"see cash by currency")
                     w(f"   any symbol quoted in another currency than "
                       f"{reading['currency']} needs that currency converted "
                       f"at IBKR first — the manual lane included")
