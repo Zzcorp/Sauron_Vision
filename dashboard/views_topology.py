@@ -88,8 +88,9 @@ WIRING = {
     "scraper_tradingview":  {"task": "scraping.tasks.fetch_tradingview_ideas", "layer": "ingest", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_sentiment_agg", "pipeline_opportunity_scanner"]},
     "scraper_calendar":     {"task": "scraping.tasks.check_economic_calendar", "layer": "ingest", "writes": ["EconomicEvent"], "feeds": ["execute_bots", "pipeline_opportunity_scanner"],
                              "note": "Needs FMP_API_KEY. While this table is empty the bot's earnings blackout cannot fire."},
-    "broker_account_sync":  {"task": "bot_program.tasks.sync_broker_account", "layer": "ingest", "writes": ["IBKRAccount.last_equity", "IBKRAccount.broker_positions"], "feeds": [],
-                             "note": "The broker's own NetLiquidation and holdings, cached every 15 min for the 'as IBKR sees it' cells. Feeds pages, not components — deliberately: nothing downstream divides by it, because a display showing broker truth over gates using platform truth is the failure this platform is built to avoid."},
+    "broker_account_sync":  {"task": "bot_program.tasks.sync_broker_account", "layer": "ingest", "writes": ["IBKRAccount.last_equity", "IBKRAccount.broker_positions"], "feeds": ["execute_bots"],
+                             "pages": ["/admin-dashboard/", "/asset-bots/"],
+                             "note": "The broker's own NetLiquidation and holdings, cached every 15 min. This table once said nothing downstream divides by it; since pools can follow the account that is false, and traced: every follower's capital — the denominator of its whole risk stack — is this reading times its share (tasks._follow_the_account), the entry path refuses to open on a follower whose reading is stale (capital_truth.tracking_freeze_reason), and arming measures the pool against it. The 'as IBKR sees it' cells read it too."},
     "scraper_sec":          {"task": "scraping.tasks.fetch_sec_filings", "cadence": 86400, "layer": "ingest", "writes": ["InstitutionalFiling"], "feeds": ["pipeline_opportunity_scanner"],
                              "note": "Form-4 issuers resolve to catalogue instruments through SEC's CIK map, so insider rows reach the evaluator. 13F rows stay filer-level (the holdings live in an attachment this scraper does not follow) and are unlinked by design."},
     "scraper_cot":          {"task": "scraping.tasks.fetch_cot_reports", "cadence": 604800, "layer": "ingest", "writes": ["COTReport"], "feeds": ["pipeline_opportunity_scanner"],
@@ -114,7 +115,8 @@ WIRING = {
     "agent_strategy":               {"task": "ai_agents.tasks.review_active_strategies", "layer": "eye", "writes": ["StrategyAdjustment"], "feeds": [],
                                      "note": "Needs ANTHROPIC_API_KEY. Its adjustments are written and rendered nowhere."},
     "agent_anomaly":                {"task": "ai_agents.tasks.run_anomaly_detection", "layer": "eye", "writes": ["AgentTask"], "feeds": [],
-                                     "note": "Needs ANTHROPIC_API_KEY. Produces prose for a human, nothing machine-readable."},
+                                     "pages": ["/", "/ai/"],
+                                     "note": "Needs ANTHROPIC_API_KEY. Prose for a human, read on the dashboard's recent AI tasks and /ai/; nothing machine-readable, by design."},
 
     # ── gate ──────────────────────────────────────────────────────────
     "kill_switch":              {"layer": "gate", "writes": ["forced closes"], "feeds": ["execute_bots"],
@@ -135,7 +137,8 @@ WIRING = {
     "pipeline_ai_decay":        {"task": "ai_agents.tasks.investigate_decaying_rules", "cadence": 86400, "layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_actuator"],
                                  "note": "Needs ANTHROPIC_API_KEY."},
     "pipeline_ai_journal":      {"layer": "learn", "writes": ["Signal.journal"], "feeds": [],
-                                 "note": "Event-driven from signal grading rather than scheduled, which is correct."},
+                                 "pages": ["/ai-journal/"],
+                                 "note": "Event-driven from signal grading rather than scheduled, which is correct. Read by the operator on /ai-journal/."},
     "pipeline_evolution":       {"task": "signals.tasks.propose_strategy_evolutions", "cadence": 86400, "layer": "learn",
                                  "writes": ["RuleMutation", "RuleControl"],
                                  "feeds": ["pipeline_promotion"],
@@ -143,10 +146,14 @@ WIRING = {
                                          "rules (daily, evidence-gated) and forks "
                                          "approved ones into RESEARCH."},
     "pipeline_pattern_miner":   {"task": "signals.tasks.mine_patterns", "cadence": 604800, "layer": "learn", "writes": [], "feeds": ["pipeline_opportunity_scanner"]},
-    "agent_daily_briefing":     {"task": "ai_agents.tasks.generate_daily_briefing", "cadence": 86400, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
-    "agent_weekly_review":      {"task": "ai_agents.tasks.generate_weekly_review", "cadence": 604800, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
-    "agent_optimization":       {"task": "ai_agents.tasks.optimize_strategies", "cadence": 604800, "layer": "learn", "writes": ["StrategyAdjustment"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
-    "agent_monday_plan":        {"task": "ai_agents.tasks.generate_monday_plan", "cadence": 604800, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
+    "agent_daily_briefing":     {"task": "ai_agents.tasks.generate_daily_briefing", "cadence": 86400, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "pages": ["/", "/ai/"],
+                                 "note": "Needs ANTHROPIC_API_KEY. Written for the operator, read on the dashboard and /ai/."},
+    "agent_weekly_review":      {"task": "ai_agents.tasks.generate_weekly_review", "cadence": 604800, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "pages": ["/", "/ai/"],
+                                 "note": "Needs ANTHROPIC_API_KEY. Written for the operator, read on the dashboard and /ai/."},
+    "agent_optimization":       {"task": "ai_agents.tasks.optimize_strategies", "cadence": 604800, "layer": "learn", "writes": ["StrategyAdjustment"], "feeds": [],
+                                 "note": "Needs ANTHROPIC_API_KEY. Writes the same StrategyAdjustment table as agent_strategy, which nothing reads and no page renders — an honest orphan."},
+    "agent_monday_plan":        {"task": "ai_agents.tasks.generate_monday_plan", "cadence": 604800, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "pages": ["/", "/ai/"],
+                                 "note": "Needs ANTHROPIC_API_KEY. Written for the operator, read on the dashboard and /ai/."},
 }
 
 # Components whose only job is to be a mode flag on another component. Drawn as
@@ -392,6 +399,10 @@ def build_topology(user):
             "enabled": comp.is_enabled,
             "writes": wiring["writes"],
             "feeds": wiring["feeds"],
+            # Pages where a PERSON reads what this writes. A component with
+            # readers and no machine consumer is not an orphan; it is a
+            # briefing.
+            "pages": wiring.get("pages", []),
             "last_run": _fmt_age(_age(comp.last_run_at)),
             # The schedule rides with the node so the inspector can say WHY a
             # 3-day-old weekly component is fine and a 10-minute-old poller is
@@ -564,13 +575,26 @@ def build_topology(user):
         # thing that 500s over a state nobody added to the vocabulary.
         counts[n["state"]] = counts.get(n["state"], 0) + 1
 
+    def _unconsumed(n):
+        return (n["kind"] == "component"
+                and not any(e["from"] == n["key"] for e in edges))
+
+    # Three kinds of "nothing consumes it", and the map used to name one.
+    # An orphan writes for nobody: no node reads it, no page renders it —
+    # agent_strategy's adjustments, the pre-trade gate the fleet never
+    # consults. A component with `pages` writes for the OPERATOR: the
+    # briefings, the anomaly scan, the journal. Calling those orphans put
+    # every human-facing agent under "producing nothing anything reads"
+    # for as long as the map existed, and hid the two real findings among
+    # seven false ones.
     orphans = [n["key"] for n in nodes
-               if n["kind"] == "component"
-               and not any(e["from"] == n["key"] for e in edges)]
+               if _unconsumed(n) and not n.get("pages")]
+    human_read = [{"key": n["key"], "pages": n["pages"]}
+                  for n in nodes if _unconsumed(n) and n.get("pages")]
 
     return {
         "layers": LAYERS, "nodes": nodes, "edges": edges,
-        "counts": counts, "orphans": orphans,
+        "counts": counts, "orphans": orphans, "human_read": human_read,
         "state_meta": STATE_META,
         # UNKNOWN earns a legend chip only when something actually is unknown;
         # a permanent 0 next to the six real states teaches nothing.

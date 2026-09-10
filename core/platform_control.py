@@ -121,7 +121,7 @@ DEFAULT_COMPONENTS = [
 
     # ── Phase 3 — AI operational ──────────────────────────────
     {"key": "feature_ai_pretrade_gate", "name": "AI Pre-Trade Sanity Gate",
-     "description": "Claude reviews each proposed trade before opening (regime/news/decay). Slow & costs tokens — leave OFF unless you want it.",
+     "description": "Claude reviews each proposed trade before opening (regime/news/decay) — for the LEGACY crypto bot only, which is not scheduled; the multi-asset bots never consult it. Slow & costs tokens. Leave OFF.",
      "category": "agent"},
     {"key": "pipeline_ai_journal", "name": "AI Signal Journal",
      "description": "Auto-generate journal entry when a signal closes with |R| ≥ 0.5",
