@@ -42,6 +42,59 @@ from django.core.management.base import BaseCommand
 # the session is over.
 BROKER_READING_STALE_HOURS = 2.0
 
+# IBKR's own floor, in IBKR's own words (Error 201, 2026-09-10, on the first
+# GLDM order from a 500 EUR account): "MINIMUM OF 2000 USD (OR EQUIVALENT IN
+# OTHER CURRENCIES) IS REQUIRED IN ORDER TO PURCHASE ON MARGIN, SELL SHORT,
+# TRADE CURRENCY OR FUTURE." Below it an account buys stocks and ETFs with
+# settled cash IN THE INSTRUMENT'S CURRENCY and does nothing else — and a
+# EUR balance buying a USD ETF is a USD loan, which is margin, which is how
+# a plain long on an 87-dollar ETF met this rule.
+IBKR_MARGIN_FLOOR_USD = 2000.0
+# Asset classes that are margin products at IBKR whatever the size: currency
+# (CASH and FX CFDs), futures, commodity CFDs.
+IBKR_FLOOR_CLASSES = {"forex", "futures", "commodity"}
+# Conservative BOUNDS on how many USD one unit has been worth this decade —
+# bounds, not rates. The platform converts nothing, by design; the floor is
+# read only when the answer is the same at both ends of the band, and is
+# called unsure otherwise.
+USD_PER_UNIT_BOUNDS = {
+    "USD": (1.0, 1.0), "EUR": (0.95, 1.30), "GBP": (1.05, 1.60),
+    "CHF": (0.95, 1.35), "CAD": (0.65, 0.90), "AUD": (0.55, 0.85),
+    "NZD": (0.50, 0.80), "JPY": (0.0055, 0.0120), "HKD": (0.12, 0.14),
+    "SGD": (0.68, 0.82),
+}
+
+
+def _ibkr_floor(value, currency) -> str:
+    """'below', 'above' or 'unsure' against IBKR's 2,000 USD floor."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return "unsure"
+    lo, hi = USD_PER_UNIT_BOUNDS.get((currency or "").upper(), (None, None))
+    if lo is None:
+        return "unsure"
+    if value * hi < IBKR_MARGIN_FLOOR_USD:
+        return "below"
+    if value * lo >= IBKR_MARGIN_FLOOR_USD:
+        return "above"
+    return "unsure"
+
+
+def _foreign_currency_symbols(configs, account_ccy) -> list:
+    """'GLDM (USD)' for every symbol an enabled live config trades in a
+    currency the account does not hold."""
+    from instruments.models import Instrument
+    want = (account_ccy or "").upper()
+    symbols = sorted({s for cfg in configs if cfg.enabled
+                      for s in (cfg.symbols or []) if s})
+    if not symbols or not want:
+        return []
+    rows = Instrument.objects.filter(symbol__in=symbols).values_list(
+        "symbol", "currency")
+    return [f"{sym} ({ccy})" for sym, ccy in rows
+            if ccy and ccy.upper() != want]
+
 
 def _age(dt, now):
     """Human age of a timestamp, or "never"."""
@@ -205,6 +258,58 @@ class Command(BaseCommand):
                     + f" (limit {BROKER_READING_STALE_HOURS:.0f}h) — the "
                     f"broker is not answering, whatever the connected flag "
                     f"says. Is the Gateway logged in?")
+
+            # ── IBKR's floor, read BEFORE the order rather than after ───
+            if reading is not None and reading["currency"]:
+                floor = _ibkr_floor(reading["value"], reading["currency"])
+                live_all = list(AssetBotConfig.objects.filter(
+                    user=user, mode="live"))
+                if floor == "below":
+                    w(f"   IBKR floor      BELOW {IBKR_MARGIN_FLOOR_USD:,.0f} "
+                      f"USD — cash purchases only, in the instrument's own "
+                      f"currency; no margin, no shorts, no currency, no "
+                      f"futures (IBKR refuses with Error 201)")
+                    for cfg in live_all:
+                        if cfg.enabled and cfg.asset_class in IBKR_FLOOR_CLASSES:
+                            blockers.append(
+                                f"config {cfg.id} ({cfg.name}) is LIVE and "
+                                f"armed for {cfg.asset_class}, a margin "
+                                f"product IBKR refuses under "
+                                f"{IBKR_MARGIN_FLOOR_USD:,.0f} USD of equity "
+                                f"(Error 201: currency, futures and CFDs need "
+                                f"the floor) — the account holds "
+                                f"{reading['value']:,.0f} "
+                                f"{reading['currency']}")
+                    foreign = _foreign_currency_symbols(
+                        live_all, reading["currency"])
+                    if foreign:
+                        shown = ", ".join(foreign[:8])
+                        blockers.append(
+                            f"{user.username}: {shown} trade in a currency "
+                            f"the account does not hold "
+                            f"({reading['currency']}) — buying them borrows "
+                            f"that currency, a loan is margin, and IBKR "
+                            f"refuses margin under "
+                            f"{IBKR_MARGIN_FLOOR_USD:,.0f} USD (Error 201 on "
+                            f"GLDM, 2026-09-10). Convert "
+                            f"{reading['currency']} into the instrument's "
+                            f"currency at IBKR first")
+                    w(f"   any symbol quoted in another currency than "
+                      f"{reading['currency']} needs that currency converted "
+                      f"at IBKR first — the manual lane included")
+                elif floor == "unsure":
+                    w(f"   IBKR floor      NEAR {IBKR_MARGIN_FLOOR_USD:,.0f} "
+                      f"USD — this platform converts nothing; check the "
+                      f"USD equivalent at IBKR before arming currency, "
+                      f"futures or CFDs")
+                    warnings.append(
+                        f"{user.username}: equity reads "
+                        f"{reading['value']:,.0f} {reading['currency']}, "
+                        f"near IBKR's {IBKR_MARGIN_FLOOR_USD:,.0f} USD "
+                        f"floor for margin, shorts, currency and futures")
+                else:
+                    w(f"   IBKR floor      above "
+                      f"{IBKR_MARGIN_FLOOR_USD:,.0f} USD")
 
             # ── 4. the live configs ─────────────────────────────────────
             live = list(AssetBotConfig.objects.filter(

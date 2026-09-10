@@ -481,6 +481,17 @@ preset travels with the login; if the Gateway keeps reporting DAY after the
 change, the preset is not the only source and IBKR support is the next call.
 Until it is fixed, every live entry is booked unprotected and bot-managed.
 
+**IBKR's 2,000 USD floor.** Under 2,000 USD of equity (or the equivalent)
+IBKR refuses margin, short sales, currency and futures — Error 201, in
+those words. That includes a plain long on a USD ETF from a EUR balance: the
+purchase borrows USD, a loan is margin, and the order is refused. Below the
+floor the account buys stocks and ETFs with settled cash **in the
+instrument's own currency**, and nothing else; convert at IBKR first
+(Client Portal → Transfer & Pay → Convert Currency). No forex, no CFDs, no
+futures until the account is funded past the floor. `preflight_live` reads
+the floor off the equity reading and names the configs and symbols it
+touches; leverage is not a setting that gets around it.
+
 **Bars survive a mute venue.** Bars come from the venue a config fills on,
 and a venue can go quiet without an error — an IBKR historical request that
 never returns, a pacing refusal, a symbol it serves no history for. Every
