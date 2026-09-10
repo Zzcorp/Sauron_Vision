@@ -32,8 +32,12 @@ Look for:
 - News/sentiment mismatches with price action
 
 Return JSON with:
-- anomalies: list of {symbol, type, description, severity (1-10), suggested_action}
+- anomalies: list of {symbol, type, description, severity (1-10), suggested_action,
+  expected_direction ("up" | "down" | "none" — where the symbol's price goes if the
+  anomaly resolves the way you expect), horizon_hours (integer, 4 to 168)}
 - market_stress_level: 1-10 overall market stress assessment
+Every anomaly with an expected_direction is graded against the price at its
+horizon; say "none" rather than guess.
 
 Respond ONLY with valid JSON."""
 

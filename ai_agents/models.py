@@ -185,6 +185,14 @@ class AgentPrediction(models.Model):
                               help_text="Granular correctness; for trade outcomes = realized_r.")
     evaluation_notes = models.TextField(blank=True)
 
+    # Direction calls (prediction_type="direction"): the price the claim was
+    # measured from and how far ahead it looks. Stored at registration so
+    # the grade is reproducible from the row alone — a call graded against
+    # a reference nobody wrote down is a grade nobody can check.
+    reference_price = models.DecimalField(max_digits=18, decimal_places=6,
+                                          null=True, blank=True)
+    horizon_hours = models.FloatField(null=True, blank=True)
+
     # Phase-6: ground-truth resolution
     expected_resolution_at = models.DateTimeField(null=True, blank=True, db_index=True,
                                                    help_text="Earliest time ground truth is expected.")

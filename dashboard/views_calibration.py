@@ -58,8 +58,16 @@ def calibration_dashboard(request):
         .order_by("-evaluated_at")[:30]
     )
     recent_pending = list(
-        AgentPrediction.objects.filter(was_correct__isnull=True)
+        AgentPrediction.objects.filter(was_correct__isnull=True,
+                                       evaluated_at__isnull=True)
         .order_by("expected_resolution_at")[:30]
+    )
+    # Every directional claim an agent made, with the price it was measured
+    # from and what the market said at the horizon: the ledger the operator
+    # reads to decide whose views to weight.
+    calls = list(
+        AgentPrediction.objects.filter(prediction_type="direction")
+        .order_by("-created_at")[:60]
     )
 
     context = {
@@ -70,5 +78,6 @@ def calibration_dashboard(request):
         "resolved_total": resolved_total,
         "recent_resolved": recent_resolved,
         "recent_pending": recent_pending,
+        "calls": calls,
     }
     return render(request, "dashboard/calibration.html", context)

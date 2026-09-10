@@ -41,14 +41,23 @@ class TheWiringTellsTheTruthTests(SimpleTestCase):
         self.assertEqual(WIRING["pipeline_ai_journal"]["pages"],
                          ["/ai-journal/"])
 
-    def test_unread_adjustments_stay_an_honest_finding(self):
+    def test_the_advisors_claims_are_graded_and_the_gate_stays_an_orphan(self):
+        """agent_strategy and agent_optimization used to be honest orphans:
+        a StrategyAdjustment table nothing read. Their proposals' legs are
+        now registered as direction calls, and the calibration grades them
+        — that edge is the only thing that reads them. The pre-trade gate
+        still gates nothing here."""
         from dashboard.views_topology import WIRING
-        for key in ("agent_strategy", "agent_optimization"):
-            self.assertEqual(WIRING[key]["feeds"], [], key)
-            self.assertFalse(WIRING[key].get("pages"), key)
+        for key in ("agent_strategy", "agent_optimization", "agent_anomaly",
+                    "agent_daily_briefing", "agent_weekly_review",
+                    "agent_monday_plan"):
+            self.assertIn("pipeline_calibration", WIRING[key]["feeds"], key)
+            self.assertIn("AgentPrediction", WIRING[key]["writes"], key)
         gate = WIRING["feature_ai_pretrade_gate"]
         self.assertEqual(gate["feeds"], [])
         self.assertFalse(gate.get("pages"))
+        self.assertEqual(WIRING["pipeline_calibration"]["writes"],
+                         ["AgentPrediction.was_correct"])
 
     def test_the_gate_switch_says_it_gates_nothing_here(self):
         from core.platform_control import DEFAULT_COMPONENTS
@@ -70,10 +79,14 @@ class TheMapSortsThemTests(TestCase):
         topo = build_topology(self.user)
         self.assertNotIn("broker_account_sync", topo["orphans"])
         self.assertNotIn("agent_daily_briefing", topo["orphans"])
-        self.assertIn("agent_strategy", topo["orphans"])
+        self.assertNotIn("agent_strategy", topo["orphans"])
         self.assertIn("feature_ai_pretrade_gate", topo["orphans"])
         readers = {h["key"]: h["pages"] for h in topo["human_read"]}
-        self.assertIn("/ai/", readers["agent_daily_briefing"])
+        # The journal writes for the operator and feeds no node: read by
+        # people. The briefing now ALSO feeds the calibration with its calls
+        # block, so it has an edge and leaves this list — which is the point.
+        self.assertIn("/ai-journal/", readers["pipeline_ai_journal"])
+        self.assertNotIn("agent_daily_briefing", readers)
         self.assertNotIn("broker_account_sync", readers)   # it has an edge
 
     def test_the_page_renders_both_lists(self):

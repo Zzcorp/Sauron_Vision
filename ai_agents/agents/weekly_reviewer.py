@@ -7,6 +7,10 @@ class WeeklyReviewerAgent(BaseAgent):
     default_tier = "deep"
 
     def get_system_prompt(self) -> str:
+        from ai_agents.calibration import CALLS_INSTRUCTION as _ci
+
+        def _calls_instruction():
+            return _ci
         return """You are the Weekly Reviewer for Sauron Vision.
 Every Saturday, you perform a deep analysis of the trading week.
 
@@ -19,7 +23,7 @@ Your review must cover:
 6. NEXT WEEK OUTLOOK: Key events, levels to watch, potential setups.
 7. RISK ASSESSMENT: Portfolio health, concentration risks, correlation concerns.
 
-Be thorough, analytical, and specific. Reference actual numbers and events."""
+Be thorough, analytical, and specific. Reference actual numbers and events.""" + _calls_instruction()
 
     def build_context(self, **kwargs) -> str:
         return f"""Weekly data for review:

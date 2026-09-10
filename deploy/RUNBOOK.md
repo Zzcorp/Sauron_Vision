@@ -501,6 +501,17 @@ fleet down without erasing traded history. The keyless feed now downloads
 one sized window per symbol per pass instead of two two-year ones, and
 breathes between symbols, so the default budget of 150 is safe.
 
+**No prose without a claim the platform can grade.** Every agent that
+talks about a symbol now registers a direction call — symbol, up or down,
+horizon, the price it was measured from: the strategy advisor's long/short
+legs, the anomaly scan's `expected_direction`, and the calls block each
+briefing ends with. The nightly calibration grades each call against the
+first bar at its horizon (flat is a miss; no bar within 48h is "ungraded",
+never "wrong"), and the trust score the strategist and the critic read is
+built from those grades. `/calibration/` shows the ledger: who called
+what, from which price, and what the market said. An agent whose views
+never reach the block has a trust score of nothing, which is the truth.
+
 **Pools are shares of the account.** A pool that follows the account takes
 a share of the broker's equity reading — an explicit percentage, or blank
 for automatic: followers without a number split what the explicit ones

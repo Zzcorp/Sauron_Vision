@@ -75,6 +75,34 @@
 </div>
 
 <div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Calls ledger — every directional claim, and what the market said</span></div>
+    {% if calls %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+      <thead><tr><th>Agent</th><th>Symbol</th><th>Call</th><th class="num">From</th><th class="num">Horizon</th><th>Deadline</th><th>Outcome</th><th class="num">Move</th></tr></thead>
+      <tbody>
+      {% for p in calls %}
+        <tr>
+          <td class="sv-ident" data-label="Agent">{{ p.agent }}</td>
+          <td class="sv-ident" data-label="Symbol">{{ p.instrument_symbol }}</td>
+          <td data-label="Call">{{ p.predicted_value|upper }} · {{ p.confidence|floatformat:2 }}</td>
+          <td class="num" data-label="From">{% if p.reference_price %}{{ p.reference_price|floatformat:4 }}{% else %}—{% endif %}</td>
+          <td class="num" data-label="Horizon">{% if p.horizon_hours %}{{ p.horizon_hours|floatformat:0 }}h{% else %}—{% endif %}</td>
+          <td class="nowrap" data-label="Deadline" style="font-size: 11px; color: var(--text-muted);">{{ p.expected_resolution_at|date:"M d H:i" }}</td>
+          <td data-label="Outcome">{% if p.was_correct is True %}<span style="color: var(--accent-green);">&#10003; {{ p.actual_value }}</span>{% elif p.was_correct is False %}<span style="color: var(--accent-red);">&#10007; {{ p.actual_value }}</span>{% elif p.evaluated_at %}<span style="color: var(--text-muted);">{{ p.actual_value }}</span>{% else %}<span style="color: var(--text-muted);">pending</span>{% endif %}</td>
+          <td class="num {% if p.score and p.score > 0 %}up{% elif p.score and p.score < 0 %}down{% endif %}" data-label="Move">{% if p.score is not None %}{{ p.score|floatformat:4 }}{% else %}—{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">&#9676;</div>
+        <p>NO CALLS YET — every long/short leg the strategy advisor proposes, every anomaly with a direction, and the calls block at the end of each briefing become rows here, graded against the price at their horizon.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
     <div class="card-header"><span class="card-title">Recent resolutions</span></div>
     {% if recent_resolved %}
     <div class="table-wrapper">

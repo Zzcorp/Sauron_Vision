@@ -112,9 +112,9 @@ WIRING = {
     "pipeline_opportunity_scanner": {"task": "signals.tasks.scan_opportunities", "cadence": 86400, "layer": "eye", "writes": ["OpportunityFlag"], "feeds": ["execute_bots"]},
     "pipeline_event_engine":        {"layer": "eye", "writes": ["Signal", "FastEvent"], "feeds": ["execute_bots"],
                                      "note": "The switch gates the async dispatch wrapper (dispatch_event_task). Direct synchronous dispatch_event calls bypass it by design, so the admin test-fire button works even with the platform stopped."},
-    "agent_strategy":               {"task": "ai_agents.tasks.review_active_strategies", "layer": "eye", "writes": ["StrategyAdjustment"], "feeds": [],
-                                     "note": "Needs ANTHROPIC_API_KEY. Its adjustments are written and rendered nowhere."},
-    "agent_anomaly":                {"task": "ai_agents.tasks.run_anomaly_detection", "layer": "eye", "writes": ["AgentTask"], "feeds": [],
+    "agent_strategy":               {"task": "ai_agents.tasks.review_active_strategies", "layer": "eye", "writes": ["StrategyAdjustment", "AgentPrediction"], "feeds": ["pipeline_calibration"],
+                                     "note": "Needs ANTHROPIC_API_KEY. Its adjustments are written and rendered nowhere; every long/short leg it proposes is now registered as a direction call the calibration grades — that edge is the only thing that reads it, and the only thing that should."},
+    "agent_anomaly":                {"task": "ai_agents.tasks.run_anomaly_detection", "layer": "eye", "writes": ["AgentTask", "AgentPrediction"], "feeds": ["pipeline_calibration"],
                                      "pages": ["/", "/ai/"],
                                      "note": "Needs ANTHROPIC_API_KEY. Prose for a human, read on the dashboard's recent AI tasks and /ai/; nothing machine-readable, by design."},
 
@@ -130,7 +130,9 @@ WIRING = {
     # ── learn ─────────────────────────────────────────────────────────
     "pipeline_snapshot":        {"task": "portfolio.tasks.create_daily_snapshot", "cadence": 86400, "layer": "learn", "writes": ["PortfolioSnapshot"], "feeds": ["eye_core"],
                                  "note": "Drawdown and daily P&L are computed from these; with none taken, both read as unknown platform-wide."},
-    "pipeline_calibration":     {"task": "ai_agents.tasks.resolve_pending_calibrations", "cadence": 86400, "layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_signals"]},
+    "pipeline_calibration":     {"task": "ai_agents.tasks.resolve_pending_calibrations", "cadence": 86400, "layer": "learn", "writes": ["AgentPrediction.was_correct"], "feeds": ["pipeline_signals"],
+                                 "pages": ["/calibration/"],
+                                 "note": "Grades every prediction past its deadline — trade outcomes, decay claims and direction calls against the first bar at the horizon. The trust score is computed from these grades on read, never stored; the strategist, the critic and the calibration page consume it."},
     "pipeline_actuator":        {"task": "signals.tasks.propose_rule_actions", "cadence": 86400, "layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_signals", "execute_bots"]},
     "pipeline_meta_allocator":  {"task": "signals.tasks.propose_meta_allocation", "cadence": 604800, "layer": "learn", "writes": ["RuleControl.weight"], "feeds": ["execute_bots"]},
     "pipeline_promotion":       {"task": "signals.tasks.auto_evaluate_promotions", "cadence": 86400, "layer": "learn", "writes": ["RuleControl.stage"], "feeds": ["pipeline_signals", "execute_bots"]},
@@ -146,14 +148,14 @@ WIRING = {
                                          "rules (daily, evidence-gated) and forks "
                                          "approved ones into RESEARCH."},
     "pipeline_pattern_miner":   {"task": "signals.tasks.mine_patterns", "cadence": 604800, "layer": "learn", "writes": [], "feeds": ["pipeline_opportunity_scanner"]},
-    "agent_daily_briefing":     {"task": "ai_agents.tasks.generate_daily_briefing", "cadence": 86400, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "pages": ["/", "/ai/"],
-                                 "note": "Needs ANTHROPIC_API_KEY. Written for the operator, read on the dashboard and /ai/."},
-    "agent_weekly_review":      {"task": "ai_agents.tasks.generate_weekly_review", "cadence": 604800, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "pages": ["/", "/ai/"],
-                                 "note": "Needs ANTHROPIC_API_KEY. Written for the operator, read on the dashboard and /ai/."},
-    "agent_optimization":       {"task": "ai_agents.tasks.optimize_strategies", "cadence": 604800, "layer": "learn", "writes": ["StrategyAdjustment"], "feeds": [],
-                                 "note": "Needs ANTHROPIC_API_KEY. Writes the same StrategyAdjustment table as agent_strategy, which nothing reads and no page renders — an honest orphan."},
-    "agent_monday_plan":        {"task": "ai_agents.tasks.generate_monday_plan", "cadence": 604800, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "pages": ["/", "/ai/"],
-                                 "note": "Needs ANTHROPIC_API_KEY. Written for the operator, read on the dashboard and /ai/."},
+    "agent_daily_briefing":     {"task": "ai_agents.tasks.generate_daily_briefing", "cadence": 86400, "layer": "learn", "writes": ["AgentTask", "AgentPrediction"], "feeds": ["pipeline_calibration"], "pages": ["/", "/ai/"],
+                                 "note": "Needs ANTHROPIC_API_KEY. Written for the operator, read on the dashboard and /ai/; the calls block it ends with is graded by the calibration."},
+    "agent_weekly_review":      {"task": "ai_agents.tasks.generate_weekly_review", "cadence": 604800, "layer": "learn", "writes": ["AgentTask", "AgentPrediction"], "feeds": ["pipeline_calibration"], "pages": ["/", "/ai/"],
+                                 "note": "Needs ANTHROPIC_API_KEY. Written for the operator, read on the dashboard and /ai/; the calls block it ends with is graded by the calibration."},
+    "agent_optimization":       {"task": "ai_agents.tasks.optimize_strategies", "cadence": 604800, "layer": "learn", "writes": ["StrategyAdjustment", "AgentPrediction"], "feeds": ["pipeline_calibration"],
+                                 "note": "Needs ANTHROPIC_API_KEY. Writes the same StrategyAdjustment table as agent_strategy, which nothing reads; its proposals' legs are registered as direction calls, and that grade is what survives."},
+    "agent_monday_plan":        {"task": "ai_agents.tasks.generate_monday_plan", "cadence": 604800, "layer": "learn", "writes": ["AgentTask", "AgentPrediction"], "feeds": ["pipeline_calibration"], "pages": ["/", "/ai/"],
+                                 "note": "Needs ANTHROPIC_API_KEY. Written for the operator, read on the dashboard and /ai/; the calls block it ends with is graded by the calibration."},
 }
 
 # Components whose only job is to be a mode flag on another component. Drawn as
