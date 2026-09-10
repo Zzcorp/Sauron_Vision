@@ -64,6 +64,12 @@ class IntervalTests(SimpleTestCase):
     """Yahoo has no 4h bar, and 4h is the timeframe the whole rule layer
     reads. 1h is fetched and resampled."""
 
+    def setUp(self):
+        # The feed remembers a downloaded frame for a few minutes; these
+        # tests count downloads, so each starts from an empty memory.
+        from market_data.public_feed import clear_frame_memo
+        clear_frame_memo()
+
     def _feed_with(self, df):
         fake_yf = MagicMock()
         fake_yf.Ticker.return_value.history.return_value = df

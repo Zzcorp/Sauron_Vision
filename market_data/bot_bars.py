@@ -21,6 +21,7 @@ Design notes:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone as dt_tz
 from decimal import Decimal, InvalidOperation
 
@@ -28,9 +29,21 @@ from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
 
-# The timeframes the rule layer actually reads.
-DEFAULT_INTERVALS = ("1h", "4h")
+# The timeframes the rule layer actually reads. The LARGER one first: the
+# keyless feed builds 4h from a single hourly download and remembers that
+# frame for a few minutes, so the 1h request that follows is served from
+# it — one download per symbol per pass instead of two.
+DEFAULT_INTERVALS = ("4h", "1h")
 DEFAULT_LIMIT = 200
+
+# A breath between symbols on the keyless feed. Yahoo tolerates a steady
+# trickle and cuts off a burst; a research fleet of 150 symbols is a burst
+# without this, and 30 seconds of a ten-minute pass with it.
+PUBLIC_FEED_PACE_S = 0.2
+
+
+def _pace() -> None:
+    time.sleep(PUBLIC_FEED_PACE_S)
 
 # A venue that gave no bars for a symbol is not asked again for a while.
 # One IBKR historical request the Gateway never answers costs the whole
@@ -238,6 +251,8 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
             written, skipped = _upsert_rows(inst, interval, rows, row_source)
             out["bars"] += written
             out["skipped"] += skipped
+        if getattr(client, "_sv_public_feed", False) is True:
+            _pace()
     return out
 
 

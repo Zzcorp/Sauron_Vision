@@ -481,6 +481,26 @@ preset travels with the login; if the Gateway keeps reporting DAY after the
 change, the preset is not the only source and IBKR support is the next call.
 Until it is fixed, every live entry is booked unprotected and bot-managed.
 
+**The research fleet feeds the learning engine.** The promotion ladder
+counts graded Signals and paper fills per rule — thirty signals before a
+rule leaves research, twenty paper fills before it can touch live money —
+and a fleet of six starter bots on 35 symbols starves it. Seed paper bots
+across the whole keyless catalogue, chunked ten symbols a config, within a
+budget the bar refresh can afford:
+
+```bash
+./deploy/dc exec web python manage.py seed_research_fleet            # ~150 symbols
+./deploy/dc exec web python manage.py backfill_bars --from-configs --intervals 1d,4h --bars 300
+```
+
+Keep `pipeline_promotion` ON: it is the rung that admits a research rule
+into paper, and a paper bot never trades a rule still in research. Its
+steps toward real money keep their own gates (thirty days, venue fills,
+walk-forward evidence). `--dry-run` prints the plan; `--reset` stands the
+fleet down without erasing traded history. The keyless feed now downloads
+one sized window per symbol per pass instead of two two-year ones, and
+breathes between symbols, so the default budget of 150 is safe.
+
 **Pools are shares of the account.** A pool that follows the account takes
 a share of the broker's equity reading — an explicit percentage, or blank
 for automatic: followers without a number split what the explicit ones
