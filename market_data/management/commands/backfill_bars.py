@@ -1,4 +1,17 @@
-"""Backfill historical OHLCV bars from Binance's public klines endpoint.
+"""Backfill historical OHLCV bars for every asset class, keylessly.
+
+Crypto comes from Binance's public klines endpoint, paginated; everything
+else — stocks, ETFs, indices, commodities, forex — from the same keyless
+Yahoo feed `refresh_bot_bars` falls back to (market_data.public_feed), in
+one call, because Yahoo serves ten years of daily bars at once.
+
+WHY EVERY CLASS. The signal scanner reads DAILY closes, and every evaluator
+needs a lookback — twenty bars, fifty, two hundred. The scheduled feeds
+write one daily bar per day, so an instrument created on Monday had six by
+Thursday, no evaluator could compute, and the ETF bot that could afford its
+symbols sat on `no_signals` for what would have been a month. That was the
+2026-09-10 state of this platform's first live deployment: the bars
+arrived, and nothing could use them.
 
 The scheduled feed (`refresh_bot_bars`) fetches the most recent 200 bars per
 symbol every ten minutes. That is the right shape for keeping current and the
@@ -18,6 +31,7 @@ candles has been validated against nothing.
 
     python manage.py backfill_bars --symbols BTCUSD,ETHUSD
     python manage.py backfill_bars --symbols BTCUSD --intervals 4h --bars 800
+    python manage.py backfill_bars --symbols GLDM,SLV --intervals 1d --bars 300
     python manage.py backfill_bars --from-configs        # every enabled bot
 
 Symbols are the platform's own spelling (BTCUSD), translated to the venue's
@@ -61,13 +75,14 @@ def venue_symbol(symbol: str) -> str:
 
 
 class Command(BaseCommand):
-    help = "Backfill historical bars from Binance public klines."
+    help = ("Backfill historical bars for every asset class: Binance public "
+            "klines for crypto, the keyless Yahoo feed for the rest.")
 
     def add_arguments(self, parser):
         parser.add_argument("--symbols", type=str, default="",
                             help="Comma-separated, platform spelling (BTCUSD,ETHUSD).")
         parser.add_argument("--from-configs", action="store_true",
-                            help="Take symbols from every enabled crypto AssetBotConfig.")
+                            help="Take symbols from every enabled AssetBotConfig.")
         parser.add_argument("--intervals", type=str, default="1h,4h",
                             help="Comma-separated timeframes. Default 1h,4h.")
         parser.add_argument("--bars", type=int, default=600,
@@ -84,14 +99,13 @@ class Command(BaseCommand):
         symbols = [s.strip().upper() for s in opts["symbols"].split(",") if s.strip()]
         if opts["from_configs"]:
             from bot_program.models import AssetBotConfig
-            for cfg in AssetBotConfig.objects.filter(enabled=True,
-                                                     asset_class="crypto"):
+            for cfg in AssetBotConfig.objects.filter(enabled=True):
                 symbols.extend(s.upper() for s in (cfg.symbols or []))
             symbols = sorted(set(symbols))
         if not symbols:
             raise CommandError(
-                "No symbols. Pass --symbols BTCUSD,ETHUSD or --from-configs "
-                "(which needs an enabled crypto bot config to read from).")
+                "No symbols. Pass --symbols GLDM,EURUSD or --from-configs "
+                "(which needs an enabled bot config to read from).")
 
         intervals = [i.strip() for i in opts["intervals"].split(",") if i.strip()]
         for iv in intervals:
@@ -113,8 +127,13 @@ class Command(BaseCommand):
                 continue
 
             for interval in intervals:
-                written = self._backfill_one(
-                    client, inst, symbol, interval, target, dry, _upsert_rows)
+                if inst.asset_class == "crypto":
+                    written = self._backfill_one(
+                        client, inst, symbol, interval, target, dry,
+                        _upsert_rows)
+                else:
+                    written = self._backfill_public(
+                        inst, symbol, interval, target, dry, _upsert_rows)
                 grand_total += written
 
         verb = "would write" if dry else "wrote"
@@ -125,6 +144,37 @@ class Command(BaseCommand):
             self.stdout.write(
                 "Next: python manage.py shell -c "
                 "\"from indicators.tasks import recalculate_all_indicators as r; print(r())\"")
+
+    def _backfill_public(self, inst, symbol, interval, target, dry,
+                         upsert) -> int:
+        """Every non-crypto class, through the keyless feed, in ONE call.
+
+        Yahoo answers with the whole window (ten years of daily bars, two
+        of hourly) and the feed trims to `limit`, so there is nothing to
+        paginate. A class with no keyless source is named and skipped,
+        never invented.
+        """
+        from market_data.public_feed import public_feed_for
+
+        feed = public_feed_for(inst.asset_class)
+        if feed is None:
+            self.stderr.write(self.style.WARNING(
+                f"  {symbol} {interval}: no keyless source for asset class "
+                f"{inst.asset_class!r} — nothing written"))
+            return 0
+        try:
+            rows = feed.klines(symbol, interval=interval, limit=target)
+        except Exception as e:  # noqa: BLE001 — one symbol must not end the run
+            self.stderr.write(self.style.ERROR(
+                f"  {symbol} {interval}: public feed failed: {e}"))
+            return 0
+        written = 0
+        if rows and not dry:
+            written, _skipped = upsert(inst, interval, rows, "yfinance_public")
+        self.stdout.write(
+            f"  {symbol:10} {interval:4} {len(rows):5} bars fetched "
+            f"(public feed){'' if dry else f', {written} written'}")
+        return written if not dry else len(rows)
 
     def _backfill_one(self, client, inst, symbol, interval, target, dry,
                       upsert) -> int:
