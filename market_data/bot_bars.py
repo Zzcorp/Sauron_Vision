@@ -24,11 +24,40 @@ import logging
 from datetime import datetime, timezone as dt_tz
 from decimal import Decimal, InvalidOperation
 
+from django.core.cache import cache
+
 logger = logging.getLogger(__name__)
 
 # The timeframes the rule layer actually reads.
 DEFAULT_INTERVALS = ("1h", "4h")
 DEFAULT_LIMIT = 200
+
+# A venue that gave no bars for a symbol is not asked again for a while.
+# One IBKR historical request the Gateway never answers costs the whole
+# request timeout, and seven forex CFDs times two intervals is most of a
+# ten-minute refresh spent waiting on a venue that has already said no —
+# which is how the 2026-09-10 bar writer spent its afternoon. The memo
+# is written only when the venue was actually asked and stayed mute, so
+# it expires on its own and the venue gets one fresh chance per window.
+MUTE_VENUE_MEMO_S = 6 * 3600
+
+
+def _mute_key(source: str, symbol: str, interval: str) -> str:
+    return f"bars:mute:{source}:{symbol}:{interval}"
+
+
+def _venue_is_mute(source: str, symbol: str, interval: str) -> bool:
+    try:
+        return bool(cache.get(_mute_key(source, symbol, interval)))
+    except Exception:  # noqa: BLE001 — a dead cache costs one request
+        return False
+
+
+def _remember_mute(source: str, symbol: str, interval: str) -> None:
+    try:
+        cache.set(_mute_key(source, symbol, interval), 1, MUTE_VENUE_MEMO_S)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _client_for(user, symbol, cfg):
@@ -170,14 +199,22 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
         fetch_symbol = _venue_symbol(client, symbol)
         for interval in intervals:
             row_source = source
-            try:
-                rows = client.klines(fetch_symbol, interval=interval,
-                                     limit=limit)
-            except Exception as e:
-                logger.warning("[bars] klines(%s, %s) failed: %s",
-                               symbol, interval, e)
-                out["errors"] += 1
-                rows = []
+            rows = []
+            asked = False
+            if _venue_is_mute(source, symbol, interval):
+                logger.info("[bars] %s %s: %s gave no bars within the last "
+                            "%dh — public feed directly", symbol, interval,
+                            source, MUTE_VENUE_MEMO_S // 3600)
+            else:
+                asked = True
+                try:
+                    rows = client.klines(fetch_symbol, interval=interval,
+                                         limit=limit)
+                except Exception as e:
+                    logger.warning("[bars] klines(%s, %s) failed: %s",
+                                   symbol, interval, e)
+                    out["errors"] += 1
+                    rows = []
             if not rows and not getattr(client, "_sv_public_feed", False):
                 # THE VENUE IS MUTE, NOT THE MARKET. An execution venue
                 # that answers a bar request with nothing — a historical
@@ -191,9 +228,13 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                                                   limit)
                 if rows:
                     out["fallback"] += 1
-                    logger.warning("[bars] %s %s: %s returned no bars — "
-                                   "written from the public feed instead",
-                                   symbol, interval, source)
+                    if asked:
+                        _remember_mute(source, symbol, interval)
+                        logger.warning("[bars] %s %s: %s returned no bars "
+                                       "— written from the public feed "
+                                       "instead, and not asked again for "
+                                       "%dh", symbol, interval, source,
+                                       MUTE_VENUE_MEMO_S // 3600)
             written, skipped = _upsert_rows(inst, interval, rows, row_source)
             out["bars"] += written
             out["skipped"] += skipped

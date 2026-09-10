@@ -68,8 +68,11 @@ class YFinanceFeed:
 class TheMuteVenueTests(TestCase):
 
     def setUp(self):
+        from django.core.cache import cache
+
         from bot_program.models import AssetBotConfig
         from instruments.models import Instrument
+        cache.clear()      # the mute memo lives there and outlives a test
         self.user = User.objects.create_user("mute_u", password="x")
         self.inst, _ = Instrument.objects.get_or_create(
             symbol="EURUSD", defaults={"name": "EURUSD",
@@ -136,3 +139,24 @@ class TheMuteVenueTests(TestCase):
         self.assertEqual(out["fallback"], 0)
         pub.assert_not_called()
         self.assertEqual(self._written(), [])
+
+    def test_a_mute_venue_is_not_asked_again_for_a_while(self):
+        """Seven forex CFDs times two intervals times a full request
+        timeout is most of a ten-minute refresh spent on a venue that
+        has already said no. Once is enough per window."""
+        venue = self._venue(rows=[])
+        feed = YFinanceFeed(_klines(3))
+        first, _ = self._refresh(venue, feed)
+        second, _ = self._refresh(venue, feed)
+        self.assertEqual(venue.klines.call_count, 1)
+        self.assertEqual((first["fallback"], second["fallback"]), (1, 1))
+        self.assertEqual(len(feed.calls), 2)
+
+    def test_the_memo_expires_and_the_venue_gets_a_fresh_chance(self):
+        from django.core.cache import cache
+        venue = self._venue(rows=[])
+        feed = YFinanceFeed(_klines(3))
+        self._refresh(venue, feed)
+        cache.clear()                       # the window passed
+        self._refresh(venue, feed)
+        self.assertEqual(venue.klines.call_count, 2)
