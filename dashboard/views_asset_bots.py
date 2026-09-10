@@ -30,6 +30,13 @@ def asset_bots_dashboard(request):
     )
     configs = [c for c in all_configs if not _is_manual_config(c)]
     manual_configs = [c for c in all_configs if _is_manual_config(c)]
+    # A follower's pool is a SHARE of the account; the row says which.
+    from bot_program.capital_truth import (allocate_shares, followers_of,
+                                           share_label, tracks_broker)
+    try:
+        plan = allocate_shares(followers_of(request.user))["plan"]
+    except Exception:  # noqa: BLE001 — the page must render regardless
+        plan = {}
 
     rows = []
     for cfg in configs:
@@ -48,6 +55,7 @@ def asset_bots_dashboard(request):
             # create/update form), so this list is where an operator reads a
             # saved value — and where "blank" stops being invisible.
             "time_stop": cfg.time_stop_setting(),
+            "follow": share_label(cfg, plan) if tracks_broker(cfg) else "",
         })
 
     from bot_program.asset_engine.base import time_stop_status

@@ -3646,7 +3646,13 @@ def admin_dashboard(request):
     # live. The ACTING user's own lanes: arming moves their money and
     # nobody else's, which is why this is not keyed on a target user the
     # way the broker credential forms are.
+    from bot_program.capital_truth import (allocate_shares, followers_of,
+                                           share_label, tracks_broker)
     from bot_program.manual_trade import EXECUTABLE_CLASS, manual_config_for
+    try:
+        _plan = allocate_shares(followers_of(request.user))["plan"]
+    except Exception:  # noqa: BLE001 — the card must render regardless
+        _plan = {}
     context["manual_lanes"] = [
         {"asset_class": cls, "mode": lane.mode,
          "capital": float(lane.capital),
@@ -3659,7 +3665,10 @@ def admin_dashboard(request):
          # exists to prevent: "an unlabelled equity becomes a number
          # behind the wrong symbol somewhere downstream."
          "currency": lane.base_currency or "",
-         "tracks": bool((lane.extras or {}).get("capital_tracks_broker"))}
+         "tracks": bool((lane.extras or {}).get("capital_tracks_broker")),
+         # The SHARE of the account this lane takes when it follows —
+         # explicit, or the automatic split it currently gets.
+         "share": share_label(lane, _plan) if tracks_broker(lane) else ""}
         for cls in sorted(set(EXECUTABLE_CLASS.values()))
         for lane in [manual_config_for(request.user, cls)]
     ]
@@ -4381,7 +4390,8 @@ def take_trade_arm(request):
         mode=str(body.get("mode", "") or ""),
         capital=body.get("capital"),
         pin_ok=_trading_pin_ok(request, body),
-        track=(bool(track) if track is not None else None)))
+        track=(bool(track) if track is not None else None),
+        share=body.get("share")))
 
 
 @login_required

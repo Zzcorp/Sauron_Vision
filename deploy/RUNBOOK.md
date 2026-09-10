@@ -481,6 +481,18 @@ preset travels with the login; if the Gateway keeps reporting DAY after the
 change, the preset is not the only source and IBKR support is the next call.
 Until it is fixed, every live entry is booked unprotected and bot-managed.
 
+**Pools are shares of the account.** A pool that follows the account takes
+a share of the broker's equity reading — an explicit percentage, or blank
+for automatic: followers without a number split what the explicit ones
+leave, equally — and the broker sync retunes it every fifteen minutes, down
+as well as up. Arm the manual lane with "follow account" and an optional
+"% of account" on `/admin-dashboard/`; make a live bot follow from
+`/asset-bots/` (Follow, share, PIN). Shares that do not fit in 100% are
+refused at the click and, if they ever get in, retune nothing and raise an
+alert. Hand-typed pools are still allowed and still measured against the
+account by `preflight_live`, which also warns when armed pools together
+exceed it.
+
 **IBKR's 2,000 USD floor.** Under 2,000 USD of equity (or the equivalent)
 IBKR refuses margin, short sales, currency and futures — Error 201, in
 those words. That includes a plain long on a USD ETF from a EUR balance: the

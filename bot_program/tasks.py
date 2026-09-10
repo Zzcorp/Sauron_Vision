@@ -409,28 +409,55 @@ def _follow_the_account(user, value, currency) -> None:
     opted-in pool when the reading goes stale
     (capital_truth.tracking_freeze_reason): following an account nobody
     can read is following a memory.
+
+    Each follower takes a SHARE of the reading — explicit, or an equal
+    split of what the explicit ones leave (capital_truth.allocate_shares).
+    Shares that do not fit in one account retune NOTHING and raise one
+    alert per six hours: writing them would size every pool against money
+    the others already claim.
     """
     from decimal import Decimal
 
-    from .models import AssetBotConfig
+    from .capital_truth import allocate_shares, followers_of
 
     try:
-        configs = (AssetBotConfig.objects
-                   .filter(user=user, enabled=True)
-                   .exclude(mode="paper"))
-        for cfg in configs:
-            if not (cfg.extras or {}).get("capital_tracks_broker"):
-                continue
-            new = Decimal(str(round(float(value), 2)))
+        followers = followers_of(user)
+        if not followers:
+            return
+        alloc = allocate_shares(followers)
+        if not alloc["ok"]:
+            logger.error("broker sync: NO pool retuned for %s — %s",
+                         user.username, alloc["reason"])
+            _alert_over_allocation(user, alloc["reason"])
+            return
+        for cfg in followers:
+            share = float(alloc["plan"].get(cfg.pk, 0.0))
+            new = Decimal(str(round(float(value) * share, 2)))
             if cfg.capital == new:
                 continue
             old = cfg.capital
             cfg.capital = new
             cfg.save(update_fields=["capital"])
-            logger.info("broker sync: %s pool follows the account: "
-                        "%s -> %s %s", cfg.name, old, new, currency or "")
+            logger.info("broker sync: %s pool follows the account at "
+                        "%.1f%%: %s -> %s %s", cfg.name, share * 100.0,
+                        old, new, currency or "")
     except Exception as e:  # noqa: BLE001 — the stored reading must stand
         logger.warning("broker sync: pool-follow failed: %s", e)
+
+
+def _alert_over_allocation(user, reason: str) -> None:
+    """Once per six hours: the followers ask for more than one account."""
+    try:
+        from .notifications import notify_staff
+        notify_staff(
+            title="⚠ Pools over-allocated — nothing follows the account",
+            body=(f"{user.username}: {reason}. No pool was retuned this "
+                  f"sync and none will be until the shares fit in 100%. "
+                  f"Lower a share on /admin-dashboard/ (manual lane) or "
+                  f"/asset-bots/, or stand a follower down."),
+            url="/asset-bots/", cooldown_hours=6)
+    except Exception as e:  # noqa: BLE001 — an alert must never fail the sync
+        logger.warning("broker sync: over-allocation alert failed: %s", e)
 
 
 # ── The stall alert ───────────────────────────────────────────────────────

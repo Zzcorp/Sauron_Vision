@@ -1914,7 +1914,7 @@ ARM_EQUITY_MAX_AGE_SECONDS = 24 * 3600
 
 
 def arm_manual_lane(user, *, asset_class, mode, capital=None,
-                    pin_ok=False, track=None) -> dict:
+                    pin_ok=False, track=None, share=None) -> dict:
     """Arm (live) or stand down (paper) the manual lane for one class.
 
     Arming live is refuse-first, because everything after it trusts it:
@@ -1957,6 +1957,22 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
 
     prior_track = bool((cfg.extras or {}).get("capital_tracks_broker"))
     want_track = prior_track if track is None else bool(track)
+    # The SHARE of the account this pool takes when it follows: a number
+    # is explicit, None is automatic (an equal split of what the explicit
+    # followers leave). Absent from the call, the saved share stands.
+    from bot_program.capital_truth import account_share_pct
+    prior_share = account_share_pct(cfg) if prior_track else None
+    if share is None:
+        want_share = prior_share
+    else:
+        try:
+            want_share = float(share)
+        except (TypeError, ValueError):
+            return {"error": "share must be a percentage between 0 and 100"}
+        if isinstance(share, bool) or not math.isfinite(want_share) \
+                or want_share <= 0 or want_share > 100:
+            return {"error": "share must be a percentage between 0 and 100"}
+    share_fraction = 1.0
 
     fields = []
     if capital is not None:
@@ -2027,21 +2043,23 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
                               f"{type(client).__name__} — arm without "
                               f"tracking, or route this class to IBKR "
                               f"first")}
-        if want_track and not prior_track:
-            # At most ONE pool follows the account: two followers would
-            # each claim the same money in full.
-            others = [c for c in (AssetBotConfig.objects
-                                  .filter(user=user, enabled=True)
-                                  .exclude(pk=cfg.pk)
-                                  .exclude(mode="paper"))
-                      if (c.extras or {}).get("capital_tracks_broker")]
-            if others:
-                o = others[0]
-                return {"error": (f"'{o.name}' ({o.asset_class}) already "
-                                  f"follows the account — one pool follows "
-                                  f"it at a time, or two pools would each "
-                                  f"claim the same money. Stand that one "
+        if want_track:
+            # Every follower takes a SHARE of the account, explicit or
+            # automatic, and the shares must fit in 100% — one rule, in
+            # capital_truth.allocate_shares, shared with the sync and the
+            # preflight. This used to be "one follower, full stop", which
+            # forced every other pool to be a number typed once: 1,000 of
+            # pools over a 500 account, on this deployment, by Thursday.
+            from bot_program.capital_truth import (allocate_shares,
+                                                   followers_of)
+            alloc = allocate_shares(followers_of(user, include=cfg),
+                                    shares={cfg.pk: want_share})
+            if not alloc["ok"]:
+                return {"error": (f"Following the account would "
+                                  f"over-allocate it: {alloc['reason']}. "
+                                  f"Lower a share, or stand a follower "
                                   f"down first")}
+            share_fraction = float(alloc["plan"][cfg.pk])
 
         # On a broker-backed route, the pool is measured against the
         # broker's own cached reading — written only by the sync beat,
@@ -2065,10 +2083,11 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
                                   f"against a memory is not arming against "
                                   f"an account")}
             if want_track:
-                # Following the account starts by BECOMING the account:
-                # the reading is the pool from this moment on, and the
+                # Following the account starts by TAKING ITS SHARE of the
+                # reading: that is the pool from this moment on, and the
                 # sync retunes it from here.
-                cfg.capital = Decimal(str(round(float(reading), 2)))
+                cfg.capital = Decimal(str(round(float(reading)
+                                                * share_fraction, 2)))
                 if "capital" not in fields:
                     fields.append("capital")
             elif float(cfg.capital) > float(reading):
@@ -2092,8 +2111,13 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
         ex = dict(cfg.extras or {})
         if want_track:
             ex["capital_tracks_broker"] = True
+            if want_share is not None:
+                ex["account_share_pct"] = float(want_share)
+            else:
+                ex.pop("account_share_pct", None)
         else:
             ex.pop("capital_tracks_broker", None)
+            ex.pop("account_share_pct", None)
         if ex != (cfg.extras or {}):
             cfg.extras = ex
             fields.append("extras")
@@ -2101,10 +2125,13 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
         # A paper pool follows nothing — trailing the flag into a later
         # re-arm would resurrect a decision nobody re-made.
         ex = dict(cfg.extras or {})
-        if ex.pop("capital_tracks_broker", None):
+        dropped = ex.pop("capital_tracks_broker", None)
+        dropped_share = ex.pop("account_share_pct", None)
+        if dropped or dropped_share is not None:
             cfg.extras = ex
             fields.append("extras")
         want_track = False
+        want_share = None
 
     cfg.mode = mode
     fields.append("mode")
@@ -2119,4 +2146,5 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
     except Exception as e:  # noqa: BLE001 — the record must not block the act
         logger.warning("[take-trade] lane-mode notification failed: %s", e)
     return {"ok": True, "asset_class": cls, "mode": mode,
-            "capital": float(cfg.capital), "tracks_broker": want_track}
+            "capital": float(cfg.capital), "tracks_broker": want_track,
+            "share_pct": (want_share if want_track else None)}

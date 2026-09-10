@@ -49,7 +49,7 @@
             <td data-label="Name">{{ r.config.name }}</td>
             <td data-label="Mode"><span class="badge badge-{% if r.config.mode == 'live' %}bearish{% else %}bullish{% endif %}">{{ r.config.mode }}</span></td>
             <td data-label="Symbols" style="font-size: 11px; color: var(--text-muted);">{{ r.config.symbols|join:", "|truncatechars:40 }}</td>
-            <td class="num" data-label="Capital">{{ r.config.capital }} {{ r.config.base_currency }}</td>
+            <td class="num" data-label="Capital">{{ r.config.capital }} {{ r.config.base_currency }}{% if r.follow %}<span style="display:block;font-size:10px;color:var(--accent-gold-ink, var(--accent-gold));">follows account · {{ r.follow }}</span>{% endif %}</td>
             {# "OFF" is a chosen state, not an unknown one, so it prints as a word rather than 0 or an em-dash. #}
             <td class="num" data-label="Max hold" title="Time stop · source: {{ r.time_stop.source }}">{% if r.time_stop.enabled %}{{ r.time_stop.hours|floatformat:0 }}h{% else %}<span style="color:var(--accent-gold-ink);">OFF</span>{% endif %}<span style="display:block;font-size:10px;color:var(--text-muted);">{{ r.time_stop.source }}</span></td>
             <td class="num" data-label="Open">{{ r.open_positions }}</td>
@@ -58,6 +58,11 @@
             <td data-label="Action" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
                 <form method="post" action="{% url 'hq_toggle_asset_bot' %}">{% csrf_token %}<input type="hidden" name="config_id" value="{{ r.config.id }}">{% if r.config.mode == 'live' and not r.config.enabled %}<input type="password" name="pin" placeholder="PIN" autocomplete="off" style="width:60px;padding:4px;font-size:11px;margin-right:4px;">{% endif %}<button class="btn btn-sm" type="submit">Toggle</button></form>
                 <form method="post" action="{% url 'hq_run_asset_bot' %}">{% csrf_token %}<input type="hidden" name="config_id" value="{{ r.config.id }}"><button class="btn btn-sm" type="submit">▶ Tick</button></form>
+                {% if r.follow %}
+                <form method="post" action="{% url 'hq_follow_asset_bot' %}">{% csrf_token %}<input type="hidden" name="config_id" value="{{ r.config.id }}"><input type="hidden" name="follow" value="0"><button class="btn btn-sm" type="submit" title="Stop following the account; the pool stays at its last value">Unfollow</button></form>
+                {% elif r.config.mode == 'live' %}
+                <form method="post" action="{% url 'hq_follow_asset_bot' %}" style="display:flex;gap:4px;align-items:center;">{% csrf_token %}<input type="hidden" name="config_id" value="{{ r.config.id }}"><input type="hidden" name="follow" value="1"><input type="number" name="share" placeholder="% of account" title="Blank = automatic: an equal split of what the explicit shares leave" min="0" max="100" step="any" style="width:100px;padding:4px;font-size:11px;"><input type="password" name="pin" placeholder="PIN" autocomplete="off" style="width:60px;padding:4px;font-size:11px;"><button class="btn btn-sm" type="submit" title="Pool = a share of the IBKR account, retuned on every broker sync">Follow</button></form>
+                {% endif %}
             </td>
           </tr>
         {% endfor %}

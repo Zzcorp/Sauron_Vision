@@ -885,6 +885,87 @@ def hq_toggle_asset_bot(request):
 
 
 @_admin_only
+def hq_follow_asset_bot(request):
+    """Make a live bot's pool a SHARE of the account, or stop it following.
+
+    Form fields: config_id; follow ("1" to start, "0" to stop); share, a
+    percentage or blank for automatic; pin, required to START — following
+    re-sizes a live pool on the spot. Stopping needs nothing and leaves
+    the pool at its last value. The share must fit beside every other
+    follower's (capital_truth.allocate_shares), or nothing changes.
+    """
+    import math
+    from decimal import Decimal
+
+    from bot_program.capital_truth import (account_equity, allocate_shares,
+                                           followers_of)
+    from bot_program.models import AssetBotConfig
+
+    cfg = AssetBotConfig.objects.filter(
+        id=request.POST.get("config_id"), user=request.user).first()
+    if not cfg:
+        messages.error(request, "AssetBotConfig not found")
+        return redirect("asset_bots_dashboard")
+    follow = str(request.POST.get("follow", "")).lower() in ("1", "on",
+                                                              "true", "yes")
+    ex = dict(cfg.extras or {})
+    if not follow:
+        ex.pop("capital_tracks_broker", None)
+        ex.pop("account_share_pct", None)
+        cfg.extras = ex
+        cfg.save(update_fields=["extras", "updated_at"])
+        messages.success(request, f"'{cfg.name}' no longer follows the "
+                                  f"account — its pool stays at "
+                                  f"{cfg.capital} {cfg.base_currency}.")
+        return redirect("asset_bots_dashboard")
+    if cfg.mode != "live":
+        messages.error(request, "Only a LIVE bot can follow the account — "
+                                "a paper pool follows nothing.")
+        return redirect("asset_bots_dashboard")
+    if not _pin_ok(request):
+        messages.error(request, "PIN required — following the account "
+                                "re-sizes a live pool.")
+        return redirect("asset_bots_dashboard")
+    raw = str(request.POST.get("share", "") or "").strip()
+    share = None
+    if raw:
+        try:
+            share = float(raw)
+        except ValueError:
+            share = float("nan")
+        if not math.isfinite(share) or share <= 0 or share > 100:
+            messages.error(request, "share must be a percentage between "
+                                    "0 and 100")
+            return redirect("asset_bots_dashboard")
+    reading = account_equity(request.user)
+    if reading is None:
+        messages.error(request, "No broker reading has landed — enable "
+                                "broker_account_sync and let it store one "
+                                "first.")
+        return redirect("asset_bots_dashboard")
+    alloc = allocate_shares(followers_of(request.user, include=cfg),
+                            shares={cfg.pk: share})
+    if not alloc["ok"]:
+        messages.error(request, f"Following the account would "
+                                f"over-allocate it: {alloc['reason']}")
+        return redirect("asset_bots_dashboard")
+    fraction = float(alloc["plan"][cfg.pk])
+    ex["capital_tracks_broker"] = True
+    if share is not None:
+        ex["account_share_pct"] = share
+    else:
+        ex.pop("account_share_pct", None)
+    cfg.extras = ex
+    cfg.capital = Decimal(str(round(float(reading["value"]) * fraction, 2)))
+    cfg.save(update_fields=["extras", "capital", "updated_at"])
+    messages.success(request, f"'{cfg.name}' follows the account at "
+                              f"{fraction * 100:.0f}% — pool {cfg.capital} "
+                              f"{reading['currency'] or ''}; the sync keeps "
+                              f"it there.")
+    return redirect("asset_bots_dashboard")
+
+
+@_admin_only
 def hq_run_asset_bot(request):
     """Manually run a single AssetBotConfig's tick."""
     from bot_program.asset_engine.runner import run_asset_bot_tick

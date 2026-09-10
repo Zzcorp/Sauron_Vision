@@ -378,6 +378,34 @@ class Command(BaseCommand):
                         blockers.append(f"config {cfg.id} ({cfg.name}) is LIVE "
                                         f"and enabled with no symbols")
 
+            # ── shares of the account ───────────────────────────────────
+            from bot_program.capital_truth import (allocate_shares,
+                                                   followers_of, share_label)
+            followers = followers_of(user)
+            if followers:
+                alloc = allocate_shares(followers)
+                for cfg in followers:
+                    w(f"   [{cfg.id}] {cfg.name:<20} follows the account · "
+                      f"{share_label(cfg, alloc['plan'])}")
+                if not alloc["ok"]:
+                    blockers.append(
+                        f"{user.username}: the pools that follow the "
+                        f"account ask for more than one account — "
+                        f"{alloc['reason']}; the sync retunes nothing "
+                        f"until the shares fit in 100%")
+            if reading is not None and reading["value"] > 0:
+                armed_total = sum(float(c.capital or 0)
+                                  for c in live if c.enabled)
+                if armed_total > reading["value"] * (1 + 1e-9):
+                    warnings.append(
+                        f"{user.username}: the armed live pools total "
+                        f"{armed_total:,.0f} against an account of "
+                        f"{reading['value']:,.0f} {reading['currency']} — "
+                        f"together they can deploy "
+                        f"{armed_total / reading['value']:.1f}x the money; "
+                        f"make them shares of the account (follow) so they "
+                        f"always fit")
+
             # ── 5. fuel AND whether one unit even fits ──────────────────
             #
             # CAN THIS POOL PLACE AN ORDER AT ALL. The pool-vs-account check

@@ -26,6 +26,7 @@ of every order, and an operator who can SEE the mismatch can fix it in one
 edit. The value is in the seeing.
 """
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -343,3 +344,95 @@ def broker_view(user):
         "equity": account_equity(user),
         "positions": broker_positions(user),
     }
+
+
+# ── Shares of the account ────────────────────────────────────────────────
+#
+# A pool that follows the account takes a SHARE of it, and the sync writes
+# capital = share × reading on every beat, down as well as up. The share is
+# explicit — extras["account_share_pct"], 0 < pct ≤ 100 — or automatic:
+# followers without a number split what the explicit ones leave, equally.
+# One follower with no number is the whole account, which is the original
+# contract, unchanged. The shares of one account can never sum past 100%:
+# an over-allocated fleet gets NOTHING retuned and the operator an alert,
+# because three pools sized against the same 500 are sized against 1,500
+# that does not exist — the state this deployment was in on 2026-09-10,
+# with 1,000 of hand-typed pools over a 500 account.
+SHARE_SLACK = 1e-6
+
+
+def account_share_pct(cfg):
+    """The explicit share of the account this pool takes, or None.
+
+    None means automatic when the pool follows the account, and nothing
+    when it does not — `tracks_broker` answers that question.
+    """
+    raw = (getattr(cfg, "extras", None) or {}).get("account_share_pct")
+    if raw in (None, ""):
+        return None
+    try:
+        pct = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(pct) or pct <= 0 or pct > 100:
+        return None
+    return pct
+
+
+def followers_of(user, *, include=None):
+    """Enabled, non-paper pools that follow the account — plus `include`,
+    a pool about to join them, whether or not it is saved as one yet."""
+    from bot_program.models import AssetBotConfig
+    qs = (AssetBotConfig.objects.filter(user=user, enabled=True)
+          .exclude(mode="paper"))
+    out = [c for c in qs if tracks_broker(c)]
+    if include is not None and all(c.pk != include.pk for c in out):
+        out.append(include)
+    return out
+
+
+def allocate_shares(followers, *, shares=None) -> dict:
+    """{"ok", "reason", "plan": {pk: fraction}} for one account's followers.
+
+    `shares` overrides a pool's share for the question "what if": a number
+    is an explicit percentage, None means automatic. Pure arithmetic — no
+    reads, no writes — so the arming path, the sync and the preflight all
+    answer from the same rule.
+    """
+    shares = dict(shares or {})
+    explicit, auto = {}, []
+    for cfg in followers:
+        pct = shares[cfg.pk] if cfg.pk in shares else account_share_pct(cfg)
+        if pct is None:
+            auto.append(cfg)
+        else:
+            explicit[cfg.pk] = float(pct)
+    names = {cfg.pk: f"{cfg.name} ({cfg.asset_class})" for cfg in followers}
+    total = sum(explicit.values())
+    if total > 100.0 + SHARE_SLACK:
+        listed = ", ".join(f"{names[pk]} {pct:.0f}%"
+                           for pk, pct in explicit.items())
+        return {"ok": False, "plan": {},
+                "reason": f"explicit shares sum to {total:.0f}% of the "
+                          f"account: {listed}"}
+    rest = 100.0 - total
+    if auto and rest <= SHARE_SLACK:
+        listed = ", ".join(names[c.pk] for c in auto)
+        return {"ok": False, "plan": {},
+                "reason": f"explicit shares take the whole account "
+                          f"({total:.0f}%) and {len(auto)} follower(s) "
+                          f"without a share would get nothing: {listed}"}
+    plan = {pk: pct / 100.0 for pk, pct in explicit.items()}
+    for cfg in auto:
+        plan[cfg.pk] = rest / 100.0 / len(auto)
+    return {"ok": True, "plan": plan, "reason": ""}
+
+
+def share_label(cfg, plan=None) -> str:
+    """'30%' / 'auto 35%' / 'auto' — for the pages that show a follower."""
+    pct = account_share_pct(cfg)
+    if pct is not None:
+        return f"{pct:g}%"
+    if plan and cfg.pk in plan:
+        return f"auto {plan[cfg.pk] * 100:.0f}%"
+    return "auto"

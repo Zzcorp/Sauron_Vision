@@ -64,6 +64,7 @@ from .views_admin_hq import (
     hq_run_pattern_miner, hq_activate_discovery, hq_reject_discovery,
     hq_fire_test_event,
     hq_create_asset_bot, hq_toggle_asset_bot, hq_run_asset_bot, hq_run_all_asset_bots,
+    hq_follow_asset_bot,
 )
 from .views_promotions import promotions_dashboard
 from .views_evolution import evolution_dashboard
@@ -284,6 +285,7 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     # ── Phase 13: Multi-Asset Bots ───────────────────────────
     path("admin-dashboard/asset-bots/create/", hq_create_asset_bot, name="hq_create_asset_bot"),
     path("admin-dashboard/asset-bots/toggle/", hq_toggle_asset_bot, name="hq_toggle_asset_bot"),
+    path("admin-dashboard/asset-bots/follow/", hq_follow_asset_bot, name="hq_follow_asset_bot"),
     path("admin-dashboard/asset-bots/tick/", hq_run_asset_bot, name="hq_run_asset_bot"),
     path("admin-dashboard/asset-bots/tick-all/", hq_run_all_asset_bots, name="hq_run_all_asset_bots"),
     path("asset-bots/", asset_bots_dashboard, name="asset_bots_dashboard"),

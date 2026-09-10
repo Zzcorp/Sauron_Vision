@@ -62,7 +62,7 @@ six scrapers could sit green with zero rows between them.
         <tr>
             <td style="padding:4px 8px;">{{ lane.asset_class|upper }}</td>
             <td style="padding:4px 8px;">
-                {% if lane.mode == 'live' %}<span style="color:var(--accent-red);font-weight:700;">● LIVE</span>{% if lane.tracks %} <span style="color:var(--accent-gold-ink, var(--accent-gold));font-size:10px;">FOLLOWS ACCOUNT</span>{% endif %}
+                {% if lane.mode == 'live' %}<span style="color:var(--accent-red);font-weight:700;">● LIVE</span>{% if lane.tracks %} <span style="color:var(--accent-gold-ink, var(--accent-gold));font-size:10px;">FOLLOWS ACCOUNT{% if lane.share %} · {{ lane.share }}{% endif %}</span>{% endif %}
                 {% else %}<span style="color:var(--text-muted);">◌ paper</span>{% endif %}
             </td>
             <td style="padding:4px 8px;">{{ lane.capital|floatformat:2 }} {{ lane.currency|default:"?" }}</td>
@@ -73,6 +73,7 @@ six scrapers could sit green with zero rows between them.
                 <input type="password" placeholder="PIN" data-lane-pin="{{ lane.asset_class }}" style="width:70px;font-size:11px;padding:4px 6px;" autocomplete="off">
                 <input type="number" placeholder="pool {{ lane.currency|default:'' }} (optional)" data-lane-capital="{{ lane.asset_class }}" style="width:130px;font-size:11px;padding:4px 6px;" step="any" min="0">
                 <label style="font-size:10px;color:var(--text-muted);white-space:nowrap;"><input type="checkbox" data-lane-track="{{ lane.asset_class }}" style="vertical-align:middle;"> follow account</label>
+                <input type="number" placeholder="% of account (auto)" title="The share of the IBKR account this pool takes when it follows — blank splits what the explicit shares leave, equally" data-lane-share="{{ lane.asset_class }}" style="width:120px;font-size:11px;padding:4px 6px;" step="any" min="0" max="100">
                 <button type="button" class="btn btn-danger" data-lane-arm="{{ lane.asset_class }}" style="font-size:11px;padding:4px 10px;">ARM LIVE</button>
                 {% endif %}
             </td>
@@ -106,6 +107,8 @@ six scrapers could sit green with zero rows between them.
       var body = {asset_class: cls, mode: 'live', pin: pinEl ? pinEl.value : ''};
       if (capEl && capEl.value) body.capital = Number(capEl.value);
       if (trkEl) body.track = !!trkEl.checked;
+      var shEl = document.querySelector('[data-lane-share="' + cls + '"]');
+      if (shEl && shEl.value) body.share = Number(shEl.value);
       post(body);
     });
   });

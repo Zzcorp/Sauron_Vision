@@ -513,16 +513,50 @@ class FundsTrackingTests(TestCase):
         self.assertIn("error", out)
         self.assertIn("route", out["error"])
 
-    def test_only_one_pool_may_follow_the_account(self):
-        """Two followers would each claim the same money in full."""
+    def test_two_followers_share_the_account(self):
+        """Two followers without a number split the account equally —
+        each takes a SHARE, so neither claims the same money in full."""
         _instrument("EURUSD", "forex")
         self._ibkr_backed(equity="500.00")
         with patch(ROUTER, return_value=self._ibkr_client()):
             first = self._arm_tracking()
             self.assertTrue(first.get("ok"), first)
             second = self._arm_tracking(asset_class="forex")
+        self.assertTrue(second.get("ok"), second)
+        self.assertEqual(second["capital"], 250.0)
+        from bot_program.tasks import _follow_the_account
+        _follow_the_account(self.user, 500.0, "EUR")
+        from bot_program.manual_trade import manual_config_for
+        self.assertEqual(
+            float(manual_config_for(self.user, "crypto").capital), 250.0)
+
+    def test_an_explicit_share_is_taken_and_the_rest_is_split(self):
+        _instrument("EURUSD", "forex")
+        self._ibkr_backed(equity="500.00")
+        with patch(ROUTER, return_value=self._ibkr_client()):
+            first = self._arm_tracking(share=30)
+            self.assertTrue(first.get("ok"), first)
+            self.assertEqual(first["capital"], 150.0)
+            self.assertEqual(first["share_pct"], 30.0)
+            second = self._arm_tracking(asset_class="forex")
+        self.assertEqual(second["capital"], 350.0)
+
+    def test_shares_that_do_not_fit_are_refused(self):
+        _instrument("EURUSD", "forex")
+        self._ibkr_backed(equity="500.00")
+        with patch(ROUTER, return_value=self._ibkr_client()):
+            self._arm_tracking(share=80)
+            second = self._arm_tracking(asset_class="forex", share=30)
         self.assertIn("error", second)
-        self.assertIn("already follows", second["error"])
+        self.assertIn("over-allocate", second["error"])
+        self.assertIn("110%", second["error"])
+
+    def test_a_share_outside_the_percentage_band_is_refused(self):
+        self._ibkr_backed(equity="500.00")
+        with patch(ROUTER, return_value=self._ibkr_client()):
+            out = self._arm_tracking(share=150)
+        self.assertIn("error", out)
+        self.assertIn("between 0 and 100", out["error"])
 
     def test_disarming_clears_the_tracking_flag(self):
         self._ibkr_backed(equity="500.00")
