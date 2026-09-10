@@ -66,6 +66,7 @@ def _bar_millis(d) -> int:
     return 0
 
 import logging
+import re as _re
 import time as _time
 from datetime import datetime, timezone as dt_tz
 from typing import Optional
@@ -325,6 +326,7 @@ class IBKRTrader:
                        timeout=self.timeout, readonly=False)
             self._ib = ib
             self._connected = True
+            self._shield_orders_from_notices(ib)
             self._next_connect_at = 0.0
             return True
         except Exception as e:
@@ -689,24 +691,130 @@ class IBKRTrader:
             })
         return out
 
-    @staticmethod
-    def _dead_order_reason(trade, filled_qty) -> "Optional[str]":
+    # Codes TWS sends about an order it has ACCEPTED and adjusted — a
+    # comment, not a verdict. 10349: "Order TIF was set to DAY based on
+    # order preset". The text pattern catches its siblings (an outsideRth
+    # or a price-cap preset says the same sentence with another noun) and
+    # the entries the shield below writes itself.
+    ORDER_NOTICE_CODES = frozenset({10349})
+    _ORDER_NOTICE_TEXT = _re.compile(
+        r"\bbased on (?:the )?order preset\b|^Notice \d+, reqId \d+:",
+        _re.IGNORECASE)
+
+    @classmethod
+    def _is_order_notice(cls, code, text) -> bool:
+        """True for a message that comments on an order without killing it."""
+        try:
+            code = int(code or 0)
+        except (TypeError, ValueError):
+            code = 0
+        if code in cls.ORDER_NOTICE_CODES:
+            return True
+        return bool(cls._ORDER_NOTICE_TEXT.search(str(text or "")))
+
+    def _shield_orders_from_notices(self, ib) -> None:
+        """Keep an accepted order alive in memory when TWS merely comments.
+
+        ib_insync 0.9.86 knows eight warning codes; every other code that
+        arrives with an order's reqId is treated as fatal — the trade is
+        marked Cancelled IN MEMORY (the broker cancels nothing), its
+        cancelledEvent fires, and because the trade now counts as done,
+        every later error on that order is dropped from its log. TWS 10.4x
+        sends 10349, "Order TIF was set to DAY based on order preset", for
+        an order it has ACCEPTED and adjusted. On 2026-09-07 the first live
+        order on this deployment died of exactly that: a notice read as a
+        rejection, and the real answer, if the broker gave one, thrown
+        away before anyone could read it.
+
+        The wrapper's `error` is replaced on the instance — the decoder
+        looks it up by name on every message — with one that passes every
+        code it does not recognise straight through and, for a notice,
+        logs it, records it on the trade WITHOUT touching its status, and
+        still raises errorEvent for anyone listening. Nothing else about
+        the library's handling changes, and a library that one day
+        classifies these codes itself is not disturbed: the shield only
+        ever pre-empts the path it would have taken.
+        """
+        wrapper = getattr(ib, "wrapper", None)
+        if wrapper is None or getattr(wrapper, "_sv_notice_shield", False):
+            return
+        original = wrapper.error
+        trader = self
+
+        def error(reqId, errorCode, errorString, *rest, **kw):
+            if not trader._is_order_notice(errorCode, errorString):
+                return original(reqId, errorCode, errorString, *rest, **kw)
+            msg = f"Notice {errorCode}, reqId {reqId}: {errorString}"
+            log.info("IBKR %s", msg)
+            try:
+                trade = wrapper.trades.get((wrapper.clientId, reqId))
+            except Exception:  # noqa: BLE001 — a stand-in without trades
+                trade = None
+            if trade is not None:
+                try:
+                    trade.log.append(_ib.TradeLogEntry(
+                        wrapper.lastTime, trade.orderStatus.status, msg, 0))
+                except Exception:  # noqa: BLE001 — the entry is a courtesy
+                    pass
+            try:
+                contract = getattr(wrapper, "_reqId2Contract", {}).get(reqId)
+                ib.errorEvent.emit(reqId, errorCode, errorString, contract)
+            except Exception:  # noqa: BLE001 — listeners are optional
+                pass
+            return None
+
+        wrapper.error = error
+        wrapper._sv_notice_shield = True
+
+    @classmethod
+    def _substantive_log(cls, trade) -> list:
+        """The trade-log messages that say something went WRONG."""
+        out = []
+        for entry in (getattr(trade, "log", None) or []):
+            message = str(getattr(entry, "message", "") or "")
+            if not message:
+                continue
+            if cls._is_order_notice(getattr(entry, "errorCode", 0), message):
+                continue
+            out.append(message)
+        return out
+
+    @classmethod
+    def _dead_order_reason(cls, trade, filled_qty,
+                           children=()) -> "Optional[str]":
         """A dead, unfilled order's reason string — or None while alive.
 
         Cancelled/ApiCancelled/Inactive with zero filled is a rejection
         whatever TWS chooses to call it; the reason is fished out of the
         trade log because the status alone says only that it died.
+
+        NOTICES ARE NOT REASONS. The first version joined every log line,
+        so the one readable line on the 2026-09-07 order — "Order TIF was
+        set to DAY based on order preset" — was presented as why it died,
+        and it was a comment on an order TWS had accepted. The rejection
+        that kills a bracket is often on a CHILD (a stop TWS will not take
+        takes the parent down with it), so the children's logs are read
+        when the parent's says nothing; and when nothing says anything the
+        string says THAT, and where to look, rather than dressing the
+        status up as a cause.
         """
         status = getattr(trade.orderStatus, "status", "") or ""
-        if status not in ("Cancelled", "ApiCancelled", "Inactive"):
+        if status not in cls._DEAD_STATES:
             return None
         if filled_qty:
             return None
-        notes = "; ".join(
-            str(getattr(entry, "message", "") or "")
-            for entry in (getattr(trade, "log", None) or [])
-            if getattr(entry, "message", ""))
-        return f"broker_rejected: {(notes or status)[:300]}"
+        notes = cls._substantive_log(trade)
+        if not notes:
+            for child in (children or []):
+                cid = getattr(getattr(child, "order", None), "orderId", "")
+                for line in cls._substantive_log(child):
+                    notes.append(f"leg {cid}: {line}" if cid else line)
+        if not notes:
+            oid = getattr(getattr(trade, "order", None), "orderId", "")
+            notes = [f"{status} with no message on this order — the "
+                     f"container log (ib_insync.wrapper) holds any error "
+                     f"TWS sent for reqId {oid}"]
+        return f"broker_rejected: {'; '.join(notes)[:300]}"
 
     # Every concurrent connection to one Gateway needs its OWN clientId.
     # Connect twice with the same one and IBKR REFUSES the newcomer with
@@ -870,6 +978,7 @@ class IBKRTrader:
             parent = _ib.MarketOrder(action, abs(float(quantity)))
             parent.orderId = parent_id
             parent.transmit = False
+            self._entry_good_for_the_day(parent)
             oca = f"SV{parent_id}"
             tp_order = _ib.LimitOrder(exit_action, abs(float(quantity)), tp)
             tp_order.parentId = parent_id
@@ -890,6 +999,7 @@ class IBKRTrader:
         # rejects a market order that still carries a limit field. Clear
         # it with the type rather than leaving the two disagreeing.
         orders[0].orderType = "MKT"
+        self._entry_good_for_the_day(orders[0])
         for attr in ("lmtPrice", "auxPrice"):
             if hasattr(orders[0], attr):
                 try:
@@ -911,13 +1021,95 @@ class IBKRTrader:
     # is what OANDA and Alpaca already give the same legs.
     PROTECTIVE_LEG_TIF = "GTC"
 
+    # The entry's own time-in-force, said out loud. An EMPTY tif is not
+    # "DAY": it is "whatever the account's order preset says", and TWS
+    # announces the substitution with notice 10349 — which the library
+    # then read as a rejection (see _shield_orders_from_notices). A
+    # market entry is good for the day: it fills now or is held for the
+    # open, and an entry that could still fill a week later at any price
+    # is not one anyone asked for.
+    ENTRY_TIF = "DAY"
+
+    def _entry_good_for_the_day(self, order) -> None:
+        try:
+            order.tif = self.ENTRY_TIF
+        except Exception:  # noqa: BLE001 — a frozen stand-in is fine
+            pass
+
     def _protection_outlives_the_session(self, legs) -> None:
-        """Stamp the protective legs GTC; the parent keeps its own tif."""
+        """Stamp the protective legs GTC; the entry carries ENTRY_TIF.
+
+        A STAMP, not a fact: what TWS keeps is read back after placement
+        by _protection_downgraded, because an account preset can rewrite
+        it and the library never shows the rewrite on the trade.
+        """
         for leg in legs:
             try:
                 leg.tif = self.PROTECTIVE_LEG_TIF
             except Exception:  # noqa: BLE001 — a frozen stand-in is fine
                 pass
+
+    def _accepted_tifs(self, order_ids) -> "Optional[dict]":
+        """{orderId: TIF} for our open orders AS TWS REPORTS THEM, or None.
+
+        reqOpenOrders() answers with TWS's own Order objects for this
+        client's open orders — the one place the accepted `tif` is
+        visible: ib_insync's openOrder callback copies permId, quantity,
+        prices, type and ref onto a trade it already tracks, and not tif,
+        so `trade.order.tif` reads whatever we stamped forever. One round
+        trip per bracket. None means the socket could not be asked, which
+        is not the same as "as stamped".
+        """
+        wanted = {str(i) for i in (order_ids or []) if i}
+        if not wanted:
+            return {}
+        try:
+            reported = self._ib.reqOpenOrders() or []
+        except Exception as e:  # noqa: BLE001
+            log.error("IBKR reqOpenOrders failed while verifying "
+                      "protection: %s", e)
+            return None
+        out = {}
+        for o in reported:
+            oid = str(getattr(o, "orderId", "") or "")
+            if oid in wanted:
+                out[oid] = str(getattr(o, "tif", "") or "").upper()
+        return out
+
+    def _protection_downgraded(self, symbol, legs, stop_leg_id) -> str:
+        """Why the resting stop is NOT good-till-cancelled — or ''.
+
+        An IBKR order preset rewrites API orders on the way in ("Order TIF
+        was set to DAY based on order preset"). A DAY stop dies at the
+        session close while the row says `protected`, and protected rows
+        skip every bot-side SL/TP check: the exact naked overnight
+        position commit 9e2bc10 exists to prevent, reintroduced by one
+        account setting. The stop is the leg that matters; a rewritten
+        target is logged and does not decide.
+        """
+        accepted = self._accepted_tifs(legs)
+        if accepted is None:
+            log.warning("IBKR %s: could not read the legs' time-in-force "
+                        "back from TWS — keeping the bracket as stamped; "
+                        "the vanished-stop check watches it from here",
+                        symbol)
+            return ""
+        wrong = {oid: tif for oid, tif in accepted.items()
+                 if tif and tif != self.PROTECTIVE_LEG_TIF}
+        if not wrong:
+            return ""
+        held = ", ".join(f"leg {oid} is {tif}"
+                         for oid, tif in sorted(wrong.items()))
+        stop_wrong = (str(stop_leg_id) in wrong) if stop_leg_id else True
+        if not stop_wrong:
+            log.warning("IBKR %s: %s — the stop is %s, so the position "
+                        "stays protected", symbol, held,
+                        self.PROTECTIVE_LEG_TIF)
+            return ""
+        return (f"the broker kept the protection as {held}, not "
+                f"{self.PROTECTIVE_LEG_TIF}: an IBKR order preset rewrites "
+                f"API orders — set the preset's Time in Force to GTC "
+                f"(TWS: Global Configuration → Presets)")
 
     # States ib_insync reports for an order TWS is still working.
     _WORKING_STATES = ("PendingSubmit", "PreSubmitted", "Submitted",
@@ -1162,8 +1354,8 @@ class IBKRTrader:
             log.error("IBKR resting_order_ids failed: %s", e)
             return None
 
-    @staticmethod
-    def _leg_is_resting(trade) -> bool:
+    @classmethod
+    def _leg_is_resting(cls, trade) -> bool:
         """True when TWS has ACCEPTED this protective leg.
 
         ib_insync's active vocabulary is PendingSubmit / PreSubmitted /
@@ -1177,7 +1369,9 @@ class IBKRTrader:
         if status in ("Cancelled", "ApiCancelled", "Inactive"):
             return False
         for entry in (getattr(trade, "log", None) or []):
-            if getattr(entry, "errorCode", None):
+            code = getattr(entry, "errorCode", None)
+            if code and not cls._is_order_notice(
+                    code, getattr(entry, "message", "")):
                 return False
         # PROVEN, not merely un-refused. `bool(status)` accepted
         # PendingSubmit, which ib_insync assigns LOCALLY the instant
@@ -1222,7 +1416,11 @@ class IBKRTrader:
                                 "(sl=%s tp=%s) — sending the entry "
                                 "UNPROTECTED, bot-side management owns it",
                                 symbol, stop_loss, take_profit)
-            orders = bracket or [_ib.MarketOrder(action, abs(float(quantity)))]
+            if bracket:
+                orders = bracket
+            else:
+                orders = [_ib.MarketOrder(action, abs(float(quantity)))]
+                self._entry_good_for_the_day(orders[0])
             # EVERY leg carries the account. A child that lands on the
             # session default is a stop resting against a book that does
             # not hold the position — it opens one when it fires.
@@ -1298,13 +1496,20 @@ class IBKRTrader:
             # the engine's REJECTED check and booked a full-size phantom
             # live trade at the pre-order ticker price. Normalize at the
             # boundary so every consumer's existing check catches it.
-            dead = self._dead_order_reason(trade, filled_qty)
+            dead = self._dead_order_reason(trade, filled_qty, child_trades)
             if dead:
                 log.error("IBKR market_order(%s, %s, %s) dead on "
                           "arrival: %s", symbol, side, quantity, dead)
                 empty["orderId"] = str(trade.order.orderId or "")
                 empty["raw"] = {"reason": dead}
                 return empty
+            # The time-in-force the broker KEPT on the legs, read back
+            # before anything is claimed for them — the stamp cannot be
+            # trusted, see _protection_downgraded.
+            downgraded = ""
+            if bracket is not None and legs:
+                downgraded = self._protection_downgraded(
+                    symbol, legs, stop_leg_id)
             out = {
                 "orderId": str(trade.order.orderId or ""),
                 "symbol": symbol, "side": side,
@@ -1347,7 +1552,17 @@ class IBKRTrader:
                 # not claimed for a position that does not exist yet.
                 out["status"] = "WORKING"
                 out["working"] = True
-                if bracket is not None:
+                if bracket is not None and downgraded:
+                    # The parent keeps working. Legs that would die at
+                    # the close are withdrawn now rather than reported as
+                    # the protection the fill will inherit.
+                    log.error("IBKR %s: %s — withdrawing the legs; the "
+                              "fill will be bot-managed", symbol, downgraded)
+                    self._retract(contract, child_trades, None)
+                    out["protectionNote"] = (
+                        f"{downgraded}; protective legs withdrawn — "
+                        f"bot-side management owns the exit")
+                elif bracket is not None:
                     out["protectiveOrders"] = legs
                     if stop_leg_id:
                         out["protectiveStopId"] = stop_leg_id
@@ -1363,10 +1578,11 @@ class IBKRTrader:
                 refused = [ct for ct in child_trades
                            if not self._leg_is_resting(ct)]
                 partial = 0 < filled_qty < abs(float(quantity))
-                if refused or partial:
+                if refused or partial or downgraded:
                     why = ("a protective leg was refused" if refused
                            else f"the parent filled {filled_qty} of "
-                                f"{quantity} and the legs would over-cover")
+                                f"{quantity} and the legs would over-cover"
+                           if partial else downgraded)
                     log.error("IBKR %s: %s — cancelling the bracket and "
                               "leaving this position to bot-side "
                               "management", symbol, why)
@@ -1386,6 +1602,9 @@ class IBKRTrader:
                     # quantities some row already claims.
                     self._retract(contract, child_trades,
                                   trade if partial else None)
+                    out["protectionNote"] = (
+                        f"{why}; protective legs withdrawn — bot-side "
+                        f"management owns the exit")
                 else:
                     out["protectedOnFill"] = True
                     out["protectiveOrders"] = legs
@@ -1813,6 +2032,7 @@ class IBKRTrader:
             self._ib.qualifyContracts(opt)
             action = "BUY" if side.upper() == "BUY" else "SELL"
             order = _ib.MarketOrder(action, abs(int(contracts)))
+            self._entry_good_for_the_day(order)
             refusal = self._bind_order_account(order)
             if refusal:
                 log.error("IBKR market_order_option(%s) refused: %s",

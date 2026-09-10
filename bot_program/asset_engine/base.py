@@ -2506,6 +2506,13 @@ class AssetBot(ABC):
                     stop_leg = res.get("protectiveStopId")
                     if stop_leg:
                         entry_meta["protective_stop_id"] = str(stop_leg)
+                # What the broker did to the protection, when it did
+                # something — a preset that rewrote the legs' time-in-
+                # force, a refused leg, a partial fill. The row explains
+                # itself instead of the operator reading it off a log.
+                note = res.get("protectionNote")
+                if note:
+                    entry_meta["protection_note"] = str(note)[:300]
                 # WORKING: the broker accepted the order and has not filled
                 # it (a market order held outside regular hours, most
                 # often). That is not a position. The row is booked so the

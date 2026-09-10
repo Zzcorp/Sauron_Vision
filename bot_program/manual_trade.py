@@ -1793,6 +1793,9 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                     handle = res.get(res_key)
                     if handle:
                         extra[meta_key] = str(handle)
+            note = res.get("protectionNote")
+            if note:
+                extra["protection_note"] = str(note)[:300]
 
             with transaction.atomic():
                 trade = _book_row(booked_px,

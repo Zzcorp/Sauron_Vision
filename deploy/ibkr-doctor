@@ -1,0 +1,103 @@
+#!/usr/bin/env sh
+# Why is the broker unreachable? One READ-ONLY command that gathers every
+# fact the runbook tells you to go and look at, in the order that decides.
+#
+#   ./deploy/ibkr-doctor            slot 1 (ibgateway)
+#   ./deploy/ibkr-doctor --slot 2   a second login's container
+#
+# It changes nothing: no restart, no recreate, no .env write. It prints,
+# and it names the next step, which is yours to take.
+#
+# WHY. "IBKR is unreachable" has had four different causes on this
+# platform, each with its own fix, and each time the operator was handed a
+# fresh ad-hoc command to tell them apart:
+#   * the Gateway container is UP but NOT LOGGED IN — stalled behind the
+#     "Gateway" dialog IBC cannot read, or waiting for the IB Key push
+#     (`ps` says (unhealthy); the phone first, then a restart);
+#   * the login was refused by the server, and only launcher.log says why
+#     (an account action, a version, a passkey);
+#   * the Gateway is logged in but the API SESSION is not: a clientId
+#     collision (error 326), or a worker holding a socket the Gateway
+#     already dropped (the workers get restarted, not the Gateway);
+#   * Sauron's own reading is stale — the broker sync has not run, so the
+#     money on the dashboard is hours old while the socket is fine.
+# The runbook's "When the Gateway hangs behind a dialog" covers the first
+# two by hand; this script runs those steps and the other two in one go.
+set -u
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+dc="$here/dc"
+slot=1
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --slot) shift || true; slot="${1:-}" ;;
+        --slot=*) slot="${1#--slot=}" ;;
+        -h|--help)
+            echo "ibkr-doctor — read-only diagnosis of an unreachable IBKR Gateway"
+            echo "  ./deploy/ibkr-doctor [--slot N]"
+            exit 0 ;;
+        *) echo "unknown option: $1" >&2; exit 2 ;;
+    esac
+    shift || true
+done
+case "$slot" in 1|2|3|4|5) ;; *)
+    echo "--slot must be 1..5 (got: '${slot}')" >&2; exit 2 ;;
+esac
+if [ "$slot" = 1 ]; then svc=ibgateway; prof=ibkr
+else svc="ibgateway-$slot"; prof="ibkr$slot"; fi
+
+say() { printf '\n== %s ==\n' "$1"; }
+
+say "1. containers (a Gateway that is UP is not a Gateway that is LOGGED IN)"
+"$dc" --profile "$prof" ps "$svc" web worker-fast worker-slow beat 2>&1 || true
+
+say "2. the Gateway's last 40 lines (IBC)"
+"$dc" --profile "$prof" logs --tail 40 "$svc" 2>&1 || true
+
+say "3. what the IBKR server said (launcher.log)"
+"$dc" --profile "$prof" exec -T "$svc" sh -c \
+    'grep -a -i -E "Authorization failed|Connection to server failed|FailReason|AdsManager|asskey|second factor|Login failed" /home/ibgateway/Jts/launcher.log 2>/dev/null | tail -8' \
+    2>/dev/null || echo "  (launcher.log unreadable — is the container running?)"
+
+say "4. the relays, from where Sauron connects (the web container)"
+"$dc" exec -T -e "GATEWAY_HOST=$svc" web python - <<'PY' 2>&1 || echo "  (web container not running)"
+import os
+import socket
+
+host = os.environ.get("GATEWAY_HOST", "ibgateway")
+for port, mode in ((4003, "live"), (4004, "paper")):
+    s = socket.socket()
+    s.settimeout(3)
+    try:
+        s.connect((host, port))
+        print(f"  {host}:{port} ({mode}): TCP open — a relay accepts even while "
+              f"the Gateway behind it is stuck; step 1's health is the truth")
+    except Exception as e:  # noqa: BLE001
+        print(f"  {host}:{port} ({mode}): {e}")
+    finally:
+        s.close()
+PY
+
+say "5. Sauron's own reading (manage.py preflight_live — read-only)"
+"$dc" exec -T web python manage.py preflight_live 2>&1 | sed -n '1,80p' || true
+
+say "6. verdict"
+state=$("$dc" --profile "$prof" ps "$svc" 2>/dev/null | tail -n +2 || true)
+case "$state" in
+    *"(unhealthy)"*)
+        echo "  The Gateway is UP but NOT logged in."
+        echo "  - step 2 shows 'second factor' / 'IB Key': approve the push on the phone, then look again in a minute."
+        echo "  - step 2 shows 'detected dialog entitled: Gateway' and nothing after: stalled — ./deploy/dc --profile $prof restart $svc"
+        echo "  - step 3 shows 'Authorization failed': the server refused the login — the reason is on that line." ;;
+    *"(healthy)"*)
+        echo "  The Gateway is logged in and its API port answers."
+        echo "  If Sauron still says the route is unavailable, the API SESSION is the problem, not the Gateway:"
+        echo "  - error 326 in step 2 = a clientId already in use; a worker holding a dead socket looks the same."
+        echo "  - ./deploy/dc restart worker-fast worker-slow web   (the Gateway stays up; nobody re-logs in)"
+        echo "  - then: ./deploy/dc exec web python manage.py preflight_live" ;;
+    "")
+        echo "  The Gateway container is not running at all: ./deploy/ibkr-apply" ;;
+    *)
+        echo "  Gateway: $state"
+        echo "  Starting (240s grace) or restarting — look again in two minutes." ;;
+esac

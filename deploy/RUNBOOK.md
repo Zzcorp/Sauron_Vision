@@ -338,7 +338,9 @@ IBC: detected dialog entitled: Gateway; event=Focused
 `dc ps` shows the container **(unhealthy)** in this state — the healthcheck
 probes the Gateway's internal API port, which only listens after login, so
 "Up 3 hours (unhealthy)" means stalled, not running. No IB Key push arrives
-because the server never reached the 2FA step. In order:
+because the server never reached the 2FA step. `./deploy/ibkr-doctor` runs
+every check below — and the API-session checks the Gateway itself cannot
+see — read-only, and names the next step; start there. By hand, in order:
 
 1. `./deploy/dc --profile ibkr restart ibgateway` — the interstitial
    variant is non-deterministic and a restart usually logs in clean.
@@ -462,6 +464,22 @@ target orders where the broker supports it (Alpaca brackets, OANDA on-fill), so
 a reboot or a crashed worker does not leave a position unprotected. On restart,
 reconciliation compares the broker's positions to the database and the
 `retry_pending_closes` task drains anything stranded.
+
+**IBKR order presets rewrite API orders.** TWS/Gateway applies the
+account's order preset to anything the API leaves unset, and can override
+what it sets — announced as notice 10349, *"Order TIF was set to DAY based
+on order preset"*. Sauron sends the entry as DAY and the stop and target as
+GTC, then reads back the time-in-force the Gateway actually kept. A stop the
+preset turned into DAY would expire at the session close while the row said
+`protected`, so such legs are withdrawn on the spot, the row is booked
+unprotected (bot-side management owns the exit) and its `protection_note`
+says why. Set the preset's Time in Force to **GTC** before going live, from
+a TWS logged in as the same user: Global Configuration → Presets → the
+instrument type (Stocks, Forex…) → Time in Force. The headless Gateway
+applied one on this deployment with no TWS installed beside it, so the
+preset travels with the login; if the Gateway keeps reporting DAY after the
+change, the preset is not the only source and IBKR support is the next call.
+Until it is fixed, every live entry is booked unprotected and bot-managed.
 
 **Watch `/health/` and `/forensics/`** rather than tailing logs: the first
 answers "is the machine running", the second answers "why did it do that".
