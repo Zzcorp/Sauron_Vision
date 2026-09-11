@@ -513,7 +513,12 @@ proposals land as draft setups in RESEARCH stage; switch
 scanner grades their signals, the stage gate keeps every bot from trading
 them, the promotion ladder decides the rest, and the brain page still lets
 you reject one. A safety refusal by the frontier model is not an outage:
-the provider re-runs the call once on Opus and says so in the log.
+the provider re-runs the call once on Opus and says so in the log. An
+idea the validator refuses is not lost either: it lands in the history
+on `/generated/` as REJECTED by `validator`, with the reason in the
+"why" column — the run's `n_validation_rejected` counts those rows. The
+`brain` logger keeps its INFO lines in production like every Sauron app,
+so `./deploy/dc logs web | grep generator` shows the same reasons.
 
 **No prose without a claim the platform can grade.** Every agent that
 talks about a symbol now registers a direction call — symbol, up or down,

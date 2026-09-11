@@ -359,6 +359,46 @@ def validate_proposal(proposal: dict) -> tuple[bool, str]:
     return True, ""
 
 
+def _record_rejection(proposal, reason: str, *, model: str = "") -> None:
+    """Write the idea the platform refused, and why, as a REJECTED row —
+    no setup, no rule, no hypothesis — so the brain page shows it.
+
+    Before this, a proposal the validator refused vanished with one INFO
+    line (silenced in production, where the brain logger sat at WARNING).
+    The operator had paid for three ideas and could see two. The row
+    carries no cost: the run's cost already sits on the rows that were
+    persisted. Never raises — a trace must not fail the run.
+    """
+    try:
+        from .generator_models import GeneratedSetupProposal
+
+        def _text(key, cap):
+            v = proposal.get(key, "") if isinstance(proposal, dict) else ""
+            return (v if isinstance(v, str) else repr(v))[:cap]
+
+        def _list(key):
+            v = proposal.get(key) if isinstance(proposal, dict) else None
+            return list(v) if isinstance(v, list) else []
+
+        GeneratedSetupProposal.objects.create(
+            proposed_name=_text("name_slug", 120) or "(unnamed)",
+            rationale_md=_text("rationale_md", 5000),
+            inspiration_summary=_text("inspiration", 300),
+            direction=_text("direction", 10) or "bullish",
+            asset_classes=_list("asset_classes"),
+            conditions=_list("conditions"),
+            status=GeneratedSetupProposal.STATUS_REJECTED,
+            reviewed_by="validator",
+            reviewed_at=timezone.now(),
+            review_notes=reason[:2000],
+            error=reason[:2000],
+            model_used=(model or "")[:80],
+        )
+    except Exception:  # noqa: BLE001 — a trace never fails the run
+        logger.warning("[generator] could not record the rejection: %s",
+                       reason[:200])
+
+
 def _final_setup_name(name_slug: str, *, today=None) -> str:
     today = today or timezone.now()
     return f"generated_{today:%Y%m%d}_{name_slug}"
@@ -376,6 +416,7 @@ def _persist_proposal(proposal: dict, *, model: str, tokens_in: int,
     ok, reason = validate_proposal(proposal)
     if not ok:
         logger.info("[generator] proposal rejected by validator: %s", reason)
+        _record_rejection(proposal, reason, model=model)
         return None
 
     from signals.models_opportunity import OpportunitySetup
@@ -389,6 +430,8 @@ def _persist_proposal(proposal: dict, *, model: str, tokens_in: int,
     # slug), bail out cleanly.
     if OpportunitySetup.objects.filter(name=final_name).exists():
         logger.info("[generator] setup name collision: %s — skipping", final_name)
+        _record_rejection(proposal, f"setup name collision: {final_name}",
+                          model=model)
         return None
 
     setup = OpportunitySetup.objects.create(

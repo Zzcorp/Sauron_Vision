@@ -214,7 +214,15 @@ class GenerateStrategiesNowTests(TestCase):
         self.assertTrue(r["ok"])
         self.assertEqual(r["n_persisted"], 1)
         self.assertEqual(r["n_validation_rejected"], 1)
-        self.assertEqual(GeneratedSetupProposal.objects.count(), 1)
+        self.assertEqual(GeneratedSetupProposal.objects.filter(
+            status=GeneratedSetupProposal.STATUS_PENDING).count(), 1)
+        # The refused idea leaves a trace, with the reason, and no setup.
+        trace = GeneratedSetupProposal.objects.get(
+            status=GeneratedSetupProposal.STATUS_REJECTED)
+        self.assertEqual(trace.proposed_name, "bad_a")
+        self.assertEqual(trace.reviewed_by, "validator")
+        self.assertIn("fake_evaluator", trace.review_notes)
+        self.assertIsNone(trace.setup)
 
     def test_error_path_returns_ok_false(self):
         from brain.strategy_generator import generate_strategies_now
