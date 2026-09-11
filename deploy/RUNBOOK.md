@@ -556,6 +556,14 @@ followed by:
   every position the bots hold, paper or LIVE, with the platform's own
   mark, unrealised P&L and R against the stop; a position with no stop is
   flagged.
+- `follow` / `follow ID --share 20 --yes` / `follow ID --stop --yes` — the
+  asset-bots page's Follow form: a live pool becomes a share of the
+  broker account, through the same `allocate_shares` as the page, the
+  sync and the preflight. Prints the plan for every follower; writes
+  only with `--yes` (the page asks the PIN for this — say so).
+- `bot list` / `bot off ID` / `bot on ID [--yes]` — the admin page's
+  toggle with its rule: stopping is frictionless, arming a LIVE config
+  takes `--yes` where the page takes the PIN.
 - `preflight_live`, `why_no_trade`, `seed_components`, and
   `./deploy/ibkr-doctor` (read-only) were already there.
 
