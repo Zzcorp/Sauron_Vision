@@ -958,10 +958,17 @@ def hq_follow_asset_bot(request):
     cfg.extras = ex
     cfg.capital = Decimal(str(round(float(reading["value"]) * fraction, 2)))
     cfg.save(update_fields=["extras", "capital", "updated_at"])
+    # The automatic shares are what the explicit ones leave, so the other
+    # followers changed too: re-split every one from the same reading now
+    # rather than leaving the pools over-allocated until the next sync.
+    from bot_program.tasks import _follow_the_account
+    _follow_the_account(request.user, float(reading["value"]),
+                        reading["currency"])
     messages.success(request, f"'{cfg.name}' follows the account at "
                               f"{fraction * 100:.0f}% — pool {cfg.capital} "
-                              f"{reading['currency'] or ''}; the sync keeps "
-                              f"it there.")
+                              f"{reading['currency'] or ''}; every follower "
+                              f"re-split from the same reading, and the sync "
+                              f"keeps them there.")
     return redirect("asset_bots_dashboard")
 
 

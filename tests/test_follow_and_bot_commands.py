@@ -84,11 +84,11 @@ class FollowCommandTests(TestCase):
         self.assertTrue(self.etf.extras["capital_tracks_broker"])
         self.assertEqual(self.etf.extras["account_share_pct"], 20)
         self.assertEqual(float(self.etf.capital), 400.11)
-        # And the sync keeps it there: the manual pool re-splits to 80%.
-        from bot_program.tasks import _follow_the_account
-        _follow_the_account(self.user, 2000.53, "EUR")
+        # The other follower is re-split at once — no sync in between —
+        # so the pools never total more than the account.
         self.manual.refresh_from_db()
         self.assertEqual(float(self.manual.capital), 1600.42)
+        self.assertIn("every follower re-split", out)
 
     def test_over_allocation_is_refused_with_the_reason(self):
         _cfg(self.user, name="big", tracks=True, share=90)

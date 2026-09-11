@@ -105,9 +105,16 @@ class Command(BaseCommand):
         cfg.extras = ex
         cfg.capital = Decimal(str(round(value * fraction, 2)))
         cfg.save(update_fields=["extras", "capital", "updated_at"])
+        # The other followers' shares changed too (an automatic share is
+        # what the explicit ones leave). Re-split them from the same
+        # reading NOW — before this, the pools were over-allocated until
+        # the next sync came round, and the preflight said so.
+        from bot_program.tasks import _follow_the_account
+        _follow_the_account(user, value, reading["currency"])
         self.stdout.write(self.style.SUCCESS(
             f"[{cfg.pk}] {cfg.name} follows the account at {fraction * 100:.0f}% — "
-            f"pool {cfg.capital} {cur}; the sync keeps it there"))
+            f"pool {cfg.capital} {cur}; every follower re-split from the "
+            f"same reading, and the sync keeps them there"))
 
     def _list(self, username):
         from django.contrib.auth import get_user_model
