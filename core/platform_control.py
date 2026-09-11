@@ -200,10 +200,13 @@ DEFAULT_COMPONENTS = [
     # Without these rows the @guarded_task on propose_share_plans skips on
     # every beat and /shares/ shows no plan without saying why.
     {"key": "pipeline_share_allocator", "name": "Share Allocator (proposer)",
-     "description": "Every 4 h (at :05, after the sync): computes a TARGET share of the broker account for each live follower pool from graded evidence, regime fit, opportunity density and news risk, under per-pool floor/ceiling, a 10-point/day change cap and a drawdown governor, and writes it as a SharePlan in PROPOSED state. SHADOW by default: nothing is re-sized until an admin applies a plan on /shares/ (trading PIN) or with `shares apply ID --yes`, and apply is refused unless share_allocator_mode_live is ON. Never writes a pool's capital, never talks to the broker.",
+     # Descriptions are a 300-char column, enforced on the VPS Postgres and
+     # not on the SQLite suite: the first cut of these two was 600 chars,
+     # seed_components failed on deploy and the stack stayed down (2026-09-12).
+     "description": "Every 4h (:05, after the sync): a TARGET share of the account per live follower pool from graded evidence, regime, opportunity density and news risk, under floor/ceiling, a 10-pt/day cap and a drawdown governor — written as a SharePlan, SHADOW by default. See /shares/ and the RUNBOOK.",
      "category": "pipeline"},
     {"key": "share_allocator_mode_live", "name": "Share Allocator Live Mode",
-     "description": "Off (default) = shadow — plans are proposed and graded, apply is refused with 'shadow mode'. On = an admin can apply a plan (PIN on /shares/, --yes on the shell), which writes each follower's extras['account_share_pct'] and re-sizes the pools through the sync's own arithmetic; rollback restores the previous shares exactly. Floors, ceilings, the daily change cap, 3 applies/day and the drawdown governor hold regardless of mode.",
+     "description": "Off (default) = shadow: plans are proposed and graded, apply is refused. On = an admin can apply a plan (PIN on /shares/, --yes on the shell), writing each follower's account_share_pct and re-sizing pools via the sync. Rollback restores exactly. Caps and the governor hold in both modes.",
      "category": "system"},
 ]
 
