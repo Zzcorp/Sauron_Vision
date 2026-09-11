@@ -87,13 +87,35 @@ class TheDoctorTests(SimpleTestCase):
         self.assertIn('restart $svc', healthy)
         # And the facts it reads come from the steps above it.
         self.assertIn('case "$pre" in *"no equity reading has landed"*', src)
-        self.assertIn('case "$srv$ibc" in', src)
+        self.assertIn('case "$after" in', src)
         self.assertIn('*"Authorization failed"*', src)
-        self.assertIn('*"Existing session"*', src)
+        self.assertIn('*"Existing session detected"*', src)
         # The dialog IBC leaves for a human: the fix is a recreate with the
         # compose's EXISTING_SESSION_DETECTED_ACTION, never a restart.
         self.assertIn("EXISTING_SESSION_DETECTED_ACTION=primary", src)
         self.assertIn("up -d $svc", src)
+
+    def test_a_completed_login_resets_the_clock(self):
+        """2026-09-11 18:46: a clean login one minute old, container
+        healthy, reading 25h old because the sync had not run since —
+        and the verdict said 'session lost' because the successful
+        'Second Factor Authentication' dialog matched its pattern. Only
+        what step 2 shows AFTER the last 'Login has completed' can be a
+        problem; a fresh login with a stale reading means 'run the sync'."""
+        src = _script()
+        self.assertIn('after="${ibc##*Login has completed}"', src)
+        self.assertIn('case "$after" in', src)
+        self.assertIn('*"Second Factor Authentication initiated"*', src)
+        self.assertNotIn('*"Second Factor"*', src)
+        self.assertNotIn('*"second factor"*|', src)
+        # The server's refusal is evidence only while no login completed.
+        self.assertIn('if [ -z "$login_done" ]; then', src)
+        start = src.index('*"(healthy)"*')
+        healthy = src[start:src.index('    "")', start)]
+        self.assertIn('[ -n "$login_done" ] && [ -z "$session" ]', healthy)
+        self.assertIn("the broker sync has not run since", healthy)
+        self.assertIn("sync_broker_account", healthy)
+        self.assertIn("Nothing to do here", healthy)
 
     def test_the_api_churn_is_hidden_not_the_ibc_lines(self):
         """Sauron's reconnects leave 'remove Client N' forty times over

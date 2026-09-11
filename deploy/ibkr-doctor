@@ -103,10 +103,28 @@ state=$("$dc" --profile "$prof" ps "$svc" 2>/dev/null | tail -n +2 || true)
 # nothing about the login. Two facts do: the server refusing the login in
 # step 3 (or IBC waiting on something in step 2), and Sauron's reading not
 # landing in step 5.
-session=""
-case "$srv$ibc" in
-    *"Authorization failed"*|*"second factor"*|*"Second Factor"*|*"Existing session"*|*"Login failed"*|*"detected dialog"*) session="lost" ;;
+# A completed login is the fact that resets the clock: whatever step 2
+# said BEFORE its last "Login has completed" was answered (a second factor
+# that opened and closed, a session fight that was won). Only what comes
+# AFTER it can be a problem now. 2026-09-11 18:46: a clean login one
+# minute old was read as "session lost" because "Second Factor
+# Authentication" — the push the operator had just approved — matched.
+login_done=""
+login_at=""
+after="$ibc"
+case "$ibc" in *"Login has completed"*)
+    login_done="yes"
+    after="${ibc##*Login has completed}"
+    login_at=$(printf '%s\n' "$ibc" | grep "Login has completed" | tail -1 | sed 's/.*| //; s/ IBC:.*//') ;;
 esac
+session=""
+case "$after" in
+    *"Existing session detected"*|*"Second Factor Authentication initiated"*|*"Login failed"*|*"detected dialog entitled: Gateway"*) session="lost" ;;
+esac
+# The server's refusal counts only while no login has completed since.
+if [ -z "$login_done" ]; then
+    case "$srv" in *"Authorization failed"*) session="lost" ;; esac
+fi
 stale=""
 case "$pre" in *"no equity reading has landed"*) stale="yes" ;; esac
 case "$state" in
@@ -119,7 +137,18 @@ case "$state" in
         echo "    nobody will click (IBC's default is manual). The compose sets EXISTING_SESSION_DETECTED_ACTION=primary; a"
         echo "    container created before that line keeps the old environment — RECREATE it: ./deploy/dc --profile $prof up -d $svc" ;;
     *"(healthy)"*)
-        if [ -n "$session" ] || [ -n "$stale" ]; then
+        if [ -n "$login_done" ] && [ -z "$session" ]; then
+        echo "  The Gateway completed a login (step 2: 'Login has completed' at ${login_at:-?}) and nothing went wrong after it."
+        if [ -n "$stale" ]; then
+        echo "  Step 5's reading is OLDER than that login: the broker sync has not run since. Read the account now:"
+        echo "     ./deploy/dc exec web python manage.py shell -c 'from bot_program.tasks import sync_broker_account as s; print(s())'"
+        echo "  then run this again. Still 'unreachable' after a completed login = the API session, not the Gateway:"
+        echo "  - error 326 in step 2 = a clientId already in use; a worker holding a dead socket looks the same."
+        echo "  - ./deploy/dc restart worker-fast worker-slow web   (the Gateway stays up; nobody re-logs in)"
+        else
+        echo "  And Sauron's reading is fresh. Nothing to do here."
+        fi
+        elif [ -n "$session" ] || [ -n "$stale" ]; then
         echo "  The container is healthy — that is the process and the port, NOT the login."
         echo "  The API accepts Sauron's socket and answers nothing: step 5 has no fresh reading (stale=${stale:-no}), step 2/3 show a login problem (session=${session:-none seen})."
         echo "  This is the Gateway's SESSION. Restarting the workers changes nothing. In order:"
