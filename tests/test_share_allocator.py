@@ -241,12 +241,58 @@ class ThePureArithmeticTests(SimpleTestCase):
         nan = bounds_for(SimpleNamespace(extras={"share_ceiling_pct": "x"}))
         self.assertEqual(nan[:2], (DEFAULT_FLOOR_PCT, DEFAULT_CEILING_PCT))
 
+    def test_the_manual_lane_has_no_default_ceiling(self):
+        """Plan #1 on the live account (2026-09-11): 80% -> 70% on the
+        operator's own pool with every lane unmeasured, because the bots'
+        60% ceiling was binding on it. The manual lane (the reserved name,
+        no symbols) defaults to 100%; an explicit ceiling still holds; a
+        config merely NAMED manual with symbols is a bot and keeps 60%."""
+        from types import SimpleNamespace
+
+        from bot_program.share_allocator import (DEFAULT_CEILING_PCT,
+                                                 DEFAULT_FLOOR_PCT, bounds_for)
+        manual = SimpleNamespace(name="manual", symbols=[], extras={})
+        self.assertEqual(bounds_for(manual)[:2], (DEFAULT_FLOOR_PCT, 100.0))
+        pinned = SimpleNamespace(name="manual", symbols=[],
+                                 extras={"share_ceiling_pct": 75})
+        self.assertEqual(bounds_for(pinned)[:2], (DEFAULT_FLOOR_PCT, 75.0))
+        bot = SimpleNamespace(name="manual", symbols=["AAPL"], extras={})
+        self.assertEqual(bounds_for(bot)[:2],
+                         (DEFAULT_FLOOR_PCT, DEFAULT_CEILING_PCT))
+
 
 class ProposeTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user("sa_u", password="x")
         self.acct = _acct(self.user)
+
+    def test_no_information_moves_the_operators_pool_only_on_information(self):
+        """The same two followers as plan #1 — manual 80% automatic, ETF
+        20% — with every reader neutral: nothing binds, both are held.
+        With the ETF class alone reading opportunity 1.2, the move is the
+        1.6 points that factor earns, not the ten a ceiling forced."""
+        from unittest.mock import patch
+
+        from bot_program.share_allocator import propose_share_plan
+        manual = _cfg(self.user, name="manual", symbols=[], capital="1600",
+                      tracks=True)
+        etf = _cfg(self.user, name="commodity_etf", capital="400",
+                   tracks=True, share=20)
+        neutral = {"lane": "none", "n": 0, "measured": False, "score": 1.0,
+                   "reason": "unmeasured"}
+        # The readers are imported lazily inside the proposer: patch them
+        # at their homes, not on the allocator module.
+        with patch("bot_program.evidence.config_evidence",
+                   return_value=neutral),                 patch("brain.context.get_brain_context", return_value=None),                 patch("signals.opportunity_density.opportunity_density",
+                      return_value={}),                 patch("bot_program.news_risk.news_risk_by_class",
+                      return_value={}):
+            plan = propose_share_plan(self.user)
+        self.assertIsNotNone(plan)
+        t = {int(k): v for k, v in plan.targets.items()}
+        self.assertAlmostEqual(t[etf.pk], 20.0, places=2)
+        self.assertAlmostEqual(t[manual.pk], 80.0, places=2)
+        self.assertTrue(plan.inputs[str(manual.pk)]["held"])
 
     def test_a_stale_reading_proposes_nothing(self):
         from bot_program.capital_truth import TRACKING_FRESH_SECONDS

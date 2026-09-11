@@ -93,12 +93,38 @@ def governor_for(drawdown_pct) -> float:
     return 1.0 - (dd - DD_KNEE) / (DD_MAX - DD_KNEE) * (1.0 - DD_FLOOR)
 
 
+def _is_manual_lane(cfg) -> bool:
+    """The config TAKE TRADE books hand-taken positions against: the
+    reserved name and no symbols (core.context_processors._is_manual_config
+    is the platform's definition; mirrored here so this module stays free
+    of the dashboard)."""
+    try:
+        from bot_program.manual_trade import MANUAL_CONFIG_NAME
+    except Exception:  # noqa: BLE001
+        MANUAL_CONFIG_NAME = "manual"
+    return (getattr(cfg, "name", None) == MANUAL_CONFIG_NAME
+            and not getattr(cfg, "symbols", None))
+
+
 def bounds_for(cfg) -> tuple:
     """(floor, ceiling, reason) — the config's own bounds when they are
-    sane (finite, 0 < floor <= ceiling <= 100), else the defaults."""
+    sane (finite, 0 < floor <= ceiling <= 100), else the defaults.
+
+    The manual lane has NO default ceiling. The first plan on the live
+    account (2026-09-11 22:52, #1) proposed moving the operator's own
+    pool 80% -> 70% and the ETF bot 20% -> 30% with every evidence lane
+    unmeasured: the 60% ceiling, a concentration guard written for BOTS,
+    was binding on the hand-taken pool and the water-fill handed the
+    excess to the only other follower. A default constant was moving ten
+    points of a 2,000 EUR account on no information. The operator's pool
+    is the operator's; a bot that earns its way up still stops at 60%.
+    An explicit extras["share_ceiling_pct"] on the manual lane is honoured.
+    """
     ex = getattr(cfg, "extras", None) or {}
     raw_lo, raw_hi = ex.get("share_floor_pct"), ex.get("share_ceiling_pct")
     lo, hi = DEFAULT_FLOOR_PCT, DEFAULT_CEILING_PCT
+    if _is_manual_lane(cfg):
+        hi = 100.0
     try:
         if raw_lo not in (None, ""):
             lo = float(raw_lo)

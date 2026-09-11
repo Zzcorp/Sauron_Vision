@@ -203,7 +203,7 @@ DEFAULT_COMPONENTS = [
      # Descriptions are a 300-char column, enforced on the VPS Postgres and
      # not on the SQLite suite: the first cut of these two was 600 chars,
      # seed_components failed on deploy and the stack stayed down (2026-09-12).
-     "description": "Every 4h (:05, after the sync): a TARGET share of the account per live follower pool from graded evidence, regime, opportunity density and news risk, under floor/ceiling, a 10-pt/day cap and a drawdown governor — written as a SharePlan, SHADOW by default. See /shares/ and the RUNBOOK.",
+     "description": "Every 4h after the sync: a TARGET share of the account per live follower pool from graded evidence, regime, opportunity density and news risk, under floor/ceiling, a 10-pt/day cap and a drawdown governor. SHADOW by default: apply needs LIVE mode and the trading PIN. See /shares/.",
      "category": "pipeline"},
     {"key": "share_allocator_mode_live", "name": "Share Allocator Live Mode",
      "description": "Off (default) = shadow: plans are proposed and graded, apply is refused. On = an admin can apply a plan (PIN on /shares/, --yes on the shell), writing each follower's account_share_pct and re-sizing pools via the sync. Rollback restores exactly. Caps and the governor hold in both modes.",
