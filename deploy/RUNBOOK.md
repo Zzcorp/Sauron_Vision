@@ -564,6 +564,13 @@ followed by:
 - `bot list` / `bot off ID` / `bot on ID [--yes]` — the admin page's
   toggle with its rule: stopping is frictionless, arming a LIVE config
   takes `--yes` where the page takes the PIN.
+- `actuator list` / `actuator apply ID...` / `actuator reject ID...` /
+  `actuator rollback ID` — the rule actuator's buttons (live mode
+  required to apply, daily caps, snapshot for rollback). `actuator
+  reject --stale` is the button the page lacks: the decay investigation
+  re-proposes the same enforcement every day it still holds, so one
+  finding shows up as six rows; --stale rejects every proposal a newer
+  one on the same rule and action supersedes.
 - `preflight_live`, `why_no_trade`, `seed_components`, and
   `./deploy/ibkr-doctor` (read-only) were already there.
 
