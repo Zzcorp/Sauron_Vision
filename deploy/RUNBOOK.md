@@ -520,6 +520,41 @@ on `/generated/` as REJECTED by `validator`, with the reason in the
 `brain` logger keeps its INFO lines in production like every Sauron app,
 so `./deploy/dc logs web | grep generator` shows the same reasons.
 
+**The admin pages, as commands.** Every decision the pages take has a
+shell twin, for the operator at a terminal and for anyone who wants the
+proof pasted back. All of them are `./deploy/dc exec web python manage.py`
+followed by:
+
+- `component list` / `component on KEY...` / `component off KEY...` — the
+  health page's toggle. Says the state before and after, refuses a key it
+  does not know (and names the nearest), and registers a component the code
+  knows but the database does not before setting it.
+- `proposals list` / `proposals approve ID...` / `proposals reject ID...` —
+  the brain page's click, through the same `approve_proposal` and the same
+  blocker check. An approved proposal is a RESEARCH-stage setup: graded by
+  the scanner, traded by no bot.
+- `open_trades` (`--symbol SOL`, `--all` for the last 7 days closed too) —
+  every position the bots hold, paper or LIVE, with the platform's own
+  mark, unrealised P&L and R against the stop; a position with no stop is
+  flagged.
+- `preflight_live`, `why_no_trade`, `seed_components`, and
+  `./deploy/ibkr-doctor` (read-only) were already there.
+
+**A healthy Gateway is not a logged-in Gateway.** The container's
+healthcheck sees a process and a port. When the session behind it is gone
+(a Client Portal login took it — converting currency counts — or the daily
+IB Key push was never approved), the API accepts Sauron's socket and every
+request times out: `positions request timed out`, `open orders request
+timed out`, `account updates ... timed out`, and the sync returns
+`unreachable`. The doctor's verdict now reads step 3 (the server's
+`Authorization failed`) and step 5 (no reading for hours) before trusting
+`(healthy)`, hides the `remove Client` churn that buries IBC's own lines,
+and says the fix in order: approve the push on the phone; if none,
+`./deploy/dc --profile ibkr restart ibgateway` (IBC logs in afresh, the
+phone gets a push); then the sync. Restarting the workers changes nothing
+in that state.
+
+
 **No prose without a claim the platform can grade.** Every agent that
 talks about a symbol now registers a direction call — symbol, up or down,
 horizon, the price it was measured from: the strategy advisor's long/short

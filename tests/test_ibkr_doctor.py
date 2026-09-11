@@ -71,6 +71,35 @@ class TheDoctorTests(SimpleTestCase):
         self.assertIn("ibkr-apply", src)       # not running at all
         self.assertIn("326", src)              # the session, not the Gateway
 
+    def test_healthy_is_not_logged_in(self):
+        """2026-09-11: the container said (healthy), every API request
+        timed out, the reading was 19h old, launcher.log said
+        'Authorization failed' — and the verdict said 'logged in' and
+        sent the operator to restart the workers. The healthy branch
+        must read step 3 and step 5 before it trusts the healthcheck."""
+        src = _script()
+        start = src.index('*"(healthy)"*')
+        healthy = src[start:src.index('    "")', start)]
+        self.assertIn('[ -n "$session" ] || [ -n "$stale" ]', healthy)
+        self.assertIn("NOT the login", healthy)
+        self.assertIn("Restarting the workers changes nothing", healthy)
+        self.assertIn("approve the IB Key notification", healthy)
+        self.assertIn('restart $svc', healthy)
+        # And the facts it reads come from the steps above it.
+        self.assertIn('case "$pre" in *"no equity reading has landed"*', src)
+        self.assertIn('case "$srv$ibc" in', src)
+        self.assertIn('*"Authorization failed"*', src)
+        self.assertIn('*"Existing session"*', src)
+
+    def test_the_api_churn_is_hidden_not_the_ibc_lines(self):
+        """Sauron's reconnects leave 'remove Client N' forty times over
+        and bury IBC's one line; the doctor hides the churn, counts it,
+        and says what it means."""
+        src = _script()
+        self.assertIn('grep -v "remove Client"', src)
+        self.assertIn('grep -c "remove Client"', src)
+        self.assertIn("lines hidden", src)
+
     def test_the_runbook_points_at_it(self):
         runbook = (Path(settings.BASE_DIR) / "deploy" / "RUNBOOK.md"
                    ).read_text(encoding="utf-8")
