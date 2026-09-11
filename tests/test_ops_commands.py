@@ -212,6 +212,37 @@ class OpenTradesCommandTests(TestCase):
             self.assertIn("no open positions",
                           _run("open_trades", symbol="BTC"))
 
+    def test_the_legacy_crypto_bot_is_read_too(self):
+        """The Solana position lived in the legacy crypto bot (BotTrade,
+        Binance) and the first cut of this command did not look there."""
+        from bot_program.models import BotConfig, BotTrade
+        legacy = BotConfig.objects.create(user=self.user, name="Sauron Bot",
+                                          mode="paper", symbols=["SOLUSDT"])
+        BotTrade.objects.create(
+            config=legacy, symbol="SOLUSDT", side="BUY", qty=Decimal("10"),
+            entry_price=Decimal("150"), stop_loss=Decimal("140"),
+            status="OPEN", paper=True, reason="momentum")
+        with patch("ai_agents.calibration.mark_for_symbol",
+                   return_value=120.0):
+            out = _run("open_trades", symbol="SOL")
+        self.assertIn("[legacy] Sauron Bot (crypto/paper)", out)
+        self.assertIn("BUY 10 SOLUSDT @ 150", out)
+        # 10 × (120 − 150) = −300 USDT; (120 − 150) / 10 = −3R
+        self.assertIn("unrealised -300.00 USDT", out)
+        self.assertIn("-3.00R", out)
+        self.assertIn("0 live, 1 paper open", out)
+
+    def test_fx_pnl_names_its_quote_currency(self):
+        """−8140 on EURJPY is yen, not euros; the line must say so."""
+        self._trade(asset_class="forex", symbol="EURJPY", qty=Decimal("6400"),
+                    entry_price=Decimal("179.5"), stop_loss=Decimal("177"),
+                    take_profit=None)
+        with patch("ai_agents.calibration.mark_for_symbol",
+                   return_value=178.25):
+            out = _run("open_trades")
+        self.assertIn("unrealised -8000.00 JPY", out)
+        self.assertIn("-0.50R", out)
+
     def test_all_includes_recent_closed_rows(self):
         from django.utils import timezone
         self._trade(status="CLOSED", exit_price=Decimal("230"),
