@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Evidence ledger{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Evidence ledger</h1>
+    <p style="color: var(--text-muted); max-width: 72ch;">What every rule and every config has proven — graded signals, paper fills, live fills — and the regret: proven paper R that nothing has taken live. A number appears only when a grade exists; nothing here is a forecast.</p>
+</div>
+
+<div class="oc-strip" style="margin-bottom: 24px;">
+    <div class="oc-strip-item"><span class="oc-strip-label">Rules with evidence</span><span class="oc-strip-value">{{ totals.rules }}</span></div>
+    <div class="oc-strip-item"><span class="oc-strip-label">Graded signals</span><span class="oc-strip-value">{{ totals.sig_n }}</span></div>
+    <div class="oc-strip-item"><span class="oc-strip-label">Paper R</span><span class="oc-strip-value {% if totals.paper_r > 0 %}up{% elif totals.paper_r < 0 %}down{% endif %}">{{ totals.paper_r|floatformat:2 }}</span></div>
+    <div class="oc-strip-item"><span class="oc-strip-label">Live R</span><span class="oc-strip-value {% if totals.live_r > 0 %}up{% elif totals.live_r < 0 %}down{% endif %}">{{ totals.live_r|floatformat:2 }}</span></div>
+    <div class="oc-strip-item" title="Cumulative paper R of rules with no live fill yet"><span class="oc-strip-label">Regret · R left in paper</span><span class="oc-strip-value">{{ totals.regret_r|floatformat:2 }}</span></div>
+    <div class="oc-strip-item"><span class="oc-strip-label">Shadow calls</span><span class="oc-strip-value">{{ totals.shadow_calls }}</span></div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Rules — signals graded, paper proven, live taken</span></div>
+    {% if rules %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+      <thead><tr>
+        <th>Rule</th><th>Stage</th>
+        <th class="num">Signals</th><th class="num">Hit</th><th class="num">Avg R</th><th class="num">Σ R</th>
+        <th class="num">Paper fills</th><th class="num">Paper R</th>
+        <th class="num">Live fills</th><th class="num">Live R</th>
+        <th class="num">Regret R</th>
+      </tr></thead>
+      <tbody>
+      {% for r in rules %}
+        <tr>
+          <td class="sv-ident" data-label="Rule">{{ r.rule }}</td>
+          <td data-label="Stage"><span class="badge">{{ r.stage }}</span> <span style="font-size: 10px; color: var(--text-muted);">{{ r.status }}</span></td>
+          <td class="num" data-label="Signals">{{ r.sig_n }}</td>
+          <td class="num" data-label="Hit">{% if r.sig_hit is not None %}{{ r.sig_hit|floatformat:2 }}{% else %}—{% endif %}</td>
+          <td class="num" data-label="Avg R">{% if r.sig_avg is not None %}{{ r.sig_avg|floatformat:2 }}{% else %}—{% endif %}</td>
+          <td class="num {% if r.sig_r > 0 %}up{% elif r.sig_r < 0 %}down{% endif %}" data-label="Σ R">{{ r.sig_r|floatformat:2 }}</td>
+          <td class="num" data-label="Paper fills">{{ r.paper_n }}</td>
+          <td class="num {% if r.paper_r > 0 %}up{% elif r.paper_r < 0 %}down{% endif %}" data-label="Paper R">{{ r.paper_r|floatformat:2 }}</td>
+          <td class="num" data-label="Live fills">{{ r.live_n }}</td>
+          <td class="num {% if r.live_r > 0 %}up{% elif r.live_r < 0 %}down{% endif %}" data-label="Live R">{{ r.live_r|floatformat:2 }}</td>
+          <td class="num" data-label="Regret R" title="Paper R with no live fill">{% if r.regret_r %}{{ r.regret_r|floatformat:2 }}{% else %}—{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">&#9676;</div>
+        <p>NO GRADED EVIDENCE YET — signals grade themselves every five minutes once they resolve; bot fills grade on close. The research fleet is what makes this table fill.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Configs — what each pool did, and what it would have done in shadow</span></div>
+    {% if configs %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+      <thead><tr>
+        <th>Config</th><th>Mode</th><th class="num">Open</th><th class="num">Closed</th><th class="num">P&amp;L</th>
+        <th class="num">Paper R</th><th class="num">Live R</th>
+        <th class="num" title="Direction calls registered in shadow mode, graded at the horizon — the direction, not the bracket">Shadow calls</th><th class="num">Graded</th><th class="num">Hit</th><th class="num">Avg move</th>
+      </tr></thead>
+      <tbody>
+      {% for c in configs %}
+        <tr>
+          <td class="sv-ident" data-label="Config">{{ c.cfg.name }} <span style="font-size: 10px; color: var(--text-muted);">{{ c.cfg.asset_class }} · {{ c.owner }}{% if c.research %} · research{% endif %}</span></td>
+          <td data-label="Mode"><span class="badge badge-{% if c.cfg.mode == 'live' %}bearish{% else %}bullish{% endif %}">{{ c.cfg.mode }}</span>{% if not c.cfg.enabled %} <span style="font-size: 10px; color: var(--text-muted);">off</span>{% endif %}{% if c.shadow %} <span style="font-size: 10px; color: var(--accent-gold-ink, var(--accent-gold));">shadow</span>{% endif %}{% if c.share %} <span style="font-size: 10px; color: var(--text-muted);">follows · {{ c.share }}</span>{% endif %}</td>
+          <td class="num" data-label="Open">{{ c.open_n }}</td>
+          <td class="num" data-label="Closed">{{ c.closed_n }}</td>
+          <td class="num {% if c.pnl > 0 %}up{% elif c.pnl < 0 %}down{% endif %}" data-label="P&amp;L">{{ c.pnl|floatformat:2 }}</td>
+          <td class="num" data-label="Paper R">{% if c.paper_n %}{{ c.paper_r|floatformat:2 }} <span style="font-size: 10px; color: var(--text-muted);">({{ c.paper_n }})</span>{% else %}—{% endif %}</td>
+          <td class="num" data-label="Live R">{% if c.live_n %}{{ c.live_r|floatformat:2 }} <span style="font-size: 10px; color: var(--text-muted);">({{ c.live_n }})</span>{% else %}—{% endif %}</td>
+          <td class="num" data-label="Shadow calls">{{ c.calls_n }}</td>
+          <td class="num" data-label="Graded">{{ c.calls_graded }}</td>
+          <td class="num" data-label="Hit">{% if c.calls_hit is not None %}{{ c.calls_hit|floatformat:2 }}{% else %}—{% endif %}</td>
+          <td class="num {% if c.calls_move and c.calls_move > 0 %}up{% elif c.calls_move and c.calls_move < 0 %}down{% endif %}" data-label="Avg move">{% if c.calls_move is not None %}{{ c.calls_move|floatformat:4 }}{% else %}—{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">&#9676;</div><p>NO CONFIGS.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Agents</span></div>
+    <p style="color: var(--text-muted); padding: 0 16px 16px;">Every directional claim an agent made, the price it was measured from and what the market said at the horizon is on <a href="{% url 'calibration_dashboard' %}">Agent Calibration</a> — the calls ledger. The trust score the strategist reads is built from those grades and nothing else.</p>
+</div>
+{% endblock %}

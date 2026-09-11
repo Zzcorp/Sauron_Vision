@@ -40,6 +40,12 @@ logger = logging.getLogger(__name__)
 # (2026-08-15): a wrong mapping returns an empty frame rather than an error,
 # so an unverified guess here is a symbol that silently never has bars.
 YF_SYMBOL_MAP = {
+    # Equities whose catalogue spelling is not Yahoo's. Found by the first
+    # fleet-wide backfill (2026-09-10): BRK.B is "BRK-B" on Yahoo, and Block
+    # renamed its ticker from SQ to XYZ on 2025-01-21 — both answered "no
+    # data found, symbol may be delisted", which is what a wrong spelling
+    # looks like from here.
+    "BRK.B": "BRK-B", "SQ": "XYZ",
     # Metals and energy: Yahoo quotes the front-month future.
     "XAUUSD": "GC=F", "XAGUSD": "SI=F", "XPTUSD": "PL=F", "XPDUSD": "PA=F",
     "WTIUSD": "CL=F", "BRNUSD": "BZ=F", "NGUSD": "NG=F", "HGUSD": "HG=F",

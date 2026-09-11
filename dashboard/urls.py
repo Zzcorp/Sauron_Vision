@@ -74,6 +74,7 @@ from .views_events import events_dashboard
 from .views_asset_bots import asset_bots_dashboard
 from .views_rule_control import rule_control_dashboard
 from .views_calibration import calibration_dashboard
+from .views_evidence import evidence_ledger
 from .views_ai_models import ai_models_dashboard
 from .views_system_health import system_health
 from .views_topology import system_map, system_map_state, system_map_toggle
@@ -235,6 +236,7 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("admin-dashboard/actuator/rollback/", hq_rollback_rule_action, name="hq_rollback_rule_action"),
     path("rule-control/", rule_control_dashboard, name="rule_control_dashboard"),
     path("calibration/", calibration_dashboard, name="calibration_dashboard"),
+    path("evidence/", evidence_ledger, name="evidence_ledger"),
     path("ai-models/", ai_models_dashboard, name="ai_models_dashboard"),
     path("health/", system_health, name="system_health"),
     # The admin panel's second division: not "is it switched on?" but "is data

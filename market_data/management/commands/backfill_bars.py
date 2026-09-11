@@ -59,6 +59,12 @@ INTERVAL_MINUTES = {
 }
 
 
+# Renames Binance made under the platform's feet. MATIC became POL in
+# September 2024 and MATICUSDT stopped answering; the fleet-wide backfill
+# of 2026-09-10 got zero pages for it.
+BINANCE_RENAMES = {"MATICUSD": "POLUSDT"}
+
+
 def venue_symbol(symbol: str) -> str:
     """Platform spelling -> Binance spelling.
 
@@ -67,6 +73,8 @@ def venue_symbol(symbol: str) -> str:
     "no history available".
     """
     s = symbol.upper()
+    if s in BINANCE_RENAMES:
+        return BINANCE_RENAMES[s]
     if s.endswith("USDT"):
         return s
     if s.endswith("USD"):

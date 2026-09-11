@@ -151,10 +151,34 @@ def enable_shadow(cfg, hours: int = 24):
 
 
 def log_shadow_entry(cfg, symbol: str, decision, price: float, qty: float):
-    """Record the entry that would have been submitted."""
+    """Record the entry that would have been submitted.
+
+    A log line, a brain observation — and a DIRECTION CALL registered with
+    the calibration under the config's own name, graded at the config's
+    time stop like any agent's claim. Shadow mode used to leave nothing
+    the operator could score: 24 hours of "would have bought" in a log
+    file. Now the evidence ledger shows, per config, how many calls the
+    shadow made and how many the market agreed with. The direction at the
+    horizon is not the bracket — a stop could have closed it earlier — and
+    the ledger says so; it is the honest lower bound of what exists.
+    """
     logger.info("[SHADOW] %s would %s %s qty=%.6f @ %s (score %.3f, rule %s)",
                 cfg.name, decision.direction, symbol, qty, price,
                 decision.score, decision.rule_name or "?")
+    try:
+        from ai_agents.calibration import log_direction_prediction
+        from dashboard.views_evidence import shadow_agent_for
+        ts = cfg.time_stop_setting()
+        horizon = float(ts["hours"]) if ts.get("enabled") and ts.get("hours") \
+            else 24.0 * 7
+        log_direction_prediction(
+            shadow_agent_for(cfg), symbol, str(decision.direction).lower(),
+            horizon_hours=horizon,
+            confidence=min(1.0, max(0.0, float(decision.score or 0.5))),
+            reference_price=float(price) if price else None,
+            notes=f"shadow: {decision.rule_name or '?'}")
+    except Exception as e:  # noqa: BLE001 — shadow must never break a tick
+        logger.warning("[SHADOW] %s: call not registered (%s)", cfg.name, e)
     try:
         from brain.observations import record_observation
         record_observation(
