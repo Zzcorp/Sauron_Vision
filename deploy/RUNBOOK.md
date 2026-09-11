@@ -252,8 +252,20 @@ this is the only test that answers the question:
 ```
 
 **One session per IBKR username.** Logging into the IBKR portal or the
-mobile app with the same credentials kicks Gateway out mid-session. Use
-the paper username for Gateway and keep the live one for the portal.
+mobile app with the same credentials kicks Gateway out mid-session. The
+image's `EXISTING_SESSION_DETECTED_ACTION` defaults to `primary`, so the
+Gateway wins that fight every time IT logs in, and loses it every time
+the human logs in with the same name; each loss costs an IB Key push
+and, unanswered, an `Authorization failed` loop with a stale reading
+(2026-09-11: converting currency in the portal did exactly this). The
+fix is structural: a SECOND username on the same account for the
+Gateway (Client Portal → Settings → User Settings → Users & Access
+Rights → add a user with trading rights and its own IB Key), applied
+with `./deploy/ibkr-apply`; the human keeps the first username for the
+portal and the mobile app. Until then: log out of the portal before
+the Gateway logs in, and expect a push after every portal visit. For
+paper, use the paper username for Gateway and keep the live one for
+the portal.
 `TRADING_MODE` decides which account Gateway logs into and the PORT
 decides which one Sauron talks to — paper with 4004, live with 4003 (the
 socat relays for the internal 4002/4001). Set one without the other and
