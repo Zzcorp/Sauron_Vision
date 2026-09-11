@@ -63,19 +63,29 @@ class Command(BaseCommand):
         return row
 
     def _stale_ids(self):
-        """Proposed rows superseded by a newer proposal on the same rule
-        and action: everything but the newest per (rule, action)."""
+        """Proposed rows that decide nothing any more: a newer row on the
+        same rule and action exists in ANY state (applied on the page,
+        rejected, or a fresher proposal), or the enforcement is already
+        in effect on the rule (pausing a paused rule, reducing a reduced
+        or paused one). 2026-09-11: the first cut only looked at other
+        PROPOSED rows, so a pause the page had already applied did not
+        make the older proposal stale, and applying it paused the rule
+        twice."""
         from signals.models import RuleAction
-        newest = {}
+        from signals.rule_actuator import _control_for, _enforcement_in_effect
+        newest_any = {}
+        for r in RuleAction.objects.exclude(
+                action__in=("monitor", "investigate_data", "retune_params")
+        ).order_by("-proposed_at", "-id"):
+            newest_any.setdefault((r.rule_name, r.action), r.id)
         stale = []
-        rows = (RuleAction.objects.filter(state=RuleAction.STATE_PROPOSED)
-                .order_by("-proposed_at", "-id"))
-        for r in rows:
+        for r in (RuleAction.objects.filter(state=RuleAction.STATE_PROPOSED)
+                  .order_by("-proposed_at", "-id")):
             key = (r.rule_name, r.action)
-            if key in newest:
+            if newest_any.get(key) != r.id:
                 stale.append(r.id)
-            else:
-                newest[key] = r.id
+            elif _enforcement_in_effect(_control_for(r.rule_name), r.action):
+                stale.append(r.id)
         return stale
 
     def _list(self):
@@ -91,8 +101,13 @@ class Command(BaseCommand):
         pending = list(RuleAction.objects.filter(state=RuleAction.STATE_PROPOSED)
                        .order_by("rule_name", "action", "-proposed_at"))
         self.stdout.write(f"PROPOSED ({len(pending)})")
+        from signals.rule_actuator import _control_for, _enforcement_in_effect
         for r in pending:
-            tag = "  [stale — newer proposal exists]" if r.id in stale else ""
+            tag = ""
+            if r.id in stale:
+                effect = _enforcement_in_effect(_control_for(r.rule_name), r.action)
+                tag = (f"  [stale — rule already {effect}]" if effect
+                       else "  [stale — a newer row on this rule and action exists]")
             why = (r.rationale or "").replace("\n", " ").strip()
             self.stdout.write(f"  #{r.id:<4} {r.action:<12} {r.rule_name:<32} "
                               f"{r.proposed_at:%m-%d %H:%M}{tag}")

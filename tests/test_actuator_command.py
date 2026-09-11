@@ -102,6 +102,38 @@ class ActuatorCommandTests(TestCase):
             self.assertEqual(row.state, RuleAction.STATE_PROPOSED)
         self.assertIn("no stale proposals", _run("actuator", "reject", stale=True))
 
+    def test_a_pause_the_page_applied_makes_the_older_proposal_stale(self):
+        """2026-09-11: the page applied #11 (pause macd); `actuator apply
+        9` then paused the same rule again. Now: #9 is stale, and apply
+        refuses it with the reason."""
+        from signals.models import RuleAction
+        from signals.rule_actuator import apply_action
+        apply_action(self.new.id, None)            # the page's click
+        out = _run("actuator", "list")
+        self.assertIn(f"#{self.mid.id}", out)
+        self.assertIn("rule already paused", out)
+        out = _run("actuator", "apply", str(self.mid.id))
+        self.assertIn("already paused", out)
+        self.assertIn("nothing to apply", out)
+        self.mid.refresh_from_db()
+        self.assertEqual(self.mid.state, RuleAction.STATE_PROPOSED)
+        # And a reduction on a paused rule is moot too.
+        moot = _proposal("macd_bullish_crossover", "reduce_size")
+        out = _run("actuator", "reject", stale=True)
+        for row in (self.old, self.mid, moot):
+            self.assertIn(f"#{row.id} ", out)
+            row.refresh_from_db()
+            self.assertEqual(row.state, RuleAction.STATE_REJECTED)
+
+    def test_an_expired_pause_is_not_in_effect(self):
+        from signals.models import RuleControl
+        RuleControl.objects.create(
+            rule_name="macd_bullish_crossover", status="paused",
+            weight_multiplier=0.0,
+            paused_until=timezone.now() - timedelta(days=1))
+        out = _run("actuator", "apply", str(self.new.id))
+        self.assertIn("APPLIED", out)
+
     def test_rollback_restores_the_rule(self):
         from signals.rule_actuator import is_rule_active
         _run("actuator", "apply", str(self.new.id))

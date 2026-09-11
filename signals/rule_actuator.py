@@ -397,6 +397,15 @@ def apply_action(action_id: int, user) -> "RuleAction":
         rule_name=action.rule_name,
         defaults={"status": RuleControl.STATUS_ACTIVE, "weight_multiplier": 1.0},
     )
+    # An enforcement already in effect is not applied twice. 2026-09-11:
+    # the page had paused macd_bullish_crossover (#11) and the next apply
+    # on the same rule (#9, an older proposal) paused it again — burning
+    # one of the day's three pauses and snapshotting "paused" as the
+    # state to roll back to, so that rollback would restore a pause.
+    already = _enforcement_in_effect(ctrl, action.action)
+    if already:
+        raise ActuatorError(f"{action.rule_name} is already {already} — "
+                            f"nothing to apply; reject this proposal instead.")
 
     # Snapshot before mutating
     action.previous_status = ctrl.status
@@ -430,6 +439,25 @@ def apply_action(action_id: int, user) -> "RuleAction":
         action.action, action.rule_name, user,
     )
     return action
+
+
+def _enforcement_in_effect(ctrl, action: str) -> str:
+    """'paused until <date>' / 'reduced to x0.5' when `action` would change
+    nothing on `ctrl`, else ''. A pause past its paused_until is not in
+    effect; a reduction is in effect while the control says reduced; a
+    pause supersedes a reduction (a paused rule cannot be reduced)."""
+    from signals.models import RuleAction, RuleControl
+    if ctrl is None:
+        return ""
+    now = timezone.now()
+    paused = (ctrl.status == RuleControl.STATUS_PAUSED
+              and (ctrl.paused_until is None or ctrl.paused_until > now))
+    if paused:
+        until = f" until {ctrl.paused_until:%Y-%m-%d}" if ctrl.paused_until else ""
+        return f"paused{until}"
+    if action == RuleAction.ACTION_REDUCE and ctrl.status == RuleControl.STATUS_REDUCED:
+        return f"reduced to x{ctrl.weight_multiplier:g}"
+    return ""
 
 
 @transaction.atomic
