@@ -134,6 +134,18 @@ class OneSlotPerLoginTests(SimpleTestCase):
                     "IBKR4_USERNAME", "IBKR5_USERNAME"):
             self.assertIn("${%s:-" % var, raw)
 
+    def test_every_slot_answers_the_existing_session_dialog_itself(self):
+        """2026-09-11: the Gateway logged in, passed 2FA, reached
+        'Existing session detected' and sat on it for good — IBC's
+        default for that dialog is manual. An unattended Gateway must
+        take the session (primary) or it is not unattended."""
+        services = _compose()["services"]
+        for name in ("ibgateway", "ibgateway-2", "ibgateway-3",
+                     "ibgateway-4", "ibgateway-5"):
+            env = services[name]["environment"]
+            self.assertEqual(env.get("EXISTING_SESSION_DETECTED_ACTION"),
+                             "primary", name)
+
     def test_no_slot_publishes_a_port(self):
         services = _compose()["services"]
         for name in self.SLOTS:

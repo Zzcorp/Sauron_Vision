@@ -252,12 +252,19 @@ this is the only test that answers the question:
 ```
 
 **One session per IBKR username.** Logging into the IBKR portal or the
-mobile app with the same credentials kicks Gateway out mid-session. The
-image's `EXISTING_SESSION_DETECTED_ACTION` defaults to `primary`, so the
-Gateway wins that fight every time IT logs in, and loses it every time
-the human logs in with the same name; each loss costs an IB Key push
-and, unanswered, an `Authorization failed` loop with a stale reading
-(2026-09-11: converting currency in the portal did exactly this). The
+mobile app with the same credentials kicks Gateway out mid-session, and
+the newcomer is shown "Existing session detected" and asked to choose.
+IBC's default for that dialog is MANUAL — it waits for a click that never
+comes: on 2026-09-11 the Gateway logged in, passed 2FA, reached the dialog
+and sat on it, container "Up", reading 19h old. The compose now sets
+`EXISTING_SESSION_DETECTED_ACTION: primary`: the Gateway takes the session
+and the other one drops. A container created before that line keeps its
+old environment — recreate it (`./deploy/dc --profile ibkr up -d
+ibgateway`), a restart is not enough. The fight stays symmetric: the human
+logging in with the same name still kicks the Gateway out, and every
+re-login costs an IB Key push; unanswered, that is the `Authorization
+failed` loop with a stale reading (converting currency in the portal did
+exactly this). The
 fix is structural: a SECOND username on the same account for the
 Gateway (Client Portal → Settings → User Settings → Users & Access
 Rights → add a user with trading rights and its own IB Key), applied

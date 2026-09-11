@@ -90,6 +90,10 @@ class TheDoctorTests(SimpleTestCase):
         self.assertIn('case "$srv$ibc" in', src)
         self.assertIn('*"Authorization failed"*', src)
         self.assertIn('*"Existing session"*', src)
+        # The dialog IBC leaves for a human: the fix is a recreate with the
+        # compose's EXISTING_SESSION_DETECTED_ACTION, never a restart.
+        self.assertIn("EXISTING_SESSION_DETECTED_ACTION=primary", src)
+        self.assertIn("up -d $svc", src)
 
     def test_the_api_churn_is_hidden_not_the_ibc_lines(self):
         """Sauron's reconnects leave 'remove Client N' forty times over

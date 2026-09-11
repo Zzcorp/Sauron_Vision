@@ -114,7 +114,10 @@ case "$state" in
         echo "  The Gateway is UP but NOT logged in."
         echo "  - step 2 shows 'second factor' / 'IB Key': approve the push on the phone, then look again in a minute."
         echo "  - step 2 shows 'detected dialog entitled: Gateway' and nothing after: stalled — ./deploy/dc --profile $prof restart $svc"
-        echo "  - step 3 shows 'Authorization failed': the server refused the login — the reason is on that line." ;;
+        echo "  - step 3 shows 'Authorization failed': the server refused the login — the reason is on that line."
+        echo "  - step 2 ends on 'Existing session detected' with no 'Click button' after it: the Gateway is waiting on a dialog"
+        echo "    nobody will click (IBC's default is manual). The compose sets EXISTING_SESSION_DETECTED_ACTION=primary; a"
+        echo "    container created before that line keeps the old environment — RECREATE it: ./deploy/dc --profile $prof up -d $svc" ;;
     *"(healthy)"*)
         if [ -n "$session" ] || [ -n "$stale" ]; then
         echo "  The container is healthy — that is the process and the port, NOT the login."
@@ -123,6 +126,8 @@ case "$state" in
         echo "  1. phone: approve the IB Key notification if one is waiting; a minute later, run this again."
         echo "  2. none waiting, or still nothing: ./deploy/dc --profile $prof restart $svc"
         echo "     IBC logs in afresh and the phone gets a push; approve it; two minutes later, run this again."
+        echo "     If step 2 then ends on 'Existing session detected' with no 'Click button' after it, the container predates"
+        echo "     EXISTING_SESSION_DETECTED_ACTION=primary in the compose — RECREATE it: ./deploy/dc --profile $prof up -d $svc"
         echo "  3. then read the account: ./deploy/dc exec web python manage.py shell -c 'from bot_program.tasks import sync_broker_account as s; print(s())'"
         else
         echo "  The Gateway is logged in and its API port answers."

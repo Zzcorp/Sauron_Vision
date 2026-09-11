@@ -259,6 +259,17 @@ services:
       TWOFA_DEVICE: ${IBKR_TWOFA_DEVICE:-IB Key}
       TWOFA_TIMEOUT_ACTION: restart
       RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      # One trading session per IBKR username. When the human is logged in
+      # to the portal or the mobile app with the Gateway's username, IBKR
+      # shows "Existing session detected" to the newcomer and waits for a
+      # click. IBC's own default for that dialog is MANUAL: on 2026-09-11
+      # the Gateway logged in, passed 2FA, reached that dialog at 18:18:22
+      # and sat on it — no click, no API, a container "Up" and a reading
+      # 19h old. `primary` makes this session win and the other one drop,
+      # which is the only sane answer for an unattended Gateway. A
+      # container created before this line must be RECREATED (up -d); a
+      # restart keeps the old environment.
+      EXISTING_SESSION_DETECTED_ACTION: primary
 
   ibgateway-2:
     <<: *ibgateway
@@ -276,6 +287,7 @@ services:
       TWOFA_DEVICE: ${IBKR_TWOFA_DEVICE:-IB Key}
       TWOFA_TIMEOUT_ACTION: restart
       RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      EXISTING_SESSION_DETECTED_ACTION: primary
 
   ibgateway-3:
     <<: *ibgateway
@@ -293,6 +305,7 @@ services:
       TWOFA_DEVICE: ${IBKR_TWOFA_DEVICE:-IB Key}
       TWOFA_TIMEOUT_ACTION: restart
       RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      EXISTING_SESSION_DETECTED_ACTION: primary
 
   ibgateway-4:
     <<: *ibgateway
@@ -310,6 +323,7 @@ services:
       TWOFA_DEVICE: ${IBKR_TWOFA_DEVICE:-IB Key}
       TWOFA_TIMEOUT_ACTION: restart
       RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      EXISTING_SESSION_DETECTED_ACTION: primary
 
   ibgateway-5:
     <<: *ibgateway
@@ -327,6 +341,7 @@ services:
       TWOFA_DEVICE: ${IBKR_TWOFA_DEVICE:-IB Key}
       TWOFA_TIMEOUT_ACTION: restart
       RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      EXISTING_SESSION_DETECTED_ACTION: primary
 
   # ── Nightly offsite backup — runs by default, deliberately ─────────────
   # A dump that lives on the same disk as the database is not a backup.
