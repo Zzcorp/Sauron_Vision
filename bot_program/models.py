@@ -482,3 +482,5 @@ from .backtest_models import BotBacktestRun  # noqa: F401
 from .track_record_models import RuleTrackRecordAlert  # noqa: F401
 from .audit_models import AuditLogEntry  # noqa: F401
 from .tax_lot_models import TaxLot, TaxLotConsumption  # noqa: F401
+from .equity_models import BrokerEquityReading  # noqa: F401
+from .share_models import SharePlan  # noqa: F401

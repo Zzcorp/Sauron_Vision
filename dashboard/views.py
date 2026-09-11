@@ -3614,6 +3614,18 @@ def admin_dashboard(request):
         .order_by("-applied_at")[:5]
     )
 
+    # The share allocator's LIVE switch — the ACTING user's pending plans,
+    # because a plan re-sizes that user's pools and nobody else's.
+    context["share_allocator_live_component"] = PlatformComponent.objects.filter(
+        key="share_allocator_mode_live"
+    ).first()
+    try:
+        from bot_program.share_models import SharePlan
+        context["share_plans_pending"] = SharePlan.objects.filter(
+            user=request.user, state=SharePlan.STATE_PROPOSED).count()
+    except Exception:  # noqa: BLE001 — the panel must render regardless
+        context["share_plans_pending"] = 0
+
     # Strategy Evolution — the constant view: pending queue inline, so the
     # operator decides from Control without leaving for /evolution/.
     from signals.models_control import RuleControl, RuleMutation

@@ -97,11 +97,34 @@ def broker_equity(user, cfg):
         # answering badly, and this module cannot tell which. Unmeasured.
         return None
 
+    # Re-read-and-merge, NOT a whole-object save of the runner's copy.
+    # This runs on the entry path from a `cfg` the tick loaded once and
+    # holds for tens of seconds; writing that copy's whole extras back
+    # reverted anything written to the row in between — and the share
+    # allocator writes extras["account_share_pct"] from a beat that can
+    # land mid-tick. A cache stamp must never undo a share decision an
+    # admin just confirmed with a PIN (2026-09-12; same pattern as
+    # asset_engine.safety._save_extras, inlined to keep this module free
+    # of the engine).
+    updates = {"broker_equity": equity,
+               "broker_equity_at": timezone.now().isoformat()}
     try:
-        extras["broker_equity"] = equity
-        extras["broker_equity_at"] = timezone.now().isoformat()
-        cfg.extras = extras
-        cfg.save(update_fields=["extras"])
+        from django.db import transaction
+        pk = getattr(cfg, "pk", None)
+        merged = None
+        if pk is not None:
+            with transaction.atomic():
+                row = (cfg.__class__._default_manager
+                       .select_for_update().filter(pk=pk).first())
+                if row is not None:
+                    merged = dict(getattr(row, "extras", None) or {})
+                    merged.update(updates)
+                    row.extras = merged
+                    row.save(update_fields=["extras", "updated_at"])
+        if merged is None:
+            merged = dict(extras)
+            merged.update(updates)
+        cfg.extras = merged
     except Exception as e:  # noqa: BLE001 — caching is a convenience
         logger.debug("capital_truth: could not cache equity: %s", e)
     return equity
@@ -436,3 +459,71 @@ def share_label(cfg, plan=None) -> str:
     if plan and cfg.pk in plan:
         return f"auto {plan[cfg.pk] * 100:.0f}%"
     return "auto"
+
+
+# ── The road the account took: high-water mark and drawdown ──────────────
+#
+# Over BrokerEquityReading rows — the sync's history, one row per stored
+# reading, written nowhere else. Only rows in the CURRENT reading's
+# currency count: a GBP ISA whose history is in EUR would otherwise show
+# a drawdown that is an exchange rate. The current reading is always part
+# of the max, so a fresh account with no history has a high-water mark
+# equal to itself, a drawdown of 0 and n == 0 — "hwm from 1 reading",
+# never "no hwm". Pure DB reads, safe on any render path.
+def equity_high_water(user, *, window_days=90):
+    """{hwm, hwm_at, currency, n} over the last `window_days`, or None
+    when no reading has landed. `n` is the number of HISTORY rows that
+    took part (the current reading is counted separately)."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from bot_program.equity_models import BrokerEquityReading
+
+    acct = broker_backed(user)
+    reading = account_equity(user)
+    if acct is None or reading is None:
+        return None
+    currency = reading["currency"] or ""
+    since = timezone.now() - timedelta(days=window_days)
+    rows = (BrokerEquityReading.objects
+            .filter(account=acct, currency=currency, at__gte=since)
+            .order_by("-value", "-at"))
+    hwm, hwm_at = float(reading["value"]), reading["at"]
+    n = 0
+    for r in rows:
+        n += 1
+        v = float(r.value)
+        if v > hwm:
+            hwm, hwm_at = v, r.at
+    return {"hwm": hwm, "hwm_at": hwm_at, "currency": currency, "n": n}
+
+
+def equity_drawdown(user, *, window_days=90):
+    """The current reading against its high-water mark, or None.
+
+    {value, currency, at, age_seconds, hwm, hwm_at, drawdown_pct (>= 0),
+     stale, n}. drawdown_pct is a FRACTION of the high-water mark (0.12 is
+    12% under), never negative: a reading above every row in the window IS
+    the new high-water mark.
+    """
+    reading = account_equity(user)
+    if reading is None:
+        return None
+    hw = equity_high_water(user, window_days=window_days)
+    if hw is None:
+        return None
+    value = float(reading["value"])
+    hwm = float(hw["hwm"])
+    dd = max(0.0, (hwm - value) / hwm) if hwm > 0 else 0.0
+    return {
+        "value": value,
+        "currency": reading["currency"],
+        "at": reading["at"],
+        "age_seconds": reading["age_seconds"],
+        "hwm": hwm,
+        "hwm_at": hw["hwm_at"],
+        "drawdown_pct": dd,
+        "stale": reading["age_seconds"] > TRACKING_FRESH_SECONDS,
+        "n": hw["n"],
+    }

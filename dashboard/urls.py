@@ -57,6 +57,8 @@ from .views_admin_hq import (
     hq_apply_rule_action, hq_reject_rule_action, hq_rollback_rule_action,
     hq_propose_allocation, hq_apply_allocation, hq_rollback_allocation,
     hq_reject_allocation,
+    hq_propose_share_plan, hq_apply_share_plan, hq_reject_share_plan,
+    hq_rollback_share_plan,
     hq_run_promotions, hq_promote_rule, hq_demote_rule,
     hq_run_evolution, hq_apply_evolution, hq_reject_evolution,
     hq_run_opportunity_scan, hq_resolve_opportunities,
@@ -81,6 +83,7 @@ from .views_topology import system_map, system_map_state, system_map_toggle
 from .views_forensics import forensics_list, forensics_detail
 from .views_bot_charts import bot_charts
 from .views_allocator import allocator_dashboard
+from .views_shares import shares_dashboard
 from .views_eye import eye_dashboard, eye_partial
 from signals.tradingview_webhook import tradingview_webhook
 from .views_eye_drilldown import eye_gate_events, eye_fills, eye_exposure
@@ -254,6 +257,15 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("admin-dashboard/allocator/apply/", hq_apply_allocation, name="hq_apply_allocation"),
     path("admin-dashboard/allocator/rollback/", hq_rollback_allocation, name="hq_rollback_allocation"),
     path("admin-dashboard/allocator/reject/", hq_reject_allocation, name="hq_reject_allocation"),
+
+    # ── Share Allocator ──────────────────────────────────────
+    # /allocator/ is the rule meta-allocator's; the share of the ACCOUNT
+    # each live pool takes lives at /shares/ (2026-09-12).
+    path("shares/", shares_dashboard, name="shares_dashboard"),
+    path("admin-dashboard/shares/propose/", hq_propose_share_plan, name="hq_propose_share_plan"),
+    path("admin-dashboard/shares/apply/", hq_apply_share_plan, name="hq_apply_share_plan"),
+    path("admin-dashboard/shares/reject/", hq_reject_share_plan, name="hq_reject_share_plan"),
+    path("admin-dashboard/shares/rollback/", hq_rollback_share_plan, name="hq_rollback_share_plan"),
 
     # ── Phase 8: Promotion Pipeline ──────────────────────────
     path("admin-dashboard/promotions/run/", hq_run_promotions, name="hq_run_promotions"),

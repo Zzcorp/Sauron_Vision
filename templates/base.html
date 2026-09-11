@@ -444,6 +444,10 @@
             <a href="{% url 'promotions_dashboard' %}" class="nav-link {% if page_id == 'promotions' %}active{% endif %}"><span class="icon">⇧</span> <span class="label-text">Promotion Ladder</span></a>
             <a href="{% url 'rule_control_dashboard' %}" class="nav-link {% if page_id == 'rule_control' %}active{% endif %}"><span class="icon">⊙</span> <span class="label-text">Rule Controls</span></a>
             <a href="{% url 'allocator_dashboard' %}" class="nav-link {% if page_id == 'allocator' %}active{% endif %}"><span class="icon">⚖</span> <span class="label-text">Risk Allocator</span></a>
+            {% comment %}The Risk Allocator weights RULES; this one sizes each live
+               pool's share of the broker ACCOUNT. Two different questions, two
+               rows — one row named "allocator" hid the second (2026-09-12). {% endcomment %}
+            <a href="{% url 'shares_dashboard' %}" class="nav-link {% if page_id == 'shares' %}active{% endif %}"><span class="icon">◫</span> <span class="label-text">Share Allocator</span></a>
             <a href="{% url 'discoveries_dashboard' %}" class="nav-link {% if page_id == 'discoveries' %}active{% endif %}"><span class="icon">⊛</span> <span class="label-text">Discoveries</span></a>
             <a href="{% url 'opportunities_dashboard' %}" data-nav-id="opportunities" class="nav-link {% if page_id == 'opportunities' %}active{% endif %}"><span class="icon">◍</span> <span class="label-text">Opportunities</span></a>
             <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategy Evolution</span></a>

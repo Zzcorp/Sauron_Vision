@@ -88,7 +88,7 @@ WIRING = {
     "scraper_tradingview":  {"task": "scraping.tasks.fetch_tradingview_ideas", "layer": "ingest", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_sentiment_agg", "pipeline_opportunity_scanner"]},
     "scraper_calendar":     {"task": "scraping.tasks.check_economic_calendar", "layer": "ingest", "writes": ["EconomicEvent"], "feeds": ["execute_bots", "pipeline_opportunity_scanner"],
                              "note": "Needs FMP_API_KEY. While this table is empty the bot's earnings blackout cannot fire."},
-    "broker_account_sync":  {"task": "bot_program.tasks.sync_broker_account", "layer": "ingest", "writes": ["IBKRAccount.last_equity", "IBKRAccount.broker_positions"], "feeds": ["execute_bots"],
+    "broker_account_sync":  {"task": "bot_program.tasks.sync_broker_account", "layer": "ingest", "writes": ["IBKRAccount.last_equity", "IBKRAccount.broker_positions", "BrokerEquityReading"], "feeds": ["execute_bots"],
                              "pages": ["/admin-dashboard/", "/asset-bots/"],
                              "note": "The broker's own NetLiquidation and holdings, cached every 15 min. This table once said nothing downstream divides by it; since pools can follow the account that is false, and traced: every follower's capital — the denominator of its whole risk stack — is this reading times its share (tasks._follow_the_account), the entry path refuses to open on a follower whose reading is stale (capital_truth.tracking_freeze_reason), and arming measures the pool against it. The 'as IBKR sees it' cells read it too."},
     "scraper_sec":          {"task": "scraping.tasks.fetch_sec_filings", "cadence": 86400, "layer": "ingest", "writes": ["InstitutionalFiling"], "feeds": ["pipeline_opportunity_scanner"],
@@ -135,6 +135,9 @@ WIRING = {
                                  "note": "Grades every prediction past its deadline — trade outcomes, decay claims and direction calls against the first bar at the horizon. The trust score is computed from these grades on read, never stored; the strategist, the critic and the calibration page consume it."},
     "pipeline_actuator":        {"task": "signals.tasks.propose_rule_actions", "cadence": 86400, "layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_signals", "execute_bots"]},
     "pipeline_meta_allocator":  {"task": "signals.tasks.propose_meta_allocation", "cadence": 604800, "layer": "learn", "writes": ["RuleControl.weight"], "feeds": ["execute_bots"]},
+    "pipeline_share_allocator": {"task": "bot_program.tasks.propose_share_plans", "cadence": 14400, "layer": "learn", "writes": ["SharePlan", "AssetBotConfig.extras.account_share_pct"], "feeds": ["broker_account_sync", "execute_bots"],
+                                 "pages": ["/shares/"],
+                                 "note": "Proposes a TARGET share of the broker account per live follower pool every 4 h (evidence × regime × opportunity × news, floors/ceilings, 10 points/day, drawdown governor over BrokerEquityReading) as a SharePlan in shadow. The share itself is written only when an admin applies a plan in LIVE mode (PIN on /shares/); the sync then re-sizes the pools from it, which is why this feeds the sync and not the bots directly."},
     "pipeline_promotion":       {"task": "signals.tasks.auto_evaluate_promotions", "cadence": 86400, "layer": "learn", "writes": ["RuleControl.stage"], "feeds": ["pipeline_signals", "execute_bots"]},
     "pipeline_ai_decay":        {"task": "ai_agents.tasks.investigate_decaying_rules", "cadence": 86400, "layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_actuator"],
                                  "note": "Needs ANTHROPIC_API_KEY."},
@@ -165,6 +168,7 @@ WIRING = {
 MODE_FLAGS = {
     "actuator_mode_live": "pipeline_actuator",
     "meta_allocator_mode_live": "pipeline_meta_allocator",
+    "share_allocator_mode_live": "pipeline_share_allocator",
 }
 
 # A component is late when it has missed more than two of its own beats. One

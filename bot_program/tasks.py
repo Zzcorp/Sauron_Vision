@@ -393,9 +393,36 @@ def sync_broker_account() -> dict:
             fields += ["broker_positions", "broker_positions_at"]
         acct.save(update_fields=fields)
         if reading is not None:
+            # The history row — the drawdown governor's memory. Written
+            # here and nowhere else, from the SAME reading the cell just
+            # stored, so the road and the current position can never
+            # quote two different syncs. A failed insert must not fail
+            # the sync (the cell is already written and the pools still
+            # need re-sizing), and a missed sync writes NOTHING: a zero
+            # placeholder would read as a total drawdown and pin the
+            # governor to its floor for 90 days (2026-09-12).
+            try:
+                from datetime import timedelta
+                from decimal import Decimal
+
+                from .equity_models import BrokerEquityReading
+                BrokerEquityReading.objects.create(
+                    account=acct, value=Decimal(str(round(float(value), 2))),
+                    currency=currency or "", env=acct.env or "", at=now)
+                BrokerEquityReading.objects.filter(
+                    account=acct,
+                    at__lt=now - timedelta(days=EQUITY_HISTORY_DAYS)
+                ).delete()
+            except Exception as e:  # noqa: BLE001 — history is beside the sync, not in it
+                logger.warning("broker sync: history row failed: %s", e)
             _follow_the_account(user, value, currency)
         out["stored"] += 1
     return out
+
+
+# The drawdown governor looks back 90 days; 400 keeps a year of context
+# for the operator's eye and bounds the table at ~1 row per sync.
+EQUITY_HISTORY_DAYS = 400
 
 
 def _follow_the_account(user, value, currency) -> None:
@@ -495,3 +522,64 @@ def _clear_broker_miss(acct) -> None:
 
     cache.delete(f"broker_sync:miss:{acct.pk}")
     cache.delete(f"broker_sync:alerted:{acct.pk}")
+
+
+# ─── The share allocator ─────────────────────────────────────────────────
+
+@shared_task
+@guarded_task("pipeline_share_allocator")
+def propose_share_plans() -> dict:
+    """Every four hours: a SharePlan per broker-backed user, in shadow.
+
+    Runs at :05 so the :00 sync has stored a fresh reading first — a
+    proposal needs one under TRACKING_FRESH_SECONDS old, and a stale one
+    proposes nothing (counted in `not_proposed`, never invented). Before
+    proposing it expires the plans nobody decided on and grades the ones
+    whose 24h window has closed, so the housekeeping runs even on a day
+    with no reading. Writes a SharePlan row and nothing else: the share
+    on a config changes only when an admin applies a plan
+    (share_allocator.apply_share_plan), and this task never calls it.
+
+    The return dict carries no top-level `skipped` key and none of the
+    gate's work/done counters (parsed, attempted, stored, ...): task_gate
+    .judge_result reads a truthy `skipped` as "not configured" and a
+    zero `stored` as "produced nothing", and a user with a stale reading
+    is neither — it is the allocator declining, which is the design
+    (2026-09-12).
+    """
+    from .capital_truth import broker_backed
+    from .models import IBKRAccount
+    # Lazily: share_allocator imports _follow_the_account from this module
+    # at apply time, so a top-level import here would close the cycle.
+    from .share_allocator import (expire_stale_plans, grade_plans,
+                                  propose_share_plan_with_reason)
+
+    expired = expire_stale_plans()
+    graded = grade_plans()
+    users = proposals = not_proposed = errors = 0
+    last_error = ""
+    for acct in (IBKRAccount.objects.exclude(account_id_enc="")
+                 .select_related("user")):
+        user = acct.user
+        if broker_backed(user) is None:
+            continue
+        users += 1
+        try:
+            plan, reason = propose_share_plan_with_reason(user)
+        except Exception as e:  # noqa: BLE001 — one user's failure must not
+            # silence the next user's plan, but it must not pass as ok either
+            errors += 1
+            last_error = f"{user.username}: {e}"
+            logger.exception("[shares] user %s: proposal failed: %s",
+                             user.username, e)
+            continue
+        if plan is None:
+            not_proposed += 1
+        else:
+            proposals += 1
+    out = {"status": "ok", "users": users, "proposals": proposals,
+           "graded": graded, "expired": expired, "not_proposed": not_proposed}
+    if errors:
+        out.update({"status": "error", "errors": errors,
+                    "error": f"{errors} proposal(s) raised — last: {last_error}"})
+    return out

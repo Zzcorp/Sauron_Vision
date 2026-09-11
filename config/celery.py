@@ -407,6 +407,18 @@ app.conf.beat_schedule = {
         "schedule": 900.0,
     },
 
+    # ── Share allocator: a TARGET share of the account per live follower
+    #              pool, every 4 h at :05 — five minutes AFTER the :00 sync
+    #              above has stored a reading, because a proposal needs one
+    #              under an hour old and a stale one proposes nothing. Shadow:
+    #              it writes a SharePlan and re-sizes no pool; an admin
+    #              applies (PIN / --yes) in LIVE mode only. Gated by its own
+    #              component (pipeline_share_allocator).
+    "propose-share-plans": {
+        "task": "bot_program.tasks.propose_share_plans",
+        "schedule": crontab(minute=5, hour="*/4"),
+    },
+
     # NB: there is deliberately no in-app "daily-postgres-backup" entry.
     # core.backups.run_postgres_backup shells out to pg_dump, which is not in
     # the application image (Dockerfile.prod installs libpq5, not the client

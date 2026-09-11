@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Share Allocator — Sauron Vision{% endblock %}
+{# ◫ is the sidebar's Share Allocator mark — title and nav row agree. #}
+{% block page_title %}◫ SHARE ALLOCATOR · {% if live_mode %}LIVE{% else %}SHADOW{% endif %}{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PENDING</span>
+        <span class="oc-strip-value {% if pending %}up{% endif %}">{{ pending|length }}</span>
+        <span class="oc-strip-sub">awaiting decision</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">APPLIED</span>
+        <span class="oc-strip-value">{{ applied|length }}</span>
+        <span class="oc-strip-sub">rollback-able · {{ daily_applies_used }}/{{ MAX_APPLIES_PER_DAY }} today</span>
+    </div>
+    {# The reading is the sync's, with its AGE — a stale number never dressed as current. #}
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ACCOUNT</span>
+        {% if reading %}
+        <span class="oc-strip-value {% if reading_stale %}down{% endif %}">{{ reading.value_text }} {{ reading.currency }}</span>
+        <span class="oc-strip-sub">{% if reading_stale %}STALE · {% endif %}read {{ reading.age_text }} ago</span>
+        {% else %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">no broker reading yet</span>
+        {% endif %}
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">DRAWDOWN</span>
+        {% if drawdown %}
+        <span class="oc-strip-value {% if drawdown.drawdown_pct > 0.05 %}down{% endif %}">{{ drawdown.pct_text }}</span>
+        <span class="oc-strip-sub">governor ×{{ governor|floatformat:2 }} · {% if drawdown.n %}hwm over {{ drawdown.n }} reading{{ drawdown.n|pluralize }}{% else %}hwm from 1 reading{% endif %}</span>
+        {% else %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">no history yet</span>
+        {% endif %}
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MODE</span>
+        <span class="oc-strip-value {% if live_mode %}up{% else %}down{% endif %}">{% if live_mode %}LIVE{% else %}SHADOW{% endif %}</span>
+        <span class="oc-strip-sub">{% if live_mode %}apply re-sizes pools{% else %}proposals only{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ROLE</span>
+        <span class="oc-strip-value">{% if is_admin %}ADMIN{% else %}VIEWER{% endif %}</span>
+        <span class="oc-strip-sub">{% if is_admin %}can propose/apply{% else %}read-only{% endif %}</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <span class="card-title">Current vs target — share of the account per live follower</span>
+        {% if is_admin %}
+        <form method="post" action="{% url 'hq_propose_share_plan' %}" data-run-job="Share-allocator proposal">
+            {% csrf_token %}<button type="submit" class="btn btn-sm">▶ Propose Now</button>
+        </form>
+        {% endif %}
+    </div>
+    {% if rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+      <thead><tr>
+        <th>Config</th><th>Class / Mode</th>
+        <th class="num">Current</th><th class="num">Target</th><th class="num">Floor–Ceiling</th><th class="num">Δ</th>
+        <th>Why</th>
+      </tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td class="sv-ident" data-label="Config">{{ r.cfg.name }}</td>
+            <td data-label="Class / Mode"><span class="badge badge-medium">{{ r.cfg.asset_class }}</span> <span class="badge badge-{% if r.cfg.mode == 'live' %}bearish{% else %}bullish{% endif %}">{{ r.cfg.mode }}</span></td>
+            <td class="num" data-label="Current">{{ r.current }}</td>
+            {# '—' when no plan has measured this follower: an unmeasured target is not 0. #}
+            <td class="num" data-label="Target">{% if r.target is not None %}{{ r.target|floatformat:2 }}%{% if r.held %} <span class="badge badge-medium" title="Move under the hysteresis threshold — the target repeats the current share exactly">held</span>{% endif %}{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}</td>
+            <td class="num" data-label="Floor–Ceiling">{% if r.floor is not None %}{{ r.floor|floatformat:0 }}–{{ r.ceiling|floatformat:0 }}%{% else %}—{% endif %}</td>
+            <td class="num {% if r.delta and r.delta > 0 %}up{% elif r.delta and r.delta < 0 %}down{% endif %}" data-label="Δ">{% if r.delta is not None %}{% if r.delta > 0 %}+{% endif %}{{ r.delta|floatformat:2 }} pt{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}</td>
+            <td data-label="Why" style="font-size: 11px; color: var(--text-muted); max-width: 46ch;">{% if r.why %}{{ r.why }}{% else %}no proposal yet for this follower{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% if alloc_reason %}
+    <p style="font-size: 11px; color: var(--accent-red, #c33); padding: 12px 16px;">Current shares do not fit the account: {{ alloc_reason }}</p>
+    {% endif %}
+    <p style="font-size: 11px; color: var(--text-muted); padding: 12px 16px;">
+        target = current × evidence × regime × opportunity × news, normalised to 100% × governor, held inside floor–ceiling,
+        half-way smoothed, at most 10 points per config per day; a move under 1 point is held. Applying writes the share only —
+        the broker sync's own arithmetic re-sizes the pools.
+    </p>
+    {% else %}
+    {# ◌ is the declared "nothing configured yet" mark; the <p> carries the meaning. #}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
+        <p>NO LIVE FOLLOWER — a pool follows the account from the Asset Bots page (Follow, with the PIN); the allocator sizes followers only.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Pending plans</span></div>
+    {% if pending %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>#</th><th>Proposed</th><th>Reading</th><th>Governor</th><th>Targets</th>{% if is_admin %}<th>Decide</th>{% endif %}</tr></thead>
+      <tbody>
+        {% for p in pending %}
+          <tr>
+            <td>#{{ p.id }}</td>
+            <td>{{ p.proposed_at|timesince }} ago</td>
+            <td style="font-family: var(--font-mono); font-size: 11px;">{% if p.reading_value is not None %}{{ p.reading_value }} {{ p.reading_currency }}{% else %}—{% endif %}</td>
+            <td class="num">×{{ p.governor|floatformat:2 }}</td>
+            <td style="font-size: 11px; font-family: var(--font-mono);">
+                {% for r in p.rows %}<div title="{{ r.why }}">{{ r.name }} {{ r.current }} → {{ r.target }}{% if r.held %} <span class="badge badge-medium">held</span>{% endif %}</div>{% endfor %}
+                {% if p.notes %}<div style="color: var(--text-muted); margin-top: 4px;">{{ p.notes }}</div>{% endif %}
+            </td>
+            {% if is_admin %}
+            <td style="display:flex;gap:6px;align-items:center;">
+                {# Apply takes the PIN: it re-sizes live pools. Disabled until the LIVE component is on. #}
+                <form method="post" action="{% url 'hq_apply_share_plan' %}" style="display:flex;gap:4px;align-items:center;">{% csrf_token %}<input type="hidden" name="plan_id" value="{{ p.id }}"><input type="password" name="pin" placeholder="PIN" autocomplete="off" style="width:60px;padding:4px;font-size:11px;" {% if not live_mode %}disabled{% endif %}><button class="btn btn-sm btn-primary" type="submit" {% if not live_mode %}disabled title="Promote to LIVE first"{% endif %}>Apply</button></form>
+                <form method="post" action="{% url 'hq_reject_share_plan' %}">{% csrf_token %}<input type="hidden" name="plan_id" value="{{ p.id }}"><button class="btn btn-sm btn-danger" type="submit">Reject</button></form>
+            </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No pending plan. The allocator proposes every four hours at :05, once the broker sync has stored a fresh reading; a proposal older than 8 hours expires undecided.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Applied (rollback-able)</span></div>
+    {% if applied %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>#</th><th>Applied</th><th>By</th><th>Shares written</th><th>Grade</th>{% if is_admin %}<th>Rollback</th>{% endif %}</tr></thead>
+      <tbody>
+        {% for p in applied %}
+          <tr>
+            <td>#{{ p.id }}</td>
+            <td>{{ p.applied_at|timesince }} ago</td>
+            <td>{{ p.confirmed_by.username|default:"—" }}</td>
+            <td style="font-size: 11px; font-family: var(--font-mono);">{% for r in p.rows %}<div>{{ r.name }} {{ r.current }} → {{ r.target }}</div>{% endfor %}</td>
+            <td class="num {% if p.grade_score and p.grade_score > 0 %}up{% elif p.grade_score and p.grade_score < 0 %}down{% endif %}">{% if p.grade_score is not None %}{{ p.grade_score|floatformat:4 }}{% elif p.graded_at %}<span style="color: var(--text-muted);" title="No live close in the 24h window">ungradeable</span>{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}</td>
+            {% if is_admin %}
+            <td><form method="post" action="{% url 'hq_rollback_share_plan' %}" style="display:flex;gap:4px;align-items:center;">{% csrf_token %}<input type="hidden" name="plan_id" value="{{ p.id }}"><input type="password" name="pin" placeholder="PIN" autocomplete="off" style="width:60px;padding:4px;font-size:11px;"><button class="btn btn-sm btn-danger" type="submit">↶ Rollback</button></form></td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No plan applied yet.{% if not live_mode %} Apply is disabled in SHADOW mode — promote the share allocator to LIVE on the admin dashboard first.{% endif %}</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">History — last 20 decided plans</span></div>
+    {% if history %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>#</th><th>State</th><th>Proposed</th><th>Grade</th><th>Why</th></tr></thead>
+      <tbody>
+        {% for p in history %}
+          <tr>
+            <td>#{{ p.id }}</td>
+            <td><span class="badge badge-{% if p.state == 'applied' %}bullish{% elif p.state == 'rolled_back' or p.state == 'rejected' %}bearish{% else %}medium{% endif %}">{{ p.get_state_display }}</span></td>
+            <td>{{ p.proposed_at|timesince }} ago</td>
+            {# Positive: the plan leaned toward the pools that then paid. '—' until the 24h window closes. #}
+            <td class="num {% if p.grade_score and p.grade_score > 0 %}up{% elif p.grade_score and p.grade_score < 0 %}down{% endif %}">{% if p.grade_score is not None %}{{ p.grade_score|floatformat:4 }}{% elif p.graded_at %}<span style="color: var(--text-muted);" title="No live close in the 24h window">ungradeable</span>{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">{% for r in p.rows %}<div>{{ r.name }} {{ r.current }} → {{ r.target }} — {{ r.why }}</div>{% endfor %}{% if p.notes %}<div>{{ p.notes }}</div>{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">Nothing decided yet. Every plan is graded 24 hours after it was proposed — applied, rejected or expired alike — against the live closes in that window.</p>
+    {% endif %}
+</div>
+{% endblock %}

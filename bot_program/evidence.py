@@ -133,3 +133,120 @@ def config_rows() -> list:
                            else None),
         })
     return rows
+
+
+# ── What one config has proven, for the share allocator ─────────────────
+#
+# Three lanes, tried in order and NEVER pooled: this config's own live
+# fills; the fleet's live fills of the same asset class; this config's
+# paper fills. Paper and live are kept apart because the gap between them
+# is the fact bot_grading exists to measure — pooling would size a live
+# pool on a simulation. Fewer than MIN_EVIDENCE_N graded fills in every
+# lane is UNMEASURED and scores 1.0 (neutral), not 0.5 (penalised): the
+# allocator must not shrink a pool for being new. A NULL realized_r is an
+# unpriced exit and is excluded, never counted as a zero-R trade.
+MIN_EVIDENCE_N = 10
+GRADED_OUTCOMES = ["hit_target", "stopped_out", "manual_close", "expired",
+                   "time_stop"]
+
+
+def _clamp(x, lo, hi):
+    return max(lo, min(hi, x))
+
+
+def evidence_score(win_rate, avg_r) -> float:
+    """1 + (wr - 0.5) * 0.6 + clamp(avg_r, -1, 1) * 0.4, held to [0.5, 1.5].
+
+    A coin-flip rule with zero expectancy is exactly 1.0; the win-rate
+    term and the R term each move it by at most ±0.3 / ±0.4, so no single
+    hot streak can double a share.
+    """
+    return _clamp(1.0 + (float(win_rate) - 0.5) * 0.6
+                  + _clamp(float(avg_r), -1.0, 1.0) * 0.4, 0.5, 1.5)
+
+
+def _own_fills(cfg, since, *, paper):
+    from bot_program.models import AssetBotTrade
+    return (AssetBotTrade.objects
+            .filter(config=cfg, status="CLOSED", paper=paper,
+                    closed_at__gte=since, outcome__in=GRADED_OUTCOMES,
+                    realized_r__isnull=False)
+            .exclude(rule_name="").exclude(rule_name="manual_take"))
+
+
+def _lane_from_rows(rows) -> dict:
+    rs = [float(r) for r in rows if r is not None]
+    n = len(rs)
+    if n == 0:
+        return {"n": 0, "win_rate": None, "avg_r": None, "r_sum": 0.0}
+    wins = sum(1 for r in rs if r > 0)
+    return {"n": n, "win_rate": wins / n, "avg_r": sum(rs) / n,
+            "r_sum": sum(rs)}
+
+
+def config_evidence(cfg, *, days=90) -> dict:
+    """{lane, n, win_rate, avg_r, r_sum, measured, score, reason}.
+
+    `lane` is 'live' (this config's live fills), 'fleet_live' (live fills
+    of every config in this asset class, trade-weighted), 'paper' (this
+    config's paper fills) or 'none'. `score` is 1.0 unless `measured`.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from bot_program.bot_grading import VENUE_LIVE, bot_performance_summary
+
+    since = timezone.now() - timedelta(days=days)
+    tried = []
+
+    # Lane 1 — this config's own live fills.
+    live = _lane_from_rows(_own_fills(cfg, since, paper=False)
+                           .values_list("realized_r", flat=True))
+    if live["n"] >= MIN_EVIDENCE_N:
+        return {"lane": "live", **live, "measured": True,
+                "score": evidence_score(live["win_rate"], live["avg_r"]),
+                "reason": f"{live['n']} live fills in {days}d"}
+    tried.append(f"live n={live['n']}")
+
+    # Lane 2 — the fleet's live fills in this asset class, weighted by n
+    # per (rule, class) row. bot_performance_summary already excludes
+    # NULL realized_r and blank rule names; manual_take rows are dropped
+    # here for the same reason lane 1 drops them — a hand-taken trade is
+    # the operator's evidence, not a rule's.
+    fleet_n, fleet_wins, fleet_r = 0, 0.0, 0.0
+    try:
+        rows = bot_performance_summary(asset_class=cfg.asset_class,
+                                       days=days, venue=VENUE_LIVE, min_n=1)
+    except Exception:  # noqa: BLE001 — a lane that cannot answer is unmeasured
+        rows = []
+    for row in rows:
+        if (row.get("rule_name") or "") == "manual_take":
+            continue
+        n = int(row.get("n") or 0)
+        fleet_n += n
+        fleet_wins += float(row.get("win_rate") or 0.0) * n
+        fleet_r += float(row.get("expectancy") or 0.0) * n
+    if fleet_n >= MIN_EVIDENCE_N:
+        wr, avg = fleet_wins / fleet_n, fleet_r / fleet_n
+        return {"lane": "fleet_live", "n": fleet_n, "win_rate": wr,
+                "avg_r": avg, "r_sum": fleet_r, "measured": True,
+                "score": evidence_score(wr, avg),
+                "reason": f"{fleet_n} fleet live fills in {cfg.asset_class} "
+                          f"over {days}d (own live n={live['n']})"}
+    tried.append(f"fleet live n={fleet_n}")
+
+    # Lane 3 — this config's own paper fills.
+    paper = _lane_from_rows(_own_fills(cfg, since, paper=True)
+                            .values_list("realized_r", flat=True))
+    if paper["n"] >= MIN_EVIDENCE_N:
+        return {"lane": "paper", **paper, "measured": True,
+                "score": evidence_score(paper["win_rate"], paper["avg_r"]),
+                "reason": f"{paper['n']} paper fills in {days}d "
+                          f"({', '.join(tried)})"}
+    tried.append(f"paper n={paper['n']}")
+
+    return {"lane": "none", "n": 0, "win_rate": None, "avg_r": None,
+            "r_sum": 0.0, "measured": False, "score": 1.0,
+            "reason": f"unmeasured — below {MIN_EVIDENCE_N} graded fills "
+                      f"in every lane ({', '.join(tried)})"}

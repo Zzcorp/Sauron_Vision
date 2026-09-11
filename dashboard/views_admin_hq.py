@@ -1502,6 +1502,118 @@ def hq_reject_allocation(request):
     return redirect("admin_dashboard")
 
 
+# ── Share allocator (/shares/) ──────────────────────────────────────────
+#
+# The plan is the ACTING user's: every view filters by user=request.user,
+# so an admin cannot apply another account's plan by editing plan_id —
+# a share plan re-sizes that user's live pools (2026-09-12).
+
+def _own_share_plan(request):
+    """The SharePlan named by plan_id, owned by the acting user, or None
+    with the flash already written."""
+    from bot_program.share_models import SharePlan
+    try:
+        plan_id = int(request.POST.get("plan_id", "0"))
+    except (TypeError, ValueError):
+        messages.error(request, "Invalid plan_id")
+        return None
+    plan = SharePlan.objects.filter(pk=plan_id, user=request.user).first()
+    if plan is None:
+        messages.error(request, f"Share plan #{plan_id} not found.")
+    return plan
+
+
+@_admin_only
+def hq_propose_share_plan(request):
+    """Admin trigger for an immediate share-plan proposal (shadow)."""
+    from bot_program.share_allocator import propose_share_plan_with_reason
+    from bot_program.tasks import propose_share_plans as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Share-allocator proposal",
+                                "/shares/")
+    if resp is not None:
+        return resp
+    try:
+        plan, reason = propose_share_plan_with_reason(request.user)
+        if plan is None:
+            messages.warning(request,
+                             f"Share allocator: nothing proposed — {reason}")
+        else:
+            messages.success(
+                request,
+                f"Share allocator: proposed plan #{plan.pk} for "
+                f"{plan.configs_considered} follower(s) — a shadow until "
+                f"it is applied.")
+    except Exception as e:  # noqa: BLE001
+        messages.error(request, f"Share-allocator proposal failed: {e}")
+    return redirect("shares_dashboard")
+
+
+@_admin_only
+def hq_apply_share_plan(request):
+    """Admin applies a PROPOSED share plan — PIN required in LIVE mode,
+    because applying writes every follower's share and re-sizes the live
+    pools on the spot. In shadow mode the service refuses by itself."""
+    from bot_program.share_allocator import (ShareAllocatorError,
+                                             apply_share_plan, is_live_mode)
+    plan = _own_share_plan(request)
+    if plan is None:
+        return redirect("shares_dashboard")
+    if is_live_mode() and not _pin_ok(request):
+        messages.error(request, "PIN required — applying a share plan "
+                                "re-sizes live pools.")
+        return redirect("shares_dashboard")
+    try:
+        plan = apply_share_plan(plan.pk, request.user)
+        n = len(plan.targets or {}) - int(plan.configs_skipped or 0)
+        messages.success(
+            request,
+            f"Applied share plan #{plan.pk} — {n} pool(s) re-sized from "
+            f"the account reading; every follower's share is now explicit.")
+    except ShareAllocatorError as e:
+        messages.error(request, f"Share allocator: {e}")
+    return redirect("shares_dashboard")
+
+
+@_admin_only
+def hq_rollback_share_plan(request):
+    """Admin restores the shares an applied plan replaced — PIN required,
+    a rollback re-sizes live pools exactly as an apply does."""
+    from bot_program.share_allocator import (ShareAllocatorError,
+                                             rollback_share_plan)
+    plan = _own_share_plan(request)
+    if plan is None:
+        return redirect("shares_dashboard")
+    if not _pin_ok(request):
+        messages.error(request, "PIN required — rolling back a share plan "
+                                "re-sizes live pools.")
+        return redirect("shares_dashboard")
+    try:
+        plan = rollback_share_plan(plan.pk, request.user)
+        messages.success(request, f"Rolled back share plan #{plan.pk} — "
+                                  f"previous shares restored exactly.")
+    except ShareAllocatorError as e:
+        messages.error(request, f"Share allocator: {e}")
+    return redirect("shares_dashboard")
+
+
+@_admin_only
+def hq_reject_share_plan(request):
+    """Admin rejects a PROPOSED plan. No PIN: nothing is written to any
+    config, and declining must stay frictionless."""
+    from bot_program.share_allocator import (ShareAllocatorError,
+                                             reject_share_plan)
+    plan = _own_share_plan(request)
+    if plan is None:
+        return redirect("shares_dashboard")
+    try:
+        plan = reject_share_plan(plan.pk, request.user)
+        messages.success(request, f"Rejected share plan #{plan.pk}.")
+    except ShareAllocatorError as e:
+        messages.error(request, f"Share allocator: {e}")
+    return redirect("shares_dashboard")
+
+
 @_admin_only
 def hq_apply_rule_action(request):
     """Admin confirms a proposed RuleAction. Live mode required."""

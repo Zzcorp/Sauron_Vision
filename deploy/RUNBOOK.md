@@ -571,8 +571,63 @@ followed by:
   re-proposes the same enforcement every day it still holds, so one
   finding shows up as six rows; --stale rejects every proposal a newer
   one on the same rule and action supersedes.
+- `shares list` / `shares propose --user NAME` / `shares apply ID --yes` /
+  `shares reject ID...` / `shares rollback ID --yes` / `shares grade` — the
+  share allocator's page (`/shares/`): the same proposal the beat writes,
+  the same apply (LIVE mode, fresh reading, three a day, snapshot for
+  rollback). Prints the plan with every factor; writes only with `--yes`
+  (the page asks the PIN — say so). See the section below.
 - `preflight_live`, `why_no_trade`, `seed_components`, and
   `./deploy/ibkr-doctor` (read-only) were already there.
+
+**The share allocator (shadow first).** Until now a live pool's share of
+the account was a number typed once on the Follow form. The allocator
+computes it instead — every four hours, at :05, after the sync has
+stored a reading — and proposes; it re-sizes nothing on its own.
+
+- *What it reads.* The last broker reading (must be under an hour old,
+  or it proposes nothing and says so), the 90-day road that reading took
+  (`BrokerEquityReading`, one row per sync, written by the sync ONLY —
+  a missed sync writes no row, never a zero), and per follower pool four
+  factors: graded evidence (this pool's LIVE closes, else the fleet's
+  live closes in the same class, else its paper closes, else unmeasured
+  = 1.0; NULL R is never counted as 0), regime fit from the brain
+  context (risk-off with confidence trims stock/crypto/CFD), opportunity
+  density (how much of the class's universe carries a flag or signal),
+  and news risk (tighten-only; blind = 1.0 when the analyst has been
+  idle two hours). A reader that fails costs a factor of 1.0 and a note
+  on the plan, never the plan.
+- *What it writes.* A `SharePlan` row in state PROPOSED with every
+  number on it: raw share, floors and ceilings (2%–60% unless the pool's
+  `extras["share_floor_pct"]` / `["share_ceiling_pct"]` say otherwise),
+  the smoothed and day-capped target (10 points per pool per rolling
+  24 h, counting what applied plans already moved), a "held" mark when
+  the move is under 1 point, and the drawdown governor (full deployment
+  to 5% under the high-water mark, 40% at 20% under; the rest is cash by
+  construction). It never writes a pool's capital and never talks to the
+  broker.
+- *The two switches.* After `./deploy/dc exec web python manage.py migrate`
+  (0026 creates both tables), `component on pipeline_share_allocator`
+  starts the proposals — shadow, safe, and worth a week of reading before
+  anything else. `component on share_allocator_mode_live` is the second
+  switch: only then does Apply work, and it still takes the trading PIN
+  on `/shares/` (or `--yes` on the shell) per plan, three plans per user
+  per day. Applying writes each follower's `extras["account_share_pct"]`
+  and re-splits the pools through the sync's own arithmetic at once;
+  Rollback puts every share back exactly as the apply found it (the key
+  removed where the pool was automatic).
+- *Read it.* `shares list` shows the mode, the pending plans with
+  "current → target" and one sentence of why per pool, the applied ones
+  (rollback possible), and the last grade. `shares propose --user NAME`
+  runs one proposal now and prints either the plan or the reason there
+  is none ("no fresh reading (age 5400s)" means run the sync first).
+- *The grade.* Twenty-four hours after a plan is proposed — applied,
+  rejected or not — `grade_plans` (inside the same beat, or `shares
+  grade`) scores it: Σ over pools of (target − current)/100 × the R that
+  pool's LIVE closes earned in the window. Positive means the plan leaned
+  toward what paid; "ungradeable" means nothing closed, which is not
+  wrong. A run of negative grades in shadow is the reason not to turn
+  LIVE on.
 
 **A healthy Gateway is not a logged-in Gateway.** The container's
 healthcheck sees a process and a port. When the session behind it is gone

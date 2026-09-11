@@ -245,6 +245,37 @@ def record_brain_soft_block(*, user, asset_class: str, symbol: str,
         logger.warning("audit record_brain_soft_block failed: %s", e)
 
 
+def record_share_plan(plan, decision: str, user=None) -> None:
+    """Hook from the share allocator's apply / reject / rollback.
+
+    `decision` is 'applied' | 'rejected' | 'rolled_back'. The targets and
+    the previous shares ride in the row so a re-sized pool can be traced
+    to the plan and the admin that confirmed it — the PIN on the page is
+    the consent, this is the receipt (2026-09-12). `user` may be an
+    AnonymousUser or a shell caller; only a saved account is linked.
+    """
+    try:
+        who = user if getattr(user, "is_authenticated", False) and \
+            getattr(user, "pk", None) else None
+        data = {
+            "plan_id": plan.pk,
+            "owner": getattr(plan.user, "username", str(plan.user_id)),
+            "decision": decision,
+            "state": plan.state,
+            "targets": dict(plan.targets or {}),
+            "previous_shares": dict(plan.previous_shares or {}),
+            "reading_value": (str(plan.reading_value)
+                              if plan.reading_value is not None else None),
+            "reading_currency": plan.reading_currency or "",
+            "governor": float(plan.governor or 1.0),
+            "drawdown_pct": plan.drawdown_pct,
+            "by": getattr(who, "username", "") or "",
+        }
+        record_event("share_plan", data, user=who)
+    except Exception as e:
+        logger.warning("audit record_share_plan failed: %s", e)
+
+
 def record_hypothesis_resolved(*, hypothesis, outcome: str,
                                   resolution_notes: str = "") -> None:
     """Hook from hypothesis market resolver — chains the calibration

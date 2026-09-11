@@ -1160,6 +1160,36 @@ button.
     {% endif %}
 </div>
 
+<!-- ═══ SHARE ALLOCATOR — Share of the Broker Account per Live Pool ═══ -->
+<div class="section-label fade-in-up">Share Allocator (Account Shares)</div>
+<div class="card fade-in-up" style="margin-bottom:24px;border-color:{% if share_allocator_live_component.is_enabled %}var(--accent-gold){% else %}var(--text-muted){% endif %};">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div>
+            <div style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:1px;color:{% if share_allocator_live_component.is_enabled %}var(--accent-gold){% else %}var(--text-muted){% endif %};">
+                {% if share_allocator_live_component.is_enabled %}LIVE MODE — admin can apply (PIN){% else %}SHADOW MODE — proposals only{% endif %}
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;line-height:1.4;">
+                evidence × regime × opportunity × news · drawdown governor · floor 2% / ceiling 60% · 10 pt/day · 3 applies/day · every 4h.
+                {{ share_plans_pending }} pending plan{{ share_plans_pending|pluralize }} for you.
+                <a href="{% url 'shares_dashboard' %}" style="color:var(--accent);">Full view →</a>
+            </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+            <form method="post" action="{% url 'hq_propose_share_plan' %}" data-run-job="Share-allocator proposal">
+                {% csrf_token %}<button type="submit" class="btn btn-sm">▶ Propose Now</button>
+            </form>
+            <form method="post" action="{% url 'admin_toggle_component' %}">
+                {% csrf_token %}<input type="hidden" name="key" value="share_allocator_mode_live">
+                {% if share_allocator_live_component.is_enabled %}
+                <button type="submit" class="btn btn-danger btn-sm">DISABLE LIVE</button>
+                {% else %}
+                <button type="submit" class="btn btn-primary btn-sm">PROMOTE TO LIVE</button>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Component Controls -->
 {% for cat_name, cat_components in components_by_category.items %}
 <div class="section-label fade-in-up">{{ cat_name|upper }}</div>

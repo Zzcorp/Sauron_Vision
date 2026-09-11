@@ -195,6 +195,16 @@ DEFAULT_COMPONENTS = [
     {"key": "broker_account_sync", "name": "Broker Account Sync (IBKR)",
      "description": "Caches each interfaced IBKR account's NetLiquidation and holdings every 15 min — the source for every 'as the broker sees it' cell. Independent of pipeline_asset_bots (knowing what the account holds is not a bot function). Read-only; touches no gate denominator.",
      "category": "pipeline"},
+
+    # ── Share allocator ───────────────────────────────────────
+    # Without these rows the @guarded_task on propose_share_plans skips on
+    # every beat and /shares/ shows no plan without saying why.
+    {"key": "pipeline_share_allocator", "name": "Share Allocator (proposer)",
+     "description": "Every 4 h (at :05, after the sync): computes a TARGET share of the broker account for each live follower pool from graded evidence, regime fit, opportunity density and news risk, under per-pool floor/ceiling, a 10-point/day change cap and a drawdown governor, and writes it as a SharePlan in PROPOSED state. SHADOW by default: nothing is re-sized until an admin applies a plan on /shares/ (trading PIN) or with `shares apply ID --yes`, and apply is refused unless share_allocator_mode_live is ON. Never writes a pool's capital, never talks to the broker.",
+     "category": "pipeline"},
+    {"key": "share_allocator_mode_live", "name": "Share Allocator Live Mode",
+     "description": "Off (default) = shadow — plans are proposed and graded, apply is refused with 'shadow mode'. On = an admin can apply a plan (PIN on /shares/, --yes on the shell), which writes each follower's extras['account_share_pct'] and re-sizes the pools through the sync's own arithmetic; rollback restores the previous shares exactly. Floors, ceilings, the daily change cap, 3 applies/day and the drawdown governor hold regardless of mode.",
+     "category": "system"},
 ]
 
 
