@@ -167,7 +167,7 @@ def log_shadow_entry(cfg, symbol: str, decision, price: float, qty: float):
                 decision.score, decision.rule_name or "?")
     try:
         from ai_agents.calibration import log_direction_prediction
-        from dashboard.views_evidence import shadow_agent_for
+        from bot_program.evidence import shadow_agent_for
         ts = cfg.time_stop_setting()
         horizon = float(ts["hours"]) if ts.get("enabled") and ts.get("hours") \
             else 24.0 * 7

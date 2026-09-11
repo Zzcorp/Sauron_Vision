@@ -501,6 +501,20 @@ fleet down without erasing traded history. The keyless feed now downloads
 one sized window per symbol per pass instead of two two-year ones, and
 breathes between symbols, so the default budget of 150 is safe.
 
+**The weekly imagination pass runs on the frontier model.** The Strategy
+Generator (Sunday 04:00 UTC, at most three proposals) is the one call on
+the platform where imagination is the product, and it alone runs on the
+`frontier` tier — Claude Fable 5.1, twice the Opus price, thinking always
+on. Every other agent stays on its tier; change any of them on `/ai-models/`
+(or `AI_MODEL_FRONTIER` in `.env`). The generator reads the evidence
+ledger — what each rule has proven in paper and live — and cites it. Its
+proposals land as draft setups in RESEARCH stage; switch
+`generator_auto_research` ON on `/health/` and it arms them itself: the
+scanner grades their signals, the stage gate keeps every bot from trading
+them, the promotion ladder decides the rest, and the brain page still lets
+you reject one. A safety refusal by the frontier model is not an outage:
+the provider re-runs the call once on Opus and says so in the log.
+
 **No prose without a claim the platform can grade.** Every agent that
 talks about a symbol now registers a direction call — symbol, up or down,
 horizon, the price it was measured from: the strategy advisor's long/short

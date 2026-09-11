@@ -114,6 +114,19 @@ def _build_generation_snapshot() -> dict:
         )
     except Exception:
         snap["recent_confirmed"] = []
+    # 6. The evidence ledger — per rule, what has been GRADED: signals,
+    # paper fills, live fills, and the regret (paper R nothing took live).
+    # The generator composes from what has proven, and is told so.
+    try:
+        from bot_program.evidence import rule_rows
+        snap["evidence_ledger"] = [
+            {k: r[k] for k in ("rule", "stage", "sig_n", "sig_hit",
+                               "sig_avg", "sig_r", "paper_n", "paper_r",
+                               "live_n", "live_r", "regret_r")}
+            for r in rule_rows()[:25]
+        ]
+    except Exception:
+        snap["evidence_ledger"] = []
 
     return snap
 
@@ -146,7 +159,11 @@ class StrategyGeneratorAgent(BaseAgent):
     """Generates new OpportunitySetup proposals from learned patterns."""
 
     agent_name = "strategy_generator"
-    default_tier = "deep"  # Opus 4.7
+    # The weekly imagination pass runs on the frontier tier — the most
+    # capable model, once a week, for at most three proposals. Every other
+    # agent on the platform stays on its tier; this is the one call where
+    # imagination is the product. Override per agent on /ai-models/.
+    default_tier = "frontier"
 
     def get_system_prompt(self) -> str:
         return (
@@ -176,7 +193,13 @@ class StrategyGeneratorAgent(BaseAgent):
             "5. Stay within the schema. min_match_score should be at most "
             "the sum of weights × 0.85.\n"
             "6. `name_slug` is short (≤30 chars), lowercase, underscores. "
-            "The platform will prefix it with `generated_<date>_`.\n\n"
+            "The platform will prefix it with `generated_<date>_`.\n"
+            "7. `evidence_ledger` is what the platform has GRADED per rule "
+            "— signals (n, hit rate, avg R), paper fills and their R, live "
+            "fills and their R, and `regret_r`, paper R nothing has taken "
+            "live. Build on rules with proven paper R; do not re-propose "
+            "what has already failed there; when you cite the ledger, cite "
+            "its numbers.\n\n"
             "Inspirations to look for:\n"
             "- Pair a top-performing rule's evaluators with a regime filter "
             "(hurst_regime / volatility_regime).\n"
@@ -558,7 +581,9 @@ def generate_strategies_now(*, max_proposals: int = 3) -> dict:
                 "n_persisted": 0}
 
     persisted_ids = []
+    armed_ids = []
     rejected_count = 0
+    auto_research = _auto_research_enabled()
     for p in proposals[:max_proposals]:
         row = _persist_proposal(
             p, model=agent.model,
@@ -568,6 +593,11 @@ def generate_strategies_now(*, max_proposals: int = 3) -> dict:
         )
         if row:
             persisted_ids.append(row.id)
+            if auto_research and approve_proposal(
+                    row, reviewed_by="auto:research",
+                    notes="armed automatically in research stage — the "
+                          "scanner grades it, no bot trades it"):
+                armed_ids.append(row.id)
         else:
             rejected_count += 1
 
@@ -577,7 +607,21 @@ def generate_strategies_now(*, max_proposals: int = 3) -> dict:
     return {
         "ok": True,
         "n_persisted": len(persisted_ids),
+        "n_armed_research": len(armed_ids),
         "n_validation_rejected": rejected_count,
         "n_expired": n_expired,
         "proposal_ids": persisted_ids,
+        "proposal_ids_armed": armed_ids,
     }
+
+
+def _auto_research_enabled() -> bool:
+    """Does the operator let the generator arm its own proposals in
+    RESEARCH stage? Armed means the scanner produces graded signals for
+    the setup; the stage gate keeps every bot from trading it; the admin
+    can still reject. Off by default, like every component."""
+    try:
+        from core.platform_control import is_component_enabled
+        return bool(is_component_enabled("generator_auto_research"))
+    except Exception:  # noqa: BLE001 — no registry, no arming
+        return False

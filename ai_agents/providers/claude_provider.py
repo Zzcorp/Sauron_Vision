@@ -19,6 +19,13 @@ _TRANSIENT_MARKERS = ("overloaded", "internal_server_error",
 # tripling the worst-case request time.
 _MAX_ATTEMPTS = 2
 
+# Where a declined request re-runs. The frontier model runs safety
+# classifiers that can decline a request outright (stop_reason "refusal")
+# — not an outage, not an answer. The deep tier's model does not run the
+# same classifiers; one re-run there is the platform's own fallback, and
+# it never chains (a decline on the fallback is returned as it is).
+REFUSAL_FALLBACK_MODEL = "claude-opus-5"
+
 
 class ClaudeProvider:
     """Claude API provider for Sauron Vision agents."""
@@ -119,6 +126,17 @@ class ClaudeProvider:
         # block, and a safety refusal can return no text at all — never index
         # content[0] blindly.
         text = next((b.text for b in response.content if b.type == "text"), "")
+
+        if (getattr(response, "stop_reason", "") == "refusal"
+                and model != REFUSAL_FALLBACK_MODEL):
+            details = getattr(response, "stop_details", None)
+            logger.warning("[claude] %s declined the request (%s) — "
+                           "re-running once on %s", model,
+                           getattr(details, "category", None) or "no category",
+                           REFUSAL_FALLBACK_MODEL)
+            return self.complete(system_prompt, user_message,
+                                 model=REFUSAL_FALLBACK_MODEL, effort=effort,
+                                 agent_name=agent_name, record=record)
 
         # Usage FIRST, before any verdict on the response: a refused or
         # empty generation was still generated, Anthropic still billed it,

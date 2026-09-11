@@ -139,6 +139,9 @@ DEFAULT_COMPONENTS = [
      "category": "system"},
 
     # ── Phase 6 — calibration loop ────────────────────────────
+    {"key": "generator_auto_research", "name": "Generator Auto-Research",
+     "description": "The weekly Strategy Generator arms its own proposals in RESEARCH stage: the scanner produces graded signals for them, no bot trades them (the stage gate), and the admin can still reject. Off (default) = proposals wait for a click on the brain page.",
+     "category": "agent"},
     {"key": "pipeline_calibration", "name": "Calibration Auto-Resolver",
      "description": "Nightly task that resolves AgentPredictions whose ground truth is available. Powers the agent trust scores consumed by the risk gate.",
      "category": "pipeline"},

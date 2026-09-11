@@ -60,7 +60,7 @@ def run_strategist() -> dict:
 
 
 @shared_task(name="brain.tasks.run_strategy_generator")
-@spend_guard(tier="deep", estimated_usd=0.3)
+@spend_guard(tier="frontier", estimated_usd=1.0)
 def run_strategy_generator(*, max_proposals: int = 3) -> dict:
     """Beat task — weekly Sun 04:00 UTC. Proposes 1-3 new OpportunitySetups
     by composing existing evaluators in novel ways. Land at is_active=False
