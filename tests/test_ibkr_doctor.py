@@ -130,3 +130,115 @@ class TheDoctorTests(SimpleTestCase):
         runbook = (Path(settings.BASE_DIR) / "deploy" / "RUNBOOK.md"
                    ).read_text(encoding="utf-8")
         self.assertIn("./deploy/ibkr-doctor", runbook)
+
+
+def _session_lost_substrings():
+    """The literals the script's own `case "$after"` tests, read OUT of the
+    script rather than restated here — a test that keeps its own copy of
+    the patterns passes while the script says something else."""
+    src = _script()
+    start = src.index('case "$after" in')
+    line = src[start:src.index("esac", start)]
+    line = line[line.index("\n") + 1:]          # drop the `case` line itself
+    return re.findall(r'\*"([^"]+)"\*', line)
+
+
+def _looks_lost(tail: str) -> bool:
+    subs = _session_lost_substrings()
+    assert subs, "no patterns extracted — the case block was re-spelled"
+    return any(s in tail for s in subs)
+
+
+class TheReauthenticationItMissedTests(SimpleTestCase):
+    """2026-09-13: six hours of a dead broker reported as healthy.
+
+    The IBC log, AFTER a 'Login has completed' at 11:53:39, read:
+
+        16:00:27 detected frame entitled: Connecting to server...; Opened
+        16:00:33 detected frame entitled: Attempt 3: Authenticating
+                 (trying for another 1772548 seconds)...
+        16:00:33 detected dialog entitled: IBKR Gateway; event=Opened
+
+    — a dialog that never carried an `event=Closed`, unlike every other
+    dialog in the file. The API accepted Sauron's sockets and answered
+    nothing (116 `remove Client` lines), the equity reading went 2.3h
+    stale, and preflight blocked arming. The doctor said "nothing went
+    wrong after it".
+
+    It said that because `$session` stayed empty: the pattern asked for
+    "detected dialog entitled: Gateway" and the title was "IBKR Gateway",
+    and no pattern knew what a re-authentication looks like. The branch
+    that would have given the right answer — "this is the Gateway's
+    SESSION, restarting the workers changes nothing, phone first" — was
+    already written and simply never reached.
+    """
+
+    REAL_TAIL = (
+        "\nibgateway-1  | 2026-09-12 16:00:27:128 IBC: detected frame "
+        "entitled: Connecting to server...; event=Activated"
+        "\nibgateway-1  | 2026-09-12 16:00:33:796 IBC: detected frame "
+        "entitled: Attempt 3: Authenticating (trying for another 1772548 "
+        "seconds)...; event=Lost focus"
+        "\nibgateway-1  | 2026-09-12 16:00:33:803 IBC: detected dialog "
+        "entitled: IBKR Gateway; event=Opened"
+        "\nibgateway-1  | 2026-09-12 16:00:33:913 IBC: detected dialog "
+        "entitled: IBKR Gateway; event=Activated\n"
+    )
+
+    def test_the_outage_that_was_called_healthy_now_reads_as_lost(self):
+        self.assertTrue(
+            _looks_lost(self.REAL_TAIL),
+            "the 2026-09-13 outage still reads as a healthy session")
+
+    def test_each_of_the_three_shapes_is_caught_on_its_own(self):
+        """Three independent tells. Any one of them alone must be enough —
+        an outage that shows only the dialog, or only the retry frame,
+        is the same outage."""
+        for name, line in (
+            ("the IBKR Gateway dialog",
+             "IBC: detected dialog entitled: IBKR Gateway; event=Opened"),
+            ("a re-authentication attempt",
+             "IBC: detected frame entitled: Attempt 3: Authenticating "
+             "(trying for another 1772548 seconds)...; event=Opened"),
+            ("a reconnect to the server",
+             "IBC: detected frame entitled: Connecting to server...; "
+             "event=Opened"),
+        ):
+            with self.subTest(shape=name):
+                self.assertTrue(_looks_lost(line), f"{name} reads as fine")
+
+    def test_the_plain_gateway_dialog_is_still_caught(self):
+        """The older shape the pattern was written for. Broadening the
+        match must not drop it."""
+        self.assertTrue(_looks_lost(
+            "IBC: detected dialog entitled: Gateway; event=Opened"))
+
+    def test_a_quiet_tail_after_a_completed_login_is_not_an_alarm(self):
+        """The other half of the contract, and the reason this is not just
+        'match more things'. $after holds only what follows the LAST
+        'Login has completed', so a login that began and finished moved
+        the marker and left nothing here. A tail with no authentication in
+        it must stay silent, or the doctor cries wolf on every healthy box
+        and the operator stops reading it."""
+        quiet = (
+            "\nibgateway-1  | 2026-09-12 11:53:40:001 IBC: detected dialog "
+            "entitled: U28134395 Trader Workstation Configuration; "
+            "event=Closed"
+            "\nibgateway-1  | 2026-09-12 12:10:02:114 IBC: Configuration "
+            "tasks completed\n"
+        )
+        self.assertFalse(_looks_lost(quiet),
+                         "a healthy post-login tail now reports a lost "
+                         "session — every box would show red")
+
+    def test_the_verdict_reached_by_this_is_the_session_branch(self):
+        """Catching it is only half: it must land on the branch that says
+        phone-then-recreate, not the one that says restart the workers."""
+        src = _script()
+        start = src.index('*"(healthy)"*')
+        healthy = src[start:src.index('    "")', start)]
+        self.assertIn('elif [ -n "$session" ] || [ -n "$stale" ]', healthy)
+        branch = healthy[healthy.index('elif [ -n "$session" ]'):]
+        self.assertIn("This is the Gateway's SESSION", branch)
+        self.assertIn("Restarting the workers changes nothing", branch)
+        self.assertIn("approve the IB Key notification", branch)

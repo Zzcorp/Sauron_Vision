@@ -118,8 +118,24 @@ case "$ibc" in *"Login has completed"*)
     login_at=$(printf '%s\n' "$ibc" | grep "Login has completed" | tail -1 | sed 's/.*| //; s/ IBC:.*//') ;;
 esac
 session=""
+# 2026-09-13: this list missed a live outage for two reasons, and the
+# verdict below then printed "nothing went wrong after it" while the API
+# had answered nothing for six hours.
+#
+#   1. The dialog was titled "IBKR Gateway", and the pattern below asks
+#      for "entitled: Gateway" — a substring that "entitled: IBKR Gateway"
+#      does not contain. Match the bare title instead of the prefix.
+#   2. Nothing matched a RE-AUTHENTICATION. The log read:
+#         16:00:33 detected frame entitled: Attempt 3: Authenticating
+#                  (trying for another 1772548 seconds)...
+#      "Authenticating" inside $after is unambiguous: $after is only what
+#      follows the LAST "Login has completed", so a login that started and
+#      finished would have moved the marker and emptied it. Seeing it here
+#      means a login began and has NOT completed — which is the whole
+#      question this script exists to answer. 1772548 seconds is IBC's
+#      retry window: it will sit there for twenty days.
 case "$after" in
-    *"Existing session detected"*|*"Second Factor Authentication initiated"*|*"Login failed"*|*"detected dialog entitled: Gateway"*) session="lost" ;;
+    *"Existing session detected"*|*"Second Factor Authentication initiated"*|*"Login failed"*|*"entitled: Gateway"*|*"entitled: IBKR Gateway"*|*"Authenticating"*|*"Connecting to server"*) session="lost" ;;
 esac
 # The server's refusal counts only while no login has completed since.
 if [ -z "$login_done" ]; then
