@@ -672,6 +672,58 @@ the mix the platform has actually learned.
 
 ---
 
+## The Oculus (/oculus/)
+
+The page above the other thirty. They each answer their own subsystem's
+question well; this one answers the operator's — **is the machine
+turning, and which of its wheels are actually engaged?** It owns no data,
+adds no arithmetic, caches nothing, and writes nothing. Ten panels, one
+per cycle: the switches, the scan, the ladder, the signals, the
+evolution, the personalities, the allocation, the horizon, the backtests,
+the trust.
+
+What it does that no single page could:
+
+1. **The gate sits beside the count.** A number written by a task nobody
+   switched on measures the switch, not the market. A component with no
+   row at all renders `absent` in amber rather than `off` — the two look
+   identical to `is_component_enabled` and have completely different
+   fixes. On 2026-09-13 that distinction was the whole bug: three
+   components had never had a row and three features had never run.
+
+2. **The qualifier sits inside the same line as the count.** The
+   recurring failure in this platform is not a wrong number, it is a
+   right number that reads as its opposite. "6 rules in research" reads
+   as coverage; a research-stage rule can neither place an order nor vote.
+   "40 entries chosen" reads as allocation; in shadow every candidate
+   executed at full size anyway. Counts that cannot act are toned down,
+   never celebrated.
+
+3. **An em-dash is not a zero.** `—` means *not measurable*; `0` means
+   *measured, and nothing happened*. `core/wall_facts.py` collapses
+   everything to 0 because it is the public login gateway and must never
+   raise; behind auth the duty is the opposite, because an operator acts
+   differently on each. Every counter that renders `—` is also listed by
+   name at the foot of the page, so a dash can never pass for a quiet
+   zero.
+
+Each panel is fenced on its own: a cycle whose table is mid-migration is
+reported **dead**, never dropped — a vanished panel reads as "there is no
+such cycle", which is a lie of omission the operator cannot see.
+
+The evolution strips are bucketed on creation stamps only, never on
+`completed_at` / `resolved_at` / `evaluated_at`: those are NULL on
+exactly the rows a stalled cycle would show, so bucketing on them hides
+the stall. Each strip is scaled to itself, never to the busiest cycle on
+the page — one shared axis would flatten every slow cycle into a flat
+line and read as "dead" when the honest reading is "slower than the
+scanner, by design".
+
+Nothing to run. Open the page; `tests/test_oculus.py` holds it to the
+three rules above.
+
+---
+
 ## The cockpit (/ops/)
 
 One page that says "everything, now": every platform switch with its

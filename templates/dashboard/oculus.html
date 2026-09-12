@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Oculus — Sauron Vision{% endblock %}
+{% comment %} ⦿ is the Oculus mark (U+29BF), used nowhere else — title and nav row agree.
+   U+25CE was the obvious pick and is already Trade Forensics'; every other
+   circled glyph in the sidebar was taken too. {% endcomment %}
+{% block page_title %}⦿ OCULUS · every cycle, and whether it is turning{% endblock %}
+
+{% block extra_css %}
+<style>
+  .ocu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+  .ocu-q { color: var(--text-muted); font-size: 12px; padding: 0 16px 10px; }
+  .ocu-gates { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 12px; }
+  .ocu-gate { font-size: 10px; letter-spacing: .04em; padding: 2px 7px; border-radius: 3px;
+              border: 1px solid var(--border, #333); white-space: nowrap; }
+  .ocu-gate.on  { color: #7fd18b; border-color: #2f5c36; }
+  .ocu-gate.off { color: var(--text-muted); }
+  .ocu-gate.unknown { color: #d9a441; border-color: #6b5320; }
+  .ocu-facts { width: 100%; border-collapse: collapse; }
+  .ocu-facts td { padding: 5px 16px; vertical-align: top; border-top: 1px solid var(--border, #2a2a2a); }
+  .ocu-v { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; width: 4.5em; white-space: nowrap; }
+  .ocu-v.dash { color: var(--text-muted); font-weight: 400; }
+  .ocu-l { font-size: 12px; }
+  .ocu-qual { display: block; color: var(--text-muted); font-size: 10.5px; margin-top: 2px; line-height: 1.35; }
+  tr.inert .ocu-v, tr.inert .ocu-l { color: var(--text-muted); }
+  tr.caution .ocu-v { color: #d9a441; }
+  .ocu-caveat { color: var(--text-muted); font-size: 11px; padding: 10px 16px 14px; line-height: 1.45;
+                border-top: 1px solid var(--border, #2a2a2a); }
+  .ocu-spark { display: flex; align-items: flex-end; gap: 1px; height: 34px; padding: 8px 16px 0; }
+  .ocu-bar { flex: 1 1 0; background: var(--accent, #5b8def); min-height: 1px; opacity: .75; border-radius: 1px 1px 0 0; }
+  .ocu-bar.zero { background: var(--border, #333); opacity: .5; }
+  .ocu-sparkcap { color: var(--text-muted); font-size: 10px; padding: 3px 16px 12px; }
+  .ocu-dead { color: #c9605f; font-size: 12px; padding: 12px 16px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="card fade-in-up" style="margin-bottom: 20px;">
+  <div class="card-header"><span class="card-title">Ce que cette page promet, et ce qu'elle refuse de faire</span></div>
+  <p style="color: var(--text-muted); padding: 0 16px 8px; max-width: 100ch; line-height: 1.55;">
+    Trente tableaux répondent chacun bien à leur question. Celui-ci répond à celle qu'aucun ne pouvait porter seul :
+    <strong>la machine tourne-t-elle, et lesquelles de ses roues sont réellement engagées ?</strong>
+    Il ne possède aucune donnée et n'invente aucun calcul — il met les cycles côte à côte sans laisser la comparaison mentir.
+  </p>
+  <p style="color: var(--text-muted); padding: 0 16px 16px; max-width: 100ch; line-height: 1.55;">
+    Trois règles tiennent toute la page. <strong>L'interrupteur est affiché à côté du chiffre</strong> : un compte produit par une tâche
+    que personne n'a allumée mesure l'interrupteur, pas le marché. <strong>Le qualificatif est dans la même phrase que le chiffre</strong> :
+    ici la panne courante n'est pas un nombre faux, c'est un nombre juste qui se lit à l'envers — « 26 règles enregistrées » sonne
+    comme de la couverture alors qu'une règle en recherche ne peut pas passer d'ordre <em>et</em> voit ses signaux retirés du vote.
+    Et <strong>un tiret n'est pas un zéro</strong> : « — » veut dire non mesurable, <code>0</code> veut dire mesuré à zéro, et on n'agit pas
+    pareil sur les deux.
+  </p>
+</div>
+
+{% if oculus_error %}
+<div class="card fade-in-up" style="margin-bottom: 20px;">
+  <p class="ocu-dead">{{ oculus_error }}</p>
+</div>
+{% endif %}
+
+<div class="ocu-grid">
+  {% for c in oculus.cycles %}
+  <div class="card fade-in-up">
+    <div class="card-header"><span class="card-title">{{ c.title }}</span></div>
+
+    {% if c.dead %}
+      <p class="ocu-dead">{{ c.caveat }}</p>
+    {% else %}
+      {% if c.question %}<p class="ocu-q">{{ c.question }}</p>{% endif %}
+
+      {% if c.gate %}
+      <div class="ocu-gates">
+        {% for g in c.gate %}
+          {% if not g.known %}
+            <span class="ocu-gate unknown" title="aucune ligne en base : la barrière lit « éteint »">{{ g.key }} · absent</span>
+          {% elif g.on %}
+            <span class="ocu-gate on">{{ g.key }} · on</span>
+          {% else %}
+            <span class="ocu-gate off">{{ g.key }} · off</span>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <table class="ocu-facts">
+        {% for f in c.facts %}
+        <tr class="{{ f.tone }}">
+          {% if f.value is None %}
+            <td class="ocu-v dash" title="non mesurable — ce n'est pas un zéro">—</td>
+          {% else %}
+            <td class="ocu-v">{{ f.value }}</td>
+          {% endif %}
+          <td class="ocu-l">
+            {{ f.label }}
+            {% if f.qualifier %}<span class="ocu-qual">{{ f.qualifier }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+
+      {% if c.series %}
+      <div class="ocu-spark">
+        {% for p in c.series %}
+          {% if p.n %}
+            <div class="ocu-bar" style="height: {% widthratio p.n c.max_n 100 %}%" title="{{ p.d }} · {{ p.n }}"></div>
+          {% else %}
+            <div class="ocu-bar zero" title="{{ p.d }} · 0"></div>
+          {% endif %}
+        {% endfor %}
+      </div>
+      <p class="ocu-sparkcap">{{ oculus.window_days }} derniers jours · pic {{ c.max_n }}/jour · une barre grise est un vrai zéro</p>
+      {% endif %}
+
+      <p class="ocu-caveat">{{ c.caveat }}</p>
+    {% endif %}
+  </div>
+  {% empty %}
+  <div class="card fade-in-up"><p class="ocu-dead">Aucun cycle n'a pu être lu.</p></div>
+  {% endfor %}
+</div>
+
+{% if oculus.degraded %}
+<div class="card fade-in-up" style="margin-top: 20px;">
+  <div class="card-header"><span class="card-title">Ce qui n'a pas pu être mesuré — {{ oculus.degraded|length }}</span></div>
+  <p style="color: var(--text-muted); padding: 0 16px 14px; max-width: 100ch; line-height: 1.5;">
+    Chacun de ces compteurs rend « — » ci-dessus. Les causes normales sont une table qu'une migration n'a pas encore créée,
+    ou un sous-système qui n'a jamais tourné sur ce déploiement. Ce bloc existe pour qu'un tiret ne passe jamais pour un zéro discret :
+    <code style="font-size: 11px;">{{ oculus.degraded|join:" · " }}</code>
+  </p>
+</div>
+{% endif %}
+
+{% if oculus.generated_at %}
+<p style="color: var(--text-muted); font-size: 11px; padding: 14px 4px;">
+  Lu le {{ oculus.generated_at|date:"Y-m-d H:i" }} UTC. Aucune valeur n'est mise en cache : chaque chiffre est compté au chargement.
+</p>
+{% endif %}
+
+{% endblock %}

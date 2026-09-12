@@ -91,6 +91,7 @@ from .views_desk import desk_dashboard
 from .views_horizon import horizon_dashboard
 from .views_ops import ops_dashboard, ops_run_command
 from .views_setups import setups_arm, setups_dashboard
+from .views_oculus import oculus_dashboard
 from .views_eye import eye_dashboard, eye_partial
 from signals.tradingview_webhook import tradingview_webhook
 from .views_eye_drilldown import eye_gate_events, eye_fills, eye_exposure
@@ -276,6 +277,12 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     # window, the share band and the horizon weight that go together.
     path("personas/", personas_dashboard, name="personas_dashboard"),
     path("admin-dashboard/personas/apply/", hq_apply_persona, name="hq_apply_persona"),
+
+    # ── The Oculus (2026-09-13) ──────────────────────────────
+    # The page ABOVE the other thirty: every cycle side by side, each
+    # count beside the switch that writes it and the qualifier that says
+    # what it means. Read-only, owns no data, caches nothing.
+    path("oculus/", oculus_dashboard, name="oculus_dashboard"),
 
     # ── The capital desk (2026-09-12) ────────────────────────
     # /shares/ sizes each POOL's share of the account; this one ranks a

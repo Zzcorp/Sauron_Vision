@@ -423,6 +423,10 @@
         <nav class="sidebar-nav" data-nav-page-id="{{ page_id }}">
             {# Nav marks are drawn only from the geometric/operator sets — no pictographs — so the rail reads as one engraved vocabulary and page titles can mirror it exactly. #}
             <div class="nav-section">Command Center</div>
+            {% comment %}The Oculus sits ABOVE the other thirty rows on purpose: it is the only page that answers "is the machine
+               turning, and which wheels are engaged" rather than one subsystem's own question. Its mark U+29BF is used nowhere
+               else (U+25CE was taken by Trade Forensics). It owns no data and caches nothing (2026-09-13). {% endcomment %}
+            <a href="{% url 'oculus_dashboard' %}" class="nav-link {% if page_id == 'oculus' %}active{% endif %}"><span class="icon">⦿</span> <span class="label-text">Oculus</span></a>
             <a href="{% url 'command_center' %}" class="nav-link {% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Operations Center</span></a>
             <a href="{% url 'bot_performance_dashboard' %}" class="nav-link {% if page_id == 'bot_performance' %}active{% endif %}"><span class="icon">▲</span> <span class="label-text">Bot Performance</span></a>
             <a href="{% url 'bot_backtest_list' %}" class="nav-link {% if page_id == 'bot_backtest' %}active{% endif %}"><span class="icon">⊟</span> <span class="label-text">Bot Backtest</span></a>
