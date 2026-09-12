@@ -46,6 +46,12 @@ ERROR = "error"                       # an exception on the entry path
 # quiet market.
 BRAIN_PAUSED = "brain_paused"         # the brain advised pause_recommended
 ORDER_ERROR = "order_error"           # the live order raised (never sent, or unknown)
+# The capital desk ranked this candidate below the tick's budget, a rule or
+# class share cap, or an open position it correlates with — and the desk was
+# in LIVE mode, so nothing was sent. A CHOICE, not a fault: the detail names
+# the plan and the reason so the operator can read the ladder on /desk/ and
+# see what took the capital instead (2026-09-12).
+DESK_DISPLACED = "desk_displaced"
 
 MAX_SYMBOLS_TRACKED = 200
 
@@ -125,6 +131,9 @@ def diagnose(cfg) -> str:
                       "the latest BrainReport before overriding it",
         ORDER_ERROR: "the broker client raised on the order — check the "
                      "gateway and the bot log; nothing was booked",
+        DESK_DISPLACED: "the capital desk is ranking these entries below "
+                        "others — read the ladder on /desk/ to see what "
+                        "took the risk budget instead",
     }.get(top, "")
     return (f"{top} accounts for {share:.0%} of {total} skips"
             + (f" — {advice}" if advice else ""))

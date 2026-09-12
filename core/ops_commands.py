@@ -125,6 +125,25 @@ COMMANDS = [
         "category": "decide",
     },
     {
+        "name": "desk",
+        "title": "Capital desk",
+        "purpose": "The capital desk's page as a command: the plans it wrote, the decisions on one of them, the nightly grade on demand, and what the desk would say about one config and symbol right now (read-only, no order).",
+        "usage": [
+            "python manage.py desk list                    # the last plans, newest first",
+            "python manage.py desk list --user alice",
+            "python manage.py desk show                    # the newest plan's decisions",
+            "python manage.py desk show 42                 # one plan by id",
+            "python manage.py desk grade                   # resolve counterfactuals + score plans",
+            "python manage.py desk explain 14 EURUSD       # what the desk would say, no order",
+        ],
+        "mirrors": "/desk/",
+        # list/show/explain read; grade writes the counterfactuals and
+        # the plan scores — a decide entry, like shares and horizon.
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
         "name": "follow",
         "title": "Follow the account",
         "purpose": "Make a live pool a share of the account, or stop it following — the asset-bots page's Follow form, through the same arithmetic, writing only with --yes.",

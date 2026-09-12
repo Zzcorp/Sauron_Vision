@@ -2174,6 +2174,24 @@ class AssetBot(ABC):
         if pricing == "data":
             client = client_for_symbol(self.user, symbol, self.cfg,
                                        purpose="data")
+            # THE DATA SESSION IS NOT THE MONEY GUARD, AND MUST NOT COST AN
+            # ENTRY. The router hands back a PaperTrader whenever the IBKR
+            # clientId for a purpose is unavailable, and the DATA id is the
+            # busy one — the bar writer takes it every 600 s. Left alone,
+            # the live-config guard below would read that stand-in as a
+            # credential failure and refuse an entry this same config takes
+            # today through its trade session: the desk's SHADOW pass would
+            # quietly stop the live fleet trading, which is the one thing
+            # shadow may never do. So a live config with no data session
+            # prices through the client this step always used. Nothing is
+            # sent from here either way, and `execute_entry` runs the real
+            # guard on the client an order actually goes through
+            # (2026-09-12).
+            if self.cfg.mode == "live" and self._is_paper_client(client):
+                logger.info("[%s_bot] %s: no live DATA session — pricing "
+                            "through the trade session, as before",
+                            self.asset_class, symbol)
+                client = client_for_symbol(self.user, symbol, self.cfg)
         else:
             client = client_for_symbol(self.user, symbol, self.cfg)
 

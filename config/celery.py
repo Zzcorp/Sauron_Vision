@@ -428,6 +428,18 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute=5, hour="*/4"),
     },
 
+    # ── The capital desk: price what the desk refused, then score the
+    #              plan against the fleet it overruled. 03:45 UTC, after
+    #              the bar refresh has had the night and before the 04:30
+    #              promotion pass reads the same closes. Gated by
+    #              pipeline_capital_desk: with the desk off there are no
+    #              plans, and the task returns without touching a row.
+    #              This is the reading `capital_desk_mode_live` waits on.
+    "grade-capital-desk": {
+        "task": "bot_program.tasks.grade_capital_desk",
+        "schedule": crontab(hour=3, minute=45),
+    },
+
     # NB: there is deliberately no in-app "daily-postgres-backup" entry.
     # core.backups.run_postgres_backup shells out to pg_dump, which is not in
     # the application image (Dockerfile.prod installs libpq5, not the client

@@ -633,3 +633,32 @@ def propose_share_plans() -> dict:
         out.update({"status": "error", "errors": errors,
                     "error": f"{errors} proposal(s) raised — last: {last_error}"})
     return out
+
+
+@shared_task
+@guarded_task("pipeline_capital_desk")
+def grade_capital_desk() -> dict:
+    """Nightly: price what the capital desk refused, then score its plans.
+
+    Two passes, in this order and never the other way round. The resolver
+    walks every decision whose horizon has closed — a taken entry against
+    its own trade, a displaced one against the bars it never got to trade —
+    and only then does the grader subtract the two sets, because a plan
+    graded before its rows are priced would book the missing ones as
+    ungradeable forever.
+
+    THIS IS THE NUMBER THE LIVE SWITCH WAITS ON. `capital_desk_mode_live`
+    turns the plan into orders; the bar for flipping it is weeks of positive
+    edge_r in shadow, the same bar the share allocator had to clear. Until
+    then this task is the only thing measuring whether the ranking is worth
+    obeying (2026-09-12).
+
+    The return dict carries `resolved` and `graded` and none of the gate's
+    work/done counters: a night on which nothing had closed is the desk
+    being patient, not a task that handled rows and stored none.
+    """
+    from . import capital_desk
+
+    resolved = capital_desk.resolve_counterfactuals()
+    graded = capital_desk.grade_plans()
+    return {"status": "ok", "resolved": resolved, "graded": graded}

@@ -448,6 +448,9 @@
                pool's share of the broker ACCOUNT. Two different questions, two
                rows — one row named "allocator" hid the second (2026-09-12). {% endcomment %}
             <a href="{% url 'shares_dashboard' %}" class="nav-link {% if page_id == 'shares' %}active{% endif %}"><span class="icon">◫</span> <span class="label-text">Share Allocator</span></a>
+            {% comment %}The Share Allocator sizes each POOL; the Capital Desk ranks ONE TICK's entries against one risk budget and says what it refused
+               and why. Its mark U+25A9 is used nowhere else (2026-09-12). {% endcomment %}
+            <a href="{% url 'desk_dashboard' %}" class="nav-link {% if page_id == 'desk' %}active{% endif %}"><span class="icon">▩</span> <span class="label-text">Capital Desk</span></a>
             {% comment %}The 5-10 year sector view the share allocator reads as a
                ±10% prior, with its own graded calls (2026-09-12). {% endcomment %}
             <a href="{% url 'horizon_dashboard' %}" class="nav-link {% if page_id == 'horizon' %}active{% endif %}"><span class="icon">◕</span> <span class="label-text">Horizon</span></a>

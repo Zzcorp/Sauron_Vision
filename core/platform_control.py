@@ -221,6 +221,20 @@ DEFAULT_COMPONENTS = [
     {"key": "share_allocator_auto_derisk", "name": "Share Allocator Auto De-risk",
      "description": "Off (default). On + LIVE mode: a SHOCK plan that only LOWERS shares (every target <= current) is applied automatically, within the daily apply cap, with snapshot and rollback, and staff are notified. Re-risking is never automatic: a plan with any upward target waits for the PIN.",
      "category": "system"},
+
+    # ── The capital desk (2026-09-12) ─────────────────────────
+    # Without the first row `is_component_enabled` answers False,
+    # run_all_asset_bots is the legacy config-after-config loop and the
+    # desk never sees a candidate — which is the correct default, and the
+    # reason the switch must exist before anything can be graded.
+    # Descriptions counted under the 300-char Postgres column, like the
+    # share allocator rows above.
+    {"key": "pipeline_capital_desk", "name": "Capital Desk (fleet pass)",
+     "description": "The fleet pass runs TWO-PHASE: every bot proposes first, the desk ranks the tick's entries on graded expected R per unit of marginal (correlation-aware) risk against one budget per venue, then they execute. SHADOW: nothing the bots do changes — the plan on /desk/ is the counterfactual being graded.",
+     "category": "pipeline"},
+    {"key": "capital_desk_mode_live", "name": "Capital Desk Live Mode",
+     "description": "Off (default) = shadow: the plan is recorded and graded, the fleet is unchanged. On = the plan is OBEYED — displaced entries are skipped and chosen sizes multiplied, never above 1. The budget, the caps and every per-order refusal hold in both modes. Flip after weeks of positive edge, not before.",
+     "category": "system"},
 ]
 
 

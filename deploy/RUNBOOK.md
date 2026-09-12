@@ -574,6 +574,82 @@ on `/generated/` as REJECTED by `validator`, with the reason in the
 `brain` logger keeps its INFO lines in production like every Sauron app,
 so `./deploy/dc logs web | grep generator` shows the same reasons.
 
+**The capital desk.** The trading rules size each entry on its own and
+nothing ever looked at a whole tick at once: the fleet pass walked config
+after config, and the third bot proposed its entry after the first two had
+already filled. Five bots each correctly risking 1% is 5% of the account on
+one tick, and no gate on this platform noticed. The desk is the agent that
+notices.
+
+With `pipeline_capital_desk` ON the fleet pass runs in two halves. Every bot
+PROPOSES first — the decision, the levels and its own final size, with the
+ticker read through the market-data session so nothing holds the exclusive
+IBKR trading client — and only then does anything execute. In between, the
+desk ranks the tick.
+
+- **What it ranks on.** Expected R per unit of MARGINAL risk. Expected R is
+  what the rule has really paid, on the narrowest population with at least
+  ten graded fills: this config live, then this account's live fleet in the
+  class, then every account's, then the paper fleet with a haircut, then the
+  signal lane with the same haircut. Under that floor there is NO expected R
+  — the candidate is ranked on conviction times its planned net
+  reward-to-risk and is flagged `unmeasured` everywhere it surfaces. A
+  decaying rule keeps its evidence and ranks at half. Marginal risk is what a
+  bet adds to the book once its 4h correlation with the chosen set AND the
+  open positions is counted: two 40-dollar bets that correlate 0.9 cost
+  nearly 80 together, two that correlate 0.0 cost 57. That is why the best
+  candidate in R sometimes ranks below one that diversifies.
+- **The budget denominator.** 2% of the capital assigned to that user's
+  ENABLED configs on that venue — the same pool each entry's own risk
+  fraction divides by — through the drawdown governor on live only, minus the
+  risk already at stop in the open book. Hand-taken positions are in that
+  book: they bypass the desk and they are still money at risk. Paper and live
+  never share a budget, a book or a correlation penalty. One rule may take at
+  most 40% of the tick's allowance and one asset class 60%, and neither cap
+  binds on the first entry of its bucket — what they bound is one idea
+  wearing six tickets, and the budget already bounds the first.
+- **The two switches.** `pipeline_capital_desk` makes the pass two-phase and
+  writes the plans; it is SHADOW, and in shadow every candidate still trades
+  at its own size exactly as it does today while the plan beside it records
+  what the desk would have done. `capital_desk_mode_live` makes the plan
+  obeyed: displaced entries are skipped (recorded as a `desk_displaced` skip
+  naming the plan) and chosen sizes multiplied. The multiplier is NEVER above
+  1.0, and `execute_entry` re-judges MAX_RISK_FRACTION, the single-position
+  cap and the duplicate/theme gates after it lands — a desk that is wrong
+  costs an opportunity and can never cost more risk than the bots had already
+  cleared.
+- **It fails open.** If the ranking pass raises, the failure is written onto
+  a plan of its own and the fleet runs UNDESKED — every candidate at its own
+  size, in config order, exactly as with the component off. A ranking agent
+  that goes down must not stop the bots.
+- **The grade.** `bot_program.tasks.grade_capital_desk` runs nightly at 03:45
+  UTC. It prices every decision whose horizon has closed — a taken entry by
+  its own trade's realized R, a displaced one by walking its own bars over
+  its own horizon against the stop and target it was refused with — and then
+  scores the plan: `edge_r` is the desk's set (realized R times the size it
+  chose) minus the default set (every desked candidate at size 1.0). Positive
+  means the ranking beat the fleet it overruled. An unpriceable decision is
+  NULL and counted separately; it is never folded in as a zero.
+
+Read all of it on `/desk/`, which explains the last tick in one sentence
+before it shows a number, or from the shell:
+
+```bash
+./deploy/dc exec web python manage.py component on pipeline_capital_desk   # SHADOW
+./deploy/dc exec web python manage.py desk list
+./deploy/dc exec web python manage.py desk show
+./deploy/dc exec web python manage.py desk explain 14 EURUSD   # read-only
+./deploy/dc exec web python manage.py desk grade
+```
+
+**The same bar as the share allocator: LIVE only after weeks of positive
+edge in shadow.** `capital_desk_mode_live` is the switch that lets an agent
+refuse an entry the bots had already approved. Nothing justifies it except
+the record on `/desk/` — a sparkline of `edge_r` that has been above zero
+over enough graded plans to be more than noise. Until then leave it off; the
+shadow plan costs nothing and is the only thing measuring whether the
+ranking is worth obeying.
+
 **The admin pages, as commands.** Every decision the pages take has a
 shell twin, for the operator at a terminal and for anyone who wants the
 proof pasted back. All of them are `./deploy/dc exec web python manage.py`

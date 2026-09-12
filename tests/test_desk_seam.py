@@ -252,6 +252,58 @@ class PricingSessionTests(TestCase):
         self.assertIsNotNone(cand)
         router.assert_called_once_with(self.user, "SEAM4", self.cfg)
 
+    def test_a_busy_data_session_does_not_cost_a_live_entry(self):
+        """REGRESSION (adversarial review, 2026-09-12): SHADOW may not stop
+        the live fleet trading.
+
+        The router hands back a PaperTrader whenever the IBKR clientId for a
+        purpose is unavailable, and the DATA id is the busy one — the bar
+        writer takes it every 600 s. Read by the live-config money guard as
+        a credential failure, that stand-in refused an entry this same
+        config takes today through its trade session: the desk's proposal
+        pass would have switched the live lane off while the plan beside it
+        claimed to change nothing. A live config with no data session prices
+        through the client this step always used; nothing is sent from here
+        either way.
+        """
+        from bot_program.asset_engine import StockBot, skips
+        from bot_program.engine.paper_trader import PaperTrader
+
+        live = _config(self.user, name="Live Bot", mode="live",
+                       symbols=["SEAM4"])
+        trade_client = _client()
+        stand_in = PaperTrader(live)
+
+        def route(user, symbol, cfg, purpose="trade"):
+            return stand_in if purpose == "data" else trade_client
+
+        with patch(ROUTER, side_effect=route), \
+                patch.object(StockBot, "_notify_paper_fallback") as notify:
+            cand = StockBot(live).propose_entry("SEAM4", pricing="data")
+
+        self.assertIsNotNone(cand, "a busy data session must not lose the entry")
+        notify.assert_not_called()
+        self.assertEqual(skips.last_by_symbol(live).get("SEAM4"), None)
+        trade_client.ticker.assert_called_with("SEAM4")
+
+    def test_no_trade_session_either_is_still_refused(self):
+        """The money guard itself is untouched: when the client an order
+        would go through is a stand-in, a live config is refused exactly as
+        before, with PAPER_FALLBACK and the operator told."""
+        from bot_program.asset_engine import StockBot, skips
+        from bot_program.engine.paper_trader import PaperTrader
+
+        live = _config(self.user, name="Dead Bot", mode="live",
+                       symbols=["SEAM4"])
+        with patch(ROUTER, side_effect=lambda *a, **k: PaperTrader(live)), \
+                patch.object(StockBot, "_notify_paper_fallback") as notify:
+            cand = StockBot(live).propose_entry("SEAM4", pricing="data")
+
+        self.assertIsNone(cand)
+        notify.assert_called_once()
+        self.assertEqual(skips.last_by_symbol(live)["SEAM4"]["code"],
+                         skips.PAPER_FALLBACK)
+
     def test_execute_acquires_the_trade_session_itself(self):
         from bot_program.asset_engine import StockBot
         bot = StockBot(self.cfg)

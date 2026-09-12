@@ -85,6 +85,7 @@ from .views_forensics import forensics_list, forensics_detail
 from .views_bot_charts import bot_charts
 from .views_allocator import allocator_dashboard
 from .views_shares import shares_dashboard
+from .views_desk import desk_dashboard
 from .views_horizon import horizon_dashboard
 from .views_ops import ops_dashboard, ops_run_command
 from .views_eye import eye_dashboard, eye_partial
@@ -265,6 +266,12 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     # /allocator/ is the rule meta-allocator's; the share of the ACCOUNT
     # each live pool takes lives at /shares/ (2026-09-12).
     path("shares/", shares_dashboard, name="shares_dashboard"),
+
+    # ── The capital desk (2026-09-12) ────────────────────────
+    # /shares/ sizes each POOL's share of the account; this one ranks a
+    # single tick's entries against one risk budget and says, in words,
+    # what it took and what it refused.
+    path("desk/", desk_dashboard, name="desk_dashboard"),
 
     # ── The ops cockpit ──────────────────────────────────────
     # Everything, now: switches, decision queues, the broker, and the

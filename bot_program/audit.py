@@ -293,3 +293,51 @@ def record_hypothesis_resolved(*, hypothesis, outcome: str,
         record_event("hypothesis_resolved", data)
     except Exception as e:
         logger.warning("audit record_hypothesis_resolved failed: %s", e)
+
+
+def record_desk_plan(plan, extra: dict = None) -> None:
+    """Hook from the capital desk — one row per plan, taken or refused.
+
+    The desk is the only agent on this platform that can cost an
+    opportunity without anything appearing in the trade table: a displaced
+    entry leaves a DeskDecision and a skip counter and no fill. This row is
+    the receipt for that, so the chain carries the budget, the book, what
+    was chosen and what was refused on every tick the desk ran.
+
+    'desk_plan' is 14 characters — AuditLogEntry.kind is a 20-wide column
+    Postgres enforces, and a kind that overflows raises inside the trading
+    path rather than at seed time (2026-09-12).
+
+    NEVER RAISES. A desk that cannot write its audit line still has a plan
+    worth executing, and the caller is on the entry path.
+    """
+    try:
+        data = {
+            "plan_id": plan.pk,
+            "tick_id": str(plan.tick_id),
+            "owner": getattr(plan.user, "username", str(plan.user_id)),
+            "venue": plan.venue,
+            "mode": plan.mode,
+            "budget": float(plan.budget or 0),
+            "book_risk": float(plan.book_risk or 0),
+            # Both, and labelled: the budget was spent in marginal risk,
+            # while the raw sum is what the account carries if every stop
+            # is hit. One number alone described less than the plan holds
+            # (2026-09-12).
+            "new_risk_chosen": float(plan.new_risk_chosen or 0),
+            "new_risk_marginal": (None if plan.new_risk_marginal is None
+                                  else float(plan.new_risk_marginal)),
+            "n_candidates": plan.n_candidates,
+            "n_chosen": plan.n_chosen,
+            "n_resized": plan.n_resized,
+            "n_displaced": plan.n_displaced,
+            "n_duplicate": plan.n_duplicate,
+            "n_not_desked": plan.n_not_desked,
+            "matrix_pairs_measured": plan.matrix_pairs_measured,
+            "matrix_pairs_total": plan.matrix_pairs_total,
+            "error": (plan.error or "")[:300],
+        }
+        data.update(extra or {})
+        record_event("desk_plan", data, user=plan.user)
+    except Exception as e:
+        logger.warning("audit record_desk_plan failed: %s", e)

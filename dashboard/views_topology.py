@@ -124,6 +124,9 @@ WIRING = {
                                  "note": "Deliberately ungated: it must keep working when everything else is switched off. Operator-triggered only."},
     "feature_ai_pretrade_gate": {"layer": "gate", "writes": ["AgentPrediction"], "feeds": [],
                                  "note": "Consulted only by the legacy crypto bot, which is itself unscheduled."},
+    "pipeline_capital_desk":    {"task": "bot_program.tasks.grade_capital_desk", "cadence": 86400, "layer": "gate", "writes": ["DeskPlan", "DeskDecision", "AssetBotTrade.metadata.desk_*"], "feeds": ["execute_bots"],
+                                 "pages": ["/desk/"],
+                                 "note": "The fleet pass, two-phase, when this is on: every bot PROPOSES (nothing sent, the ticker read through the data session), the desk ranks the whole tick against one risk budget per venue on graded expected R per unit of MARGINAL risk (4h correlation over the candidates and the open book), then the chosen execute. It is a gate, not a sizer: size_mult is never above 1.0 and execute_entry re-judges MAX_RISK_FRACTION and the duplicate/theme gates after the multiplier lands. SHADOW by default — every candidate still trades at its own size and the plan is the counterfactual the nightly grade scores. Off: the legacy loop, zero overhead."},
     "pipeline_exposure":        {"task": "portfolio.tasks.recalculate_exposure", "layer": "gate", "writes": ["Portfolio.current_value", "Position marks"], "feeds": ["execute_bots"],
                                  "note": "Marks open positions to market (current_price + unrealized P&L, day-fresh data only), then recomputes exposure. The three per-category breakdowns are still returned without being stored."},
 
@@ -173,6 +176,7 @@ MODE_FLAGS = {
     "meta_allocator_mode_live": "pipeline_meta_allocator",
     "share_allocator_mode_live": "pipeline_share_allocator",
     "share_allocator_auto_derisk": "pipeline_share_allocator",
+    "capital_desk_mode_live": "pipeline_capital_desk",
 }
 
 # A component is late when it has missed more than two of its own beats. One
