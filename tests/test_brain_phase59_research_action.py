@@ -186,8 +186,20 @@ class SaveAsDraftViewTests(TestCase):
         content = (f"draft:\n```strategy-draft\n{json.dumps(bad_payload)}\n```")
         _conv, msg = _conv_with_message(u, content)
         self.client.post(f"/research/save-draft/{msg.id}/")
-        # Validation fails — no proposal persisted.
-        self.assertEqual(GeneratedSetupProposal.objects.count(), 0)
+        # Validation fails on the unknown kind, so NOTHING downstream is
+        # built — no setup, no rule, no hypothesis. What IS written is a
+        # REJECTED row, deliberately: `_record_rejection` exists so an idea
+        # the platform refused stays visible on the brain page instead of
+        # vanishing into one INFO line the operator never sees. Asserting
+        # count()==0 predated that function and made a working refusal path
+        # look broken (fixed 2026-09-13); the contract to hold is the
+        # STATUS, not the absence of a row.
+        from signals.models_opportunity import OpportunitySetup
+        rows = GeneratedSetupProposal.objects.all()
+        self.assertEqual(rows.count(), 1)
+        self.assertEqual(rows.first().status,
+                         GeneratedSetupProposal.STATUS_REJECTED)
+        self.assertEqual(OpportunitySetup.objects.count(), 0)
 
     def test_message_without_draft_block_errors_cleanly(self):
         from brain.generator_models import GeneratedSetupProposal

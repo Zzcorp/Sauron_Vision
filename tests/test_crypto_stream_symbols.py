@@ -75,11 +75,18 @@ class DiscoveryTests(TestCase):
         _crypto()
 
     def test_the_ticker_stream_covers_the_whole_crypto_catalogue(self):
+        """MATICUSD is in the catalogue but MATICUSDT is not what the stream
+        subscribes to: Binance renamed MATIC to POL in September 2024 and
+        MATICUSDT stopped answering. `venue_symbol` carries the rename
+        (BINANCE_RENAMES in backfill_bars, asserted by
+        tests/test_catalogue_spellings), so the correct subscription is
+        POLUSDT. This assertion spelled the retired ticker until 2026-09-13,
+        which made a working stream look broken."""
         from market_data.management.commands.stream_binance import discover_symbols
         found = async_to_sync(discover_symbols)(None)
         self.assertEqual(
             sorted(found),
-            ["BTCUSDT", "ETHUSDT", "LINKUSDT", "MATICUSDT", "SOLUSDT"])
+            ["BTCUSDT", "ETHUSDT", "LINKUSDT", "POLUSDT", "SOLUSDT"])
 
     def test_the_ticker_stream_no_longer_falls_back_to_bnb(self):
         """BNBUSDT has no Instrument row, so every tick it produced was
