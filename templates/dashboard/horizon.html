@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Horizon — Sauron Vision{% endblock %}
+{# ◔ is the sidebar's Horizon mark — title and nav row agree. #}
+{% block page_title %}◔ HORIZON · the 5-10 year view{% if view %} · #{{ view.pk }}{% if stale %} · STALE{% endif %}{% endif %}{% endblock %}
+
+{% block content %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">VIEW</span>
+        {% if view %}
+        <span class="oc-strip-value {% if stale %}down{% endif %}">#{{ view.pk }}</span>
+        <span class="oc-strip-sub">{{ view.horizon_years }}y · {{ view.created_at|timesince }} ago{% if stale %} · older than {{ max_age_days }}d, the allocator reads it as neutral{% endif %}</span>
+        {% else %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">no OK view yet</span>
+        {% endif %}
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CALLS</span>
+        <span class="oc-strip-value">{{ record.n_total }}</span>
+        <span class="oc-strip-sub">{{ record.n_graded }} graded · {{ record.n_pending }} pending</span>
+    </div>
+    {# '—' until MIN_SAMPLE_FOR_TRUST graded calls: a trust built on three grades is not a record. #}
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">BRIER</span>
+        <span class="oc-strip-value">{% if record.measured and record.brier is not None %}{{ record.brier|floatformat:3 }}{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">{% if record.measured %}lower is better{% else %}needs {{ record.min_sample }} graded calls{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TRUST</span>
+        <span class="oc-strip-value {% if record.measured and record.trust > 1 %}up{% elif record.measured and record.trust < 1 %}down{% endif %}">{% if record.measured %}×{{ record.trust|floatformat:2 }}{% else %}—{% endif %}</span>
+        <span class="oc-strip-sub">{% if record.measured %}{{ record.n_correct }}/{{ record.n_graded }} right{% else %}unmeasured{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">PRIOR</span>
+        <span class="oc-strip-value">±{{ tilt_step_pct }}%/pt</span>
+        <span class="oc-strip-sub">share allocator, ±{{ tilt_step_pct|add:tilt_step_pct }}% at most</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ROLE</span>
+        <span class="oc-strip-value">{% if is_admin %}ADMIN{% else %}VIEWER{% endif %}</span>
+        <span class="oc-strip-sub">{% if is_admin %}can run now{% else %}read-only{% endif %}</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <span class="card-title">The view{% if view %} — written {{ view.created_at|date:"M d, Y H:i" }} by {{ view.model_used|default:"?" }}{% endif %}</span>
+        {% if is_admin %}
+        {# Superuser only: the button says what it spends before it is pressed. #}
+        <form method="post" action="{% url 'hq_run_horizon' %}" data-run-job="Horizon synthesis">
+            {% csrf_token %}<button type="submit" class="btn btn-sm">▶ Run now — ~1.5 USD on the frontier model</button>
+        </form>
+        {% endif %}
+    </div>
+    {% if view %}
+    <div style="padding: 12px 16px; white-space: pre-wrap; font-size: 13px;">{{ view.summary_md }}</div>
+    {% if view.regime_claims %}
+    <div style="padding: 0 16px 12px; font-size: 11px; color: var(--text-muted);">
+        Regime claims:
+        {% for c in view.regime_claims %}<div>· {{ c.claim }} <span style="font-family: var(--font-mono);">({{ c.horizon_hours }}h · {{ c.confidence|floatformat:2 }})</span></div>{% endfor %}
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
+        <p>NO HORIZON VIEW YET — the synthesis runs monthly on the 1st at 04:45 UTC once <code>agent_horizon</code> is on, or now from the button above (superusers). Until a view exists the share allocator's horizon factor is 1.00.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Sectors — tilt, confidence, thesis, and the calls each thesis is held to</span></div>
+    {% if sectors %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+      <thead><tr>
+        <th>Sector</th><th class="num">Tilt</th><th class="num">Conf</th><th>Thesis · drivers / risks / catalysts</th><th>Calls</th>
+      </tr></thead>
+      <tbody>
+        {% for s in sectors %}
+          <tr>
+            <td class="sv-ident" data-label="Sector">{{ s.name }}<div style="font-size: 10px; color: var(--text-muted);">{{ s.key }}</div></td>
+            <td class="num" data-label="Tilt"><span class="badge badge-{% if s.tilt > 0 %}bullish{% elif s.tilt < 0 %}bearish{% else %}medium{% endif %}">{% if s.tilt > 0 %}+{% endif %}{{ s.tilt }}</span></td>
+            <td class="num" data-label="Conf">{{ s.confidence|floatformat:2 }}</td>
+            <td data-label="Thesis" style="font-size: 11px; max-width: 60ch;">
+                <details><summary style="cursor: pointer;">{{ s.thesis_md|truncatechars:90 }}</summary>
+                    <div style="white-space: pre-wrap; margin-top: 6px;">{{ s.thesis_md }}</div>
+                    {% if s.drivers %}<div style="margin-top: 6px;"><strong>Drivers:</strong> {{ s.drivers|join:"; " }}</div>{% endif %}
+                    {% if s.risks %}<div><strong>Risks:</strong> {{ s.risks|join:"; " }}</div>{% endif %}
+                    {% if s.catalysts %}<div><strong>Catalysts:</strong> {{ s.catalysts|join:"; " }}</div>{% endif %}
+                </details>
+            </td>
+            <td data-label="Calls" style="font-size: 11px; font-family: var(--font-mono);">
+                {% for c in s.calls %}
+                <div title="{{ c.why }}">{{ c.symbol }} {{ c.direction|upper }} · {{ c.horizon_months }}m · {{ c.confidence|floatformat:2 }} —
+                    {% if c.state == 'right' %}<span style="color: var(--accent-green);">&#10003; {{ c.actual }}</span>
+                    {% elif c.state == 'wrong' %}<span style="color: var(--accent-red);">&#10007; {{ c.actual }}</span>
+                    {% elif c.state == 'pending' %}<span style="color: var(--text-muted);">pending{% if c.deadline %} until {{ c.deadline|date:"M d, Y" }}{% endif %}</span>
+                    {% elif c.state == 'ungraded' %}<span style="color: var(--text-muted);">{{ c.actual }}</span>
+                    {% else %}<span style="color: var(--text-muted);" title="Dropped at registration: a live call already stood on this symbol, or it had no price to measure from">not registered</span>{% endif %}
+                    {% if c.move is not None %}<span class="{% if c.move > 0 %}up{% elif c.move < 0 %}down{% endif %}">{{ c.move|floatformat:4 }}</span>{% endif %}
+                </div>
+                {% empty %}<span style="color: var(--text-muted);">no call — a thesis nobody can check</span>{% endfor %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No sectors to show. The universe is {% for k, n, sym in universe %}{{ sym }}{% if not forloop.last %}, {% endif %}{% endfor %}.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Asset-class tilts — what the share allocator derives</span></div>
+    {% if tilts %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>Class</th><th class="num">Tilt</th><th class="num">Conf</th><th class="num">Factor</th><th>Why</th></tr></thead>
+      <tbody>
+        {% for t in tilts %}
+          <tr>
+            <td class="sv-ident">{{ t.asset_class }}</td>
+            <td class="num"><span class="badge badge-{% if t.tilt > 0 %}bullish{% elif t.tilt < 0 %}bearish{% else %}medium{% endif %}">{% if t.tilt > 0 %}+{% endif %}{{ t.tilt }}</span></td>
+            <td class="num">{{ t.confidence|floatformat:2 }}</td>
+            {# factor = 1 + 0.05 × tilt × confidence; stale views read ×1.00 on the allocator's side. #}
+            <td class="num {% if t.factor > 1 %}up{% elif t.factor < 1 %}down{% endif %}">{% if t.factor is not None %}×{{ t.factor|floatformat:3 }}{% else %}—{% endif %}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">{{ t.why }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p style="font-size: 11px; color: var(--text-muted); padding: 12px 16px;">
+        factor = 1 + {{ tilt_step_pct }}% × tilt × confidence — the fifth factor in the share allocator's raw product, ±{{ tilt_step_pct|add:tilt_step_pct }}% at most; a view older than {{ max_age_days }} days reads ×1.00.
+    </p>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No asset-class tilt on record — the allocator's horizon factor is 1.00.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Runs — last 20</span></div>
+    {% if history %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr><th>#</th><th>Status</th><th>When</th><th>Model</th><th class="num">Cost</th><th class="num">Calls</th><th>Note</th></tr></thead>
+      <tbody>
+        {% for h in history %}
+          <tr>
+            <td>#{{ h.pk }}</td>
+            <td><span class="badge badge-{% if h.status == 'ok' %}bullish{% elif h.status == 'running' %}medium{% else %}bearish{% endif %}">{{ h.status|upper }}</span></td>
+            <td>{{ h.created_at|timesince }} ago</td>
+            <td style="font-family: var(--font-mono); font-size: 11px;">{{ h.model_used|default:"—" }}</td>
+            <td class="num">{{ h.cost_usd|floatformat:3 }} USD</td>
+            <td class="num">{{ h.calls_registered }} registered / {{ h.calls_dropped }} dropped</td>
+            <td style="font-size: 11px; color: var(--text-muted); max-width: 50ch;">{% if h.error %}{{ h.error|truncatechars:160 }}{% endif %}{% if h.status == 'rejected' and h.raw %} <details><summary>raw output</summary><pre style="white-space: pre-wrap; font-size: 10px;">{{ h.raw|truncatechars:4000 }}</pre></details>{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px;">No run yet.</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -91,9 +91,11 @@
     <p style="font-size: 11px; color: var(--accent-red, #c33); padding: 12px 16px;">Current shares do not fit the account: {{ alloc_reason }}</p>
     {% endif %}
     <p style="font-size: 11px; color: var(--text-muted); padding: 12px 16px;">
-        target = current × evidence × regime × opportunity × news, normalised to 100% × governor, held inside floor–ceiling,
+        target = current × evidence × regime × opportunity × news × horizon, normalised to 100% × governor, held inside floor–ceiling,
         half-way smoothed, at most 10 points per config per day; a move under 1 point is held. Applying writes the share only —
         the broker sync's own arithmetic re-sizes the pools.
+        {# The fifth factor: the monthly 5-10 year view's asset-class tilt, 5% a point × confidence — ±10% at most. #}
+        Horizon prior: {% if horizon.view %}<a href="{% url 'horizon_dashboard' %}">view #{{ horizon.view.pk }}</a> ({{ horizon.age_days }}d old){% for t in horizon.tilts %} · {{ t.asset_class }} {% if t.tilt > 0 %}+{% endif %}{{ t.tilt }} → ×{{ t.factor|floatformat:2 }}{% endfor %}{% else %}{{ horizon.reason }} (×1.00){% endif %}.
         De-risk fast, re-risk slow: in SHOCK (equity 3% off its 24 h high, drawdown past the knee, or a confident risk-off / blow-off regime — held 24 h)
         a share only goes down, uncapped and unsmoothed, and what it releases is cash; in EXPANSION (at the high-water mark with a measured positive lane)
         the upward allowance is 20 points a day.

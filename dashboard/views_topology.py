@@ -159,6 +159,9 @@ WIRING = {
                                  "note": "Needs ANTHROPIC_API_KEY. Writes the same StrategyAdjustment table as agent_strategy, which nothing reads; its proposals' legs are registered as direction calls, and that grade is what survives."},
     "agent_monday_plan":        {"task": "ai_agents.tasks.generate_monday_plan", "cadence": 604800, "layer": "learn", "writes": ["AgentTask", "AgentPrediction"], "feeds": ["pipeline_calibration"], "pages": ["/", "/ai/"],
                                  "note": "Needs ANTHROPIC_API_KEY. Written for the operator, read on the dashboard and /ai/; the calls block it ends with is graded by the calibration."},
+    # Monthly on a crontab, so the 31-day cadence is declared here (2026-09-12).
+    "agent_horizon":            {"task": "brain.tasks.run_horizon", "cadence": 2678400, "layer": "learn", "writes": ["HorizonView", "AgentPrediction"], "feeds": ["pipeline_share_allocator", "pipeline_calibration"], "pages": ["/horizon/"],
+                                 "note": "Needs ANTHROPIC_API_KEY; ~1.5 USD a run on the frontier tier. The 5-10 year sector synthesis: sector tilts with 6/12-month direction calls the calibration grades, and asset-class tilts the share allocator folds in as a fifth factor, ±10% at most."},
 }
 
 # Components whose only job is to be a mode flag on another component. Drawn as
@@ -234,6 +237,10 @@ def _fmt_cadence(seconds):
     """The schedule in the operator's words, so the verdict shows its reason."""
     if not seconds:
         return "no declared cadence"
+    # 28 days and up is a month: the horizon agent's 31-day cadence read
+    # "weekly" under the branch below and its verdict named the wrong rhythm.
+    if seconds >= 86400 * 28:
+        return "monthly"
     if seconds >= 604800 * 0.9:
         return "weekly"
     if seconds >= 86400 * 0.9:

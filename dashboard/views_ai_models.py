@@ -44,6 +44,7 @@ AGENT_GROUPS = [
         ("strategy_generator", "Strategy Generator", "deep"),
         ("earnings_reviewer", "Earnings Reviewer", "balanced"),
         ("research", "Research Chat", "balanced"),
+        ("horizon", "Horizon (5-10y sectors)", "frontier"),
     ]),
 ]
 

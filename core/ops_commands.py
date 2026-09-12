@@ -107,6 +107,24 @@ COMMANDS = [
         "category": "decide",
     },
     {
+        "name": "horizon",
+        "title": "Horizon (5-10y view)",
+        "purpose": "The Horizon page as a command: list the runs, show a view's sectors, tilts and graded calls, print the agent's grade, and run one synthesis (--yes: ~1.5 USD on the frontier model).",
+        "usage": [
+            "python manage.py horizon list             # runs: status, model, cost, calls, age",
+            "python manage.py horizon show             # the latest OK view: sectors, tilts, calls, grades",
+            "python manage.py horizon show 12          # one view by id",
+            "python manage.py horizon run              # prints the cost, does nothing",
+            "python manage.py horizon run --yes        # one synthesis now (~1.5 USD, frontier tier)",
+            "python manage.py horizon grade            # brier / trust for agent 'horizon'",
+        ],
+        "mirrors": "/horizon/",
+        # list/show/grade read; run spends — a decide entry, like shares.
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
         "name": "follow",
         "title": "Follow the account",
         "purpose": "Make a live pool a share of the account, or stop it following — the asset-bots page's Follow form, through the same arithmetic, writing only with --yes.",

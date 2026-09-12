@@ -59,6 +59,7 @@ from .views_admin_hq import (
     hq_reject_allocation,
     hq_propose_share_plan, hq_apply_share_plan, hq_reject_share_plan,
     hq_rollback_share_plan,
+    hq_run_horizon,
     hq_run_promotions, hq_promote_rule, hq_demote_rule,
     hq_run_evolution, hq_apply_evolution, hq_reject_evolution,
     hq_run_opportunity_scan, hq_resolve_opportunities,
@@ -84,6 +85,7 @@ from .views_forensics import forensics_list, forensics_detail
 from .views_bot_charts import bot_charts
 from .views_allocator import allocator_dashboard
 from .views_shares import shares_dashboard
+from .views_horizon import horizon_dashboard
 from .views_ops import ops_dashboard, ops_run_command
 from .views_eye import eye_dashboard, eye_partial
 from signals.tradingview_webhook import tradingview_webhook
@@ -274,6 +276,10 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("admin-dashboard/shares/apply/", hq_apply_share_plan, name="hq_apply_share_plan"),
     path("admin-dashboard/shares/reject/", hq_reject_share_plan, name="hq_reject_share_plan"),
     path("admin-dashboard/shares/rollback/", hq_rollback_share_plan, name="hq_rollback_share_plan"),
+
+    # ── Horizon: the 5-10 year sector synthesis (2026-09-12) ──
+    path("horizon/", horizon_dashboard, name="horizon_dashboard"),
+    path("admin-dashboard/horizon/run/", hq_run_horizon, name="hq_run_horizon"),
 
     # ── Phase 8: Promotion Pipeline ──────────────────────────
     path("admin-dashboard/promotions/run/", hq_run_promotions, name="hq_run_promotions"),

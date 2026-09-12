@@ -2,8 +2,10 @@
 
 Every few hours (propose_share_plans, beat) this computes a TARGET
 `account_share_pct` for every live follower config (capital_truth
-.followers_of) from four inputs — graded evidence, regime fit,
-opportunity density, news risk — under per-config floor/ceiling, a max
+.followers_of) from five inputs — graded evidence, regime fit,
+opportunity density, news risk, and the horizon prior (the monthly
+5-10 year view's asset-class tilt, ±10% at most; 2026-09-12) — under
+per-config floor/ceiling, a max
 change per day and a drawdown governor, and writes it as a SharePlan in
 state PROPOSED. That is a SHADOW: nothing moves. A plan moves only when
 an admin applies it — PIN on /shares/, --yes on `shares apply` — and
@@ -65,6 +67,14 @@ PROPOSAL_TTL_HOURS = 8
 # Evidence window and the graded fills needed before a lane counts.
 EVIDENCE_DAYS = 90
 MIN_EVIDENCE_N = 10
+# The HORIZON prior (2026-09-12): the monthly 5-10 year synthesis
+# (brain.horizon) tilts each asset class -2..+2 with a confidence. Each
+# tilt point is 5%, scaled by confidence, so the factor runs 0.90..1.10
+# — a weak prior by construction, never a vote that outweighs graded
+# evidence. A view older than HORIZON_MAX_AGE_DAYS is history, not a
+# prior, and costs a factor of 1.0 with the reason on the plan.
+HORIZON_TILT_STEP = 0.05
+HORIZON_MAX_AGE_DAYS = 45
 
 LIVE_COMPONENT = "share_allocator_mode_live"
 GRADED_OUTCOMES = ["hit_target", "stopped_out", "manual_close", "expired",
@@ -443,6 +453,60 @@ def regime_for(cfg, ctx) -> dict:
             "theme_factor": theme_f, "riskoff": riskoff, "reason": reason}
 
 
+def _neutral_horizon(reason: str, label: str, *, age_days=None) -> dict:
+    return {"factor": 1.0, "tilt": None, "confidence": None,
+            "age_days": age_days, "label": label, "reason": reason}
+
+
+def horizon_for(cfg, view, *, now=None) -> dict:
+    """{factor, tilt, confidence, age_days, label, reason} from the latest
+    HorizonView for the config's asset class.
+
+    factor = 1 + HORIZON_TILT_STEP × tilt × confidence, so ±2 at full
+    confidence is ±10% and nothing more. No view, a stale view, or a
+    class the view did not tilt → 1.0 with the reason: a missing prior
+    must never read as a bearish one. `label` is the short form the why
+    sentence prints ('stock tilt +1, conf 0.8').
+    """
+    if view is None:
+        return _neutral_horizon("no horizon view — neutral", "no view")
+    now = now or timezone.now()
+    try:
+        age_days = (now - view.created_at).total_seconds() / 86400.0
+    except (TypeError, AttributeError):
+        age_days = None
+    if age_days is not None and age_days > HORIZON_MAX_AGE_DAYS:
+        return _neutral_horizon(
+            f"horizon view #{getattr(view, 'pk', '?')} is {age_days:.0f}d old "
+            f"(max {HORIZON_MAX_AGE_DAYS}) — neutral",
+            f"stale {age_days:.0f}d", age_days=age_days)
+    ac = getattr(cfg, "asset_class", "") or ""
+    tilts = getattr(view, "asset_class_tilts", None) or {}
+    slot = tilts.get(ac) if isinstance(tilts, dict) else None
+    if not isinstance(slot, dict):
+        return _neutral_horizon(
+            f"horizon view #{getattr(view, 'pk', '?')} has no {ac} tilt — neutral",
+            f"no {ac} tilt", age_days=age_days)
+    try:
+        tilt = int(round(float(slot.get("tilt") or 0)))
+        conf = float(slot.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        return _neutral_horizon(
+            f"horizon view #{getattr(view, 'pk', '?')}: {ac} tilt not numeric — neutral",
+            f"bad {ac} tilt", age_days=age_days)
+    # Clamped again here, not only at parse time: a row edited by hand or
+    # written by an older version must still be a ±10% prior at most.
+    tilt = max(-2, min(2, tilt))
+    conf = max(0.0, min(1.0, conf))
+    factor = 1.0 + HORIZON_TILT_STEP * tilt * conf
+    label = f"{ac} tilt {tilt:+d}, conf {conf:.1f}"
+    return {"factor": factor, "tilt": tilt, "confidence": conf,
+            "age_days": age_days, "label": label,
+            "reason": (f"horizon view #{getattr(view, 'pk', '?')} "
+                       f"({age_days:.0f}d old): {label}"
+                       + (f" — {slot.get('why')}" if slot.get("why") else ""))}
+
+
 def _classes_of(cfg) -> dict:
     """{asset_class: symbol_count} for the config's symbols, through the
     Instrument table — a 'stock' config holding GLDM holds an 'etf'."""
@@ -511,7 +575,8 @@ def _shave_to_100(targets: dict, bounds: dict, held: set) -> dict:
 
 
 def _why(ev, rg, opp, nw, raw, capped, smoothed, target, held, *,
-         mode=MODE_NORMAL, allowance_up=None, allowance_down=None) -> str:
+         mode=MODE_NORMAL, allowance_up=None, allowance_down=None,
+         hz=None) -> str:
     ev_bits = ev.get("lane", "none")
     if ev.get("measured"):
         ev_bits += (f", n={ev.get('n')}, wr {float(ev.get('win_rate') or 0):.2f}, "
@@ -520,9 +585,15 @@ def _why(ev, rg, opp, nw, raw, capped, smoothed, target, held, *,
         ev_bits += ", unmeasured"
     opp_bits = "measured" if opp.get("measured") else "unmeasured"
     nw_bits = "blind" if nw.get("blind") else "measured"
+    # The fifth factor, named only on plans that carried one (older
+    # plans' inputs have no "horizon" and their sentence reads as before).
+    hz_bits = ""
+    if isinstance(hz, dict) and hz.get("factor") is not None:
+        hz_bits = (f" × horizon {float(hz['factor']):.2f} "
+                   f"({hz.get('label') or 'no view'})")
     s = (f"evidence {ev['score']:.2f} ({ev_bits}) × regime {rg['factor']:.2f} "
          f"× opportunity {opp['factor']:.2f} ({opp_bits}) × news "
-         f"{nw['factor']:.2f} ({nw_bits}) → {raw:.1f}% capped {capped:.1f}% "
+         f"{nw['factor']:.2f} ({nw_bits}){hz_bits} → {raw:.1f}% capped {capped:.1f}% "
          f"smoothed {smoothed:.1f}% (max change {MAX_CHANGE_PCT_PER_DAY:g}/day)")
     if held:
         s += f" — held at {target:.1f}% (move under {MIN_DELTA_PCT:g} pt)"
@@ -618,8 +689,16 @@ def propose_share_plan_with_reason(user, *, now=None):
         news = news_risk_by_class(now=now)
     except Exception as e:  # noqa: BLE001
         news_err = f"news reader failed: {e}"
+    # The horizon view is read ONCE per proposal, never per config: one
+    # row, one age, one set of tilts for every follower on the plan.
+    horizon_view, horizon_err = None, ""
+    try:
+        from brain.horizon_models import latest_view
+        horizon_view = latest_view(max_age_days=HORIZON_MAX_AGE_DAYS)
+    except Exception as e:  # noqa: BLE001
+        horizon_err = f"horizon reader failed: {e}"
 
-    # c. per config: the four factors and the raw share
+    # c. per config: the five factors and the raw share
     inputs: dict = {}
     raw: dict = {}
     bounds: dict = {}
@@ -679,9 +758,17 @@ def propose_share_plan_with_reason(user, *, now=None):
             nw = {"factor": f_min, "blind": blind_all, "classes": per_class,
                   "reason": "; ".join(f"{ac}: {d.get('reason', '')}"
                                       for ac, d in per_class.items())}
+        if horizon_err:
+            hz = _neutral_horizon(horizon_err, "unreadable")
+        else:
+            try:
+                hz = horizon_for(cfg, horizon_view, now=now)
+            except Exception as e:  # noqa: BLE001
+                hz = _neutral_horizon(f"horizon reader failed: {e}",
+                                      "unreadable")
         cur = current.get(cfg.pk)
         raw[cfg.pk] = (float(cur or 0.0) * float(ev["score"]) * rg["factor"]
-                       * opp["factor"] * nw["factor"])
+                       * opp["factor"] * nw["factor"] * hz["factor"])
         lo, hi, why_bounds = bounds_for(cfg)
         bounds[cfg.pk] = (lo, hi)
         if why_bounds:
@@ -690,6 +777,7 @@ def propose_share_plan_with_reason(user, *, now=None):
             "name": cfg.name, "asset_class": cfg.asset_class,
             "mode": cfg.mode, "current": cur, "floor": lo, "ceiling": hi,
             "evidence": ev, "regime": rg, "opportunity": opp, "news": nw,
+            "horizon": hz,
         }
 
     # the market state — after the evidence is read (expansion needs it),
@@ -808,7 +896,8 @@ def propose_share_plan_with_reason(user, *, now=None):
                                 row["opportunity"], row["news"], raw[pk],
                                 capped[pk], smoothed, target, held,
                                 mode=mode, allowance_up=allowance_up,
-                                allowance_down=allowance_down)})
+                                allowance_down=allowance_down,
+                                hz=row.get("horizon"))})
 
     # Rounding and the lifts above can push a full account past 100 —
     # shave the excess (moved targets first, held ones only when nothing
@@ -823,7 +912,8 @@ def propose_share_plan_with_reason(user, *, now=None):
                           row["news"], row["raw"], row["capped"],
                           row["smoothed"], targets[pk], False, mode=mode,
                           allowance_up=row.get("allowance_up"),
-                          allowance_down=row.get("allowance_down")) + \
+                          allowance_down=row.get("allowance_down"),
+                          hz=row.get("horizon")) + \
             f" — {cut:.2f} pt shaved to fit 100%"
     if sum(cuts.values()) > 0.01 + 1e-9:
         notes.append(f"targets summed past 100% — {sum(cuts.values()):.2f} pt "

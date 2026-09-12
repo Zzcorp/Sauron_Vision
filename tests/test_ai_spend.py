@@ -86,7 +86,8 @@ class GuardedTaskTests(TestCase):
                      "brain.tasks.run_critic_pass",
                      "brain.tasks.run_strategist",
                      "brain.tasks.run_strategy_generator",
-                     "brain.tasks.run_earnings_reviewer"):
+                     "brain.tasks.run_earnings_reviewer",
+                     "brain.tasks.run_horizon"):
             self.assertIn(name, registered)
 
     def test_brain_cadences_were_reduced(self):

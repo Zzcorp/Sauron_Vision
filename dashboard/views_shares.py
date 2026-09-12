@@ -158,8 +158,31 @@ def shares_dashboard(request):
     except Exception as e:  # noqa: BLE001
         logger.warning("[shares page] market state unreadable: %s", e)
 
+    # ── the horizon prior the allocator folds in as its fifth factor ──
+    # Read from the same latest_view the proposer reads, so the page and
+    # the next plan name the same view; neutral (and said so) without one.
+    horizon = {"view": None, "tilts": [], "reason": "no horizon view — neutral"}
+    try:
+        from bot_program.share_allocator import HORIZON_MAX_AGE_DAYS, horizon_for
+        from brain.horizon_models import latest_view
+        hv = latest_view(max_age_days=HORIZON_MAX_AGE_DAYS)
+        if hv is not None:
+            from types import SimpleNamespace
+            horizon["view"] = hv
+            horizon["age_days"] = round(hv.age_days, 1)
+            horizon["reason"] = ""
+            for ac in sorted((hv.asset_class_tilts or {}).keys()):
+                hz = horizon_for(SimpleNamespace(asset_class=ac), hv)
+                horizon["tilts"].append({"asset_class": ac, "tilt": hz["tilt"],
+                                         "confidence": hz["confidence"],
+                                         "factor": hz["factor"]})
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[shares page] horizon view unreadable: %s", e)
+        horizon["reason"] = f"horizon view unreadable: {e}"
+
     context = {
         "page_id": "shares",
+        "horizon": horizon,
         "reading": reading,
         "reading_stale": reading_stale,
         "drawdown": drawdown,

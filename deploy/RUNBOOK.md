@@ -612,6 +612,10 @@ followed by:
   the same apply (LIVE mode, fresh reading, three a day, snapshot for
   rollback). Prints the plan with every factor; writes only with `--yes`
   (the page asks the PIN — say so). See the section below.
+- `horizon list` / `horizon show [ID]` / `horizon grade` / `horizon run
+  --yes` — the Horizon page (`/horizon/`): the 5-10 year sector view,
+  its tilts, its graded calls; `run` without `--yes` prints the cost
+  (~1.5 USD, frontier model) and does nothing. See the section below.
 - `preflight_live`, `why_no_trade`, `seed_components`, and
   `./deploy/ibkr-doctor` (read-only) were already there.
 
@@ -690,6 +694,41 @@ stored a reading — and proposes; it re-sizes nothing on its own.
   a refused apply (daily cap, stale reading) leaves it PROPOSED. The card
   on `/admin-dashboard/` shows all three switches; `/shares/` shows the
   mode and its reasons in the KPI strip.
+
+**Horizon: the 5-10 year view.** Every other agent looks hours to weeks
+ahead. Horizon (`brain/horizon.py`) writes the platform's STRUCTURAL
+view once a month — how each sector in its universe (the eleven US
+sector ETFs plus gold, oil, long Treasuries, the dollar and bitcoin)
+develops over 5-10 years, the risks that view must guard against, and
+a tilt per asset class — and is held to account like every other
+agent: each sector thesis ends in direction calls at 6 and 12 months,
+graded by the calibration beat against the first bar at or after the
+deadline, and `/horizon/` shows the Brier score and trust built from
+them ("—" until ten calls have graded).
+
+- *The switch and the cost.* `component on agent_horizon` arms the
+  monthly beat (the 1st at 04:45 UTC). One run is ~1.5 USD on the
+  frontier model, under the deep-tier reserve of the daily AI budget;
+  a day whose budget is gone skips it cleanly. Off by default.
+- *The commands.* `horizon list` (every run: status, model, cost, calls
+  registered/dropped, age), `horizon show [ID]` (the sectors, tilts,
+  calls and their grades — a REJECTED run shows the raw text the
+  operator paid for), `horizon grade` (brier/trust for agent
+  `horizon`), and `horizon run` (prints the cost and does nothing) /
+  `horizon run --yes` (one synthesis now — the page's Run now button,
+  superusers only there).
+- *The prior, and its ceiling.* The share allocator reads the latest
+  OK view (45 days at most) as its FIFTH factor: 1 + 0.05 × tilt ×
+  confidence per asset class, so ±2 at full confidence is ±10% and
+  nothing more. The rule: the prior is ±10% at most, by construction —
+  a structural view never out-votes graded evidence, and no view, a
+  stale view, or a class the view did not tilt reads ×1.00 with the
+  reason on the plan. `/shares/` and `shares list` print the factor
+  beside the other four.
+- *What a bad answer does.* A garbled answer (a sector outside the
+  universe, a tilt past ±2, a horizon that is not 6 or 12 months) is a
+  REJECTED row with the raw text kept, never a view; a provider error
+  is an ERROR row. Neither is read by the allocator.
 
 **A healthy Gateway is not a logged-in Gateway.** The container's
 healthcheck sees a process and a port. When the session behind it is gone

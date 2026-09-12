@@ -391,14 +391,27 @@ def normalise_direction(value) -> Optional[str]:
     return None
 
 
-def clamp_horizon(hours, default: float = DEFAULT_HORIZON_HOURS) -> float:
+def clamp_horizon(hours, default: float = DEFAULT_HORIZON_HOURS, *,
+                  max_horizon_hours: float = DIRECTION_MAX_HORIZON_H) -> float:
+    """Clamp a horizon into [DIRECTION_MIN_HORIZON_H, max_horizon_hours].
+
+    `max_horizon_hours` defaults to the sixty-day ceiling every existing
+    caller relies on. It is a keyword so that ONE caller — the monthly
+    horizon agent (brain/horizon.py), whose calls are 6 and 12 months by
+    design — can lift it to 8760 h without a 12-month call being silently
+    folded to 60 days and graded against the wrong bar (2026-09-12).
+    """
     try:
         h = float(hours)
     except (TypeError, ValueError):
         return default
     if h != h:                      # NaN
         return default
-    return max(DIRECTION_MIN_HORIZON_H, min(DIRECTION_MAX_HORIZON_H, h))
+    try:
+        ceiling = float(max_horizon_hours)
+    except (TypeError, ValueError):
+        ceiling = DIRECTION_MAX_HORIZON_H
+    return max(DIRECTION_MIN_HORIZON_H, min(ceiling, h))
 
 
 def mark_for_symbol(symbol: str) -> Optional[float]:
@@ -440,7 +453,8 @@ def mark_for_symbol(symbol: str) -> Optional[float]:
 def log_direction_prediction(agent: str, symbol, direction, *,
                              horizon_hours=DEFAULT_HORIZON_HOURS,
                              confidence=0.5, reference_price=None,
-                             notes: str = ""):
+                             notes: str = "",
+                             max_horizon_hours: float = DIRECTION_MAX_HORIZON_H):
     """Register "symbol goes up/down within horizon_hours", or None.
 
     None, with the reason logged, when the claim cannot be graded: an
@@ -448,6 +462,10 @@ def log_direction_prediction(agent: str, symbol, direction, *,
     measure from, or the same agent already has a live call on the
     symbol. One live call per agent per symbol: an hourly scan that
     re-detects a condition must not stack ten identical claims.
+
+    `max_horizon_hours` is the clamp ceiling handed to `clamp_horizon`;
+    the default keeps every existing caller at sixty days, and only the
+    horizon agent passes a year (see clamp_horizon).
     """
     from instruments.models import Instrument
 
@@ -475,7 +493,7 @@ def log_direction_prediction(agent: str, symbol, direction, *,
         logger.info("calibration: %s called %s on %s with no price to "
                     "measure from — not registered", agent, d, sym)
         return None
-    h = clamp_horizon(horizon_hours)
+    h = clamp_horizon(horizon_hours, max_horizon_hours=max_horizon_hours)
     try:
         conf = float(confidence)
     except (TypeError, ValueError):

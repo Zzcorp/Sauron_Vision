@@ -69,6 +69,23 @@ def run_strategy_generator(*, max_proposals: int = 3) -> dict:
     return generate_strategies_now(max_proposals=max_proposals)
 
 
+@shared_task(name="brain.tasks.run_horizon")
+@guarded_task("agent_horizon")
+@spend_guard(tier="frontier", estimated_usd=1.5)
+def run_horizon() -> dict:
+    """Beat task — monthly, the 1st at 04:45 UTC. The 5-10 year sector
+    synthesis on the frontier tier: sector tilts with graded 6/12-month
+    calls, asset-class tilts the share allocator reads as a ±10% prior.
+
+    The body is model-only, so @spend_guard sits INSIDE the component
+    gate: a day whose budget is gone skips the call cleanly and writes
+    nothing, and there is no free deterministic half to protect (the
+    grading of its calls is the calibration beat's). ~1.5 USD a run
+    (2026-09-12)."""
+    from .horizon import run_horizon_now
+    return run_horizon_now()
+
+
 @shared_task(name="brain.tasks.run_auto_demoter")
 def run_auto_demoter() -> dict:
     """Beat task — daily 04:30 UTC. Walks active auto-generated rules and

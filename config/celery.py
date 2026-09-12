@@ -109,6 +109,15 @@ app.conf.beat_schedule = {
         "task": "brain.tasks.run_auto_demoter",
         "schedule": crontab(hour=4, minute=30),  # 04:30 UTC daily
     },
+    # ── HORIZON: the 5-10 year sector synthesis ────────────────
+    # Monthly on the 1st at 04:45 UTC — after the demoter's 04:30 and
+    # never in the Sunday generator's 04:00 hour, so the two frontier
+    # calls of the month cannot land in the same deep-tier reserve
+    # window. ~1.5 USD a run, gated by agent_horizon (off by default).
+    "sauron-horizon-monthly": {
+        "task": "brain.tasks.run_horizon",
+        "schedule": crontab(day_of_month=1, hour=4, minute=45),
+    },
     "sauron-earnings-reviewer": {
         "task": "brain.tasks.run_earnings_reviewer",
         "schedule": 14400.0,  # every 4 hours

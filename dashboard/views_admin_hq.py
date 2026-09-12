@@ -1598,6 +1598,41 @@ def hq_rollback_share_plan(request):
 
 
 @_admin_only
+def hq_run_horizon(request):
+    """Admin trigger for the 5-10 year sector synthesis (~1.5 USD on the
+    frontier model). XHR clicks enqueue the real beat task (budgeted by
+    its @spend_guard, announced live); a plain form POST runs it here
+    synchronously and flashes the cost, so the operator sees what the
+    click spent (2026-09-12)."""
+    from brain.horizon import run_horizon_now
+    from brain.tasks import run_horizon as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Horizon synthesis",
+                                "/horizon/")
+    if resp is not None:
+        return resp
+    try:
+        out = run_horizon_now()
+        cost = float(out.get("cost_usd") or 0.0)
+        if out.get("ok"):
+            messages.success(
+                request,
+                f"Horizon: view #{out['view_id']} written — "
+                f"{out['calls_registered']} call(s) registered, "
+                f"{out['calls_dropped']} dropped; {cost:.2f} USD on "
+                f"{out.get('model') or 'the frontier model'}.")
+        else:
+            messages.error(
+                request,
+                f"Horizon: {out.get('outcome', 'error')} — "
+                f"{out.get('error', '')} (view #{out.get('view_id', '?')}, "
+                f"{cost:.2f} USD).")
+    except Exception as e:  # noqa: BLE001
+        messages.error(request, f"Horizon synthesis failed: {e}")
+    return redirect("horizon_dashboard")
+
+
+@_admin_only
 def hq_reject_share_plan(request):
     """Admin rejects a PROPOSED plan. No PIN: nothing is written to any
     config, and declining must stay frictionless."""

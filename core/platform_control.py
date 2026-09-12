@@ -186,6 +186,14 @@ DEFAULT_COMPONENTS = [
      "description": "Watches OPEN positions between entry and exit. A free pass every 30 min scores R at risk, excursion, distance to stop/target, age, regime flip, vol expansion, events and concentration; only flagged positions reach a budgeted model pass answering hold / tighten / trim / exit. PROPOSES ONLY.",
      "category": "agent"},
 
+    # ── HORIZON — the 5-10 year sector synthesis (2026-09-12) ─
+    # Without this row the @guarded_task on brain.tasks.run_horizon
+    # short-circuits on every beat. Description counted under 300 chars
+    # (the Postgres column; see the share allocator rows above).
+    {"key": "agent_horizon", "name": "Horizon (5-10y sector synthesis)",
+     "description": "Monthly (1st, 04:45 UTC) on the frontier model, ~1.5 USD a run: sector tilts -2..+2 with graded 6/12-month calls, and asset-class tilts the share allocator reads as a ±10% prior at most. Off by default; /horizon/ shows the view and its grade record.",
+     "category": "agent"},
+
     # ── Phase 13 — multi-asset bot framework ──────────────────
     {"key": "pipeline_asset_bots", "name": "Multi-Asset Bots (stocks/forex/commodities)",
      "description": "Phase-13 framework: per-(user, asset_class) bot configs that consume Phase-1 Signals and route trades through Phase-4 broker_router (Alpaca for stocks, OANDA for forex, paper-only for commodities). Crypto bot is unchanged.",

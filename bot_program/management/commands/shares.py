@@ -78,6 +78,29 @@ class Command(BaseCommand):
         return ("LIVE (apply allowed)" if is_live_mode()
                 else "SHADOW (apply disabled)")
 
+    def _horizon_line(self) -> str:
+        """The fifth factor as the page's footer prints it: the view the
+        next plan would read and the factor per tilted class, or the
+        reason there is none. Never raises — a missing table on a fresh
+        install must not hide the plans below it (2026-09-12)."""
+        try:
+            from types import SimpleNamespace
+
+            from bot_program.share_allocator import (HORIZON_MAX_AGE_DAYS,
+                                                     horizon_for)
+            from brain.horizon_models import latest_view
+            view = latest_view(max_age_days=HORIZON_MAX_AGE_DAYS)
+        except Exception as e:  # noqa: BLE001
+            return f"unreadable ({e}) — x1.00"
+        if view is None:
+            return "no horizon view — x1.00 (see `horizon list`)"
+        bits = []
+        for ac in sorted((view.asset_class_tilts or {}).keys()):
+            hz = horizon_for(SimpleNamespace(asset_class=ac), view)
+            bits.append(f"{ac} {hz['tilt']:+d} -> x{hz['factor']:.2f}")
+        return (f"view #{view.pk} ({view.age_days:.0f}d old)"
+                + (": " + ", ".join(bits) if bits else ": no class tilted"))
+
     def _print_plan(self, plan, *, indent="  "):
         """One line per config: current → target, and the sentence of why.
         The same numbers the page shows — a plan the shell cannot explain
@@ -133,6 +156,7 @@ class Command(BaseCommand):
         from bot_program.share_models import SharePlan
 
         self.stdout.write(f"share allocator {self._mode()}")
+        self.stdout.write(f"horizon prior: {self._horizon_line()}")
         User = get_user_model()
         users = ([self._user(username)] if username else
                  list(User.objects.filter(
