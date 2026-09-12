@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Share Allocator — Sauron Vision{% endblock %}
 {# ◫ is the sidebar's Share Allocator mark — title and nav row agree. #}
-{% block page_title %}◫ SHARE ALLOCATOR · {% if live_mode %}LIVE{% else %}SHADOW{% endif %}{% endblock %}
+{% block page_title %}◫ SHARE ALLOCATOR · {% if live_mode %}LIVE{% else %}SHADOW{% endif %} · auto de-risk {% if auto_derisk %}ON{% else %}OFF{% endif %}{% endblock %}
 
 {% block content %}
 <div class="oc-strip" style="margin-bottom:18px;">
@@ -36,10 +36,16 @@
         <span class="oc-strip-sub">no history yet</span>
         {% endif %}
     </div>
+    {# The market state: SHOCK (down uncapped, up frozen) / EXPANSION (20 pt/day up at the high-water mark) / NORMAL. #}
     <div class="oc-strip-cell">
         <span class="oc-strip-label">MODE</span>
+        <span class="oc-strip-value {% if market.mode == 'shock' %}down{% elif market.mode == 'expansion' %}up{% endif %}">{{ market.mode|upper }}</span>
+        <span class="oc-strip-sub" title="{{ market.reasons|join:'; ' }}">{{ market.reasons|join:"; "|truncatechars:60 }}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">APPLY</span>
         <span class="oc-strip-value {% if live_mode %}up{% else %}down{% endif %}">{% if live_mode %}LIVE{% else %}SHADOW{% endif %}</span>
-        <span class="oc-strip-sub">{% if live_mode %}apply re-sizes pools{% else %}proposals only{% endif %}</span>
+        <span class="oc-strip-sub">{% if live_mode %}apply re-sizes pools{% else %}proposals only{% endif %} · auto de-risk {% if auto_derisk %}ON{% else %}OFF{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">ROLE</span>
@@ -88,6 +94,9 @@
         target = current × evidence × regime × opportunity × news, normalised to 100% × governor, held inside floor–ceiling,
         half-way smoothed, at most 10 points per config per day; a move under 1 point is held. Applying writes the share only —
         the broker sync's own arithmetic re-sizes the pools.
+        De-risk fast, re-risk slow: in SHOCK (equity 3% off its 24 h high, drawdown past the knee, or a confident risk-off / blow-off regime — held 24 h)
+        a share only goes down, uncapped and unsmoothed, and what it releases is cash; in EXPANSION (at the high-water mark with a measured positive lane)
+        the upward allowance is 20 points a day.
     </p>
     {% else %}
     {# ◌ is the declared "nothing configured yet" mark; the <p> carries the meaning. #}
@@ -101,16 +110,18 @@
     {% if pending %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
-      <thead><tr><th>#</th><th>Proposed</th><th>Reading</th><th>Governor</th><th>Targets</th>{% if is_admin %}<th>Decide</th>{% endif %}</tr></thead>
+      <thead><tr><th>#</th><th>Mode</th><th>Proposed</th><th>Reading</th><th>Governor</th><th>Targets</th>{% if is_admin %}<th>Decide</th>{% endif %}</tr></thead>
       <tbody>
         {% for p in pending %}
           <tr>
             <td>#{{ p.id }}</td>
+            {# The mode badge: a SHOCK plan lowers shares uncapped and raises none — the operator must read that before the targets. #}
+            <td><span class="badge badge-{% if p.mode == 'shock' %}bearish{% elif p.mode == 'expansion' %}bullish{% else %}medium{% endif %}" title="{{ p.mode_reasons|join:'; ' }}">{{ p.mode|upper }}</span></td>
             <td>{{ p.proposed_at|timesince }} ago</td>
             <td style="font-family: var(--font-mono); font-size: 11px;">{% if p.reading_value is not None %}{{ p.reading_value }} {{ p.reading_currency }}{% else %}—{% endif %}</td>
             <td class="num">×{{ p.governor|floatformat:2 }}</td>
             <td style="font-size: 11px; font-family: var(--font-mono);">
-                {% for r in p.rows %}<div title="{{ r.why }}">{{ r.name }} {{ r.current }} → {{ r.target }}{% if r.held %} <span class="badge badge-medium">held</span>{% endif %}</div>{% endfor %}
+                {% for r in p.rows %}<div title="{{ r.why }}">{{ r.name }} {{ r.current }} → {{ r.target }}{% if r.held %} <span class="badge badge-medium">held</span>{% endif %}{% if r.allowance_up is not None %} <span style="color: var(--text-muted);" title="The day's allowance under this plan's mode: how far this share may still move up / down">(allowance +{{ r.allowance_up|floatformat:0 }} / −{{ r.allowance_down|floatformat:0 }} pt)</span>{% endif %}</div>{% endfor %}
                 {% if p.notes %}<div style="color: var(--text-muted); margin-top: 4px;">{{ p.notes }}</div>{% endif %}
             </td>
             {% if is_admin %}
@@ -135,13 +146,15 @@
     {% if applied %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
-      <thead><tr><th>#</th><th>Applied</th><th>By</th><th>Shares written</th><th>Grade</th>{% if is_admin %}<th>Rollback</th>{% endif %}</tr></thead>
+      <thead><tr><th>#</th><th>Mode</th><th>Applied</th><th>By</th><th>Shares written</th><th>Grade</th>{% if is_admin %}<th>Rollback</th>{% endif %}</tr></thead>
       <tbody>
         {% for p in applied %}
           <tr>
             <td>#{{ p.id }}</td>
+            <td><span class="badge badge-{% if p.mode == 'shock' %}bearish{% elif p.mode == 'expansion' %}bullish{% else %}medium{% endif %}" title="{{ p.mode_reasons|join:'; ' }}">{{ p.mode|upper }}</span></td>
             <td>{{ p.applied_at|timesince }} ago</td>
-            <td>{{ p.confirmed_by.username|default:"—" }}</td>
+            {# 'auto' — no confirmed_by — is the auto de-risk switch, and the notes say so. #}
+            <td>{% if p.confirmed_by %}{{ p.confirmed_by.username }}{% elif 'auto de-risk applied' in p.notes %}<span class="badge badge-bearish" title="Applied by the share_allocator_auto_derisk switch — a pure de-risk SHOCK plan">auto</span>{% else %}—{% endif %}</td>
             <td style="font-size: 11px; font-family: var(--font-mono);">{% for r in p.rows %}<div>{{ r.name }} {{ r.current }} → {{ r.target }}</div>{% endfor %}</td>
             <td class="num {% if p.grade_score and p.grade_score > 0 %}up{% elif p.grade_score and p.grade_score < 0 %}down{% endif %}">{% if p.grade_score is not None %}{{ p.grade_score|floatformat:4 }}{% elif p.graded_at %}<span style="color: var(--text-muted);" title="No live close in the 24h window">ungradeable</span>{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}</td>
             {% if is_admin %}

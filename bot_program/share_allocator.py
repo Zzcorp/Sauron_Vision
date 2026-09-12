@@ -70,6 +70,45 @@ LIVE_COMPONENT = "share_allocator_mode_live"
 GRADED_OUTCOMES = ["hit_target", "stopped_out", "manual_close", "expired",
                    "time_stop"]
 
+# ── Market state: DE-RISK FAST, RE-RISK SLOW (2026-09-12) ────────────────
+# The 10-point cap and the half-way smoothing above are symmetric, so a
+# 20% crash whose governor says 0.4 took three days to reach the pools —
+# every day of which the pools were sized against money that was gone.
+# The operator's ask: "today the cap is small, but in a strong rally or a
+# big crash Sauron must be able to respond." Three modes follow:
+#   shock      — de-risk only: down UNCAPPED and unsmoothed, up frozen,
+#                nothing redistributed (what a pool releases is cash);
+#   expansion  — at the high-water mark with measured positive evidence,
+#                the upward allowance is EXPANSION_CAP_PCT_PER_DAY;
+#   normal     — the rule exactly as it was.
+# Equity fell this fraction or more from the highest reading of the last
+# 24 h → shock. 3% because the governor's own knee is 5% off the 90-day
+# high: a shock is the day the road turns, not the drawdown afterwards.
+SHOCK_DROP_PCT = 0.03
+# Brain regimes that are a shock on their own, at this confidence or
+# more. 'unknown' never counts — an idle brain is not a crash.
+SHOCK_REGIMES = ("risk_off", "blow_off")
+SHOCK_REGIME_MIN_CONF = 0.65
+# A detected shock keeps re-risking frozen for this long after the last
+# shock plan: a bounce the morning after a 4% day is not a rally, and a
+# plan that re-risked into it would buy the shares it sold yesterday.
+SHOCK_HOLD_HOURS = 24
+# Upward allowance in expansion, per config per rolling 24h (down stays
+# MAX_CHANGE_PCT_PER_DAY): a proven rally expands faster than a quiet
+# week, still never in one step.
+EXPANSION_CAP_PCT_PER_DAY = 20.0
+# The sync trigger (tasks.sync_broker_account) proposes at most once per
+# this many seconds on a shock, so a 15-minute beat on a bad day does not
+# write four shock plans an hour that supersede one another.
+SHOCK_TRIGGER_COOLDOWN_S = 3600
+# The opt-in that lets a pure de-risk shock plan apply itself in LIVE mode.
+AUTO_DERISK_COMPONENT = "share_allocator_auto_derisk"
+MODE_NORMAL, MODE_SHOCK, MODE_EXPANSION = "normal", "shock", "expansion"
+# The reason string the hold writes on a plan; `_hold_only` reads it
+# back so a plan that was a shock ONLY because of the hold does not
+# re-arm the hold (see market_state).
+HOLD_REASON_PREFIX = "shock hold until"
+
 
 class ShareAllocatorError(Exception):
     pass
@@ -79,6 +118,156 @@ def is_live_mode() -> bool:
     """True iff an admin may apply — otherwise every plan is a shadow."""
     from core.platform_control import is_component_enabled
     return is_component_enabled(LIVE_COMPONENT)
+
+
+def is_auto_derisk_enabled() -> bool:
+    """True iff a pure de-risk shock plan may apply itself (LIVE mode is
+    checked separately — both switches must be on)."""
+    from core.platform_control import is_component_enabled
+    return is_component_enabled(AUTO_DERISK_COMPONENT)
+
+
+# ── Market state readers (pure DB reads; never raise to the caller) ──────
+
+def _hold_only(reasons) -> bool:
+    """True iff `reasons` is non-empty and every entry is the hold itself
+    — a shock plan proposed inside the hold with no fresh detection of
+    its own. An empty list counts as fresh: a real shock plan always
+    records its trigger, so a plan with none is a hand-made anchor."""
+    rs = [str(r) for r in (reasons or [])]
+    return bool(rs) and all(r.startswith(HOLD_REASON_PREFIX) for r in rs)
+
+
+def drop_24h(user, *, now=None):
+    """The fraction the current reading sits under the highest reading of
+    the last 24 h in the current currency — 0.042 is 4.2% under — or None
+    when no history row landed in the window. The current reading is part
+    of the max, so the answer is never negative; a history in another
+    currency is an exchange rate, not a drop, and does not count."""
+    from bot_program.capital_truth import account_equity, broker_backed
+    from bot_program.equity_models import BrokerEquityReading
+    now = now or timezone.now()
+    acct = broker_backed(user)
+    reading = account_equity(user)
+    if acct is None or reading is None:
+        return None
+    current = float(reading["value"])
+    rows = BrokerEquityReading.objects.filter(
+        account=acct, currency=reading["currency"] or "",
+        at__gte=now - timedelta(hours=24)).values_list("value", flat=True)
+    values = [float(v) for v in rows]
+    if not values:
+        return None
+    top = max(max(values), current)
+    if top <= 0:
+        return None
+    return max(0.0, (top - current) / top)
+
+
+def shock_detected(user, *, now=None) -> bool:
+    """The cheap half of `market_state`, for the sync trigger: equity fell
+    SHOCK_DROP_PCT or more in 24 h, or the drawdown is past the governor's
+    knee — from the rows the sync just wrote, no brain context. False on
+    any reader failure: a trigger that cannot read must not fire."""
+    from bot_program.capital_truth import equity_drawdown
+    try:
+        drop = drop_24h(user, now=now)
+        if drop is not None and drop >= SHOCK_DROP_PCT:
+            return True
+        dd = equity_drawdown(user)
+        return bool(dd and float(dd["drawdown_pct"] or 0.0) > DD_KNEE)
+    except Exception as e:  # noqa: BLE001 — unreadable is not a shock
+        logger.warning("[shares] shock detection failed: %s", e)
+        return False
+
+
+def market_state(user, ctx, *, evidence=None, now=None) -> dict:
+    """{mode, reasons, drop_24h_pct, drawdown_pct, at_hwm, regime}.
+
+    shock when the drawdown is past DD_KNEE, or equity fell SHOCK_DROP_PCT
+    in 24 h, or the brain's regime is one of SHOCK_REGIMES at
+    SHOCK_REGIME_MIN_CONF or more, or a shock plan was proposed within
+    SHOCK_HOLD_HOURS (the hold). expansion when no shock, the current
+    reading IS the high-water mark, and at least one follower's evidence
+    is measured with avg_r > 0 over MIN_EVIDENCE_N fills or more —
+    `evidence` is {label: evidence dict} as the proposer already read it;
+    this function re-queries nothing. Else normal. Never raises: a reader
+    that fails answers normal with the reason, because a market state
+    nobody can read must not freeze or expand anything.
+    """
+    from bot_program.capital_truth import equity_drawdown
+    from bot_program.share_models import SharePlan
+    now = now or timezone.now()
+    out = {"mode": MODE_NORMAL, "reasons": [], "drop_24h_pct": None,
+           "drawdown_pct": None, "at_hwm": False, "regime": None}
+    try:
+        dd = equity_drawdown(user)
+        dd_pct = float(dd["drawdown_pct"] or 0.0) if dd else None
+        out["drawdown_pct"] = dd_pct
+        out["at_hwm"] = dd_pct is not None and dd_pct <= 1e-12
+        drop = drop_24h(user, now=now)
+        out["drop_24h_pct"] = drop
+        label = str((ctx or {}).get("regime_label") or "unknown")
+        conf = float((ctx or {}).get("regime_confidence") or 0.0)
+        out["regime"] = label if ctx else None
+
+        reasons = []
+        if dd_pct is not None and dd_pct > DD_KNEE:
+            reasons.append(f"drawdown {dd_pct * 100:.1f}% past the "
+                           f"{DD_KNEE * 100:g}% knee")
+        if drop is not None and drop >= SHOCK_DROP_PCT:
+            reasons.append(f"equity −{drop * 100:.1f}% in 24h")
+        if label != "unknown" and label in SHOCK_REGIMES \
+                and conf >= SHOCK_REGIME_MIN_CONF:
+            reasons.append(f"regime {label} {conf:.2f}")
+        # The hold is anchored on the last shock plan that carried a
+        # FRESH detection (drop, drawdown, regime). A plan proposed inside
+        # the hold on the hold alone is a shock plan too; if it restarted
+        # the clock, the 4-hourly beat would re-arm the hold every 4 h
+        # and the account would never re-risk again (2026-09-12).
+        last_fresh = None
+        for p in (SharePlan.objects
+                  .filter(user=user, mode=MODE_SHOCK,
+                          proposed_at__gte=now - timedelta(hours=SHOCK_HOLD_HOURS))
+                  .order_by("-proposed_at")):
+            if not _hold_only(p.mode_reasons):
+                last_fresh = p
+                break
+        if last_fresh is not None:
+            until = last_fresh.proposed_at + timedelta(hours=SHOCK_HOLD_HOURS)
+            reasons.append(f"{HOLD_REASON_PREFIX} {until:%m-%d %H:%M} "
+                           f"(plan #{last_fresh.pk})")
+        if reasons:
+            out.update({"mode": MODE_SHOCK, "reasons": reasons})
+            return out
+
+        proven = []
+        for label_, ev in (evidence or {}).items():
+            try:
+                if ev.get("measured") and float(ev.get("avg_r") or 0.0) > 0 \
+                        and int(ev.get("n") or 0) >= MIN_EVIDENCE_N:
+                    proven.append(f"{label_}: avg_r {float(ev['avg_r']):+.2f} "
+                                  f"over {int(ev['n'])} fills")
+            except (TypeError, ValueError):
+                continue
+        if out["at_hwm"] and proven:
+            out.update({"mode": MODE_EXPANSION,
+                        "reasons": ["at the high-water mark"] + proven})
+            return out
+        why = []
+        if dd_pct is None:
+            why.append("no reading")
+        elif not out["at_hwm"]:
+            why.append(f"{dd_pct * 100:.1f}% under the high-water mark")
+        else:
+            why.append("at the high-water mark, no measured positive lane")
+        out["reasons"] = why
+        return out
+    except Exception as e:  # noqa: BLE001 — unreadable is normal, with the reason
+        logger.warning("[shares] market state unreadable: %s", e)
+        out.update({"mode": MODE_NORMAL,
+                    "reasons": [f"market state unreadable: {e}"]})
+        return out
 
 
 # ── Pieces of the arithmetic (pure; the tests pin each one) ──────────────
@@ -321,7 +510,8 @@ def _shave_to_100(targets: dict, bounds: dict, held: set) -> dict:
     return cuts
 
 
-def _why(ev, rg, opp, nw, raw, capped, smoothed, target, held) -> str:
+def _why(ev, rg, opp, nw, raw, capped, smoothed, target, held, *,
+         mode=MODE_NORMAL, allowance_up=None, allowance_down=None) -> str:
     ev_bits = ev.get("lane", "none")
     if ev.get("measured"):
         ev_bits += (f", n={ev.get('n')}, wr {float(ev.get('win_rate') or 0):.2f}, "
@@ -336,6 +526,14 @@ def _why(ev, rg, opp, nw, raw, capped, smoothed, target, held) -> str:
          f"smoothed {smoothed:.1f}% (max change {MAX_CHANGE_PCT_PER_DAY:g}/day)")
     if held:
         s += f" — held at {target:.1f}% (move under {MIN_DELTA_PCT:g} pt)"
+    # The mode tail is appended only off the normal path so a normal
+    # plan's sentence reads exactly as it did before the modes existed.
+    if mode == MODE_SHOCK:
+        s += (" — SHOCK: de-risk only (no smoothing, down uncapped, "
+              "up frozen)")
+    elif mode == MODE_EXPANSION:
+        s += (f" — EXPANSION: up to {float(allowance_up or 0):g} pt up / "
+              f"{float(allowance_down or 0):g} pt down today")
     return s
 
 
@@ -425,6 +623,7 @@ def propose_share_plan_with_reason(user, *, now=None):
     inputs: dict = {}
     raw: dict = {}
     bounds: dict = {}
+    evidence_by_name: dict = {}
     for cfg in followers:
         try:
             from bot_program.evidence import config_evidence
@@ -433,6 +632,7 @@ def propose_share_plan_with_reason(user, *, now=None):
             ev = {"lane": "none", "n": 0, "win_rate": None, "avg_r": None,
                   "r_sum": 0.0, "measured": False, "score": 1.0,
                   "reason": f"evidence reader failed: {e}"}
+        evidence_by_name[cfg.name] = ev
         try:
             rg = regime_for(cfg, ctx)
         except Exception as e:  # noqa: BLE001
@@ -492,6 +692,16 @@ def propose_share_plan_with_reason(user, *, now=None):
             "evidence": ev, "regime": rg, "opportunity": opp, "news": nw,
         }
 
+    # the market state — after the evidence is read (expansion needs it),
+    # before the caps (shock and expansion change them)
+    state = market_state(user, ctx, evidence=evidence_by_name, now=now)
+    mode = state["mode"]
+    if mode == MODE_SHOCK:
+        notes.append("SHOCK: de-risk only — " + "; ".join(state["reasons"]))
+    elif mode == MODE_EXPANSION:
+        notes.append(f"EXPANSION: up to {EXPANSION_CAP_PCT_PER_DAY:g} pt/day "
+                     f"up — " + "; ".join(state["reasons"]))
+
     # d. normalise to the deployable share of the account
     deployable = 100.0 * governor
     mass = sum(raw.values())
@@ -509,7 +719,14 @@ def propose_share_plan_with_reason(user, *, now=None):
         return None, reason
     capped = water_fill(raw, bounds, deployable)
 
-    # f. smoothing, the per-day cap, hysteresis
+    # f. smoothing, the per-day cap, hysteresis — by mode. NORMAL is the
+    # rule exactly as it was: one symmetric allowance, half-way smoothing.
+    # EXPANSION widens the UPWARD allowance only. SHOCK is de-risk only:
+    # no smoothing and no redistribution — the target is min(current,
+    # capped), so a pool only ever goes down or holds, the mass it
+    # releases is cash (the sum may sit well under 100 × governor, by
+    # design), the move down is uncapped and the move up is frozen at 0.
+    # A 20% crash used to take three plans to reach the pools (2026-09-12).
     moved = _applied_today(user, now)
     targets: dict = {}
     held_pks: set = set()
@@ -518,12 +735,32 @@ def propose_share_plan_with_reason(user, *, now=None):
         lo = bounds[pk][0]
         cur = current.get(pk)
         cur_num = float(cur or 0.0)
-        smoothed = cur_num + SMOOTHING_ALPHA * (capped[pk] - cur_num)
-        allowance = max(0.0, MAX_CHANGE_PCT_PER_DAY
-                        - float(moved.get(str(pk), 0.0)))
-        move = max(-allowance, min(allowance, smoothed - cur_num))
+        used = float(moved.get(str(pk), 0.0))
+        if mode == MODE_SHOCK:
+            smoothed = min(cur_num, capped[pk]) if cur is not None else capped[pk]
+            # 100 points is the whole account: "uncapped" as a number the
+            # page can print, and a bound nothing can exceed.
+            allowance_up, allowance_down = 0.0, 100.0
+        elif mode == MODE_EXPANSION:
+            smoothed = cur_num + SMOOTHING_ALPHA * (capped[pk] - cur_num)
+            allowance_up = max(0.0, EXPANSION_CAP_PCT_PER_DAY - used)
+            allowance_down = max(0.0, MAX_CHANGE_PCT_PER_DAY - used)
+        else:
+            smoothed = cur_num + SMOOTHING_ALPHA * (capped[pk] - cur_num)
+            allowance_up = allowance_down = max(0.0, MAX_CHANGE_PCT_PER_DAY
+                                                - used)
+        allowance = allowance_up
+        move = max(-allowance_down, min(allowance_up, smoothed - cur_num))
         held = False
-        if cur is not None and cur_num >= lo \
+        # In SHOCK the floor guard comes off the hysteresis: a pool under
+        # its floor cannot move up (up is frozen) and must not move down
+        # by the rounding of its own share either — an automatic third,
+        # 33.3333, written as 33.33 was a "move" the sync re-sized on and
+        # is_pure_derisk counted as a de-risk (2026-09-12). The floor
+        # lift below still runs on it. NORMAL keeps the guard: there the
+        # pool smooths up toward its floor.
+        hold_ok = (mode == MODE_SHOCK) or cur_num >= lo
+        if cur is not None and hold_ok \
                 and abs(smoothed - cur_num) < MIN_DELTA_PCT:
             # Hysteresis: the target repeats the current share EXACTLY —
             # not rounded. Three automatic followers hold 33.333…% each;
@@ -548,10 +785,14 @@ def propose_share_plan_with_reason(user, *, now=None):
         # (50 → 52.5 → 53.75 → 55 under a 55% floor).
         if target < lo and (cur is None or lo - target < MIN_DELTA_PCT):
             reach = round(min(lo, cur_num + allowance), 2)
-            if reach <= 0.0:
+            if reach <= 0.0 or mode == MODE_SHOCK:
+                # In shock the upward allowance is 0, which would leave a
+                # pool under its floor there; the floor is the size that
+                # still grades, and it holds in every mode.
                 reach = round(lo, 2)
             if reach > target:
                 target = reach
+                held = False   # lifted: the target is the floor, not cur
                 notes.append(f"{cfg.name}: below its floor — lifted to "
                              f"{target:g}%")
         if held:
@@ -560,10 +801,14 @@ def propose_share_plan_with_reason(user, *, now=None):
         row = inputs[str(pk)]
         row.update({"raw": round(raw[pk], 4), "capped": round(capped[pk], 4),
                     "smoothed": round(smoothed, 4), "held": held,
-                    "target": target,
+                    "target": target, "mode": mode,
+                    "allowance_up": round(allowance_up, 4),
+                    "allowance_down": round(allowance_down, 4),
                     "why": _why(row["evidence"], row["regime"],
                                 row["opportunity"], row["news"], raw[pk],
-                                capped[pk], smoothed, target, held)})
+                                capped[pk], smoothed, target, held,
+                                mode=mode, allowance_up=allowance_up,
+                                allowance_down=allowance_down)})
 
     # Rounding and the lifts above can push a full account past 100 —
     # shave the excess (moved targets first, held ones only when nothing
@@ -576,7 +821,9 @@ def propose_share_plan_with_reason(user, *, now=None):
         row["target"] = targets[pk]
         row["why"] = _why(row["evidence"], row["regime"], row["opportunity"],
                           row["news"], row["raw"], row["capped"],
-                          row["smoothed"], targets[pk], False) + \
+                          row["smoothed"], targets[pk], False, mode=mode,
+                          allowance_up=row.get("allowance_up"),
+                          allowance_down=row.get("allowance_down")) + \
             f" — {cut:.2f} pt shaved to fit 100%"
     if sum(cuts.values()) > 0.01 + 1e-9:
         notes.append(f"targets summed past 100% — {sum(cuts.values()):.2f} pt "
@@ -597,7 +844,7 @@ def propose_share_plan_with_reason(user, *, now=None):
             reading_currency=reading["currency"] or "",
             reading_at=reading["at"], reading_age_s=reading["age_seconds"],
             hwm=Decimal(str(round(hwm, 2))), drawdown_pct=dd_pct,
-            governor=governor,
+            governor=governor, mode=mode, mode_reasons=list(state["reasons"]),
             inputs=inputs, targets={str(k): v for k, v in targets.items()},
             current_shares={str(k): v for k, v in current.items()},
             configs_considered=len(followers), configs_skipped=0,
@@ -610,8 +857,95 @@ def propose_share_plan_with_reason(user, *, now=None):
                 f"superseded by #{plan.pk}"
             old.save(update_fields=["state", "notes"])
     logger.info("[shares] user %s: proposed plan #%s for %d follower(s) "
-                "(governor %.2f)", name, plan.pk, len(followers), governor)
+                "(governor %.2f, mode %s)", name, plan.pk, len(followers),
+                governor, mode)
+    # The opt-in automatic de-risk — only a SHOCK plan that lowers every
+    # share, only with both switches on. Wrapped: an apply that fails
+    # (daily cap, stale reading) leaves the plan PROPOSED for a human and
+    # must never undo the proposal that was just written.
+    try:
+        if auto_derisk_if_allowed(plan, now=now):
+            plan.refresh_from_db()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[shares] auto de-risk of plan #%s failed: %s",
+                       plan.pk, e)
     return plan, ""
+
+
+# ── Automatic de-risking (opt-in) ────────────────────────────────────────
+
+def is_pure_derisk(plan) -> bool:
+    """True iff every target is at or under its current share (within
+    1e-9) and at least one is strictly under. A follower with no current
+    share (entering at its floor) is an UPWARD move and disqualifies the
+    plan: automatic means down only, never a new pool sized by nobody."""
+    current = plan.current_shares or {}
+    lowered = False
+    for k, target in (plan.targets or {}).items():
+        cur = current.get(k)
+        if cur is None:
+            return False
+        try:
+            t, c = float(target), float(cur)
+        except (TypeError, ValueError):
+            return False
+        if t > c + 1e-9:
+            return False
+        if t < c - 1e-9:
+            lowered = True
+    return lowered
+
+
+def auto_derisk_if_allowed(plan, *, now=None) -> bool:
+    """Apply `plan` with no human when — and only when — LIVE mode and the
+    share_allocator_auto_derisk component are both on, the plan is a
+    SHOCK plan, and it is a pure de-risk (is_pure_derisk). The apply is
+    the same apply_share_plan an admin runs: daily cap, fresh reading,
+    snapshot for rollback, audit row (decision 'auto_derisk'). Re-risking
+    is never automatic. A ShareAllocatorError is logged and the plan
+    stays PROPOSED for a human. Returns True iff the plan was applied."""
+    from bot_program.share_models import SharePlan
+    # The plan's own mode first: a NORMAL proposal must not cost two
+    # component reads to learn it was never a candidate.
+    if plan.mode != MODE_SHOCK or plan.state != SharePlan.STATE_PROPOSED:
+        return False
+    if not is_live_mode() or not is_auto_derisk_enabled():
+        return False
+    if not is_pure_derisk(plan):
+        logger.info("[shares] plan #%s is not a pure de-risk — left for "
+                    "a human", plan.pk)
+        return False
+    try:
+        applied = apply_share_plan(plan.pk, None, decision="auto_derisk")
+    except ShareAllocatorError as e:
+        logger.warning("[shares] auto de-risk of plan #%s refused: %s "
+                       "— left PROPOSED", plan.pk, e)
+        return False
+    applied.notes = ((applied.notes + "; ") if applied.notes else "") + \
+        "auto de-risk applied"
+    applied.save(update_fields=["notes"])
+    inputs = applied.inputs or {}
+    current = applied.current_shares or {}
+    moves = []
+    for k, target in (applied.targets or {}).items():
+        name = (inputs.get(k) or {}).get("name") or f"#{k}"
+        cur = current.get(k)
+        cur_s = f"{float(cur):g}%" if cur is not None else "auto"
+        moves.append(f"{name} {cur_s} → {float(target):g}%")
+    try:
+        from bot_program.notifications import notify_staff
+        notify_staff(
+            title="⚠ Shares de-risked automatically",
+            body=(f"{getattr(applied.user, 'username', applied.user_id)}: "
+                  f"plan #{applied.pk} — " + "; ".join(moves)
+                  + ". Rollback on /shares/ restores the previous shares "
+                    "exactly."),
+            url="/shares/", cooldown_hours=1)
+    except Exception as e:  # noqa: BLE001 — the apply stands, the alert is beside it
+        logger.warning("[shares] auto de-risk alert failed: %s", e)
+    logger.info("[shares] auto de-risk applied plan #%s: %s", applied.pk,
+                "; ".join(moves))
+    return True
 
 
 # ── Apply / rollback / reject ────────────────────────────────────────────
@@ -633,10 +967,12 @@ def applies_used_today(user, now=None) -> int:
 
 
 @transaction.atomic
-def apply_share_plan(plan_id, user):
+def apply_share_plan(plan_id, user, *, decision="applied"):
     """Write every surviving target as the follower's explicit share and
     re-split the pools through the sync's own arithmetic. LIVE mode only,
-    PROPOSED only, fresh reading only, MAX_APPLIES_PER_DAY per user."""
+    PROPOSED only, fresh reading only, MAX_APPLIES_PER_DAY per user.
+    `decision` is the audit row's word: 'applied' for a human, 'auto_derisk'
+    for auto_derisk_if_allowed — same kind, same gates, same snapshot."""
     from bot_program.audit import record_share_plan
     from bot_program.capital_truth import (TRACKING_FRESH_SECONDS,
                                            account_equity, allocate_shares,
@@ -708,9 +1044,9 @@ def apply_share_plan(plan_id, user):
             f"skipped at apply (no longer a follower): {names}"
     plan.save(update_fields=["previous_shares", "state", "applied_at",
                              "confirmed_by", "configs_skipped", "notes"])
-    record_share_plan(plan, "applied", user)
-    logger.info("[shares] applied plan #%s — %d pool(s) re-sized",
-                plan.pk, len(surviving))
+    record_share_plan(plan, decision, user)
+    logger.info("[shares] applied plan #%s — %d pool(s) re-sized (%s)",
+                plan.pk, len(surviving), decision)
     return plan
 
 

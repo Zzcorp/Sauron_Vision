@@ -1167,9 +1167,10 @@ button.
         <div>
             <div style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:1px;color:{% if share_allocator_live_component.is_enabled %}var(--accent-gold){% else %}var(--text-muted){% endif %};">
                 {% if share_allocator_live_component.is_enabled %}LIVE MODE — admin can apply (PIN){% else %}SHADOW MODE — proposals only{% endif %}
+                · auto de-risk {% if share_allocator_auto_derisk_component.is_enabled %}ON{% else %}OFF{% endif %}
             </div>
             <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;line-height:1.4;">
-                evidence × regime × opportunity × news · drawdown governor · floor 2% / ceiling 60% · 10 pt/day · 3 applies/day · every 4h.
+                evidence × regime × opportunity × news · drawdown governor · floor 2% / ceiling 60% · 10 pt/day (20 up in EXPANSION, down uncapped in SHOCK) · 3 applies/day · every 4h + at once on a shock.
                 {{ share_plans_pending }} pending plan{{ share_plans_pending|pluralize }} for you.
                 <a href="{% url 'shares_dashboard' %}" style="color:var(--accent);">Full view →</a>
             </div>
@@ -1184,6 +1185,15 @@ button.
                 <button type="submit" class="btn btn-danger btn-sm">DISABLE LIVE</button>
                 {% else %}
                 <button type="submit" class="btn btn-primary btn-sm">PROMOTE TO LIVE</button>
+                {% endif %}
+            </form>
+            {# The third switch, mirroring the live toggle: a pure de-risk SHOCK plan applies itself in LIVE mode. Re-risking never does. #}
+            <form method="post" action="{% url 'admin_toggle_component' %}">
+                {% csrf_token %}<input type="hidden" name="key" value="share_allocator_auto_derisk">
+                {% if share_allocator_auto_derisk_component.is_enabled %}
+                <button type="submit" class="btn btn-danger btn-sm" title="A SHOCK plan that only lowers shares is applied automatically in LIVE mode">AUTO DE-RISK OFF</button>
+                {% else %}
+                <button type="submit" class="btn btn-primary btn-sm" title="A SHOCK plan that only lowers shares is applied automatically in LIVE mode">AUTO DE-RISK ON</button>
                 {% endif %}
             </form>
         </div>

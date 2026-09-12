@@ -628,6 +628,33 @@ stored a reading — and proposes; it re-sizes nothing on its own.
   toward what paid; "ungradeable" means nothing closed, which is not
   wrong. A run of negative grades in shadow is the reason not to turn
   LIVE on.
+- *De-risk fast, re-risk slow.* The 10-point cap and the half-way
+  smoothing are symmetric, and a 20% crash whose governor said 0.4 took
+  three plans to reach the pools. Every plan now carries a MODE (the
+  `mode` column, the badge on `/shares/`, the `mode …` line in `shares
+  list`). **SHOCK** — the drawdown is past the 5% knee, or equity is 3%
+  or more under its highest reading of the last 24 h, or the brain says
+  `risk_off` / `blow_off` at 0.65 confidence or more (`unknown` never
+  counts), or a shock plan was proposed in the last 24 h (the hold): a
+  share only goes DOWN or holds, uncapped and unsmoothed, nothing is
+  redistributed and what a pool releases is cash; floors still hold.
+  **EXPANSION** — no shock, the reading IS the 90-day high-water mark
+  and at least one pool's evidence is measured with a positive avg_r
+  over ten fills or more: the upward allowance is 20 points a day (down
+  stays 10). **NORMAL** — the rule exactly as above. The sync itself is
+  a trigger: when the reading it just stored is a shock (drop or
+  drawdown — no brain context on that path) it proposes at once, once
+  per hour per user, and staff get "⚠ Shock plan proposed"; the 4-hourly
+  beat is unchanged. Applying still takes the PIN — unless the third
+  switch is on: `component on share_allocator_auto_derisk` (LIVE mode
+  required too) applies a SHOCK plan that only LOWERS shares by itself,
+  under the same daily cap and fresh-reading rule, with the same snapshot
+  for rollback, an audit row whose decision reads `auto_derisk`, and a
+  "⚠ Shares de-risked automatically" alert. A plan with any upward
+  target — a pool entering at its floor counts — waits for a human, and
+  a refused apply (daily cap, stale reading) leaves it PROPOSED. The card
+  on `/admin-dashboard/` shows all three switches; `/shares/` shows the
+  mode and its reasons in the KPI strip.
 
 **A healthy Gateway is not a logged-in Gateway.** The container's
 healthcheck sees a process and a port. When the session behind it is gone

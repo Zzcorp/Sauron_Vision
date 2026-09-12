@@ -445,7 +445,10 @@ class ProposeTests(TestCase):
 
     def test_the_governor_leaves_the_drawdown_in_cash(self):
         """20% under the 90-day high → governor 0.4 → capped shares sum
-        to 40; the move down is then capped at 10 points per day."""
+        to 40. Until 2026-09-12 the move down was then capped at 10
+        points per day (50 → 40 → 30 → 20 over three plans); a drawdown
+        past the knee is now a SHOCK and the whole move lands in one plan
+        — de-risk fast (ResponsiveTests pins the mode itself)."""
         from bot_program.share_allocator import propose_share_plan
         _reading(self.acct, 2500, days_ago=10)
         a = _cfg(self.user, name="a", tracks=True, share=50)
@@ -456,8 +459,9 @@ class ProposeTests(TestCase):
         self.assertEqual(float(plan.hwm), 2500.0)
         ia, ib = plan.inputs[str(a.pk)], plan.inputs[str(b.pk)]
         self.assertAlmostEqual(ia["capped"] + ib["capped"], 40.0, places=3)
-        self.assertEqual(plan.targets[str(a.pk)], 40.0)     # 50 - 10
-        self.assertEqual(plan.targets[str(b.pk)], 40.0)
+        self.assertEqual(plan.mode, "shock")
+        self.assertEqual(plan.targets[str(a.pk)], 20.0)     # 50 - 30, uncapped
+        self.assertEqual(plan.targets[str(b.pk)], 20.0)
         self.assertIn("governor 0.40", plan.notes)
 
     def test_ceilings_and_floors_hold(self):
@@ -940,6 +944,26 @@ class WiringTests(SimpleTestCase):
                          "pipeline_share_allocator")
         self.assertIn(MODE_FLAGS["share_allocator_mode_live"], WIRING)
 
+    def test_the_auto_derisk_switch_is_registered_and_folds_into_its_proposer(self):
+        """The third switch: off by default, a system flag on the proposer
+        (a node of its own would be a box with no edges), its description
+        inside the 300-char column Postgres enforces, and honest about the
+        one thing it never does."""
+        from core.platform_control import DEFAULT_COMPONENTS
+        from dashboard.views_topology import MODE_FLAGS, WIRING
+        by_key = {c["key"]: c for c in DEFAULT_COMPONENTS}
+        auto = by_key["share_allocator_auto_derisk"]
+        self.assertEqual(auto["category"], "system")
+        self.assertLessEqual(len(auto["description"]), 300)
+        self.assertIn("Off (default)", auto["description"])
+        self.assertIn("LIVE", auto["description"])
+        self.assertIn("Re-risking is never automatic", auto["description"])
+        self.assertEqual(MODE_FLAGS["share_allocator_auto_derisk"],
+                         "pipeline_share_allocator")
+        self.assertIn("sync", WIRING["pipeline_share_allocator"]["note"])
+        self.assertIn("share_allocator_auto_derisk",
+                      WIRING["pipeline_share_allocator"]["note"])
+
     def test_the_sync_declares_the_history_table_it_writes(self):
         from dashboard.views_topology import WIRING
         self.assertIn("BrokerEquityReading",
@@ -1040,3 +1064,626 @@ class TaskTests(TestCase):
         self.assertEqual(out["errors"], 1)
         self.assertIn("boom", out["error"])
         self.assertEqual(judge_result(out)[0], "error")
+
+
+# ── De-risk fast, re-risk slow ───────────────────────────────────────────
+
+def _set_auto_derisk(enabled: bool):
+    from core.platform_control import PlatformComponent
+    c, _ = PlatformComponent.objects.get_or_create(
+        key="share_allocator_auto_derisk",
+        defaults={"name": "Share Allocator Auto De-risk", "category": "system"})
+    c.is_enabled = enabled
+    c.save()
+
+
+def _run_sync(reading):
+    """The sync task with the socket layer stubbed, as test_equity_history
+    runs it: __wrapped__ twice to step past @shared_task and @guarded_task."""
+    from unittest.mock import MagicMock
+
+    from bot_program.tasks import sync_broker_account
+    trader = MagicMock()
+    trader.net_liquidation.return_value = reading
+    trader.broker_portfolio.return_value = []
+    with patch("bot_program.engine.ibkr_client.is_ibkr_available",
+               return_value=True), \
+         patch("bot_program.engine.ibkr_client.IBKRTrader",
+               return_value=trader):
+        return sync_broker_account.__wrapped__.__wrapped__()
+
+
+class ResponsiveTests(TestCase):
+    """The operator's ask (2026-09-12): "the allocation percentages must
+    be purely responsive — in a strong rally or a big crash Sauron must
+    be able to respond." The symmetric 10-point cap took three plans to
+    reach a 20% crash's governor. These pin the three modes: SHOCK is
+    de-risk only (down uncapped and unsmoothed, up frozen, released
+    mass is cash, floors hold, held exactly below the capped value);
+    EXPANSION widens the upward allowance to 20 at the high-water mark
+    with measured positive evidence and leaves the downward one at 10;
+    NORMAL is the rule as it was. The sync proposes at once on a shock,
+    once an hour, never without the component; and the opt-in auto
+    de-risk applies only a pure de-risk SHOCK plan, only with both
+    switches on, and leaves a refused plan PROPOSED."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.user = User.objects.create_user("sa_resp", password="x")
+        self.acct = _acct(self.user)
+
+    # ── market_state ────────────────────────────────────────────────
+
+    def test_shock_via_the_24h_drop(self):
+        """2,100 twelve hours ago, 2,000 now: −4.8% in 24h is a shock
+        even though the drawdown (4.8%) is under the governor's knee.
+        The same reading 30h ago is outside the window: normal."""
+        from bot_program.share_allocator import market_state
+        _reading(self.acct, 2100, days_ago=0.5)
+        st = market_state(self.user, None)
+        self.assertEqual(st["mode"], "shock")
+        self.assertAlmostEqual(st["drop_24h_pct"], 100.0 / 2100.0)
+        self.assertLess(st["drawdown_pct"], 0.05)
+        self.assertEqual(st["reasons"], ["equity −4.8% in 24h"])
+        self.assertFalse(st["at_hwm"])
+        from bot_program.models import BrokerEquityReading
+        BrokerEquityReading.objects.filter(account=self.acct).update(
+            at=timezone.now() - timedelta(hours=30))
+        st = market_state(self.user, None)
+        self.assertEqual(st["mode"], "normal")
+        self.assertIsNone(st["drop_24h_pct"])
+        self.assertIn("4.8% under the high-water mark", st["reasons"][0])
+
+    def test_shock_via_the_drawdown_past_the_knee(self):
+        from bot_program.share_allocator import market_state
+        _reading(self.acct, 2200, days_ago=10)         # dd 9.1%, no 24h row
+        st = market_state(self.user, None)
+        self.assertEqual(st["mode"], "shock")
+        self.assertEqual(st["reasons"], ["drawdown 9.1% past the 5% knee"])
+        self.assertIsNone(st["drop_24h_pct"])
+        # Exactly at the knee is not past it.
+        from bot_program.models import BrokerEquityReading
+        BrokerEquityReading.objects.filter(account=self.acct).update(
+            value=Decimal("2105.26"))                   # dd 5.000%
+        self.assertEqual(market_state(self.user, None)["mode"], "normal")
+
+    def test_shock_via_the_regime_and_never_via_unknown(self):
+        from bot_program.share_allocator import market_state
+        risk_off = {"regime_label": "risk_off", "regime_confidence": 0.71}
+        st = market_state(self.user, risk_off)
+        self.assertEqual(st["mode"], "shock")
+        self.assertEqual(st["reasons"], ["regime risk_off 0.71"])
+        self.assertEqual(st["regime"], "risk_off")
+        blow = {"regime_label": "blow_off", "regime_confidence": 0.65}
+        self.assertEqual(market_state(self.user, blow)["mode"], "shock")
+        timid = {"regime_label": "risk_off", "regime_confidence": 0.64}
+        self.assertEqual(market_state(self.user, timid)["mode"], "normal")
+        unknown = {"regime_label": "unknown", "regime_confidence": 0.99}
+        self.assertEqual(market_state(self.user, unknown)["mode"], "normal")
+        risk_on = {"regime_label": "risk_on", "regime_confidence": 0.99}
+        self.assertEqual(market_state(self.user, risk_on)["mode"], "normal")
+        self.assertIsNone(market_state(self.user, None)["regime"])
+
+    def test_the_hold_after_a_shock_plan(self):
+        """A shock plan proposed 23h ago keeps the mode at shock with no
+        other trigger; one proposed 25h ago does not."""
+        from bot_program.share_allocator import market_state
+        from bot_program.share_models import SharePlan
+        p = SharePlan.objects.create(user=self.user, mode="shock",
+                                     state=SharePlan.STATE_EXPIRED)
+        SharePlan.objects.filter(pk=p.pk).update(
+            proposed_at=timezone.now() - timedelta(hours=23))
+        st = market_state(self.user, None)
+        self.assertEqual(st["mode"], "shock")
+        self.assertEqual(len(st["reasons"]), 1)
+        self.assertIn("shock hold until", st["reasons"][0])
+        self.assertIn(f"plan #{p.pk}", st["reasons"][0])
+        SharePlan.objects.filter(pk=p.pk).update(
+            proposed_at=timezone.now() - timedelta(hours=25))
+        self.assertEqual(market_state(self.user, None)["mode"], "normal")
+        # Another user's shock plan is not this user's hold.
+        other = User.objects.create_user("sa_resp_o", password="x")
+        SharePlan.objects.create(user=other, mode="shock")
+        self.assertEqual(market_state(self.user, None)["mode"], "normal")
+
+    def test_a_plan_proposed_on_the_hold_alone_does_not_restart_the_hold(self):
+        """Plan A: a fresh shock 20 h ago (hold until +4 h). Plan B: proposed
+        2 h ago on the hold alone. The hold is A's — A's plan number, A's
+        clock — and once A is 25 h old the mode is normal although B is
+        2 h old. Before 2026-09-12 B re-armed the hold, the 4-hourly beat
+        wrote such a plan every 4 h, and the account never re-risked
+        again. A plan that carries the hold AND a fresh detection is an
+        anchor of its own."""
+        from bot_program.share_allocator import market_state
+        from bot_program.share_models import SharePlan
+        a = SharePlan.objects.create(user=self.user, mode="shock",
+                                     state=SharePlan.STATE_EXPIRED,
+                                     mode_reasons=["equity −4.8% in 24h"])
+        SharePlan.objects.filter(pk=a.pk).update(
+            proposed_at=timezone.now() - timedelta(hours=20))
+        b = SharePlan.objects.create(
+            user=self.user, mode="shock",
+            mode_reasons=[f"shock hold until 09-12 10:00 (plan #{a.pk})"])
+        SharePlan.objects.filter(pk=b.pk).update(
+            proposed_at=timezone.now() - timedelta(hours=2))
+        st = market_state(self.user, None)
+        self.assertEqual(st["mode"], "shock")
+        self.assertEqual(len(st["reasons"]), 1)
+        self.assertIn(f"plan #{a.pk}", st["reasons"][0])
+        self.assertNotIn(f"plan #{b.pk}", st["reasons"][0])
+        SharePlan.objects.filter(pk=a.pk).update(
+            proposed_at=timezone.now() - timedelta(hours=25))
+        st = market_state(self.user, None)
+        self.assertEqual(st["mode"], "normal")
+        self.assertNotIn("shock hold", " ".join(st["reasons"]))
+        c = SharePlan.objects.create(
+            user=self.user, mode="shock",
+            mode_reasons=[f"shock hold until 09-12 10:00 (plan #{a.pk})",
+                          "drawdown 9.1% past the 5% knee"])
+        SharePlan.objects.filter(pk=c.pk).update(
+            proposed_at=timezone.now() - timedelta(hours=2))
+        st = market_state(self.user, None)
+        self.assertEqual(st["mode"], "shock")
+        self.assertIn(f"plan #{c.pk}", st["reasons"][0])
+
+    def test_the_beat_inside_the_hold_lets_the_hold_lapse(self):
+        """End to end. Plan #1 is a fresh shock (−4.8% in 24 h). Twenty
+        hours on, the drop is out of its window and the drawdown (4.8%)
+        is under the knee, so plan #2 is a shock on the hold alone — and
+        its reasons say only that, anchored on #1. Once #1 is 25 h old the
+        hold has lapsed although #2 is seconds old: the next plan is
+        NORMAL, with the drawdown as its reason."""
+        from bot_program.models import BrokerEquityReading
+        from bot_program.share_allocator import (market_state,
+                                                 propose_share_plan)
+        from bot_program.share_models import SharePlan
+        _reading(self.acct, 2100, days_ago=0.5)
+        _cfg(self.user, name="a", tracks=True, share=50)
+        _cfg(self.user, name="b", tracks=True, share=50, asset_class="forex",
+             symbols=["EURUSD"])
+        p1 = propose_share_plan(self.user)
+        self.assertEqual(p1.mode_reasons, ["equity −4.8% in 24h"])
+        BrokerEquityReading.objects.filter(account=self.acct).update(
+            at=timezone.now() - timedelta(hours=30))
+        SharePlan.objects.filter(pk=p1.pk).update(
+            proposed_at=timezone.now() - timedelta(hours=20))
+        p2 = propose_share_plan(self.user)
+        self.assertEqual(p2.mode, "shock")
+        self.assertEqual(len(p2.mode_reasons), 1)
+        self.assertTrue(p2.mode_reasons[0].startswith("shock hold until"),
+                        p2.mode_reasons)
+        self.assertIn(f"plan #{p1.pk}", p2.mode_reasons[0])
+        SharePlan.objects.filter(pk=p1.pk).update(
+            proposed_at=timezone.now() - timedelta(hours=25))
+        self.assertEqual(market_state(self.user, None)["mode"], "normal")
+        p3 = propose_share_plan(self.user)
+        self.assertEqual(p3.mode, "normal")
+        self.assertEqual(p3.mode_reasons, ["4.8% under the high-water mark"])
+
+    def test_expansion_only_at_the_hwm_with_measured_positive_evidence(self):
+        from bot_program.share_allocator import MIN_EVIDENCE_N, market_state
+        proven = {"a": {"measured": True, "avg_r": 0.4, "n": MIN_EVIDENCE_N,
+                        "lane": "live", "score": 1.3}}
+        st = market_state(self.user, None, evidence=proven)  # no history: at hwm
+        self.assertEqual(st["mode"], "expansion")
+        self.assertTrue(st["at_hwm"])
+        self.assertEqual(st["reasons"][0], "at the high-water mark")
+        self.assertIn("a: avg_r +0.40 over 10 fills", st["reasons"][1])
+        thin = {"a": {"measured": True, "avg_r": 0.4, "n": MIN_EVIDENCE_N - 1}}
+        self.assertEqual(market_state(self.user, None, evidence=thin)["mode"],
+                         "normal")
+        losing = {"a": {"measured": True, "avg_r": -0.1, "n": 30}}
+        self.assertEqual(market_state(self.user, None, evidence=losing)["mode"],
+                         "normal")
+        unmeasured = {"a": {"measured": False, "avg_r": None, "n": 0}}
+        st = market_state(self.user, None, evidence=unmeasured)
+        self.assertEqual(st["mode"], "normal")
+        self.assertIn("no measured positive lane", st["reasons"][0])
+        # 0.5% under the high-water mark is not AT it.
+        _reading(self.acct, 2010, days_ago=3)
+        st = market_state(self.user, None, evidence=proven)
+        self.assertEqual(st["mode"], "normal")
+        self.assertFalse(st["at_hwm"])
+        self.assertIn("0.5% under the high-water mark", st["reasons"][0])
+
+    def test_a_reader_failure_is_normal_with_the_reason(self):
+        from bot_program.share_allocator import market_state
+        with patch("bot_program.capital_truth.equity_drawdown",
+                   side_effect=RuntimeError("history down")):
+            st = market_state(self.user, {"regime_label": "risk_off",
+                                          "regime_confidence": 0.9})
+        self.assertEqual(st["mode"], "normal")
+        self.assertIn("market state unreadable: history down", st["reasons"][0])
+        # No reading at all: normal, and it says so.
+        self.acct.last_equity = None
+        self.acct.save(update_fields=["last_equity"])
+        st = market_state(self.user, None)
+        self.assertEqual((st["mode"], st["reasons"]), ("normal", ["no reading"]))
+
+    # ── the SHOCK plan ──────────────────────────────────────────────
+
+    def test_a_shock_plan_drops_the_whole_way_and_floors_hold(self):
+        """20% under the high → governor 0.4 → 40 deployable. b's floor is
+        25, so the water-fill gives b 25 and a 15: a drops 35 points in
+        ONE plan (the cap would have allowed 10), b drops to its floor and
+        not under it, the sum is the governor's 40, and the notes and the
+        why say SHOCK."""
+        from bot_program.share_allocator import propose_share_plan
+        _reading(self.acct, 2500, days_ago=10)
+        a = _cfg(self.user, name="a", tracks=True, share=50)
+        b = _cfg(self.user, name="b", tracks=True, share=50,
+                 share_floor_pct=25)
+        plan = propose_share_plan(self.user)
+        self.assertEqual(plan.mode, "shock")
+        self.assertEqual(plan.mode_reasons, ["drawdown 20.0% past the 5% knee"])
+        self.assertEqual(plan.targets[str(a.pk)], 15.0)
+        self.assertEqual(plan.targets[str(b.pk)], 25.0)
+        self.assertAlmostEqual(sum(plan.targets.values()), 40.0)
+        ia, ib = plan.inputs[str(a.pk)], plan.inputs[str(b.pk)]
+        self.assertEqual((ia["allowance_up"], ia["allowance_down"]), (0.0, 100.0))
+        self.assertEqual(ia["mode"], "shock")
+        self.assertFalse(ia["held"]); self.assertFalse(ib["held"])
+        self.assertIn("SHOCK: de-risk only", ia["why"])
+        self.assertIn("SHOCK: de-risk only — drawdown 20.0% past the 5% knee",
+                      plan.notes)
+        self.assertNotIn("EXPANSION", plan.notes)
+
+    def test_a_shock_plan_holds_a_pool_below_its_capped_value_and_leaves_cash(self):
+        """A 24h drop with no drawdown past the knee: governor 1.0, so the
+        water-fill says 60/40 (a has ten winning fills). a sits BELOW its
+        capped 60 and is held at 50 exactly — up is frozen; b drops the
+        whole 10 at once (normal would have smoothed it to 45). The ten
+        points b released go nowhere: the sum is 90 < 100 × governor."""
+        from bot_program.share_allocator import propose_share_plan
+        _reading(self.acct, 2100, days_ago=0.5)
+        a = _cfg(self.user, name="a", tracks=True, share=50)
+        b = _cfg(self.user, name="b", tracks=True, share=50,
+                 asset_class="forex", symbols=["EURUSD"])
+        for _ in range(10):
+            _fill(a, 1.0)
+        plan = propose_share_plan(self.user)
+        self.assertEqual(plan.mode, "shock")
+        self.assertEqual(plan.mode_reasons, ["equity −4.8% in 24h"])
+        self.assertAlmostEqual(plan.governor, 1.0)
+        ia, ib = plan.inputs[str(a.pk)], plan.inputs[str(b.pk)]
+        self.assertAlmostEqual(ia["capped"], 60.0, places=3)
+        self.assertEqual(plan.targets[str(a.pk)], 50.0)
+        self.assertTrue(ia["held"])
+        self.assertEqual(plan.targets[str(b.pk)], 40.0)
+        self.assertFalse(ib["held"])
+        self.assertAlmostEqual(sum(plan.targets.values()), 90.0)
+        self.assertLess(sum(plan.targets.values()), 100.0 * plan.governor)
+        self.assertIn("SHOCK", plan.notes)
+
+    def test_a_shock_plan_holds_a_pool_under_its_floor_exactly(self):
+        """10% under the high → governor 0.8, 80 deployable. b's floor is
+        40 but its share is 33.3333 (an automatic third, four decimals);
+        the water-fill gives b its floor and a the other 40. a drops
+        66.67 → 40 uncapped. b sits BELOW its capped value, so it is held
+        — exactly, 33.3333, not the 33.33 that rounding made of it: that
+        phantom 0.0033 was a move the sync re-sized on and is_pure_derisk
+        counted as a de-risk (2026-09-12). Under its floor by 6.67 points
+        it is not lifted (the lift closes gaps under the hysteresis)."""
+        from bot_program.share_allocator import (is_pure_derisk,
+                                                 propose_share_plan)
+        _reading(self.acct, 2222.22, days_ago=10)
+        a = _cfg(self.user, name="a", tracks=True, share=66.6667)
+        b = _cfg(self.user, name="b", tracks=True, share=33.3333,
+                 share_floor_pct=40, asset_class="forex", symbols=["EURUSD"])
+        plan = propose_share_plan(self.user)
+        self.assertEqual(plan.mode, "shock")
+        self.assertAlmostEqual(plan.governor, 0.8, places=5)
+        ia, ib = plan.inputs[str(a.pk)], plan.inputs[str(b.pk)]
+        self.assertAlmostEqual(ib["capped"], 40.0, places=3)
+        self.assertEqual(plan.targets[str(b.pk)], 33.3333)
+        self.assertTrue(ib["held"])
+        self.assertNotIn("b: below its floor", plan.notes)
+        self.assertEqual(plan.targets[str(a.pk)], 40.0)
+        self.assertFalse(ia["held"])
+        self.assertTrue(is_pure_derisk(plan))
+
+    def test_a_shock_plan_lifts_a_new_follower_to_its_floor_only(self):
+        """A follower with no share at all enters at its floor even in a
+        shock (0 reads as "automatic" to the sync); it never gets more."""
+        from bot_program.share_allocator import propose_share_plan
+        _reading(self.acct, 2500, days_ago=10)
+        a = _cfg(self.user, name="a", tracks=True, share=50)
+        b = _cfg(self.user, name="b", tracks=True, share=50)
+        c = _cfg(self.user, name="c", tracks=True)
+        plan = propose_share_plan(self.user)
+        self.assertEqual(plan.mode, "shock")
+        self.assertIsNone(plan.current_shares[str(c.pk)])
+        self.assertEqual(plan.targets[str(c.pk)], 2.0)
+        self.assertIn("c: below its floor — lifted to 2%", plan.notes)
+        self.assertLess(plan.targets[str(a.pk)], 50.0)
+        self.assertLess(plan.targets[str(b.pk)], 50.0)
+        self.assertLessEqual(sum(plan.targets.values()), 40.0 + 1e-6)
+
+    # ── the EXPANSION plan ──────────────────────────────────────────
+
+    def _expansion_fleet(self, score_a):
+        """a at 30, b and c at 35 each, at the high-water mark; a's
+        evidence is patched to `score_a` (measured, positive, ten fills)
+        so the water-fill hands it capped = 100 × 30s / (30s + 70)."""
+        a = _cfg(self.user, name="a", tracks=True, share=30,
+                 share_ceiling_pct=100)
+        b = _cfg(self.user, name="b", tracks=True, share=35,
+                 asset_class="forex", symbols=["EURUSD"])
+        c = _cfg(self.user, name="c", tracks=True, share=35,
+                 asset_class="crypto", symbols=["BTCUSDT"])
+        neutral = {"lane": "none", "n": 0, "win_rate": None, "avg_r": None,
+                   "measured": False, "score": 1.0, "reason": "unmeasured"}
+        proven = {"lane": "live", "n": 10, "win_rate": 0.8, "avg_r": 1.0,
+                  "measured": True, "score": score_a, "reason": "live"}
+
+        def evidence(cfg, days=90):
+            return dict(proven if cfg.name == "a" else neutral)
+        return a, b, c, evidence
+
+    def test_expansion_lets_15_points_pass_and_down_stays_10(self):
+        """score 3.5 → a capped 60, smoothed 45: +15 passes under the
+        20-point expansion allowance (normal would stop at 40). b and c
+        each want −7.5, inside the downward 10."""
+        from bot_program.share_allocator import propose_share_plan
+        a, b, c, evidence = self._expansion_fleet(3.5)
+        with patch("bot_program.evidence.config_evidence", side_effect=evidence):
+            plan = propose_share_plan(self.user)
+        self.assertEqual(plan.mode, "expansion")
+        self.assertEqual(plan.mode_reasons[0], "at the high-water mark")
+        self.assertIn("a: avg_r +1.00 over 10 fills", plan.mode_reasons[1])
+        ia = plan.inputs[str(a.pk)]
+        self.assertAlmostEqual(ia["capped"], 60.0, places=3)
+        self.assertEqual(plan.targets[str(a.pk)], 45.0)
+        self.assertEqual(plan.targets[str(b.pk)], 27.5)
+        self.assertEqual(plan.targets[str(c.pk)], 27.5)
+        self.assertEqual((ia["allowance_up"], ia["allowance_down"]), (20.0, 10.0))
+        self.assertIn("EXPANSION: up to 20 pt up / 10 pt down today", ia["why"])
+        self.assertIn("EXPANSION: up to 20 pt/day up — at the high-water mark",
+                      plan.notes)
+
+    def test_expansion_caps_25_at_20_and_the_downward_10_still_binds(self):
+        """score 9.333… → a capped 80, smoothed 55: +25 is capped at 20
+        (30 → 50). b and c each want −12.5 and stop at −10 (35 → 25)."""
+        from bot_program.share_allocator import propose_share_plan
+        a, b, c, evidence = self._expansion_fleet(28.0 / 3.0)
+        with patch("bot_program.evidence.config_evidence", side_effect=evidence):
+            plan = propose_share_plan(self.user)
+        self.assertEqual(plan.mode, "expansion")
+        ia = plan.inputs[str(a.pk)]
+        self.assertAlmostEqual(ia["capped"], 80.0, places=3)
+        self.assertEqual(plan.targets[str(a.pk)], 50.0)
+        self.assertEqual(plan.targets[str(b.pk)], 25.0)
+        self.assertEqual(plan.targets[str(c.pk)], 25.0)
+        # ... and what applied plans already moved today comes off the
+        # upward allowance too: 8 points used leaves 12.
+        _applied(self.user, {a.pk: 30, b.pk: 35, c.pk: 35},
+                 {a.pk: 22, b.pk: 39, c.pk: 39}, hours_ago=3)
+        with patch("bot_program.evidence.config_evidence", side_effect=evidence):
+            plan = propose_share_plan(self.user)
+        self.assertEqual(plan.targets[str(a.pk)], 42.0)
+        self.assertEqual(plan.inputs[str(a.pk)]["allowance_up"], 12.0)
+        self.assertEqual(plan.targets[str(b.pk)], 29.0)          # 10 - 4 = 6 left
+
+    def test_normal_is_the_rule_exactly_as_it_was(self):
+        """Not at the high-water mark, no shock: the same +5 the
+        ApplyTests fixture has always produced, with a symmetric 10."""
+        from bot_program.share_allocator import propose_share_plan
+        _reading(self.acct, 2020, days_ago=3)              # dd 1%: not at hwm
+        a = _cfg(self.user, name="a", tracks=True, share=50)
+        b = _cfg(self.user, name="b", tracks=True, asset_class="forex",
+                 symbols=["EURUSD"])
+        for _ in range(10):
+            _fill(a, 1.0)
+        plan = propose_share_plan(self.user)
+        self.assertEqual(plan.mode, "normal")
+        self.assertEqual(plan.mode_reasons, ["1.0% under the high-water mark"])
+        self.assertEqual(plan.targets[str(a.pk)], 55.0)
+        self.assertEqual(plan.targets[str(b.pk)], 45.0)
+        ia = plan.inputs[str(a.pk)]
+        self.assertEqual((ia["allowance_up"], ia["allowance_down"]), (10.0, 10.0))
+        self.assertNotIn("SHOCK", ia["why"]); self.assertNotIn("EXPANSION", ia["why"])
+        self.assertNotIn("SHOCK", plan.notes); self.assertNotIn("EXPANSION", plan.notes)
+
+    # ── the sync trigger ────────────────────────────────────────────
+
+    def test_the_sync_trigger_proposes_once_per_hour_on_a_shock(self):
+        """2,100 twelve hours ago; the sync stores 2,000 → −4.8% → a
+        shock plan at once, staff told; the next sync inside the hour
+        writes no second plan. A sync that stores no shock never fires."""
+        from bot_program.share_models import SharePlan
+        _enable("pipeline_share_allocator", "broker_account_sync")
+        _reading(self.acct, 2100, days_ago=0.5)
+        _cfg(self.user, name="a", tracks=True, share=50, capital="1000")
+        _cfg(self.user, name="b", tracks=True, share=50, capital="1000")
+        with patch("bot_program.notifications.notify_staff") as notify:
+            out = _run_sync((2000.0, "EUR"))
+        self.assertEqual(out["stored"], 1)
+        plans = list(SharePlan.objects.filter(user=self.user))
+        self.assertEqual(len(plans), 1)
+        self.assertEqual(plans[0].mode, "shock")
+        self.assertEqual(plans[0].state, SharePlan.STATE_PROPOSED)
+        self.assertIn("equity −4.8% in 24h", plans[0].mode_reasons)
+        notify.assert_called_once()
+        self.assertEqual(notify.call_args.kwargs["title"], "⚠ Shock plan proposed")
+        self.assertIn("sa_resp: equity −4.8% in 24h", notify.call_args.kwargs["body"])
+        self.assertIn("pool(s) to de-risk — open /shares/",
+                      notify.call_args.kwargs["body"])
+        self.assertEqual(notify.call_args.kwargs["url"], "/shares/")
+        self.assertEqual(notify.call_args.kwargs["cooldown_hours"], 1)
+        # Inside the cooldown: the reading lands, no second plan.
+        with patch("bot_program.notifications.notify_staff") as notify:
+            out = _run_sync((1990.0, "EUR"))
+        self.assertEqual(out["stored"], 1)
+        self.assertEqual(SharePlan.objects.filter(user=self.user).count(), 1)
+        notify.assert_not_called()
+        # The cooldown key is the gate: cleared, the next shock fires again.
+        from django.core.cache import cache
+        cache.delete(f"shares:shock:{self.user.pk}")
+        with patch("bot_program.notifications.notify_staff") as notify:
+            _run_sync((1980.0, "EUR"))
+        self.assertEqual(SharePlan.objects.filter(user=self.user).count(), 2)
+        notify.assert_called_once()
+
+    def test_the_sync_trigger_never_fires_without_the_component(self):
+        from bot_program.share_models import SharePlan
+        _enable("broker_account_sync")                  # the allocator off
+        _reading(self.acct, 2100, days_ago=0.5)
+        _cfg(self.user, name="a", tracks=True, share=50)
+        with patch("bot_program.notifications.notify_staff") as notify:
+            out = _run_sync((2000.0, "EUR"))
+        self.assertEqual(out["stored"], 1)
+        self.assertFalse(SharePlan.objects.exists())
+        notify.assert_not_called()
+        # And with the component on but no shock in the reading: nothing.
+        _enable("pipeline_share_allocator")
+        with patch("bot_program.notifications.notify_staff") as notify:
+            _run_sync((2100.0, "EUR"))                     # back at the high
+        self.assertFalse(SharePlan.objects.exists())
+        notify.assert_not_called()
+
+    def test_a_failed_shock_proposal_never_fails_the_sync(self):
+        _enable("pipeline_share_allocator", "broker_account_sync")
+        _reading(self.acct, 2100, days_ago=0.5)
+        _cfg(self.user, name="a", tracks=True, share=50)
+        with patch("bot_program.share_allocator.propose_share_plan_with_reason",
+                   side_effect=RuntimeError("boom")):
+            out = _run_sync((2000.0, "EUR"))
+        self.assertEqual(out["stored"], 1)
+        self.acct.refresh_from_db()
+        self.assertEqual(float(self.acct.last_equity), 2000.0)
+
+    # ── automatic de-risking ────────────────────────────────────────
+
+    def _shock_fleet(self):
+        _reading(self.acct, 2500, days_ago=10)          # dd 20% → 20/20
+        a = _cfg(self.user, name="a", tracks=True, share=50, capital="1000")
+        b = _cfg(self.user, name="b", tracks=True, share=50, capital="1000")
+        return a, b
+
+    def test_auto_derisk_needs_both_switches_and_a_shock_plan(self):
+        from bot_program.share_allocator import propose_share_plan
+        from bot_program.share_models import SharePlan
+        a, b = self._shock_fleet()
+        for live, auto in ((False, False), (True, False), (False, True)):
+            _set_live(live); _set_auto_derisk(auto)
+            with patch("bot_program.notifications.notify_staff") as notify:
+                plan = propose_share_plan(self.user)
+            self.assertEqual(plan.mode, "shock")
+            self.assertEqual(plan.state, SharePlan.STATE_PROPOSED)
+            self.assertNotIn("auto de-risk", plan.notes)
+            notify.assert_not_called()
+            a.refresh_from_db()
+            self.assertEqual(a.extras["account_share_pct"], 50)
+            self.assertEqual(float(a.capital), 1000.0)
+
+    def test_auto_derisk_applies_a_pure_derisk_shock_plan_and_tells_staff(self):
+        from bot_program.models import AuditLogEntry
+        from bot_program.share_allocator import propose_share_plan
+        from bot_program.share_models import SharePlan
+        a, b = self._shock_fleet()
+        _set_live(True); _set_auto_derisk(True)
+        with patch("bot_program.notifications.notify_staff") as notify:
+            plan = propose_share_plan(self.user)
+        self.assertEqual(plan.mode, "shock")
+        self.assertEqual(plan.state, SharePlan.STATE_APPLIED)
+        self.assertIsNone(plan.confirmed_by)
+        self.assertIsNotNone(plan.applied_at)
+        self.assertIn("auto de-risk applied", plan.notes)
+        self.assertEqual(plan.previous_shares, {str(a.pk): 50, str(b.pk): 50})
+        a.refresh_from_db(); b.refresh_from_db()
+        self.assertEqual(a.extras["account_share_pct"], 20.0)
+        self.assertEqual(b.extras["account_share_pct"], 20.0)
+        self.assertEqual(float(a.capital), 400.0)          # 20% of 2000
+        self.assertEqual(float(b.capital), 400.0)
+        row = AuditLogEntry.objects.filter(kind="share_plan").last()
+        self.assertEqual(row.data["decision"], "auto_derisk")
+        self.assertEqual(row.data["plan_id"], plan.pk)
+        self.assertIsNone(row.user)
+        notify.assert_called_once()
+        kw = notify.call_args.kwargs
+        self.assertEqual(kw["title"], "⚠ Shares de-risked automatically")
+        self.assertIn("a 50% → 20%", kw["body"])
+        self.assertIn("b 50% → 20%", kw["body"])
+        self.assertEqual((kw["url"], kw["cooldown_hours"]), ("/shares/", 1))
+        # Rollback is the same rollback: exact.
+        from bot_program.share_allocator import rollback_share_plan
+        rollback_share_plan(plan.pk, None)
+        a.refresh_from_db()
+        self.assertEqual(a.extras["account_share_pct"], 50)
+        self.assertEqual(float(a.capital), 1000.0)
+
+    def test_auto_derisk_never_applies_a_plan_with_an_upward_target(self):
+        """c just opted in with no share: it enters at its floor, which is
+        an UPWARD move, so the plan waits for a human although a and b
+        both drop. is_pure_derisk is the rule, pinned on its own too."""
+        from bot_program.share_allocator import (is_pure_derisk,
+                                                 propose_share_plan)
+        from bot_program.share_models import SharePlan
+        a, b = self._shock_fleet()
+        c = _cfg(self.user, name="c", tracks=True, capital="10")
+        _set_live(True); _set_auto_derisk(True)
+        with patch("bot_program.notifications.notify_staff") as notify:
+            plan = propose_share_plan(self.user)
+        self.assertEqual(plan.mode, "shock")
+        self.assertEqual(plan.targets[str(c.pk)], 2.0)
+        self.assertEqual(plan.state, SharePlan.STATE_PROPOSED)
+        self.assertNotIn("auto de-risk", plan.notes)
+        notify.assert_not_called()
+        a.refresh_from_db()
+        self.assertEqual(float(a.capital), 1000.0)
+        from types import SimpleNamespace
+        self.assertTrue(is_pure_derisk(SimpleNamespace(
+            targets={"1": 20.0, "2": 50.0}, current_shares={"1": 50, "2": 50})))
+        self.assertFalse(is_pure_derisk(SimpleNamespace(       # one goes up
+            targets={"1": 20.0, "2": 50.01}, current_shares={"1": 50, "2": 50})))
+        self.assertFalse(is_pure_derisk(SimpleNamespace(       # all held
+            targets={"1": 50.0, "2": 50.0}, current_shares={"1": 50, "2": 50})))
+        self.assertFalse(is_pure_derisk(SimpleNamespace(       # no current
+            targets={"1": 2.0}, current_shares={"1": None})))
+        self.assertTrue(is_pure_derisk(SimpleNamespace(        # 1e-9 slack
+            targets={"1": 50.0 + 1e-10, "2": 40.0},
+            current_shares={"1": 50, "2": 50})))
+
+    def test_auto_derisk_leaves_the_plan_proposed_on_a_daily_cap_refusal(self):
+        from bot_program.share_allocator import (MAX_APPLIES_PER_DAY,
+                                                 propose_share_plan)
+        from bot_program.share_models import SharePlan
+        a, b = self._shock_fleet()
+        _set_live(True); _set_auto_derisk(True)
+        for _ in range(MAX_APPLIES_PER_DAY):
+            _applied(self.user, {a.pk: 50}, {a.pk: 50}, hours_ago=2)
+        with patch("bot_program.notifications.notify_staff") as notify:
+            plan = propose_share_plan(self.user)
+        self.assertEqual(plan.mode, "shock")
+        self.assertEqual(plan.state, SharePlan.STATE_PROPOSED)
+        self.assertNotIn("auto de-risk", plan.notes)
+        notify.assert_not_called()
+        a.refresh_from_db()
+        self.assertEqual(a.extras["account_share_pct"], 50)
+        self.assertEqual(float(a.capital), 1000.0)
+        # A human can still apply it once the cap frees — the plan is whole.
+        self.assertEqual(plan.targets[str(a.pk)], 20.0)
+
+    def test_the_migration_is_present_and_clean(self):
+        """0027 adds mode and mode_reasons; makemigrations --check finds
+        nothing left to write."""
+        from importlib import import_module
+        from io import StringIO
+
+        from django.core.management import call_command
+        from bot_program.share_models import SharePlan
+        mig = import_module("bot_program.migrations.0027_share_plan_mode")
+        self.assertEqual({op.name for op in mig.Migration.operations},
+                         {"mode", "mode_reasons"})
+        self.assertEqual(SharePlan._meta.get_field("mode").max_length, 12)
+        self.assertEqual(SharePlan._meta.get_field("mode").default, "normal")
+        self.assertTrue(SharePlan._meta.get_field("mode").db_index)
+        self.assertEqual(SharePlan._meta.get_field("mode_reasons").default, list)
+        out = StringIO()
+        try:
+            call_command("makemigrations", "bot_program", "--check", "--dry-run",
+                         stdout=out, verbosity=0)
+        except SystemExit as e:  # --check exits 1 when a migration is missing
+            self.fail(f"makemigrations --check found changes: {out.getvalue()} "
+                      f"(exit {e.code})")

@@ -155,6 +155,35 @@ class ListAndProposeTests(_Fixture):
         self.assertEqual(self.a.extras["account_share_pct"], 50)
         self.assertEqual(float(self.a.capital), 1000.0)
 
+    def test_list_and_propose_print_the_mode_and_its_reasons(self):
+        """A plan proposed 20% under the high is a SHOCK plan and the
+        shell says so, with the reason, before the targets — an operator
+        reading "50% → 20%" must know the cap was off on purpose."""
+        from bot_program.models import BrokerEquityReading
+        BrokerEquityReading.objects.create(
+            account=self.acct, value=Decimal("2500"), currency="EUR",
+            env="live", at=timezone.now() - timedelta(days=10))
+        out = _run("shares", "propose", user="sh_u")
+        self.assertIn("mode SHOCK — drawdown 20.0% past the 5% knee", out)
+        # 60/40 by evidence, × the 0.4 governor: 24/16, the whole way in
+        # one plan — the 10-point cap would have printed 40/40.
+        self.assertIn("50% → 24%", out)
+        self.assertIn("50% → 16%", out)
+        self.assertIn("SHOCK: de-risk only (no smoothing, down uncapped, "
+                      "up frozen)", out)
+        out = _run("shares", "list")
+        self.assertIn("mode SHOCK — drawdown 20.0% past the 5% knee", out)
+        # And the fixture's own plan — at the high-water mark with a
+        # measured positive lane — reads EXPANSION, with its reasons, once
+        # the shock plan's 24h hold has passed (the hold is a shock too).
+        BrokerEquityReading.objects.filter(account=self.acct).delete()
+        from bot_program.share_models import SharePlan
+        SharePlan.objects.filter(user=self.user).update(
+            proposed_at=timezone.now() - timedelta(hours=25))
+        out = _run("shares", "propose", user="sh_u")
+        self.assertIn("mode EXPANSION — at the high-water mark; alpha_stock: "
+                      "avg_r +1.00 over 10 fills", out)
+
     def test_propose_prints_the_reason_when_nothing_is_proposed(self):
         from bot_program.share_models import SharePlan
         self.acct.last_equity_at = timezone.now() - timedelta(hours=3)

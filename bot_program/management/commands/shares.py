@@ -94,6 +94,13 @@ class Command(BaseCommand):
             f"{stamp:%m-%d %H:%M}  reading {reading}  "
             f"drawdown {float(plan.drawdown_pct or 0) * 100:.1f}%  "
             f"governor {float(plan.governor):.2f}")
+        # The market state the plan was computed under, and why: a SHOCK
+        # plan reads "down uncapped, up frozen" and the operator must see
+        # that before the numbers, not infer it from them.
+        mode = (getattr(plan, "mode", "") or "normal").upper()
+        reasons = "; ".join(str(r) for r in (plan.mode_reasons or []))
+        self.stdout.write(f"{indent}     mode {mode}"
+                          + (f" — {reasons}" if reasons else ""))
         inputs = plan.inputs or {}
         current = plan.current_shares or {}
         for k, target in (plan.targets or {}).items():

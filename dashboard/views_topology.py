@@ -137,7 +137,7 @@ WIRING = {
     "pipeline_meta_allocator":  {"task": "signals.tasks.propose_meta_allocation", "cadence": 604800, "layer": "learn", "writes": ["RuleControl.weight"], "feeds": ["execute_bots"]},
     "pipeline_share_allocator": {"task": "bot_program.tasks.propose_share_plans", "cadence": 14400, "layer": "learn", "writes": ["SharePlan", "AssetBotConfig.extras.account_share_pct"], "feeds": ["broker_account_sync", "execute_bots"],
                                  "pages": ["/shares/"],
-                                 "note": "Proposes a TARGET share of the broker account per live follower pool every 4 h (evidence × regime × opportunity × news, floors/ceilings, 10 points/day, drawdown governor over BrokerEquityReading) as a SharePlan in shadow. The share itself is written only when an admin applies a plan in LIVE mode (PIN on /shares/); the sync then re-sizes the pools from it, which is why this feeds the sync and not the bots directly."},
+                                 "note": "Proposes a TARGET share of the broker account per live follower pool every 4 h (evidence × regime × opportunity × news, floors/ceilings, 10 points/day, drawdown governor over BrokerEquityReading) as a SharePlan in shadow. The share itself is written only when an admin applies a plan in LIVE mode (PIN on /shares/); the sync then re-sizes the pools from it, which is why this feeds the sync and not the bots directly. De-risk fast, re-risk slow: the sync itself also triggers a proposal at once (once per hour) when its fresh reading shows a shock — 3% off the 24 h high or past the drawdown knee — and a SHOCK plan lowers shares uncapped, raises none; with share_allocator_auto_derisk on, a pure de-risk applies itself in LIVE mode."},
     "pipeline_promotion":       {"task": "signals.tasks.auto_evaluate_promotions", "cadence": 86400, "layer": "learn", "writes": ["RuleControl.stage"], "feeds": ["pipeline_signals", "execute_bots"]},
     "pipeline_ai_decay":        {"task": "ai_agents.tasks.investigate_decaying_rules", "cadence": 86400, "layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_actuator"],
                                  "note": "Needs ANTHROPIC_API_KEY."},
@@ -169,6 +169,7 @@ MODE_FLAGS = {
     "actuator_mode_live": "pipeline_actuator",
     "meta_allocator_mode_live": "pipeline_meta_allocator",
     "share_allocator_mode_live": "pipeline_share_allocator",
+    "share_allocator_auto_derisk": "pipeline_share_allocator",
 }
 
 # A component is late when it has missed more than two of its own beats. One

@@ -260,6 +260,53 @@ class PageGetTests(_Fixture):
         self.assertEqual(resp.status_code, 200)
         self.assertIsNone(resp.context["drawdown"])
         self.assertContains(resp, "alpha_stock")
+        # The market state is fenced on its own: unreadable is NORMAL
+        # with the reason, never a missing KPI cell.
+        self.assertEqual(resp.context["market"]["mode"], "normal")
+        self.assertContains(resp, "market state unreadable")
+
+    def test_the_mode_cell_and_the_plan_badge_say_shock_with_the_reason(self):
+        """20% under the high: the KPI cell reads SHOCK with why, the
+        pending row wears the badge, the header says auto de-risk OFF
+        and the row shows the allowance the move stopped at."""
+        from bot_program.models import BrokerEquityReading
+        BrokerEquityReading.objects.create(
+            account=self.acct, value=Decimal("2500"), currency="EUR",
+            env="live", at=timezone.now() - timedelta(days=10))
+        plan = self._propose()
+        self.assertEqual(plan.mode, "shock")
+        resp = self.client.get("/shares/")
+        self.assertEqual(resp.status_code, 200)
+        market = resp.context["market"]
+        self.assertEqual(market["mode"], "shock")
+        # The plan just proposed is itself the 24h hold — the page reads
+        # the state as the next proposal would see it.
+        self.assertEqual(market["reasons"][0], "drawdown 20.0% past the 5% knee")
+        self.assertIn("shock hold until", market["reasons"][1])
+        self.assertContains(resp, "SHOCK")
+        self.assertContains(resp, "drawdown 20.0% past the 5% knee")
+        self.assertContains(resp, "auto de-risk OFF")
+        self.assertFalse(resp.context["auto_derisk"])
+        self.assertContains(resp, "(allowance +0 / −100 pt)")
+        self.assertEqual(resp.context["pending"][0].mode, "shock")
+        # The fixture's own plan is EXPANSION (at the high-water mark with
+        # a measured positive lane) once the hold has passed, and the
+        # switch reads ON when it is.
+        BrokerEquityReading.objects.filter(account=self.acct).delete()
+        from bot_program.share_models import SharePlan
+        SharePlan.objects.filter(user=self.admin).update(
+            proposed_at=timezone.now() - timedelta(hours=25))
+        from core.platform_control import PlatformComponent
+        PlatformComponent.objects.update_or_create(
+            key="share_allocator_auto_derisk",
+            defaults={"name": "auto", "category": "system", "is_enabled": True})
+        self._propose()
+        resp = self.client.get("/shares/")
+        self.assertEqual(resp.context["market"]["mode"], "expansion")
+        self.assertContains(resp, "EXPANSION")
+        self.assertContains(resp, "at the high-water mark")
+        self.assertContains(resp, "auto de-risk ON")
+        self.assertTrue(resp.context["auto_derisk"])
 
 
 class ApplyViewTests(_Fixture):
@@ -495,6 +542,26 @@ class ProposeViewTests(_Fixture):
 
 
 class AdminDashboardPanelTests(_Fixture):
+
+    def test_the_admin_dashboard_carries_the_auto_derisk_toggle(self):
+        """The third switch sits beside the live toggle, mirrors its
+        pattern (same POST view, its own key) and reads OFF by default."""
+        from core.platform_control import PlatformComponent, seed_components
+        seed_components()
+        resp = self.client.get("/admin-dashboard/")
+        self.assertEqual(resp.status_code, 200)
+        comp = resp.context["share_allocator_auto_derisk_component"]
+        self.assertIsNotNone(comp)
+        self.assertEqual(comp.key, "share_allocator_auto_derisk")
+        self.assertFalse(comp.is_enabled)
+        self.assertContains(resp, 'value="share_allocator_auto_derisk"')
+        self.assertContains(resp, "AUTO DE-RISK ON")
+        self.assertContains(resp, "auto de-risk OFF")
+        PlatformComponent.objects.filter(
+            key="share_allocator_auto_derisk").update(is_enabled=True)
+        resp = self.client.get("/admin-dashboard/")
+        self.assertContains(resp, "AUTO DE-RISK OFF")
+        self.assertContains(resp, "auto de-risk ON")
 
     def test_the_admin_dashboard_carries_the_live_toggle(self):
         from core.platform_control import seed_components

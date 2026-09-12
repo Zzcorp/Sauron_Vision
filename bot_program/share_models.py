@@ -33,11 +33,31 @@ class SharePlan(models.Model):
         (STATE_EXPIRED, "Expired"),
     ]
 
+    # The market state the plan was computed under (2026-09-12). NORMAL is
+    # the symmetric rule (10 pt/day, half-way smoothing); SHOCK is de-risk
+    # only (down uncapped, up frozen, no redistribution); EXPANSION lets a
+    # proven rally at the high-water mark expand at 20 pt/day. Persisted so
+    # the 24h shock hold can find the last shock plan without re-deriving
+    # it from a reading that is gone, and so the page can badge the row.
+    MODE_NORMAL = "normal"
+    MODE_SHOCK = "shock"
+    MODE_EXPANSION = "expansion"
+    MODE_CHOICES = [
+        (MODE_NORMAL, "Normal"),
+        (MODE_SHOCK, "Shock (de-risk only)"),
+        (MODE_EXPANSION, "Expansion"),
+    ]
+
     user = models.ForeignKey(settings.AUTH_USER_MODEL,
                              on_delete=models.CASCADE,
                              related_name="share_plans")
     state = models.CharField(max_length=16, choices=STATE_CHOICES,
                              default=STATE_PROPOSED, db_index=True)
+    mode = models.CharField(max_length=12, choices=MODE_CHOICES,
+                            default=MODE_NORMAL, db_index=True)
+    # Why the plan is in that mode, one string per trigger ('equity −4.2%
+    # in 24h', 'regime risk_off 0.71', 'shock hold until …').
+    mode_reasons = models.JSONField(default=list, blank=True)
 
     # The reading the plan was computed against — value, currency, when,
     # and how old it was at proposal time. Apply re-checks freshness

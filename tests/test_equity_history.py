@@ -214,6 +214,71 @@ class TheHighWaterMarkTests(TestCase):
         self.assertTrue(equity_drawdown(self.user)["stale"])
 
 
+class TheShockReadersTests(TestCase):
+    """The share allocator's fast path (2026-09-12) reads this history
+    twice: `drop_24h` — how far the current reading sits under the
+    highest reading of the last 24 h — and `shock_detected`, the cheap
+    check the sync runs on the rows it just wrote. Same rules as the
+    high-water mark: the current reading is part of the max (never
+    negative), other currencies do not count, and unreadable is False,
+    never a shock."""
+
+    def setUp(self):
+        self.user = _user("eq_shock")
+        self.acct = _acct(self.user)
+
+    def test_drop_24h_is_measured_against_the_24h_high(self):
+        from bot_program.share_allocator import drop_24h
+        _reading(self.acct, 1000, days_ago=0.5)
+        _reading(self.acct, 950, days_ago=0.25)
+        _reading(self.acct, 1200, days_ago=2)              # outside the window
+        _stamp(self.acct, "900")
+        self.assertAlmostEqual(drop_24h(self.user), 0.1)
+
+    def test_drop_24h_is_none_without_a_row_in_the_window_and_never_negative(self):
+        from bot_program.share_allocator import drop_24h
+        _stamp(self.acct, "900")
+        self.assertIsNone(drop_24h(self.user))            # no history at all
+        _reading(self.acct, 1000, days_ago=1.25)
+        self.assertIsNone(drop_24h(self.user))            # 30h ago: not in the window
+        _reading(self.acct, 800, days_ago=0.5)
+        self.assertEqual(drop_24h(self.user), 0.0)        # a new high is 0, not −12.5%
+        self.acct.last_equity = None
+        self.acct.save(update_fields=["last_equity"])
+        self.assertIsNone(drop_24h(self.user))            # no reading: unmeasured
+
+    def test_drop_24h_ignores_rows_in_another_currency(self):
+        from bot_program.share_allocator import drop_24h
+        _reading(self.acct, 1000, days_ago=0.5, currency="GBP")
+        _stamp(self.acct, "900", currency="EUR")
+        self.assertIsNone(drop_24h(self.user))
+        _reading(self.acct, 1000, days_ago=0.5, currency="EUR")
+        self.assertAlmostEqual(drop_24h(self.user), 0.1)
+
+    def test_shock_detected_on_the_drop_or_the_drawdown_and_false_when_unreadable(self):
+        from bot_program.share_allocator import (DD_KNEE, SHOCK_DROP_PCT,
+                                                 shock_detected)
+        from bot_program.models import BrokerEquityReading
+        self.assertFalse(shock_detected(self.user))        # no reading
+        # −2% in 24h: under the 3% shock line, under the 5% knee.
+        _reading(self.acct, 1000, days_ago=0.5)
+        _stamp(self.acct, "980")
+        self.assertFalse(shock_detected(self.user))
+        # −3% exactly: the line is inclusive.
+        _stamp(self.acct, str(1000 * (1 - SHOCK_DROP_PCT)))
+        self.assertTrue(shock_detected(self.user))
+        # No row in 24 h but the 90-day high says 6% under: the knee fires.
+        BrokerEquityReading.objects.filter(account=self.acct).delete()
+        _reading(self.acct, 1000, days_ago=10)
+        _stamp(self.acct, str(1000 * (1 - DD_KNEE) - 10))
+        self.assertTrue(shock_detected(self.user))
+        _stamp(self.acct, str(1000 * (1 - DD_KNEE)))       # at the knee: not past it
+        self.assertFalse(shock_detected(self.user))
+        with patch("bot_program.share_allocator.drop_24h",
+                   side_effect=RuntimeError("history down")):
+            self.assertFalse(shock_detected(self.user))
+
+
 class TheEntryPathCacheMergesTests(TestCase):
     """capital_truth.broker_equity stamps a cache into extras from the
     entry path, off a `cfg` the tick loaded once. It used to write that

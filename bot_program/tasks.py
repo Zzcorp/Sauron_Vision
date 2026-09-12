@@ -416,8 +416,58 @@ def sync_broker_account() -> dict:
             except Exception as e:  # noqa: BLE001 — history is beside the sync, not in it
                 logger.warning("broker sync: history row failed: %s", e)
             _follow_the_account(user, value, currency)
+            _shock_trigger(user, now)
         out["stored"] += 1
     return out
+
+
+def _shock_trigger(user, now) -> None:
+    """The fast path of the share allocator: a shock plan the moment the
+    sync that saw the shock has stored its reading, not up to four hours
+    later at the next :05 beat (2026-09-12). Cheap on purpose — the 24 h
+    drop and the drawdown off the rows just written, no brain context —
+    and once per SHOCK_TRIGGER_COOLDOWN_S per user through cache.add, so
+    a 15-minute beat on a bad day does not write a plan per beat. Gated
+    on the allocator's own component: when the proposer is off, nothing
+    proposes. Wrapped whole: a failed proposal must never fail the sync
+    whose reading the pools are being re-sized from.
+    """
+    try:
+        from django.core.cache import cache
+
+        from core.platform_control import is_component_enabled
+
+        from . import share_allocator
+        if not is_component_enabled("pipeline_share_allocator"):
+            return
+        if not share_allocator.shock_detected(user, now=now):
+            return
+        if not cache.add(f"shares:shock:{user.pk}", "1",
+                         timeout=share_allocator.SHOCK_TRIGGER_COOLDOWN_S):
+            return
+        plan, reason = share_allocator.propose_share_plan_with_reason(
+            user, now=now)
+        if plan is None:
+            logger.info("[shares] shock detected for %s but nothing "
+                        "proposed: %s", user.username, reason)
+            return
+        current = plan.current_shares or {}
+        n = 0
+        for k, target in (plan.targets or {}).items():
+            try:
+                if current.get(k) is not None \
+                        and float(target) < float(current[k]) - 1e-9:
+                    n += 1
+            except (TypeError, ValueError):
+                continue
+        from .notifications import notify_staff
+        notify_staff(
+            title="⚠ Shock plan proposed",
+            body=(f"{user.username}: {'; '.join(plan.mode_reasons or [])}; "
+                  f"{n} pool(s) to de-risk — open /shares/"),
+            url="/shares/", cooldown_hours=1)
+    except Exception as e:  # noqa: BLE001 — the sync's reading stands
+        logger.warning("[shares] shock proposal failed: %s", e)
 
 
 # The drawdown governor looks back 90 days; 400 keeps a year of context

@@ -208,6 +208,11 @@ DEFAULT_COMPONENTS = [
     {"key": "share_allocator_mode_live", "name": "Share Allocator Live Mode",
      "description": "Off (default) = shadow: plans are proposed and graded, apply is refused. On = an admin can apply a plan (PIN on /shares/, --yes on the shell), writing each follower's account_share_pct and re-sizing pools via the sync. Rollback restores exactly. Caps and the governor hold in both modes.",
      "category": "system"},
+    # De-risk fast, re-risk slow (2026-09-12): the third switch. Off by
+    # default; needs LIVE mode too. Description counted under 300 chars.
+    {"key": "share_allocator_auto_derisk", "name": "Share Allocator Auto De-risk",
+     "description": "Off (default). On + LIVE mode: a SHOCK plan that only LOWERS shares (every target <= current) is applied automatically, within the daily apply cap, with snapshot and rollback, and staff are notified. Re-risking is never automatic: a plan with any upward target waits for the PIN.",
+     "category": "system"},
 ]
 
 

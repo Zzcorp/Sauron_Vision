@@ -3619,6 +3619,11 @@ def admin_dashboard(request):
     context["share_allocator_live_component"] = PlatformComponent.objects.filter(
         key="share_allocator_mode_live"
     ).first()
+    # The third switch: a pure de-risk SHOCK plan applies itself in LIVE
+    # mode. Its own row, so the card can show OFF/ON beside the live toggle.
+    context["share_allocator_auto_derisk_component"] = \
+        PlatformComponent.objects.filter(
+            key="share_allocator_auto_derisk").first()
     try:
         from bot_program.share_models import SharePlan
         context["share_plans_pending"] = SharePlan.objects.filter(
