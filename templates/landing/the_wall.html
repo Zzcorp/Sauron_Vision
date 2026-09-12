@@ -1636,6 +1636,139 @@
         }
 
         /* ══════════════════════════════════════════════════════════════ */
+        /* THE CAPITAL DESK — candidate ladder + the risk budget filling  */
+        /* Same panel recipe as .ops-frame and the same keyframes this    */
+        /* file already owns (logRowIn for the rows, themeFill for the    */
+        /* budget): a twenty-first animation for a sixth kind of bar      */
+        /* would read as a bolted-on section, which is the one way a      */
+        /* true sentence can still fail on this page.                     */
+        /* ══════════════════════════════════════════════════════════════ */
+        .desk-rows { display: flex; flex-direction: column; gap: 6px; }
+        .desk-row {
+            display: grid; grid-template-columns: 34px 1fr 130px 104px;
+            gap: 10px; align-items: center;
+            padding: 8px 10px; border-radius: 6px;
+            background: rgba(0,0,0,0.18);
+            border-left: 2px solid var(--border);
+            font-family: var(--font-m); font-size: 10px;
+            letter-spacing: 0.4px; color: var(--text2);
+            opacity: 0; transform: translateY(-6px);
+            animation: logRowIn 0.4s cubic-bezier(0.16,1,0.3,1) forwards;
+        }
+        .desk-row:nth-child(2) { animation-delay: 0.10s; }
+        .desk-row:nth-child(3) { animation-delay: 0.20s; }
+        .desk-row:nth-child(4) { animation-delay: 0.30s; }
+        .desk-row:nth-child(5) { animation-delay: 0.40s; }
+        .desk-row.taken { border-left-color: var(--accent); }
+        .desk-row.taken .desk-verdict { color: var(--accent); }
+        .desk-row.displaced { border-left-color: var(--gold); }
+        .desk-row.displaced .desk-verdict { color: var(--gold); }
+        .desk-rank { color: var(--text3); letter-spacing: 1.5px; }
+        .desk-name { color: var(--text); text-align: left; }
+        .desk-track {
+            height: 4px; border-radius: 2px;
+            background: var(--bg3); overflow: hidden;
+        }
+        .desk-track > i {
+            display: block; height: 100%;
+            background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+            box-shadow: 0 0 8px var(--accent);
+        }
+        .desk-row.displaced .desk-track > i {
+            background: linear-gradient(90deg, #5a4610, var(--gold));
+            box-shadow: 0 0 8px var(--gold);
+        }
+        .desk-verdict { text-align: right; letter-spacing: 1.5px; }
+        .desk-budget {
+            margin-top: 14px; padding-top: 14px;
+            border-top: 1px solid var(--border);
+        }
+        .desk-budget-head {
+            display: flex; justify-content: space-between; gap: 8px;
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 2px;
+            color: var(--text3); text-transform: uppercase; margin-bottom: 7px;
+        }
+        .desk-budget-track {
+            position: relative; height: 8px; border-radius: 4px;
+            background: var(--bg); border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .desk-budget-fill {
+            position: absolute; top: 0; left: 0; height: 100%; width: 58%;
+            background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+            box-shadow: 0 0 10px var(--accent);
+            transform-origin: left;
+            animation: themeFill 3s ease-in-out infinite;
+        }
+        .desk-budget-cut {
+            position: absolute; top: 0; bottom: 0; right: 0; width: 24%;
+            border-left: 1px solid rgba(232,48,48,0.45);
+            background: repeating-linear-gradient(45deg,
+                rgba(232,48,48,0.16) 0 5px, transparent 5px 10px);
+        }
+        @media (max-width: 768px) {
+            .desk-row { grid-template-columns: 30px 1fr 86px; }
+            .desk-track { display: none; }
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* THE SHARE ALLOCATOR — the account as one bar that re-splits    */
+        /* Segments pulse on themeFill, the same motif the orchestrator   */
+        /* exposure bars use, because this IS the same idea one level up: */
+        /* a share of something finite, moved by evidence.                */
+        /* ══════════════════════════════════════════════════════════════ */
+        .share-bar {
+            display: flex; height: 34px; margin-top: 10px;
+            border: 1px solid var(--border); border-radius: 8px;
+            background: var(--bg); overflow: hidden;
+        }
+        .share-seg {
+            display: flex; align-items: center; justify-content: center;
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 1.5px;
+            color: #020804; white-space: nowrap; overflow: hidden;
+            border-right: 1px solid var(--bg);
+            background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+            transform-origin: left;
+            animation: themeFill 3.4s ease-in-out infinite;
+        }
+        .share-seg:last-child { border-right: 0; }
+        .share-seg.s2 { background: linear-gradient(90deg, #14506e, var(--blue)); animation-delay: 0.3s; }
+        .share-seg.s3 { background: linear-gradient(90deg, #5a3070, var(--purple)); animation-delay: 0.6s; }
+        .share-seg.cash {
+            color: var(--text3); animation: none;
+            background: repeating-linear-gradient(45deg,
+                rgba(232,48,48,0.14) 0 5px, transparent 5px 10px);
+        }
+        .share-caption {
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 2px;
+            color: var(--text3); text-transform: uppercase;
+            margin-top: 16px; text-align: left;
+        }
+        .share-legend {
+            display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px;
+            font-family: var(--font-m); font-size: 10px; color: var(--text3);
+            letter-spacing: 0.5px; text-align: left;
+        }
+        .share-legend i {
+            display: inline-block; width: 10px; height: 10px;
+            border-radius: 3px; margin-right: 6px; vertical-align: -1px;
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* PERSONALITIES — the knob rows inside each preset card          */
+        /* ══════════════════════════════════════════════════════════════ */
+        .persona-knobs {
+            list-style: none; margin-top: 14px; padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+        .persona-knobs li {
+            display: flex; justify-content: space-between; gap: 10px;
+            font-family: var(--font-m); font-size: 10px; line-height: 1.9;
+            color: var(--text3); letter-spacing: 0.4px;
+        }
+        .persona-knobs li b { color: var(--text2); font-weight: 400; text-align: right; }
+
+        /* ══════════════════════════════════════════════════════════════ */
         /* NAV BREATHING ROOM — two more anchors than the nav was built   */
         /* for, so it tightens instead of overflowing on narrow laptops.  */
         /* ══════════════════════════════════════════════════════════════ */
@@ -1649,7 +1782,8 @@
         @media (min-width: 769px) and (max-width: 1080px) {
             .nav-links { gap: 14px; }
             .nav-links a[href="#demo"],
-            .nav-links a[href="#brokers"] { display: none; }
+            .nav-links a[href="#brokers"],
+            .nav-links a[href="#horizon"] { display: none; }
         }
 
         /* Motion added by the sections above respects the same preference
@@ -1659,7 +1793,20 @@
             .sess-pill.open::before,
             .ops-panel-title .live-pulse,
             .ladder-flow,
+            .desk-budget-fill,
+            .share-seg,
             .ask-caret { animation: none; }
+            /* .desk-row ENTERS on logRowIn from opacity:0, so `animation:
+               none` alone would leave the five candidate rows — the entire
+               visual of the desk section — permanently invisible to anyone
+               who asked for less motion. The end state has to be restored
+               by hand. This is why .demo-log-row, which uses the same
+               keyframe, was never added to the list above (2026-09-12). */
+            .desk-row {
+                animation: none;
+                opacity: 1;
+                transform: none;
+            }
         }
     </style>
 </head>
@@ -1731,7 +1878,9 @@
         <a href="#demo">Demo</a>
         <a href="#operations">Operations</a>
         <a href="#fleet">Fleet</a>
+        <a href="#desk">Desk</a>
         <a href="#mind">Mind</a>
+        <a href="#horizon">Horizon</a>
         <a href="#research">Ask</a>
         <a href="#brokers">Brokers</a>
         <a href="#trust">Trust</a>
@@ -2862,6 +3011,372 @@
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- THE THREE PERSONALITIES                                            -->
+<!-- No number in this section, on purpose: every knob a persona sets   -->
+<!-- lives in bot_program/personas.py, and a value typed into this      -->
+<!-- template would be the stale-literal failure with a new subject:    -->
+<!-- the number the page prints is the number the code holds, or the    -->
+<!-- sentence carries no number at all.                                 -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="personas">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">Trader Personalities <span class="new-pill">PRESETS</span></div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            Three Ways to Hold a Thesis.
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            A personality is not a new engine. It is a coherent preset of the knobs that already decide
+            how a bot behaves &mdash; the bar it reads, the volatility its stop and target are cut from,
+            how long a thesis may live, how many bets run at once, how much one stop-out costs. Those
+            knobs used to be set one at a time, and nothing in the platform said which combination was a
+            trading style and which was a typo. Three of them are named now: each graded over a window
+            that matches its own holding period, each with its own band in
+            <a href="#shares" style="color:var(--accent);text-decoration:none;">the account allocator</a>.
+        </p>
+
+        <div class="features-grid" style="text-align: left; margin-top: 36px;">
+            <div class="feature-card reveal delay-1">
+                <div class="feature-icon">
+                    <!-- Scalp — a burst of short strokes on a baseline: many small bets -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <line x1="2.5" y1="20" x2="21.5" y2="20"/>
+                        <line x1="5" y1="20" x2="5" y2="13"/>
+                        <line x1="9" y1="20" x2="9" y2="7"/>
+                        <line x1="13" y1="20" x2="13" y2="15"/>
+                        <line x1="17" y1="20" x2="17" y2="10"/>
+                        <line x1="21" y1="20" x2="21" y2="16"/>
+                        <circle cx="9" cy="6" r="1" fill="var(--accent)" stroke="none"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Scalp &mdash; Hours, Not Days</div>
+                <div class="feature-text">
+                    Many small bets on the hourly frame, with the stop and the target cut from hourly
+                    volatility rather than the four-hour default &mdash; a tight stop the bar can actually
+                    reach inside a session. A thesis that has not moved by the end of that session is closed.
+                    Graded over the shortest window, because a run of scalps is a sample.
+                </div>
+                <ul class="persona-knobs">
+                    <li><span>Frame</span><b>hourly</b></li>
+                    <li><span>Hold ceiling</span><b>hours</b></li>
+                    <li><span>Bets at once</span><b>many, each small</b></li>
+                    <li><span>Horizon prior</span><b>none &mdash; nothing to say</b></li>
+                </ul>
+            </div>
+            <div class="feature-card reveal delay-2">
+                <div class="feature-icon blue">
+                    <!-- Swing — the zigzag of a trend held across sessions -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polyline points="2.5,18 7,12 11,15 16,6 21.5,9"/>
+                        <circle cx="7" cy="12" r="1.2" fill="var(--blue)" stroke="none"/>
+                        <circle cx="16" cy="6" r="1.2" fill="var(--blue)" stroke="none"/>
+                        <line x1="2.5" y1="21.5" x2="21.5" y2="21.5" opacity="0.5"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Swing &mdash; What Sauron Is Today</div>
+                <div class="feature-text">
+                    The four-hour trend, held across sessions rather than across weeks. This is the
+                    behaviour every existing bot already has, written down as a preset instead of
+                    living as the accident of whichever defaults shipped &mdash; so the other two
+                    personalities are a choice against a named baseline, not against a blank.
+                </div>
+                <ul class="persona-knobs">
+                    <li><span>Frame</span><b>four-hour</b></li>
+                    <li><span>Hold ceiling</span><b>days</b></li>
+                    <li><span>Bets at once</span><b>a handful</b></li>
+                    <li><span>Horizon prior</span><b>light</b></li>
+                </ul>
+            </div>
+            <div class="feature-card reveal delay-3">
+                <div class="feature-icon purple">
+                    <!-- Position — one long line toward a distant mark -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <line x1="2.5" y1="20" x2="21.5" y2="20"/>
+                        <polyline points="3,17 9,14 15,8 20,4"/>
+                        <circle cx="3" cy="17" r="1.2" fill="var(--purple)" stroke="none"/>
+                        <polygon points="20,4 16.5,5 18.5,7.5"/>
+                        <line x1="20" y1="4" x2="20" y2="20" stroke-dasharray="2,3" opacity="0.6"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Position &mdash; The Long View</div>
+                <div class="feature-text">
+                    Daily bars, few bets, each one allowed a wide stop because it is meant to survive
+                    ordinary noise. The personality the
+                    <a href="#horizon" style="color:var(--accent);text-decoration:none;">five-to-ten-year view</a>
+                    actually moves &mdash; swing feels it at half weight, and the scalp book not at all
+                    &mdash; and even here the tilt is capped: a structural opinion must never out-vote a
+                    measured one.
+                </div>
+                <ul class="persona-knobs">
+                    <li><span>Frame</span><b>daily</b></li>
+                    <li><span>Hold ceiling</span><b>weeks</b></li>
+                    <li><span>Bets at once</span><b>few, each larger</b></li>
+                    <li><span>Horizon prior</span><b>its own lane</b></li>
+                </ul>
+            </div>
+        </div>
+
+        <p class="section-desc reveal delay-4" style="margin: 32px auto 0; font-size: 13px; color: var(--text2); max-width: 760px;">
+            <span class="hash-shimmer">No personality borrows to fund a position.</span> None of the three
+            sets a leverage or a margin knob &mdash; the preset is timeframes, stop and target multiples,
+            a hold ceiling, a concurrency limit and a risk fraction, and that is the whole list. What the
+            short-term one actually gets is how much position one fixed risk budget buys when the stop is
+            tight, plus how many bets may run at once. Both are cash. Where leverage exists at all it is
+            the broker's, on the venues that are built that way, and this platform reports it back to you
+            as a fact at the confirm step instead of offering it as a dial to turn up. And a personality
+            moves no capital by itself: it changes no account share, enables no config, and applying one
+            to a bot that is already trading live re-sizes real risk &mdash; so that one asks for your PIN.
+        </p>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- THE CAPITAL DESK — proposes, ranks, fills a budget. In SHADOW.     -->
+<!-- The word SHADOW is load-bearing and appears in the frame, the copy -->
+<!-- and the pillar: a visitor who reads one of the three and stops     -->
+<!-- must not come away believing this thing places orders.             -->
+<!--                                                                    -->
+<!-- 2026-09-12 (review): those three were TYPED, which made them a     -->
+<!-- claim about deployment history hardcoded into a template — the     -->
+<!-- same failure as the retired test-count literal this page was       -->
+<!-- rebuilt to remove (do not quote that number here: comments are     -->
+<!-- served, and quoting it puts it back on the page). It would have    -->
+<!-- kept serving the day someone flipped                               -->
+<!-- capital_desk_mode_live. They are now driven by                     -->
+<!-- wall.desk_live_plans, a real count of DeskPlan rows written in     -->
+<!-- live mode. On 0 the page says SHADOW; the day it is not 0 the      -->
+<!-- page says so instead. The count decides the sentence.              -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="desk">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">The Capital Desk <span class="new-pill">{% if wall.desk_live_plans %}OBEYED{% else %}SHADOW{% endif %}</span></div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            Every Candidate Seen<br>Before Any Order.
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            The entry path is cut in two: every bot proposes before anything executes. Turn the fleet pass
+            on &mdash; it ships off, like every switch here that can reach an order &mdash; and one layer
+            finally sees the whole tick at once. The desk ranks the candidates each bot has already cleared
+            through its own gates, grades what that rule has really paid across five lanes of evidence,
+            and prices every candidate by its <em>marginal</em> risk &mdash; what it adds to a book that
+            already holds correlated positions, not what it would cost standing alone. Then it fills a
+            risk budget the drawdown governor is allowed to cut. Its only power over a size is to shrink
+            one.
+        </p>
+
+        <div class="ops-frame reveal-scale delay-4">
+            <div class="ops-head">
+                <div class="ops-head-title">◈ CAPITAL_DESK · PROPOSE → RANK → FILL</div>
+                <div class="ops-head-right">
+                    <span class="ops-pill paper"><span class="blip">◌</span> {% if wall.desk_live_plans %}OBEYED{% else %}SHADOW{% endif %}</span>
+                    <span class="ops-pill ws">⟂ MARGINAL RISK</span>
+                    <span class="ops-pill">PER USER · PER VENUE</span>
+                </div>
+            </div>
+
+            <div class="ops-panel">
+                <div class="ops-panel-title">
+                    <span>Candidate Ladder &mdash; one pass</span>
+                    <span class="live-pulse">● RANKED</span>
+                </div>
+                <div class="desk-rows">
+                    <div class="desk-row taken">
+                        <span class="desk-rank">01</span>
+                        <span class="desk-name">FOREX &middot; cleared by its bot</span>
+                        <span class="desk-track"><i style="width:88%;"></i></span>
+                        <span class="desk-verdict">TAKEN</span>
+                    </div>
+                    <div class="desk-row taken">
+                        <span class="desk-rank">02</span>
+                        <span class="desk-name">COMMODITY &middot; uncorrelated with the book</span>
+                        <span class="desk-track"><i style="width:71%;"></i></span>
+                        <span class="desk-verdict">TAKEN</span>
+                    </div>
+                    <div class="desk-row displaced">
+                        <span class="desk-rank">03</span>
+                        <span class="desk-name">STOCK &middot; higher R, but correlated</span>
+                        <span class="desk-track"><i style="width:64%;"></i></span>
+                        <span class="desk-verdict">DISPLACED</span>
+                    </div>
+                    <div class="desk-row taken">
+                        <span class="desk-rank">04</span>
+                        <span class="desk-name">CRYPTO &middot; small, diversifying</span>
+                        <span class="desk-track"><i style="width:52%;"></i></span>
+                        <span class="desk-verdict">TAKEN</span>
+                    </div>
+                    <div class="desk-row displaced">
+                        <span class="desk-rank">05</span>
+                        <span class="desk-name">STOCK &middot; budget exhausted</span>
+                        <span class="desk-track"><i style="width:38%;"></i></span>
+                        <span class="desk-verdict">DISPLACED</span>
+                    </div>
+                </div>
+
+                <div class="desk-budget">
+                    <div class="desk-budget-head">
+                        <span>Risk budget · this venue</span>
+                        <span>Governor cut</span>
+                    </div>
+                    <div class="desk-budget-track">
+                        <div class="desk-budget-fill"></div>
+                        <div class="desk-budget-cut"></div>
+                    </div>
+                    <div style="font-family:var(--font-m);font-size:9px;color:var(--text3);letter-spacing:1px;margin-top:8px;line-height:1.5;text-align:left;">
+                        The budget is a share of the venue's capital, less the risk already standing at
+                        stop in the open book, and the drawdown governor shrinks it as the curve falls
+                        away from its high-water mark. Paper and live never share a budget, a book, or a
+                        correlation penalty.
+                    </div>
+                </div>
+            </div>
+
+            <div class="ops-band">
+                <div class="ops-band-cell">Ranked on<b>EXPECTED R</b></div>
+                <div class="ops-band-cell">Costed by<b>MARGINAL RISK</b></div>
+                <div class="ops-band-cell">Unmeasured pair<b>&mdash;</b></div>
+                <div class="ops-band-cell">Size may<b>ONLY SHRINK</b></div>
+                <div class="ops-band-cell">Orders the desk sends<b>NONE</b></div>
+            </div>
+        </div>
+
+        <p class="section-desc reveal delay-5" style="margin: 32px auto 0; font-size: 13px; color: var(--text2); max-width: 820px;">
+            Displaced is not discarded. The desk walks the bars the entry it refused would have lived
+            through, prices the exit it would have found, and books the R it would have paid &mdash; so
+            the desk is graded against the fleet it overruled, with the tie-breaks in that counterfactual
+            deliberately set <em>against</em> the desk. A correlation it could not measure enters the
+            arithmetic as zero and is written down as unmeasured, never quietly assumed away.
+        </p>
+
+        <div class="pillar-row reveal delay-6" style="max-width: 1080px; margin: 32px auto 0;">
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.desk_plans }}">0</span></div>
+                <div class="pillar-lbl">Desk Passes Recorded</div>
+                <div class="pillar-desc">One row per user, per venue, per tick &mdash; how many times the desk
+                has <em>thought</em>. Not how many times it acted: in shadow the fleet executes exactly as it
+                always has, and the plan is the counterfactual being graded beside it.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.desk_decisions_graded }}">0</span></div>
+                <div class="pillar-lbl">Decisions With an R</div>
+                <div class="pillar-desc">A taken candidate inherits its trade's realised R; a displaced one is
+                graded on the bar-walk it never got. A decision no bar could price stays ungraded rather than
+                being counted as evidence that the desk measures itself.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num">NO ORDERS</div>
+                <div class="pillar-lbl">Placed by the Desk</div>
+                <div class="pillar-desc">The desk sends nothing itself, in either mode: its whole power is to
+                shrink a size or skip an entry.{% if wall.desk_live_plans %}
+                Of the passes above, <span class="count-up" data-target="{{ wall.desk_live_plans }}">0</span>
+                were written with the fleet obeying the plan &mdash; because a person read the graded
+                evidence and turned that switch on.{% else %}
+                Every pass above was written in SHADOW: the switch that would let the plan be obeyed is off,
+                and it turns on the way everything else here does &mdash; on graded evidence, by a person,
+                behind the PIN.{% endif %}
+                <a href="#spine" style="color:var(--accent);text-decoration:none;">Why that is the point &rarr;</a></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- THE SHARE ALLOCATOR — the account re-split between pools           -->
+<!-- The two bars are an illustration of the mechanism and carry no     -->
+<!-- percentages: a labelled slice would read as this deployment's real -->
+<!-- allocation, which is an account figure and never goes on this page.-->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="shares">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">The Share Allocator <span class="new-pill">{% if wall.share_plans_applied %}APPLIED{% else %}SHADOW{% endif %}</span></div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            One Account.<br>Re-Split on Evidence.
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            With its pipeline running, the allocator proposes every few hours what share of the broker
+            account each live pool should take &mdash; that switch ships off too, and none of this starts
+            until somebody turns it on. The proposal comes from graded evidence, the brain's regime read,
+            how many opportunities the scanner
+            is actually finding, news risk, and the
+            <a href="#horizon" style="color:var(--accent);text-decoration:none;">horizon prior</a> &mdash;
+            the last one capped low, because a structural view must never out-vote a measured one. A floor
+            keeps a pool that is doing badly alive at a size that still produces evidence: a pool at nothing
+            can never earn its way back. A ceiling stops one good week handing the account to one bot. A cap
+            on daily movement stops the whole book chasing the morning.
+        </p>
+
+        <div class="ops-frame reveal-scale delay-4">
+            <div class="ops-head">
+                <div class="ops-head-title">◇ SHARE_ALLOCATOR · PROPOSED</div>
+                <div class="ops-head-right">
+                    <span class="ops-pill paper"><span class="blip">◌</span> {% if wall.share_plans_applied %}APPLIED{% else %}SHADOW{% endif %}</span>
+                    <span class="ops-pill ws">⟂ GRADED NEXT DAY</span>
+                    <span class="ops-pill">PIN TO APPLY</span>
+                </div>
+            </div>
+
+            <div class="share-caption">Calm &mdash; the account spread across the live pools</div>
+            <div class="share-bar">
+                <div class="share-seg" style="flex: 0 0 34%;">STOCKS</div>
+                <div class="share-seg s2" style="flex: 0 0 28%;">FOREX</div>
+                <div class="share-seg s3" style="flex: 0 0 22%;">CRYPTO</div>
+                <div class="share-seg cash" style="flex: 0 0 16%;">CASH</div>
+            </div>
+
+            <div class="share-caption">After a shock &mdash; de-risked in one plan, the governor holding the rest back</div>
+            <div class="share-bar">
+                <div class="share-seg" style="flex: 0 0 22%;">STOCKS</div>
+                <div class="share-seg s2" style="flex: 0 0 20%;">FOREX</div>
+                <div class="share-seg s3" style="flex: 0 0 10%;">CRYPTO</div>
+                <div class="share-seg cash" style="flex: 0 0 48%;">CASH &middot; GOVERNOR</div>
+            </div>
+
+            <div class="share-legend">
+                <span><i style="background:var(--accent);"></i>a live pool's target share</span>
+                <span><i style="background:var(--blue);"></i>another pool, another persona band</span>
+                <span><i style="background:var(--purple);"></i>and another</span>
+                <span><i style="background:rgba(232,48,48,0.3);"></i>held back by the drawdown governor</span>
+            </div>
+
+            <div style="font-family:var(--font-m);font-size:9px;color:var(--text3);letter-spacing:1px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);line-height:1.6;text-align:left;">
+                Three market states, and they are not symmetric on purpose: it de-risks in a single plan on
+                a shock and re-risks slowly afterwards. The bars above are the shape of the mechanism, not
+                this deployment's book &mdash; what any account actually holds is nobody's business but its
+                operator's, and it is not on a public page.
+            </div>
+        </div>
+
+        <div class="pillar-row reveal delay-5" style="max-width: 1080px; margin: 32px auto 0;">
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.share_plans }}">0</span></div>
+                <div class="pillar-lbl">Share Plans Written</div>
+                <div class="pillar-desc">Every plan, in every state &mdash; not only the applied ones. The claim
+                is that the allocator proposes on a schedule and is graded whether or not anybody clicks;
+                counting applies would tell the story of the operator instead of the engine.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num">PROPOSED</div>
+                <div class="pillar-lbl">Nothing Moves</div>
+                <div class="pillar-desc">A plan is a proposal. It moves a share only when an admin applies it
+                behind the PIN, and only with the live switch on.{% if wall.share_plans_applied %}
+                <span class="count-up" data-target="{{ wall.share_plans_applied }}">0</span> have been applied
+                here &mdash; each one by a person, each one reversible.{% else %}
+                None has ever been applied here.{% endif %} This module never writes a pool's capital
+                and never touches the broker: the share is the only thing it decides.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num">GRADED</div>
+                <div class="pillar-lbl">A Day Later</div>
+                <div class="pillar-desc">Each plan is scored against what the live book actually paid &mdash;
+                positive when it leaned toward the pools that then earned R. Every input that went into
+                a target is stored on the plan, including the readers that degraded and why.</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 <!-- STRATEGY EVOLUTION                                                 -->
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <section class="wall-section" id="evolution">
@@ -3054,6 +3569,70 @@
                     records what each agent said, what it cost, and how it aged; Brier-scored calibration
                     turns that history into per-agent trust, and low trust means less weight downstream.
                 </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- HORIZON — the 5-to-10-year sector view                             -->
+<!-- The only claim this section is allowed to make about accuracy is   -->
+<!-- that the first calls have not resolved yet. They come due in 2027. -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="horizon">
+    <div class="container">
+        <div class="split">
+            <div class="split-visual reveal-left">
+                <div class="visual-grid"></div>
+                <svg viewBox="0 0 400 300" style="position:absolute;inset:0;width:100%;height:100%;opacity:0.7;">
+                    <defs>
+                        <linearGradient id="horizonGrad" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stop-color="#00e868" stop-opacity="0.5"/>
+                            <stop offset="100%" stop-color="#00e868" stop-opacity="0.05"/>
+                        </linearGradient>
+                    </defs>
+                    <!-- The time axis: now on the left, the structural view on the right -->
+                    <line x1="24" y1="250" x2="376" y2="250" stroke="#00e868" stroke-width="1" opacity="0.5"/>
+                    <line x1="24" y1="40" x2="24" y2="250" stroke="#3a6850" stroke-width="1" opacity="0.5"/>
+                    <!-- Sector paths fanning out from today -->
+                    <path d="M24,210 Q140,150 240,110 T376,70" fill="none" stroke="url(#horizonGrad)" stroke-width="2"/>
+                    <path d="M24,210 Q140,196 240,186 T376,160" fill="none" stroke="#3a6850" stroke-width="1.2"/>
+                    <path d="M24,210 Q140,232 240,238 T376,226" fill="none" stroke="#8840d0" stroke-width="1.2" opacity="0.6"/>
+                    <!-- The two deadlines the calls are graded on -->
+                    <line x1="110" y1="40" x2="110" y2="250" stroke="#d8b020" stroke-width="0.8" stroke-dasharray="3,4" opacity="0.7"/>
+                    <line x1="176" y1="40" x2="176" y2="250" stroke="#d8b020" stroke-width="0.8" stroke-dasharray="3,4" opacity="0.7"/>
+                    <text x="86" y="34" fill="#d8b020" font-size="8" font-family="monospace">SIX MONTHS</text>
+                    <text x="152" y="34" fill="#d8b020" font-size="8" font-family="monospace">TWELVE MONTHS</text>
+                    <text x="20" y="268" fill="#3a6850" font-size="8" font-family="monospace">TODAY</text>
+                    <text x="300" y="268" fill="#00e868" font-size="8" font-family="monospace">FIVE TO TEN YEARS</text>
+                    <circle cx="24" cy="210" r="4" fill="#00e868" opacity="0.5"/>
+                    <circle r="3" fill="#d8b020" opacity="0.85">
+                        <animateMotion dur="6s" repeatCount="indefinite" path="M24,210 Q140,150 240,110 T376,70"/>
+                    </circle>
+                </svg>
+                <div class="split-visual-inner">SECTOR HORIZON</div>
+            </div>
+            <div class="split-content reveal-right">
+                <div class="section-label">Horizon <span class="new-pill">FIVE TO TEN YEARS</span></div>
+                <h2 class="section-title">The Only Agent<br>Looking Past Friday.</h2>
+                <div class="sep sep-left"></div>
+                <p class="section-desc" style="margin-bottom:0;">
+                    Switched on &mdash; it ships off, and costs a frontier-model pass when it runs &mdash;
+                    Horizon writes, once a month, a five-to-ten-year view of every
+                    sector this platform can trade: what structurally changes, what it would take to be wrong,
+                    and which risks are worth guarding against years before they arrive. Every other agent
+                    on this platform looks hours to weeks ahead. This one is held to exactly the same bar
+                    as the rest: prose with no gradable claim in it does not count, so each thesis ends in
+                    direction calls at six and twelve months, resolved against the first bar at or after
+                    the deadline by the same calibration ledger that scores every other agent.
+                </p>
+                <ul class="check-list">
+                    <li><span class="check-mark">&#x2713;</span>The first of those calls come due in 2027 &mdash; until then this page claims nothing about how right they were</li>
+                    <li><span class="check-mark">&#x2713;</span>Its sector tilts reach <a href="#shares" style="color:var(--accent);text-decoration:none;">the allocator</a> as a weak prior, capped by construction</li>
+                    <li><span class="check-mark">&#x2713;</span>It moves the long-horizon book most and the mid-horizon one at half weight; a book that is flat by lunchtime never sees it at all</li>
+                    <li><span class="check-mark">&#x2713;</span>The row is written before the model is called, so a provider outage is an error row, never a silent gap</li>
+                    <li><span class="check-mark">&#x2713;</span>A garbled answer is kept and marked rejected &mdash; you paid for it and you get to read it &mdash; but it is never treated as a view</li>
+                </ul>
             </div>
         </div>
     </div>
@@ -3262,6 +3841,74 @@
                 an open terminal.</div>
             </div>
         </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- THE EVIDENCE SPINE — the one rule the rest of the page runs on     -->
+<!-- rules_governed and strategies count the same table. That is said   -->
+<!-- out loud in the pillar below: two labels over one population is    -->
+<!-- honest only while neither is sold as extra coverage.               -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="spine">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">The Evidence Spine <span class="new-pill">GRADED</span></div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            Nothing Here Grades<br>Itself Kindly.
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            One rule runs under all of it. Every proposal is a gradable call with a deadline on it. Every
+            plan is scored against the counterfactual &mdash; what actually happened, or what the trade it
+            displaced would have paid. Anything unmeasured renders as an em dash, never as a zero dressed
+            up as data. And every switch that can move money is off until a person turns it on, behind the
+            PIN, with an audit row to show for it.
+        </p>
+
+        <div class="pillar-row reveal delay-4" style="max-width: 1080px; margin: 32px auto 0;">
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.agent_calls_graded }}">0</span></div>
+                <div class="pillar-lbl">Agent Calls Resolved</div>
+                <div class="pillar-desc">Predictions the resolver has marked right or wrong. Both directions,
+                summed &mdash; publishing only the correct ones would be a hit rate dressed up as a volume,
+                on the page whose whole pitch is that this platform grades itself in both.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.components }}">0</span></div>
+                <div class="pillar-lbl">Components on a Switch</div>
+                <div class="pillar-desc">Scrapers, engines, pipelines &mdash; each one something an admin can
+                stop from the cockpit. Counted whether it is running or paused: the number says how much of
+                the platform answers to a switch at all.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.shell_commands }}">0</span></div>
+                <div class="pillar-lbl">Commands Catalogued</div>
+                <div class="pillar-desc">Every operator command with its exact usage, held against the
+                framework's own command list by a test &mdash; so the catalogue in the cockpit cannot drift
+                away from what the shell will actually accept.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.rules_governed }}">0</span></div>
+                <div class="pillar-lbl">Rules Under Control</div>
+                <div class="pillar-desc">The same rules the promotion ladder counts, seen from the other
+                side: each carries an enforcement state, and nothing sizes money without one. Two labels
+                over one population &mdash; said plainly, because it is not extra coverage.</div>
+            </div>
+        </div>
+
+        <p class="section-desc reveal delay-5" style="margin: 36px auto 0; font-size: 15px; color: var(--text2); max-width: 780px;">
+            So here is the honest position, which is the better story anyway.
+            <span class="hash-shimmer">The desk places no orders.</span>
+            It ranks, and its only power over a size is to shrink it; the allocator moves no share by
+            itself. Both are built to run on every tick and every schedule, behind switches that ship off
+            like every other switch here that can reach the money, and both are graded against what would
+            have happened without them.{% if wall.desk_live_plans or wall.share_plans_applied %}
+            Where one of those switches has since been turned on, it was turned on by a person who had read
+            the grades &mdash; not because a landing page said it was ready.{% else %}
+            Neither has been trusted with the account on this deployment. When one is, it will be because a
+            human read the evidence and turned a switch &mdash; not because a landing page said they were
+            ready.{% endif %}
+        </p>
     </div>
 </section>
 

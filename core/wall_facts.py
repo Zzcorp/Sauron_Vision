@@ -23,7 +23,9 @@ Fencing
 table that does not exist yet mid-migration must all degrade to a number,
 because a 500 on the front door locks every user out of a platform that is
 otherwise perfectly healthy. Each counter carries its own fence, so one bad
-query zeroes its own key and leaves the other ten alone.
+query zeroes its own key and leaves every other key alone. (Written as "the
+other ten" when there were eleven keys; the contract has grown since, and a
+count of the counts is the one literal this module cannot police.)
 
 A degraded counter reports 0 — never a remembered figure, never an estimate.
 0 reads as "nothing measured", which is true; anything else would smuggle
@@ -47,7 +49,7 @@ logger = logging.getLogger(__name__)
 # tests/test_wall_facts.py counts the suite and fails when this drifts: the
 # first version of this module shipped a number its own commit had already
 # invalidated, which is exactly the failure it was written to prevent.
-TESTS_GREEN = 6393
+TESTS_GREEN = 6454
 
 # Broker adapters implemented under bot_program/engine/ — one module and one
 # client class each, all reachable from broker_router.client_for_symbol().
@@ -81,6 +83,27 @@ FALLBACK_FACTS = {
     "chain_length": 0,
     "news_24h": 0,
     "bots": 0,
+    # 2026-09-12 — the capital desk, the share allocator and the evidence
+    # spine. Appended, never reordered: the template and the contract test
+    # both index this dict by name, and the eleven keys above are already
+    # rendered on the live page.
+    "desk_plans": 0,
+    "desk_decisions_graded": 0,
+    "share_plans": 0,
+    "agent_calls_graded": 0,
+    "components": 0,
+    "shell_commands": 0,
+    "rules_governed": 0,
+    # 2026-09-12 (review) — the key that lets the page STOP hardcoding its
+    # own shadow. The wall said "SHADOW is ... the only mode any plan has
+    # been written in" as a literal, which is a claim about deployment
+    # history typed into a template: the day an operator flips
+    # `capital_desk_mode_live`, the public page goes on saying it. This
+    # counts the live-mode plans, so the number decides the sentence.
+    "desk_live_plans": 0,
+    # The allocator's half of the same repair: the page wore a SHADOW pill
+    # that no code could ever take off it.
+    "share_plans_applied": 0,
 }
 
 
@@ -202,6 +225,175 @@ def _count_bots() -> int:
     return AssetBotConfig.objects.count()
 
 
+# ── The 2026-09-12 engines ──────────────────────────────────────────────────
+#
+# The wall went quiet while the capital desk, the share allocator, Horizon and
+# the command registry all shipped. The temptation when catching a landing
+# page up is to describe the new machinery in prose and pick round numbers to
+# go beside it — which is the "667 tests green" failure with a new subject.
+# Everything the page will say about these engines is counted here or is a
+# sentence carrying no number at all.
+#
+# Each of these counts an ATTEMPT or a GRADE, never an outcome in money and
+# never a decision the platform was trusted to take alone: the desk and the
+# allocator are both in shadow, and a counter that read as "the desk moved
+# capital N times" would advertise something that has not happened once.
+
+def _count_desk_plans() -> int:
+    """Capital-desk passes recorded — one row per (user, venue) per tick.
+
+    This is how many times the desk has THOUGHT, not how many times it acted.
+    In SHADOW (the default and, as of 2026-09-12, the only mode any plan has
+    been written in) the fleet executed exactly as it always does and the row
+    is the counterfactual being graded. The page must say so beside this
+    number; the number itself is deliberately the modest one.
+    """
+    from bot_program.desk_models import DeskPlan
+    return DeskPlan.objects.count()
+
+
+def _count_desk_decisions_graded() -> int:
+    """Desk decisions that have an R against them.
+
+    Two ways a decision gets graded and both count: a taken candidate
+    inherits its trade's realized_r, and a displaced one is walked over its
+    stored bars and levels until the counterfactual books an R. The OR on
+    `trade__realized_r` catches the window where the trade has closed and
+    graded but the desk's own resolver has not yet copied it across, so the
+    page never under-reports its own evidence for a scheduling gap.
+
+    Excluded on purpose: rows stamped `resolved_at` with
+    counterfactual_outcome "ungradeable" and counterfactual_r NULL. Those are
+    resolved, not graded — no bars could be priced — and counting a decision
+    the desk explicitly failed to measure as evidence of self-measurement is
+    the exact overclaim this module exists to prevent (2026-09-12).
+
+    The FK to AssetBotTrade is many-to-one, so the join cannot duplicate a
+    decision row and this needs no `.distinct()` (which would cost a sort).
+    """
+    from django.db.models import Q
+
+    from bot_program.desk_models import DeskDecision
+    return DeskDecision.objects.filter(
+        Q(counterfactual_r__isnull=False) | Q(trade__realized_r__isnull=False)
+    ).count()
+
+
+def _count_desk_live_plans() -> int:
+    """Desk passes made with `capital_desk_mode_live` ON — the plans the
+    fleet actually OBEYED (displaced entries skipped, sizes multiplied).
+
+    Added 2026-09-12 by the review, and the reason is the whole point of
+    this module. The wall carried three sentences asserting that the desk
+    has only ever run in shadow — hardcoded, in a template, on the page
+    whose pitch is that it never hardcodes a claim about reality. The
+    switch exists (`core.platform_control`, component
+    `capital_desk_mode_live`) and `DeskPlan.mode` records which side of it
+    each pass was written on, so the honest version is a count: while this
+    is 0 the page may say the desk has only ever shadowed, and the moment
+    it is not, the page says something else instead.
+
+    Reads the COLUMN, never `is_live_mode()` at render time: the switch can
+    be flipped between a plan and its grade, and the question here is what
+    the desk has actually done, not what it is permitted to do next.
+    """
+    from bot_program.desk_models import DeskPlan
+    return DeskPlan.objects.filter(mode=DeskPlan.MODE_LIVE).count()
+
+
+def _count_share_plans() -> int:
+    """Share-allocator proposals written, in every state.
+
+    Every state, not `state="applied"`: the allocator's whole claim is that
+    it proposes on a schedule and is graded 24h later whether or not a human
+    ever applies the plan, so an applied-only count would tell the story of
+    the operator's clicking rather than of the engine's running. It would
+    also sit at 0 for as long as the switch stays off, which would read on
+    the page as "the allocator has never run" — false, and the opposite of
+    the honesty the shadow default is for.
+    """
+    from bot_program.share_models import SharePlan
+    return SharePlan.objects.count()
+
+
+def _count_share_plans_applied() -> int:
+    """Share plans an admin actually APPLIED — the ones that moved a share.
+
+    The counterpart to `share_plans`, and the reason both exist: the plain
+    count says how often the allocator proposed, this one says how often a
+    human agreed. The page needs the pair, because "it proposes and nothing
+    moves" was written into the template as a permanent fact and it is not
+    one — `share_allocator_mode_live` exists precisely so that it can stop
+    being true, and the wall must notice the day it does (2026-09-12
+    review).
+
+    Counted on `applied_at`, NOT on `state=STATE_APPLIED`. A rolled-back
+    plan really did move a share and then move it back: `rollback` rewrites
+    the state and leaves the timestamp standing, so the state filter would
+    quietly drop it. Pretending an undone action never happened is the
+    flattering direction, and this module rounds the other way.
+    """
+    from bot_program.share_models import SharePlan
+    return SharePlan.objects.filter(applied_at__isnull=False).count()
+
+
+def _count_agent_calls_graded() -> int:
+    """Agent predictions the resolver has marked right or wrong.
+
+    `was_correct__isnull=False` is the grade, and it rides the
+    (was_correct, expected_resolution_at) index. Pending calls are excluded:
+    a prediction nobody has checked yet is a claim, not a track record, and
+    the page is counting the track record.
+
+    Right AND wrong, summed together. Publishing only the correct ones would
+    be a hit rate dressed as a volume, on the page whose pitch is that this
+    platform grades itself in both directions.
+    """
+    from ai_agents.models import AgentPrediction
+    return AgentPrediction.objects.filter(was_correct__isnull=False).count()
+
+
+def _count_components() -> int:
+    """Controllable platform components — the switches on /health/.
+
+    Every row is something an admin can turn on or off, which is the claim
+    the page makes beside it. Counted regardless of `is_enabled`: the number
+    describes how much of the platform is under a switch, and an enabled-only
+    count would shrink every time somebody paused a scraper.
+    """
+    from core.platform_control import PlatformComponent
+    return PlatformComponent.objects.count()
+
+
+def _count_shell_commands() -> int:
+    """Registered shell twins and diagnostics (core.ops_commands.COMMANDS).
+
+    A registry read, not a database count, and not a glob over
+    */management/commands/: tests/test_ops_cockpit.py holds this list to
+    Django's own command list in both directions, so len() here is a number
+    another test already refuses to let drift. Fenced anyway — `_safe` turns
+    an ImportError into 0 — because the module is young enough that the wall
+    must not depend on its existence to serve.
+    """
+    from core.ops_commands import COMMANDS
+    return len(COMMANDS)
+
+
+def _count_rules_governed() -> int:
+    """Signal rules carrying an enforcement state (RuleControl rows).
+
+    The same population as `strategies` above, counted for a different
+    sentence: `strategies` renders beside the promotion ladder (research →
+    paper → live_small → live_full), this one beside the claim that every
+    rule that can size money sits behind an admin-confirmed control. Two
+    labels over one table is honest as long as neither is presented as
+    additional coverage — they are the same rows seen from two sides
+    (2026-09-12).
+    """
+    from signals.models_control import RuleControl
+    return RuleControl.objects.count()
+
+
 # ── Assembly ────────────────────────────────────────────────────────────────
 
 def _safe(name: str, builder, fallback: int) -> int:
@@ -253,6 +445,29 @@ def _build_facts() -> dict:
         "chain_length": _safe("chain_length", _count_chain_length, 0),
         "news_24h": _safe("news_24h", _count_news_24h, 0),
         "bots": _safe("bots", _count_bots, 0),
+        # 2026-09-12 engines. Appended below the original eleven so a diff of
+        # this function reads as an addition and never as a reshuffle of the
+        # keys the live template already renders.
+        "desk_plans": _safe("desk_plans", _count_desk_plans, 0),
+        "desk_decisions_graded": _safe(
+            "desk_decisions_graded", _count_desk_decisions_graded, 0),
+        "share_plans": _safe("share_plans", _count_share_plans, 0),
+        "agent_calls_graded": _safe(
+            "agent_calls_graded", _count_agent_calls_graded, 0),
+        "components": _safe("components", _count_components, 0),
+        # In-process registry, like `evaluators`: no query, but the import can
+        # fail, so it is fenced the same way.
+        "shell_commands": _safe("shell_commands", _count_shell_commands, 0),
+        "rules_governed": _safe("rules_governed", _count_rules_governed, 0),
+        # 2026-09-12 (review). Fenced like every other database count, and
+        # the fence matters more here than anywhere else in this dict: on a
+        # fallback this reads 0, which renders the page's SHADOW wording —
+        # the modest sentence. A counter that degraded toward the immodest
+        # claim would be a fence pointing the wrong way.
+        "desk_live_plans": _safe(
+            "desk_live_plans", _count_desk_live_plans, 0),
+        "share_plans_applied": _safe(
+            "share_plans_applied", _count_share_plans_applied, 0),
     }
 
 
