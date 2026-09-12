@@ -218,11 +218,12 @@ class ForexBot(AssetBot):
 
     # ── decide(): session-aware override ─────────────────────────────────
 
-    def decide(self, symbol: str) -> BotDecision:
+    def decide(self, symbol: str, *,
+               signal_stats: dict | None = None) -> BotDecision:
         """Skip entry outside the pair's preferred sessions; otherwise delegate."""
         extras = self.cfg.extras or {}
         if extras.get("session_filter_disabled"):
-            return super().decide(symbol)
+            return super().decide(symbol, signal_stats=signal_stats)
 
         now = timezone.now()
         if not forex_market_open(now):
@@ -253,7 +254,7 @@ class ForexBot(AssetBot):
             ])
 
         # Inside a preferred session — fall through to default Signal-consuming decide().
-        return super().decide(symbol)
+        return super().decide(symbol, signal_stats=signal_stats)
 
     # ── sizing ───────────────────────────────────────────────────────────
 

@@ -157,6 +157,28 @@ class OptionsBot(AssetBot):
 
     asset_class = "options"
 
+    # NOT DESKED. `scan_symbol` below overrides the base entry path wholesale
+    # and in a different order (contract selection before the gate, the
+    # duplicate check before the client, the cost filter after sizing on the
+    # contract's own spread). Splitting that faithfully into propose/execute
+    # was judged riskier than leaving it whole (2026-09-12): the capital desk
+    # must run this lane through `scan_symbol` as today and file its entries
+    # 'not_desked' — never displaced, never resized. The two methods below
+    # exist so a desk that forgets to check this flag fails loudly on the
+    # first options config rather than sizing an option like a share.
+    DESKED = False
+
+    def propose_entry(self, symbol: str, *, pricing: str = "trade",
+                      signal_stats: dict | None = None):
+        raise NotImplementedError(
+            "OptionsBot is not desked (DESKED = False): the options lane "
+            "trades through scan_symbol only — the desk files it 'not_desked'")
+
+    def execute_entry(self, cand, *, size_mult: float = 1.0):
+        raise NotImplementedError(
+            "OptionsBot is not desked (DESKED = False): the options lane "
+            "trades through scan_symbol only — the desk files it 'not_desked'")
+
     # ── extras helpers ───────────────────────────────────────────────────
 
     def _extras(self) -> dict:
@@ -211,7 +233,8 @@ class OptionsBot(AssetBot):
 
     # ── decide(): defer to base, then translate direction → call/put ────
 
-    def decide(self, underlying: str) -> BotDecision:
+    def decide(self, underlying: str, *,
+               signal_stats: dict | None = None) -> BotDecision:
         """Use the default signal-vote logic on the underlying.
 
         BUY  → long call
@@ -219,7 +242,7 @@ class OptionsBot(AssetBot):
                since we always *buy* premium; put-vs-call is recorded in
                metadata.right).
         """
-        return super().decide(underlying)
+        return super().decide(underlying, signal_stats=signal_stats)
 
     # ── contract selection ──────────────────────────────────────────────
 

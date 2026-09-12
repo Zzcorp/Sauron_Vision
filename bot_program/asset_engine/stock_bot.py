@@ -58,11 +58,12 @@ class StockBot(AssetBot):
 
     # ── decide(): earnings-aware override ────────────────────────────────
 
-    def decide(self, symbol: str) -> BotDecision:
+    def decide(self, symbol: str, *,
+               signal_stats: dict | None = None) -> BotDecision:
         """Skip new entries inside the earnings blackout window; otherwise delegate."""
         extras = self.cfg.extras or {}
         if extras.get("earnings_blackout_disabled"):
-            return super().decide(symbol)
+            return super().decide(symbol, signal_stats=signal_stats)
 
         try:
             days = int(extras.get("earnings_blackout_days", DEFAULT_EARNINGS_BLACKOUT_DAYS))
@@ -75,7 +76,7 @@ class StockBot(AssetBot):
                 f"{symbol} in earnings blackout (≤{days}d): \"{ev_title[:120]}\""
             ])
 
-        return super().decide(symbol)
+        return super().decide(symbol, signal_stats=signal_stats)
 
     # ── sizing ───────────────────────────────────────────────────────────
 

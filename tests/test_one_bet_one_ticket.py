@@ -334,25 +334,41 @@ class ThemeStateTests(TestCase):
 class BotPathTests(TestCase):
     """The gates sit ON the entry path, not beside it — both lanes."""
 
-    def test_scan_symbol_asks_both_questions(self):
-        """AST-pinned on CALL nodes, the way the seeded-setup params are
-        pinned: the options lane once proved a limit can live in a method
-        a lane never runs — and a plain substring pin is satisfied by the
-        import line alone, so a reverted call with a surviving import
-        would keep this green while gating nothing."""
+    @staticmethod
+    def _calls_in(fn) -> set:
         import ast
         import inspect
         import textwrap
-        from bot_program.asset_engine.base import AssetBot
-        src = textwrap.dedent(inspect.getsource(AssetBot.scan_symbol))
-        called = {
+        src = textwrap.dedent(inspect.getsource(fn))
+        return {
             (node.func.id if isinstance(node.func, ast.Name)
              else getattr(node.func, "attr", None))
             for node in ast.walk(ast.parse(src))
             if isinstance(node, ast.Call)
         }
-        self.assertIn("duplicate_state", called)
-        self.assertIn("theme_state", called)
+
+    def test_scan_symbol_asks_both_questions(self):
+        """AST-pinned on CALL nodes, the way the seeded-setup params are
+        pinned: the options lane once proved a limit can live in a method
+        a lane never runs — and a plain substring pin is satisfied by the
+        import line alone, so a reverted call with a surviving import
+        would keep this green while gating nothing.
+
+        Since the capital-desk seam (2026-09-12) the entry path is
+        scan_symbol = execute_entry(propose_entry(symbol)), and the two
+        questions live in `_judge_final_size`, which BOTH halves must call:
+        the proposal on the bot's own size, the execution on the size the
+        desk hands back — the book may have moved in between."""
+        from bot_program.asset_engine.base import AssetBot
+        judged = self._calls_in(AssetBot._judge_final_size)
+        self.assertIn("duplicate_state", judged)
+        self.assertIn("theme_state", judged)
+        self.assertIn("_judge_final_size", self._calls_in(AssetBot.propose_entry))
+        self.assertIn("_judge_final_size", self._calls_in(AssetBot.execute_entry))
+        # And scan_symbol is nothing but the two halves.
+        wrapper = self._calls_in(AssetBot.scan_symbol)
+        self.assertIn("propose_entry", wrapper)
+        self.assertIn("execute_entry", wrapper)
 
     def test_the_options_lane_asks_the_duplicate_question_too(self):
         import inspect

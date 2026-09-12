@@ -178,10 +178,26 @@ def _signal_stats() -> dict:
         return {}
 
 
+def signal_stats_for_tick() -> dict:
+    """The six-month per-rule signal aggregate, computed ONCE for a pass.
+
+    `weighted_consensus` recomputes `calculate_signal_stats(days=180,
+    group_by="rule_name")` on every call that has a vote to weigh — one
+    aggregation per symbol per config. A fleet pass over every user's
+    configs multiplies that by the fleet. Callers that walk more than one
+    decision compute this once and hand it down through
+    `decide(symbol, signal_stats=...)`; a single-config tick may still pass
+    nothing and get today's lazy behaviour. Never raises: an unreadable
+    ledger is an empty dict, which weighs every rule neutral, same as now.
+    """
+    return _signal_stats()
+
+
 def weighted_consensus(bullish, bearish, *, asset_class: str = "",
                        min_net_weight: float = DEFAULT_MIN_NET_WEIGHT,
                        min_signals: int = 1,
-                       venue: str | None = None) -> dict:
+                       venue: str | None = None,
+                       signal_stats: dict | None = None) -> dict:
     """Weigh both sides by evidence and return the net verdict.
 
     `bullish` / `bearish` are Signal-like objects exposing `score` and
@@ -205,6 +221,10 @@ def weighted_consensus(bullish, bearish, *, asset_class: str = "",
     rather than on the first tick that happens to have a signal to weigh: a
     quiet tick returning HOLD would otherwise hide the typo until the day
     the bot had a reason to trade.
+
+    `signal_stats` is `signal_stats_for_tick()` already computed by a caller
+    that has more than one decision to make; it is handed to `rule_weight`
+    as-is. None keeps the lazy per-call aggregation below, unchanged.
     """
     _check_decision_venue(venue)
 
@@ -212,7 +232,9 @@ def weighted_consensus(bullish, bearish, *, asset_class: str = "",
     # and computed only if some rule actually needs weighing. Most ticks
     # find nothing above entry_score_min on either side, and a decision
     # with no votes to weigh should not pay for six months of history.
-    stats_cache: list = []
+    # A caller-supplied aggregate seeds the cache, so nothing is computed
+    # here at all; `{}` counts as supplied (the list is non-empty).
+    stats_cache: list = [] if signal_stats is None else [signal_stats]
     weights: dict[str, float] = {}
 
     def weight_for(rule: str) -> float:

@@ -4,6 +4,10 @@ Common loop (tick):
   1. manage_positions — for every OPEN trade, check current price vs SL/TP, close if hit.
   2. can_open_new — gate: max concurrent + daily loss limit.
   3. scan_for_entries — for each symbol in cfg.symbols, decide() and open if BUY/SELL.
+     scan_symbol = execute_entry(propose_entry(symbol)): the proposal is
+     every gate and the bot's own size (an EntryCandidate), the execution is
+     the shadow branch, the order and the row. The capital desk ranks a
+     fleet's candidates between the two.
 
 Default `decide()` consumes Phase-1 active Signal rows for the instrument:
 sufficient bullish/bearish agreement with score ≥ entry_score_min triggers an
@@ -317,6 +321,12 @@ class AssetBot(ABC):
     """Base class. Subclass per asset_class to specialise decide()/sizing."""
 
     asset_class: str = ""
+
+    # Whether the capital desk may run this lane as propose_entry /
+    # execute_entry. OptionsBot overrides scan_symbol wholesale and sets
+    # this False (2026-09-12); the desk runs such a lane through
+    # scan_symbol as before and files its entries 'not_desked'.
+    DESKED = True
 
     def __init__(self, config):
         self.cfg = config
@@ -2023,9 +2033,49 @@ class AssetBot(ABC):
     # ── per-symbol scan ─────────────────────────────────────────────────
 
     def scan_symbol(self, symbol: str) -> Optional[dict]:
+        """Propose, then execute: the bot's own entry path, unchanged.
+
+        Split on 2026-09-12 into `propose_entry` (steps A-O: every gate and
+        the bot's own final size) and `execute_entry` (steps P-T: shadow,
+        order, row, notify) so the capital desk can rank a whole fleet's
+        candidates BETWEEN the two. A symbol ticking through here still does
+        exactly what it did before the split - the candidate is executed at
+        its default size, and every skip is recorded where it always was.
+        """
+        cand = self.propose_entry(symbol)
+        if cand is None:
+            return None
+        return self.execute_entry(cand)
+
+    def propose_entry(self, symbol: str, *, pricing: str = "trade",
+                      signal_stats: dict | None = None):
+        """Steps A-O of the entry path: decide, price, level, size, gate.
+
+        Returns an `EntryCandidate` - the entry this bot WOULD take, at the
+        size it would take it - or None after recording the skip, exactly as
+        scan_symbol always has. Nothing here submits an order or writes a
+        row. The two exits that used to be a bare `return None` (the brain
+        pause and the live-order exception) are recorded as BRAIN_PAUSED and
+        ORDER_ERROR now, so the skip distribution stops having two blind
+        spots.
+
+        `pricing="data"` reads the ticker through the router's DATA session
+        instead of the exclusive trade session. The desk's proposal pass
+        walks every config's symbols before anything is executed; holding
+        the one clientId that can place an order across that whole pass
+        would starve the pending-close drain and the kill switch for
+        minutes (see runner.run_all_asset_bots). `execute_entry` acquires
+        the trade client itself, whatever this pass priced through.
+
+        `signal_stats` is the tick-wide `calculate_signal_stats` aggregate,
+        threaded to `decide` so a fleet pass computes six months of signal
+        history once rather than once per symbol. None means "compute it
+        yourself", which is what a single-config tick still does.
+        """
         from bot_program.models import AssetBotTrade
         from bot_program.engine.broker_router import client_for_symbol
         from bot_program.asset_engine import skips
+        from bot_program.asset_engine.candidates import EntryCandidate
 
         # Skip if a trade for this symbol is already open (or awaiting a
         # retried close — the broker position is still live) under this config.
@@ -2046,7 +2096,13 @@ class AssetBot(ABC):
                 return self._skip(symbol, skips.COOLDOWN,
                                   f"closed a trade within {cool}m")
 
-        decision = self.decide(symbol)
+        # Called exactly as before when no tick-wide stats were handed in,
+        # so a `decide` patched or overridden with the one-argument
+        # signature keeps working.
+        if signal_stats is None:
+            decision = self.decide(symbol)
+        else:
+            decision = self.decide(symbol, signal_stats=signal_stats)
         if decision.direction == "HOLD":
             reason = (decision.reasons or [""])[0]
             code = (skips.STALE_SIGNALS if "stale" in reason
@@ -2085,7 +2141,13 @@ class AssetBot(ABC):
                     )
                 except Exception:
                     pass
-                return None
+                # Recorded, not silent: this exit was one of the two bare
+                # `return None`s left on the path, so a rule the brain had
+                # parked read from outside exactly like a quiet market.
+                return self._skip(
+                    symbol, skips.BRAIN_PAUSED,
+                    f"brain pause_recommended for "
+                    f"{decision.rule_name or '?'}: {why}")
         except Exception:
             pass  # Brain advisory is never fatal.
 
@@ -2104,7 +2166,16 @@ class AssetBot(ABC):
             logger.warning("[%s_bot] orchestrator check failed for %s: %s",
                            self.asset_class, symbol, e)
 
-        client = client_for_symbol(self.user, symbol, self.cfg)
+        # The client this pass PRICES through. On the bot's own tick that is
+        # the trade session, as it always was; the desk's proposal pass asks
+        # for the data session so the exclusive clientId is not held across
+        # a fleet-wide walk. The trade session is acquired again, by
+        # execute_entry, right before an order.
+        if pricing == "data":
+            client = client_for_symbol(self.user, symbol, self.cfg,
+                                       purpose="data")
+        else:
+            client = client_for_symbol(self.user, symbol, self.cfg)
 
         # Money-safety: a live-mode config whose broker creds are missing or
         # broken gets a PaperTrader back from the router. Refuse to trade —
@@ -2214,11 +2285,12 @@ class AssetBot(ABC):
         # and refusing an entry the rest of the platform has approved because
         # a price history is thin would be the taper acting as a gate, which
         # is exactly what it is not.
+        inst = None
         try:
             from instruments.models import Instrument
             from portfolio.risk_gate import correlation_state
-            corr = correlation_state(
-                self.user, Instrument.objects.filter(symbol=symbol).first())
+            inst = Instrument.objects.filter(symbol=symbol).first()
+            corr = correlation_state(self.user, inst)
         except Exception as e:  # noqa: BLE001 — see above
             logger.warning("[%s_bot] correlation taper unavailable for %s: "
                            "%s — sizing untapered", self.asset_class, symbol, e)
@@ -2229,6 +2301,62 @@ class AssetBot(ABC):
                         self.asset_class, symbol, corr["reason"])
 
         qty = self._round_qty(qty, price)
+
+        # Steps M-O: the ceiling, the single-position cap, the duplicate and
+        # theme gates - on the bot's own final size. execute_entry runs the
+        # same judgement again on the size actually sent.
+        if not self._judge_final_size(symbol, qty=qty, price=price, sl=sl,
+                                      decision=decision, sizing=sizing):
+            return None
+
+        # ── The candidate: everything decided, nothing sent ──────────────
+        # The horizon the desk grades a displaced candidate over. The
+        # config's time stop is the honest bound; 0.0 means "off" and a
+        # counterfactual with no bound would never resolve.
+        try:
+            from bot_program.asset_engine.candidates import (
+                DEFAULT_HORIZON_HOURS,
+            )
+            horizon = (float(self.cfg.time_stop_setting()["hours"] or 0.0)
+                       or DEFAULT_HORIZON_HOURS)
+        except Exception:  # noqa: BLE001 — a horizon must never cost an entry
+            horizon = 168.0
+        # The same value_per_unit the sizer used and the ceiling above
+        # re-derived, so risk_dollars_default is the number the ceiling
+        # judged, not a second opinion of it.
+        vpu = float(sizing.get("value_per_unit", 1.0))
+        per_unit_risk = abs(float(price) - float(sl)) * vpu
+        return EntryCandidate(
+            bot=self, cfg_id=self.cfg.id, user_id=self.user.id,
+            symbol=symbol, instrument_id=getattr(inst, "id", None),
+            asset_class=self.asset_class,
+            # The venue the row would be filed under - the same rule
+            # execute_entry applies to AssetBotTrade.paper.
+            venue=("paper" if (self.cfg.mode == "paper"
+                               or bool(stage["force_paper"])) else "live"),
+            decision=decision, price=float(price),
+            market_price=float(market_price),
+            stop=float(sl), target=float(tp), level_meta=dict(level_meta),
+            cost_reason=cost_reason, stage=dict(stage), sizing=dict(sizing),
+            qty_default=float(qty), per_unit_risk=per_unit_risk,
+            risk_dollars_default=float(qty) * per_unit_risk,
+            notional_default=float(qty) * float(price) * vpu,
+            value_per_unit=vpu, corr_scale=float(corr.get("scale", 1.0)),
+            horizon_hours=horizon,
+        )
+
+    def _judge_final_size(self, symbol: str, *, qty: float, price: float,
+                          sl: float, decision, sizing: dict) -> bool:
+        """Steps M-O on a FINAL quantity: True when it may go to the book.
+
+        Records the skip and returns False otherwise. Shared by
+        propose_entry (on the bot's own size) and execute_entry (on that
+        size times the desk's multiplier), because every size multiplier
+        that exists must sit BEFORE these checks: anything applied after
+        them is a quantity nothing judged, and a multiplier past
+        MAX_RISK_FRACTION is refused here rather than clamped.
+        """
+        from bot_program.asset_engine import skips
 
         # THE CAP, ENFORCED WHERE THE FINAL QUANTITY EXISTS.
         # `risk_fraction()` clamps to MAX_RISK_FRACTION and its docstring
@@ -2258,7 +2386,8 @@ class AssetBot(ABC):
             # failure here means something is wrong enough to stop.
             logger.error("[%s_bot] %s: risk ceiling uncomputable (%s) — "
                          "refusing the entry", self.asset_class, symbol, e)
-            return self._skip(symbol, skips.ERROR, f"risk ceiling: {e}")
+            self._skip(symbol, skips.ERROR, f"risk ceiling: {e}")
+            return False
         # The 1e-9 slack is for float noise at exactly the cap, not
         # tolerance — the same slack the manual path uses.
         if (risk_ceiling > 0 and per_unit_risk > 0
@@ -2267,22 +2396,24 @@ class AssetBot(ABC):
                 "[%s_bot] %s REFUSED: %.4f units risk $%.2f, past the $%.2f "
                 "ceiling (%.1f%% of the pool)", self.asset_class, symbol,
                 qty, realised_risk, risk_ceiling, MAX_RISK_FRACTION * 100)
-            return self._skip(
+            self._skip(
                 symbol, skips.GATE_BLOCKED,
                 f"sized to ${realised_risk:,.2f} of risk, past the "
                 f"${risk_ceiling:,.2f} ceiling "
                 f"({MAX_RISK_FRACTION * 100:.1f}% of the bot pool) — the "
                 f"allocator lane scaled past the cap")
+            return False
 
         if qty <= 0:
             logger.info("[%s_bot] %s sized to zero (risk budget %.2f%% of "
                         "%s, stop %.3f%% away) — skipping", self.asset_class,
                         symbol, sizing["risk_fraction"] * 100, self.cfg.capital,
                         abs(price - sl) / price * 100 if price else 0)
-            return self._skip(
+            self._skip(
                 symbol, skips.SIZED_TO_ZERO,
                 f"risk budget {sizing['risk_fraction'] * 100:.2f}% of "
                 f"{self.cfg.capital} is below one tradeable unit")
+            return False
 
         # MAX SINGLE POSITION from /setup/, judged on the size actually about
         # to be sent — after every multiplier and after rounding, because a
@@ -2311,7 +2442,8 @@ class AssetBot(ABC):
         if not cap["ok"]:
             logger.info("[%s_bot] %s refused by the book's single-position "
                         "limit: %s", self.asset_class, symbol, cap["reason"])
-            return self._skip(symbol, skips.GATE_BLOCKED, cap["reason"])
+            self._skip(symbol, skips.GATE_BLOCKED, cap["reason"])
+            return False
 
         # NOT a per-ticket total-exposure pre-check here, deliberately.
         #
@@ -2355,14 +2487,58 @@ class AssetBot(ABC):
         if not dup["ok"]:
             logger.info("[%s_bot] %s refused as a duplicate expression: %s",
                         self.asset_class, symbol, dup["reason"])
-            return self._skip(symbol, skips.GATE_BLOCKED, dup["reason"])
+            self._skip(symbol, skips.GATE_BLOCKED, dup["reason"])
+            return False
         theme = theme_state(self.user, symbol=symbol,
                             side=decision.direction,
                             asset_class=self.asset_class)
         if not theme["ok"]:
             logger.info("[%s_bot] %s refused by the theme-leg cap: %s",
                         self.asset_class, symbol, theme["reason"])
-            return self._skip(symbol, skips.GATE_BLOCKED, theme["reason"])
+            self._skip(symbol, skips.GATE_BLOCKED, theme["reason"])
+            return False
+        return True
+
+    def execute_entry(self, cand, *, size_mult: float = 1.0) -> Optional[dict]:
+        """Steps P-T: re-judge the size, then shadow / order / row / notify.
+
+        `cand` is what propose_entry returned. `size_mult` is the desk's
+        multiplier, never above 1.0 by doctrine (caps only ever tighten),
+        applied to the bot's own final size and then judged AGAIN by the
+        MAX_RISK_FRACTION arithmetic, the single-position cap and the
+        duplicate/theme gates. Again, because the book may have moved since
+        the proposal - duplicate_state and theme_state read the live rows at
+        call time and see this tick's earlier fills - and because a size
+        nothing judged must never reach a broker. A multiplier that pushes
+        past the ceiling is refused there exactly as the allocator lane is,
+        not clamped.
+
+        Acquires the trade client itself: an order goes through the
+        exclusive session whatever session the proposal priced through, and
+        the money-safety guard against a PaperTrader fallback runs on THIS
+        client, which is the one that matters.
+        """
+        from bot_program.engine.broker_router import client_for_symbol
+        from bot_program.asset_engine import skips
+
+        symbol = cand.symbol
+        decision = cand.decision
+        price = float(cand.price)
+        market_price = float(cand.market_price)
+        paper_now = (self.cfg.mode == "paper")
+        sl, tp = float(cand.stop), float(cand.target)
+        level_meta, cost_reason = cand.level_meta, cand.cost_reason
+        stage, sizing = cand.stage, cand.sizing
+
+        # The multiplier lands BEFORE rounding and BEFORE the judgement, so
+        # the quantity judged is the quantity sent. At 1.0 this is the
+        # bot's own size rounded a second time, which every _round_qty is
+        # idempotent under (round-to-6, floor-to-whole, snap-to-100).
+        qty = self._round_qty(float(cand.qty_default) * float(size_mult),
+                              price)
+        if not self._judge_final_size(symbol, qty=qty, price=price, sl=sl,
+                                      decision=decision, sizing=sizing):
+            return None
 
         # Shadow mode: everything is computed, nothing is submitted and no
         # row is written. The way to validate a change against live data
@@ -2372,6 +2548,31 @@ class AssetBot(ABC):
             log_shadow_entry(self.cfg, symbol, decision, price, qty)
             return self._skip(symbol, skips.SHADOW,
                               "shadow mode — computed, not submitted")
+
+        # The TRADE client, acquired by the step that sends. On the bot's
+        # own tick propose_entry already held it and this is the pooled
+        # session handed straight back; on the desk's pass the proposal
+        # priced through the data session and this is the first time the
+        # exclusive id is asked for - after every refusal above, so a
+        # candidate the book no longer has room for never takes the lease.
+        client = client_for_symbol(self.user, symbol, self.cfg)
+
+        # Money-safety, on the client an order would actually go through:
+        # a live-mode config whose broker creds are missing or broken gets a
+        # PaperTrader back from the router. Refuse to trade — recording a
+        # paper fill as paper=False fabricates live history.
+        if self.cfg.mode == "live" and self._is_paper_client(client):
+            logger.error(
+                "[%s_bot] LIVE config %s fell back to PaperTrader for %s "
+                "(missing/invalid broker credentials?) — refusing to trade",
+                self.asset_class, self.cfg.id, symbol)
+            from bot_program.engine.broker_router import session_busy
+            busy = session_busy(client)
+            self._notify_paper_fallback(symbol, busy=busy)
+            return self._skip(symbol, skips.PAPER_FALLBACK,
+                              "the IBKR trading session is held by another "
+                              "process — nothing was sent" if busy else
+                              "live config fell back to PaperTrader")
 
         # A paper-STAGE rule trades on the paper venue even in a live config:
         # that is the whole point of the stage, and it is how the evidence to
@@ -2532,7 +2733,10 @@ class AssetBot(ABC):
             except Exception as e:
                 logger.error("[%s_bot] live order failed for %s: %s",
                              self.asset_class, symbol, e)
-                return None
+                # The other bare `return None`: an order the broker threw
+                # on used to leave the same trace as no order at all.
+                return self._skip(symbol, skips.ORDER_ERROR,
+                                  f"live order failed: {e}")
 
         from bot_program.models import AssetBotTrade
         trade = AssetBotTrade.objects.create(
@@ -2759,11 +2963,18 @@ class AssetBot(ABC):
 
     # ── default decision: consume Phase-1 Signal rows ────────────────────
 
-    def decide(self, symbol: str) -> BotDecision:
+    def decide(self, symbol: str, *,
+               signal_stats: dict | None = None) -> BotDecision:
         """Default decision: weighted vote over recent active Signal rows.
 
         Subclasses can override for asset-specific logic. Returns a BotDecision
         with rule_name=<top contributing rule> so Phase 5/7/8 multipliers apply.
+
+        `signal_stats` is the output of `aggregation.signal_stats_for_tick()`,
+        handed through to `weighted_consensus` so a fleet pass aggregates six
+        months of signal history once. None leaves the vote exactly as it was:
+        the consensus computes the aggregate itself, lazily, when a vote needs
+        weighing.
         """
         from signals.models import Signal
         from instruments.models import Instrument
@@ -2865,13 +3076,14 @@ class AssetBot(ABC):
                 min_net_weight=float(
                     extras.get("min_net_weight", default_threshold)),
                 min_signals=self.cfg.min_signals_for_entry,
-                venue=venue)
+                venue=venue, signal_stats=signal_stats)
             if verdict["direction"] == "HOLD":
                 return BotDecision("HOLD", 0, [verdict["detail"]])
             side = bullish if verdict["direction"] == "BUY" else bearish
             return BotDecision(
                 verdict["direction"],
-                self._conviction_score(verdict, side, venue=venue),
+                self._conviction_score(verdict, side, venue=venue,
+                                       signal_stats=signal_stats),
                 reasons=([verdict["detail"]]
                           + [f"{s.rule_name}: {s.title}" for s in side[:3]]),
                 rule_name=verdict["rule_name"] or "asset_bot_weighted_consensus",
@@ -2974,7 +3186,8 @@ class AssetBot(ABC):
         return bullish, bearish + [vote]
 
     def _conviction_score(self, verdict: dict, side: list, *,
-                          venue: str) -> float:
+                          venue: str,
+                          signal_stats: dict | None = None) -> float:
         """The winning side's conviction, with the SMC seat taken back out.
 
         `weighted_consensus` scores a side as its total evidence divided by
@@ -3015,7 +3228,7 @@ class AssetBot(ABC):
         rules_only = weighted_consensus(
             real if buy else [], [] if buy else real,
             asset_class=self.asset_class, min_net_weight=0.0, min_signals=1,
-            venue=venue)
+            venue=venue, signal_stats=signal_stats)
         return rules_only["score"]
 
     # ── Phase-17: optional bot-trade track-record feedback ──────────────

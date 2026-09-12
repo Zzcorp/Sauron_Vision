@@ -41,6 +41,11 @@ SIZED_TO_ZERO = "sized_to_zero"       # risk budget below one tradeable unit
 SHADOW = "shadow"                     # shadow mode: computed, not submitted
 ORDER_REJECTED = "order_rejected"     # broker refused
 ERROR = "error"                       # an exception on the entry path
+# The two exits that were still a bare `return None` when the entry path was
+# split for the capital desk (2026-09-12). Both looked, from outside, like a
+# quiet market.
+BRAIN_PAUSED = "brain_paused"         # the brain advised pause_recommended
+ORDER_ERROR = "order_error"           # the live order raised (never sent, or unknown)
 
 MAX_SYMBOLS_TRACKED = 200
 
@@ -116,6 +121,10 @@ def diagnose(cfg) -> str:
         SIZED_TO_ZERO: "the risk budget is below one tradeable unit — fund more "
                        "capital or raise extras['risk_per_trade_pct']",
         SHADOW: "shadow mode is on: everything is computed, nothing submitted",
+        BRAIN_PAUSED: "the brain has this rule on pause_recommended — read "
+                      "the latest BrainReport before overriding it",
+        ORDER_ERROR: "the broker client raised on the order — check the "
+                     "gateway and the bot log; nothing was booked",
     }.get(top, "")
     return (f"{top} accounts for {share:.0%} of {total} skips"
             + (f" — {advice}" if advice else ""))
