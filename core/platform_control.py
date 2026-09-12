@@ -235,14 +235,44 @@ DEFAULT_COMPONENTS = [
     {"key": "capital_desk_mode_live", "name": "Capital Desk Live Mode",
      "description": "Off (default) = shadow: the plan is recorded and graded, the fleet is unchanged. On = the plan is OBEYED — displaced entries are skipped and chosen sizes multiplied, never above 1. The budget, the caps and every per-order refusal hold in both modes. Flip after weeks of positive edge, not before.",
      "category": "system"},
+
+    # ── The three that were never registered (found live 2026-09-13) ────
+    # These keys have guarded tasks and beat entries in this codebase, and
+    # had NO row in DEFAULT_COMPONENTS. `is_component_enabled` returns
+    # False for a key with no row, so the gate skipped all three on every
+    # single run since the day they were written — silently, at INFO, one
+    # line buried among thousands of bar lines. On the live box the
+    # registry held 51 components and none of these.
+    #
+    # The old comment on RETIRED_COMPONENT_KEYS called them "admin-created
+    # by hand". That is not a design, it is a dependency on somebody
+    # remembering, and nobody did: price alerts were never checked and the
+    # 07:00 and 17:00 digests were never sent. Seeding them here costs
+    # nothing — is_enabled defaults to False, so each arrives OFF and the
+    # operator turns on what they want. tests/test_component_registry.py
+    # now fails if any guarded_task key is missing from this list.
+    {"key": "pipeline_alerts", "name": "Price Alerts",
+     "description": "Checks every active price alert against the current quote. OFF on arrival: turning it on starts evaluating alerts the operator may have set months ago.",
+     "category": "pipeline"},
+    {"key": "pipeline_digest", "name": "Morning and EOD Digests",
+     "description": "The 07:00 and 17:00 UTC digests. OFF on arrival — turning it on SENDS messages outward on a schedule, so it is the operator's decision, not a deploy's.",
+     "category": "pipeline"},
+    {"key": "agent_commentator", "name": "Market Commentator",
+     "description": "Daily market commentary from the commentator agent. OFF on arrival: it costs model spend on every run.",
+     "category": "agent"},
 ]
 
 
 # Components that once existed and were deliberately removed. Named
 # explicitly rather than pruning everything outside DEFAULT_COMPONENTS,
-# because some live keys (pipeline_alerts, pipeline_digest,
-# agent_commentator) are admin-created by hand and a blanket prune would
-# silently disable them.
+# because an admin can create a row by hand and a blanket prune would
+# silently disable it.
+#
+# This comment used to name pipeline_alerts, pipeline_digest and
+# agent_commentator as the hand-made keys it was protecting. They are in
+# DEFAULT_COMPONENTS now: "admin-created by hand" turned out to mean
+# "never created at all" on the live box, and the gate had been skipping
+# all three since they were written. Seeding beats remembering.
 RETIRED_COMPONENT_KEYS = ["scraper_finviz"]
 
 
