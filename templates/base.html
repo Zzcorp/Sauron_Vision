@@ -479,6 +479,7 @@
             <a href="{% url 'consolidation_dashboard' %}" class="nav-link {% if page_id == 'consolidation' %}active{% endif %}"><span class="icon">⊜</span> <span class="label-text">Consolidation</span></a>
             <a href="{% url 'generated_dashboard' %}" data-nav-id="generated" class="nav-link {% if page_id == 'generated' %}active{% endif %}"><span class="icon">⊞</span> <span class="label-text">Generated Strategies</span></a>
             {% if request.user.is_superuser %}<div class="nav-section">Admin</div>
+            <a href="{% url 'ops_dashboard' %}" class="nav-link {% if page_id == 'ops' %}active{% endif %}"><span class="icon">⌘</span> <span class="label-text">Ops</span></a>
             <a href="{% url 'admin_dashboard' %}" class="nav-link {% if page_id == 'admin_dashboard' %}active{% endif %}"><span class="icon">⬢</span> <span class="label-text">Admin Panel</span></a>
             {% if user.is_staff %}<a href="{% url 'audit_dashboard' %}" class="nav-link {% if page_id == 'audit' %}active{% endif %}"><span class="icon">⊠</span> <span class="label-text">Audit Log</span></a>{% endif %}
             <a href="{% url 'admin_newsletters' %}" class="nav-link {% if page_id == 'admin_newsletters' %}active{% endif %}"><span class="icon">&#x25A3;</span> <span class="label-text">Newsletters</span></a>

@@ -3711,6 +3711,11 @@ def admin_toggle_component(request):
         except PlatformComponent.DoesNotExist:
             messages.error(request, f"Component '{key}' not found.")
     from django.shortcuts import redirect
+    # The cockpit (/ops/) posts the same form with next=ops; without
+    # this the toggle bounced the operator to the admin dashboard and
+    # the page they were reading lost its place (2026-09-12).
+    if request.method == "POST" and request.POST.get("next") == "ops":
+        return redirect("ops_dashboard")
     return redirect("admin_dashboard")
 
 
@@ -3730,6 +3735,11 @@ def admin_bulk_toggle(request):
         verb = "started" if enable else "stopped"
         messages.success(request, f"{count} {category} components {verb}.")
     from django.shortcuts import redirect
+    # The cockpit (/ops/) posts the same form with next=ops; without
+    # this the toggle bounced the operator to the admin dashboard and
+    # the page they were reading lost its place (2026-09-12).
+    if request.method == "POST" and request.POST.get("next") == "ops":
+        return redirect("ops_dashboard")
     return redirect("admin_dashboard")
 
 

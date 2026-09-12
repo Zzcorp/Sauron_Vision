@@ -465,6 +465,41 @@ docker compose --env-file .env -f deploy/docker-compose.yml ps   # nothing Resta
 
 ---
 
+## The cockpit (/ops/)
+
+One page that says "everything, now": every platform switch with its
+state, last run, status and error count (toggle from the page, superusers
+only); every decision queue with its count, the newest item's age and the
+page that decides it (actuator proposals, generator proposals, share plans,
+meta-allocation shadows, pending closes, open positions live/paper, the
+research fleet); the broker's last reading with its age, the drawdown and
+governor, the share-allocator mode, and `preflight_live`'s verdict (the
+BLOCKERS lines or NO BLOCKERS FOUND, cached two minutes per user); and the
+command catalogue. Every number carries its source and age and reads `—`
+where nothing has been measured. The switches and the queues are
+platform-wide and follow `/health/`'s rule — staff only; any login reads
+its own account, its own plans, the preflight verdict and the catalogue.
+
+The Run lane's rule: the page runs only a command registered as read-only
+in `core/ops_commands.py`, with the fixed arguments the registry gives it
+and nothing from the browser — `open_trades`, `preflight_live`,
+`why_no_trade`. Every run and every refusal is an audit row (`ops_run`,
+`ops_run_refused`); the output is kept an hour, truncated at 20,000
+characters. Anything that writes — `component on`, `proposals approve`,
+`actuator apply`, `shares apply`, `follow`, `bot on`, the seeders, the
+backfill — shows its usage on the page and runs on the server, where
+`--yes` or the PIN keeps its meaning:
+
+```bash
+./deploy/dc exec web python manage.py ops            # the catalogue, as text
+./deploy/dc exec web python manage.py ops --category read
+```
+
+A management command missing from the registry (or from its EXEMPT set)
+fails `tests.test_ops_cockpit`, so the page and the shell cannot drift.
+
+---
+
 ## Operating notes
 
 **Going live is deliberate.** Bots ship in paper mode; flipping one to live

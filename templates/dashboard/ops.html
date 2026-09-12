@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% block title %}Ops Cockpit — Sauron Vision{% endblock %}
+{# ⌘ is the sidebar's Ops mark — title and nav row agree. #}
+{% block page_title %}⌘ OPS COCKPIT · everything, now{% endblock %}
+
+{% block content %}
+{# base.html renders no messages region: a refused Run would be a silent redirect without this block. #}
+{% if messages %}
+<div style="margin-bottom:18px;">
+    {% for msg in messages %}
+    <div class="card" style="border-color:{% if msg.tags == 'success' %}var(--accent){% elif msg.tags == 'error' %}var(--accent-red){% elif msg.tags == 'warning' %}var(--accent-gold-ink, var(--accent-gold)){% else %}var(--border){% endif %};padding:12px 20px;margin-bottom:8px;">
+        <span style="font-family:var(--font-mono);font-size:13px;">{% if msg.tags == 'success' %}OK{% elif msg.tags == 'error' %}ERR{% elif msg.tags == 'warning' %}WARN{% else %}NOTE{% endif %} {{ msg }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{# The strip: six numbers, each with its source and its age; '—' where nothing has been measured. #}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SWITCHES</span>
+        {% if switches.total is not None %}
+        <span class="oc-strip-value {% if switches.erroring %}down{% endif %}">{{ switches.on }}/{{ switches.total }}</span>
+        <span class="oc-strip-sub">on · {{ switches.erroring }} erroring · PlatformComponent</span>
+        {% else %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">{{ switches.error|default:"unreadable" }}</span>
+        {% endif %}
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">QUEUES</span>
+        {% if queues.pending is not None %}
+        <span class="oc-strip-value {% if queues.pending %}up{% endif %}">{{ queues.pending }}</span>
+        <span class="oc-strip-sub">awaiting a decision{% if queues.unmeasured %} · one queue unmeasured{% endif %}</span>
+        {% else %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">{{ queues.error|default:"unreadable" }}</span>
+        {% endif %}
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ACCOUNT</span>
+        {% if broker.reading %}
+        <span class="oc-strip-value {% if broker.reading_stale %}down{% endif %}">{{ broker.reading.value_text }} {{ broker.reading.currency }}</span>
+        <span class="oc-strip-sub">{% if broker.reading_stale %}STALE · {% endif %}broker sync read {{ broker.reading.age_text }}</span>
+        {% else %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">{% if broker.reading_error %}{{ broker.reading_error }}{% else %}no broker reading yet{% endif %}</span>
+        {% endif %}
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">DRAWDOWN</span>
+        {% if broker.drawdown %}
+        <span class="oc-strip-value {% if broker.drawdown.drawdown_pct > 0.05 %}down{% endif %}">{{ broker.drawdown.pct_text }}</span>
+        <span class="oc-strip-sub">governor ×{{ broker.governor|floatformat:2 }} · hwm {{ broker.drawdown.hwm_text }} over {{ broker.drawdown.n }} reading{{ broker.drawdown.n|pluralize }}</span>
+        {% else %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">{% if broker.drawdown_error %}{{ broker.drawdown_error }}{% else %}no equity history yet{% endif %}</span>
+        {% endif %}
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MODE</span>
+        {% if broker.live_mode is not None %}
+        <span class="oc-strip-value {% if broker.live_mode %}up{% else %}down{% endif %}">{% if broker.live_mode %}LIVE{% else %}SHADOW{% endif %}</span>
+        <span class="oc-strip-sub">share allocator{% if broker.plan_mode %} · newest plan {{ broker.plan_mode|upper }}{% endif %} · auto de-risk {% if broker.auto_derisk %}ON{% else %}OFF{% endif %}</span>
+        {% else %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">{{ broker.mode_error|default:"share allocator unreadable" }}</span>
+        {% endif %}
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">TESTS</span>
+        <span class="oc-strip-value">{{ tests_green }}</span>
+        <span class="oc-strip-sub">tests green · core.wall_facts</span>
+    </div>
+</div>
+
+{% if last %}
+{# The Run lane's last output — this user's, from the cache or the session; an hour old at most. #}
+<div class="card fade-in-up" style="margin-bottom:24px;" id="ops-last-output">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <span class="card-title">Last command output — <code>{{ last.name }}</code></span>
+        <span style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);">{{ last.at }} · {{ last.seconds }}s · {% if last.ok %}OK{% else %}FAILED{% endif %}{% if last.truncated %} · truncated at {{ output_cap }} chars{% endif %}</span>
+    </div>
+    <pre style="margin:0;padding:12px 16px;font-size:11px;line-height:1.45;white-space:pre-wrap;overflow-x:auto;max-height:480px;overflow-y:auto;font-family:var(--font-mono);">{{ last.output }}</pre>
+</div>
+{% endif %}
+
+{# ══ (a) SWITCHES ══ #}
+<div class="section-label fade-in-up" id="ops-switches">Switches — every platform component, its state and its last run</div>
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <span class="card-title">{% if switches.total is not None %}{{ switches.on }} on / {{ switches.off }} off / {{ switches.erroring }} erroring{% else %}Switches — {{ switches.error }}{% endif %}</span>
+        <span style="font-size:11px;color:var(--text-muted);">the same write as /health/ and <code>component on|off</code>{% if not is_admin %} · read-only for viewers{% endif %}</span>
+    </div>
+    {% if switches.groups %}
+    {% for g in switches.groups %}
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 16px 4px;">
+        <span style="font-size:11px;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;">{{ g.label }} · {{ g.rows|length }}</span>
+        {% if is_admin and g.key != 'other' %}
+        <span style="display:flex;gap:6px;">
+            <form method="post" action="{% url 'admin_bulk_toggle' %}">{% csrf_token %}<input type="hidden" name="category" value="{{ g.key }}"><input type="hidden" name="action" value="enable"><input type="hidden" name="next" value="ops"><button type="submit" class="btn btn-sm">all on</button></form>
+            <form method="post" action="{% url 'admin_bulk_toggle' %}">{% csrf_token %}<input type="hidden" name="category" value="{{ g.key }}"><input type="hidden" name="action" value="disable"><input type="hidden" name="next" value="ops"><button type="submit" class="btn btn-sm btn-danger">all off</button></form>
+        </span>
+        {% endif %}
+    </div>
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+      <thead><tr>
+        <th>Key</th><th>Name</th><th>State</th><th>Last run</th><th>Status</th><th class="num">Runs</th><th class="num">Errors</th>{% if is_admin %}<th>Toggle</th>{% endif %}
+      </tr></thead>
+      <tbody>
+        {% for r in g.rows %}
+          <tr>
+            <td class="sv-ident" data-label="Key"><code>{{ r.comp.key }}</code></td>
+            <td data-label="Name" title="{{ r.comp.description }}">{{ r.comp.name }}</td>
+            <td data-label="State"><span class="badge badge-{% if r.comp.is_enabled %}bullish{% else %}bearish{% endif %}">{% if r.comp.is_enabled %}ON{% else %}OFF{% endif %}</span></td>
+            <td data-label="Last run" style="font-family:var(--font-mono);font-size:11px;">{{ r.age }}</td>
+            {# success / error / skipped / warning, coloured; '—' before the first run. #}
+            <td data-label="Status">{% if r.comp.last_status %}<span class="badge badge-{% if r.comp.last_status == 'success' %}bullish{% elif r.comp.last_status == 'error' %}bearish{% else %}medium{% endif %}" title="{{ r.comp.last_message }}">{{ r.comp.last_status }}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+            <td class="num" data-label="Runs">{{ r.comp.run_count }}</td>
+            <td class="num {% if r.comp.error_count %}down{% endif %}" data-label="Errors">{{ r.comp.error_count }}</td>
+            {% if is_admin %}
+            <td data-label="Toggle">
+                <form method="post" action="{% url 'admin_toggle_component' %}" style="display:inline;">{% csrf_token %}<input type="hidden" name="key" value="{{ r.comp.key }}"><input type="hidden" name="next" value="ops"><button type="submit" class="btn btn-sm {% if r.comp.is_enabled %}btn-danger{% else %}btn-primary{% endif %}">{% if r.comp.is_enabled %}turn off{% else %}turn on{% endif %}</button></form>
+            </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% endfor %}
+    {% elif switches.staff_only %}
+    {# /health/'s rule: the platform-wide zones are staff's; a viewer's own zones are below. #}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
+        <p>STAFF ONLY — the switches are platform-wide, as on <a href="/health/" style="color:var(--accent);">/health/</a>; your account and your plans are below.</p></div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
+        <p>NO COMPONENT REGISTERED — <code>python manage.py seed_components</code> creates every switch the code knows, OFF.</p></div>
+    {% endif %}
+</div>
+
+{# ══ (b) DECISION QUEUES ══ #}
+<div class="section-label fade-in-up" id="ops-queues">Decision queues — what is waiting, how old the newest is, where to decide it</div>
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">{% if queues.pending is not None %}{{ queues.pending }} awaiting a decision{% else %}Queues — {{ queues.error }}{% endif %}</span></div>
+    {% if queues.rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+      <thead><tr><th>Queue</th><th class="num">Count</th><th>Newest</th><th>Source</th><th>Page</th></tr></thead>
+      <tbody>
+        {% for q in queues.rows %}
+          <tr>
+            <td class="sv-ident" data-label="Queue">{{ q.label }}{% if not q.decide %} <span class="badge badge-medium" title="Exposure, not a decision — not counted in QUEUES">exposure</span>{% endif %}</td>
+            {# '—' with the reason when the model is unreadable: an unmeasured queue is not an empty one. #}
+            <td class="num {% if q.count and q.decide %}up{% endif %}" data-label="Count">{% if q.count is not None %}{{ q.count }}{% else %}<span style="color:var(--text-muted);" title="{{ q.error }}">—</span> <span style="font-size:10px;color:var(--accent-red,#c33);">{{ q.error }}</span>{% endif %}</td>
+            <td data-label="Newest" style="font-family:var(--font-mono);font-size:11px;">{% if q.newest %}{{ q.newest_age }}{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+            <td data-label="Source" style="font-size:11px;color:var(--text-muted);">{{ q.note }}</td>
+            <td data-label="Page">{% if q.url %}<a href="{{ q.url }}" style="color:var(--accent);">{{ q.url }} →</a>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% elif queues.staff_only %}
+    <p style="color:var(--text-muted);padding:16px;">STAFF ONLY — the queues count every user's rows, as on /health/; your own share plans are on <a href="/shares/" style="color:var(--accent);">/shares/</a>.</p>
+    {% else %}
+    <p style="color:var(--text-muted);padding:16px;">No queue could be read{% if queues.error %} — {{ queues.error }}{% endif %}.</p>
+    {% endif %}
+</div>
+
+{# ══ (c) THE BROKER ══ #}
+<div class="section-label fade-in-up" id="ops-broker">The broker — the sync's last reading, its age, the drawdown, the preflight verdict</div>
+<div class="grid grid-2" style="margin-bottom:24px;">
+    <div class="card fade-in-up">
+        <div class="card-header"><span class="card-title">Account — {{ request.user.username }}</span></div>
+        <div class="table-wrapper">
+        <table class="sv-perf-table">
+          <tbody>
+            <tr><td>Equity</td><td class="num">{% if broker.reading %}<span class="{% if broker.reading_stale %}down{% endif %}">{{ broker.reading.value_text }} {{ broker.reading.currency }}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+                <td style="font-size:11px;color:var(--text-muted);">{% if broker.reading %}capital_truth.account_equity · read {{ broker.reading.age_text }}{% if broker.reading_stale %} · <span class="down">STALE</span> (over the tracking window){% endif %}{% elif broker.reading_error %}{{ broker.reading_error }}{% else %}no reading has ever landed — the sync writes it{% endif %}</td></tr>
+            <tr><td>Broker sync</td><td class="num">{% if broker.sync %}<span class="badge badge-{% if broker.sync.is_enabled %}bullish{% else %}bearish{% endif %}">{% if broker.sync.is_enabled %}ON{% else %}OFF{% endif %}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+                <td style="font-size:11px;color:var(--text-muted);">{% if broker.sync %}broker_account_sync · last run {{ broker.sync_age }} · {{ broker.sync.last_status|default:"no run yet" }}{% else %}no broker_account_sync row — seed_components{% endif %}</td></tr>
+            <tr><td>Drawdown</td><td class="num">{% if broker.drawdown %}<span class="{% if broker.drawdown.drawdown_pct > 0.05 %}down{% endif %}">{{ broker.drawdown.pct_text }}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+                <td style="font-size:11px;color:var(--text-muted);">{% if broker.drawdown %}hwm {{ broker.drawdown.hwm_text }} over {{ broker.drawdown.n }} reading{{ broker.drawdown.n|pluralize }} · governor ×{{ broker.governor|floatformat:2 }} (share_allocator.governor_for){% elif broker.drawdown_error %}{{ broker.drawdown_error }}{% else %}capital_truth.equity_drawdown — no history yet{% endif %}</td></tr>
+            <tr><td>Share allocator</td><td class="num">{% if broker.live_mode is not None %}{% if broker.live_mode %}LIVE{% else %}SHADOW{% endif %}{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+                <td style="font-size:11px;color:var(--text-muted);">{% if broker.live_mode is not None %}share_allocator_mode_live · auto de-risk {% if broker.auto_derisk %}ON{% else %}OFF{% endif %} · newest plan {% if broker.plan_mode %}<span class="badge badge-{% if broker.plan_mode == 'shock' %}bearish{% elif broker.plan_mode == 'expansion' %}bullish{% else %}medium{% endif %}" title="{{ broker.plan_mode_reasons|join:'; ' }}">{{ broker.plan_mode|upper }}</span>{% if broker.plan_at %} {{ broker.plan_at|timesince }} ago{% endif %}{% else %}—{% endif %}{% else %}{{ broker.mode_error }}{% endif %}</td></tr>
+          </tbody>
+        </table>
+        </div>
+    </div>
+    <div class="card fade-in-up">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+            <span class="card-title">Preflight verdict</span>
+            {% if broker.preflight %}<span style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);">preflight_live --user {{ request.user.username }} · {{ broker.preflight.seconds }}s{% if broker.preflight.cached %} · cached ≤120s{% endif %}{% if broker.preflight.slow %} · SLOW{% endif %}</span>{% endif %}
+        </div>
+        {% if broker.preflight %}
+            {% if broker.preflight.verdict == 'clear' %}
+            <div style="padding:12px 16px;"><span class="badge badge-bullish">NO BLOCKERS FOUND</span> <span style="font-size:11px;color:var(--text-muted);">— which is not the same as safe: cached columns only, the Gateway's login is not seen from here.</span></div>
+            {% elif broker.preflight.verdict == 'blocked' %}
+            <div style="padding:12px 16px;"><span class="badge badge-bearish">BLOCKERS</span></div>
+            <pre style="margin:0;padding:0 16px 12px;font-size:11px;line-height:1.45;white-space:pre-wrap;font-family:var(--font-mono);">{% for l in broker.preflight.lines %}{{ l }}
+{% endfor %}</pre>
+            {% elif broker.preflight.verdict == 'error' %}
+            <div style="padding:12px 16px;"><span class="badge badge-bearish">UNREADABLE</span> <span style="font-size:11px;color:var(--accent-red,#c33);">{{ broker.preflight.error }}</span></div>
+            {% else %}
+            <div style="padding:12px 16px;"><span style="color:var(--text-muted);">—</span> <span style="font-size:11px;color:var(--text-muted);">the command printed no verdict line</span></div>
+            {% endif %}
+        {% else %}
+        <p style="color:var(--text-muted);padding:16px;">— preflight not run.</p>
+        {% endif %}
+    </div>
+</div>
+
+{# ══ (d) COMMANDS ══ #}
+<div class="section-label fade-in-up" id="ops-commands">Commands — every shell twin and diagnostic, from core.ops_commands (<code>python manage.py ops</code> prints the same)</div>
+{% for cat in catalogue %}
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">[{{ cat.key }}] {{ cat.label }}</span></div>
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+      <thead><tr><th>Command</th><th>Purpose</th><th>Usage</th><th>Mirrors</th><th>Run</th></tr></thead>
+      <tbody>
+        {% for c in cat.rows %}
+          <tr>
+            <td class="sv-ident" data-label="Command"><strong>{{ c.title }}</strong><br><code style="font-size:11px;">{{ c.name }}</code></td>
+            <td data-label="Purpose" style="font-size:11px;max-width:40ch;">{{ c.purpose }}</td>
+            <td data-label="Usage"><code style="display:block;white-space:pre;font-size:11px;line-height:1.5;">{% for u in c.usage %}{{ u }}{% if not forloop.last %}
+{% endif %}{% endfor %}</code></td>
+            <td data-label="Mirrors">{% if c.mirrors %}<a href="{{ c.mirrors }}" style="color:var(--accent);">{{ c.mirrors }} →</a>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+            <td data-label="Run">
+                {% if c.runnable %}
+                    {% if is_admin %}
+                    {# Fixed argv only — the button carries the name, never an argument. #}
+                    <form method="post" action="{% url 'ops_run_command' %}" style="display:inline;">{% csrf_token %}<input type="hidden" name="name" value="{{ c.name }}"><button type="submit" class="btn btn-sm btn-primary">▶ Run</button></form>
+                    {% else %}
+                    <span style="font-size:11px;color:var(--text-muted);">read-only · superusers run it</span>
+                    {% endif %}
+                {% elif c.read_only %}
+                    <span style="font-size:11px;color:var(--text-muted);">{{ c.runnable_reason }}</span>
+                {% else %}
+                    <span style="font-size:11px;color:var(--text-muted);">{% if c.runnable_reason %}{{ c.runnable_reason }} — {% endif %}run on the server — --yes or the PIN keeps its meaning</span>
+                {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+</div>
+{% endfor %}
+{% endblock %}

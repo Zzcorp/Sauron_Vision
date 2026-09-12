@@ -84,6 +84,7 @@ from .views_forensics import forensics_list, forensics_detail
 from .views_bot_charts import bot_charts
 from .views_allocator import allocator_dashboard
 from .views_shares import shares_dashboard
+from .views_ops import ops_dashboard, ops_run_command
 from .views_eye import eye_dashboard, eye_partial
 from signals.tradingview_webhook import tradingview_webhook
 from .views_eye_drilldown import eye_gate_events, eye_fills, eye_exposure
@@ -262,6 +263,13 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     # /allocator/ is the rule meta-allocator's; the share of the ACCOUNT
     # each live pool takes lives at /shares/ (2026-09-12).
     path("shares/", shares_dashboard, name="shares_dashboard"),
+
+    # ── The ops cockpit ──────────────────────────────────────
+    # Everything, now: switches, decision queues, the broker, and the
+    # command catalogue (core.ops_commands) with a Run lane restricted
+    # to registered read-only commands (2026-09-12).
+    path("ops/", ops_dashboard, name="ops_dashboard"),
+    path("ops/run/", ops_run_command, name="ops_run_command"),
     path("admin-dashboard/shares/propose/", hq_propose_share_plan, name="hq_propose_share_plan"),
     path("admin-dashboard/shares/apply/", hq_apply_share_plan, name="hq_apply_share_plan"),
     path("admin-dashboard/shares/reject/", hq_reject_share_plan, name="hq_reject_share_plan"),
