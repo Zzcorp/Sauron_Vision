@@ -333,6 +333,20 @@ app.conf.beat_schedule = {
 
     # ── Phase 10 — opportunity scanner: match registered setups against
     #              every instrument; resolve flags after their horizon.
+    # CADENCE, MEASURED AND LEFT ALONE (2026-09-12). Raising this to every
+    # four hours would multiply the flag rate — and so the evidence the
+    # promotion ladder is starved of — by four. It was not raised, because a
+    # cadence nobody has timed is a cadence nobody should raise: a full
+    # `diagnose_setups` pass (the same one-`scan_setup`-per-pair loop
+    # `scan_all_setups` runs) took 4.0-7.1 s over 6 setups × 179 instruments —
+    # 566 pairs — on a development database holding 5,600 bars, where nearly
+    # every evaluator returned early for want of data. That is a FLOOR. The
+    # live population is 20 active setups over the same 179 instruments with
+    # full history: 13-24 s of loop before one real window is measured, with
+    # an unknown multiplier above it. Not comfortably under 60 s, so this
+    # stays daily.
+    # `deploy/RUNBOOK.md` § "Why a setup never fires" carries the arithmetic
+    # and the one command that re-measures it on the box.
     "scan-opportunities": {
         "task": "signals.tasks.scan_opportunities",
         "schedule": crontab(hour=9, minute=0),  # daily 09:00 UTC

@@ -140,8 +140,14 @@ class RegistryTests(TestCase):
         doctor = ops_commands.get("ibkr-doctor")
         self.assertFalse(ops_commands.is_runnable(doctor))
         self.assertEqual(doctor["runnable_reason"], "runs on the host, needs docker")
+        # `signals` joined the Run lane on 2026-09-12: both its verbs read
+        # and neither writes, so it is a `read` entry with fixed argv.
+        # `setups` did NOT — its `arm` verb writes, and the registry is per
+        # COMMAND, not per subcommand, so it is one `decide` entry like
+        # `persona` and the lane refuses the whole of it.
         self.assertEqual(ops_commands.runnable_names(),
-                         {"open_trades", "preflight_live", "why_no_trade"})
+                         {"open_trades", "preflight_live", "why_no_trade",
+                          "signals"})
         self.assertIsNone(ops_commands.get("nope"))
         self.assertEqual([k for k, _l, _r in ops_commands.by_category()],
                          ["read", "decide", "ops"])

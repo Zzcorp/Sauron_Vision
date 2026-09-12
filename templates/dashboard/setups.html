@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}Setups — Sauron Vision{% endblock %}
+{# ◧ is the sidebar's Setups mark — title and nav row agree. #}
+{% block page_title %}◧ WHY A SETUP NEVER FIRES{% endblock %}
+
+{% block content %}
+{# ── 1. KPI strip ────────────────────────────────────────────────── #}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SETUPS</span>
+        <span class="oc-strip-value">{{ n_active }}</span>
+        <span class="oc-strip-sub">{{ n_inactive }} unarmed — the scanner never looks at those</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">FLAGS 7D</span>
+        <span class="oc-strip-value {% if n_flags_7d %}up{% endif %}">{{ n_flags_7d }}</span>
+        <span class="oc-strip-sub">matches published in seven days</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SIGNALS 7D</span>
+        <span class="oc-strip-value">{{ n_signals_7d }}</span>
+        <span class="oc-strip-sub">rows a bot or a grader could read</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">GRADED EVER</span>
+        <span class="oc-strip-value {% if n_graded %}{% else %}down{% endif %}">{{ n_graded }}</span>
+        <span class="oc-strip-sub">the ladder needs 30 per rule to leave research</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RULES</span>
+        <span class="oc-strip-value">{{ n_research }}<span style="font-size:60%;"> / {{ n_promoted }}</span></span>
+        <span class="oc-strip-sub">at research / promoted past it</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SCAN</span>
+        <span class="oc-strip-value" style="font-size:60%;">{{ scan_cadence }}</span>
+        <span class="oc-strip-sub">the beat entry's own schedule</span>
+    </div>
+</div>
+
+{# ── 2. The reading's age, always, before any number is read ─────── #}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">The diagnosis</span></div>
+    <p style="font-size:11px;color:var(--text-muted);padding:12px 16px;">
+        {% if diag %}
+            Read {{ diag.as_of|date:"Y-m-d H:i" }} UTC — {{ diag.n_setups }} active setup{{ diag.n_setups|pluralize }}
+            against {{ diag.n_instruments }} active instrument{{ diag.n_instruments|pluralize }} in {{ diag.seconds }}s,
+            near-miss band {{ diag.near_miss|floatformat:2 }}.
+            The pass runs the scanner's own <code>scan_setup</code> with emit disabled: it writes no flag and no signal.
+            It is cached for {{ cache_seconds }}s, so this reading can be up to that old.
+            Verdicts: {{ diag.by_verdict.fires }} fires · {{ diag.by_verdict.near }} near ·
+            {{ diag.by_verdict.strict }} strict · {{ diag.by_verdict.blind }} blind · {{ diag.by_verdict.empty }} empty.
+            {% if any_truncated %}<strong>This reading is CAPPED:</strong> the page's pass walks at most
+            {{ page_instrument_limit }} instrument{{ page_instrument_limit|pluralize }} per setup, so a verdict here is a verdict
+            over the rows it walked and not over the {{ diag.n_instruments }} active instrument{{ diag.n_instruments|pluralize }} above.
+            <code>python manage.py setups diagnose</code> walks the whole universe.{% endif %}
+        {% elif diag_error %}
+            The diagnostic could not run: {{ diag_error }}. Run it from the shell to see the whole traceback:
+            <code>python manage.py setups diagnose</code>.
+        {% else %}
+            THE DIAGNOSTIC HAS NEVER RUN on this deployment, so every verdict below is blank.
+            Run <code>python manage.py setups diagnose</code> to take the first reading, or reload this page —
+            the first load after a cold cache takes it.
+        {% endif %}
+    </p>
+    <p style="font-size:11px;color:var(--text-muted);padding:0 16px 12px;">
+        <strong>fires</strong> it matched somewhere · <strong>near</strong> its best composite is inside the near-miss band below its threshold ·
+        <strong>strict</strong> every condition evaluates and none combine past the threshold ·
+        <strong>blind</strong> a condition cannot evaluate at all on most of the population — loosening the threshold of a blind leg changes nothing, ever ·
+        <strong>empty</strong> no active instrument is in its asset classes.
+    </p>
+</div>
+
+{# ── 3. Every setup, verdict first ───────────────────────────────── #}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Every setup — worst verdict first</span></div>
+    {% if rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+        <thead><tr>
+            <th>Setup</th><th>Armed</th><th>Stage</th><th>Verdict</th>
+            <th>p90 vs threshold</th><th class="num">7d</th><th class="num">Graded</th><th>Why</th>
+        </tr></thead>
+        <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="sv-ident" data-label="Setup">{{ r.name }}</td>
+            <td data-label="Armed">{% if r.armed %}<span class="badge badge-bullish">armed</span>{% else %}<span class="badge badge-medium" title="The scanner never looks at an unarmed setup">unarmed</span>{% endif %}</td>
+            <td data-label="Stage">{% if r.has_control %}<span class="badge badge-medium">{{ r.stage }}</span>{% else %}<span class="badge badge-high" title="stage_policy treats a rule with no RuleControl row as PAPER — full size on the paper venue">no control row</span>{% endif %}</td>
+            <td data-label="Verdict">{% if r.verdict %}<span class="badge badge-{% if r.verdict == 'fires' %}bullish{% elif r.verdict == 'near' %}medium{% elif r.verdict == 'blind' %}bearish{% else %}high{% endif %}">{{ r.verdict }}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+            <td data-label="p90 vs threshold">
+                {% if r.p90_pct is not None %}
+                {# The bar is the composite p90; the notch is the threshold it has to clear. #}
+                <div style="position:relative;width:120px;height:10px;background:var(--bg-elevated,#222);border-radius:2px;">
+                    <div style="position:absolute;left:0;top:0;height:10px;width:{{ r.p90_pct }}%;background:{% if r.verdict == 'fires' %}var(--accent-green){% elif r.verdict == 'near' %}var(--accent-gold){% else %}var(--accent-red){% endif %};border-radius:2px;"></div>
+                    <div title="threshold {{ r.threshold|floatformat:2 }}" style="position:absolute;left:{{ r.threshold_pct }}%;top:-2px;width:2px;height:14px;background:var(--text-primary,#eee);"></div>
+                </div>
+                <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">{{ r.p90|floatformat:2 }} / {{ r.threshold|floatformat:2 }}</span>
+                {% else %}
+                <span style="color:var(--text-muted);">—</span>
+                {% endif %}
+            </td>
+            <td class="num" data-label="7d">{{ r.signals_7d }}</td>
+            <td class="num" data-label="Graded">{{ r.graded_ever }}</td>
+            <td data-label="Why" style="font-size:11px;color:var(--text-muted);max-width:52ch;">{% if r.verdict_detail %}{{ r.verdict_detail }}{% else %}no reading yet — run <code>python manage.py setups diagnose</code>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
+        <p>NO OPPORTUNITY SETUP EXISTS ON THIS DEPLOYMENT — seed the starter pack with <code>python manage.py seed_strategies</code>, then run <code>python manage.py setups diagnose</code>.</p></div>
+    {% endif %}
+</div>
+
+{# ── 4. Never fired ──────────────────────────────────────────────── #}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Never fired — armed, and silent for seven days</span></div>
+    {% if never %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+        <thead><tr><th>Setup</th><th>Verdict</th><th>Binding condition</th></tr></thead>
+        <tbody>
+        {% for r in never %}
+        <tr>
+            <td class="sv-ident" data-label="Setup">{{ r.name }}</td>
+            <td data-label="Verdict">{% if r.verdict %}<span class="badge badge-{% if r.verdict == 'blind' %}bearish{% else %}high{% endif %}">{{ r.verdict }}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+            <td data-label="Binding condition" style="font-size:11px;color:var(--text-muted);max-width:60ch;">{% if r.binding %}{{ r.binding }}{% else %}no reading yet — run <code>python manage.py setups show {{ r.name }}</code>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
+        <p>EVERY ARMED SETUP HAS PRODUCED A FLAG OR A SIGNAL IN THE LAST SEVEN DAYS — nothing is silent. <code>python manage.py setups list</code> prints the same seven-day counts from the shell.</p></div>
+    {% endif %}
+</div>
+
+{# ── 5. The grading leak ─────────────────────────────────────────── #}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">The grading leak — signals that died without a grade</span></div>
+    {% if grading_error %}
+        <p style="font-size:11px;color:var(--text-muted);padding:12px 16px;">{{ grading_error }}</p>
+    {% elif grading %}
+        <p style="font-size:11px;color:var(--text-muted);padding:12px 16px;">
+            Signals CREATED in the last {{ grading.days }} days and what they became.
+            A signal that closes with no outcome, or with an outcome and no realized_r, is invisible to the promotion
+            ladder (<code>_stats_since</code> excludes both) and to every evidence lane — it cost a scan and taught nothing.
+            Created {{ grading.totals.n_created }} · closed {{ grading.totals.n_closed }} · graded {{ grading.totals.n_graded }} ·
+            closed ungraded {{ grading.totals.n_closed_ungraded }} · closed with no outcome {{ grading.totals.n_expired_no_outcome }}.
+            {% if grading.totals.leak_pct is None %}Leak rate unmeasured — nothing closed in the window, so there is no share to take.
+            {% else %}Leak rate {{ grading.totals.leak_pct }}% of closed signals.{% endif %}
+        </p>
+        {% if grading.worst %}
+        <div class="table-wrapper">
+        <table class="sv-perf-table sv-stack">
+            <thead><tr><th>Rule</th><th class="num">Made</th><th class="num">Closed</th><th class="num">Graded</th><th class="num">Ungraded</th><th class="num">No outcome</th></tr></thead>
+            <tbody>
+            {% for r in grading.worst %}
+            <tr>
+                <td class="sv-ident" data-label="Rule">{{ r.rule_name }}</td>
+                <td class="num" data-label="Made">{{ r.n_created }}</td>
+                <td class="num" data-label="Closed">{{ r.n_closed }}</td>
+                <td class="num" data-label="Graded">{{ r.n_graded }}</td>
+                <td class="num down" data-label="Ungraded">{{ r.n_closed_ungraded }}</td>
+                <td class="num down" data-label="No outcome">{{ r.n_expired_no_outcome }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
+            <p>NO SIGNAL CLOSED UNGRADED IN THE WINDOW — every closed signal carries an outcome and a realized R. <code>python manage.py setups grading --days 30</code> prints the same table.</p></div>
+        {% endif %}
+    {% else %}
+        <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
+            <p>THE GRADING AUDIT HAS NOT RUN — <code>python manage.py setups grading --days 30</code> takes the reading.</p></div>
+    {% endif %}
+</div>
+
+{# ── 6. Arm what was never armed (superuser) ─────────────────────── #}
+{% if is_superuser %}
+<div class="card">
+    <div class="card-header"><span class="card-title">Arm a setup</span></div>
+    <p style="font-size:11px;color:var(--text-muted);padding:12px 16px;">
+        Arming a RESEARCH-stage setup is safe: <code>is_active</code> decides whether the SCANNER looks at it,
+        <code>RuleControl.promotion_stage</code> decides whether any bot may act on what it finds, and at research
+        <code>stage_policy</code> returns may_trade False — no order is ever placed. Where a pending proposal exists
+        the arm goes through the generator's own <code>approve_proposal</code>, with its re-validation and its audit row.
+        A setup with NO RuleControl row is not research: <code>stage_policy</code> treats it as PAPER, full size on the
+        paper venue.
+    </p>
+    {% if inactive_rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+        <thead><tr><th>Setup</th><th>Stage</th><th>Verdict</th><th>Arm</th></tr></thead>
+        <tbody>
+        {% for r in inactive_rows %}
+        <tr>
+            <td class="sv-ident" data-label="Setup">{{ r.name }}</td>
+            <td data-label="Stage">{% if r.has_control %}<span class="badge badge-medium">{{ r.stage }}</span>{% else %}<span class="badge badge-high">no control row — paper venue at full size</span>{% endif %}</td>
+            <td data-label="Verdict"><span style="font-size:11px;color:var(--text-muted);">unarmed setups are not scanned, so they have no verdict</span></td>
+            <td data-label="Arm">
+                <form method="post" action="{% url 'setups_arm' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="name" value="{{ r.name }}">
+                    <button type="submit" class="btn btn-sm">Arm {{ r.name }}</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
+        <p>EVERY SETUP ON THIS DEPLOYMENT IS ARMED — there is nothing to arm. <code>python manage.py setups list</code> prints the same armed column.</p></div>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

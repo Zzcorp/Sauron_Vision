@@ -973,6 +973,66 @@ def hq_follow_asset_bot(request):
 
 
 @_admin_only
+def hq_apply_persona(request):
+    """Give one config a trader personality — the /personas/ Apply form.
+
+    Form fields: config_id; persona (one of scalp / swing / position);
+    pin, required ONLY when the config is LIVE. A personality is a
+    coherent preset of knobs that already exist — it writes NO capital,
+    NO account_share_pct, and never enables or disables the bot — but on
+    a live config those knobs re-size REAL risk on the next entry
+    (risk_per_trade_pct, the ATR stop distance and the notional cap all
+    feed sizing.size_position), which is exactly the class of write the
+    trading PIN exists to gate. `force=True` is passed only once the PIN
+    has been checked here, so a live config can never be re-styled by a
+    click alone (2026-09-12).
+
+    Every warning `plan_for` raised is flashed, one message each: an open
+    position whose exit moves under it, or a timeframe with no bars, is
+    the thing the operator most needs to read AFTER the write, not a
+    sentence folded into a success line nobody re-reads.
+    """
+    from bot_program.models import AssetBotConfig
+    from bot_program.personas import PERSONA_KEYS, apply_persona
+
+    cfg = AssetBotConfig.objects.filter(
+        id=request.POST.get("config_id")).first()
+    if cfg is None:
+        messages.error(request, "No such bot config — nothing was changed.")
+        return redirect("personas_dashboard")
+    key = str(request.POST.get("persona", "") or "").strip().lower()
+    if key not in PERSONA_KEYS:
+        messages.error(request, f"{key or '(blank)'} is not a personality — "
+                                f"the three are {', '.join(PERSONA_KEYS)}.")
+        return redirect("personas_dashboard")
+    live = (cfg.mode == "live")
+    if live and not _pin_ok(request):
+        messages.error(request, f"PIN required — '{cfg.name}' is LIVE, and a "
+                                f"personality re-sizes real risk on its next "
+                                f"entry.")
+        return redirect("personas_dashboard")
+
+    result = apply_persona(cfg, key, user=request.user, force=live)
+    if not result["ok"]:
+        messages.error(request, f"Personality refused: {result['reason']}")
+        return redirect("personas_dashboard")
+    for warning in result["warnings"]:
+        messages.warning(request, f"'{cfg.name}': {warning}")
+    dropped = result.get("drops") or {}
+    messages.success(
+        request,
+        f"'{cfg.name}' now trades as {result['key']} — "
+        f"{len(result['changes'])} field(s) and {len(result['extras'])} "
+        f"extra(s) written"
+        + (f", {len(dropped)} extra(s) removed "
+           f"({', '.join(sorted(dropped))}) so nothing from the previous "
+           f"style outranks this one" if dropped else "")
+        + f". Its capital and its share of the account are "
+          f"unchanged, and it was neither enabled nor disabled.")
+    return redirect("personas_dashboard")
+
+
+@_admin_only
 def hq_run_asset_bot(request):
     """Manually run a single AssetBotConfig's tick."""
     from bot_program.asset_engine.runner import run_asset_bot_tick

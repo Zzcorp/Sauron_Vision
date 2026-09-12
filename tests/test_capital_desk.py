@@ -701,6 +701,44 @@ class ChooseTests(TestCase):
         refused = [d for d in plan["decisions"] if d["outcome"] == "displaced"]
         self.assertTrue(all("class_share" in d["reason"] for d in refused))
 
+    def test_the_persona_share_cap_bites(self):
+        """A trading STYLE is a bucket the other two caps cannot see: four
+        entries on four different rules, all taken by a scalp book, are one
+        bet on intraday mean reversion continuing to work, and both the
+        rule cap (one rule each) and the class cap (60%) wave it through.
+
+        50% of 250 is 125 — two entries of 50, and the third is refused by
+        name (2026-09-12).
+        """
+        from bot_program.capital_desk import DESK_MAX_PERSONA_SHARE
+        cfg = _config(self.user, name="Scalper",
+                      extras={"persona": "scalp"})
+        bot = _bot(cfg)
+        cands = [_cand(bot, f"PS{i}", qty=10.0, rule=f"rule_{i}")
+                 for i in range(4)]
+        plan = self._choose(cands, [self._ev(0.9 - i * 0.05) for i in range(4)],
+                            budget=250.0)
+        self.assertEqual(plan["n_chosen"], 2)
+        refused = [d for d in plan["decisions"] if d["outcome"] == "displaced"]
+        self.assertEqual(len(refused), 2)
+        for row in refused:
+            self.assertIn("persona_share", row["reason"])
+            self.assertIn("scalp", row["reason"])
+            self.assertIn(f"{DESK_MAX_PERSONA_SHARE * 100:.0f}%",
+                          row["reason"])
+
+    def test_a_config_wearing_no_persona_is_never_refused_by_that_cap(self):
+        """There is nothing to concentrate: a fleet that has never heard of
+        personalities chooses exactly as it did before they existed — the
+        class cap does the displacing, at 60% and not at 50%."""
+        cands = [_cand(self.bot, f"NP{i}", qty=10.0, rule=f"rule_{i}")
+                 for i in range(4)]
+        plan = self._choose(cands, [self._ev(0.9 - i * 0.05) for i in range(4)],
+                            budget=250.0)
+        self.assertEqual(plan["n_chosen"], 3)
+        reasons = " ".join(d["reason"] for d in plan["decisions"])
+        self.assertNotIn("persona_share", reasons)
+
     def test_one_expression_per_bet_across_configs(self):
         other = _config(self.user, name="Second")
         cand_a = _cand(self.bot, "DUP", qty=10.0)

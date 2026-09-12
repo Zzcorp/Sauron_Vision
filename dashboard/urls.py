@@ -68,6 +68,7 @@ from .views_admin_hq import (
     hq_fire_test_event,
     hq_create_asset_bot, hq_toggle_asset_bot, hq_run_asset_bot, hq_run_all_asset_bots,
     hq_follow_asset_bot,
+    hq_apply_persona,
 )
 from .views_promotions import promotions_dashboard
 from .views_evolution import evolution_dashboard
@@ -85,9 +86,11 @@ from .views_forensics import forensics_list, forensics_detail
 from .views_bot_charts import bot_charts
 from .views_allocator import allocator_dashboard
 from .views_shares import shares_dashboard
+from .views_personas import personas_dashboard
 from .views_desk import desk_dashboard
 from .views_horizon import horizon_dashboard
 from .views_ops import ops_dashboard, ops_run_command
+from .views_setups import setups_arm, setups_dashboard
 from .views_eye import eye_dashboard, eye_partial
 from signals.tradingview_webhook import tradingview_webhook
 from .views_eye_drilldown import eye_gate_events, eye_fills, eye_exposure
@@ -267,11 +270,26 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     # each live pool takes lives at /shares/ (2026-09-12).
     path("shares/", shares_dashboard, name="shares_dashboard"),
 
+    # ── The three trader personalities (2026-09-12) ───────
+    # /shares/ says how much of the account a pool gets; this one says
+    # WHAT KIND OF TRADER that pool is — the preset of knobs, the grading
+    # window, the share band and the horizon weight that go together.
+    path("personas/", personas_dashboard, name="personas_dashboard"),
+    path("admin-dashboard/personas/apply/", hq_apply_persona, name="hq_apply_persona"),
+
     # ── The capital desk (2026-09-12) ────────────────────────
     # /shares/ sizes each POOL's share of the account; this one ranks a
     # single tick's entries against one risk budget and says, in words,
     # what it took and what it refused.
     path("desk/", desk_dashboard, name="desk_dashboard"),
+
+    # ── Why a setup never fires (2026-09-12) ─────────────────
+    # /opportunities/ shows the matches a setup MADE; this one answers the
+    # question a setup that never matched leaves behind — too strict, blind
+    # on its data, or short of its threshold by two hundredths — and arms
+    # the setups the generator wrote that nobody ever clicked.
+    path("setups/", setups_dashboard, name="setups_dashboard"),
+    path("setups/arm/", setups_arm, name="setups_arm"),
 
     # ── The ops cockpit ──────────────────────────────────────
     # Everything, now: switches, decision queues, the broker, and the

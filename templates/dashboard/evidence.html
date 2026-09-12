@@ -87,6 +87,46 @@
 </div>
 
 <div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Personalities — each graded over its OWN window</span></div>
+    <p style="color: var(--text-muted); padding: 0 16px 8px; max-width: 88ch;">A trader personality is a coherent preset of knobs plus the window its record is graded over: 21 days of scalps is a sample, 21 days of position trades is one trade. Paper and live are never pooled, and — is unmeasured, which is not zero. The presets themselves are on <a href="{% url 'personas_dashboard' %}">Personalities</a>.</p>
+    {% if personas_error %}
+    <p style="font-size: 12px; color: var(--accent-red, #c33); padding: 0 16px 16px;">{{ personas_error }}</p>
+    {% elif personas %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+      <thead><tr>
+        <th>Personality</th><th class="num" title="The window this personality is graded over">Window</th><th class="num">Configs</th><th>Wearing it</th>
+        <th class="num">Live fills</th><th class="num">Live R</th><th class="num">Live hit</th>
+        <th class="num">Paper fills</th><th class="num">Paper R</th><th class="num">Paper hit</th>
+      </tr></thead>
+      <tbody>
+      {% for p in personas %}
+        <tr>
+          <td class="sv-ident" data-label="Personality">{{ p.label }} <span style="font-size: 10px; color: var(--text-muted);">{{ p.purpose }}</span></td>
+          <td class="num" data-label="Window">{{ p.evidence_days }}d</td>
+          <td class="num" data-label="Configs">{{ p.n_configs }}</td>
+          <td data-label="Wearing it"><span style="font-size: 10px; color: var(--text-muted);">{% if p.names %}{{ p.names|join:", " }}{% else %}—{% endif %}</span></td>
+          <td class="num" data-label="Live fills">{{ p.live.n }}</td>
+          <td class="num {% if p.live.r_sum and p.live.r_sum > 0 %}up{% elif p.live.r_sum and p.live.r_sum < 0 %}down{% endif %}" data-label="Live R">{% if p.live.r_sum is not None %}{{ p.live.r_sum|floatformat:2 }}{% else %}—{% endif %}</td>
+          <td class="num" data-label="Live hit">{% if p.live.win_rate is not None %}{{ p.live.win_rate|floatformat:2 }}{% else %}—{% endif %}</td>
+          <td class="num" data-label="Paper fills">{{ p.paper.n }}</td>
+          <td class="num {% if p.paper.r_sum and p.paper.r_sum > 0 %}up{% elif p.paper.r_sum and p.paper.r_sum < 0 %}down{% endif %}" data-label="Paper R">{% if p.paper.r_sum is not None %}{{ p.paper.r_sum|floatformat:2 }}{% else %}—{% endif %}</td>
+          <td class="num" data-label="Paper hit">{% if p.paper.win_rate is not None %}{{ p.paper.win_rate|floatformat:2 }}{% else %}—{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <ul style="padding: 12px 16px 16px 32px; margin: 0; color: var(--text-muted); font-size: 12px;">
+      {% for p in personas %}<li>{{ p.sentence }}</li>{% endfor %}
+    </ul>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">&#9676;</div>
+        <p>NO PERSONALITIES TO GRADE — give a config one with <code>python manage.py persona apply &lt;config_id&gt; swing --yes</code>, or from the Personalities page.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
     <div class="card-header"><span class="card-title">Agents</span></div>
     <p style="color: var(--text-muted); padding: 0 16px 16px;">Every directional claim an agent made, the price it was measured from and what the market said at the horizon is on <a href="{% url 'calibration_dashboard' %}">Agent Calibration</a> — the calls ledger. The trust score the strategist reads is built from those grades and nothing else.</p>
 </div>

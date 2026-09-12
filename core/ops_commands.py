@@ -1,8 +1,8 @@
 """The command registry — every shell twin and diagnostic, in one list.
 
 The decisions of this platform live on eight pages, and each page has a
-shell twin (`component`, `proposals`, `actuator`, `shares`, `follow`,
-`bot`) and a set of read-only diagnostics beside it (`open_trades`,
+shell twin (`component`, `proposals`, `actuator`, `shares`, `persona`,
+`follow`, `bot`) and a set of read-only diagnostics beside it (`open_trades`,
 `preflight_live`, `why_no_trade`). By 2026-09-12 nothing on any screen
 said those twins existed: an operator learned a command's name from a
 runbook paragraph or a colleague, and the runbook and the commands
@@ -144,6 +144,30 @@ COMMANDS = [
         "category": "decide",
     },
     {
+        "name": "persona",
+        "title": "Trader personalities",
+        "purpose": "The three trader personalities as a command: the presets side by side, one in full, applying one to a config (--yes writes, the page's PIN), the grade over each persona's own window, and the regime mix matrix — which personality this tape has actually rewarded, and how many of the eighteen cells are still unproven priors.",
+        "usage": [
+            "python manage.py persona list",
+            "python manage.py persona show scalp",
+            "python manage.py persona apply 14 swing         # plan only, writes nothing",
+            "python manage.py persona apply 14 swing --yes   # writes",
+            "python manage.py persona grade",
+            "python manage.py persona mix                    # the matrix + the recorded regime",
+            "python manage.py persona mix --venue paper --regime trending",
+        ],
+        "mirrors": "/personas/",
+        # THE REGISTRY IS PER COMMAND, NOT PER SUBCOMMAND, and
+        # test_ops_cockpit pins read_only == (category == "read") — so a
+        # command with any writing verb is one 'decide' entry, exactly as
+        # `shares`, `horizon` and `desk` already are. list/show/grade read
+        # and write nothing; apply is the write, and the Run lane refuses
+        # the whole entry rather than offering three of its four verbs.
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
         "name": "follow",
         "title": "Follow the account",
         "purpose": "Make a live pool a share of the account, or stop it following — the asset-bots page's Follow form, through the same arithmetic, writing only with --yes.",
@@ -174,6 +198,31 @@ COMMANDS = [
         "run_args": [],
         "category": "decide",
     },
+    {
+        "name": "setups",
+        "title": "Why a setup never fires",
+        "purpose": "Answer, per setup, whether it is too strict, blind on its data, or short of its threshold by two hundredths — and arm the ones the generator wrote that nobody clicked.",
+        "usage": [
+            "python manage.py setups list",
+            "python manage.py setups diagnose",
+            "python manage.py setups diagnose --near-miss 0.15 --limit 40",
+            "python manage.py setups show starter_forex_breakout",
+            "python manage.py setups arm advanced_smc_long              # plan only",
+            "python manage.py setups arm advanced_smc_long --yes        # writes",
+            "python manage.py setups grading --days 30",
+        ],
+        "mirrors": "/setups/",
+        # THE REGISTRY IS PER COMMAND, NOT PER SUBCOMMAND, and
+        # test_ops_cockpit pins read_only == (category == "read"). list,
+        # diagnose, show and grading write nothing; `arm` flips is_active
+        # through approve_proposal. So this is ONE decide entry, exactly as
+        # `persona`, `shares`, `horizon` and `desk` already are, and the Run
+        # lane refuses the whole entry rather than offering four of its five
+        # verbs (2026-09-12).
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
     # ── read: the diagnostics ───────────────────────────────────────────
     {
         "name": "open_trades",
@@ -200,6 +249,29 @@ COMMANDS = [
         "mirrors": "/health/",
         "read_only": True,
         "run_args": [],
+        "category": "read",
+    },
+    {
+        "name": "signals",
+        "title": "Signals, filtered",
+        "purpose": "The signals page as a command: the same twelve filters, and the six answers per signal — can anything act on it, what the rule is worth, why it fired, what it would cost, whether anyone acted, and its own grade.",
+        "usage": [
+            "python manage.py signals list",
+            "python manage.py signals list --stage research --min-score 0.7",
+            "python manage.py signals list --rule starter_forex_breakout --active",
+            "python manage.py signals list --class crypto --direction bullish --acted no",
+            "python manage.py signals show 4211",
+            # (d) is answerable only against a pool: the round trip belongs to
+            # the config that would take the trade, not to the signal. Named,
+            # never guessed.
+            "python manage.py signals show 4211 --config \"Crypto Paper\"",
+        ],
+        "mirrors": "/signals/",
+        # Both verbs read and neither writes, so this is a `read` entry and
+        # the Run lane may execute it. `run_args` is the FIXED argv the
+        # button passes — the browser supplies nothing, ever.
+        "read_only": True,
+        "run_args": ["list"],
         "category": "read",
     },
     {

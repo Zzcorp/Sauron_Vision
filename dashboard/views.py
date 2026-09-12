@@ -484,23 +484,135 @@ def economic_calendar(request):
     return render(request, "dashboard/economic_calendar.html", ctx)
 
 
+def _signal_rows(signals, configs=None):
+    """One page of Signals, each carrying its six answers (2026-09-12).
+
+    `configs` is the viewing user's enabled bot configs — the only thing that
+    makes block (d) answerable, fetched ONCE for the page rather than per row,
+    because the cost of a trade belongs to the pool that would take it and a
+    signal on its own does not know one.
+
+    A FIXED query budget, whatever the page size: one query for the linked
+    flags, one for the evidence ledger, one for the trade join, and one
+    `stage_policy` call per DISTINCT rule name — never per row. The
+    alternative (calling the per-signal helpers inside the loop) is a page
+    that costs four queries a card and gets slower the more the platform
+    produces, which is the wrong direction for a page whose whole point is
+    that the platform is about to produce more.
+    """
+    from dashboard import signal_surface
+    from signals.models import OpportunityFlag
+
+    signals = list(signals)
+    if not signals:
+        return []
+
+    flags = {}
+    try:
+        for f in (OpportunityFlag.objects
+                  .filter(signal_id__in=[s.pk for s in signals])
+                  .select_related("setup").order_by("-scanned_at")):
+            # Newest first, so `setdefault` keeps the most recent flag on a
+            # signal that matched on several passes.
+            flags.setdefault(f.signal_id, f)
+    except Exception as e:  # noqa: BLE001 — the list renders regardless
+        logger.warning("[signals] flags unreadable: %s", e)
+
+    names = [s.rule_name or "" for s in signals]
+    badges = signal_surface.badges_for(names)
+    records = signal_surface.rule_records(names)
+    acted = signal_surface.acted_index(signals)
+
+    rows = []
+    for s in signals:
+        flag = flags.get(s.pk)
+        graded = bool(s.outcome) and s.realized_r is not None
+        rows.append({
+            "s": s,
+            "badge": badges.get(s.rule_name or "", {}),
+            "record": records.get(s.rule_name or ""),
+            "why": signal_surface.why_block(s, flag),
+            # (d) WHAT WOULD IT COST — `passes_cost_filter`, the gate every
+            # bot entry goes through, asked of this signal's own levels; or
+            # its honest refusal where no config context answers it.
+            "cost": signal_surface.cost_block(s, configs),
+            "flag": flag,
+            "trades": acted.get(s.pk) or [],
+            "graded": graded,
+            # A closed signal with no realized_r is not a zero-R signal: it is
+            # a signal the ladder and every evidence lane cannot see at all.
+            "ungraded_closed": (not s.is_active) and not graded,
+            "hours_to_outcome": (round(s.time_to_outcome_seconds / 3600.0, 1)
+                                 if s.time_to_outcome_seconds else None),
+        })
+    return rows
+
+
 @login_required
 def signals_list(request):
-    """Phase 63 — enriched signals dashboard.
+    """Phase 63 — enriched signals dashboard, plus the six questions (2026-09-12).
 
-    Adds: 24h fresh count · direction donut · score-distribution histogram ·
+    Aggregates (unchanged, and all computed over the UNFILTERED active set so
+    a filter narrows the list without silently redefining the platform):
+    24h fresh count · direction donut · score-distribution histogram ·
     asset-class breakdown · win-rate by signal_type (Phase 1 grading) ·
     urgency mix.
+
+    What 2026-09-12 added, and why. This page had exactly ONE filter
+    (`?active=1`) and its rows carried no stage, no rule record, no conditions
+    and no outcome — so a 0.85 signal from a RESEARCH-stage rule that no bot
+    will ever act on looked exactly like one a bot is about to trade at full
+    size on a live venue. Twenty-six of the platform's twenty-eight rules are
+    at research, so that was almost every row. Every row now answers six
+    questions, the first of which did not exist anywhere before:
+
+        (a) CAN ANYTHING ACT ON IT — `signal_surface.stage_badge`, derived
+            from `rule_actuator.stage_policy` + `is_rule_active`, the SAME
+            two functions the entry path calls
+        (b) WHAT IS THE RULE WORTH — `bot_program.evidence.rule_rows` held to
+            that module's own MIN_EVIDENCE_N floor; below it, 'unmeasured'
+        (c) WHY DID IT FIRE — the linked OpportunityFlag's
+            conditions_evaluated, or Signal.sub_scores, NAMED
+        (d) WHAT WOULD IT COST — the levels on the row; the cost verdict only
+            where a config context makes it answerable
+        (e) DID ANYONE ACT — the rule_name + symbol + time join, captioned as
+            the inference it is
+        (f) ITS OWN GRADE — outcome, realized R, time to outcome
+
+    Twelve filters, every one a real queryset narrowing (never a Python pass
+    over an unbounded queryset), all combinable as AND, each a removable chip,
+    with an 'N of M' header so a filter matching nothing is visibly a filter
+    and not an empty platform. The list is paginated; it is never unbounded.
     """
     from collections import defaultdict
     from datetime import timedelta
+
+    from django.core.paginator import Paginator
     from django.utils import timezone as _tz
+
+    from dashboard import signal_surface
     from signals.models import Signal
 
     active_only = request.GET.get("active") == "1"
-    qs = Signal.objects.select_related("instrument").order_by("-created_at")
-    if active_only:
-        qs = qs.filter(is_active=True)
+    base_qs = Signal.objects.select_related("instrument").order_by("-created_at")
+    # M — the denominator of the header. Taken before any filter, so "3 of
+    # 412" says both how narrow the view is and how big the platform is.
+    n_total = base_qs.count()
+    qs, filter_chips, active_filters = signal_surface.apply_filters(
+        base_qs, request.GET)
+    n_shown = qs.count()
+
+    paginator = Paginator(qs, 50)
+    page_obj = paginator.get_page(request.GET.get("page") or 1)
+    page_signals = list(page_obj.object_list)
+    # One query for the viewing user's enabled pools, not one per card: (d) is
+    # answerable only against a config, and which config answers is a property
+    # of the reader, not of the signal.
+    rows = _signal_rows(page_signals, signal_surface.configs_for(request.user))
+    # The chips' own querystring, minus `page`: changing a filter must land on
+    # page 1 of the new result, not on page 7 of a list that no longer has one.
+    page_params = request.GET.copy()
+    page_params.pop("page", None)
     active_qs = Signal.objects.filter(is_active=True)
 
     n_active = active_qs.count()
@@ -581,8 +693,36 @@ def signals_list(request):
         })
     perf_by_type.sort(key=lambda r: r["avg_r"], reverse=True)
 
+    from signals.models import RuleControl
+
     return render(request, "dashboard/signals_list.html", {
-        "page_id": "signals", "signals": qs[:100], "active_only": active_only,
+        "page_id": "signals", "signals": rows, "active_only": active_only,
+        # The six-question surface.
+        "page_obj": page_obj,
+        "paginator": paginator,
+        "n_shown": n_shown,
+        "n_total": n_total,
+        "filter_chips": filter_chips,
+        "active_filters": active_filters,
+        "page_params": page_params.urlencode(),
+        "acted_caption": signal_surface.ACTED_CAPTION,
+        "cost_no_context": signal_surface.COST_NO_CONTEXT,
+        "cost_symbol_caveat": signal_surface.COST_SYMBOL_CAVEAT,
+        "filter_stages": signal_surface.STAGES,
+        "filter_states": signal_surface.STATES,
+        "filter_rules": sorted(
+            n for n in set(RuleControl.objects.values_list("rule_name",
+                                                           flat=True))
+            | set(Signal.objects.order_by().values_list("rule_name", flat=True)
+                  .distinct()[:200]) if n),
+        "filter_classes": sorted(
+            c for c in set(active_qs.order_by()
+                           .values_list("instrument__asset_class", flat=True)
+                           .distinct()) if c),
+        "filter_types": [t for t, _ in Signal.SIGNAL_TYPES],
+        "filter_urgencies": sorted(
+            u for u in set(Signal.objects.order_by()
+                           .values_list("urgency", flat=True).distinct()) if u),
         "active_count": n_active,
         "bullish_count": n_bull,
         "bearish_count": n_bear,

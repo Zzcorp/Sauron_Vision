@@ -223,6 +223,13 @@ def _read_evidence() -> dict:
                           "mode": cfg.mode, "lane": ev.get("lane"),
                           "n": ev.get("n"), "win_rate": ev.get("win_rate"),
                           "avg_r": ev.get("avg_r"),
+                          # The window this lane was measured over. It is
+                          # the config's PERSONA window since 2026-09-12
+                          # (21 / 90 / 365 days), so lanes in this list no
+                          # longer share one — an n of 4 over 21 days and
+                          # an n of 4 over a year are different facts and
+                          # the agent must not read them as the same.
+                          "window_days": ev.get("days"),
                           "measured": bool(ev.get("measured"))})
     except Exception as e:  # noqa: BLE001 — the rule ledger still stands
         lanes = [{"error": f"config lanes unreadable: {e}"[:200]}]

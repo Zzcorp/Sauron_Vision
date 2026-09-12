@@ -84,6 +84,16 @@ DESK_MAX_RULE_SHARE = 0.40
 # The same for an asset class, looser because a class is a broader bucket
 # than a rule and a forex-only fleet would otherwise refuse itself.
 DESK_MAX_CLASS_SHARE = 0.60
+# And the same for a PERSONA (2026-09-12). A trading style is a bucket the
+# rule and class caps cannot see: three scalp configs on three different
+# classes running three different rules are one bet on intraday mean
+# reversion continuing to work, and both existing caps wave that through.
+# 0.50 — between the rule cap and the class cap, because a persona is
+# broader than a rule and narrower than a class is meant to be. Skipped
+# entirely for a config wearing no persona, and, like the other two,
+# skipped while the bucket is still empty: a cap that binds on the first
+# candidate of a persona would switch a single-personality fleet off.
+DESK_MAX_PERSONA_SHARE = 0.50
 # Below this multiplier an entry is not worth taking: a quarter-size
 # position pays a full round trip, and its R is measured against a stop the
 # operator would not have chosen for a bet that small. Displaced instead.
@@ -783,7 +793,8 @@ def choose(candidates, *, user, venue, book, rho, budget,
       2. THE BUDGET, spent in MARGINAL risk. Full size when it fits, else
          cut to what is left, else displaced — never clamped upward, never
          above 1.0.
-      3. THE RULE SHARE, then THE CLASS SHARE, on the size actually taken.
+      3. THE RULE SHARE, then THE CLASS SHARE, then THE PERSONA SHARE, on
+         the size actually taken.
          Judged against the BUDGET — the tick's risk allowance — rather than
          against the tick's realised total, and skipped entirely while the
          bucket is still empty. Both details exist for the same reason: a
@@ -848,8 +859,11 @@ def choose(candidates, *, user, venue, book, rho, budget,
     new_risk = 0.0
     rule_risk = defaultdict(float)
     class_risk = defaultdict(float)
+    persona_risk = defaultdict(float)
     taken_by_cfg = defaultdict(int)
     pool = list(kept)
+
+    from bot_program.personas import persona_of
 
     while pool:
         base = _portfolio_risk(open_entries + sel, matrix)
@@ -948,6 +962,22 @@ def choose(candidates, *, user, venue, book, rho, budget,
                     f"risk (cap {DESK_MAX_CLASS_SHARE * 100:.0f}%)")[:120]
                 decisions.append(row)
                 continue
+            # ...and the PERSONA share, on the same terms. A config
+            # wearing none is not in any persona bucket and is never
+            # refused by this cap — it cannot be, there is nothing to
+            # concentrate.
+            pkey = persona_of(getattr(cand.bot, "cfg", None))
+            if pkey:
+                after_persona = persona_risk[pkey] + taken_risk
+                if (persona_risk[pkey] > 0
+                        and after_persona > DESK_MAX_PERSONA_SHARE * share_base + 1e-9):
+                    row["reason"] = (
+                        f"persona_share — {pkey} would hold "
+                        f"{after_persona / share_base * 100:.0f}% of the "
+                        f"tick's risk (cap "
+                        f"{DESK_MAX_PERSONA_SHARE * 100:.0f}%)")[:120]
+                    decisions.append(row)
+                    continue
 
         # taken
         row["size_mult"] = mult
@@ -965,6 +995,9 @@ def choose(candidates, *, user, venue, book, rho, budget,
         new_risk += taken_risk
         rule_risk[rule] += taken_risk
         class_risk[cand.asset_class] += taken_risk
+        _pkey = persona_of(getattr(cand.bot, "cfg", None))
+        if _pkey:
+            persona_risk[_pkey] += taken_risk
         taken_by_cfg[cand.cfg_id] += 1
         decisions.append(row)
 

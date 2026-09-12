@@ -80,6 +80,30 @@ YF_UNAVAILABLE = {
     "XAUGBP", "XAUEUR", "XAGEUR",
 }
 
+# Catalogue symbols whose HOURLY series is healthy and whose DAILY series is
+# not. This is a different condition from YF_UNAVAILABLE — the symbol is
+# mapped correctly and serves data; only one interval is broken at the
+# source — and it must stay different, because a symbol listed above is
+# skipped ENTIRELY, which would also throw away a working 4h frame.
+#
+# Measured against the live feed on 2026-09-12, both spellings:
+#     USDCNH=X  1d  rows=1     2026-09-11 -> 2026-09-11
+#     USDCNH=X  1h  rows=1416  2026-06-22 -> 2026-09-11
+#     CNH=X     1d  rows=1     2026-09-11 -> 2026-09-11
+#     CNH=X     1h  rows=1416  2026-06-22 -> 2026-09-11
+#     USDCNH    1d/1h  404 "Quote not found" (so the =X suffix is right)
+# The 4h frame built from those hourly rows wrote 400 bars in the same pass
+# that wrote 1 daily bar. The mapping was checked and is correct.
+#
+# 1d is NOT resampled from 1h here on purpose: an FX trading day closes at
+# 17:00 New York, not at midnight, so a midnight-boundary bar built from
+# hourly closes is a DIFFERENT OBJECT from a daily bar, and storing it
+# beside native daily bars would make the two indistinguishable. A symbol
+# that needs a real daily series needs a broker feed; IBKR serves CNH.
+YF_NO_DAILY = {
+    "USDCNH",
+}
+
 # ── How much history one call asks for ────────────────────────────────
 #
 # Yahoo has no 4h bar, so 4h is resampled from 1h — and the first version
@@ -200,6 +224,16 @@ class YFinanceFeed:
 
         ysym = yf_symbol(symbol, self.asset_class)
         fetch_interval = RESAMPLE_FROM.get(interval, interval)
+        if fetch_interval == "1d" and (symbol or "").upper() in YF_NO_DAILY:
+            # Not a mapping fault and not a missing symbol: this one's daily
+            # series is broken at the source while its hourly series is
+            # fine. Say so, so nobody audits a correct mapping again.
+            logger.info("[public_feed] %s: Yahoo's DAILY series is empty for "
+                        "this symbol on every known spelling, while its "
+                        "hourly series serves normally — see YF_NO_DAILY. "
+                        "The mapping (%r) is correct; the daily series is "
+                        "not. Intraday frames are unaffected.", symbol, ysym)
+            return []
         if fetch_interval not in YF_NATIVE:
             logger.warning("[public_feed] %s: interval %r is not available "
                            "from Yahoo and cannot be resampled", symbol, interval)
@@ -223,8 +257,13 @@ class YFinanceFeed:
             # An unmapped symbol returns an empty frame rather than raising,
             # which otherwise reads as "this instrument has no history".
             logger.warning("[public_feed] %s resolved to Yahoo symbol %r and "
-                           "returned no rows — check the symbol mapping",
-                           symbol, ysym)
+                           "returned no rows at %s. Check the symbol mapping "
+                           "FIRST, but if another interval serves this same "
+                           "symbol normally the mapping is not the fault — "
+                           "record it in YF_NO_DAILY (or its per-interval "
+                           "equivalent) with the measurement, rather than "
+                           "leaving a silent hole.",
+                           symbol, ysym, fetch_interval)
             return []
 
         if interval in RESAMPLE_FROM:

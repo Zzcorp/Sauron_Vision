@@ -465,6 +465,213 @@ docker compose --env-file .env -f deploy/docker-compose.yml ps   # nothing Resta
 
 ---
 
+## Three personalities (/personas/)
+
+A **trader personality** is not a new engine. Every knob it needs already
+decides how a bot behaves — the timeframe it reads, the ATR multiples its
+stop and target are cut from, how long a thesis may live, how many bets
+run at once, how much of the pool one stop-out costs. What was missing is
+that those knobs were set ONE AT A TIME with no coherence between them,
+graded over one 90-day window that fits none of them, and allocated out of
+one 2–60% band. A personality is four things and nothing more:
+
+1. a **coherent preset** of knobs that already exist and are already read;
+2. a **grading window** matched to the holding period (21 days of scalps
+   is a sample; 21 days of position trades is one trade);
+3. a **share band** in the account allocator (`bounds_for`);
+4. a **weight** on the 5–10 year horizon prior (`horizon_for`), clamped so
+   the factor can never leave 0.85–1.15 whatever the weight.
+
+**The leverage correction — read this one.** The ask was "short exposure in
+time and large in volume and leverage". **No personality borrows to fund a
+position.** The claim is scoped to personalities because the sweeping
+version of it is false, and was caught being false in review:
+`bot_program.models.BotConfig` carries both `leverage` and `margin_mode`,
+`engine/risk.py` multiplies the position dollars by the first, and
+`engine/runner.py` POSTs both at the Binance futures venue through
+`ensure_config`. That engine is dormant, not absent, and it is
+hand-triggerable from `views.run_tick_now`. Scoped, the claim is stronger
+than the sweeping one: `AssetBotConfig` — the only config a personality can
+be worn by — carries neither field, so no persona can set what it does not
+have.
+
+The honest short-term lever is (a) the **notional fraction** the risk sizer
+is allowed to reach — how much position one fixed *cash* risk budget buys
+when the stop is tight — and (b) the **number of concurrent positions**. On
+stock, ETF, index, commodity, crypto and options both are cash and neither
+is a loan. **Forex is the exception, and the leverage there is real:**
+`sizing.MAX_NOTIONAL_FRACTION` grants it 4.0 — 400% of the pool in notional
+— because 20% on an FX major is an economically meaningless constraint, and
+that module names where the leverage sits: *"the leverage is at the
+broker"*. **No personality ever lowers it.** "Large in volume" is delivered
+as eight concurrent bets at a 35% notional cap on a 0.15% risk budget
+everywhere else, and by the venue on FX.
+
+Separately and independently of all the above: IBKR refuses margin, shorts,
+currency conversion and futures outright below a 2,000 USD account floor
+(Error 201). That is the broker's constraint on the account, not a property
+of this code.
+
+| | **scalp** | **swing** | **position** |
+|---|---|---|---|
+| purpose | many small bets, hours not days | what Sauron is today: the 4h trend | the long view: weeks, few bets |
+| timeframe | `1h` | `4h` | `1d` |
+| entry_score_min | 0.65 | 0.60 | 0.65 |
+| min_signals_for_entry | 2 | 1 | 2 |
+| cool_down_minutes | 15 | 60 | 1440 |
+| max_concurrent_positions | 8 | 5 | 3 |
+| max_daily_loss_pct | 2.0 | 2.0 | 3.0 |
+| hold ceiling (`max_hold_hours`) | 8h | 72h | 720h |
+| risk_per_trade_pct | 0.15 | 0.25 | 0.40 |
+| ATR stop / target | 1.0 / 2.0 | 1.5 / 3.0 | 2.5 / 6.0 |
+| ATR measured on (`atr_timeframe`) | `1h` | `4h` | `1d` |
+| max_signal_age_hours | 4 | 24 | 72 |
+| max_notional_fraction | 0.35 (never forex) | class default | class default |
+| loss streak / drawdown breaker | 3 / 8% | 4 / 10% | 5 / 15% |
+| grading window | 21 days | 90 days | 365 days |
+| horizon weight | ×0.0 | ×0.5 | ×1.5 |
+| share band | 5–25% | 20–60% | 15–50% |
+
+A scalp config's horizon factor is therefore exactly 1.00, and the share
+plan says so in words: `horizon 1.00 (scalp ignores the 5-year view)`.
+
+**`atr_timeframe` is a separate key from `timeframe`, and it matters.**
+`risk_levels.stop_and_target` cuts every ATR multiple from
+`extras["atr_timeframe"]`, which defaults to `4h` for every config on the
+platform. A multiple is only as long as the frame it is measured on: a
+"1.0 ATR" stop measured on 4h bars is two to four times the hourly range a
+scalp is written around, and a 2.5 ATR stop measured on 4h bars is about
+2% on a liquid equity — which an ordinary week clears twice, so a
+thirty-day position thesis would be stopped out by four-hour noise. Each
+personality therefore sets `atr_timeframe` to its own frame, and the
+missing-bars warning covers it: with no `1d` bars, `atr_for` returns None
+and `stop_and_target` falls back to the flat `stop_loss_pct` percentage —
+a DIFFERENT stop, not a clamped one.
+
+**Two keys are REMOVED, not merged, when a personality is applied**, and
+the plan names both before the write:
+
+* `extras["max_hold_hours"]` — the legacy time-stop inlet.
+  `time_stop_setting()` reads it *before* the column, so leaving it would
+  let an old value outrank the personality's ceiling silently. It is
+  drained exactly as the migration and the settings form drain it.
+* a knob the **previous** personality set that the new one does not — today
+  only `max_notional_fraction`, which `scalp` writes and the other two do
+  not. Without the drop, `scalp -> swing` would leave a scalp's 35%
+  notional cap on a swing book for ever. Removed **only** when the stored
+  value is still exactly what the previous personality wrote; a number the
+  operator typed themselves is never touched by a change of style.
+
+**Applying one to a LIVE config re-sizes REAL risk** on the next entry:
+`risk_per_trade_pct`, the ATR stop distance and the notional cap all feed
+`sizing.size_position`. The page asks for the trading PIN there, and the
+command asks for `--yes`; `apply_persona` refuses a live config without
+that force. **A personality changes NO capital and NO account share by
+itself, and never enables or disables a bot.** It writes only the knobs in
+the table above, plus the `persona` / `persona_at` stamp in `extras`.
+
+```bash
+./deploy/dc exec web python manage.py persona list                 # the three side by side, and who wears them
+./deploy/dc exec web python manage.py persona show scalp           # one in full, with why each number
+./deploy/dc exec web python manage.py persona apply 14 swing       # the plan and every warning — WRITES NOTHING
+./deploy/dc exec web python manage.py persona apply 14 swing --yes # writes (--yes stands in for the page's PIN)
+./deploy/dc exec web python manage.py persona grade                # each personality over ITS OWN window
+./deploy/dc exec web python manage.py persona mix                  # which personality this tape rewards (see below)
+```
+
+Read the plan's warnings before the `--yes`. The three that matter: the
+timeframe has **no bars** for this config's symbols (nothing writes `1d`
+bars for crypto — the EOD task covers stock/etf/index/commodity/forex
+only); the config holds **open positions** and the time stop or the ATR
+multiples are moving (the time stop measures from `opened_at`, so a
+shorter ceiling can flatten a position on the very next tick); and the
+config is **live**.
+
+The eleven sector ETFs the Horizon view needs (`XLK XLE XLF XLV XLI XLY
+XLP XLU XLB XLRE XLC`) plus `UUP` are in the instrument catalogue, but
+their bars are not backfilled by adding them. That is an operator command:
+
+```bash
+./deploy/dc exec web python manage.py seed_instruments
+./deploy/dc exec web python manage.py backfill_bars --symbols XLV,XLI,XLY,XLP,XLU,XLB,XLRE,XLC,UUP --intervals 1d,4h --bars 300
+```
+
+`/personas/` shows the same three presets, the same grade and the same
+warnings as the commands, with an Apply form for superusers.
+
+### The mix moves with the market
+
+The ask was: *"make the three personalities interact continuously — under
+certain market states some personalities should be used more, no?"* The
+intuition is sound and the platform has every piece. **What it does not
+have is the answer.** Nobody knows yet which personality suits which
+regime: not the operator, not this runbook, and not the code. So the
+platform does not hard-code a belief — it runs **two lanes**, and every
+answer says which one spoke and with what `n`:
+
+* **MEASURED** — what configs wearing that personality actually earned
+  while the platform *recorded* that regime, above the evidence ledger's
+  own sample floor (10 graded fills). The regime is joined on the trade's
+  **entry**, against the `BrainReport` that existed *then* — never
+  today's. This lane wins whenever it exists.
+* **PRIOR** — a small, explicitly-labelled, **unproven** tilt, used only
+  where nothing is measured. The loudest entry in the table moves a band
+  by 9%; the largest one the code permits is 15%. Not one of them is
+  backed by a single graded fill on this deployment. **A measured cell
+  replaces its prior entirely** — not blended, not decayed, gone.
+* **NEUTRAL** — exactly 1.00, when the regime is `unknown` (the absence of
+  a reading, not a state of the market) or no prior says anything.
+
+**What the factor does, and the bound on it.** It moves that
+personality's **share band**: the band's *centre* shifts, its *width*
+never changes, and the shift is held to **5 percentage points of the
+account** whatever the factor says — so a ×1.15 on swing (20–60%) lands
+at 25–65%, never at 40–80%. Everything under the band is unchanged: the
+water-fill, the half-way smoothing, the **per-day cap** and the
+hysteresis all still bind, so **a regime flip moves a pool no further in
+one day than the allowance the allocator already granted it**: 10 points
+in NORMAL and SHOCK, and the 20 points upward that an EXPANSION tape
+already allowed before the mix existed. (Saying "still 10 points" would
+have been wrong on an expanding tape, and it was wrong there before this
+feature too.) An explicit
+`extras["share_floor_pct"]`/`["share_ceiling_pct"]` still wins over the
+mix, the manual lane still has no ceiling, and **a config wearing no
+personality is not touched at all** — its plan is byte-for-byte what it
+was before this existed.
+
+**When the shift does not run, the plan says which rule beat it.** The
+band shift sits inside one case of `bounds_for`'s precedence — manual
+lane, then an explicit band, then the persona band, then the defaults —
+so on the hand-taken pool and on a config whose band an operator typed
+by hand the mix is read, printed, and **not applied**. The plan's inputs
+carry `mix.applied: false` with `mix.outranked_by` naming the winner and
+the sentence reads *"not applied, the manual lane wins"*. It used to say
+*"the explicit band wins"* on the manual lane and then quote a band move
+(5–25 → 2–100%) the exemption had made and the mix had not — a plan
+must never claim a number it did not set (2026-09-12).
+
+**The mix moves SHARES ONLY.** It never touches `risk_per_trade_pct` or
+`max_notional_fraction`. Two dials moving in the same week make the grade
+unattributable: if a regime flip shifted both the share and the risk per
+trade, no reading afterwards could say which one earned the R — and being
+able to say is the entire point of recording the lane and the `n`.
+
+```bash
+./deploy/dc exec web python manage.py persona mix                          # the matrix, the regime, its confidence and age
+./deploy/dc exec web python manage.py persona mix --venue paper            # paper is NEVER pooled with live
+./deploy/dc exec web python manage.py persona mix --regime trending        # a what-if column, in full sentences
+```
+
+`/personas/` carries the same matrix: three rows, six regime columns,
+measured cells in bold with their `n`, priors in italic, the current
+regime's column marked, and one line saying **how many of the eighteen
+cells are still guesses**. On a fresh deployment that line reads 18 of
+18. Watching it fall is the feature — the priors retire cell by cell as
+the graded fills arrive, and the operator can see exactly which parts of
+the mix the platform has actually learned.
+
+---
+
 ## The cockpit (/ops/)
 
 One page that says "everything, now": every platform switch with its
@@ -483,7 +690,7 @@ its own account, its own plans, the preflight verdict and the catalogue.
 The Run lane's rule: the page runs only a command registered as read-only
 in `core/ops_commands.py`, with the fixed arguments the registry gives it
 and nothing from the browser — `open_trades`, `preflight_live`,
-`why_no_trade`. Every run and every refusal is an audit row (`ops_run`,
+`why_no_trade`, `signals`. Every run and every refusal is an audit row (`ops_run`,
 `ops_run_refused`); the output is kept an hour, truncated at 20,000
 characters. Anything that writes — `component on`, `proposals approve`,
 `actuator apply`, `shares apply`, `follow`, `bot on`, the seeders, the
@@ -497,6 +704,155 @@ backfill — shows its usage on the page and runs on the server, where
 
 A management command missing from the registry (or from its EXEMPT set)
 fails `tests.test_ops_cockpit`, so the page and the shell cannot drift.
+
+---
+
+## Why a setup never fires (/setups/)
+
+On 2026-09-12 the platform carried 28 RuleControl rows, 26 of them at
+`research`. Sixteen of those 26 had produced ZERO signals in seven days AND
+zero graded signals in their entire life. The ladder wants 30 graded signals
+to leave `research`, so at that rate no designed rule is ever promoted, no
+designed rule ever trades, and every evidence lane stays unmeasured for ever.
+Until this page existed a silent setup was simply silent: nothing said
+whether its conditions were too strict, its data was missing, or it missed
+its threshold by 0.02.
+
+`/setups/` and `python manage.py setups diagnose` answer that. The diagnostic
+runs the SCANNER'S OWN `scan_setup` with `emit=False` — it writes no flag and
+no signal — over every active setup × every active instrument the setup's
+`asset_classes` admit (an empty `asset_classes` means all). Four verdicts and
+an empty case:
+
+| verdict | what it means | what to do |
+|---|---|---|
+| `fires` | it matched somewhere in the population | nothing — it is working |
+| `near` | its best composite is inside the near-miss band (default 0.10) below its threshold | lower `min_match_score`, or widen the weakest condition — the sentence names it |
+| `strict` | every condition EVALUATES and none combine past the threshold | it is a rare pattern, honestly measured. Loosen it or accept the rarity |
+| `blind` | a condition CANNOT EVALUATE on most of the population — no bars, no indicator row, no news | **loosening the threshold changes nothing, ever.** Backfill the data or drop the condition |
+
+A composite the scanner REFUSED is never counted as a near miss and never
+enters the distribution. When less than half a setup's authored weight could
+be measured on a pair, `scan_setup` returns `not_enough_measured` with a
+score on it — the surviving legs renormalised to themselves — and that
+number was never compared to the threshold. Those pairs are counted under
+"below quorum" in `setups show` and named in the verdict sentence; lowering
+`min_match_score` on such a setup changes nothing.
+| `empty` | no active instrument is in its asset classes at all | fix `asset_classes`, or activate instruments |
+
+The distinction between `strict` and `blind` is the whole point. A condition
+that evaluates and refuses is a judgement about the market; a condition that
+never got to look is a dead leg, and the scanner scores it as a zero either
+way — which is exactly why the silence looked identical from outside.
+
+```bash
+./deploy/dc exec web python manage.py setups list        # armed, stage, 7d, graded ever
+./deploy/dc exec web python manage.py setups diagnose    # every verdict, worst first
+./deploy/dc exec web python manage.py setups show advanced_smc_long
+./deploy/dc exec web python manage.py setups grading --days 30
+```
+
+**Arming what was never armed.** A generated setup is written `is_active=False`
+with a research-stage RuleControl row, so nobody clicking means it is neither
+scanned nor traded — pure dead weight. `setups arm <name> --yes` (or the Arm
+form on `/setups/`, superusers) arms it. Where a PENDING `GeneratedSetupProposal`
+exists it goes through `brain.strategy_generator.approve_proposal`, so the
+`approval_blocker` re-validation and the audit row are the `/generated/` page's
+own and not a second path; with no proposal row it flips `is_active` and writes
+its own `setup_armed` audit event. Without `--yes` it prints what it would arm
+and the blocker for anything it cannot.
+
+**Arming a research-stage setup is SAFE.** `is_active` decides whether the
+SCANNER looks at a setup; `RuleControl.promotion_stage` decides whether any bot
+may act on what it finds, and at `research` `stage_policy` returns
+`may_trade False` — no order is ever placed. A setup with NO RuleControl row is
+NOT research: `stage_policy` treats such a rule as PAPER — it may trade, at full
+nominal size, on the paper venue. The command prints that warning before it
+arms one, and so does the page.
+
+**The grading leak.** `setups grading --days 30` counts, per rule, how many
+signals were created, how many closed, and how many closed with no outcome or
+with an outcome and no `realized_r`. Both of those last two are INVISIBLE to
+the promotion ladder (`promotion_pipeline._stats_since` excludes both) and to
+every evidence lane (`bot_program.evidence.rule_rows` excludes both): the
+signal was produced, it cost a scan, and it taught nothing. If a material
+share of closed signals lands there, the repair is in `signals/performance.py`
+and `run_signal_lifecycle`, not in the scanner.
+
+**The scan cadence stays at daily 09:00 UTC — measured, not assumed.**
+A full `diagnose_setups` pass (the same loop `scan_all_setups` runs, one
+`scan_setup` per pair) over 6 active setups × 179 active instruments —
+**566 admitted pairs, 1,698 evaluator calls, 4.0-7.1 seconds** measured four
+times on the local development database on 2026-09-12 (7-12.5 ms a pair; the
+spread is OS page cache, cold to warm). That database holds only 5,600 price
+bars, so nearly every evaluator refused for want of data before doing any
+arithmetic: **the number is a FLOOR on the cost, not an estimate of it.**
+The live deployment carries 20 active setups over the same 179 instruments
+with a full bar history — about 3.3× the pairs, and a real window measured on
+each one instead of an early return. 3.3 × (4.0-7.1) s is 13-24 s of pure
+loop before a single real measurement is paid for, and the multiplier above
+that is unknown. **13-24 seconds with an unknown multiplier on top is not
+"comfortably under 60", so the cadence is NOT raised.** Re-measure on the box
+before changing it:
+
+```bash
+./deploy/dc exec web python manage.py setups diagnose | head -2   # prints the seconds
+```
+
+If that line reads comfortably under 60 s against the real 20-setup
+population, `config/celery.py`'s `scan-opportunities` entry may move from
+`crontab(hour=9, minute=0)` to `crontab(minute=5, hour='*/4')`: 4× the scans,
+4× the flag rate, 4× the evidence accrual, against that many seconds of
+worker time per pass. Do not raise a cadence nobody has timed on the
+population it will actually run against.
+
+## Reading a signal (/signals/)
+
+Every signal row answers six questions, and the first of them did not exist
+anywhere before 2026-09-12:
+
+1. **Can anything act on it?** One badge, derived from
+   `rule_actuator.stage_policy` + `is_rule_active` — the SAME two functions the
+   entry path calls, never a second implementation. `TRADEABLE` (live venue),
+   `PAPER ONLY` (paper stage, or NO RuleControl row at all, which reads
+   "unregistered - paper venue at full size" — `stage_policy` fails safe, not
+   closed), `WATCHED` (research: may_trade False, and the rule's votes are
+   dropped from every bot's consensus, which is why the fleet reads
+   "net evidence +0.00"), `PAUSED` / `REDUCED` from the admin lane.
+   **A PAUSE IS NOT A VENUE GATE.** `is_rule_active` is read in exactly two
+   places — the rule engine's signal write path (`signals/tasks.py`) and the
+   fast-rule runner. `scan_all_setups` never reads it, so a paused
+   setup-backed rule keeps scanning and publishing; and the bot entry path
+   reads `stage_policy` alone, so a bot WILL act on a signal that already
+   exists from a paused rule. The badge therefore shows `PAUSED` and still
+   reports the stage's own `may_trade`: to stop a rule reaching a venue,
+   demote its stage, not its status (2026-09-12).
+2. **What is the rule worth?** `bot_program.evidence.rule_rows`, held to that
+   module's own `MIN_EVIDENCE_N` floor. Below the floor it reads `unmeasured`,
+   never a number.
+3. **Why did it fire?** The linked OpportunityFlag's `conditions_evaluated`, or
+   `Signal.sub_scores` for an engine rule — and the block names which.
+4. **What would it cost?** The levels and R:R on the row. There is no cost
+   verdict without a config context, and the page says so rather than
+   inventing one.
+5. **Did anyone act?** The AssetBotTrade rows joined on rule_name + symbol +
+   time. **There is no foreign key from a trade to a signal**, so the block is
+   captioned as the inference it is.
+6. **Its own grade.** Outcome, realized R, time to outcome — or `ungraded`,
+   which is the loud one: a closed signal with no realized R is invisible to
+   the ladder and to every evidence lane.
+
+Twelve filters, all combinable as AND, each a removable chip, each a real
+queryset narrowing: `q` `rule` `stage` (multi) `asset_class` `direction`
+`signal_type` `urgency` `score_min` `age_hours` `state` `acted`, plus the
+original `active=1`. The header reads "N of M signals", so a filter matching
+nothing is visibly a filter and not an empty platform. An out-of-vocabulary
+value is IGNORED, not applied. The list is paginated at 50.
+
+```bash
+./deploy/dc exec web python manage.py signals list --stage research --min-score 0.7
+./deploy/dc exec web python manage.py signals show 4211     # the same six blocks
+```
 
 ---
 

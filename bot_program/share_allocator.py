@@ -7,7 +7,23 @@ opportunity density, news risk, and the horizon prior (the monthly
 5-10 year view's asset-class tilt, ±10% at most; 2026-09-12) — under
 per-config floor/ceiling, a max
 change per day and a drawdown governor, and writes it as a SharePlan in
-state PROPOSED. That is a SHADOW: nothing moves. A plan moves only when
+state PROPOSED.
+
+THE MIX (2026-09-12) is a sixth reading and it is NOT a sixth factor: it
+does not multiply the raw share, it moves the persona's BAND. Which
+personality the tape has been rewarding (bot_program.persona_mix —
+measured beats an unproven prior beats neutral) shifts that band's centre
+and preserves its width, by at most persona_mix.MAX_BAND_SHIFT_PCT
+points. It MOVES SHARES ONLY: risk_per_trade_pct and
+max_notional_fraction are never touched by it, because two dials moving
+in one week make the grade unattributable — no reading afterwards could
+say whether the share or the risk earned the R. And everything below the
+band is unchanged, so a regime flip moves a pool no further in one day
+than THE DAY'S OWN ALLOWANCE already allowed before the mix existed:
+MAX_CHANGE_PCT_PER_DAY in NORMAL and SHOCK, and the
+EXPANSION_CAP_PCT_PER_DAY that an EXPANSION tape already grants upward.
+Naming the NORMAL constant alone would have read as a bound the mix does
+not have on an expanding tape (2026-09-12). That is a SHADOW: nothing moves. A plan moves only when
 an admin applies it — PIN on /shares/, --yes on `shares apply` — and
 only in LIVE mode (component share_allocator_mode_live). Applying
 writes extras["account_share_pct"] and calls tasks._follow_the_account,
@@ -75,6 +91,14 @@ MIN_EVIDENCE_N = 10
 # prior, and costs a factor of 1.0 with the reason on the plan.
 HORIZON_TILT_STEP = 0.05
 HORIZON_MAX_AGE_DAYS = 45
+# The persona weight multiplies the tilt step (personas.horizon_weight:
+# scalp 0.0, swing 0.5, position 1.5), and the result is clamped HERE
+# whatever the weight. Without the clamp a weight the presets could grow
+# to would turn a "weak prior by construction" into the loudest factor on
+# the plan — and the one thing this prior must never become is a vote
+# that outweighs graded evidence (2026-09-12).
+HORIZON_FACTOR_MIN = 0.85
+HORIZON_FACTOR_MAX = 1.15
 
 LIVE_COMPONENT = "share_allocator_mode_live"
 GRADED_OUTCOMES = ["hit_target", "stopped_out", "manual_close", "expired",
@@ -305,7 +329,56 @@ def _is_manual_lane(cfg) -> bool:
             and not getattr(cfg, "symbols", None))
 
 
-def bounds_for(cfg) -> tuple:
+def persona_band_for(cfg):
+    """(floor, ceiling) from the config's persona, or None — never raises.
+
+    A thin wrapper so this module keeps one import site for personas and
+    a page can ask the same question without re-deriving it.
+    """
+    try:
+        from bot_program.personas import persona_band
+        return persona_band(cfg)
+    except Exception as e:  # noqa: BLE001 — a plan must still be proposable
+        logger.warning("[shares] persona band unreadable: %s", e)
+        return None
+
+
+def _has_explicit_band(cfg) -> bool:
+    """True iff a human typed a floor or a ceiling into this config's
+    extras. Either half is enough: shifting the other half by a regime
+    would mix the operator's instruction with the platform's guess inside
+    one band, and neither number afterwards would be attributable to the
+    one who set it (2026-09-12)."""
+    ex = getattr(cfg, "extras", None) or {}
+    return (ex.get("share_floor_pct") not in (None, "")
+            or ex.get("share_ceiling_pct") not in (None, ""))
+
+
+def _mix_cell(cfg, mix) -> dict:
+    """The mix factor for this config's PERSONA, or {} — never raises.
+
+    A config wearing NO persona answers {} here, and that is the binding
+    guarantee of the mix chantier (2026-09-12): it never reaches
+    `shift_band`, never gains a 'mix' row in the plan's inputs and never
+    has a word added to its why sentence. A fleet that has not been given
+    personalities proposes exactly the numbers it proposed before this
+    feature existed — provably, not approximately.
+    """
+    if not mix:
+        return {}
+    try:
+        from bot_program.personas import persona_of
+        key = persona_of(cfg)
+    except Exception as e:  # noqa: BLE001 — no persona readable is no mix
+        logger.warning("[shares] persona unreadable for the mix: %s", e)
+        return {}
+    if not key:
+        return {}
+    cell = (mix.get("personas") or {}).get(key)
+    return dict(cell) if isinstance(cell, dict) else {}
+
+
+def bounds_for(cfg, *, mix=None) -> tuple:
     """(floor, ceiling, reason) — the config's own bounds when they are
     sane (finite, 0 < floor <= ceiling <= 100), else the defaults.
 
@@ -318,12 +391,50 @@ def bounds_for(cfg) -> tuple:
     points of a 2,000 EUR account on no information. The operator's pool
     is the operator's; a bot that earns its way up still stops at 60%.
     An explicit extras["share_ceiling_pct"] on the manual lane is honoured.
+
+    PRECEDENCE, and it is this order on purpose (2026-09-12):
+
+      1. the MANUAL LANE exemption. It wins over everything, persona
+         included: the hand-taken pool is the operator's, and a trading
+         style typed onto it must not put a 25% ceiling back on the one
+         pool this exemption exists to keep uncapped.
+      2. an explicit extras band. Typed by a human for this config.
+      3. the PERSONA's band. A scalp book at 5-25% and a position book at
+         15-50% are different sizes of bet, and one 2-60% default for
+         both was the allocator saying it could not tell them apart.
+      4. DEFAULT_FLOOR_PCT / DEFAULT_CEILING_PCT.
+
+    3 sits under 2 because a persona is a preset and an extras key is an
+    instruction; it sits above 4 because a default constant knows nothing
+    about the config at all.
+
+    `mix` is what `persona_mix.current_mix` answered for this proposal
+    (read ONCE per plan, never per config). When it is given AND the
+    config wears a persona AND no human typed a band into its extras, the
+    PERSONA BAND'S CENTRE is shifted by that personality's factor with the
+    band's WIDTH preserved, clamped to persona_mix.MAX_BAND_SHIFT_PCT
+    points — `shift_band` does the arithmetic and documents the bound.
+    The shift sits INSIDE case 3 on purpose: it moves the persona's band
+    and nothing else, so cases 1 and 2 still win exactly as they did and
+    a config with no persona is untouched (2026-09-12).
     """
     ex = getattr(cfg, "extras", None) or {}
     raw_lo, raw_hi = ex.get("share_floor_pct"), ex.get("share_ceiling_pct")
     lo, hi = DEFAULT_FLOOR_PCT, DEFAULT_CEILING_PCT
     if _is_manual_lane(cfg):
         hi = 100.0
+    else:
+        band = persona_band_for(cfg)
+        if band is not None:
+            lo, hi = band
+            cell = {} if _has_explicit_band(cfg) else _mix_cell(cfg, mix)
+            if cell:
+                try:
+                    from bot_program.persona_mix import shift_band
+                    lo, hi = shift_band(lo, hi,
+                                        float(cell.get("factor") or 1.0))
+                except Exception as e:  # noqa: BLE001 — the band, never the plan
+                    logger.warning("[shares] mix band shift failed: %s", e)
     try:
         if raw_lo not in (None, ""):
             lo = float(raw_lo)
@@ -462,11 +573,21 @@ def horizon_for(cfg, view, *, now=None) -> dict:
     """{factor, tilt, confidence, age_days, label, reason} from the latest
     HorizonView for the config's asset class.
 
-    factor = 1 + HORIZON_TILT_STEP × tilt × confidence, so ±2 at full
+    factor = 1 + HORIZON_TILT_STEP × tilt × confidence × PERSONA WEIGHT,
+    clamped to HORIZON_FACTOR_MIN..HORIZON_FACTOR_MAX. With no persona the
+    weight is 1.0 and this is exactly what it always was: ±2 at full
     confidence is ±10% and nothing more. No view, a stale view, or a
     class the view did not tilt → 1.0 with the reason: a missing prior
     must never read as a bearish one. `label` is the short form the why
     sentence prints ('stock tilt +1, conf 0.8').
+
+    WHY THE WEIGHT (2026-09-12). A 5-10 year sector view is an argument
+    about where capital should sit for years. Applying it with the same
+    strength to a book that is flat by lunchtime and to one that holds for
+    a month is applying it to the wrong question in one of the two cases.
+    A scalp config's weight is 0.0, so its factor is EXACTLY 1.0 and the
+    plan says so in words rather than printing a neutral number the
+    operator has to interpret.
     """
     if view is None:
         return _neutral_horizon("no horizon view — neutral", "no view")
@@ -498,13 +619,35 @@ def horizon_for(cfg, view, *, now=None) -> dict:
     # written by an older version must still be a ±10% prior at most.
     tilt = max(-2, min(2, tilt))
     conf = max(0.0, min(1.0, conf))
-    factor = 1.0 + HORIZON_TILT_STEP * tilt * conf
-    label = f"{ac} tilt {tilt:+d}, conf {conf:.1f}"
+    weight, pkey = _persona_horizon_weight(cfg)
+    factor = 1.0 + HORIZON_TILT_STEP * tilt * conf * weight
+    # Clamped whatever the weight: the prior is a ±15% nudge at the very
+    # most, by construction rather than by the presets happening to be
+    # small.
+    factor = max(HORIZON_FACTOR_MIN, min(HORIZON_FACTOR_MAX, factor))
+    if pkey and weight == 0.0:
+        label = f"{pkey} ignores the 5-year view"
+    elif pkey and weight != 1.0:
+        label = f"{ac} tilt {tilt:+d}, conf {conf:.1f} × {pkey} w{weight:g}"
+    else:
+        label = f"{ac} tilt {tilt:+d}, conf {conf:.1f}"
     return {"factor": factor, "tilt": tilt, "confidence": conf,
             "age_days": age_days, "label": label,
+            "persona": pkey, "persona_weight": weight,
             "reason": (f"horizon view #{getattr(view, 'pk', '?')} "
                        f"({age_days:.0f}d old): {label}"
                        + (f" — {slot.get('why')}" if slot.get("why") else ""))}
+
+
+def _persona_horizon_weight(cfg) -> tuple:
+    """(weight, persona_key) — (1.0, '') for a config with no persona, so
+    a fleet that has never heard of personas reads exactly as before."""
+    try:
+        from bot_program.personas import persona_horizon_weight, persona_of
+        return float(persona_horizon_weight(cfg, 1.0)), persona_of(cfg)
+    except Exception as e:  # noqa: BLE001 — a prior must never break a plan
+        logger.warning("[shares] persona horizon weight unreadable: %s", e)
+        return 1.0, ""
 
 
 def _classes_of(cfg) -> dict:
@@ -576,7 +719,7 @@ def _shave_to_100(targets: dict, bounds: dict, held: set) -> dict:
 
 def _why(ev, rg, opp, nw, raw, capped, smoothed, target, held, *,
          mode=MODE_NORMAL, allowance_up=None, allowance_down=None,
-         hz=None) -> str:
+         hz=None, persona=None, mix=None) -> str:
     ev_bits = ev.get("lane", "none")
     if ev.get("measured"):
         ev_bits += (f", n={ev.get('n')}, wr {float(ev.get('win_rate') or 0):.2f}, "
@@ -591,9 +734,43 @@ def _why(ev, rg, opp, nw, raw, capped, smoothed, target, held, *,
     if isinstance(hz, dict) and hz.get("factor") is not None:
         hz_bits = (f" × horizon {float(hz['factor']):.2f} "
                    f"({hz.get('label') or 'no view'})")
-    s = (f"evidence {ev['score']:.2f} ({ev_bits}) × regime {rg['factor']:.2f} "
+    # The persona is named FIRST when there is one: it is what set the
+    # band the capped figure was held inside and the weight the horizon
+    # factor was scaled by, so reading the sentence without it leaves two
+    # of its numbers unexplained. A config with no persona reads exactly
+    # as it did before personas existed.
+    # THE MIX (2026-09-12). Named only for a config that WEARS a persona,
+    # because only those have a band for it to move — the sentence for a
+    # config with none reads exactly as it did before the mix existed.
+    # It is printed apart from the × chain above because it does NOT
+    # multiply the raw share: it moves the BAND the capped figure was
+    # water-filled inside, and a sentence that put it in the chain would
+    # claim an arithmetic the allocator does not do.
+    mix_bits = ""
+    if isinstance(mix, dict) and mix.get("factor") is not None:
+        mix_bits = (f" × mix {float(mix['factor']):.2f} "
+                    f"({mix.get('lane', '?')}, {mix.get('regime', '?')})"
+                    f" on the band")
+        band, before = mix.get("band"), mix.get("band_before")
+        if not mix.get("applied"):
+            # WHICH rule outranked it, named. "the explicit band wins" was
+            # printed for the manual lane too, where the winner is the
+            # manual-lane exemption and the band the sentence went on to
+            # quote (5-25 → 2-100%) was a move the mix never made
+            # (2026-09-12). An older plan's inputs carry no
+            # `outranked_by`; those were all explicit bands, so that is
+            # what the fallback says.
+            mix_bits += (f" — not applied, "
+                         f"{mix.get('outranked_by') or 'the explicit band'} "
+                         f"wins")
+        elif band and before:
+            mix_bits += (f" {float(before[0]):g}–{float(before[1]):g} → "
+                         f"{float(band[0]):g}–{float(band[1]):g}%")
+    head = f"persona {persona} · " if persona else ""
+    s = (f"{head}evidence {ev['score']:.2f} ({ev_bits}) × regime "
+         f"{rg['factor']:.2f} "
          f"× opportunity {opp['factor']:.2f} ({opp_bits}) × news "
-         f"{nw['factor']:.2f} ({nw_bits}){hz_bits} → {raw:.1f}% capped {capped:.1f}% "
+         f"{nw['factor']:.2f} ({nw_bits}){hz_bits}{mix_bits} → {raw:.1f}% capped {capped:.1f}% "
          f"smoothed {smoothed:.1f}% (max change {MAX_CHANGE_PCT_PER_DAY:g}/day)")
     if held:
         s += f" — held at {target:.1f}% (move under {MIN_DELTA_PCT:g} pt)"
@@ -697,6 +874,26 @@ def propose_share_plan_with_reason(user, *, now=None):
         horizon_view = latest_view(max_age_days=HORIZON_MAX_AGE_DAYS)
     except Exception as e:  # noqa: BLE001
         horizon_err = f"horizon reader failed: {e}"
+    # THE MIX — read ONCE per proposal, exactly like the horizon view and
+    # for the same reason. `current_mix` is one BrainReport read plus the
+    # eighteen-cell record; calling it per follower would repeat all of
+    # that for every pool on the plan, and two followers could read two
+    # different regimes inside one proposal. A reader that fails costs the
+    # band shift and nothing else — the plan is still written, with the
+    # persona bands exactly as the presets declare them (2026-09-12).
+    mix = None
+    try:
+        from bot_program.persona_mix import current_mix
+        mix = current_mix(user, now=now)
+    except Exception as e:  # noqa: BLE001
+        notes.append(f"mix reader failed: {e} — persona bands unshifted")
+    if mix:
+        lanes = [str(d.get("lane")) for d in (mix.get("personas") or {}).values()]
+        notes.append(
+            f"mix: regime {mix.get('regime')} ({mix.get('source')}) — "
+            f"{lanes.count('measured')} of {len(lanes)} personalities "
+            f"measured, {lanes.count('prior')} on an UNPROVEN prior, "
+            f"{lanes.count('neutral')} neutral")
 
     # c. per config: the five factors and the raw share
     inputs: dict = {}
@@ -769,16 +966,53 @@ def propose_share_plan_with_reason(user, *, now=None):
         cur = current.get(cfg.pk)
         raw[cfg.pk] = (float(cur or 0.0) * float(ev["score"]) * rg["factor"]
                        * opp["factor"] * nw["factor"] * hz["factor"])
-        lo, hi, why_bounds = bounds_for(cfg)
+        lo, hi, why_bounds = bounds_for(cfg, mix=mix)
         bounds[cfg.pk] = (lo, hi)
         if why_bounds:
             notes.append(f"{cfg.name}: {why_bounds}")
+        # The mix cell this config's band was (or was not) moved by. Built
+        # from the SAME `mix` bounds_for just read, so the plan can never
+        # print a factor the band was not shifted by.
+        mx = _mix_cell(cfg, mix)
+        if mx:
+            declared = persona_band_for(cfg) or (lo, hi)
+            # WHAT OUTRANKED THE SHIFT, in bounds_for's own precedence —
+            # and the MANUAL LANE has to be in this list. It is case 1 and
+            # wins over the persona band, so the shift that moves that
+            # band never runs there; reporting `applied` True anyway made
+            # the plan say "× mix 1.09 (prior, mean_reverting) on the band
+            # 5–25 → 2–100%" about the operator's own hand-taken pool — a
+            # move the exemption made and the mix did not. The plan must
+            # never claim a number it did not set (2026-09-12).
+            outranked = ("the manual lane" if _is_manual_lane(cfg)
+                         else "the explicit band" if _has_explicit_band(cfg)
+                         else "")
+            mx = {**mx, "regime": mix.get("regime"),
+                  "confidence": mix.get("confidence"),
+                  "source": mix.get("source"),
+                  "applied": not outranked,
+                  "outranked_by": outranked,
+                  "band_before": [round(float(declared[0]), 4),
+                                  round(float(declared[1]), 4)],
+                  "band": [round(float(lo), 4), round(float(hi), 4)]}
         inputs[str(cfg.pk)] = {
             "name": cfg.name, "asset_class": cfg.asset_class,
             "mode": cfg.mode, "current": cur, "floor": lo, "ceiling": hi,
             "evidence": ev, "regime": rg, "opportunity": opp, "news": nw,
             "horizon": hz,
+            # The trading style this pool runs (2026-09-12). Read from
+            # the config, not off `hz` — a neutral horizon block (no
+            # view, a stale one) carries no persona, and the band the
+            # capped figure was held inside came from the persona whether
+            # a view existed or not. '' for a config wearing none, which
+            # is every config on a fleet that has not been given
+            # personalities — the plan then reads exactly as it always did.
+            "persona": _persona_horizon_weight(cfg)[1],
         }
+        # Added only when there IS one: a config wearing no persona keeps
+        # the inputs row it had before this feature, key for key.
+        if mx:
+            inputs[str(cfg.pk)]["mix"] = mx
 
     # the market state — after the evidence is read (expansion needs it),
     # before the caps (shock and expansion change them)
@@ -897,7 +1131,9 @@ def propose_share_plan_with_reason(user, *, now=None):
                                 capped[pk], smoothed, target, held,
                                 mode=mode, allowance_up=allowance_up,
                                 allowance_down=allowance_down,
-                                hz=row.get("horizon"))})
+                                hz=row.get("horizon"),
+                                persona=row.get("persona"),
+                                mix=row.get("mix"))})
 
     # Rounding and the lifts above can push a full account past 100 —
     # shave the excess (moved targets first, held ones only when nothing
@@ -913,7 +1149,9 @@ def propose_share_plan_with_reason(user, *, now=None):
                           row["smoothed"], targets[pk], False, mode=mode,
                           allowance_up=row.get("allowance_up"),
                           allowance_down=row.get("allowance_down"),
-                          hz=row.get("horizon")) + \
+                          hz=row.get("horizon"),
+                          persona=row.get("persona"),
+                          mix=row.get("mix")) + \
             f" — {cut:.2f} pt shaved to fit 100%"
     if sum(cuts.values()) > 0.01 + 1e-9:
         notes.append(f"targets summed past 100% — {sum(cuts.values()):.2f} pt "

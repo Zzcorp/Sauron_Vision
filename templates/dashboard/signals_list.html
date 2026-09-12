@@ -132,10 +132,71 @@
     </div>
 </div>
 
+{# ── 3b. Filters — every one a real queryset narrowing, all combinable ─ #}
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Filters</span></div>
+    <form method="get" action="{% url 'signals_list' %}" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:12px 16px;">
+        <label style="font-size:10px;color:var(--text-muted);">SYMBOL<br><input type="text" name="q" value="{{ active_filters.q|default:'' }}" placeholder="EUR" style="width:90px;"></label>
+        <label style="font-size:10px;color:var(--text-muted);">RULE<br>
+            <select name="rule"><option value="">any</option>
+            {% for r in filter_rules %}<option value="{{ r }}" {% if active_filters.rule == r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select></label>
+        {# STAGE is the filter this page most needed and never had: a research #}
+        {# rule's signal can never be traded, and nothing said so. Multi-select. #}
+        <label style="font-size:10px;color:var(--text-muted);">STAGE (multi)<br>
+            <select name="stage" multiple size="5">
+            {% for st in filter_stages %}<option value="{{ st }}" {% if st in active_filters.stage %}selected{% endif %}>{{ st }}</option>{% endfor %}
+            </select></label>
+        <label style="font-size:10px;color:var(--text-muted);">CLASS<br>
+            <select name="asset_class"><option value="">any</option>
+            {% for c in filter_classes %}<option value="{{ c }}" {% if active_filters.asset_class == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+            </select></label>
+        <label style="font-size:10px;color:var(--text-muted);">DIRECTION<br>
+            <select name="direction"><option value="">any</option>
+            <option value="bullish" {% if active_filters.direction == 'bullish' %}selected{% endif %}>bullish</option>
+            <option value="bearish" {% if active_filters.direction == 'bearish' %}selected{% endif %}>bearish</option>
+            <option value="neutral" {% if active_filters.direction == 'neutral' %}selected{% endif %}>neutral</option>
+            </select></label>
+        <label style="font-size:10px;color:var(--text-muted);">TYPE<br>
+            <select name="signal_type"><option value="">any</option>
+            {% for t in filter_types %}<option value="{{ t }}" {% if active_filters.signal_type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+            </select></label>
+        <label style="font-size:10px;color:var(--text-muted);">URGENCY<br>
+            <select name="urgency"><option value="">any</option>
+            {% for u in filter_urgencies %}<option value="{{ u }}" {% if active_filters.urgency == u %}selected{% endif %}>{{ u }}</option>{% endfor %}
+            </select></label>
+        <label style="font-size:10px;color:var(--text-muted);">SCORE ≥<br><input type="text" name="score_min" value="{{ active_filters.score_min|default:'' }}" placeholder="0.7" style="width:56px;"></label>
+        <label style="font-size:10px;color:var(--text-muted);">AGE ≤ h<br><input type="text" name="age_hours" value="{{ active_filters.age_hours|default:'' }}" placeholder="24" style="width:56px;"></label>
+        <label style="font-size:10px;color:var(--text-muted);">STATE<br>
+            <select name="state"><option value="">any</option>
+            {% for st in filter_states %}<option value="{{ st }}" {% if active_filters.state == st %}selected{% endif %}>{{ st }}</option>{% endfor %}
+            </select></label>
+        <label style="font-size:10px;color:var(--text-muted);">ACTED<br>
+            <select name="acted"><option value="">any</option>
+            <option value="yes" {% if active_filters.acted == 'yes' %}selected{% endif %}>yes</option>
+            <option value="no" {% if active_filters.acted == 'no' %}selected{% endif %}>no</option>
+            </select></label>
+        <button type="submit" class="btn btn-sm btn-primary">Apply</button>
+        <a href="{% url 'signals_list' %}" class="btn btn-sm">Clear all</a>
+    </form>
+    {% if filter_chips %}
+    <div style="padding:0 16px 12px;display:flex;flex-wrap:wrap;gap:6px;">
+        {% for c in filter_chips %}
+        {# Each chip carries the querystring that REMOVES it — a filter must #}
+        {# never be something the operator has to edit a URL to escape. #}
+        <a href="?{{ c.remove }}" class="badge badge-medium" style="text-decoration:none;" title="Remove the {{ c.label }} filter">{{ c.label }}: {{ c.value }} ✕</a>
+        {% endfor %}
+        <a href="{% url 'signals_list' %}" class="badge badge-high" style="text-decoration:none;">clear all ✕</a>
+    </div>
+    {% endif %}
+</div>
+
 {# ── 4. Signal table ─────────────────────────────────────────────── #}
 <div class="card">
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-        <span class="card-title">{% if active_only %}Active signals{% else %}All signals{% endif %} <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">({{ signals|length }} shown)</span></span>
+        {# 'N of M' — so a filter that matches nothing is visibly a FILTER and #}
+        {# not an empty platform. M is taken before any filter is applied. #}
+        <span class="card-title">{% if active_only %}Active signals{% else %}Signals{% endif %} <span style="color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">{{ n_shown }} of {{ n_total }} signals{% if paginator.num_pages > 1 %} · page {{ page_obj.number }} of {{ paginator.num_pages }}{% endif %}</span></span>
         <div>
             <a href="?active=1" class="btn btn-sm {% if active_only %}btn-primary{% endif %}">Active Only</a>
             <a href="{% url 'signals_list' %}" class="btn btn-sm">All</a>
@@ -147,11 +208,15 @@
     <div class="table-wrapper">
     {# sv-stack: eleven columns cannot be eleven columns on a phone. #}
     <table class="sv-perf-table sv-stack">
-        <thead><tr><th>Time</th><th>Symbol</th><th>Type</th><th>Direction</th><th>Urgency</th><th>Title</th><th>Score</th><th>Entry</th><th>Stop</th><th>Target</th><th>R:R</th></tr></thead>
+        <thead><tr><th>Time</th><th>Can anything act?</th><th>Symbol</th><th>Type</th><th>Direction</th><th>Urgency</th><th>Title</th><th>Score</th><th>Entry</th><th>Stop</th><th>Target</th><th>R:R</th><th>Grade</th><th>Detail</th></tr></thead>
         <tbody>
-        {% for s in signals %}
+        {% for r in signals %}{% with s=r.s %}
         <tr>
             <td data-label="Time" style="font-size: 11px; color: var(--text-muted);">{{ s.created_at|date:"M d H:i" }}</td>
+            {# (a) CAN ANYTHING ACT ON IT. Derived from rule_actuator.stage_policy #}
+            {# and is_rule_active — the same two functions the ENTRY path calls, #}
+            {# never a second implementation. The reason is in the title. #}
+            <td data-label="Can anything act?"><span class="badge badge-{{ r.badge.tone|default:'medium' }}" title="{{ r.badge.reason }}">{{ r.badge.label|default:"—" }}</span></td>
             <td data-label="Symbol" style="font-family: var(--font-display); font-size: 12px;">
                 {# The ticker AND the asset it names. A row of tickers asks #}
                 {# the reader to already know that HGUSD is copper and MES #}
@@ -180,16 +245,76 @@
             <td class="num" data-label="Stop" style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-red);">{{ s.suggested_stop|default:"-" }}</td>
             <td class="num" data-label="Target" style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-green);">{{ s.suggested_target|default:"-" }}</td>
             <td class="num" data-label="R:R">{{ s.risk_reward_ratio|default:"-" }}</td>
+            {# (f) ITS OWN GRADE. A closed signal with no realized_r is not a #}
+            {# zero-R signal — it is one the promotion ladder cannot see at all. #}
+            <td data-label="Grade" style="font-size:11px;">
+                {% if r.graded %}<span class="badge badge-{% if s.realized_r > 0 %}bullish{% else %}bearish{% endif %}" title="{{ s.outcome }}{% if r.hours_to_outcome %} after {{ r.hours_to_outcome }}h{% endif %}">{{ s.outcome }} {{ s.realized_r|floatformat:2 }}R</span>
+                {% elif r.ungraded_closed %}<span class="badge badge-high" title="Closed with no realized R — invisible to the promotion ladder and to every evidence lane">ungraded</span>
+                {% elif s.is_active %}<span style="color:var(--text-muted);">open</span>
+                {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+            </td>
+            <td data-label="Detail">
+                {# Native <details>: the six blocks without a JavaScript library. #}
+                <details>
+                    <summary style="cursor:pointer;font-size:11px;color:var(--text-muted);">six answers</summary>
+                    <div style="font-size:11px;color:var(--text-muted);max-width:64ch;padding:6px 0;">
+                        {# (a) restated in words, because a badge is not a sentence. #}
+                        <p><strong>Can anything act on it?</strong> {{ r.badge.label }} — {{ r.badge.reason }}</p>
+                        {# (b) WHAT IS THIS RULE WORTH — the evidence ledger's own #}
+                        {# numbers, held to its own sample floor. #}
+                        <p><strong>What is {{ s.rule_name|default:"this rule" }} worth?</strong>
+                        {% if r.record %}{{ r.record.text }}{% else %}unmeasured — this rule has no row in the evidence ledger at all{% endif %}</p>
+                        {# (c) WHY DID IT FIRE — and WHICH SOURCE it came from. #}
+                        <p><strong>Why did it fire?</strong> <em>{{ r.why.source }}</em> — {{ r.why.caption }}</p>
+                        {% if r.why.rows %}
+                        <table class="sv-perf-table"><thead><tr><th>condition</th><th>value</th><th>matched</th></tr></thead><tbody>
+                        {% for c in r.why.rows %}<tr><td data-label="condition">{{ c.label }}{% if c.gate %} [gate]{% endif %}</td><td data-label="value">{{ c.value }}</td><td data-label="matched">{% if c.matched is None %}—{% elif c.matched %}yes{% else %}no{% endif %}</td></tr>{% endfor %}
+                        </tbody></table>
+                        {% endif %}
+                        {# (d) WHAT WOULD IT COST — the levels, and the verdict #}
+                        {# of passes_cost_filter, the SAME gate every bot entry #}
+                        {# goes through, wherever a config context answers it. #}
+                        {# Where none does, an honest refusal and no number. #}
+                        <p><strong>What would it cost?</strong>
+                        entry {{ s.suggested_entry|default:"—" }} · stop {{ s.suggested_stop|default:"—" }} ·
+                        target {{ s.suggested_target|default:"—" }} · R:R {{ s.risk_reward_ratio|default:"—" }}.
+                        {% if r.cost.answerable %}
+                        <span class="badge badge-{% if r.cost.ok %}bullish{% else %}bearish{% endif %}"
+                              title="passes_cost_filter — the gate every bot entry goes through — asked of these levels against {{ r.cost.config }}">{{ r.cost.verdict }}</span>
+                        {{ r.cost.reason }} — {{ r.cost.cost_pct }}% round trip, judged against <em>{{ r.cost.config }}</em>{% if not r.cost.trades_symbol %} ({{ cost_symbol_caveat }}){% endif %}.
+                        {% else %}{{ r.cost.reason }}.{% endif %}</p>
+                        {# (e) DID ANYONE ACT — the string join, captioned as one. #}
+                        <p><strong>Did anyone act?</strong>
+                        {% if r.trades %}
+                            {% for t in r.trades %}{{ t.venue }} {{ t.side }} {{ t.qty }} — {{ t.status }}{% if t.outcome %}, {{ t.outcome }}{% endif %}{% if t.realized_r is not None %}, {{ t.realized_r|floatformat:2 }}R{% endif %} ({{ t.opened_at|date:"M d H:i" }}){% if not forloop.last %}; {% endif %}{% endfor %}
+                        {% else %}no trade matches this rule and symbol after this signal{% endif %}
+                        <br><span style="font-size:10px;">{{ acted_caption }}</span></p>
+                    </div>
+                </details>
+            </td>
         </tr>
-        {% endfor %}
+        {% endwith %}{% endfor %}
         </tbody>
     </table>
     </div>
+    {% if paginator.num_pages > 1 %}
+    <div style="padding:12px 16px;font-size:11px;color:var(--text-muted);">
+        {% if page_obj.has_previous %}<a href="?{{ page_params }}&page={{ page_obj.previous_page_number }}">‹ previous</a>{% endif %}
+        <span style="margin:0 8px;">page {{ page_obj.number }} of {{ paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a href="?{{ page_params }}&page={{ page_obj.next_page_number }}">next ›</a>{% endif %}
+    </div>
+    {% endif %}
     {% else %}
     <div class="empty-state">
         {# ◌ is the declared "nothing recorded yet" mark; the <p> carries the meaning. #}
         <div class="empty-icon" aria-hidden="true">◌</div>
-        <p>NO SIGNALS DETECTED — Signal engine scans every 15 minutes</p>
+        {# A filter that matches nothing is NOT an empty platform, and the two #}
+        {# empty states must not share one sentence. #}
+        {% if filter_chips %}
+        <p>NO SIGNAL MATCHES THESE FILTERS — {{ n_total }} signal{{ n_total|pluralize }} exist on the platform; remove a chip above, or <a href="{% url 'signals_list' %}">clear all</a>. The same narrowing from the shell: <code>python manage.py signals list --stage research</code>.</p>
+        {% else %}
+        <p>NO SIGNAL HAS EVER BEEN WRITTEN — the opportunity scanner runs daily at 09:00 UTC and the rule engine every 15 minutes. <code>python manage.py setups diagnose</code> says why a setup is producing none.</p>
+        {% endif %}
     </div>
     {% endif %}
 </div>

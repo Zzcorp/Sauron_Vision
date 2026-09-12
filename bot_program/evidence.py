@@ -148,6 +148,12 @@ def config_rows() -> list:
 MIN_EVIDENCE_N = 10
 GRADED_OUTCOMES = ["hit_target", "stopped_out", "manual_close", "expired",
                    "time_stop"]
+# The window a config with no persona is graded over — the number
+# `config_evidence` carried as its only default for its whole life. A
+# persona replaces it with a window matched to its holding period: 90
+# days of scalps is four hundred trades and 90 days of position trades
+# is three, and one window cannot grade both (2026-09-12).
+DEFAULT_EVIDENCE_DAYS = 90
 
 
 def _clamp(x, lo, hi):
@@ -184,12 +190,25 @@ def _lane_from_rows(rows) -> dict:
             "r_sum": sum(rs)}
 
 
-def config_evidence(cfg, *, days=90) -> dict:
-    """{lane, n, win_rate, avg_r, r_sum, measured, score, reason}.
+def config_evidence(cfg, *, days=None) -> dict:
+    """{lane, n, win_rate, avg_r, r_sum, measured, days, score, reason}.
 
     `lane` is 'live' (this config's live fills), 'fleet_live' (live fills
     of every config in this asset class, trade-weighted), 'paper' (this
     config's paper fills) or 'none'. `score` is 1.0 unless `measured`.
+
+    `days` None means THE CONFIG'S PERSONA WINDOW, and
+    DEFAULT_EVIDENCE_DAYS when it wears none. The grading window has to
+    follow the holding period or the number is not an expectancy: 21 days
+    is a sample of scalps and one position trade, and the old fixed 90
+    graded both as if they were the same evidence. An explicit `days`
+    still wins outright — every caller that names a window keeps it, so
+    the share allocator's own 90-day lane is untouched (2026-09-12).
+
+    `days` comes BACK in the answer for the same reason: a caller that did
+    not name a window (brain.horizon's config lanes) would otherwise print
+    numbers from three different windows side by side with nothing saying
+    so.
     """
     from datetime import timedelta
 
@@ -197,6 +216,9 @@ def config_evidence(cfg, *, days=90) -> dict:
 
     from bot_program.bot_grading import VENUE_LIVE, bot_performance_summary
 
+    if days is None:
+        from bot_program.personas import persona_evidence_days
+        days = persona_evidence_days(cfg, DEFAULT_EVIDENCE_DAYS)
     since = timezone.now() - timedelta(days=days)
     tried = []
 
@@ -204,7 +226,7 @@ def config_evidence(cfg, *, days=90) -> dict:
     live = _lane_from_rows(_own_fills(cfg, since, paper=False)
                            .values_list("realized_r", flat=True))
     if live["n"] >= MIN_EVIDENCE_N:
-        return {"lane": "live", **live, "measured": True,
+        return {"lane": "live", **live, "measured": True, "days": days,
                 "score": evidence_score(live["win_rate"], live["avg_r"]),
                 "reason": f"{live['n']} live fills in {days}d"}
     tried.append(f"live n={live['n']}")
@@ -231,7 +253,7 @@ def config_evidence(cfg, *, days=90) -> dict:
         wr, avg = fleet_wins / fleet_n, fleet_r / fleet_n
         return {"lane": "fleet_live", "n": fleet_n, "win_rate": wr,
                 "avg_r": avg, "r_sum": fleet_r, "measured": True,
-                "score": evidence_score(wr, avg),
+                "days": days, "score": evidence_score(wr, avg),
                 "reason": f"{fleet_n} fleet live fills in {cfg.asset_class} "
                           f"over {days}d (own live n={live['n']})"}
     tried.append(f"fleet live n={fleet_n}")
@@ -240,13 +262,154 @@ def config_evidence(cfg, *, days=90) -> dict:
     paper = _lane_from_rows(_own_fills(cfg, since, paper=True)
                             .values_list("realized_r", flat=True))
     if paper["n"] >= MIN_EVIDENCE_N:
-        return {"lane": "paper", **paper, "measured": True,
+        return {"lane": "paper", **paper, "measured": True, "days": days,
                 "score": evidence_score(paper["win_rate"], paper["avg_r"]),
                 "reason": f"{paper['n']} paper fills in {days}d "
                           f"({', '.join(tried)})"}
     tried.append(f"paper n={paper['n']}")
 
+    # The window is named HERE too, and this is the branch that needed it
+    # most: "unmeasured" is the answer a config gets for months, and which
+    # window it was unmeasured over is the difference between "too few
+    # scalps in three weeks" and "too few position trades in a year". The
+    # three measured branches always said it; this one used not to, so a
+    # persona window was invisible in exactly the case it governs
+    # (2026-09-12).
     return {"lane": "none", "n": 0, "win_rate": None, "avg_r": None,
-            "r_sum": 0.0, "measured": False, "score": 1.0,
+            "r_sum": 0.0, "measured": False, "score": 1.0, "days": days,
             "reason": f"unmeasured — below {MIN_EVIDENCE_N} graded fills "
-                      f"in every lane ({', '.join(tried)})"}
+                      f"in every lane in {days}d ({', '.join(tried)})"}
+
+
+# ── What each PERSONA has proven, over its own window ───────────────────
+#
+# Not a fourth grading system: the same graded rows `_own_fills` reads,
+# grouped by the persona the config wears and windowed by the window that
+# persona declares. Live and paper are NEVER pooled here, for the reason
+# they are never pooled anywhere in this module — the gap between them is
+# the fact bot_grading exists to measure, and a persona whose record is
+# mostly simulation must say so rather than average it away.
+
+def _persona_lane(rows) -> dict:
+    """{n, win_rate, avg_r, r_sum, measured} — r_sum None at n=0.
+
+    `_lane_from_rows` answers 0.0 for an empty lane, which is right for
+    the allocator (it multiplies) and wrong for a page (it PRINTS). A
+    persona nothing has traded has earned NOTHING MEASURED, and 0.0 R
+    reads as "broke even", which is a claim. None renders as an em-dash.
+    """
+    lane = _lane_from_rows(rows)
+    if lane["n"] == 0:
+        return {"n": 0, "win_rate": None, "avg_r": None, "r_sum": None,
+                "measured": False}
+    lane["measured"] = lane["n"] >= MIN_EVIDENCE_N
+    return lane
+
+
+def _fills_for(configs, since, *, paper):
+    from bot_program.models import AssetBotTrade
+    if not configs:
+        return []
+    return list(AssetBotTrade.objects
+                .filter(config__in=configs, status="CLOSED", paper=paper,
+                        closed_at__gte=since, outcome__in=GRADED_OUTCOMES,
+                        realized_r__isnull=False)
+                .exclude(rule_name="").exclude(rule_name="manual_take")
+                .values_list("realized_r", flat=True))
+
+
+def _lane_sentence(label, lane, days) -> str:
+    """A full sentence, always — 'swing has earned +3.2R over 18 live
+    fills in 90 days' or 'scalp is unmeasured: 2 fills, the floor is 10'.
+
+    The empty state is a sentence too. A dash in a cell with no sentence
+    beside it is the platform's oldest UI lie: it looks like a measured
+    nothing.
+    """
+    n = int(lane["n"] or 0)
+    if n == 0:
+        return (f"{label} has no graded fill in {days} days — "
+                f"unmeasured, which is not zero.")
+    if not lane["measured"]:
+        return (f"{label} is unmeasured: {n} fill"
+                f"{'' if n == 1 else 's'} in {days} days, the floor is "
+                f"{MIN_EVIDENCE_N}.")
+    return (f"{label} has earned {float(lane['r_sum']):+.1f}R over {n} "
+            f"fills in {days} days, {float(lane['win_rate']) * 100:.0f}% "
+            f"of them winners.")
+
+
+def persona_rows() -> list:
+    """One row per persona, over THAT persona's own grading window.
+
+    [{key, label, purpose, holding, evidence_days, horizon_weight,
+      share_floor_pct, share_ceiling_pct, n_configs, names, configs,
+      live, paper, measured, sentence}]
+
+    `measured` is True when EITHER lane has cleared MIN_EVIDENCE_N — the
+    platform's floor, the same one config_evidence uses. `configs` carries
+    each wearing config with its own live and paper record over the same
+    window, so the page can show which of them the persona's number is
+    actually made of.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from bot_program.models import AssetBotConfig
+    from bot_program.personas import PERSONAS, persona_of
+
+    now = timezone.now()
+    wearing: dict = {k: [] for k in PERSONAS}
+    for cfg in (AssetBotConfig.objects.select_related("user")
+                .order_by("asset_class", "name")):
+        key = persona_of(cfg)
+        if key in wearing:
+            wearing[key].append(cfg)
+
+    rows = []
+    for key, persona in PERSONAS.items():
+        cfgs = wearing[key]
+        since = now - timedelta(days=persona.evidence_days)
+        live = _persona_lane(_fills_for(cfgs, since, paper=False))
+        paper = _persona_lane(_fills_for(cfgs, since, paper=True))
+        per_config = []
+        for cfg in cfgs:
+            c_live = _persona_lane(_fills_for([cfg], since, paper=False))
+            c_paper = _persona_lane(_fills_for([cfg], since, paper=True))
+            per_config.append({
+                "cfg": cfg, "name": cfg.name, "pk": cfg.pk,
+                "owner": cfg.user.username, "mode": cfg.mode,
+                "asset_class": cfg.asset_class, "enabled": cfg.enabled,
+                "live": c_live, "paper": c_paper,
+                "live_sentence": _lane_sentence(f"{cfg.name} live", c_live,
+                                                persona.evidence_days),
+                "paper_sentence": _lane_sentence(f"{cfg.name} paper",
+                                                 c_paper,
+                                                 persona.evidence_days),
+            })
+        measured = bool(live["measured"] or paper["measured"])
+        if not cfgs:
+            sentence = (f"No config wears {key}. Give one this personality "
+                        f"with: python manage.py persona apply "
+                        f"<config_id> {key} --yes")
+        elif live["n"]:
+            sentence = _lane_sentence(key, live, persona.evidence_days)
+        else:
+            sentence = _lane_sentence(key, paper, persona.evidence_days) \
+                if paper["n"] else _lane_sentence(key, live,
+                                                  persona.evidence_days)
+        rows.append({
+            "key": key, "label": persona.label, "purpose": persona.purpose,
+            "holding": persona.holding,
+            "evidence_days": persona.evidence_days,
+            "horizon_weight": persona.horizon_weight,
+            "share_floor_pct": persona.share_floor_pct,
+            "share_ceiling_pct": persona.share_ceiling_pct,
+            "n_configs": len(cfgs),
+            "names": [c.name for c in cfgs],
+            "configs": per_config,
+            "live": live, "paper": paper,
+            "measured": measured, "sentence": sentence,
+        })
+    return rows

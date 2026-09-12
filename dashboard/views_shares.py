@@ -82,6 +82,20 @@ def shares_dashboard(request):
         p.rows = _plan_rows(p)
 
     # ── current vs target, one row per follower ──────────────────────
+    # THE MIX (2026-09-12), read ONCE for the whole page and for the same
+    # reason the proposer reads it once: `bounds_for` without it answers
+    # a persona's DECLARED band, while the next plan will hold that pool
+    # inside the band the regime SHIFTED. A follower that has no plan yet
+    # would then read 20–60% here and 21.8–61.8% on the plan an hour
+    # later, and the operator would have two numbers and no way to tell
+    # which was the lie. Fenced: a mix that cannot be read costs the
+    # shift, never the page.
+    share_mix = None
+    try:
+        from bot_program.persona_mix import current_mix
+        share_mix = current_mix(user)
+    except Exception as e:  # noqa: BLE001 — the bands render regardless
+        logger.warning("[shares page] mix unreadable: %s", e)
     rows = []
     inputs = (plan.inputs or {}) if plan is not None else {}
     for cfg in followers:
@@ -97,7 +111,7 @@ def shares_dashboard(request):
             if pct is None and cfg.pk in plan_now:
                 pct = float(plan_now[cfg.pk]) * 100.0
             row["current_pct"] = pct
-            lo, hi, _why = bounds_for(cfg)
+            lo, hi, _why = bounds_for(cfg, mix=share_mix)
             row["floor"], row["ceiling"] = lo, hi
         except Exception as e:  # noqa: BLE001
             logger.warning("[shares page] %s: share unreadable: %s",

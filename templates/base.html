@@ -451,11 +451,18 @@
             {% comment %}The Share Allocator sizes each POOL; the Capital Desk ranks ONE TICK's entries against one risk budget and says what it refused
                and why. Its mark U+25A9 is used nowhere else (2026-09-12). {% endcomment %}
             <a href="{% url 'desk_dashboard' %}" class="nav-link {% if page_id == 'desk' %}active{% endif %}"><span class="icon">▩</span> <span class="label-text">Capital Desk</span></a>
+            {% comment %}The Share Allocator and the Capital Desk size a pool and a tick; this row says WHAT KIND OF TRADER the pool is — the
+               coherent preset of knobs, its own grading window, its share band and its weight on the 5-10 year view. Its mark U+25E8 is
+               used nowhere else, and the leverage correction lives on the page: no personality borrows to fund a position, and forex is the
+               exception where the platform does lever, at the broker (2026-09-12). {% endcomment %}
+            <a href="{% url 'personas_dashboard' %}" class="nav-link {% if page_id == 'personas' %}active{% endif %}"><span class="icon">◨</span> <span class="label-text">Personalities</span></a>
             {% comment %}The 5-10 year sector view the share allocator reads as a
                ±10% prior, with its own graded calls (2026-09-12). {% endcomment %}
             <a href="{% url 'horizon_dashboard' %}" class="nav-link {% if page_id == 'horizon' %}active{% endif %}"><span class="icon">◕</span> <span class="label-text">Horizon</span></a>
             <a href="{% url 'discoveries_dashboard' %}" class="nav-link {% if page_id == 'discoveries' %}active{% endif %}"><span class="icon">⊛</span> <span class="label-text">Discoveries</span></a>
             <a href="{% url 'opportunities_dashboard' %}" data-nav-id="opportunities" class="nav-link {% if page_id == 'opportunities' %}active{% endif %}"><span class="icon">◍</span> <span class="label-text">Opportunities</span></a>
+            {# ◧ — the half-filled square, unused elsewhere in this nav: /opportunities/ shows the matches a setup MADE, /setups/ answers for the ones it never made. No data-nav-id: the dot probe's table is the seven sections in tests/test_nothing_unseen.py, and a diagnosis has no "new since your last visit". #}
+            <a href="{% url 'setups_dashboard' %}" class="nav-link {% if page_id == 'setups' %}active{% endif %}"><span class="icon">◧</span> <span class="label-text">Setups</span></a>
             <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategy Evolution</span></a>
             <a href="{% url 'news_feed' %}" data-nav-id="news" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon">▤</span> <span class="label-text">News & Sentiment</span></a>
             <a href="{% url 'backtest_list' %}" class="nav-link {% if page_id == 'backtest' %}active{% endif %}"><span class="icon">&#x25A1;</span> <span class="label-text">Backtesting</span></a>
