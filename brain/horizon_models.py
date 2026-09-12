@@ -45,10 +45,15 @@ class HorizonView(models.Model):
                               default=STATUS_RUNNING, db_index=True)
     horizon_years = models.IntegerField(default=5)
     summary_md = models.TextField(blank=True)
-    # The validated sector list, exactly as parse_response returned it:
+    # The validated sector list, as parse_response returned it, plus the
+    # registration annotation brain.horizon.register_view_calls writes onto
+    # each call in place (2026-09-12):
     # [{key, thesis_md, structural_drivers, risks, catalysts, tilt,
     #   confidence, calls: [{symbol, direction, horizon_hours, confidence,
-    #   why}]}]
+    #   why, registered: bool, drop_reason: str when not registered}]}]
+    # `registered`/`drop_reason` are the ONLY thing a display may read to
+    # decide a call's state; a view written before that date carries
+    # neither and falls back to a bare 'not registered'.
     sectors = models.JSONField(default=list)
     # {asset_class: {"tilt": -2..2, "confidence": 0..1, "why": str}} — the
     # shape the share allocator reads.

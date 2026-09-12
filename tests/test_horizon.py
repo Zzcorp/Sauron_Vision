@@ -374,6 +374,59 @@ class RunTests(_Universe, TestCase):
         self.assertEqual(AgentPrediction.objects.filter(
             agent="horizon", instrument_symbol="XLK").count(), 1)
 
+    def test_the_shortest_horizon_wins_the_symbol_and_the_other_says_why(self):
+        """One live call per (agent, symbol), so a symbol carrying a 6- and
+        a 12-month call registers the SIX-month one — the first graded
+        feedback then lands in six months, not twelve — and the 12-month
+        call is annotated as superseded. The operator read both as
+        'pending until' the same date a year out (2026-09-12)."""
+        from ai_agents.models import AgentPrediction
+        from brain.horizon import run_horizon_now
+        from brain.horizon_models import HorizonView
+        self._seed_universe()
+        data = _good_view()
+        data["sectors"][0]["calls"] = [
+            {"symbol": "XLK", "direction": "up", "horizon_hours": 8760,
+             "confidence": 0.58, "why": "capex"},
+            {"symbol": "XLK", "direction": "up", "horizon_hours": 4380,
+             "confidence": 0.52, "why": "capex sooner"},
+        ]
+        with _stub_horizon(data):
+            out = run_horizon_now()
+        self.assertEqual(out["calls_registered"], 2)          # XLK 6m, XLE 6m
+        self.assertEqual(out["calls_dropped_duplicate"], 1)
+        pred = AgentPrediction.objects.get(agent="horizon",
+                                           instrument_symbol="XLK")
+        self.assertEqual(pred.horizon_hours, 4380.0)
+        self.assertEqual(float(pred.confidence), 0.52)
+        # Re-read: the annotation is written after the row is saved, so it
+        # only reaches a display if the sectors field was re-saved.
+        view = HorizonView.objects.get()
+        calls = view.sectors[0]["calls"]
+        short = [c for c in calls if c["horizon_hours"] == 4380][0]
+        long_ = [c for c in calls if c["horizon_hours"] == 8760][0]
+        self.assertIs(short["registered"], True)
+        self.assertNotIn("drop_reason", short)
+        self.assertIs(long_["registered"], False)
+        self.assertEqual(long_["drop_reason"],
+                         "superseded by the 6m call on XLK — one live call "
+                         "per symbol")
+
+    def test_a_call_with_no_instrument_row_is_annotated_with_that_reason(self):
+        from brain.horizon import run_horizon_now
+        from brain.horizon_models import HorizonView
+        data = _good_view()
+        data["sectors"] = [data["sectors"][0]]      # XLK only, no catalogue
+        with _stub_horizon(data):
+            out = run_horizon_now()
+        self.assertTrue(out["ok"])                  # the view still stands
+        self.assertEqual(out["calls_registered"], 0)
+        self.assertEqual(out["calls_dropped_unregistered"], 1)
+        c = HorizonView.objects.get().sectors[0]["calls"][0]
+        self.assertIs(c["registered"], False)
+        self.assertIn("no instrument row or no usable price for XLK",
+                      c["drop_reason"])
+
     def test_a_friday_close_is_the_reference_when_no_fresh_mark_exists(self):
         """A monthly run on the 1st can land on a Monday with Friday's bar
         as the newest — 60+ hours old, outside mark_for_symbol's window."""
@@ -739,6 +792,33 @@ class HorizonPageTests(TestCase):
         self.assertIn("1.37 USD", flashes)
         self.assertIn("2 call(s) registered", flashes)
 
+    def test_an_unregistered_call_renders_a_badge_and_never_a_date(self):
+        """The page matched a call to its prediction by symbol alone, so
+        the dropped 12-month call rendered the registered 6-month call's
+        deadline — a date for a call nobody will ever grade."""
+        from brain.horizon import run_horizon_now
+        _daily_history(_instrument("XLK"))
+        data = _good_view()
+        data["sectors"] = [data["sectors"][0]]
+        data["sectors"][0]["calls"] = [
+            {"symbol": "XLK", "direction": "up", "horizon_hours": 8760,
+             "confidence": 0.58, "why": "capex"},
+            {"symbol": "XLK", "direction": "up", "horizon_hours": 4380,
+             "confidence": 0.52, "why": "capex sooner"},
+        ]
+        with _stub_horizon(data):
+            run_horizon_now()
+        self.client.force_login(self.user)
+        resp = self.client.get(reverse("horizon_dashboard"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "XLK UP · 6m")
+        self.assertContains(resp, "XLK UP · 12m")
+        self.assertContains(resp, 'class="badge badge-low"')
+        self.assertContains(resp, "not registered")
+        self.assertContains(resp, "superseded by the 6m call on XLK")
+        # Exactly one date on the page's calls: the registered call's.
+        self.assertEqual(resp.content.decode().count("pending until"), 1)
+
     def test_the_stale_view_is_marked_on_the_page(self):
         _ok_view_row(days_ago=60)
         self.client.force_login(self.user)
@@ -793,6 +873,43 @@ class CommandTests(TestCase):
         self.assertIn("1 call(s), 1 graded (1 right)", text)
         self.assertIn("brier — (needs 10 graded calls)", text)
         self.assertIn("trust — (unmeasured)", text)
+
+    def test_show_names_a_dropped_call_and_never_lends_it_a_deadline(self):
+        """`horizon show` printed two 'pending until 2027-09-12' lines for
+        one graded call: the calls were matched to predictions by symbol
+        alone, so the dropped 6-month call borrowed the registered
+        12-month call's state (2026-09-12)."""
+        from brain.horizon import run_horizon_now
+        _daily_history(_instrument("XLK"))
+        data = _good_view()
+        data["sectors"] = [data["sectors"][0]]
+        data["sectors"][0]["calls"] = [
+            {"symbol": "XLK", "direction": "up", "horizon_hours": 8760,
+             "confidence": 0.58, "why": "capex"},
+            {"symbol": "XLK", "direction": "up", "horizon_hours": 4380,
+             "confidence": 0.52, "why": "capex sooner"},
+        ]
+        with _stub_horizon(data):
+            out = run_horizon_now()
+        self.assertEqual((out["calls_registered"],
+                          out["calls_dropped_duplicate"]), (1, 1))
+        text = self._run("show")
+        self.assertIn("call XLK UP 6m conf 0.52 — pending until", text)
+        self.assertIn("call XLK UP 12m conf 0.58 — not registered — "
+                      "superseded by the 6m call on XLK — one live call "
+                      "per symbol", text)
+        self.assertEqual(text.count("pending until"), 1)
+
+    def test_a_view_written_before_the_annotation_still_shows(self):
+        """Views from before 2026-09-12 carry no `registered` key: the
+        display falls back to the bare phrase, never a KeyError and never
+        a borrowed date."""
+        _ok_view_row()                       # _good_view sectors, unannotated
+        text = self._run("show")             # no predictions at all
+        self.assertIn("call XLK UP 12m conf 0.70 — not registered", text)
+        self.assertIn("call XLE DOWN 6m conf 0.55 — not registered", text)
+        self.assertNotIn("superseded", text)
+        self.assertNotIn("pending until", text)
 
     def test_run_without_yes_prints_the_cost_and_does_nothing(self):
         from brain.horizon_models import HorizonView

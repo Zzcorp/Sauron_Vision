@@ -63,8 +63,8 @@ class Command(BaseCommand):
     def _show(self, pk):
         from types import SimpleNamespace
 
-        from ai_agents.models import AgentPrediction
-        from brain.horizon import SECTOR_NAMES
+        from brain.horizon import (SECTOR_NAMES, call_key,
+                                   call_not_registered_label, view_predictions)
         from brain.horizon_models import HorizonView
         from bot_program.share_allocator import horizon_for
 
@@ -92,12 +92,11 @@ class Command(BaseCommand):
             self.stdout.write("\nSUMMARY")
             self.stdout.write("  " + view.summary_md.replace("\n", "\n  "))
 
-        preds = {}
-        for p in (AgentPrediction.objects
-                  .filter(agent="horizon", prediction_type="direction",
-                          created_at__gte=view.created_at)
-                  .order_by("instrument_symbol", "-created_at")):
-            preds.setdefault(p.instrument_symbol, p)
+        # Matched on (symbol, horizon), never on the symbol alone: this
+        # map was symbol -> one prediction, so both calls on XLK rendered
+        # the registered one's state and the 6-month call printed the
+        # 12-month deadline as its own (2026-09-12).
+        preds = view_predictions(view)
 
         self.stdout.write("\nSECTORS")
         for s in view.sectors or []:
@@ -109,9 +108,12 @@ class Command(BaseCommand):
             if thesis:
                 self.stdout.write(f"      {thesis[:240]}")
             for c in s.get("calls") or []:
-                p = preds.get(str(c.get("symbol") or "").upper())
-                if p is None:
-                    state = "not registered"
+                p = preds.get(call_key(c))
+                # The annotation decides, and a call with no row of its
+                # own decides the same way: an unregistered call says so
+                # and names why, and never borrows a date.
+                if c.get("registered") is False or p is None:
+                    state = call_not_registered_label(c)
                 elif p.was_correct is True:
                     state = f"RIGHT ({p.actual_value}, move {p.score:+.4f})"
                 elif p.was_correct is False:

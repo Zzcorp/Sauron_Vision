@@ -20,24 +20,23 @@ logger = logging.getLogger(__name__)
 
 
 def _call_rows(view):
-    """[{symbol, direction, horizon_hours, confidence, why, state, actual,
-    move}] per sector key, with the grade state read off AgentPrediction.
+    """[{symbol, direction, horizon_hours, confidence, why, state, reason,
+    actual, move, deadline}] per sector key, the grade state read off
+    AgentPrediction.
 
-    The newest 'horizon' prediction per symbol at or after the view's
-    creation is the one this view registered; a symbol with none was a
-    dropped call (a live call from last month, an unknown symbol, no
-    price) and is marked as such rather than shown as pending.
+    Matched on (symbol, horizon_hours) — brain.horizon.call_key — never on
+    the symbol alone: this map was symbol -> one prediction, so a symbol
+    carrying a 6- and a 12-month call rendered BOTH with the registered
+    call's state, and the unregistered one showed the other's deadline as
+    its own (2026-09-12). A call the annotation marks unregistered, or one
+    with no prediction row of its own, renders 'not registered' with the
+    reason and no date.
     """
-    from ai_agents.models import AgentPrediction
+    from brain.horizon import call_drop_reason, call_key, view_predictions
 
     preds = {}
     try:
-        qs = (AgentPrediction.objects
-              .filter(agent="horizon", prediction_type="direction",
-                      created_at__gte=view.created_at)
-              .order_by("instrument_symbol", "-created_at"))
-        for p in qs:
-            preds.setdefault(p.instrument_symbol, p)
+        preds = view_predictions(view)
     except Exception as e:  # noqa: BLE001
         logger.warning("[horizon page] predictions unreadable: %s", e)
 
@@ -45,15 +44,19 @@ def _call_rows(view):
     for sector in view.sectors or []:
         rows = []
         for c in sector.get("calls") or []:
-            p = preds.get(str(c.get("symbol") or "").upper())
+            p = preds.get(call_key(c))
             row = {"symbol": c.get("symbol"), "direction": c.get("direction"),
                    "horizon_hours": c.get("horizon_hours"),
                    "horizon_months": round(float(c.get("horizon_hours") or 0)
                                            / 730.0),
                    "confidence": c.get("confidence"), "why": c.get("why"),
-                   "state": "not registered", "actual": "", "move": None,
-                   "deadline": None}
-            if p is not None:
+                   "state": "unregistered", "reason": "", "actual": "",
+                   "move": None, "deadline": None}
+            if c.get("registered") is False or p is None:
+                # '' on a view written before the annotation existed: the
+                # badge still renders, without a reason it cannot know.
+                row["reason"] = call_drop_reason(c)
+            else:
                 row["deadline"] = p.expected_resolution_at
                 if p.was_correct is True:
                     row["state"] = "right"

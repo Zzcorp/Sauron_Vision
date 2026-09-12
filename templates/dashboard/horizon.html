@@ -96,7 +96,8 @@
                     {% elif c.state == 'wrong' %}<span style="color: var(--accent-red);">&#10007; {{ c.actual }}</span>
                     {% elif c.state == 'pending' %}<span style="color: var(--text-muted);">pending{% if c.deadline %} until {{ c.deadline|date:"M d, Y" }}{% endif %}</span>
                     {% elif c.state == 'ungraded' %}<span style="color: var(--text-muted);">{{ c.actual }}</span>
-                    {% else %}<span style="color: var(--text-muted);" title="Dropped at registration: a live call already stood on this symbol, or it had no price to measure from">not registered</span>{% endif %}
+                    {# Dropped at registration: no date, ever. This branch used to be reached by matching on the symbol alone, which handed the dropped call the registered call's deadline (2026-09-12). #}
+                    {% else %}<span class="badge badge-low" title="Dropped at registration — the platform holds no graded call for this line">not registered</span>{% if c.reason %}<span style="color: var(--text-muted);"> {{ c.reason }}</span>{% endif %}{% endif %}
                     {% if c.move is not None %}<span class="{% if c.move > 0 %}up{% elif c.move < 0 %}down{% endif %}">{{ c.move|floatformat:4 }}</span>{% endif %}
                 </div>
                 {% empty %}<span style="color: var(--text-muted);">no call — a thesis nobody can check</span>{% endfor %}

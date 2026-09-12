@@ -587,35 +587,153 @@ def _reference_for(symbol: str, universe_block: dict):
     return None
 
 
+# ── The display contract for a call ─────────────────────────────────────
+# Every display of a call (the page, the shell) reads the annotation
+# register_view_calls writes onto the call dict — `registered` and, when
+# False, `drop_reason`. Nothing else may decide whether a call is graded.
+NOT_REGISTERED = "not registered"
+
+
+def _months(horizon_hours) -> int:
+    """4380 h -> 6, 8760 h -> 12: the month label every display prints."""
+    try:
+        return int(round(float(horizon_hours or 0) / 730.0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _horizon_key(horizon_hours):
+    """The horizon rounded to the hour, or None. AgentPrediction stores a
+    float (clamp_horizon returns one); a call dict carries an int."""
+    try:
+        return int(round(float(horizon_hours)))
+    except (TypeError, ValueError):
+        return None
+
+
+def call_key(call) -> tuple:
+    """The (SYMBOL, hours) key a call dict and its AgentPrediction match on.
+
+    The symbol ALONE was the key, and the operator read this on the first
+    live view:
+
+        call XLK UP 12m conf 0.58 — pending until 2027-09-12
+        call XLK UP  6m conf 0.52 — pending until 2027-09-12
+
+    One of those calls exists. The unregistered 6-month call was matched
+    to the registered 12-month call's row and printed its deadline as its
+    own — an unmeasured quantity shown as a confident date, the one thing
+    tests/test_ui_honesty.py forbids (2026-09-12).
+    """
+    c = call or {}
+    return (str(c.get("symbol") or "").strip().upper(),
+            _horizon_key(c.get("horizon_hours")))
+
+
+def view_predictions(view) -> dict:
+    """{call_key: the newest 'horizon' prediction this view registered}.
+
+    Keyed by (symbol, horizon) and filtered to rows created at or after
+    the view: a call with no row here was NOT registered and must render
+    as such — never with another call's deadline.
+    """
+    from ai_agents.models import AgentPrediction
+
+    out = {}
+    for p in (AgentPrediction.objects
+              .filter(agent=AGENT_NAME, prediction_type="direction",
+                      created_at__gte=view.created_at)
+              .order_by("instrument_symbol", "-created_at")):
+        out.setdefault((str(p.instrument_symbol or "").strip().upper(),
+                        _horizon_key(p.horizon_hours)), p)
+    return out
+
+
+def call_drop_reason(call) -> str:
+    """The annotated reason this call was not registered, without the
+    'not registered — ' prefix the displays add themselves.
+
+    '' for a view written before 2026-09-12, whose calls carry no
+    annotation at all: the display then says the bare 'not registered'
+    rather than raising a KeyError on a view the operator paid for.
+    """
+    reason = str((call or {}).get("drop_reason") or "").strip()
+    prefix = f"{NOT_REGISTERED} — "
+    if reason.startswith(prefix):
+        reason = reason[len(prefix):]
+    return reason
+
+
+def call_not_registered_label(call) -> str:
+    """'not registered — <reason>' — the whole line, for the shell."""
+    reason = call_drop_reason(call)
+    return f"{NOT_REGISTERED} — {reason}" if reason else NOT_REGISTERED
+
+
 def register_view_calls(parsed: dict, *, universe_block=None) -> dict:
-    """Register every sector call under agent 'horizon', one per symbol.
+    """Register every sector call under agent 'horizon', one per symbol,
+    and ANNOTATE each call dict in place with what happened to it.
 
     The second call on a symbol inside one view is dropped here; a call
     on a symbol the agent already has a LIVE call on (last month's
     12-month call) is dropped by the calibration's own one-live-call rule.
     Both are counted, so the run result says what it did not register.
+
+    Two rules the first live view broke (2026-09-12):
+
+    1. SHORTEST HORIZON FIRST. The calibration allows one live call per
+       (agent, symbol), so a symbol carrying both a 6- and a 12-month
+       call gets exactly one of them registered. Registering the 6-month
+       one means the agent's first graded feedback lands in six months
+       instead of twelve — which is the whole point of registering calls
+       at all. The sort is stable and spans the view, so calls of equal
+       horizon keep the model's own order.
+    2. THE ANNOTATION IS THE ONLY SOURCE OF TRUTH FOR A DISPLAY.
+       `c["registered"]` on every call, `c["drop_reason"]` on every
+       dropped one. The mutation is in place, on the dicts the caller
+       persists onto the HorizonView — see run_horizon_now, which
+       re-saves `sectors` because registration runs after the row is
+       written.
     """
     from ai_agents.calibration import log_direction_prediction
 
-    registered, dropped_dup, dropped_unreg, seen = 0, 0, 0, set()
-    for sector in parsed.get("sectors") or []:
-        for c in sector.get("calls") or []:
-            sym = c["symbol"]
-            if sym in seen:
-                dropped_dup += 1
-                continue
-            seen.add(sym)
-            pred = log_direction_prediction(
-                AGENT_NAME, sym, c["direction"],
-                horizon_hours=c["horizon_hours"],
-                confidence=c["confidence"],
-                reference_price=_reference_for(sym, universe_block),
-                notes=f"{sector['key']}: {c.get('why', '')}"[:300],
-                max_horizon_hours=HORIZON_MAX_H)
-            if pred is None:
-                dropped_unreg += 1
-            else:
-                registered += 1
+    registered, dropped_dup, dropped_unreg = 0, 0, 0
+    # symbol -> the horizon (hours) actually registered on it, so a
+    # dropped duplicate can name the call that superseded it. Only a
+    # SUCCESSFUL registration lands here: naming a call that was itself
+    # refused would be a second fiction.
+    taken = {}
+    pairs = sorted(((s, c) for s in parsed.get("sectors") or []
+                    for c in s.get("calls") or []),
+                   key=lambda sc: float(sc[1].get("horizon_hours") or 0))
+    for sector, c in pairs:
+        sym = c["symbol"]
+        if sym in taken:
+            dropped_dup += 1
+            c["registered"] = False
+            c["drop_reason"] = (f"superseded by the {_months(taken[sym])}m "
+                                f"call on {sym} — one live call per symbol")
+            continue
+        pred = log_direction_prediction(
+            AGENT_NAME, sym, c["direction"],
+            horizon_hours=c["horizon_hours"],
+            confidence=c["confidence"],
+            reference_price=_reference_for(sym, universe_block),
+            notes=f"{sector['key']}: {c.get('why', '')}"[:300],
+            max_horizon_hours=HORIZON_MAX_H)
+        if pred is None:
+            dropped_unreg += 1
+            c["registered"] = False
+            # log_direction_prediction also returns None when a live call
+            # from an earlier view still stands on the symbol; that call
+            # is on the /calibration/ ledger, and this reason names the
+            # two causes the operator can act on.
+            c["drop_reason"] = (f"{NOT_REGISTERED} — no instrument row or no "
+                                f"usable price for {sym}")
+        else:
+            registered += 1
+            taken[sym] = c["horizon_hours"]
+            c["registered"] = True
     return {"registered": registered, "dropped": dropped_dup + dropped_unreg,
             "dropped_duplicate": dropped_dup,
             "dropped_unregistered": dropped_unreg}
@@ -708,7 +826,14 @@ def run_horizon_now() -> dict:
         view.error = f"calls not registered: {e}"[:2000]
     view.calls_registered = calls["registered"]
     view.calls_dropped = calls["dropped"]
-    view.save(update_fields=["calls_registered", "calls_dropped", "error"])
+    # `sectors` again: register_view_calls annotates each call dict in
+    # place (registered / drop_reason) and runs AFTER the row above was
+    # written, so the JSON on disk still held un-annotated calls and every
+    # display fell back to a bare 'not registered' — or, worse, to another
+    # call's deadline. view.sectors IS parsed["sectors"], the dicts the
+    # annotation mutated, so one cheap re-save persists it (2026-09-12).
+    view.save(update_fields=["calls_registered", "calls_dropped", "error",
+                             "sectors"])
 
     return {"ok": True, "status": "ok", "outcome": "ok", "view_id": view.pk,
             "horizon_years": view.horizon_years,
