@@ -59,6 +59,73 @@ WINDOW_DAYS = 30
 #: A fact whose builder failed, or whose table holds nothing to measure.
 UNMEASURED = None
 
+#: WHERE EACH CYCLE IS ANSWERED IN FULL (2026-09-13).
+#:
+#: A panel that reports a count and offers no way into it is a report, not
+#: a command post: the operator reads "12 setups blind", nods, and still
+#: has to remember which of thirty pages explains why. These are the
+#: drill-downs — the existing pages, unchanged, reached from the cycle
+#: that summarises them.
+#:
+#: SEVERAL DESTINATIONS PER CYCLE, ON PURPOSE. Picking one would be a
+#: judgement this map has no business making: the ladder is answered by
+#: three pages at three zooms, and allocation by three that size three
+#: different things — the account's share per pool, one tick's entries,
+#: and per-rule multipliers. One row named "allocator" once hid the
+#: second (2026-09-12), and collapsing them here would repeat that.
+#:
+#: Names only, never paths: a hard-coded "/setups/" survives a route
+#: rename and 404s in silence. tests/test_oculus.py reverses every one.
+CYCLE_PAGES = {
+    "book": [("portfolio_overview", "Portfolio"),
+             ("positions_list", "Positions"),
+             ("desk_dashboard", "Capital Desk")],
+    "gates": [("ops_dashboard", "Ops"),
+              ("system_health", "System Health")],
+    "scan": [("setups_dashboard", "Setups"),
+             ("opportunities_dashboard", "Opportunities")],
+    "ladder": [("strategies_list", "Strategies"),
+               ("promotions_dashboard", "Promotion Ladder"),
+               ("rule_control_dashboard", "Rule Controls")],
+    "signals": [("signals_list", "Signals"),
+                ("performance_dashboard", "Signal Performance")],
+    "evolution": [("evolution_dashboard", "Strategy Evolution"),
+                  ("generated_dashboard", "Generated Strategies"),
+                  ("discoveries_dashboard", "Discoveries")],
+    "personas": [("personas_dashboard", "Personalities")],
+    "allocation": [("shares_dashboard", "Share Allocator"),
+                   ("desk_dashboard", "Capital Desk"),
+                   ("allocator_dashboard", "Risk Allocator")],
+    "horizon": [("horizon_dashboard", "Horizon"),
+                ("calibration_dashboard", "Agent Calibration")],
+    "backtests": [("backtest_list", "Backtesting"),
+                  ("bot_backtest_list", "Bot Backtest"),
+                  ("bot_performance_dashboard", "Bot Performance")],
+    "trust": [("calibration_dashboard", "Agent Calibration"),
+              ("brain_dashboard", "Sauron's Mind"),
+              ("evidence_ledger", "Evidence Ledger")],
+}
+
+
+def _pages_for(key):
+    """Resolve a cycle's drill-downs, dropping any that no longer exist.
+
+    A dead url name in a template raises at RENDER — on this page and on
+    nothing else, but completely. A cycle losing a link is a smaller
+    failure than the page losing itself, so this resolves rather than
+    trusts, and a route that has been renamed simply stops being offered.
+    """
+    from django.urls import NoReverseMatch, reverse
+
+    out = []
+    for name, label in CYCLE_PAGES.get(key, ()):
+        try:
+            out.append({"name": name, "label": label, "href": reverse(name)})
+        except NoReverseMatch:
+            logger.warning("oculus: cycle %s links to %r, which reverses to "
+                           "nothing — link dropped", key, name)
+    return out
+
 
 # ── one fact, one fence ─────────────────────────────────────────────────
 
@@ -669,6 +736,9 @@ def oculus(user=None) -> dict:
         # the honest reading is "slower than the scanner, by design".
         series = cycle.get("series") or []
         cycle["max_n"] = max((p["n"] for p in series), default=0)
+        # The way OUT of the panel. Resolved here rather than in the
+        # template so a renamed route costs one link, not the page.
+        cycle["pages"] = _pages_for(cycle.get("key", ""))
         for fact in cycle.get("facts", []):
             if fact.get("value") is UNMEASURED:
                 degraded.append(f"{cycle['key']}.{fact['label']}")

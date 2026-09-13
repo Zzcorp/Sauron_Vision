@@ -59,6 +59,24 @@
   .ocu-gaps td.dash { color: var(--text-muted); }
   .ocu-gaps td.neg { color: var(--accent-red, #e83030); }
   .ocu-gaps td.pos { color: #7fd18b; }
+
+  /* THE WAY OUT. A panel that reports a count and offers no way into it
+     is a report, not a command post. These are the existing pages,
+     unchanged — the Oculus summarises, they answer. */
+  .ocu-out {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 0 16px 14px; border-top: 1px solid var(--border, #2a2a2a);
+    padding-top: 10px;
+  }
+  .ocu-out a {
+    font-size: 10.5px; letter-spacing: .03em; text-decoration: none;
+    padding: 3px 8px; border-radius: 3px;
+    border: 1px solid var(--border, #333); color: var(--text-secondary, #9aa);
+    white-space: nowrap;
+  }
+  .ocu-out a:hover {
+    color: var(--accent, #5b8def); border-color: var(--accent, #5b8def);
+  }
 </style>
 {% endblock %}
 
@@ -161,6 +179,9 @@
     {% endif %}
 
     <p class="ocu-caveat">{{ c.caveat }}</p>
+    {% if c.pages %}
+    <div class="ocu-out">{% for pg in c.pages %}<a href="{{ pg.href }}">{{ pg.label }} &rsaquo;</a>{% endfor %}</div>
+    {% endif %}
   {% endif %}
 </div>
 {% endif %}{% endfor %}
@@ -219,6 +240,9 @@
       {% endif %}
 
       <p class="ocu-caveat">{{ c.caveat }}</p>
+      {% if c.pages %}
+      <div class="ocu-out">{% for pg in c.pages %}<a href="{{ pg.href }}">{{ pg.label }} &rsaquo;</a>{% endfor %}</div>
+      {% endif %}
     {% endif %}
   </div>
   {% endif %}{% empty %}

@@ -399,3 +399,79 @@ class TheExpectancyGapIsRenderedHonestlyTests(TestCase):
         self.assertIn("Négatif est la direction normale", body)
         # And the distinction that decides what the operator does about it.
         self.assertIn("plus petit que ses coûts", body)
+
+
+class EveryCycleOffersAWayIntoItTests(TestCase):
+    """LA MACHINE — the panels became doors (2026-09-13).
+
+    A panel that reports a count and offers no way into it is a report,
+    not a command post: the operator reads "12 setups blind", nods, and
+    still has to remember which of thirty pages explains why. That was
+    the Oculus's own limit from the day it shipped.
+
+    The drill-downs are the EXISTING pages, unchanged. The Oculus
+    summarises; they answer. Several per cycle on purpose — the ladder is
+    answered by three pages at three zooms, and allocation by three that
+    size three different things. Collapsing them would repeat the defect
+    the rail already fixed once, where one row named "allocator" hid a
+    second page sizing something else entirely.
+    """
+
+    def test_every_cycle_carries_at_least_one_way_out(self):
+        for cycle in oculus()["cycles"]:
+            self.assertTrue(
+                cycle.get("pages"),
+                f"cycle {cycle['key']!r} is a dead end — it reports a count "
+                f"and names no page that explains it")
+
+    def test_every_destination_reverses(self):
+        """Names, never paths: a hard-coded '/setups/' survives a route
+        rename and 404s in silence."""
+        from django.urls import NoReverseMatch, reverse
+
+        from dashboard.oculus import CYCLE_PAGES
+        for key, pages in CYCLE_PAGES.items():
+            for name, label in pages:
+                with self.subTest(cycle=key, page=name):
+                    self.assertTrue(label, "a link with no label is a dot")
+                    try:
+                        reverse(name)
+                    except NoReverseMatch:  # pragma: no cover
+                        self.fail(f"cycle {key!r} links to {name!r}, which "
+                                  f"reverses to nothing")
+
+    def test_a_renamed_route_costs_one_link_and_not_the_page(self):
+        """The page must survive a route it can no longer resolve. Losing a
+        link is a smaller failure than losing the ten panels."""
+        from dashboard import oculus as mod
+
+        original = dict(mod.CYCLE_PAGES)
+        mod.CYCLE_PAGES = {**original,
+                           "gates": original["gates"] + [("gone_away", "Gone")]}
+        try:
+            data = oculus()
+        finally:
+            mod.CYCLE_PAGES = original
+
+        gates = next(c for c in data["cycles"] if c["key"] == "gates")
+        names = [p["name"] for p in gates["pages"]]
+        self.assertNotIn("gone_away", names)
+        self.assertIn("ops_dashboard", names)
+
+    def test_the_links_reach_the_page(self):
+        import html as _html
+        user = User.objects.create_user("out_u", password="x")
+        self.client.force_login(user)
+        body = _html.unescape(
+            self.client.get(reverse("oculus_dashboard")).content.decode())
+        for href in ("/setups/", "/promotions/", "/evidence/", "/ops/"):
+            self.assertIn(f'href="{href}"', body,
+                          f"{href} is in the map and not on the page")
+
+    def test_no_cycle_points_at_itself(self):
+        """/oculus/ among its own drill-downs would be a loop, and a loop
+        reads as 'there is nowhere further to go'."""
+        from dashboard.oculus import CYCLE_PAGES
+        for key, pages in CYCLE_PAGES.items():
+            self.assertNotIn("oculus_dashboard", [n for n, _l in pages],
+                             f"cycle {key!r} links back to the Oculus")
