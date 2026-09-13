@@ -1995,10 +1995,36 @@ def _eval_funding_carry(params: dict, instrument, now: datetime) -> dict:
 
     # FundingRate has no FK to Instrument — it is keyed by the exchange's own
     # perp symbol, so a symbol this install stores as "BTCUSD" simply finds
-    # nothing under Binance's "BTCUSDT". The symbol is echoed into `details`
-    # rather than guessed at, because a silent zero-row read on a mis-mapped
-    # symbol looks exactly like a market with no funding skew.
+    # nothing under Binance's "BTCUSDT". This comment named that failure from
+    # the day it was written and then declined to act on it, "rather than
+    # guessed at"; the diagnose of 2026-09-13 measured the consequence —
+    # "0 funding snapshots for 'AAVEUSD', need 30" on 15 of 15 crypto
+    # instruments, while stream-binance-futures had been filling the table
+    # under AAVEUSDT the whole time. The leg had never once evaluated.
+    #
+    # `venue_symbol` is not a guess. It is the platform's own translation,
+    # the one backfill_bars uses to fetch these very bars, carrying the
+    # MATIC -> POL rename with it, and tests/test_catalogue_spellings asserts
+    # it. Its docstring describes this exact trap: "Getting this wrong yields
+    # an empty response rather than an error, which looks exactly like 'no
+    # history available'."
+    #
+    # BOTH spellings are queried, not just the translated one: a row written
+    # before the streamer existed, or by a venue that spells it the platform's
+    # way, still counts. `iexact` per spelling keeps the original
+    # case-insensitivity — Binance sends "AAVEUSDT" but nothing guarantees
+    # every writer upper-cases. The spellings tried are echoed into `details`
+    # so the NEXT mis-map is visible on the page instead of silent.
     symbol = getattr(instrument, "symbol", "") or ""
+    spellings = {symbol.upper()} - {""}
+    try:
+        from market_data.management.commands.backfill_bars import venue_symbol
+        spellings.add(venue_symbol(symbol).upper())
+    except Exception:  # noqa: BLE001 — a missing helper must not blind the leg
+        pass
+    spelling_q = Q()
+    for spelling in sorted(spellings):
+        spelling_q |= Q(symbol__iexact=spelling)
     # Counted and averaged IN THE DATABASE, never materialised. `save_funding`
     # writes one row per @markPrice tick — around 2,880 a day per symbol, not
     # the three settlements a day the rate itself changes on — and
@@ -2010,7 +2036,7 @@ def _eval_funding_carry(params: dict, instrument, now: datetime) -> dict:
     # questions of the whole window and carries back four numbers rather than
     # forty thousand rows.
     window = (FundingRate.objects
-              .filter(symbol__iexact=symbol,
+              .filter(spelling_q,
                       timestamp__gte=now - timedelta(days=lookback_days),
                       timestamp__lte=now)
               # Meta.ordering is ["-timestamp"]; left on, it joins the DISTINCT
@@ -2023,7 +2049,11 @@ def _eval_funding_carry(params: dict, instrument, now: datetime) -> dict:
                            paying=Count("id", filter=paying_side))
     n = int(agg["n"] or 0)
     base = {"symbol": symbol, "direction": direction, "n_snapshots": n,
-            "lookback_days": lookback_days, "measures": "level_and_persistence"}
+            "lookback_days": lookback_days, "measures": "level_and_persistence",
+            # What was actually asked of the table. A zero-row read is
+            # ambiguous — no funding skew, or the wrong spelling — and this
+            # is what tells the two apart on the page.
+            "queried": sorted(spellings)}
     if n < MIN_FUNDING_SNAPSHOTS:
         return {"matched": False, "score": 0.0,
                 "details": {**base, "measured": False,
