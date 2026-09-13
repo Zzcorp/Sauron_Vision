@@ -47,6 +47,16 @@ x-django: &django
   build:
     context: ..
     dockerfile: Dockerfile.prod
+    # THE BUILD STAMP. `deploy/dc` exports both from the checkout right
+    # before it calls compose, so an image knows which commit it is —
+    # something the running app could not answer at all until 2026-09-13,
+    # the day a box served a day-old commit and nothing on the platform
+    # could say so. Defaulted rather than required: a hand-typed
+    # `docker compose build` still works and stamps "unknown", which the
+    # page renders as an em dash instead of inventing a sha.
+    args:
+      GIT_SHA: ${GIT_SHA:-unknown}
+      BUILT_AT: ${BUILT_AT:-unknown}
   env_file: ../.env
   # The runbook tells an operator to point IBKR at `host.docker.internal`
   # when TWS or Gateway runs on the box rather than in a container — and

@@ -19,6 +19,12 @@
   .ocu-facts td { padding: 5px 16px; vertical-align: top; border-top: 1px solid var(--border, #2a2a2a); }
   .ocu-v { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; width: 4.5em; white-space: nowrap; }
   .ocu-v.dash { color: var(--text-muted); font-weight: 400; }
+  /* A sha is an identifier, not a count: it needs room and a mono face,
+     and it must not be right-aligned into a column sized for four digits. */
+  .ocu-v--text {
+    width: auto; text-align: left; font-family: var(--font-mono, monospace);
+    font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  }
   .ocu-l { font-size: 12px; }
   .ocu-qual { display: block; color: var(--text-muted); font-size: 10.5px; margin-top: 2px; line-height: 1.35; }
   tr.inert .ocu-v, tr.inert .ocu-l { color: var(--text-muted); }
@@ -132,6 +138,8 @@
           <tr class="{{ f.tone }}">
             {% if f.value is None %}
               <td class="ocu-v dash" title="non mesurable — ce n'est pas un zéro">—</td>
+            {% elif f.text %}
+              <td class="ocu-v ocu-v--text">{{ f.value }}</td>
             {% else %}
               <td class="ocu-v">{{ f.value }}</td>
             {% endif %}
@@ -215,6 +223,8 @@
         <tr class="{{ f.tone }}">
           {% if f.value is None %}
             <td class="ocu-v dash" title="non mesurable — ce n'est pas un zéro">—</td>
+          {% elif f.text %}
+            <td class="ocu-v ocu-v--text">{{ f.value }}</td>
           {% else %}
             <td class="ocu-v">{{ f.value }}</td>
           {% endif %}

@@ -77,6 +77,9 @@ UNMEASURED = None
 #: Names only, never paths: a hard-coded "/setups/" survives a route
 #: rename and 404s in silence. tests/test_oculus.py reverses every one.
 CYCLE_PAGES = {
+    "forge": [("ops_dashboard", "Ops"),
+              ("system_health", "System Health"),
+              ("audit_dashboard", "Audit Log")],
     "book": [("portfolio_overview", "Portfolio"),
              ("positions_list", "Positions"),
              ("desk_dashboard", "Capital Desk")],
@@ -146,6 +149,26 @@ def _fact(label, builder, *, note="", qualifier="", tone="plain"):
         value = UNMEASURED
     return {"label": label, "value": value, "note": note,
             "qualifier": qualifier, "tone": tone}
+
+
+def _text_fact(label, builder, *, note="", qualifier="", tone="plain"):
+    """A fact whose answer is a word, not a count.
+
+    `_fact` coerces to int because nearly everything on this page is a
+    count and an accidental string would sort and compare wrongly. A
+    commit sha is the exception: it is an identifier, and rounding it to
+    an integer is not a category error anyone would catch later. Same
+    fence, same None-is-not-zero rule — an unstamped build renders an em
+    dash rather than the word "unknown", which reads like data.
+    """
+    try:
+        value = builder()
+        value = None if value in (None, "") else str(value)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("oculus: %s unavailable (%s)", label, exc)
+        value = None
+    return {"label": label, "value": value, "note": note,
+            "qualifier": qualifier, "tone": tone, "text": True}
 
 
 def _series(model, field, *, days=WINDOW_DAYS, extra=None):
@@ -678,7 +701,103 @@ def _cycle_trust():
     }
 
 
+def _cycle_forge():
+    """LA FORGE — the state of the code that is running, not of the market.
+
+    Every other cycle answers a question about trading. This one answers
+    the question the platform could not answer about ITSELF, and the one
+    that cost a whole day on 2026-09-13: WHICH COMMIT AM I, and is what I
+    am running the thing that was written?
+
+    The blindness was total. `.dockerignore` excludes `.git`, so the
+    container had no sha; nothing was stamped at build time; the box
+    served the previous commit for a day while two pages answered 404,
+    and the only way to discover it was probing the public site route by
+    route from outside. A stamp and a timestamp would have made it a
+    five-second glance.
+
+    It reports and does not act — and that is the honest state of the
+    forge today. The lane where an agent proposes a patch and a human
+    approves it from this page is the next brick; a table of proposals
+    that do not exist yet would be a panel of em dashes pretending to be
+    a feature.
+    """
+    from core.build_stamp import stamp
+
+    st = stamp()
+
+    def _pending_migrations():
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+        executor = MigrationExecutor(connection)
+        targets = executor.loader.graph.leaf_nodes()
+        return len(executor.migration_plan(targets))
+
+    def _tests_published():
+        from core.wall_facts import TESTS_GREEN
+        return TESTS_GREEN
+
+    def _unregistered_guards():
+        """Guarded task keys with no component row — the defect that hid
+        three never-running tasks until 2026-09-13."""
+        import re
+        from pathlib import Path
+
+        from django.conf import settings
+        from core.platform_control import DEFAULT_COMPONENTS
+        declared = {c["key"] for c in DEFAULT_COMPONENTS}
+        skip = {".git", ".venv", "venv", "__pycache__", "staticfiles",
+                "static", "node_modules", ".pytest_cache", "test_backups",
+                "migrations"}
+        pattern = re.compile(r"""guarded_task\(\s*["']([A-Za-z0-9_]+)["']""")
+        root = Path(settings.BASE_DIR)
+        used = set()
+        for path in root.rglob("*.py"):
+            if any(p in skip for p in path.relative_to(root).parts):
+                continue
+            used.update(pattern.findall(
+                path.read_text(encoding="utf-8", errors="replace")))
+        return len(used - declared)
+
+    return {
+        "key": "forge",
+        "title": "La forge",
+        "question": "De quel code cette plateforme tourne-t-elle, et est-ce celui qui a été écrit ?",
+        "gate": [],
+        "facts": [
+            _text_fact("commit de cette image", lambda: st["sha"],
+                       qualifier="posé au build par deploy/dc ; un tiret veut "
+                                 "dire que l'image n'a pas été estampillée, "
+                                 "jamais un sha inventé"),
+            _fact("âge du build, en heures", lambda: st["age_hours"],
+                  tone="caution",
+                  qualifier="l'âge est le fait qui compte : un sha ne dit rien "
+                            "à un humain, « construit il y a 31 h » sur une "
+                            "branche qui a bougé ce matin dit tout"),
+            _fact("migrations en attente", _pending_migrations, tone="caution",
+                  qualifier="non appliquées sur CETTE base : un déploiement "
+                            "sans elles sert des pages contre un schéma absent"),
+            _fact("tests publiés sur le mur", _tests_published,
+                  qualifier="le chiffre que la page publique affiche ; "
+                            "tests/test_wall_facts échoue quand il dérive"),
+            _fact("tâches gardées sans interrupteur", _unregistered_guards,
+                  tone="caution",
+                  qualifier="une clé guarded_task sans ligne se lit « éteint » "
+                            "et la tâche ne tourne jamais — trois l'étaient "
+                            "depuis toujours, découvertes le 2026-09-13"),
+        ],
+        "caveat": (
+            "Cette lane REND COMPTE, elle n'agit pas encore, et c'est l'état "
+            "honnête de la forge aujourd'hui. Elle sait de quel commit l'image "
+            "a été construite ; elle ne peut pas savoir si ce commit est "
+            "toujours le dernier — l'image n'a ni git ni réseau garanti. "
+            "C'était déjà tout ce qui manquait le 13 septembre."),
+        "series": [],
+    }
+
+
 BUILDERS = (
+    _cycle_forge,
     _cycle_gates,
     _cycle_scan,
     _cycle_ladder,

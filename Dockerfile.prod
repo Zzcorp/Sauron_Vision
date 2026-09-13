@@ -75,6 +75,29 @@ RUN DJANGO_SETTINGS_MODULE=config.settings \
 RUN mkdir -p /app/staticfiles /app/media /app/logs \
     && chown -R sauron:sauron /app/staticfiles /app/media /app/logs
 
+# ── THE BUILD STAMP (2026-09-13) ────────────────────────────────────────
+#
+# `.dockerignore` excludes `.git`, deliberately and correctly — a 200 MB
+# object store has no business in a runtime image. The consequence nobody
+# had accounted for is that the running application CANNOT KNOW WHICH
+# COMMIT IT IS, and on 2026-09-13 that cost a day: the box served code
+# from the previous commit, /personas/ and /setups/ answered 404, and
+# nothing on the platform could say "I am stale". It took probing the
+# public site route by route from outside to find out.
+#
+# These two args are the cheapest possible answer. They sit AFTER every
+# expensive layer on purpose: they change on every build by definition, so
+# placed higher they would bust the wheel cache and the collectstatic
+# layer each time, turning a 4-second rebuild into a four-minute one.
+#
+# Both default to "unknown" rather than to a plausible value. A build
+# that was not stamped must say so — `core/build_stamp.py` renders it as
+# an em dash, never as a sha nobody can check.
+ARG GIT_SHA=unknown
+ARG BUILT_AT=unknown
+ENV SAURON_GIT_SHA=$GIT_SHA \
+    SAURON_BUILT_AT=$BUILT_AT
+
 USER sauron
 
 EXPOSE 8000
