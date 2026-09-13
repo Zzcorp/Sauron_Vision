@@ -190,3 +190,60 @@ class DepthCapKeepsTheDeepestBooksTests(TestCase):
         self.assertEqual(len(found), d.MAX_DEPTH_SYMBOLS)
         self.assertIn("BTCUSDT", found, "the cap dropped a major")
         self.assertIn("dropping", "".join(logs.output))
+
+
+class BothStreamersRefuseAnEmptySymbolListTests(SimpleTestCase):
+    """A subscription to nothing is the quietest failure in this codebase.
+
+    With no symbols, the futures loop's two joins both collapse to "" and the
+    url becomes the websocket base plus a bare "/". Binance ACCEPTS that and
+    then sends nothing, ever. The container stays Up, reports healthy, never
+    disconnects, logs no warning — and FundingRate and LiquidationEvent stay
+    empty for as long as it runs.
+
+    Measured on the live box 2026-09-13: `docker logs` on a twelve-minute-old
+    stream-binance-futures container returned NOT ONE LINE, while
+    `setups diagnose` refused advanced_funding_carry_short on all 15 crypto
+    instruments for want of the snapshots that loop is supposed to write.
+
+    `stream_binance.py` already guarded this — "no crypto symbols to stream;
+    retrying in 30s" — and its futures sibling, written later, did not. This
+    holds the two together so the next streamer added here inherits the
+    guard by failing this test rather than by someone remembering.
+    """
+
+    STREAMERS = ("stream_binance", "stream_binance_futures")
+
+    def _source(self, name):
+        from pathlib import Path
+
+        from django.conf import settings
+        return (Path(settings.BASE_DIR) / "market_data" / "management" /
+                "commands" / f"{name}.py").read_text(encoding="utf-8")
+
+    def test_each_streamer_refuses_to_subscribe_to_nothing(self):
+        for name in self.STREAMERS:
+            with self.subTest(streamer=name):
+                src = self._source(name)
+                self.assertIn("if not symbols:", src,
+                              f"{name} builds a subscription url without "
+                              f"checking that it has anything to subscribe to")
+                # Wide enough to contain a guard whose warning explains
+                # itself: the futures message names the shell command that
+                # reproduces the empty discovery, which is worth more than
+                # brevity to whoever reads it at 02:00.
+                guard = src[src.index("if not symbols:"):][:1200]
+                self.assertIn("log.warning", guard,
+                              f"{name} skips an empty list silently — the "
+                              f"operator learns nothing from an empty table")
+                self.assertIn("continue", guard,
+                              f"{name} does not retry after an empty list")
+
+    def test_the_futures_connect_line_survives_a_production_log_level(self):
+        """core.logging_config puts root at WARNING when DEBUG is off, so an
+        INFO line is invisible exactly where it is needed. The one line that
+        says what this process subscribed to has to clear that bar; it fires
+        once per connection, not per tick."""
+        src = self._source("stream_binance_futures")
+        self.assertIn('log.warning("futures: connecting for %d symbols', src)
+        self.assertNotIn('log.info("futures: connecting', src)

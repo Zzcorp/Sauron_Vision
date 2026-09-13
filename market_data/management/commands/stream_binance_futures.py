@@ -102,10 +102,38 @@ async def run(override):
     last_funding = {}
     while True:
         symbols = await discover_symbols(override)
+        # AN EMPTY LIST MUST NOT LOOK LIKE A QUIET MARKET (2026-09-13).
+        # With no symbols the joins below both collapse to "" and the url
+        # becomes WS + "/" — a subscription to nothing. Binance accepts it and
+        # sends no message, ever. The container then sits Up for days with a
+        # HEALTHY status, no disconnect, no warning and an empty FundingRate
+        # table, which is exactly what was measured on the live box: `docker
+        # logs` returned not one line, and funding_carry refused all 15 crypto
+        # instruments for want of the snapshots this loop was supposed to
+        # write. Silence is the one thing this must never do.
+        if not symbols:
+            log.warning(
+                "futures: discover_symbols returned NOTHING — not subscribing. "
+                "Nothing will be written to FundingRate or LiquidationEvent "
+                "until the catalogue holds a crypto instrument that maps to a "
+                "USDT perp. Check: manage.py shell -c \"from asgiref.sync "
+                "import async_to_sync; from market_data.management.commands"
+                ".stream_binance_futures import discover_symbols; "
+                "print(async_to_sync(discover_symbols)(None))\"")
+            await asyncio.sleep(60)
+            continue
         streams = "/".join(f"{s.lower()}@forceOrder" for s in symbols) + "/" + \
                   "/".join(f"{s.lower()}@markPrice@1s" for s in symbols)
         url = WS + streams
-        log.info("futures: connecting for %d symbols", len(symbols))
+        # WARNING, not INFO, and deliberately. `core.logging_config` puts the
+        # root logger at WARNING when DEBUG is off, so the INFO this line used
+        # to be was dropped in production — which is why `docker logs` on a
+        # twelve-minute-old container returned nothing at all and there was no
+        # way to tell a healthy subscription from a subscription to nothing.
+        # It fires once per connection, not per tick, so it costs nothing and
+        # it is the single line that makes this process observable at all.
+        log.warning("futures: connecting for %d symbols: %s",
+                    len(symbols), ",".join(symbols))
         try:
             async with websockets.connect(url, ping_interval=20, ping_timeout=20, max_size=2**20) as ws:
                 backoff = 1
