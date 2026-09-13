@@ -30,6 +30,35 @@
   .ocu-bar.zero { background: var(--border, #333); opacity: .5; }
   .ocu-sparkcap { color: var(--text-muted); font-size: 10px; padding: 3px 16px 12px; }
   .ocu-dead { color: #c9605f; font-size: 12px; padding: 12px 16px; }
+
+  /* THE BOOK. Two columns that never become one sum. The live column
+     carries the only coloured edge, the convention sauron.css states:
+     "an account whose connected broker routes to real money gets the only
+     coloured edge on the grid. Everything else is monochrome so this one
+     thing is findable at a glance." */
+  .ocu-book { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .ocu-venue { padding: 0 0 8px; border-top: 1px solid var(--border, #2a2a2a); }
+  .ocu-venue + .ocu-venue { border-left: 1px solid var(--border, #2a2a2a); }
+  .ocu-venue--live { border-left: 2px solid var(--accent-red, #e83030); }
+  .ocu-venue-head {
+    font-size: 11px; font-weight: 700; letter-spacing: .08em;
+    padding: 10px 16px 6px; color: var(--text-muted);
+  }
+  .ocu-venue--live .ocu-venue-head { color: var(--accent-red, #e83030); }
+  .ocu-gaps { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .ocu-gaps th {
+    text-align: right; font-weight: 600; color: var(--text-muted);
+    font-size: 10px; letter-spacing: .05em; padding: 6px 10px;
+    border-bottom: 1px solid var(--border, #2a2a2a);
+  }
+  .ocu-gaps th:first-child, .ocu-gaps td:first-child { text-align: left; }
+  .ocu-gaps td {
+    text-align: right; padding: 5px 10px; font-variant-numeric: tabular-nums;
+    border-top: 1px solid var(--border, #222);
+  }
+  .ocu-gaps td.dash { color: var(--text-muted); }
+  .ocu-gaps td.neg { color: var(--accent-red, #e83030); }
+  .ocu-gaps td.pos { color: #7fd18b; }
 </style>
 {% endblock %}
 
@@ -58,8 +87,86 @@
 </div>
 {% endif %}
 
+{% for c in oculus.cycles %}{% if c.key == "book" %}
+<div class="card fade-in-up" style="margin-bottom: 20px;">
+  <div class="card-header"><span class="card-title">{{ c.title }}</span></div>
+  {% if c.dead %}
+    <p class="ocu-dead">{{ c.caveat }}</p>
+  {% else %}
+    <p class="ocu-q">{{ c.question }}</p>
+    {% if c.gate %}
+    <div class="ocu-gates">
+      {% for g in c.gate %}
+        {% if not g.known %}<span class="ocu-gate unknown">{{ g.key }} · absent</span>
+        {% elif g.on %}<span class="ocu-gate on">{{ g.key }} · on</span>
+        {% else %}<span class="ocu-gate off">{{ g.key }} · off</span>{% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="ocu-book">
+      {% for v in c.venues %}
+      <div class="ocu-venue {% if v.venue == 'live' %}ocu-venue--live{% endif %}">
+        <div class="ocu-venue-head">{% if v.venue == 'live' %}LIVE · ARGENT RÉEL{% else %}PAPIER · SIMULATION{% endif %}</div>
+        {% if v.facts %}
+        <table class="ocu-facts">
+          {% for f in v.facts %}
+          <tr class="{{ f.tone }}">
+            {% if f.value is None %}
+              <td class="ocu-v dash" title="non mesurable — ce n'est pas un zéro">—</td>
+            {% else %}
+              <td class="ocu-v">{{ f.value }}</td>
+            {% endif %}
+            <td class="ocu-l">{{ f.label }}{% if f.qualifier %}<span class="ocu-qual">{{ f.qualifier }}</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}
+        <p class="ocu-dead">Ce livre n'a pas pu être lu. Aucun chiffre n'est affiché plutôt qu'un chiffre faux.</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if c.gaps %}
+    <div class="ocu-venue-head" style="border-top: 1px solid var(--border, #2a2a2a); padding-top: 12px;">
+      CE QUE LE SIMULATEUR PROMETTAIT, CONTRE CE QUE L'EXÉCUTION A RENDU
+    </div>
+    <div style="overflow-x: auto;">
+      <table class="ocu-gaps">
+        <tr>
+          <th>règle</th><th>classe</th>
+          <th>n papier</th><th>espérance papier</th>
+          <th>n live</th><th>espérance live</th><th>écart (R)</th>
+        </tr>
+        {% for g in c.gaps %}
+        <tr>
+          <td>{{ g.rule }}</td>
+          <td>{{ g.asset_class }}</td>
+          <td>{{ g.n_paper }}</td>
+          <td class="{% if g.paper is None %}dash{% endif %}">{% if g.paper is None %}—{% else %}{{ g.paper|floatformat:2 }}{% endif %}</td>
+          <td>{{ g.n_live }}</td>
+          <td class="{% if g.live is None %}dash{% endif %}">{% if g.live is None %}—{% else %}{{ g.live|floatformat:2 }}{% endif %}</td>
+          <td class="{% if g.gap is None %}dash{% elif g.gap < 0 %}neg{% elif g.gap > 0 %}pos{% endif %}">{% if g.gap is None %}—{% else %}{{ g.gap|floatformat:2 }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+    <p class="ocu-caveat">
+      L'écart est <strong>live moins papier</strong>, en multiples de R. Négatif est la direction normale : le remplissage simulé paie un demi-spread modélisé
+      mais ne subit jamais une file d'attente, un saut au travers du stop, ni une exécution partielle. Un écart largement négatif ne signale pas une règle
+      qui a cessé de fonctionner — mais une règle dont l'avantage est plus petit que ses coûts, et les deux appellent des correctifs opposés.
+      Un tiret veut dire qu'une des deux venues n'a rien clôturé : ce n'est pas un petit écart, c'est l'absence de mesure.
+    </p>
+    {% endif %}
+
+    <p class="ocu-caveat">{{ c.caveat }}</p>
+  {% endif %}
+</div>
+{% endif %}{% endfor %}
+
 <div class="ocu-grid">
-  {% for c in oculus.cycles %}
+  {% for c in oculus.cycles %}{% if c.key != "book" %}
   <div class="card fade-in-up">
     <div class="card-header"><span class="card-title">{{ c.title }}</span></div>
 
@@ -114,7 +221,7 @@
       <p class="ocu-caveat">{{ c.caveat }}</p>
     {% endif %}
   </div>
-  {% empty %}
+  {% endif %}{% empty %}
   <div class="card fade-in-up"><p class="ocu-dead">Aucun cycle n'a pu être lu.</p></div>
   {% endfor %}
 </div>

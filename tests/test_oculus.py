@@ -221,3 +221,181 @@ class OculusMarkTests(SimpleTestCase):
                          "the Oculus mark U+29BF is not unique in the sidebar")
         self.assertGreater(icons.count("◎"), 0,
                            "U+25CE moved — recheck which glyph is free")
+
+
+class TheBookIsPerViewerAndNeverPooledTests(TestCase):
+    """THE BOOK — the one panel on this page that is not platform-wide.
+
+    Every other cycle counts the whole platform, which is the right grain
+    for a machine. Capital is not: it belongs to a user, and a book pooled
+    across users is a number nobody can act on. So the panel appears only
+    when a viewer is known, and the page says so in its caveat — a reader
+    who takes it for a fleet total misreads every figure in it.
+
+    Live and paper stand in two columns and are never added. That rule is
+    not this page's invention: persona_mix._venue_ok RAISES rather than
+    accept a pooled venue, capital_desk.budget_for applies the drawdown
+    governor to the live venue only, and portfolio.services.capital_summary
+    says why at the dict that produces the split.
+    """
+
+    def setUp(self):
+        from decimal import Decimal
+
+        from bot_program.models import AssetBotConfig
+        self.user = User.objects.create_user("book_u", password="x")
+        for name, mode, capital in (("live-pool", "live", "1000"),
+                                    ("paper-pool", "paper", "4000")):
+            AssetBotConfig.objects.create(
+                user=self.user, asset_class="crypto", name=name, enabled=True,
+                mode=mode, symbols=[], capital=Decimal(capital),
+                base_currency="USD")
+
+    def _book(self, data):
+        return next((c for c in data["cycles"] if c["key"] == "book"), None)
+
+    def test_a_viewer_gets_the_book(self):
+        self.assertIsNotNone(self._book(oculus(user=self.user)))
+
+    def test_no_viewer_means_no_book_rather_than_a_pooled_one(self):
+        """A system or anonymous caller must not be handed someone's money,
+        and must not be handed everyone's money added together either."""
+        self.assertIsNone(self._book(oculus()))
+        self.assertIsNone(self._book(oculus(user=None)))
+
+    def test_it_carries_two_venues_and_keeps_them_apart(self):
+        book = self._book(oculus(user=self.user))
+        venues = [v["venue"] for v in book["venues"]]
+        self.assertEqual(venues, ["live", "paper"])
+        # No fact on the panel is a sum of the two columns.
+        self.assertEqual(book["facts"], [],
+                         "a flat fact on the book panel would sit outside "
+                         "both columns and read as a total")
+
+    def test_the_drawdown_governor_is_a_live_only_fact(self):
+        """A drawdown brake on a simulation would throttle a book that
+        cannot lose anything. capital_desk says so: 'paper venue — no
+        drawdown governor'."""
+        book = self._book(oculus(user=self.user))
+        by_venue = {v["venue"]: [f["label"] for f in v["facts"]]
+                    for v in book["venues"]}
+        self.assertTrue(any("gouverneur" in l for l in by_venue["live"]))
+        self.assertFalse(any("gouverneur" in l for l in by_venue["paper"]))
+
+    def test_the_governor_says_that_100_is_ambiguous(self):
+        """1.00 means EITHER no drawdown OR no equity reading at all, and an
+        operator acts differently on each."""
+        book = self._book(oculus(user=self.user))
+        live = next(v for v in book["venues"] if v["venue"] == "live")
+        gov = next(f for f in live["facts"] if "gouverneur" in f["label"])
+        self.assertIn("DEUX", gov["qualifier"])
+
+    def test_the_caveat_says_the_panel_is_yours_and_not_the_fleet(self):
+        book = self._book(oculus(user=self.user))
+        self.assertIn("VOUS", book["caveat"])
+        self.assertIn("jamais additionnés", book["caveat"])
+
+    def test_a_venue_that_cannot_be_read_costs_only_itself(self):
+        """One unreadable column must not take the other, nor the page."""
+        from dashboard import oculus as mod
+
+        original = mod._venue_facts
+
+        def _half(user, venue):
+            if venue == "live":
+                raise RuntimeError("broker table mid-migration")
+            return original(user, venue)
+
+        mod._venue_facts = _half
+        try:
+            book = self._book(oculus(user=self.user))
+        finally:
+            mod._venue_facts = original
+
+        by_venue = {v["venue"]: v["facts"] for v in book["venues"]}
+        self.assertEqual(by_venue["live"], [])
+        self.assertTrue(by_venue["paper"])
+
+
+class TheExpectancyGapIsRenderedHonestlyTests(TestCase):
+    """`bot_grading.paper_live_expectancy_gap` ends its docstring with
+    "Nothing in the decision path consumes this yet — exposed so a
+    dashboard or the promotion ladder can pick it up". This is that
+    dashboard.
+
+    Its contract is the interesting part: `gap` is None whenever EITHER
+    venue has no closed trade, "because a gap against an unmeasured venue
+    is not a small gap, it is no measurement at all". The page must render
+    that None as an em dash and never as 0.00, which would read as "live
+    matched paper exactly" — the most flattering possible lie.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user("gap_u", password="x")
+
+    def test_the_page_renders_a_none_gap_as_a_dash(self):
+        import html as _html
+
+        from dashboard import oculus as mod
+        original = mod._cycle_book
+
+        def _seeded(user):
+            cycle = original(user)
+            cycle["gaps"] = [{
+                "rule": "only_ever_paper", "asset_class": "crypto",
+                "n_paper": 12, "n_live": 0,
+                "paper": 0.42, "live": None, "gap": None,
+            }]
+            return cycle
+
+        mod._cycle_book = _seeded
+        try:
+            self.client.force_login(self.user)
+            body = _html.unescape(
+                self.client.get(reverse("oculus_dashboard")).content.decode())
+        finally:
+            mod._cycle_book = original
+
+        self.assertIn("only_ever_paper", body)
+        row = body[body.index("only_ever_paper"):]
+        row = row[:row.index("</tr>")]
+        self.assertIn("—", row)
+        self.assertNotIn("0.00", row,
+                         "a None gap rendered as 0.00 reads as 'live matched "
+                         "paper exactly', which is the most flattering lie "
+                         "this table could tell")
+
+    def test_the_page_explains_which_direction_is_normal(self):
+        """A negative gap is the NORMAL direction — the simulated fill never
+        suffers a queue, a gap through the stop or a partial. Without that
+        sentence an operator reads every red number as a broken rule.
+
+        The explanation lives WITH the table and not above it, so a book
+        with nothing to compare shows neither. That is deliberate: a legend
+        for an absent table is noise, and this test seeds a row rather than
+        asserting the sentence is always on the page."""
+        import html as _html
+
+        from dashboard import oculus as mod
+        original = mod._cycle_book
+
+        def _seeded(user):
+            cycle = original(user)
+            cycle["gaps"] = [{
+                "rule": "ate_its_edge", "asset_class": "forex",
+                "n_paper": 30, "n_live": 14,
+                "paper": 0.31, "live": -0.05, "gap": -0.36,
+            }]
+            return cycle
+
+        mod._cycle_book = _seeded
+        try:
+            self.client.force_login(self.user)
+            body = _html.unescape(
+                self.client.get(reverse("oculus_dashboard")).content.decode())
+        finally:
+            mod._cycle_book = original
+
+        self.assertIn("Négatif est la direction normale", body)
+        # And the distinction that decides what the operator does about it.
+        self.assertIn("plus petit que ses coûts", body)

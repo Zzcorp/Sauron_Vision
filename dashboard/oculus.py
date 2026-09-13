@@ -140,6 +140,103 @@ def _gate(*keys):
 
 # ── the cycles ──────────────────────────────────────────────────────────
 
+def _venue_facts(user, venue):
+    """One venue's book, from the primitives the desk already sizes with.
+
+    `budget_for` answers the whole column in one call — capital, risk at
+    stop, budget left, the governor and how many open rows could not be
+    measured — so this cannot drift from what the sizing engine believes.
+    """
+    from bot_program.capital_desk import budget_for
+
+    b = budget_for(user, venue)
+
+    def _f(key):
+        return lambda: b.get(key)
+
+    facts = [
+        _fact("capital du pool", _f("capital"),
+              qualifier="le dénominateur que le dimensionnement divise"),
+        _fact("positions ouvertes", _f("n_open")),
+        _fact("risque au stop engagé", _f("book_risk"),
+              qualifier="somme de qty × |entrée − stop d'ouverture|, "
+                        "les clôtures en attente comprises"),
+        _fact("budget restant", _f("budget"), tone="caution",
+              qualifier="brut moins le risque déjà au livre"),
+    ]
+    if b.get("unmeasured_open"):
+        facts.append(_fact(
+            "positions au risque NON mesuré", _f("unmeasured_open"),
+            tone="caution",
+            qualifier="ouvertes sans stop initial lisible : elles pèsent sur "
+                      "le livre et ne pèsent sur aucun budget"))
+    if venue == "live":
+        # The governor exists on the live venue only — a drawdown brake on a
+        # simulation would throttle a book that cannot lose anything.
+        facts.append(_fact(
+            "gouverneur de drawdown (×100)",
+            lambda: round(float(b.get("governor") or 0) * 100),
+            tone="caution",
+            qualifier="100 veut dire DEUX choses : aucun drawdown, ou aucune "
+                      "lecture d'équité. Le plancher est 40."))
+    return facts
+
+
+def _cycle_book(user):
+    """THE BOOK — live beside paper, and never the two added.
+
+    The only per-VIEWER panel on this page; every other cycle is
+    platform-wide. Capital belongs to a user, so pooling it across the
+    platform would be meaningless, and saying so in the caveat matters
+    more than the numbers: a reader who takes this for a fleet total
+    misreads every figure in it.
+    """
+    venues = []
+    for venue in ("live", "paper"):
+        try:
+            facts = _venue_facts(user, venue)
+        except Exception as exc:  # noqa: BLE001 — one venue must not cost both
+            logger.debug("oculus: book/%s unavailable (%s)", venue, exc)
+            facts = []
+        venues.append({"venue": venue, "facts": facts})
+
+    # What the simulator promised, against what execution returned.
+    gaps = []
+    try:
+        from bot_program.bot_grading import paper_live_expectancy_gap
+        for row in paper_live_expectancy_gap(user=user, days=180, min_n=1):
+            gaps.append({
+                "rule": row.get("rule_name") or "—",
+                "asset_class": row.get("asset_class") or "—",
+                "n_paper": row.get("n_paper"),
+                "n_live": row.get("n_live"),
+                "paper": row.get("paper_expectancy"),
+                "live": row.get("live_expectancy"),
+                "gap": row.get("gap"),
+            })
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("oculus: expectancy gap unavailable (%s)", exc)
+
+    return {
+        "key": "book",
+        "title": "Le livre",
+        "question": "Combien d'argent réel est engagé, et combien n'est qu'une simulation ?",
+        "gate": _gate("platform_master", "broker_account_sync"),
+        "facts": [],
+        "venues": venues,
+        "gaps": gaps,
+        "caveat": (
+            "Le seul panneau de cette page qui ne parle que de VOUS : tous "
+            "les autres cycles comptent la plateforme entière. Live et papier "
+            "ne sont jamais additionnés — un pool simulé gonfle le total et "
+            "aucune entrée réelle ne peut y puiser. L'écart d'espérance vaut "
+            "None quand une des deux venues n'a rien clôturé : un écart "
+            "contre une venue non mesurée n'est pas un petit écart, c'est "
+            "l'absence de mesure."),
+        "series": [],
+    }
+
+
 def _cycle_gates():
     from core.platform_control import PlatformComponent
 
@@ -528,16 +625,26 @@ BUILDERS = (
 )
 
 
-def oculus() -> dict:
+def oculus(user=None) -> dict:
     """Every cycle, fenced one by one. Never raises.
 
     A cycle whose builder dies is REPORTED AS DEAD rather than dropped:
     a missing panel reads as "there is no such cycle", which is a lie of
     omission the operator cannot see. A broken one says so.
+
+    `user` adds THE BOOK — the one per-viewer panel. Without it the page
+    is entirely platform-wide, which is what an anonymous or system
+    caller should get: a book pooled across users would be a number
+    nobody could act on.
     """
     cycles, degraded = [], []
-    for builder in BUILDERS:
-        name = builder.__name__
+    builders = list(BUILDERS)
+    if user is not None and getattr(user, "is_authenticated", False):
+        builders.insert(0, lambda: _cycle_book(user))
+    for builder in builders:
+        name = getattr(builder, "__name__", "_cycle_book")
+        if name == "<lambda>":
+            name = "_cycle_book"
         try:
             cycle = builder()
         except Exception as exc:  # noqa: BLE001

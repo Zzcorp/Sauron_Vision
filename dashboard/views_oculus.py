@@ -46,7 +46,10 @@ def oculus_dashboard(request):
 
     data, error = None, ""
     try:
-        data = oculus()
+        # The viewer, for THE BOOK — the one per-user panel on an otherwise
+        # platform-wide page. Capital belongs to a user; pooling it across
+        # the platform would produce a number nobody could act on.
+        data = oculus(user=request.user)
     except Exception as exc:  # noqa: BLE001 — oculus() is fenced, this is the belt
         logger.warning("[oculus] unreadable: %s", exc)
         error = (f"L'Occulus n'a pas pu être assemblé ({exc}). Aucun chiffre "
