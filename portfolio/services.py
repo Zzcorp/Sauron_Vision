@@ -317,6 +317,14 @@ def capital_summary(user):
         # real pools — one number that no live entry could deploy in full.
         "pool_live": _mode_total(pools, "live"),
         "pool_paper": _mode_total(pools, "paper"),
+        # COMMITTED per venue, added 2026-09-13 to complete the set. The
+        # split had pool and free but not used, so a caller wanting "how
+        # much real money is engaged right now" had to re-derive it from
+        # `classes` — and the bottom strip, which is where that question is
+        # actually asked, took the POOLED `used_total` instead and showed
+        # simulated capital as though it were engaged.
+        "used_live": _mode_total(used, "live"),
+        "used_paper": _mode_total(used, "paper"),
         "free_live": round(_mode_total(pools, "live")
                            - _mode_total(used, "live"), 2),
         "free_paper": round(_mode_total(pools, "paper")

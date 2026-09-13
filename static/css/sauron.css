@@ -2289,6 +2289,34 @@
             color: var(--accent-red); border-color: var(--accent-red);
             background: color-mix(in srgb, var(--accent-red) 10%, transparent);
         }
+
+        /* ── THE VENUE CONVENTION, NAMED ONCE (2026-09-13) ──────────────
+           RED IS LIVE. MUTED IS PAPER. The two rules above already say it
+           and say why; this promotes the pair to a reusable marker so the
+           next surface does not invent a fourth spelling.
+
+           A fourth is not hypothetical — a survey on 2026-09-13 found
+           THREE conventions already running against each other: red=live
+           here and on .hq-acct--live, GOLD=live in the capital card's MODE
+           column, and /desk/ borrowing the `bearish` badge for live and
+           `medium` for paper. Three answers to one question is the same as
+           none, because the operator cannot learn any of them.
+
+           Use `sv-venue` on the LABEL, not on the value. Two reasons. The
+           value carries its own meaning already — up/down/red for a
+           negative free pool — and a live figure painted red would be
+           indistinguishable from a loss. And a whole row tinted by venue
+           shouts across the width of the card, which is exactly the
+           "paper position dressed as an alert" the comment above warns
+           against.
+
+           Deliberately NOT a background fill: this marker sits in dense
+           grids where a fill would fight the cell borders. */
+        .sv-venue {
+            font-weight: 700; letter-spacing: .04em;
+        }
+        .sv-venue--live { color: var(--accent-red); }
+        .sv-venue--paper { color: var(--text-muted); }
         /* Gold, and therefore --accent-gold-ink, not --accent-gold: this
            chip prints on a white card in light mode, where the neon gold
            has almost no contrast. */

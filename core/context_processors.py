@@ -368,6 +368,23 @@ def _book_truth(user, portfolio):
         out["panel_pool_used"] = f"{cap['used_total']:,.0f}"
         out["panel_pool_free"] = f"{cap['free_total']:,.0f}"
         out["panel_pool_free_neg"] = cap["free_total"] < 0
+        # THE SAME THREE NUMBERS, PER VENUE (2026-09-13). The totals above
+        # are the pooled ones and the strip labels them "BOTH BOOKS", which
+        # is honest — but it is also the wrong grain for the question an
+        # operator asks at a glance: how much REAL money is engaged. A
+        # simulated pool inflates `used_total` and no live entry can draw
+        # on `free_total`. capital_summary has kept the split since it was
+        # written; nothing rendered it. Live and paper stay two numbers
+        # here and are never added — `portfolio/services.py` says why at
+        # the dict that produces them.
+        out["panel_pool_live"] = f"{cap['pool_live']:,.0f}"
+        out["panel_pool_paper"] = f"{cap['pool_paper']:,.0f}"
+        out["panel_used_live"] = f"{cap['used_live']:,.0f}"
+        out["panel_used_paper"] = f"{cap['used_paper']:,.0f}"
+        out["panel_free_live"] = f"{cap['free_live']:,.0f}"
+        out["panel_free_paper"] = f"{cap['free_paper']:,.0f}"
+        out["panel_free_live_neg"] = cap["free_live"] < 0
+        out["panel_free_paper_neg"] = cap["free_paper"] < 0
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Panel pools unavailable: {e}")
 
