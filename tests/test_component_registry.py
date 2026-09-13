@@ -130,3 +130,55 @@ class GuardedTaskKeysAreRegisteredTests(TestCase):
             self.assertLessEqual(
                 len(comp.get("description", "")), limit,
                 f"{comp['key']}'s description is longer than {limit} chars")
+
+
+class ATaskThatStoredNothingMustNotReportSuccessTests(TestCase):
+    """The silent-success family, third member (2026-09-13).
+
+    `core.task_gate.judge_result` was written precisely to catch "the source
+    answered and we kept none of it", and it reads counts rather than the
+    adjective a task declares. It only works on tasks that speak its
+    vocabulary: WORK_KEYS ("parsed", "attempted") and DONE_KEYS ("stored",
+    "written", "saved", "fetched", ...).
+
+    `ai_agents.tasks.process_unanalyzed_news` did not. It returned
+    {"status": "success", "processed": N} unconditionally, and with no
+    ANTHROPIC_API_KEY on the box every article threw inside the provider,
+    each exception was swallowed per-article, and the task reported success
+    with processed=0 every five minutes for as long as it has existed. The
+    component stayed green; NewsArticle.ai_sentiment_score was never written;
+    two setups were blind on that column and nothing said so until
+    `setups diagnose` counted the articles.
+    """
+
+    def test_the_gate_flags_a_run_that_attempted_work_and_stored_none(self):
+        from core.task_gate import judge_result
+        status, message = judge_result(
+            {"status": "success", "processed": 0, "attempted": 10, "stored": 0})
+        self.assertEqual(status, "warning")
+        self.assertIn("stored none", message)
+
+    def test_a_run_that_stored_what_it_attempted_is_healthy(self):
+        from core.task_gate import judge_result
+        status, _ = judge_result(
+            {"status": "success", "processed": 10, "attempted": 10,
+             "stored": 10})
+        self.assertEqual(status, "success")
+
+    def test_the_news_task_reports_the_counts_the_gate_reads(self):
+        """Read out of the source: a task that drops the vocabulary silently
+        becomes ungradeable again, and nothing else would notice."""
+        from pathlib import Path
+
+        from django.conf import settings
+        src = (Path(settings.BASE_DIR) / "ai_agents" / "tasks.py").read_text(
+            encoding="utf-8")
+        start = src.index("def process_unanalyzed_news")
+        body = src[start:src.index("\n@shared_task", start + 1)]
+        self.assertIn('"attempted"', body)
+        self.assertIn('"stored"', body)
+        self.assertNotIn('return {"status": "success", "processed": processed}',
+                         body,
+                         "the bare-adjective return is back — judge_result "
+                         "cannot grade it and the component goes green on a "
+                         "task that stored nothing")

@@ -227,7 +227,22 @@ def process_unanalyzed_news():
         except Exception as e:
             logger.error(f"Failed to process article {article.id}: {e}")
 
-    return {"status": "success", "processed": processed}
+    # Speak the counts `core.task_gate.judge_result` already reads, instead of
+    # a bare adjective. Until 2026-09-13 this returned {"status": "success",
+    # "processed": processed} unconditionally: with no ANTHROPIC_API_KEY on
+    # the box every one of the ten articles threw, each exception was
+    # swallowed above, and the task reported SUCCESS with processed=0 every
+    # five minutes. `agent_news_analyst` sat green while NewsArticle
+    # .ai_sentiment_score was never written once — and two setups
+    # (starter_news_event_bullish, generated_20260823_news_divergence_reclaim)
+    # were blind on that column, which `setups diagnose` finally surfaced as
+    # "only 1 sentiment-tagged articles".
+    #
+    # judge_result's WORK_KEYS/DONE_KEYS turn "attempted 10, stored 0" into a
+    # warning by itself — the machinery was there, this caller just never used
+    # its vocabulary. `processed` is kept for any existing reader.
+    return {"status": "success", "processed": processed,
+            "attempted": len(unprocessed), "stored": processed}
 
 
 # An agent's answer is unbounded and the detail card is a popup, not a
