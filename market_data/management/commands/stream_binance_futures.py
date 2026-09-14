@@ -9,6 +9,38 @@ Writes:
 Broadcasts:
   - "liquidation" frames to the dashboard_live Channels group
   - "funding" frames idem
+
+WHY THIS PROCESS COULD NOT BE TRUSTED (2026-09-14)
+--------------------------------------------------
+
+`FundingRate` held 0 rows on the live box while this worker reported a
+healthy connection and `funding_carry` refused all 15 crypto instruments
+for want of the snapshots it was supposed to write.
+
+Both write paths swallowed every exception into `log.debug`, and
+`core.logging_config` puts the root logger at WARNING when DEBUG is off.
+So a stream that connected, subscribed, received ticks and failed EVERY
+insert was indistinguishable from a healthy one: container Up, socket
+open, table empty, `docker logs` silent. The writes were also handed to
+`asyncio.create_task` with the task dropped on the floor — an unreferenced
+task can be collected before it runs, and its exception is never
+retrieved.
+
+Three changes, none of which touch what is written:
+
+  - The FIRST failure on either path is a WARNING carrying the exception
+    type and the symbol. After that one per hundred, so a persistently
+    broken feed is visible without flooding the log.
+  - `STATS` counts what landed and what did not, and a heartbeat prints it
+    every HEARTBEAT_SEC. The heartbeat runs on its own task, so it fires
+    even when no tick ever arrives — and says so explicitly, because
+    silence on an open socket is this process's worst failure mode and the
+    one it was least able to show.
+  - `_fire` keeps a reference to each write task until it completes.
+
+Unmeasured is not zero: an empty table with no failure count says nothing
+about whether the feed works. A table with 0 written and 4,812 failed says
+everything.
 """
 from __future__ import annotations
 import asyncio, json, logging, random
@@ -22,6 +54,84 @@ from asgiref.sync import sync_to_async
 log = logging.getLogger("stream_binance_futures")
 WS = "wss://fstream.binance.com/stream?streams="
 FUNDING_THROTTLE_SEC = 30
+
+#: Seconds between heartbeat lines. Long enough to cost nothing, short
+#: enough that an operator who runs `docker logs --tail 20` on a broken
+#: feed sees the problem in the window they actually look at.
+HEARTBEAT_SEC = 300
+
+#: After the first, one failure report per this many. A feed that is broken
+#: for an hour should not be able to hide, and should not be able to fill
+#: the disk either.
+FAILURE_REPORT_EVERY = 100
+
+#: What this process has DONE, not what it was asked to do. Read by the
+#: heartbeat. Module-level on purpose: there is one streamer per container
+#: and the numbers have to outlive every reconnection, since a stream that
+#: reconnects cleanly every 30s and writes nothing is the case that matters.
+STATS = {
+    "ticks": 0, "tick_errors": 0,
+    "funding_written": 0, "funding_failed": 0,
+    "liquidations_written": 0, "liquidations_failed": 0,
+}
+
+#: `asyncio.create_task` returns a task the event loop only weakly holds.
+#: Dropping it permits collection before the coroutine runs and discards any
+#: exception it raises. Own it until it is done.
+_PENDING: set = set()
+
+
+def _fire(coro):
+    """Run `coro` in the background, keeping the task alive until it ends."""
+    task = asyncio.create_task(coro)
+    _PENDING.add(task)
+    task.add_done_callback(_PENDING.discard)
+    return task
+
+
+def _report_failure(where: str, symbol: str, exc: Exception, count: int):
+    """The first failure is loud. The hundredth is a footnote.
+
+    This was a `log.debug`, which in production is not a volume choice but
+    a deletion: the root logger sits at WARNING when DEBUG is off. A broken
+    write path is allowed to be quiet about its hundredth failure; it is
+    not allowed to be quiet about its first.
+    """
+    if count == 1 or count % FAILURE_REPORT_EVERY == 0:
+        log.warning("futures: %s failed for %s (failure #%d) — %s: %s",
+                    where, symbol or "?", count, type(exc).__name__, exc)
+
+
+def heartbeat_line() -> str:
+    """One line an operator can act on: what landed, and what did not."""
+    return (f"{STATS['ticks']} ticks · "
+            f"funding {STATS['funding_written']} written / "
+            f"{STATS['funding_failed']} failed · "
+            f"liquidations {STATS['liquidations_written']} written / "
+            f"{STATS['liquidations_failed']} failed · "
+            f"{STATS['tick_errors']} unparsed")
+
+
+async def _heartbeat(stop: "asyncio.Event"):
+    """Print `heartbeat_line()` every HEARTBEAT_SEC until `stop` is set.
+
+    On its own task rather than inside the message loop, so it still fires
+    when no message ever arrives — which is precisely the state that used to
+    be indistinguishable from a working feed.
+    """
+    last_ticks = STATS["ticks"]
+    while True:
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=HEARTBEAT_SEC)
+            return
+        except asyncio.TimeoutError:
+            pass
+        silent = STATS["ticks"] == last_ticks
+        last_ticks = STATS["ticks"]
+        log.warning(
+            "futures: %s%s", heartbeat_line(),
+            " — NOTHING RECEIVED SINCE THE LAST LINE, the subscription is "
+            "open and empty" if silent else "")
 
 class Command(BaseCommand):
     help = "Stream Binance futures liquidations + mark/funding."
@@ -70,7 +180,12 @@ def save_liquidation(symbol, side, qty, price, notional, ts):
             qty=Decimal(str(qty)), price=Decimal(str(price)),
             notional_usd=Decimal(str(round(notional, 2))), timestamp=ts)
     except Exception as e:
-        log.debug("save_liquidation failed: %s", e)
+        STATS["liquidations_failed"] += 1
+        _report_failure("save_liquidation", symbol, e,
+                        STATS["liquidations_failed"])
+        return False
+    STATS["liquidations_written"] += 1
+    return True
 
 @sync_to_async
 def save_funding(symbol, mark, index, rate, nft, ts):
@@ -82,7 +197,11 @@ def save_funding(symbol, mark, index, rate, nft, ts):
             funding_rate=Decimal(str(rate or 0)),
             next_funding_time=nft, timestamp=ts)
     except Exception as e:
-        log.debug("save_funding failed: %s", e)
+        STATS["funding_failed"] += 1
+        _report_failure("save_funding", symbol, e, STATS["funding_failed"])
+        return False
+    STATS["funding_written"] += 1
+    return True
 
 async def broadcast(kind, data):
     try:
@@ -137,7 +256,10 @@ async def run(override):
         try:
             async with websockets.connect(url, ping_interval=20, ping_timeout=20, max_size=2**20) as ws:
                 backoff = 1
+                stop = asyncio.Event()
+                beat = _fire(_heartbeat(stop))
                 async for raw in ws:
+                    STATS["ticks"] += 1
                     try:
                         msg = json.loads(raw)
                         stream = msg.get("stream","")
@@ -152,7 +274,7 @@ async def run(override):
                             price = float(o.get("p") or o.get("ap") or 0)
                             notional = qty * price
                             ts = datetime.fromtimestamp((o.get("T") or 0)/1000, tz=dtz.utc)
-                            asyncio.create_task(save_liquidation(sym, side, qty, price, notional, ts))
+                            _fire(save_liquidation(sym, side, qty, price, notional, ts))
                             await broadcast("liquidation", {
                                 "symbol": sym, "side": side, "qty": qty,
                                 "price": price, "notional": notional,
@@ -167,13 +289,31 @@ async def run(override):
                             now_ts = timezone.now()
                             if now_ts.timestamp() - last_funding.get(sym, 0) >= FUNDING_THROTTLE_SEC:
                                 last_funding[sym] = now_ts.timestamp()
-                                asyncio.create_task(save_funding(sym, mark, index, rate, nft, now_ts))
+                                _fire(save_funding(sym, mark, index, rate, nft, now_ts))
                                 await broadcast("funding", {
                                     "symbol": sym, "mark": mark, "index": index,
                                     "rate": rate, "next_funding": nft.isoformat() if nft else None})
                     except Exception as e:
-                        log.debug("tick error: %s", e)
+                        # Was log.debug, i.e. discarded in production. A tick
+                        # this process cannot parse is a tick it does not
+                        # write, and a feed that changed shape would have
+                        # emptied both tables in silence.
+                        STATS["tick_errors"] += 1
+                        _report_failure("tick", "", e, STATS["tick_errors"])
         except Exception as e:
             log.warning("futures disconnected: %s", e)
+        finally:
+            # The heartbeat belongs to the connection. Left running across a
+            # reconnect it would print the same counts twice a cycle.
+            try:
+                stop.set()
+                beat.cancel()
+            except (NameError, UnboundLocalError):
+                pass  # connect() itself failed; there is no heartbeat yet
         delay = min(60, backoff + random.random()); backoff = min(60, backoff*2)
-        log.info("reconnect in %.1fs", delay); await asyncio.sleep(delay)
+        # WARNING for the same reason as the connect line: the root logger
+        # drops INFO in production, so a worker reconnecting every second was
+        # silent. The counts come with it, because a reconnect loop that
+        # writes nothing is the failure this file exists to make visible.
+        log.warning("futures: reconnect in %.1fs — %s", delay, heartbeat_line())
+        await asyncio.sleep(delay)
