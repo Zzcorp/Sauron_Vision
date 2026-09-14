@@ -495,10 +495,10 @@
                the two levels of self-grading (signal and fill), the one-fill autopsy, the two simulators, and how reliable each
                agent has actually been.{% endcomment %}
             <div class="nav-section">Ce qui est mesur&eacute;</div>
-            <a href="{% url 'evidence_ledger' %}" class="nav-link {% if page_id == 'evidence' %}active{% endif %}"><span class="icon">⚖</span> <span class="label-text">Evidence Ledger</span></a>
+            <a href="{% url 'evidence_ledger' %}" class="nav-link {% if page_id == 'evidence' %}active{% endif %}"><span class="icon">⊨</span> <span class="label-text">Evidence Ledger</span></a>
             <a href="{% url 'performance_dashboard' %}" class="nav-link {% if page_id == 'performance' %}active{% endif %}"><span class="icon">◮</span> <span class="label-text">Signal Performance</span></a>
             <a href="{% url 'bot_performance_dashboard' %}" class="nav-link {% if page_id == 'bot_performance' %}active{% endif %}"><span class="icon">▲</span> <span class="label-text">Bot Performance</span></a>
-            <a href="{% url 'forensics_list' %}" class="nav-link {% if page_id == 'forensics' %}active{% endif %}"><span class="icon">◎</span> <span class="label-text">Trade Forensics</span></a>
+            <a href="{% url 'forensics_list' %}" class="nav-link {% if page_id == 'forensics' %}active{% endif %}"><span class="icon">⌖</span> <span class="label-text">Trade Forensics</span></a>
             <a href="{% url 'backtest_list' %}" class="nav-link {% if page_id == 'backtest' %}active{% endif %}"><span class="icon">&#x25A1;</span> <span class="label-text">Backtesting</span></a>
             <a href="{% url 'bot_backtest_list' %}" class="nav-link {% if page_id == 'bot_backtest' %}active{% endif %}"><span class="icon">⊟</span> <span class="label-text">Bot Backtest</span></a>
             <a href="{% url 'calibration_dashboard' %}" class="nav-link {% if page_id == 'calibration' %}active{% endif %}"><span class="icon">◔</span> <span class="label-text">Agent Calibration</span></a>
@@ -508,12 +508,12 @@
                runs through the ladder in "ce qui peut agir" first, which is the whole reason the two are separate sections and
                not one.{% endcomment %}
             <div class="nav-section">Ce qui est invent&eacute;</div>
-            <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategy Evolution</span></a>
+            <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon">⟲</span> <span class="label-text">Strategy Evolution</span></a>
             <a href="{% url 'discoveries_dashboard' %}" class="nav-link {% if page_id == 'discoveries' %}active{% endif %}"><span class="icon">⊛</span> <span class="label-text">Discoveries</span></a>
             <a href="{% url 'generated_dashboard' %}" data-nav-id="generated" class="nav-link {% if page_id == 'generated' %}active{% endif %}"><span class="icon">⊞</span> <span class="label-text">Generated Strategies</span></a>
             <a href="{% url 'hypotheses_dashboard' %}" data-nav-id="hypotheses" class="nav-link {% if page_id == 'hypotheses' %}active{% endif %}"><span class="icon">⊕</span> <span class="label-text">Hypothesis Market</span></a>
-            <a href="{% url 'brain_dashboard' %}" class="nav-link {% if page_id == 'brain' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Sauron&#39;s Mind</span></a>
-            <a href="{% url 'knowledge_dashboard' %}" class="nav-link {% if page_id == 'knowledge' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Knowledge Graph</span></a>
+            <a href="{% url 'brain_dashboard' %}" class="nav-link {% if page_id == 'brain' %}active{% endif %}"><span class="icon">⌬</span> <span class="label-text">Sauron&#39;s Mind</span></a>
+            <a href="{% url 'knowledge_dashboard' %}" class="nav-link {% if page_id == 'knowledge' %}active{% endif %}"><span class="icon">❖</span> <span class="label-text">Knowledge Graph</span></a>
             <a href="{% url 'consolidation_dashboard' %}" class="nav-link {% if page_id == 'consolidation' %}active{% endif %}"><span class="icon">⊜</span> <span class="label-text">Consolidation</span></a>
             {% comment %}The 5-10 year sector view the share allocator reads as a ±10% prior, with its own graded calls (2026-09-12).{% endcomment %}
             <a href="{% url 'horizon_dashboard' %}" class="nav-link {% if page_id == 'horizon' %}active{% endif %}"><span class="icon">◕</span> <span class="label-text">Horizon</span></a>
@@ -526,7 +526,7 @@
             <a href="{% url 'ai_insights' %}" class="nav-link {% if page_id == 'ai' %}active{% endif %}"><span class="icon">◬</span> <span class="label-text">AI Insights</span></a>
 
             <div class="nav-section">Les march&eacute;s</div>
-            <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' or page_id == 'quotes' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Instruments & Quotes</span></a>
+            <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' or page_id == 'quotes' %}active{% endif %}"><span class="icon">⌗</span> <span class="label-text">Instruments & Quotes</span></a>
             <a href="{% url 'economic_calendar' %}" class="nav-link {% if page_id == 'calendar' %}active{% endif %}"><span class="icon">◇</span> <span class="label-text">Economic Calendar</span></a>
             <a href="{% url 'news_feed' %}" data-nav-id="news" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon">▤</span> <span class="label-text">News & Sentiment</span></a>
 
@@ -540,11 +540,11 @@
             {% if request.user.is_superuser %}<a href="{% url 'ops_dashboard' %}" class="nav-link {% if page_id == 'ops' %}active{% endif %}"><span class="icon">⌘</span> <span class="label-text">Ops</span></a>
             <a href="{% url 'admin_dashboard' %}" class="nav-link {% if page_id == 'admin_dashboard' %}active{% endif %}"><span class="icon">⬢</span> <span class="label-text">Admin Panel</span></a>
             {% if user.is_staff %}<a href="{% url 'audit_dashboard' %}" class="nav-link {% if page_id == 'audit' %}active{% endif %}"><span class="icon">⊠</span> <span class="label-text">Audit Log</span></a>{% endif %}
-            <a href="{% url 'admin_newsletters' %}" class="nav-link {% if page_id == 'admin_newsletters' %}active{% endif %}"><span class="icon">&#x25A3;</span> <span class="label-text">Newsletters</span></a>
+            <a href="{% url 'admin_newsletters' %}" class="nav-link {% if page_id == 'admin_newsletters' %}active{% endif %}"><span class="icon">▭</span> <span class="label-text">Newsletters</span></a>
             {% endif %}<div class="nav-section">Vous</div>
 
-            <a href="{% url 'profile' %}" class="nav-link {% if page_id == 'profile' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Profile</span></a>
-            <a href="{% url 'notifications_inbox' %}" class="nav-link {% if page_id == 'notifications_inbox' or page_id == 'notifications' %}active{% endif %}"><span class="icon">&#x25C9;</span> <span class="label-text">Notifications</span></a>
+            <a href="{% url 'profile' %}" class="nav-link {% if page_id == 'profile' %}active{% endif %}"><span class="icon">◐</span> <span class="label-text">Profile</span></a>
+            <a href="{% url 'notifications_inbox' %}" class="nav-link {% if page_id == 'notifications_inbox' or page_id == 'notifications' %}active{% endif %}"><span class="icon">◌</span> <span class="label-text">Notifications</span></a>
             <a href="{% url 'setup' %}" class="nav-link {% if page_id == 'setup' %}active{% endif %}"><span class="icon">⊡</span> <span class="label-text">Setup</span></a>
             <a href="{% url 'getting_started' %}" class="nav-link {% if page_id == 'getting_started' %}active{% endif %}"><span class="icon">★</span> <span class="label-text">Getting Started</span></a>
         </nav>
