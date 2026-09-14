@@ -140,6 +140,11 @@ def bot_backtest_run(request):
                 "train": result.train_stats,
                 "test": result.test_stats,
             }
+        # Signals that qualified and could not be simulated, because no bar
+        # exists after them. They used to be priced at 0.0 and booked as
+        # -50 R expiries; they are now dropped, and a dropped signal has to
+        # be visible or the run overstates how much it measured.
+        run.stats["unmeasured"] = result.unmeasured or {}
         run.trades_json = serialise_trades(result.trades)
         run.status = "complete"
         run.completed_at = timezone.now()

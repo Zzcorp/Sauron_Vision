@@ -102,8 +102,34 @@
         <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;">
             <div style="display:flex;justify-content:space-between;"><span>✓ Hit target</span><span class="up">{{ run.stats.by_outcome.hit_target|default:0 }}</span></div>
             <div style="display:flex;justify-content:space-between;"><span>✗ Stopped out</span><span class="down">{{ run.stats.by_outcome.stopped_out|default:0 }}</span></div>
+            {% comment %}
+               The exit no broker holds. The live engine fires it with reason
+               TIME; until 2026-09-14 this backtester had never heard of it
+               and walked past every ceiling, so a scalper with an 8h limit
+               was graded as a bot that holds for 500 hours.
+            {% endcomment %}
+            <div style="display:flex;justify-content:space-between;"><span>⧗ Time stop</span><span style="color:var(--accent-gold);">{{ run.stats.by_outcome.time_stop|default:0 }}</span></div>
             {# ○ completes the ✓ / ✗ pair: neither target nor stop was reached. #}
             <div style="display:flex;justify-content:space-between;"><span>○ Expired</span><span style="color:var(--text-muted);">{{ run.stats.by_outcome.expired|default:0 }}</span></div>
+            {% comment %}
+               The two rows below used to hide inside the one above, and they
+               are not the same claim. "Expired" means the walk ran its full
+               length and the price touched neither level — a measurement.
+               "Open at data end" means the bar feed stopped: the position is
+               marked to the last close that exists, not closed. And a signal
+               with no bar after it at all was, until 2026-09-14, priced at
+               0.0 and booked as a −50 R expiry.
+            {% endcomment %}
+            <div style="display:flex;justify-content:space-between;"><span>◌ Open at data end</span><span style="color:var(--accent-gold);">{{ run.stats.by_outcome.open_at_data_end|default:0 }}</span></div>
+            <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:6px;">
+                <span title="Signals that qualified but had no bar after them. Not simulated, not averaged.">⌀ No bars — not simulated</span>
+                <span style="color:{% if run.stats.unmeasured.signals_without_bars %}var(--accent-red){% else %}var(--text-muted){% endif %};">{{ run.stats.unmeasured.signals_without_bars|default:0 }}</span>
+            </div>
+            {% if run.stats.unmeasured.by_symbol %}
+            <div style="font-size:10px;color:var(--text-muted);line-height:1.5;">
+                {% for sym, n in run.stats.unmeasured.by_symbol.items %}{{ sym }}&nbsp;×{{ n }}{% if not forloop.last %} · {% endif %}{% endfor %}
+            </div>
+            {% endif %}
         </div>
     </div>
 
@@ -138,7 +164,9 @@
                 <td>
                     {% if t.outcome == "hit_target" %}<span style="color:var(--accent);">✓ TP</span>
                     {% elif t.outcome == "stopped_out" %}<span style="color:#ff5e5e;">✗ SL</span>
-                    {% else %}<span style="color:var(--accent-gold);">○ EXP</span>{% endif %}
+                    {% elif t.outcome == "time_stop" %}<span style="color:var(--accent-gold);" title="Closed at the config's max-hold ceiling, the same exit the live engine fires with reason TIME.">⧗ TIME</span>
+                    {% elif t.outcome == "open_at_data_end" %}<span style="color:var(--accent-gold);" title="The bar feed ends here. This R is a mark to the last close, not a fill.">◌ OPEN</span>
+                    {% else %}<span style="color:var(--text-muted);">○ EXP</span>{% endif %}
                 </td>
                 <td class="{% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}">{{ t.realized_r|floatformat:2 }}</td>
                 <td>{{ t.duration_minutes }}</td>

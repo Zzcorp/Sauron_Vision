@@ -1,5 +1,6 @@
 """Phase-18 bot-trade backtester tests:
-  - Exit simulation (TP, SL, expired, conservative SL-first when bar covers both)
+  - Exit simulation (TP, SL, expired vs open-at-data-end vs no-data,
+    conservative SL-first when a bar covers both, gap-through-stop fills)
   - End-to-end run_backtest with seeded signals + price bars
   - Stats computation (win rate, R, drawdown, profit factor, sharpe)
   - One-position-per-symbol + cooldown gating
@@ -112,22 +113,85 @@ class ExitSimulationTests(TestCase):
         self.assertEqual(outcome, "hit_target")
         self.assertEqual(px, 96)
 
-    def test_expired_when_neither_hit(self):
-        from bot_program.backtest_asset import _simulate_exit
-        # tight range, neither SL nor TP triggered
+    def _flat_pair(self):
+        """Two bars that touch neither level."""
         _bar(self.inst, ts=self.t0 + timedelta(hours=1), o=100, h=100.5, low=99.5, c=100)
         _bar(self.inst, ts=self.t0 + timedelta(hours=2), o=100, h=100.4, low=99.6, c=100)
+
+    def test_expired_means_the_walk_ran_its_full_course(self):
+        """`expired` is a measurement: max_bars bars, neither level touched."""
+        from bot_program.backtest_asset import _simulate_exit
+        self._flat_pair()
         et, px, outcome = _simulate_exit(
-            self.inst, "1h", self.t0, side="BUY", sl=98, tp=104, max_bars=10)
+            self.inst, "1h", self.t0, side="BUY", sl=98, tp=104, max_bars=2)
         self.assertEqual(outcome, "expired")
         self.assertEqual(px, 100)
 
-    def test_no_bars_returns_expired(self):
+    def test_a_feed_that_runs_out_is_not_an_expiry(self):
+        """The same two bars, with room for ten. The trade did not expire -
+        the DATA did, and the position is still open. Calling that `expired`
+        is what makes a stale bar feed read as a flat strategy, which is the
+        difference between "this bot does nothing" and "you have no data"."""
         from bot_program.backtest_asset import _simulate_exit
+        self._flat_pair()
         et, px, outcome = _simulate_exit(
             self.inst, "1h", self.t0, side="BUY", sl=98, tp=104, max_bars=10)
-        self.assertEqual(outcome, "expired")
+        self.assertEqual(outcome, "open_at_data_end")
+        self.assertEqual(px, 100)
+
+    def test_no_bars_is_no_data_and_carries_no_price(self):
+        """The contract asserted here until 2026-09-14 was `("expired", 0.0)`,
+        written out of the implementation rather than against it. The caller
+        then priced that 0.0 as a fill and booked -50 R. A price of None
+        cannot be multiplied by a slippage factor and quietly become one."""
+        from bot_program.backtest_asset import NO_DATA, _simulate_exit
+        et, px, outcome = _simulate_exit(
+            self.inst, "1h", self.t0, side="BUY", sl=98, tp=104, max_bars=10)
+        self.assertEqual(outcome, NO_DATA)
         self.assertIsNone(et)
+        self.assertIsNone(px)
+
+    def test_a_long_gapping_through_its_stop_fills_at_the_open(self):
+        """Stop at 98, bar opens at 90. A stop order does not fill at 98 in
+        that bar; it fills at 90. Filling at the stop anyway flatters the
+        backtest in exactly the events that empty an account."""
+        from bot_program.backtest_asset import _simulate_exit
+        _bar(self.inst, ts=self.t0 + timedelta(hours=1), o=90, h=91, low=88, c=90)
+        et, px, outcome = _simulate_exit(
+            self.inst, "1h", self.t0, side="BUY", sl=98, tp=104, max_bars=10)
+        self.assertEqual(outcome, "stopped_out")
+        self.assertEqual(px, 90)
+
+    def test_a_short_gapping_through_its_stop_fills_at_the_open(self):
+        from bot_program.backtest_asset import _simulate_exit
+        # SELL: stop at 102 (above). The bar opens at 110.
+        _bar(self.inst, ts=self.t0 + timedelta(hours=1), o=110, h=112, low=109, c=110)
+        et, px, outcome = _simulate_exit(
+            self.inst, "1h", self.t0, side="SELL", sl=102, tp=96, max_bars=10)
+        self.assertEqual(outcome, "stopped_out")
+        self.assertEqual(px, 110)
+
+    def test_a_gap_through_the_target_is_not_credited(self):
+        """The mirror case is deliberately NOT symmetric. Charging an
+        unfavourable gap while refusing to credit a favourable one is the
+        asymmetry a backtest is supposed to have; the reverse is how a
+        strategy looks good on a screen and loses money in an account."""
+        from bot_program.backtest_asset import _simulate_exit
+        # Target at 104, bar opens at 120 — still booked at 104.
+        _bar(self.inst, ts=self.t0 + timedelta(hours=1), o=120, h=121, low=119, c=120)
+        et, px, outcome = _simulate_exit(
+            self.inst, "1h", self.t0, side="BUY", sl=98, tp=104, max_bars=10)
+        self.assertEqual(outcome, "hit_target")
+        self.assertEqual(px, 104)
+
+    def test_the_ordinary_stop_still_fills_at_the_stop(self):
+        """The gap rule must not move a normal fill: a bar that opens INSIDE
+        the range and trades down through the stop fills at the stop."""
+        from bot_program.backtest_asset import _simulate_exit
+        _bar(self.inst, ts=self.t0 + timedelta(hours=1), o=100, h=100.5, low=97, c=98)
+        et, px, outcome = _simulate_exit(
+            self.inst, "1h", self.t0, side="BUY", sl=98, tp=104, max_bars=10)
+        self.assertEqual(px, 98)
 
 
 # ── End-to-end run_backtest ──────────────────────────────────────────────

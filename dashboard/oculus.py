@@ -626,6 +626,40 @@ def _cycle_horizon():
     }
 
 
+def _bot_runs_before_the_fix():
+    """Completed bot runs whose stats carry no `unmeasured` key.
+
+    Until 2026-09-14 a signal with no bar after it was priced at 0.0 and
+    booked as a −50 R expiry, and the config's time-stop ceiling was ignored
+    entirely. Both are fixed, and every run stored since carries the
+    `unmeasured` key. Its absence is therefore a reliable marker of a number
+    computed by the old engine — which must not be read beside the new ones
+    as though they measured the same thing.
+    """
+    from bot_program.backtest_models import BotBacktestRun
+    stale = 0
+    for stats in BotBacktestRun.objects.filter(
+            status="complete").values_list("stats", flat=True):
+        if not isinstance(stats, dict) or "unmeasured" not in stats:
+            stale += 1
+    return stale
+
+
+def _signals_no_run_could_price():
+    """Signals that qualified and had no bar after them, across all runs."""
+    from bot_program.backtest_models import BotBacktestRun
+    total = 0
+    for stats in BotBacktestRun.objects.filter(
+            status="complete").values_list("stats", flat=True):
+        if isinstance(stats, dict):
+            block = stats.get("unmeasured") or {}
+            try:
+                total += int(block.get("signals_without_bars") or 0)
+            except (TypeError, ValueError):
+                continue
+    return total
+
+
 def _cycle_backtests():
     from backtester.models import BacktestRun
     from bot_program.backtest_models import BotBacktestRun
@@ -651,13 +685,29 @@ def _cycle_backtests():
                 status="complete").count(),
                 qualifier="ici le littéral est « complete », sans -d : "
                           "un filtre partagé renverrait 0 pour toujours"),
+            _fact("… calculés avant le correctif du 14/09",
+                  _bot_runs_before_the_fix, tone="caution",
+                  qualifier="un signal sans barre y valait −50 R et le "
+                            "plafond de durée n'existait pas : ces chiffres "
+                            "ne se comparent pas aux suivants"),
+            _fact("signaux qu'un run n'a pas pu simuler",
+                  _signals_no_run_could_price, tone="caution",
+                  qualifier="aucune barre après le signal — écartés et "
+                            "comptés, jamais moyennés"),
         ],
         "caveat": (
             "Deux tables, deux vocabulaires de statut à une lettre près, et "
             "deux unités pour le taux de réussite (pourcentage d'un côté, "
             "fraction de l'autre). Elles ne sont jamais additionnées ici. "
             "Aucun backtest ne conditionne une promotion : la barrière "
-            "automatique tourne en mémoire et n'écrit aucune ligne."),
+            "automatique tourne en mémoire et n'écrit aucune ligne. "
+            "Le 14/09 le simulateur de bots a changé sur quatre points : un "
+            "signal sans barre n'est plus une perte de −50 R mais un signal "
+            "écarté et compté, un gap à travers le stop se remplit à "
+            "l'ouverture et non au stop, « expiré » ne recouvre plus « le "
+            "flux de barres s'arrête ici », et le plafond de durée du bot "
+            "est enfin respecté. Les runs d'avant ne mesuraient pas le même "
+            "bot."),
         "series": [],
     }
 
