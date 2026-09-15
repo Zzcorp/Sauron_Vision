@@ -239,6 +239,19 @@ COMMANDS = [
         "category": "read",
     },
     {
+        "name": "paper_readiness",
+        "title": "Paper readiness",
+        "purpose": "The mirror of preflight_live: not whether it is safe to arm money, but whether the evidence chain can produce a graded track record at all. Every link is a component, and a missing row reads as OFF while nothing raises.",
+        "usage": [
+            "python manage.py paper_readiness",
+            "python manage.py paper_readiness --window-days 90",
+        ],
+        "mirrors": "/ops/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+    },
+    {
         "name": "preflight_live",
         "title": "Preflight live",
         "purpose": "Answer, in one pass, whether it is safe to arm real money right now — switches, connection, money, live configs, bars, PIN — from cached columns only.",

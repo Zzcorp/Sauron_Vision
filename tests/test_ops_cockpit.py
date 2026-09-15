@@ -145,9 +145,16 @@ class RegistryTests(TestCase):
         # `setups` did NOT — its `arm` verb writes, and the registry is per
         # COMMAND, not per subcommand, so it is one `decide` entry like
         # `persona` and the lane refuses the whole of it.
+        # `paper_readiness` joined on 2026-09-15, deliberately and for the
+        # same reason `preflight_live` is here: it is read-only, it makes no
+        # broker call (tests/test_paper_readiness.py pins both), and it is
+        # the command an operator wants at the exact moment they are looking
+        # at a screen rather than a terminal. The set stays PINNED because
+        # this lane is a shell on the web and every addition to it is a
+        # security decision, not a convenience.
         self.assertEqual(ops_commands.runnable_names(),
-                         {"open_trades", "preflight_live", "why_no_trade",
-                          "signals"})
+                         {"open_trades", "paper_readiness", "preflight_live",
+                          "why_no_trade", "signals"})
         self.assertIsNone(ops_commands.get("nope"))
         self.assertEqual([k for k, _l, _r in ops_commands.by_category()],
                          ["read", "decide", "ops"])
