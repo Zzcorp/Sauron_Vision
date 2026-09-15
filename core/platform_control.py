@@ -260,6 +260,14 @@ DEFAULT_COMPONENTS = [
     {"key": "agent_commentator", "name": "Market Commentator",
      "description": "Daily market commentary from the commentator agent. OFF on arrival: it costs model spend on every run.",
      "category": "agent"},
+    # 2026-09-15 — the watchdog for a paper campaign. `paper_readiness`
+    # answers the question the moment it is asked; a campaign that starts
+    # green and goes cold on day twelve spends seventy-eight days producing
+    # nothing, and the only thing that would notice is somebody choosing to
+    # run the command again. Nothing on this platform chose to.
+    {"key": "pipeline_campaign_watch", "name": "Evidence Chain Watchdog",
+     "description": "Daily read-only check that the paper-campaign evidence chain (bars -> indicators -> signals -> fills -> outcomes -> ladder) is still complete, and one notification when a link goes cold. Writes nothing and makes no broker call.",
+     "category": "pipeline"},
 ]
 
 

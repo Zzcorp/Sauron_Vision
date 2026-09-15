@@ -726,3 +726,35 @@ def notify_broker_unreachable(user, *, label: str, host: str, port: int,
               f"showing their last reading with its age, not a live one."),
         url="/system-health/",
     )
+
+
+def notify_evidence_chain_cold(user, *, cold: list, blockers: list) -> bool:
+    """A link in the paper-campaign evidence chain has gone cold.
+
+    Filed under system_health for the same reason as the broker alert: it is
+    not a trading event, it is the platform failing to measure itself.
+
+    The distinction that makes this worth sending: a cold link costs nothing
+    TODAY and everything in ninety days. Nothing breaks, no page goes red, no
+    task raises — `guarded_task` simply no-ops on a component that is off or
+    has no row, and the ladder reads n=0 at the end of a campaign that was
+    never running. By then the time is spent and cannot be bought back.
+
+    The body names the links rather than a count, because "2 links cold" sends
+    an operator to a page and "pipeline_promotion is off" sends them to a
+    switch.
+    """
+    names = ", ".join(cold) if cold else "the chain"
+    first = blockers[0] if blockers else ""
+    return dispatch_notification(
+        user, "system_health",
+        title=f"▲ Evidence chain cold: {names}",
+        body=(f"The paper-campaign chain is not complete, so the days passing "
+              f"now are producing nothing the promotion ladder can grade. "
+              f"Cold: {names}. {first} "
+              f"Run `manage.py paper_readiness` for the full chain — it "
+              f"writes nothing. A link that is off is a decision; a link with "
+              f"NO ROW was never seeded, and the two are fixed by different "
+              f"commands."),
+        url="/ops/",
+    )

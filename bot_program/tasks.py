@@ -706,3 +706,82 @@ def grade_capital_desk() -> dict:
     resolved = capital_desk.resolve_counterfactuals()
     graded = capital_desk.grade_plans()
     return {"status": "ok", "resolved": resolved, "graded": graded}
+
+
+# ─── 2026-09-15: the watchdog for a paper campaign ──────────────────────────
+
+#: One notification per cold spell, not one per day. A chain that stays cold
+#: for a week is one problem, and seven identical alerts is how an operator
+#: learns to ignore the eighth. Cleared the moment the chain is complete, so
+#: a NEW cold spell speaks immediately.
+CHAIN_COLD_ALERT_COOLDOWN = 24 * 3600
+
+
+@shared_task
+@guarded_task("pipeline_campaign_watch")
+def watch_evidence_chain():
+    """Is the paper-campaign evidence chain still complete? Say so if not.
+
+    `paper_readiness` answers the question the moment an operator asks it.
+    This asks on their behalf, daily, because the failure mode is silence:
+    a campaign that starts green and goes cold on day twelve spends
+    seventy-eight days producing nothing, and `guarded_task` no-ops without
+    raising on a component that is off or has no row.
+
+    The cost of a cold link is zero today and the whole campaign in ninety
+    days, which is exactly the shape of failure this platform keeps finding
+    — the funding feed that wrote nothing, the broker sync that missed eight
+    times in silence, the backtester that priced an absent bar at zero.
+
+    READ-ONLY. It measures and it notifies; it turns nothing on. A watchdog
+    that repaired the chain would be a watchdog nobody could trust to report
+    it honestly, and switching a pipeline back on is an operator's decision.
+    """
+    from django.contrib.auth.models import User
+    from django.core.cache import cache
+
+    from .campaign_readiness import readiness
+
+    report = readiness()
+    cold = report["cold_links"]
+    blockers = report["blockers"]
+    out = {"status": "ok", "cold_links": cold,
+           "blockers": len(blockers), "notified": 0}
+
+    if not blockers:
+        # A complete chain clears the gate, so the next cold spell is heard
+        # at once rather than swallowed by a cooldown from the last one.
+        cache.delete("campaign_watch:alerted")
+        return out
+
+    if cache.get("campaign_watch:alerted"):
+        out["status"] = "cooldown"
+        return out
+
+    recipients = list(User.objects.filter(is_staff=True, is_active=True))
+    if not recipients:
+        # Not an error and not a success: the check ran, the chain is cold,
+        # and there is nobody configured to tell. Said plainly rather than
+        # returned as a clean dict.
+        logger.warning(
+            "[campaign watch] chain is cold (%s) and no active staff user "
+            "exists to notify", ", ".join(cold) or "blockers with no key")
+        out["status"] = "nobody_to_tell"
+        return out
+
+    from .notifications import notify_evidence_chain_cold
+    for user in recipients:
+        try:
+            if notify_evidence_chain_cold(user, cold=cold, blockers=blockers):
+                out["notified"] += 1
+        except Exception as e:  # noqa: BLE001 — one failure must not eat the rest
+            logger.warning("[campaign watch] notify failed for %s: %s",
+                           user.id, e)
+
+    if out["notified"]:
+        cache.set("campaign_watch:alerted", 1, CHAIN_COLD_ALERT_COOLDOWN)
+    logger.warning(
+        "[campaign watch] evidence chain is cold: %s — %d blocker(s), "
+        "%d operator(s) told", ", ".join(cold) or "see blockers",
+        len(blockers), out["notified"])
+    return out

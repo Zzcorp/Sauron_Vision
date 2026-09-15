@@ -466,6 +466,18 @@ app.conf.beat_schedule = {
 
     # ── Phase 8 — promotion pipeline: walk every rule, auto-promote
     #              the eligible and auto-demote the degrading.
+    # 2026-09-15 — the evidence chain, watched rather than checked.
+    # Daily at 06:40 UTC: after the nightly passes have run and before the
+    # operator's morning, so a cold link is in the first thing they read
+    # rather than discovered on day ninety. Read-only; it turns nothing on.
+    # Gated by its own component (pipeline_campaign_watch) because a
+    # watchdog nobody asked for is noise, and this platform's rule is that
+    # a task an operator did not enable does not run.
+    "watch-evidence-chain": {
+        "task": "bot_program.tasks.watch_evidence_chain",
+        "schedule": crontab(hour=6, minute=40),
+    },
+
     "auto-evaluate-promotions": {
         "task": "signals.tasks.auto_evaluate_promotions",
         "schedule": crontab(hour=4, minute=30),

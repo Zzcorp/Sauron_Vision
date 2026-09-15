@@ -39,7 +39,7 @@ from django.conf import settings
 from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
 
-from bot_program.management.commands import paper_readiness as pr
+from bot_program import campaign_readiness as pr
 
 CELERY = Path(settings.BASE_DIR) / "config" / "celery.py"
 
@@ -98,8 +98,8 @@ class EveryKeyItNamesIsRealTests(SimpleTestCase):
     def test_the_actuator_list_is_named_not_pattern_matched(self):
         """Matching on "_mode_live" would let a new actuator inherit an
         exemption from a naming convention. Each one is listed on purpose."""
-        src = (Path(settings.BASE_DIR) / "bot_program" / "management"
-               / "commands" / "paper_readiness.py").read_text(encoding="utf-8")
+        src = (Path(settings.BASE_DIR) / "bot_program"
+               / "campaign_readiness.py").read_text(encoding="utf-8")
         self.assertNotIn('endswith("_mode_live")', src)
         for key in pr.MUST_BE_OFF:
             self.assertIn(f'"{key}"', src)
@@ -152,8 +152,8 @@ class TheCadencesItQuotesAreTheRealOnesTests(SimpleTestCase):
         """The report quotes three thresholds it does not own. Naming the
         constants keeps them true when the ladder is retuned; typing the
         numbers would make this report the place they go stale."""
-        src = (Path(settings.BASE_DIR) / "bot_program" / "management"
-               / "commands" / "paper_readiness.py").read_text(encoding="utf-8")
+        src = (Path(settings.BASE_DIR) / "bot_program"
+               / "campaign_readiness.py").read_text(encoding="utf-8")
         self.assertIn("from signals.promotion_pipeline import", src)
         for constant in ("PROMO_RESEARCH_TO_PAPER_MIN_N",
                          "PROMO_PAPER_TO_LIVE_SMALL_MIN_N",
@@ -161,14 +161,13 @@ class TheCadencesItQuotesAreTheRealOnesTests(SimpleTestCase):
             self.assertIn(constant, src)
         # And the numbers they currently hold must not be typed anywhere.
         from signals import promotion_pipeline as pp
-        gates = src[src.index("gates: research"):][:400]
         for value in (pp.PROMO_RESEARCH_TO_PAPER_MIN_N,
                       pp.PROMO_PAPER_TO_LIVE_SMALL_MIN_N,
                       pp.PROMO_PAPER_TO_LIVE_SMALL_MIN_DAYS):
             self.assertNotIn(
-                f"n>={value}", gates,
+                f"n>={value}", src,
                 f"the gate {value} is typed into the report; retuning the "
-                f"ladder would leave this line describing the old one")
+                f"ladder would leave it describing the old one")
 
 
 class ItWritesNothingTests(TestCase):
@@ -289,8 +288,10 @@ class TheLadderCountIsTheGradedRowsTests(TestCase):
         for _ in range(3):
             self._signal(closed=True, realized_r=None)
         body = _run()
-        self.assertIn("signals closed              3", body)
-        self.assertIn("carrying a realized_r   0", body)
+        # Asserted on the numbers rather than on column widths: a report
+        # whose tests break when a column moves is a report nobody reformats.
+        self.assertRegex(body, r"signals closed\s+3")
+        self.assertRegex(body, r"carrying a realized_r\s+0")
 
     def test_all_closed_and_none_graded_is_a_blocker(self):
         self._signal(closed=True, realized_r=None)
@@ -301,7 +302,7 @@ class TheLadderCountIsTheGradedRowsTests(TestCase):
         self._signal(closed=True, realized_r=1.5)
         body = _run()
         self.assertNotIn("NOT ONE carries a realized_r", body)
-        self.assertIn("carrying a realized_r   1", body)
+        self.assertRegex(body, r"carrying a realized_r\s+1")
 
 
 class TheReportRefusesToFlatterTests(TestCase):

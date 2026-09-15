@@ -172,6 +172,40 @@ def _market_note(row, newest, now) -> str:
     return f"  · {name} shut"
 
 
+def _bar_verdict(row, newest, now) -> tuple:
+    """(kind, market_name, age_hours) — the DECISION, with no prose.
+
+    kind is one of:
+      "ok"          nothing to say
+      "late_open"   the market is open and the bar is behind: the feed
+                    stopped, and an armed bot is deciding on a stale candle
+      "shut_stale"  shut, past the six hours every price path enforces:
+                    correct and temporary, and worth reading once
+      "shut_dead"   "shut" for longer than a long weekend explains
+      "unknown"     no market clock for this instrument
+
+    Split out from `_bar_findings` on 2026-09-15 because one function that
+    both decides and phrases forces every caller to take the same phrasing.
+    `paper_readiness` walks a whole fleet and needs to group sixty-one
+    identical verdicts into one line; the preflight walks a handful and
+    wants one line each. Same rule, two renderings.
+    """
+    market = _market_for(row)
+    if market is None:
+        return ("unknown", "?", _bar_age_hours(newest, now))
+    age = _bar_age_hours(newest, now)
+    name = market.get("session") or market.get("code") or "?"
+    if market.get("is_open"):
+        if age >= BAR_LATE_HOURS_WHILE_OPEN:
+            return ("late_open", name, age)
+        return ("ok", name, age)
+    if age >= BAR_SHUT_GRACE_HOURS:
+        return ("shut_dead", name, age)
+    if age >= BAR_DEAD_HOURS:
+        return ("shut_stale", name, age)
+    return ("ok", name, age)
+
+
 def _bar_findings(sym, row, newest, now, blockers, warnings) -> None:
     """Split the one number into the two things it can mean.
 
@@ -182,25 +216,22 @@ def _bar_findings(sym, row, newest, now, blockers, warnings) -> None:
     an operator counting on 90 days of fills should read it once rather
     than discover it on day 90.
     """
-    market = _market_for(row)
-    if market is None:
+    kind, name, age = _bar_verdict(row, newest, now)
+    if kind in ("ok", "unknown"):
         return
-    age = _bar_age_hours(newest, now)
-    name = market.get("session") or market.get("code") or "?"
-    if market.get("is_open"):
-        if age >= BAR_LATE_HOURS_WHILE_OPEN:
-            blockers.append(
-                f"{sym}: {name} is OPEN and the newest 4h bar is {age:.1f}h "
-                f"old — refresh-bot-bars runs every 10 minutes, so the feed "
-                f"has stopped. An armed bot is deciding on a stale candle")
+    if kind == "late_open":
+        blockers.append(
+            f"{sym}: {name} is OPEN and the newest 4h bar is {age:.1f}h "
+            f"old — refresh-bot-bars runs every 10 minutes, so the feed "
+            f"has stopped. An armed bot is deciding on a stale candle")
         return
-    if age >= BAR_SHUT_GRACE_HOURS:
+    if kind == "shut_dead":
         blockers.append(
             f"{sym}: {age / 24:.1f} days of 4h bars are missing. {name} being "
             f"shut explains a weekend, not this — the bar writer has "
             f"stopped for this symbol and no rule can form a decision on it")
         return
-    if age >= BAR_DEAD_HOURS:
+    if True:
         warnings.append(
             f"{sym}: {name} is shut and the newest bar is {age:.1f}h old, "
             f"past the {BAR_DEAD_HOURS:.0f}h limit the paper venue and the "
