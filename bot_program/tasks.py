@@ -374,6 +374,22 @@ def sync_broker_account() -> dict:
 
         if reading is None and rows is None:
             out["unreachable"] += 1
+            # NONE IS THE CONTRACT HERE, NOT AN EXCEPTION (2026-09-15).
+            # `account_values()` and `broker_portfolio()` both document "or
+            # None when unreadable" and both return None from
+            # `if not self._connect()` without logging. So the `except`
+            # above never fires for the case that matters most — a Gateway
+            # that is up and not logged in — and this miss used to be
+            # counted in total silence: the live box showed misses = 8
+            # against zero "unreadable" lines in six hours of worker logs,
+            # while every equity figure on every page went stale.
+            #
+            # The line itself lives in `_note_broker_miss`, which is the
+            # only place the CONSECUTIVE count exists. `out["unreachable"]`
+            # counts accounts within THIS pass and resets every invocation,
+            # so logging it here printed "miss 1" forever on a one-account
+            # box — a number shaped like the one an operator needs and not
+            # it.
             _note_broker_miss(acct, user)
             continue
         _clear_broker_miss(acct)
@@ -553,6 +569,34 @@ def _note_broker_miss(acct, user) -> None:
     key = f"broker_sync:miss:{acct.pk}"
     misses = int(cache.get(key) or 0) + 1
     cache.set(key, misses, 24 * 3600)
+
+    # EVERY miss is written down, with its true consecutive number, before
+    # any decision about alerting (2026-09-15).
+    #
+    # This used to be silent, and the silence was the defect. The caller
+    # logged from its `except`, but neither read raises: `account_values()`
+    # and `broker_portfolio()` both return None from
+    # `if not self._connect()` without a word, and "None means UNREADABLE"
+    # is their documented contract — a good one, argued for at length in
+    # `account_values`. The caller had simply relied on an exception it was
+    # never promised.
+    #
+    # So the case the whole ibkr-doctor exists for, a Gateway that is UP and
+    # not logged in, was the one case that produced no log line at all. The
+    # live box showed misses = 8 against zero matches in six hours of worker
+    # logs, while every equity figure on every page quietly aged.
+    #
+    # The notification below waits for the third miss and then goes quiet
+    # for six hours. The log does neither: a failure an operator can only
+    # learn about from an alert they have already been shown is a failure
+    # they cannot follow.
+    logger.warning(
+        "broker sync: %s (%s:%s) returned no equity AND no holdings — "
+        "consecutive miss %d. Neither read raised; both answered None, "
+        "which is what an unauthenticated Gateway looks like. Check "
+        "`dc ps` for (unhealthy) and `./deploy/ibkr-doctor`",
+        acct.label, acct.host, acct.port, misses)
+
     if misses < BROKER_MISS_ALERT_AFTER:
         return
     gate = f"broker_sync:alerted:{acct.pk}"

@@ -178,3 +178,140 @@ class TheSyncRaisesTheAlarmTests(TestCase):
             notify_broker_unreachable(self.user, label="ISA_CAPITAL",
                                       host="ibgateway", port=4003, misses=3)
         self.assertEqual(d.call_args.args[1], "system_health")
+
+
+class AMissMustNotBeSilentTests(TestCase):
+    """Eight misses, not one log line (2026-09-15).
+
+    Measured on the live box:
+
+        misses = 8 | last_equity_at = 2026-09-14 23:33:43
+
+    and six hours of `worker-fast worker-slow` logs grepped for "broker sync"
+    returned only routine `_follow_the_account` INFO lines. Not one
+    `broker sync: ... unreadable:` warning, although that line sat
+    immediately before every increment of the counter that reached 8.
+
+    THE REASON, AND WHY IT IS A DESIGN TRAP RATHER THAN A TYPO
+
+    `sync_broker_account` logged from its `except`. Neither read raises:
+
+        account_values()    if not self._connect(): return None   # no log
+        broker_portfolio()  if not self._connect(): return None   # no log
+
+    "None means UNREADABLE" is their documented contract and a good one —
+    `account_values` argues for it at length, because a caller that cannot
+    tell "no reading" from "an empty account" will eventually tell an
+    operator their money is gone. The caller's mistake was to rely on an
+    exception it had never been promised.
+
+    So the exact case that matters most — a Gateway that is UP and not
+    logged in, the one the whole ibkr-doctor exists for — was the one case
+    that produced no log at all, while every equity figure on every page
+    quietly aged.
+
+    These tests pin the caller's own line. The client is a MagicMock whose
+    methods RETURN None and never raise, so a log that depends on an
+    exception cannot satisfy them.
+    """
+
+    def setUp(self):
+        cache.clear()
+        from django.contrib.auth.models import User
+
+        from bot_program.models import IBKRAccount
+        self.user = User.objects.create_user("silent_u", password="x")
+        self.acct = IBKRAccount.objects.create(
+            user=self.user, label="Main", host="ibgateway",
+            port=4003, client_id=1)
+        self.acct.set_credentials("U7654321")
+        self.acct.save()
+
+    def _sync_unreadable(self):
+        """One pass where both reads answer None WITHOUT raising."""
+        from bot_program.tasks import sync_broker_account
+        trader = MagicMock()
+        trader.net_liquidation.return_value = None
+        trader.broker_portfolio.return_value = None
+        trader.net_liquidation.side_effect = None      # explicitly: no raise
+        trader.broker_portfolio.side_effect = None
+        with patch("bot_program.engine.ibkr_client.is_ibkr_available",
+                   return_value=True), \
+             patch("bot_program.engine.ibkr_client.IBKRTrader",
+                   return_value=trader), \
+             patch("bot_program.notifications.notify_broker_unreachable"):
+            with self.assertLogs("bot_program.tasks", level="WARNING") as got:
+                out = sync_broker_account.__wrapped__.__wrapped__()
+        return out, "\n".join(got.output)
+
+    def test_a_miss_that_raised_nothing_still_writes_a_line(self):
+        out, logged = self._sync_unreadable()
+        self.assertEqual(out["unreachable"], 1)
+        self.assertIn("broker sync", logged)
+
+    def test_the_line_names_the_account_and_the_socket(self):
+        """An operator reading `docker logs` needs to know WHICH account and
+        WHERE, because a box can carry five Gateways on five ports."""
+        _out, logged = self._sync_unreadable()
+        self.assertIn("Main", logged)
+        self.assertIn("ibgateway", logged)
+        self.assertIn("4003", logged)
+
+    def test_the_line_says_nothing_raised(self):
+        """The distinction that cost the six hours: an operator who greps for
+        a failure and finds nothing concludes the sync is not running. The
+        line has to say the reads ANSWERED, and answered nothing."""
+        _out, logged = self._sync_unreadable()
+        self.assertIn("None", logged)
+        self.assertIn("raise", logged.lower())
+
+    def test_it_points_at_the_tool_that_diagnoses_it(self):
+        _out, logged = self._sync_unreadable()
+        self.assertIn("ibkr-doctor", logged)
+
+    def test_every_miss_is_logged_not_only_the_alerting_one(self):
+        """The notification waits for the third miss and then goes quiet for
+        six hours. The log must not: a miss the operator can only learn about
+        from an alert they have already been shown is a miss they cannot
+        follow."""
+        for expected in (1, 2, 3, 4):
+            out, logged = self._sync_unreadable()
+            self.assertIn("broker sync", logged)
+            self.assertIn(f"miss {expected}", logged)
+
+    def test_the_reads_it_guards_are_the_kind_that_return_none(self):
+        """The confrontation. If either read is ever changed to RAISE, the
+        caller's own line becomes redundant — harmless, but this test is
+        where that shows up rather than in a silent log six months later."""
+        import inspect
+
+        from bot_program.engine.ibkr_client import IBKRTrader
+        for name in ("account_values", "broker_portfolio"):
+            src = inspect.getsource(getattr(IBKRTrader, name))
+            self.assertIn(
+                "if not self._connect():", src,
+                f"{name} no longer has a connect-failure branch; the caller's "
+                f"unconditional log was written for exactly that branch")
+            branch = src[src.index("if not self._connect():"):][:120]
+            self.assertIn(
+                "return None", branch,
+                f"{name}'s connect-failure branch no longer returns None — if "
+                f"it now raises, say so and simplify the caller")
+
+    def test_the_log_precedes_the_alert_gate(self):
+        """Read off the source. The warning must sit ABOVE the
+        `misses < BROKER_MISS_ALERT_AFTER` return, or the first two misses of
+        every outage are silent again — which is most of a 45-minute window."""
+        from pathlib import Path as _P
+
+        from django.conf import settings as _s
+        src = (_P(_s.BASE_DIR) / "bot_program" / "tasks.py").read_text(
+            encoding="utf-8")
+        head = src.index("def _note_broker_miss")
+        body = src[head:src.index("def _clear_broker_miss")]
+        self.assertIn("logger.warning", body)
+        self.assertLess(
+            body.index("logger.warning"),
+            body.index("BROKER_MISS_ALERT_AFTER"),
+            "the line is written only after the alert gate, so the first two "
+            "misses of every outage would still be silent")
