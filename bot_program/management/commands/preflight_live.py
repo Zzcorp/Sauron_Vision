@@ -42,6 +42,32 @@ from django.core.management.base import BaseCommand
 # the session is over.
 BROKER_READING_STALE_HOURS = 2.0
 
+# Imported, never restated. Three modules enforce the same six hours, and a
+# fourth copy of the number here would be the copy that drifts:
+#   signals/performance.py    _bar_close_fallback  -> no price, no outcome
+#   signals/lifecycle.py      the SMC pass         -> no resolution
+#   engine/paper_trader.py    ticker()             -> cannot mark a position
+# Past it, a symbol produces no evidence at all. That is correct for a shut
+# market and a failure for an open one, which is why the line below prints
+# the market beside the age.
+from signals.performance import MAX_BAR_AGE_SECONDS  # noqa: E402
+BAR_DEAD_HOURS = MAX_BAR_AGE_SECONDS / 3600.0
+
+# A ten-minute refresh (config/celery.py "refresh-bot-bars", schedule 600.0)
+# writing 4h candles: the newest bar's own period is up to four hours wide,
+# so age alone cannot detect a late writer. Only a gap well past one whole
+# period can, and 4h + a margin is the honest line.
+BAR_LATE_HOURS_WHILE_OPEN = 5.0
+
+# Past this, "the market is shut" stops being an explanation. Borrowed from
+# signals/lifecycle.py, which already decided four days is too old for the
+# slowest frame this platform reads: a long weekend plus a holiday fits
+# inside it, a dead bar writer does not. A closed market excused 923.6h -
+# 38 days - before this line existed.
+from signals.lifecycle import (  # noqa: E402
+    MAX_BAR_AGE_SECONDS_BY_TIMEFRAME as _BAR_AGE_BY_TF)
+BAR_SHUT_GRACE_HOURS = _BAR_AGE_BY_TF["1d"] / 3600.0
+
 # IBKR's own floor, in IBKR's own words (Error 201, 2026-09-10, on the first
 # GLDM order from a 500 EUR account): "MINIMUM OF 2000 USD (OR EQUIVALENT IN
 # OTHER CURRENCIES) IS REQUIRED IN ORDER TO PURCHASE ON MARGIN, SELL SHORT,
@@ -106,6 +132,81 @@ def _age(dt, now):
     if h < 48:
         return f"{h:.1f}h ago"
     return f"{h / 24:.1f}d ago"
+
+
+def _bar_age_hours(newest, now) -> float:
+    return (now - newest).total_seconds() / 3600.0
+
+
+def _market_for(row):
+    """The market clock this instrument keeps, or None when unknowable."""
+    if not row:
+        return None
+    try:
+        from core.exchange_status import market_status_for
+        return market_status_for(row.get("instrument__asset_class") or "",
+                                 row.get("instrument__exchange") or "")
+    except Exception:  # noqa: BLE001 — a missing clock must not take the page
+        return None
+
+
+def _market_note(row, newest, now) -> str:
+    """The clause that stops one number from carrying two diagnoses."""
+    if newest is None:
+        return ""
+    market = _market_for(row)
+    if market is None:
+        return "  (market clock unknown)"
+    age = _bar_age_hours(newest, now)
+    name = market.get("session") or market.get("code") or "?"
+    if market.get("is_open"):
+        if age >= BAR_LATE_HOURS_WHILE_OPEN:
+            return f"  · {name} OPEN and the bar is {age:.1f}h behind"
+        return f"  · {name} open"
+    if age >= BAR_SHUT_GRACE_HOURS:
+        return (f"  · {name} shut, but {age / 24:.1f} DAYS of bars are "
+                f"missing — a closed market does not explain this")
+    if age >= BAR_DEAD_HOURS:
+        return (f"  · {name} shut — past {BAR_DEAD_HOURS:.0f}h, this symbol "
+                f"resolves nothing until it reopens")
+    return f"  · {name} shut"
+
+
+def _bar_findings(sym, row, newest, now, blockers, warnings) -> None:
+    """Split the one number into the two things it can mean.
+
+    An OPEN market with a bar hours behind is a feed that stopped: a
+    blocker, because an armed bot decides on that candle. A SHUT market
+    past the six-hour mark is correct and temporary — but it is also the
+    reason a paper campaign accumulates evidence only inside sessions, and
+    an operator counting on 90 days of fills should read it once rather
+    than discover it on day 90.
+    """
+    market = _market_for(row)
+    if market is None:
+        return
+    age = _bar_age_hours(newest, now)
+    name = market.get("session") or market.get("code") or "?"
+    if market.get("is_open"):
+        if age >= BAR_LATE_HOURS_WHILE_OPEN:
+            blockers.append(
+                f"{sym}: {name} is OPEN and the newest 4h bar is {age:.1f}h "
+                f"old — refresh-bot-bars runs every 10 minutes, so the feed "
+                f"has stopped. An armed bot is deciding on a stale candle")
+        return
+    if age >= BAR_SHUT_GRACE_HOURS:
+        blockers.append(
+            f"{sym}: {age / 24:.1f} days of 4h bars are missing. {name} being "
+            f"shut explains a weekend, not this — the bar writer has "
+            f"stopped for this symbol and no rule can form a decision on it")
+        return
+    if age >= BAR_DEAD_HOURS:
+        warnings.append(
+            f"{sym}: {name} is shut and the newest bar is {age:.1f}h old, "
+            f"past the {BAR_DEAD_HOURS:.0f}h limit the paper venue and the "
+            f"signal lifecycle both enforce. Correct for a shut market — and "
+            f"it means no signal on {sym} can reach an outcome, and no paper "
+            f"position can be marked, until {name} reopens")
 
 
 class Command(BaseCommand):
@@ -444,7 +545,9 @@ class Command(BaseCommand):
                                .filter(instrument__symbol=sym,
                                        timeframe="4h")
                                .order_by("-timestamp")
-                               .values("timestamp", "close")
+                               .values("timestamp", "close",
+                                       "instrument__asset_class",
+                                       "instrument__exchange")
                                .first())
                         newest = row["timestamp"] if row else None
                         price = float(row["close"] or 0) if row else 0.0
@@ -452,12 +555,16 @@ class Command(BaseCommand):
                         if price > 0 and ceiling > 0 and price > ceiling:
                             note = (f"  ← ONE UNIT ({price:,.2f}) EXCEEDS THE "
                                     f"CEILING")
+                        market = _market_note(row, newest, now)
                         w(f"   {sym:<12} newest 4h bar {_age(newest, now)}"
-                          f"{note}")
+                          f"{market}{note}")
                         if newest is None:
                             blockers.append(f"{sym} has no 4h bars — an armed "
                                             f"live bot cannot form a decision")
-                        elif note:
+                        else:
+                            _bar_findings(sym, row, newest, now,
+                                          blockers, warnings)
+                        if note:
                             blockers.append(
                                 f"config {cfg.id} ({cfg.name}): one unit of "
                                 f"{sym} costs {price:,.2f} and the notional "
