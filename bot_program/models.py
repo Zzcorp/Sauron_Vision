@@ -391,6 +391,18 @@ class EtoroAccount(models.Model):
     is_primary_for_crypto = models.BooleanField(default=False)
     connected = models.BooleanField(default=False)
     last_sync = models.DateTimeField(null=True, blank=True)
+    # The reading cells, in IBKRAccount's exact shape (2026-09-17): the nine
+    # broker_backed() call sites read these five names and nothing that is
+    # IBKR-specific, so an eToro row wearing them is a book the pages, the
+    # preflight and the drawdown governor can read without change. Written
+    # only by sync_etoro_accounts, from one broker call, with its age.
+    last_equity = models.DecimalField(max_digits=18, decimal_places=2,
+                                      null=True, blank=True)
+    last_equity_currency = models.CharField(max_length=8, blank=True,
+                                            default="")
+    last_equity_at = models.DateTimeField(null=True, blank=True)
+    broker_positions = models.JSONField(default=list, blank=True)
+    broker_positions_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def is_primary_for(self, asset_class: str) -> bool:

@@ -429,6 +429,15 @@ app.conf.beat_schedule = {
         "task": "bot_program.tasks.sync_broker_account",
         "schedule": 900.0,
     },
+    # 2026-09-17 — the eToro twin: same cadence, same component switch
+    # (broker_account_sync), a separate task so the IBKR loop's session
+    # leasing and 2FA guards are never touched. Both are plain intervals,
+    # so they may coincide; each is one HTTP round trip per account and
+    # the fast queue has two workers, which is contention nobody will see.
+    "sync-etoro-accounts": {
+        "task": "bot_program.tasks.sync_etoro_accounts",
+        "schedule": 900.0,
+    },
 
     # ── Share allocator: a TARGET share of the account per live follower
     #              pool, every 4 h at :05 — five minutes AFTER the :00 sync

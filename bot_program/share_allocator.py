@@ -178,7 +178,8 @@ def drop_24h(user, *, now=None):
     when no history row landed in the window. The current reading is part
     of the max, so the answer is never negative; a history in another
     currency is an exchange rate, not a drop, and does not count."""
-    from bot_program.capital_truth import account_equity, broker_backed
+    from bot_program.capital_truth import (account_equity, broker_backed,
+                                           broker_kind)
     from bot_program.equity_models import BrokerEquityReading
     now = now or timezone.now()
     acct = broker_backed(user)
@@ -187,7 +188,8 @@ def drop_24h(user, *, now=None):
         return None
     current = float(reading["value"])
     rows = BrokerEquityReading.objects.filter(
-        account=acct, currency=reading["currency"] or "",
+        broker=broker_kind(acct), account_pk=acct.pk,
+        currency=reading["currency"] or "",
         at__gte=now - timedelta(hours=24)).values_list("value", flat=True)
     values = [float(v) for v in rows]
     if not values:

@@ -186,6 +186,23 @@ def broker_backed(user):
     True forever. Reachability is a different question and it is answered
     by the AGE of the last reading, never by a stored flag.
     """
+    # eToro first, since 2026-09-17, by the router's own rule: the row is
+    # the book when it is keyed AND flagged primary for at least one asset
+    # class. A keyed row with no flag carries nothing and is therefore not
+    # the book, and a user who has flipped no flag sees IBKR exactly as
+    # before. Precedence over IBKR is deliberate — retiring it is the
+    # stated direction — and it is the same ordering broker_router uses.
+    etoro = getattr(user, "etoro_account", None)
+    if etoro is not None:
+        try:
+            keyed = bool(etoro.get_credentials()[0])
+            carries = any(etoro.is_primary_for(c)
+                          for c in ("stock", "forex", "commodity", "crypto"))
+        except Exception:  # noqa: BLE001 — an unreadable row is not backed
+            keyed, carries = False, False
+        if keyed and carries:
+            return etoro
+
     acct = getattr(user, "ibkr_account", None)
     if acct is None:
         return None
@@ -194,6 +211,12 @@ def broker_backed(user):
     except Exception:  # noqa: BLE001 — an undecryptable id is not backed
         return None
     return acct if account_id else None
+
+
+def broker_kind(acct) -> str:
+    """The `broker` value a reading for this account row is stored under.
+    One place, so the writer and both readers cannot spell it differently."""
+    return "etoro" if type(acct).__name__ == "EtoroAccount" else "ibkr"
 
 
 def account_equity(user):
@@ -487,7 +510,8 @@ def equity_high_water(user, *, window_days=90):
     currency = reading["currency"] or ""
     since = timezone.now() - timedelta(days=window_days)
     rows = (BrokerEquityReading.objects
-            .filter(account=acct, currency=currency, at__gte=since)
+            .filter(broker=broker_kind(acct), account_pk=acct.pk,
+                    currency=currency, at__gte=since)
             .order_by("-value", "-at"))
     hwm, hwm_at = float(reading["value"]), reading["at"]
     n = 0

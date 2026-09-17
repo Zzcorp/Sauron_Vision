@@ -423,9 +423,11 @@ def sync_broker_account() -> dict:
 
                 from .equity_models import BrokerEquityReading
                 BrokerEquityReading.objects.create(
+                    broker="ibkr", account_pk=acct.pk,
                     account=acct, value=Decimal(str(round(float(value), 2))),
                     currency=currency or "", env=acct.env or "", at=now)
                 BrokerEquityReading.objects.filter(
+                    broker="ibkr", account_pk=acct.pk,
                     account=acct,
                     at__lt=now - timedelta(days=EQUITY_HISTORY_DAYS)
                 ).delete()
@@ -561,12 +563,99 @@ BROKER_MISS_ALERT_AFTER = 3
 BROKER_MISS_ALERT_COOLDOWN = 6 * 3600
 
 
+def _broker_kind(acct) -> str:
+    """The `broker` value this row's readings and miss keys are filed under.
+    Mirrors capital_truth.broker_kind; duplicated here rather than imported
+    so the miss helpers stay importable when capital_truth is not."""
+    return "etoro" if type(acct).__name__ == "EtoroAccount" else "ibkr"
+
+
+@shared_task
+@guarded_task("broker_account_sync")
+def sync_etoro_accounts():
+    """Read every keyed eToro account: equity, holdings, one history row.
+
+    The eToro twin of sync_broker_account, and deliberately NOT a branch
+    inside it — that loop leases IBKR session slots and carries a year of
+    2FA-shaped guards. Same component switch, same five cells, same history
+    shape keyed (broker="etoro", account_pk). One switch governs "does the
+    platform read its brokers"; one row shape means the drawdown governor
+    and the preflight read eToro exactly as they read IBKR.
+
+    Not gated on broker_backed(): a keyed row's equity is a fact worth
+    storing whether or not that row is currently "the book". The page
+    shows last_sync for it either way.
+
+    `attempted` and `stored` are the gate's work/done counters, so a walk
+    that read N accounts and stored nothing is judged as such rather than
+    returning a clean dict.
+    """
+    from django.utils import timezone
+
+    from .engine.etoro_client import EtoroTrader
+    from .models import EtoroAccount
+
+    out = {"attempted": 0, "stored": 0, "unreachable": 0}
+    for acct in EtoroAccount.objects.exclude(api_key_enc=""):
+        user = acct.user
+        k, u = acct.get_credentials()
+        if not (k and u):
+            continue
+        out["attempted"] += 1
+        reading, rows = None, None
+        try:
+            client = EtoroTrader(k, u, env="demo" if acct.demo else "live")
+            reading = client.net_liquidation()
+            rows = client.broker_portfolio()
+        except Exception as e:  # noqa: BLE001 — one account must not stop the rest
+            logger.warning("broker sync: %s (etoro) unreadable: %s",
+                           acct.label, e)
+            reading, rows = None, None
+
+        if reading is None and rows is None:
+            out["unreachable"] += 1
+            _note_broker_miss(acct, user)
+            continue
+        _clear_broker_miss(acct)
+
+        now = timezone.now()
+        fields = []
+        if reading is not None:
+            value, currency = reading
+            acct.last_equity = value
+            acct.last_equity_currency = currency
+            acct.last_equity_at = now
+            fields += ["last_equity", "last_equity_currency",
+                       "last_equity_at"]
+        if rows is not None:
+            acct.broker_positions = rows
+            acct.broker_positions_at = now
+            fields += ["broker_positions", "broker_positions_at"]
+        acct.connected = True
+        acct.last_sync = now
+        fields += ["connected", "last_sync"]
+        acct.save(update_fields=fields)
+
+        if reading is not None:
+            from .equity_models import BrokerEquityReading
+            try:
+                BrokerEquityReading.objects.get_or_create(
+                    broker="etoro", account_pk=acct.pk, at=now,
+                    defaults={"value": value, "currency": currency,
+                              "env": "paper" if acct.demo else "live"})
+                out["stored"] += 1
+            except Exception as e:  # noqa: BLE001 — the cell is written; history must not fail the sync
+                logger.warning("broker sync: %s (etoro) history row failed: "
+                               "%s", acct.label, e)
+    return out
+
+
 def _note_broker_miss(acct, user) -> None:
     from django.core.cache import cache
 
     from .notifications import notify_broker_unreachable
 
-    key = f"broker_sync:miss:{acct.pk}"
+    key = f"broker_sync:miss:{_broker_kind(acct)}:{acct.pk}"
     misses = int(cache.get(key) or 0) + 1
     cache.set(key, misses, 24 * 3600)
 
@@ -595,16 +684,19 @@ def _note_broker_miss(acct, user) -> None:
         "consecutive miss %d. Neither read raised; both answered None, "
         "which is what an unauthenticated Gateway looks like. Check "
         "`dc ps` for (unhealthy) and `./deploy/ibkr-doctor`",
-        acct.label, acct.host, acct.port, misses)
+        acct.label, getattr(acct, "host", "api"),
+        getattr(acct, "port", ""), misses)
 
     if misses < BROKER_MISS_ALERT_AFTER:
         return
-    gate = f"broker_sync:alerted:{acct.pk}"
+    gate = f"broker_sync:alerted:{_broker_kind(acct)}:{acct.pk}"
     if cache.get(gate):
         return
     try:
-        notify_broker_unreachable(user, label=acct.label, host=acct.host,
-                                  port=acct.port, misses=misses)
+        notify_broker_unreachable(user, label=acct.label,
+                                  host=getattr(acct, "host", "api"),
+                                  port=getattr(acct, "port", 0),
+                                  misses=misses)
         cache.set(gate, 1, BROKER_MISS_ALERT_COOLDOWN)
     except Exception as e:  # noqa: BLE001 — an alert must never fail the sync
         logger.warning("broker sync: stall alert failed for %s: %s",
@@ -614,8 +706,8 @@ def _note_broker_miss(acct, user) -> None:
 def _clear_broker_miss(acct) -> None:
     from django.core.cache import cache
 
-    cache.delete(f"broker_sync:miss:{acct.pk}")
-    cache.delete(f"broker_sync:alerted:{acct.pk}")
+    cache.delete(f"broker_sync:miss:{_broker_kind(acct)}:{acct.pk}")
+    cache.delete(f"broker_sync:alerted:{_broker_kind(acct)}:{acct.pk}")
 
 
 # ─── The share allocator ─────────────────────────────────────────────────
