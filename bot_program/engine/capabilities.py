@@ -86,6 +86,11 @@ ADAPTER_CAPABILITIES: dict = {
     # author had written from memory a minute earlier — which is the whole
     # argument for deriving the second opinion from the class.
     "binance_futures": ("market_data", "execution", "leverage"),
+    # 2026-09-17. NOT "orders": the reference documents no cancel for a
+    # pending order. NOT "fills": no closed-position history is documented
+    # and the close confirmation has not met a real key. A method that
+    # existed and could not act would pass this table's test and lie.
+    "etoro": ("market_data", "execution", "brackets", "account"),
     "ibkr": ("market_data", "execution", "orders", "brackets", "account",
              "options"),
     "oanda": ("market_data", "execution", "orders", "brackets", "fills"),

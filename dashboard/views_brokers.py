@@ -41,26 +41,34 @@ from .views_admin_hq import _admin_only
 
 logger = logging.getLogger(__name__)
 
-#: The authenticated read used to prove a key pair reaches eToro. Taken from
-#: the public API reference; if it 404s the probe reports "unknown" rather
-#: than "refused", because a wrong PATH is not a wrong KEY.
-ETORO_PROBE_URL = "https://api.etoro.com/API/User/V1/user"
 ETORO_PROBE_TIMEOUT_S = 10
 
 
-def etoro_probe(api_key: str, user_key: str) -> tuple:
+def etoro_probe(api_key: str, user_key: str, demo: bool = True) -> tuple:
     """("ok" | "refused" | "unknown", detail) — three answers, on purpose.
 
     200 means the keys work. 401 or 403 means eToro saw them and said no.
-    Anything else — a 404 on the probe path, a 5xx, a timeout — means this
-    call could not decide, and the operator must not be told their keys are
-    wrong on the strength of it.
+    Anything else — a 404, a 5xx, a timeout — means this call could not
+    decide, and the operator must not be told their keys are wrong on the
+    strength of it.
+
+    The endpoint is the adapter's own aggregate-portfolio read, built by
+    the adapter's path rule, so the probe and the client can never disagree
+    about where eToro lives. The first version of this hit a host and path
+    taken from an earlier, unverified guess; it would have answered
+    "unknown" for every real key. `demo` matters: a demo key against the
+    real path is a 401 that reads as "your keys are wrong".
     """
+    from bot_program.engine.etoro_client import EtoroTrader
+    url = EtoroTrader(api_key, user_key,
+                      env="demo" if demo else "live")._v1_info(
+        "aggregate-portfolio")
     try:
         import requests
         r = requests.get(
-            ETORO_PROBE_URL,
-            headers={"x-api-key": api_key, "x-user-key": user_key},
+            url,
+            headers={"x-api-key": api_key, "x-user-key": user_key,
+                     "x-request-id": EtoroTrader._rid()},
             timeout=ETORO_PROBE_TIMEOUT_S)
     except Exception as e:  # noqa: BLE001 — a network error is "unknown"
         return "unknown", f"{type(e).__name__}: {e}"
@@ -123,9 +131,10 @@ def _rows(user) -> list:
             _env(oanda, "practice", "practice", "live") if oanda else "—"),
         row("binance", "Binance", binance,
             _env(binance, "testnet", "testnet", "live") if binance else "—"),
+        # Adapter landed 2026-09-17 (engine/etoro_client.py); the
+        # capabilities column now reads the enforced table for it.
         row("etoro", "eToro", etoro,
-            _env(etoro, "demo", "demo", "live") if etoro else "—",
-            has_adapter=False),
+            _env(etoro, "demo", "demo", "live") if etoro else "—"),
         row("saxo", "Saxo Bank", saxo,
             _env(saxo, "sim", "sim", "live") if saxo else "—",
             has_adapter=False, extra=saxo_extra),
@@ -175,7 +184,7 @@ def save_etoro_credentials(request):
     acct.demo = demo
     env = "demo" if demo else "live"
 
-    verdict, detail = etoro_probe(api_key, user_key)
+    verdict, detail = etoro_probe(api_key, user_key, demo=demo)
     acct.connected = verdict == "ok"
     if acct.connected:
         acct.last_sync = timezone.now()

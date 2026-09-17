@@ -47,6 +47,7 @@ ADAPTERS = {
     "binance": ("bot_program.engine.binance_client", "BinanceClient"),
     "binance_futures": ("bot_program.engine.binance_futures_client",
                         "BinanceFuturesClient"),
+    "etoro": ("bot_program.engine.etoro_client", "EtoroTrader"),
     "ibkr": ("bot_program.engine.ibkr_client", "IBKRTrader"),
     "oanda": ("bot_program.engine.oanda_client", "OANDATrader"),
     "paper": ("bot_program.engine.paper_trader", "PaperTrader"),
@@ -140,16 +141,21 @@ class TheFactsBehindTheTableTests(SimpleTestCase):
     """Four measured facts, pinned because each one explains a behaviour an
     operator will otherwise find surprising."""
 
-    def test_only_ibkr_can_be_asked_for_the_account(self):
-        """`sync_broker_account` walks IBKRAccount and nothing else. This is
-        why — no other adapter can answer net_liquidation."""
+    def test_which_adapters_can_be_asked_for_the_account(self):
+        """Until 2026-09-17 only IBKR could answer net_liquidation, which is
+        why `sync_broker_account` walks IBKRAccount and nothing else. eToro
+        can now — and the sync STILL walks only IBKR rows. That gap is
+        recorded here on purpose: an eToro account's equity will not reach
+        the pages, the drawdown governor or the preflight until the sync
+        learns to walk EtoroAccount. The next adapter that joins this set
+        should make the same note, or fix the sync."""
         able = {n for n in ADAPTERS
                 if cap.has_capability(_klass(n), "account")}
         self.assertEqual(
-            able, {"ibkr"},
-            "another adapter can now read an account; the broker sync should "
-            "probably walk it too, and this test is where that decision gets "
-            "made rather than forgotten")
+            able, {"ibkr", "etoro"},
+            "the set of adapters that can read an account changed; decide "
+            "here whether the broker sync walks the newcomer, rather than "
+            "letting its equity go unread in silence")
 
     def test_the_simulator_claims_nothing_it_cannot_simulate(self):
         """PaperTrader is what a live config falls back to when credentials

@@ -100,8 +100,9 @@ class ThePageTests(TestCase):
         """However good the keys, nothing can be asked of a broker the engine
         has no client for. Showing it green would send an operator to arm a
         live config against it."""
-        acct = EtoroAccount.objects.create(user=self.user, connected=False)
-        acct.set_credentials(RAW_KEY, RAW_USER)
+        # Saxo is the example now: eToro grew an adapter on 2026-09-17.
+        acct = SaxoAccount.objects.create(user=self.user, connected=False)
+        acct.set_credentials(RAW_APP, RAW_SECRET)
         acct.save()
         self.client.force_login(self.user)
         body = self.client.get(reverse("brokers_page")).content.decode()
@@ -165,7 +166,7 @@ class SavingEtoroTests(TestCase):
     def test_verified_keys_are_stored_encrypted_and_connected(self):
         r, probe = self._save(("ok", "200"))
         self.assertEqual(r.status_code, 302)
-        probe.assert_called_once_with(RAW_KEY, RAW_USER)
+        probe.assert_called_once_with(RAW_KEY, RAW_USER, demo=True)
         acct = EtoroAccount.objects.get(user=self.user)
         self.assertTrue(acct.connected)
         self.assertTrue(acct.demo)

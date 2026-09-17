@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # tests/test_wall_facts.py counts the suite and fails when this drifts: the
 # first version of this module shipped a number its own commit had already
 # invalidated, which is exactly the failure it was written to prevent.
-TESTS_GREEN = 6891
+TESTS_GREEN = 6919
 
 # Broker adapters implemented under bot_program/engine/ — one module and one
 # client class each, all reachable from broker_router.client_for_symbol().
@@ -59,6 +59,7 @@ BROKER_ADAPTERS = (
     "alpaca",           # engine/alpaca_client.py           AlpacaTrader
     "binance",          # engine/binance_client.py          BinanceClient
     "binance_futures",  # engine/binance_futures_client.py  BinanceFuturesClient
+    "etoro",            # engine/etoro_client.py            EtoroTrader
     "ibkr",             # engine/ibkr_client.py             IBKRTrader
     "oanda",            # engine/oanda_client.py            OANDATrader
     "paper",            # engine/paper_trader.py            PaperTrader
