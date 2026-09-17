@@ -66,6 +66,8 @@ UNGATED = (
      "stamps MFE/MAE and closes outcomes — the sole writer of realized_r"),
     ("market_data.tasks.refresh_bot_bars_task", 600,
      "writes the 1h/4h bars every other link reads"),
+    ("bot_program.tasks.refresh_saxo_sessions", 600,
+     "rotates the Saxo OAuth session — its refresh token lives 40 minutes"),
 )
 
 #: How many symbols of a config to inspect. The point is to find a cold feed,
@@ -127,6 +129,24 @@ def readiness(window_days: int = 30) -> dict:
         cold.append("platform_master")
 
     # ── 2. the chain ────────────────────────────────────────────────────
+    # ── 1b. the switch that "ungated" tasks DO have ────────────────────
+    # Under django_celery_beat's DatabaseScheduler every beat entry is a
+    # PeriodicTask row with an `enabled` box in /admin/, and a box unticked
+    # there stays unticked across every beat restart. "No switch to look
+    # for" is true of PlatformComponent, not of that box — so look at it.
+    for task, _every, _what in UNGATED:
+        try:
+            from django_celery_beat.models import PeriodicTask
+            off = PeriodicTask.objects.filter(task=task, enabled=False).exists()
+        except Exception:  # noqa: BLE001 — no scheduler table is not a blocker
+            off = False
+        if off:
+            blockers.append(
+                f"{task.split('.')[-1]} is DISABLED in the beat schedule "
+                f"(Django admin → Periodic tasks). It has no PlatformComponent "
+                f"switch, but that box is one, and it stays unticked across "
+                f"restarts")
+
     rows = []
     for key, what in EVIDENCE_CHAIN:
         state = component_state(key)

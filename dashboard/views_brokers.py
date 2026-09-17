@@ -88,7 +88,10 @@ def _status(acct, *, has_adapter: bool) -> str:
     if acct is None:
         return "no row"
     if getattr(acct, "connected", False):
-        return "connected"
+        # A session is not an adapter: the page's rule is that a broker
+        # nothing can be asked of is never painted green, however good its
+        # keys or its session. Saxo sits here until SaxoTrader lands.
+        return "connected" if has_adapter else "session open — adapter pending"
     if not has_adapter:
         return "recorded — adapter pending"
     return "recorded — never verified"
@@ -107,16 +110,68 @@ def _primary_classes(acct) -> list:
     return [c for c in ROUTABLE_CLASSES if fn(c)]
 
 
+def _redirect_uri_problem(uri: str):
+    """Why a registered redirect URI cannot work, or None.
+
+    The callback PATH is fixed by urls.py; only the host is the operator's.
+    A URI that lands anywhere else makes the sign-in a silent no-op — Saxo
+    accepts it (it matches the portal), the browser comes back to a page
+    that ignores ?code=, and the armed state is left dangling. And an
+    http:// URI would carry the authorization code in clear text.
+    """
+    from urllib.parse import urlparse
+
+    from django.urls import reverse
+
+    p = urlparse((uri or "").strip())
+    if p.scheme not in ("https", "http"):
+        return "must start with https://"
+    host = (p.hostname or "").lower()
+    if p.scheme == "http" and host not in ("localhost", "127.0.0.1"):
+        return "must be https (http is allowed only for localhost)"
+    expected = reverse("saxo_callback")
+    if p.path != expected:
+        return f"path must be exactly {expected}"
+    return None
+
+
+def _saxo_session_line(saxo, now=None):
+    """(the session line for the row, whether a sign-in is what it needs).
+
+    Five states, not two — the page the lost-session log sends the
+    operator to must be able to say "lost" and "again"."""
+    now = now or timezone.now()
+    registered = bool(saxo.app_key_enc)
+    if not saxo.has_session:
+        if saxo.session_lost_at:
+            when = saxo.session_lost_at.strftime("%Y-%m-%d %H:%M")
+            why = saxo.session_lost_reason or "refresh refused"
+            return (f"session: LOST {when} UTC — {why} — sign in again",
+                    registered)
+        return "session: none — OAuth sign-in not yet done", registered
+    if not saxo.session_alive(now):
+        return ("session: EXPIRED — refresh token past its life — sign in "
+                "again", registered)
+    if not saxo.access_token_valid(now):
+        return ("session: renewable — access token expired, renewing at the "
+                "next cycle", False)
+    return "session: renewable", False
+
+
 def _rows(user) -> list:
     from bot_program.engine.capabilities import declared
 
-    def row(key, name, acct, env, has_adapter=True, extra=""):
+    def row(key, name, acct, env, has_adapter=True, extra="",
+            needs_signin=False):
         return {
             "key": key, "name": name, "account": acct,
             "env": env if acct is not None else "—",
             "status": _status(acct, has_adapter=has_adapter),
-            "connected": bool(acct is not None
+            # Green means "can be asked of": a session on a broker with no
+            # adapter is real and is NOT green — see _status.
+            "connected": bool(acct is not None and has_adapter
                               and getattr(acct, "connected", False)),
+            "needs_signin": needs_signin,
             "last_sync": getattr(acct, "last_sync", None),
             "capabilities": declared(key) if has_adapter else (),
             "has_adapter": has_adapter,
@@ -131,10 +186,9 @@ def _rows(user) -> list:
     etoro = getattr(user, "etoro_account", None)
     saxo = getattr(user, "saxo_account", None)
 
-    saxo_extra = ""
+    saxo_extra, saxo_needs_signin = "", False
     if saxo is not None:
-        saxo_extra = ("session: renewable" if saxo.has_session
-                      else "session: none — OAuth sign-in not yet done")
+        saxo_extra, saxo_needs_signin = _saxo_session_line(saxo)
 
     return [
         row("ibkr", "Interactive Brokers", ibkr,
@@ -151,7 +205,8 @@ def _rows(user) -> list:
             _env(etoro, "demo", "demo", "live") if etoro else "—"),
         row("saxo", "Saxo Bank", saxo,
             _env(saxo, "sim", "sim", "live") if saxo else "—",
-            has_adapter=False, extra=saxo_extra),
+            has_adapter=False, extra=saxo_extra,
+            needs_signin=saxo_needs_signin),
     ]
 
 
@@ -250,17 +305,167 @@ def save_saxo_credentials(request):
         messages.error(request, f"Saxo: user '{target_username}' not found.")
         return redirect("brokers_page")
 
+    problem = _redirect_uri_problem(redirect_uri)
+    if problem:
+        messages.error(request, f"Saxo: the redirect URI {problem}. Nothing "
+                                f"was saved.")
+        return redirect("brokers_page")
+
     acct, _ = SaxoAccount.objects.get_or_create(user=user)
     acct.set_credentials(app_key, app_secret)
     acct.redirect_uri = redirect_uri
     acct.sim = sim
-    # An app key cannot be verified on its own: Saxo answers only after the
-    # OAuth sign-in, which does not exist yet. Recorded, honestly not
-    # connected.
-    acct.connected = False
+    # A session belongs to ONE application on ONE environment: a re-saved
+    # key, secret, URI or sim flag closes whatever session was open, or the
+    # keeper would present a SIM token to the live host (or an old app's
+    # token under the new app's credentials) every ten minutes. An app key
+    # cannot be verified on its own — Saxo answers only after the sign-in.
+    acct.clear_session()
+    acct.session_lost_at = None
+    acct.session_lost_reason = ""
     acct.save()
     messages.warning(request, f"Saxo application saved for {target_username} "
                               f"({'sim' if sim else 'live'}). Not yet "
-                              f"connected: the OAuth sign-in that opens a "
-                              f"session arrives with the Saxo adapter.")
+                              f"connected: press 'Connect Saxo — sign in "
+                              f"once' on the row to open the session. Any "
+                              f"session that was open is closed.")
     return redirect("brokers_page")
+
+
+# ── Saxo: the one browser sign-in ────────────────────────────────────────
+
+SAXO_STATE_KEY = "saxo_oauth_state"
+
+
+@login_required
+def saxo_connect(request):
+    """Send the operator's browser to Saxo to sign in once.
+
+    Own row only. A random `state` goes into the session and must come back
+    unchanged, or the callback stores nothing — the standard defence
+    against a forged callback landing tokens on someone else's row.
+    """
+    import secrets
+
+    from bot_program.engine import saxo_oauth
+
+    acct = getattr(request.user, "saxo_account", None)
+    if acct is None or not acct.get_credentials()[0] or not acct.redirect_uri:
+        messages.error(request, "Saxo: register the application (app key, "
+                                "secret, redirect URI) before connecting.")
+        return redirect("brokers_page")
+    problem = _redirect_uri_problem(acct.redirect_uri)
+    if problem:
+        messages.error(request, f"Saxo: the registered redirect URI {problem} "
+                                f"— fix it under Register Saxo Application "
+                                f"before connecting.")
+        return redirect("brokers_page")
+    state = secrets.token_urlsafe(32)
+    request.session[SAXO_STATE_KEY] = state
+    return redirect(saxo_oauth.authorize_url(acct, state))
+
+
+@login_required
+def saxo_callback(request):
+    """Saxo sends the browser back here with ?code=&state=.
+
+    The path is fixed — /brokers/saxo/callback/ — and the host is whatever
+    the operator registered; the row carries that full URI and it is the
+    one presented to Saxo in the code exchange, so a mismatch is Saxo's
+    error message and never a silent partial success.
+    """
+    from bot_program.engine import saxo_oauth
+
+    acct = getattr(request.user, "saxo_account", None)
+    expected = request.session.pop(SAXO_STATE_KEY, None)
+    state = request.GET.get("state", "")
+    code = request.GET.get("code", "")
+    if acct is None:
+        messages.error(request, "Saxo: no application registered on your "
+                                "account.")
+        return redirect("brokers_page")
+    if not expected or state != expected:
+        if expected is None and acct.session_alive():
+            # A replayed callback (F5, back button, a prefetch) after a
+            # successful exchange: the state was consumed by the hit that
+            # opened the session. Nothing to redeem, nothing to apologise
+            # for.
+            messages.info(request, "Saxo: session already open — nothing to "
+                                   "do.")
+            return redirect("brokers_page")
+        messages.error(request, "Saxo: sign-in state did not match — nothing "
+                                "was stored. Start again from Connect.")
+        return redirect("brokers_page")
+    if not code:
+        messages.error(request, "Saxo: no authorization code came back — "
+                                f"{request.GET.get('error', 'no error given')}.")
+        return redirect("brokers_page")
+    try:
+        payload = saxo_oauth.exchange_code(acct, code)
+        saxo_oauth.store_tokens(acct, payload)
+    except Exception as e:  # noqa: BLE001 — the message is the point
+        # The hint is shown only when Saxo's own words name the redirect:
+        # a wrong secret or a 503 has nothing to do with the portal.
+        hint = (" The registered redirect URI must match the portal to the "
+                "character." if "redirect" in str(e).lower() else "")
+        messages.error(request, f"Saxo: the code exchange failed — {e}.{hint}")
+        return redirect("brokers_page")
+    messages.success(request, "Saxo session opened. It renews itself every "
+                              "ten minutes while the platform is up; an "
+                              "outage longer than forty minutes needs this "
+                              "sign-in again.")
+    return redirect("brokers_page")
+
+
+# ── Forgetting a broker: the house pattern for pulling secrets ───────────
+
+@_admin_only
+def disconnect_saxo(request):
+    """Forget the Saxo application AND its session for one account.
+
+    The keeper renews any session it finds every ten minutes, so "remove
+    the row in Django admin" was the only way to stop a session an
+    operator no longer wants (wrong account signed in, laptop lost). Now
+    it is a button, superuser + POST like every other secret-pulling view.
+    """
+    from bot_program.models import SaxoAccount
+
+    target = request.POST.get("target_username", "").strip()
+    try:
+        acct = SaxoAccount.objects.get(user__username=target)
+    except SaxoAccount.DoesNotExist:
+        messages.error(request, f"Saxo: no application registered for "
+                                f"'{target}'.")
+        return redirect("brokers_page")
+    acct.clear_session()
+    acct.app_key_enc = ""
+    acct.app_secret_enc = ""
+    acct.session_lost_at = None
+    acct.session_lost_reason = ""
+    acct.save()
+    messages.success(request, f"Saxo: keys and session forgotten for {target}. "
+                              f"The keeper has nothing left to renew; register "
+                              f"the application again to reconnect.")
+    return redirect("brokers_page")
+
+
+@_admin_only
+def disconnect_etoro(request):
+    """Forget the eToro keys for one account. Its routing flags stay — a
+    flag with no key routes nowhere, and the router reads (None, None)."""
+    from bot_program.models import EtoroAccount
+
+    target = request.POST.get("target_username", "").strip()
+    try:
+        acct = EtoroAccount.objects.get(user__username=target)
+    except EtoroAccount.DoesNotExist:
+        messages.error(request, f"eToro: no keys recorded for '{target}'.")
+        return redirect("brokers_page")
+    acct.api_key_enc = ""
+    acct.user_key_enc = ""
+    acct.connected = False
+    acct.save()
+    messages.success(request, f"eToro: keys forgotten for {target}. Nothing "
+                              f"routes to eToro until new keys pass the probe.")
+    return redirect("brokers_page")
+

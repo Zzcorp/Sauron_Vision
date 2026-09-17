@@ -438,6 +438,19 @@ app.conf.beat_schedule = {
         "task": "bot_program.tasks.sync_etoro_accounts",
         "schedule": 900.0,
     },
+    # 2026-09-17 — Saxo's OAuth session keeper. UNGATED: the refresh token
+    # lives forty minutes and rotates, so a session that died because a
+    # sync switch was off for an afternoon would cost a browser sign-in.
+    # Ten minutes gives four refreshes per token lifetime; one missed cycle
+    # costs nothing. Cadence pinned against the lifetime by
+    # tests/test_saxo_oauth.py.
+    "refresh-saxo-sessions": {
+        "task": "bot_program.tasks.refresh_saxo_sessions",
+        "schedule": 600.0,
+        # A backlog must never drain two rotations at once: the refresh
+        # token rotates, so a second run racing the first can only lose.
+        "options": {"expires": 540},
+    },
 
     # ── Share allocator: a TARGET share of the account per live follower
     #              pool, every 4 h at :05 — five minutes AFTER the :00 sync

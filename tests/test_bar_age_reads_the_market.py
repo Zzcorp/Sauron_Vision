@@ -219,7 +219,7 @@ class TheLineCarriesBothTests(TestCase):
         self.assertIn("newest 4h bar", body)
         line = next(ln for ln in body.splitlines() if "newest 4h bar" in ln)
         self.assertRegex(
-            line, r"newest 4h bar .*(open|shut|unknown)",
+            line, r"newest 4h bar .*(?i:open|shut|unknown)",
             f"the bar age is printed bare: {line!r}. That is the line that "
             f"was read as a broken feed on a correctly shut market.")
 

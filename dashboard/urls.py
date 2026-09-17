@@ -109,7 +109,8 @@ from .api import market_views, signal_views, strategy_views, portfolio_views, ai
 from core.views import rate_limiter_stats, system_status
 
 from .views_brokers import (  # noqa: E402 — 2026-09-17, les courtiers
-    brokers_page, save_etoro_credentials, save_saxo_credentials)
+    brokers_page, disconnect_etoro, disconnect_saxo, save_etoro_credentials,
+    save_saxo_credentials, saxo_callback, saxo_connect)
 
 urlpatterns = [
     # ── Command Center (unified Dashboard + Eye merge) ───────
@@ -236,6 +237,12 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("brokers/", brokers_page, name="brokers_page"),
     path("admin-dashboard/brokers/etoro/save/", save_etoro_credentials, name="hq_save_etoro"),
     path("admin-dashboard/brokers/saxo/save/", save_saxo_credentials, name="hq_save_saxo"),
+    path("admin-dashboard/brokers/saxo/disconnect/", disconnect_saxo, name="hq_disconnect_saxo"),
+    path("admin-dashboard/brokers/etoro/disconnect/", disconnect_etoro, name="hq_disconnect_etoro"),
+    # The one browser sign-in. The callback PATH is fixed here; the HOST is
+    # whatever the operator registered on Saxo's portal and saved on the row.
+    path("brokers/saxo/connect/", saxo_connect, name="saxo_connect"),
+    path("brokers/saxo/callback/", saxo_callback, name="saxo_callback"),
     # TradingView alerts arrive as SIGNALS, never as orders — they join
     # the same queue every internal rule writes into and are gated by the
     # same book. Unauthenticated by design (TradingView cannot send

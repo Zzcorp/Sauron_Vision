@@ -563,6 +563,72 @@ BROKER_MISS_ALERT_AFTER = 3
 BROKER_MISS_ALERT_COOLDOWN = 6 * 3600
 
 
+@shared_task
+def refresh_saxo_sessions():
+    """Rotate every Saxo row's tokens. Ungated — see the module note in
+    engine/saxo_oauth.py and the docstring of this patch.
+
+    The counters are the honest ones for a keeper: `attempted` rows with a
+    refresh token, `renewed` rotations that landed, `lost` sessions whose
+    refresh token was past its life when the refresh failed. A transient
+    failure inside the window counts as neither — it is logged, the session
+    is kept, and the next cycle tries again.
+    """
+    from django.utils import timezone
+
+    from .engine import saxo_oauth
+    from .models import SaxoAccount
+
+    out = {"attempted": 0, "renewed": 0, "lost": 0, "retry": 0}
+    now = timezone.now()
+    for acct in SaxoAccount.objects.exclude(refresh_token_enc=""):
+        out["attempted"] += 1
+        try:
+            payload = saxo_oauth.refresh(acct)
+            saxo_oauth.store_tokens(acct, payload, now=now)
+            out["renewed"] += 1
+        except Exception as e:  # noqa: BLE001 — one row must not stop the rest
+            deadline = acct.refresh_expires_at
+            if deadline is not None and now < deadline:
+                out["retry"] += 1
+                logger.warning(
+                    "saxo session: %s refresh failed (%s: %s) — the refresh "
+                    "token is still alive until %s, retrying next cycle",
+                    acct.label, type(e).__name__, e, deadline.isoformat())
+                continue
+            reason = f"{type(e).__name__}: {e}"[:120]
+            # Compare-and-clear: only a row STILL holding the token that
+            # just failed is cleared. A concurrent run that rotated it in
+            # the meantime keeps its fresh session — this failure was about
+            # a token that no longer exists.
+            n = SaxoAccount.objects.filter(
+                pk=acct.pk, refresh_token_enc=acct.refresh_token_enc,
+            ).update(access_token_enc="", refresh_token_enc="",
+                     token_expires_at=None, refresh_expires_at=None,
+                     connected=False, session_lost_at=now,
+                     session_lost_reason=reason)
+            if n != 1:
+                logger.info("saxo session: %s was rotated by another run "
+                            "while this one failed — nothing cleared",
+                            acct.label)
+                continue
+            out["lost"] += 1
+            logger.warning(
+                "saxo session: %s is LOST (%s) — the refresh token was past "
+                "its life. Sign in again at /brokers/. Nothing on Saxo can "
+                "be read or traded until then.", acct.label, reason)
+            try:
+                from .notifications import notify_staff
+                notify_staff(
+                    title="Saxo session LOST — sign in again at /brokers/",
+                    body=f"{acct.label}: {reason}", url="/brokers/",
+                    cooldown_hours=6)
+            except Exception as alert_err:  # noqa: BLE001 — an alert must never fail the keeper
+                logger.warning("saxo session: staff alert failed (%s: %s)",
+                               type(alert_err).__name__, alert_err)
+    return out
+
+
 def _broker_kind(acct) -> str:
     """The `broker` value this row's readings and miss keys are filed under.
     Mirrors capital_truth.broker_kind; duplicated here rather than imported

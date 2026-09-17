@@ -34,6 +34,15 @@
                     {% elif r.account %}<span style="color:var(--accent-gold);">◐ {{ r.status }}</span>
                     {% else %}<span style="color:var(--text-muted);">○ {{ r.status }}</span>{% endif %}
                     {% if r.extra %}<div style="font-size:10px;color:var(--text-muted);">{{ r.extra }}</div>{% endif %}
+                    {% if r.needs_signin %}
+                    <a class="btn btn-primary btn-sm" style="margin-top:6px;" href="{% url 'saxo_connect' %}">Connect Saxo — sign in once</a>
+                    {% endif %}
+                    {% if user.is_superuser and r.key == "saxo" and r.account and r.account.app_key_enc %}
+                    <form method="post" action="{% url 'hq_disconnect_saxo' %}" style="margin-top:6px;">{% csrf_token %}<input type="hidden" name="target_username" value="{{ user.username }}"><button type="submit" class="btn btn-sm">Forget Saxo — keys and session</button></form>
+                    {% endif %}
+                    {% if user.is_superuser and r.key == "etoro" and r.account and r.account.api_key_enc %}
+                    <form method="post" action="{% url 'hq_disconnect_etoro' %}" style="margin-top:6px;">{% csrf_token %}<input type="hidden" name="target_username" value="{{ user.username }}"><button type="submit" class="btn btn-sm">Forget eToro keys</button></form>
+                    {% endif %}
                 </td>
                 <td class="sv-venue {% if r.env == 'live' %}sv-venue--live{% else %}sv-venue--paper{% endif %}">{{ r.env }}</td>
                 <td style="font-size:11px;color:var(--text-muted);">{% if r.last_sync %}{{ r.last_sync|date:"Y-m-d H:i" }}{% else %}—{% endif %}</td>
@@ -86,7 +95,7 @@
         <div class="card-header"><span class="card-title">Register Saxo Application</span></div>
         <form method="post" action="{% url 'hq_save_saxo' %}" style="padding:16px;display:grid;gap:10px;">
             {% csrf_token %}
-            <p class="hq-cred-note">The application you registered on <code>developer.saxo</code>. This identifies Sauron to Saxo; the session that lets it trade comes from an OAuth sign-in, which is the next build. The redirect URI must match the portal <em>exactly</em>.</p>
+            <p class="hq-cred-note">The application you registered on <code>developer.saxo</code>. This identifies Sauron to Saxo; the session that lets it trade comes from one OAuth sign-in — the <em>Connect Saxo</em> button on the row, once this is saved. Re-saving closes any open session. The redirect URI must match the portal <em>exactly</em>.</p>
             <label class="hq-field-label">Account this application belongs to</label>
             <select name="target_username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
                 <option value="">— pick an account —</option>

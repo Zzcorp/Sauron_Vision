@@ -445,9 +445,11 @@ class SaxoAccount(models.Model):
         token renews it without a human. This is the whole reason Saxo was
         chosen over IBKR, whose retail API has no such thing.
 
-    The session fields are blank until that flow exists and runs. A blank
-    refresh token means "registered, never connected", and the page says so
-    rather than reporting a broker that has never answered as connected.
+    The session fields are blank until the operator has signed in once
+    through /brokers/saxo/connect/. A blank refresh token means "registered,
+    never connected" — or "lost", when session_lost_at says the keeper gave
+    the session up — and the page says which, rather than reporting a
+    broker that has never answered as connected.
 
     `sim` mirrors the other rows' environment flag. Saxo issues DIFFERENT
     app keys for SIM and LIVE; the operator registers twice.
@@ -465,6 +467,18 @@ class SaxoAccount(models.Model):
     access_token_enc = models.TextField(blank=True)
     refresh_token_enc = models.TextField(blank=True)
     token_expires_at = models.DateTimeField(null=True, blank=True)
+    # When the REFRESH token itself dies (2 400 s after it was issued, and
+    # it rotates on every refresh). The refresh task reads this to tell a
+    # transient failure — retry next cycle — from a lost session, which
+    # needs one browser sign-in again. Documented on Saxo's code-grant page;
+    # tests/test_saxo_oauth.py pins the numbers.
+    refresh_expires_at = models.DateTimeField(null=True, blank=True)
+    # Set by the keeper when it gives a session up (refresh token past its
+    # life, or Saxo refused the rotation); cleared by the next sign-in. The
+    # page reads them so "lost — sign in again" and "never signed in" are
+    # two different lines, not one. Reason is capped at 120 for Postgres.
+    session_lost_at = models.DateTimeField(null=True, blank=True)
+    session_lost_reason = models.CharField(max_length=120, blank=True)
     connected = models.BooleanField(default=False)
     last_sync = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -481,11 +495,26 @@ class SaxoAccount(models.Model):
         secret = _decrypt(self.app_secret_enc)
         return (key, secret) if key and secret else (None, None)
 
-    def set_tokens(self, access_token: str, refresh_token: str, expires_at):
+    def set_tokens(self, access_token: str, refresh_token: str, expires_at,
+                   refresh_expires_at=None):
         f = _fernet()
         self.access_token_enc = f.encrypt(access_token.encode()).decode()
         self.refresh_token_enc = f.encrypt(refresh_token.encode()).decode()
         self.token_expires_at = expires_at
+        self.refresh_expires_at = refresh_expires_at
+
+    def get_access_token(self) -> "str | None":
+        return _decrypt(self.access_token_enc) if self.access_token_enc else None
+
+    def clear_session(self):
+        """The session is gone — the refresh token died or Saxo refused it.
+        Clearing the tokens is what makes the page say "sign in again"
+        instead of showing a session that will never answer."""
+        self.access_token_enc = ""
+        self.refresh_token_enc = ""
+        self.token_expires_at = None
+        self.refresh_expires_at = None
+        self.connected = False
 
     def get_refresh_token(self) -> "str | None":
         return _decrypt(self.refresh_token_enc) if self.refresh_token_enc else None
@@ -495,6 +524,31 @@ class SaxoAccount(models.Model):
         """Registered is not connected. Only a refresh token means the OAuth
         flow completed once and the server can renew on its own."""
         return bool(self.refresh_token_enc)
+
+    def session_alive(self, now=None) -> bool:
+        """has_session AND the refresh token is not past its life. A row
+        whose deadline is unknown counts as alive until the keeper's next
+        attempt says otherwise — it cannot be proven dead from here."""
+        if not self.has_session:
+            return False
+        if self.refresh_expires_at is None:
+            return True
+        return (now or timezone.now()) < self.refresh_expires_at
+
+    def access_token_valid(self, now=None, margin_s: int = 60) -> bool:
+        """The bearer can be presented right now with `margin_s` to spare.
+        Written for the adapter: a token that dies mid-request is a 401
+        nobody can explain, so the margin errs on refreshing early."""
+        from datetime import timedelta
+        if not self.access_token_enc or self.token_expires_at is None:
+            return False
+        return (now or timezone.now()) + timedelta(seconds=margin_s) < self.token_expires_at
+
+    def mark_session_lost(self, reason: str, now=None):
+        """The keeper gave the session up: clear it and say when and why."""
+        self.clear_session()
+        self.session_lost_at = now or timezone.now()
+        self.session_lost_reason = (reason or "")[:120]
 
     def __str__(self):
         return f"{self.user.username} · Saxo ({'sim' if self.sim else 'live'})"
