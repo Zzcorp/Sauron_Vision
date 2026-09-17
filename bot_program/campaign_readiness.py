@@ -224,7 +224,7 @@ def readiness(window_days: int = 30) -> dict:
                    .filter(instrument__symbol=sym, timeframe="4h")
                    .order_by("-timestamp")
                    .values("timestamp", "close", "instrument__asset_class",
-                           "instrument__exchange")
+                           "instrument__exchange", "instrument__symbol")
                    .first())
             newest = row["timestamp"] if row else None
             if newest is None:

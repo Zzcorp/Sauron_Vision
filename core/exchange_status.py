@@ -43,6 +43,20 @@ def _format_delta(td):
         return f"{hours}h {minutes}m"
     return f"{minutes}m"
 
+def _weekday_session(ex, local_now, tz):
+    """Open-or-not and the countdown for a plain weekday session (one open,
+    one close, listed weekdays). Shared by the EXCHANGES rows that keep
+    such hours and by the product sessions below."""
+    weekday = local_now.weekday()
+    local_time = local_now.time()
+    is_open = weekday in ex["weekdays"] and ex["open"] <= local_time < ex["close"]
+    if is_open:
+        time_until = _format_delta(_time_until(local_now, ex["close"], tz))
+    else:
+        time_until = _format_delta(_time_until(local_now, ex["open"], tz))
+    return is_open, time_until
+
+
 def get_exchange_status(now_utc=None):
     if now_utc is None:
         now_utc = datetime.now(pytz.UTC)
@@ -110,11 +124,7 @@ def get_exchange_status(now_utc=None):
                     open_dt += timedelta(days=1)
                 time_until = _format_delta(open_dt - local_now)
         else:
-            is_open = weekday in ex["weekdays"] and ex["open"] <= local_time < ex["close"]
-            if is_open:
-                time_until = _format_delta(_time_until(local_now, ex["close"], tz))
-            else:
-                time_until = _format_delta(_time_until(local_now, ex["open"], tz))
+            is_open, time_until = _weekday_session(ex, local_now, tz)
 
         if is_open:
             open_count += 1
@@ -170,15 +180,172 @@ ASSET_CLASS_DEFAULT_SESSION = {
 
 _EXCHANGE_CODES = {ex["code"] for ex in EXCHANGES}
 
+# ── Products whose session is narrower than their venue's clock ───────────
+#
+# The CME row is the Globex week — right for metals and energy, which
+# trade nearly round the clock, and WRONG for every product that keeps a
+# daytime session, a gap, or an overnight that starts and stops. Read on
+# 2026-09-17: at 05:54 CT the readiness report called lean hogs, live
+# cattle and lumber OPEN with an 18.9h bar and blamed the feed. Nothing was
+# wrong with the feed; the clock was one row for a whole exchange group.
+#
+# A product session is a list of SEGMENTS in the product's own zone. A
+# segment whose close is EARLIER than its open wraps past midnight: it
+# opens on each listed weekday and closes the next day. Hours below were
+# read at the source (CME Group contract specifications and FAQ, ICE
+# product pages), 2026-09-17, in the venue's local time:
+#
+#   CME livestock (HE, LE)   Mon–Fri 08:30–13:05 CT
+#   CME lumber (LBR)         Mon–Fri 09:00–15:05 CT   (16:05 was the
+#                            delisted LBS contract — the feed is LBR=F)
+#   CBOT grains (ZC ZW ZS    Sun–Thu 19:00 → next day 07:45 CT, and
+#     ZO ZR)                 Mon–Fri 08:30–13:20 CT — a 13:20–19:00 gap
+#   ICE coffee (KC)          Mon–Fri 04:15–13:30 ET
+#   ICE cocoa (CC)           Mon–Fri 04:45–13:30 ET
+#   ICE sugar no. 11 (SB)    Mon–Fri 03:30–13:00 ET
+#   ICE orange juice (OJ)    Mon–Fri 08:00–14:00 ET
+#   ICE cotton no. 2 (CT)    Sun–Thu 21:00 → next day 14:20 ET
+#
+# Consulted BY SYMBOL before the exchange string, and deliberately not part
+# of EXCHANGES: that list is the world-exchange strip and the topbar's N/14
+# count, and "CME Livestock" is not a world exchange. A caller that does
+# not know the symbol gets the venue's answer, exactly as before. The
+# short forms (ZCUSD, KCUSD…) are the pre-catalogue aliases public_feed
+# still accepts.
+_CT, _ET = "US/Central", "US/Eastern"
 
-def session_code_for(asset_class: str, exchange: str = "") -> str:
-    """The EXCHANGES code (or "CRYPTO") whose clock this instrument keeps.
+
+def _seg(open_, close, weekdays=(0, 1, 2, 3, 4)) -> dict:
+    return {"open": open_, "close": close, "weekdays": list(weekdays)}
+
+
+_LIVESTOCK = {"code": "CME_LIVESTOCK", "name": "CME Livestock", "flag": "US",
+              "tz": _CT, "segments": [_seg(time(8, 30), time(13, 5))]}
+_LUMBER = {"code": "CME_LUMBER", "name": "CME Lumber", "flag": "US",
+           "tz": _CT, "segments": [_seg(time(9, 0), time(15, 5))]}
+_GRAINS = {"code": "CBOT_GRAINS", "name": "CBOT Grains", "flag": "US",
+           "tz": _CT, "segments": [_seg(time(19, 0), time(7, 45), (6, 0, 1, 2, 3)),
+                                   _seg(time(8, 30), time(13, 20))]}
+_COFFEE = {"code": "ICE_COFFEE", "name": "ICE Coffee", "flag": "US",
+           "tz": _ET, "segments": [_seg(time(4, 15), time(13, 30))]}
+_COCOA = {"code": "ICE_COCOA", "name": "ICE Cocoa", "flag": "US",
+          "tz": _ET, "segments": [_seg(time(4, 45), time(13, 30))]}
+_SUGAR = {"code": "ICE_SUGAR", "name": "ICE Sugar", "flag": "US",
+          "tz": _ET, "segments": [_seg(time(3, 30), time(13, 0))]}
+_OJ = {"code": "ICE_OJ", "name": "ICE Orange Juice", "flag": "US",
+       "tz": _ET, "segments": [_seg(time(8, 0), time(14, 0))]}
+_COTTON = {"code": "ICE_COTTON", "name": "ICE Cotton", "flag": "US",
+           "tz": _ET, "segments": [_seg(time(21, 0), time(14, 20), (6, 0, 1, 2, 3))]}
+PRODUCT_SESSIONS = {
+    "LEANHOGS": _LIVESTOCK, "LIVECATTLE": _LIVESTOCK,
+    "LUMBER": _LUMBER,
+    "WHEATUSD": _GRAINS, "CORNUSD": _GRAINS, "SOYUSD": _GRAINS,
+    "OATS": _GRAINS, "RICE": _GRAINS,
+    "ZWUSD": _GRAINS, "ZCUSD": _GRAINS, "ZSUSD": _GRAINS,
+    "COFFEEUSD": _COFFEE, "KCUSD": _COFFEE,
+    "COCOAUSD": _COCOA, "CCUSD": _COCOA,
+    "SUGARUSD": _SUGAR, "SBUSD": _SUGAR,
+    "ORANGEJUICE": _OJ,
+    "COTTONUSD": _COTTON, "CTUSD": _COTTON,
+}
+_PRODUCT_BY_CODE = {p["code"]: p for p in PRODUCT_SESSIONS.values()}
+
+# Symbols whose BARS come from a cash index that prints only during the
+# cash market's hours, while the catalogue files them under the futures
+# venue: ^GSPC, ^NDX, ^DJI, ^RUT print with New York, ^FTSE with London.
+# The clock must be the feed's, or every evening reads as a dead feed.
+SYMBOL_VENUE = {
+    "SPX500": "NYSE", "NSDQ100": "NYSE", "DJ30": "NYSE", "RUSSELL2000": "NYSE",
+    "SPX": "NYSE", "NDX": "NYSE", "DJI": "NYSE", "RUT": "NYSE",
+    "FTSE100": "LSE", "FTSE": "LSE",
+}
+
+
+def _segment_window(seg, day, tz):
+    """The absolute (start, end) of one segment that OPENS on `day`."""
+    start = tz.localize(datetime.combine(day, seg["open"]))
+    end_day = day if seg["close"] > seg["open"] else day + timedelta(days=1)
+    end = tz.localize(datetime.combine(end_day, seg["close"]))
+    return start, end
+
+
+def _segments_status(ex, local_now, tz):
+    """(is_open, time_until, opens, closes) for a multi-segment session.
+
+    A wrapped segment that opened YESTERDAY may still be running, so both
+    days are checked. When shut, the countdown points at the nearest next
+    open of any segment within the coming week, and `opens`/`closes` name
+    that segment — the one the operator is waiting for."""
+    today = local_now.date()
+    for seg in ex["segments"]:
+        for day in (today - timedelta(days=1), today):
+            if day.weekday() not in seg["weekdays"]:
+                continue
+            start, end = _segment_window(seg, day, tz)
+            if start <= local_now < end:
+                return (True, _format_delta(end - local_now),
+                        seg["open"], seg["close"])
+    upcoming = []
+    for seg in ex["segments"]:
+        for offset in range(0, 8):
+            day = today + timedelta(days=offset)
+            if day.weekday() not in seg["weekdays"]:
+                continue
+            start, _end = _segment_window(seg, day, tz)
+            if start > local_now:
+                upcoming.append((start, seg))
+                break
+    if not upcoming:
+        first = ex["segments"][0]
+        return False, "", first["open"], first["close"]
+    start, seg = min(upcoming, key=lambda pair: pair[0])
+    return False, _format_delta(start - local_now), seg["open"], seg["close"]
+
+
+def _product_status(ex, now_utc=None) -> dict:
+    """A product session answered in the same shape as an EXCHANGES row."""
+    if now_utc is None:
+        now_utc = datetime.now(pytz.UTC)
+    tz = pytz.timezone(ex["tz"])
+    local_now = now_utc.astimezone(tz)
+    is_open, time_until, opens, closes = _segments_status(ex, local_now, tz)
+    return {
+        "code": ex["code"], "name": ex["name"], "flag": ex["flag"],
+        "session": ex["code"], "is_open": is_open,
+        "local_time": local_now.strftime("%H:%M"),
+        "opens": opens.strftime("%H:%M"),
+        "closes": closes.strftime("%H:%M"),
+        "time_until_change": time_until,
+        "next_state": "closes" if is_open else "opens",
+    }
+
+
+def product_sessions_status(now_utc=None) -> list:
+    """Every product session, once each, for the badge poller: the JSON
+    endpoint appends these beside the EXCHANGES rows so a livestock badge
+    left open across 13:05 CT flips like every other badge on the page —
+    without touching the strip's count."""
+    return [_product_status(p, now_utc) for p in _PRODUCT_BY_CODE.values()]
+
+
+def session_code_for(asset_class: str, exchange: str = "",
+                     symbol: str = "") -> str:
+    """The EXCHANGES code (or "CRYPTO", or a PRODUCT_SESSIONS code) whose
+    clock this instrument keeps.
 
     Crypto wins over any stored exchange string: the seeds write
-    exchange="CRYPTO" and no session row will ever exist for it.
+    exchange="CRYPTO" and no session row will ever exist for it. Then the
+    product table, by symbol, for the few contracts whose session is
+    narrower than their venue's; then the venue string as before.
     """
     if asset_class == "crypto":
         return "CRYPTO"
+    sym = (symbol or "").strip().upper()
+    product = PRODUCT_SESSIONS.get(sym)
+    if product is not None:
+        return product["code"]
+    if sym in SYMBOL_VENUE:
+        return SYMBOL_VENUE[sym]
     venue = (exchange or "").strip().upper()
     if venue in _EXCHANGE_CODES:
         return venue
@@ -188,7 +355,7 @@ def session_code_for(asset_class: str, exchange: str = "") -> str:
 
 
 def market_status_for(asset_class: str, exchange: str = "", now_utc=None,
-                      _status=None) -> dict:
+                      _status=None, symbol: str = "") -> dict:
     """One instrument's market, answered: which session, open or not, and
     when that changes. Shape matches a get_exchange_status() row plus
     "session" (the code actually consulted, so a defaulted clock is
@@ -198,7 +365,10 @@ def market_status_for(asset_class: str, exchange: str = "", now_utc=None,
     (the anomaly scan walks every quote) reuse it instead of recomputing
     fourteen timezones per instrument.
     """
-    code = session_code_for(asset_class, exchange)
+    code = session_code_for(asset_class, exchange, symbol)
+    product = _PRODUCT_BY_CODE.get(code)
+    if product is not None:
+        return _product_status(product, now_utc)
     if code == "CRYPTO":
         return {
             "code": "CRYPTO", "name": "Crypto", "flag": "₿",

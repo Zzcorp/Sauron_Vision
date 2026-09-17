@@ -290,7 +290,9 @@ def _fresh_open_quotes(quotes, now_utc):
     kept, dropped_closed, dropped_stale = [], 0, 0
     for q in quotes:
         market = market_status_for(q.instrument.asset_class,
-                                   q.instrument.exchange, _status=status)
+                                   q.instrument.exchange, _status=status,
+                                   symbol=q.instrument.symbol,
+                                   now_utc=now_utc)
         if not market["is_open"]:
             dropped_closed += 1
             continue

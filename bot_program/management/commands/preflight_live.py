@@ -138,14 +138,19 @@ def _bar_age_hours(newest, now) -> float:
     return (now - newest).total_seconds() / 3600.0
 
 
-def _market_for(row):
-    """The market clock this instrument keeps, or None when unknowable."""
+def _market_for(row, now=None):
+    """The market clock this instrument keeps AT `now`, or None when
+    unknowable. Until 2026-09-17 this read the wall regardless of the
+    `now` its callers were given — right in production by coincidence,
+    wrong under every fixed clock a test could set."""
     if not row:
         return None
     try:
         from core.exchange_status import market_status_for
         return market_status_for(row.get("instrument__asset_class") or "",
-                                 row.get("instrument__exchange") or "")
+                                 row.get("instrument__exchange") or "",
+                                 now_utc=now,
+                                 symbol=row.get("instrument__symbol") or "")
     except Exception:  # noqa: BLE001 — a missing clock must not take the page
         return None
 
@@ -154,7 +159,7 @@ def _market_note(row, newest, now) -> str:
     """The clause that stops one number from carrying two diagnoses."""
     if newest is None:
         return ""
-    market = _market_for(row)
+    market = _market_for(row, now)
     if market is None:
         return "  (market clock unknown)"
     age = _bar_age_hours(newest, now)
@@ -190,7 +195,7 @@ def _bar_verdict(row, newest, now) -> tuple:
     identical verdicts into one line; the preflight walks a handful and
     wants one line each. Same rule, two renderings.
     """
-    market = _market_for(row)
+    market = _market_for(row, now)
     if market is None:
         return ("unknown", "?", _bar_age_hours(newest, now))
     age = _bar_age_hours(newest, now)
@@ -578,7 +583,8 @@ class Command(BaseCommand):
                                .order_by("-timestamp")
                                .values("timestamp", "close",
                                        "instrument__asset_class",
-                                       "instrument__exchange")
+                                       "instrument__exchange",
+                                       "instrument__symbol")
                                .first())
                         newest = row["timestamp"] if row else None
                         price = float(row["close"] or 0) if row else 0.0

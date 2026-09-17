@@ -261,7 +261,8 @@ def instruments_list(request):
         if _ex_status is not None:
             try:
                 market = market_status_for(inst.asset_class, inst.exchange,
-                                           _status=_ex_status)
+                                           _status=_ex_status,
+                                           symbol=inst.symbol)
             except Exception:
                 market = None
         items.append({
@@ -4049,7 +4050,8 @@ def instrument_detail(request, symbol):
     # paint, kept true by sv-market-status.js polling the same computation.
     from core.exchange_status import market_status_for
     try:
-        market = market_status_for(instrument.asset_class, instrument.exchange)
+        market = market_status_for(instrument.asset_class, instrument.exchange,
+                                   symbol=instrument.symbol)
     except Exception:
         market = None
 
@@ -4468,10 +4470,16 @@ def exchange_status_json(request):
     and the instrument page's market badge.
     """
     from django.http import JsonResponse
-    from core.exchange_status import get_exchange_status
+    from core.exchange_status import (get_exchange_status,
+                                      product_sessions_status)
 
     try:
-        return JsonResponse(get_exchange_status())
+        payload = get_exchange_status()
+        # Product sessions ride beside the strip's rows, never in them:
+        # total/open_count stay the world-exchange count, and a livestock
+        # badge still repaints across 13:05 CT.
+        payload["products"] = product_sessions_status()
+        return JsonResponse(payload)
     except Exception as e:  # noqa: BLE001 — a clock bug must not 500
         logger.debug(f"exchange status unavailable: {e}")
         return JsonResponse({"open_count": 0, "total": 0, "exchanges": [],
