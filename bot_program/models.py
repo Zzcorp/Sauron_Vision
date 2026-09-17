@@ -377,9 +377,31 @@ class EtoroAccount(models.Model):
     user_key_enc = models.TextField(blank=True)
     demo = models.BooleanField(
         default=True, help_text="Keys for eToro's demo (virtual) portfolio.")
+    # Routing opt-ins, one per asset class, all OFF on arrival — the same
+    # shape as IBKRAccount.is_primary_for_*. broker_router consults these
+    # BEFORE IBKR's, so a flag here wins when both are set: retiring IBKR
+    # is the stated direction, and the newer broker taking precedence is
+    # what "retiring" means in routing terms. No options / cfd flag: those
+    # two classes are forced to IBKR in the router today, and lifting that
+    # is a separate, named change.
+    is_primary_for_stocks = models.BooleanField(
+        default=False, help_text="Route stocks, ETFs and indices here.")
+    is_primary_for_forex = models.BooleanField(default=False)
+    is_primary_for_commodity = models.BooleanField(default=False)
+    is_primary_for_crypto = models.BooleanField(default=False)
     connected = models.BooleanField(default=False)
     last_sync = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def is_primary_for(self, asset_class: str) -> bool:
+        return bool({
+            "stock": self.is_primary_for_stocks,
+            "etf": self.is_primary_for_stocks,
+            "index": self.is_primary_for_stocks,
+            "forex": self.is_primary_for_forex,
+            "commodity": self.is_primary_for_commodity,
+            "crypto": self.is_primary_for_crypto,
+        }.get(asset_class, False))
 
     def set_credentials(self, api_key: str, user_key: str):
         f = _fernet()

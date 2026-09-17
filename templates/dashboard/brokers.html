@@ -24,7 +24,7 @@
     <div class="card-header"><span class="card-title">Comptes</span></div>
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th>Broker</th><th>Status</th><th>Env</th><th>Last sync</th><th>Can hold</th></tr></thead>
+        <thead><tr><th>Broker</th><th>Status</th><th>Env</th><th>Last sync</th><th>Can hold</th><th>Primary for</th></tr></thead>
         <tbody>
         {% for r in rows %}
             <tr>
@@ -43,6 +43,9 @@
                     {% else %}
                         <span style="color:var(--text-muted);">adapter pending — nothing can be asked of it yet</span>
                     {% endif %}
+                </td>
+                <td style="font-size:11px;">
+                    {% for c in r.primary_for %}<span class="badge" style="margin-right:4px;">{{ c }}</span>{% empty %}<span style="color:var(--text-muted);">—</span>{% endfor %}
                 </td>
             </tr>
         {% endfor %}
@@ -70,6 +73,11 @@
             <input type="password" name="etoro_api_key" placeholder="x-api-key" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="password" name="etoro_user_key" placeholder="x-user-key" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="demo" checked> Demo (virtual) portfolio keys</label>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:4px;">Carry as primary broker — wins over IBKR's flag for the same class:</div>
+            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_stocks"> stocks · ETFs · indices</label>
+            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_forex"> forex</label>
+            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_commodity"> commodities</label>
+            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_crypto"> crypto</label>
             <button type="submit" class="btn btn-primary btn-sm">Save eToro</button>
         </form>
     </div>

@@ -94,6 +94,19 @@ def _status(acct, *, has_adapter: bool) -> str:
     return "recorded — never verified"
 
 
+ROUTABLE_CLASSES = ("stock", "forex", "commodity", "crypto")
+
+
+def _primary_classes(acct) -> list:
+    """The asset classes this account is the primary broker for, read off
+    its own is_primary_for() — the same method the router consults — or []
+    for a row that has no routing flags at all."""
+    fn = getattr(acct, "is_primary_for", None)
+    if acct is None or not callable(fn):
+        return []
+    return [c for c in ROUTABLE_CLASSES if fn(c)]
+
+
 def _rows(user) -> list:
     from bot_program.engine.capabilities import declared
 
@@ -108,6 +121,7 @@ def _rows(user) -> list:
             "capabilities": declared(key) if has_adapter else (),
             "has_adapter": has_adapter,
             "extra": extra,
+            "primary_for": _primary_classes(acct),
         }
 
     ibkr = getattr(user, "ibkr_account", None)
@@ -183,6 +197,13 @@ def save_etoro_credentials(request):
     acct.set_credentials(api_key, user_key)
     acct.demo = demo
     env = "demo" if demo else "live"
+    # Routing opt-ins. Unchecked = absent = off, so a save that omits them
+    # leaves eToro carrying nothing — the safe default when keys are new.
+    acct.is_primary_for_stocks = request.POST.get("primary_stocks") == "on"
+    acct.is_primary_for_forex = request.POST.get("primary_forex") == "on"
+    acct.is_primary_for_commodity = (
+        request.POST.get("primary_commodity") == "on")
+    acct.is_primary_for_crypto = request.POST.get("primary_crypto") == "on"
 
     verdict, detail = etoro_probe(api_key, user_key, demo=demo)
     acct.connected = verdict == "ok"

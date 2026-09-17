@@ -131,6 +131,43 @@ def _ibkr_overrides(user, asset_class: str) -> bool:
 
 # ── public ─────────────────────────────────────────────────────────────────
 
+def _etoro_overrides(user, asset_class: str) -> bool:
+    """True iff the user has an EtoroAccount that is_primary_for(asset_class).
+
+    Checked BEFORE _ibkr_overrides on purpose (2026-09-17): when both are
+    flagged for a class, eToro carries it. Retiring IBKR is the stated
+    direction, and the router is where that direction becomes a fact.
+    """
+    try:
+        acct = getattr(user, "etoro_account", None)
+        return bool(acct and acct.is_primary_for(asset_class))
+    except Exception:
+        return False
+
+
+def _etoro_client_for(user, cfg, symbol: str):
+    """EtoroTrader from the user's row, or PaperTrader when it cannot be.
+
+    Same posture as the OANDA branch: no credentials means paper, and a
+    live-mode config gets a PaperTrader back — which asset_engine refuses
+    to trade against, loudly. Demo keys route to eToro's demo world even
+    for a live config, because the KEYS decide the world, not the config.
+    """
+    try:
+        from bot_program.models import EtoroAccount
+        acct: EtoroAccount = user.etoro_account
+        k, u = acct.get_credentials()
+        if not (k and u):
+            log.info("[router] %s: no eToro creds — paper", symbol)
+            return _paper_client(cfg)
+        from .etoro_client import EtoroTrader
+        return EtoroTrader(k, u, env="demo" if acct.demo else "live")
+    except Exception as e:
+        log.warning("[router] %s: EtoroAccount unavailable (%s) — paper",
+                    symbol, e)
+        return _paper_client(cfg)
+
+
 def client_for_symbol(user, symbol: str, cfg=None, purpose: str = "trade"):
     """Return a broker client capable of trading `symbol` for `user`.
 
@@ -153,6 +190,12 @@ def client_for_symbol(user, symbol: str, cfg=None, purpose: str = "trade"):
     # on their IBKRAccount, route through IBKR instead of the default broker.
     # Options + CFDs always go through IBKR by default — no other wired broker
     # handles either at scale.
+    # eToro opt-in, before IBKR's: the newer broker wins when both are set.
+    # options / cfd never reach here with a True — EtoroAccount has no flag
+    # for either — so the forced-IBKR rule below still holds for them.
+    if _etoro_overrides(user, asset_class):
+        return _etoro_client_for(user, cfg, symbol)
+
     if asset_class in ("options", "cfd") or _ibkr_overrides(user, asset_class):
         return _ibkr_client_for(user, cfg, purpose)
 
@@ -228,6 +271,8 @@ def broker_name_for_symbol(user, symbol: str, cfg=None) -> str:
     if inst is None:
         return "paper"
     asset_class = inst.asset_class
+    if _etoro_overrides(user, asset_class):
+        return "etoro"
     if asset_class in ("options", "cfd") or _ibkr_overrides(user, asset_class):
         return "ibkr"
     return _broker_for_asset_class(asset_class)
