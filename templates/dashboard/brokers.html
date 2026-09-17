@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Les courtiers — Sauron Vision{% endblock %}
+{% block page_title %}⌁ LES COURTIERS{% endblock %}
+
+{% block content %}
+
+{# base.html renders no messages region — same convention as ops.html: a saved-but-refused key would be a silent redirect without this. #}
+{% if messages %}
+<div style="margin-bottom:18px;">
+    {% for msg in messages %}
+    <div class="card" style="border-color:{% if msg.tags == 'success' %}var(--accent){% elif msg.tags == 'error' %}var(--accent-red){% elif msg.tags == 'warning' %}var(--accent-gold-ink, var(--accent-gold)){% else %}var(--border){% endif %};padding:12px 20px;margin-bottom:8px;">
+        <span style="font-family:var(--font-mono);font-size:13px;">{% if msg.tags == 'success' %}OK{% elif msg.tags == 'error' %}ERR{% elif msg.tags == 'warning' %}WARN{% else %}NOTE{% endif %} {{ msg }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<p class="form-hint" style="margin:0 0 18px;font-size:12px;max-width:820px;">
+    One row per broker. <strong>Recorded</strong> means keys are stored; <strong>connected</strong> means they have reached the broker at least once.
+    The capabilities column is read from the same table the test suite enforces — a broker cannot be shown holding what its adapter cannot be asked for.
+</p>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Comptes</span></div>
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Broker</th><th>Status</th><th>Env</th><th>Last sync</th><th>Can hold</th></tr></thead>
+        <tbody>
+        {% for r in rows %}
+            <tr>
+                <td><strong>{{ r.name }}</strong></td>
+                <td>
+                    {% if r.connected %}<span class="up">● {{ r.status }}</span>
+                    {% elif r.account %}<span style="color:var(--accent-gold);">◐ {{ r.status }}</span>
+                    {% else %}<span style="color:var(--text-muted);">○ {{ r.status }}</span>{% endif %}
+                    {% if r.extra %}<div style="font-size:10px;color:var(--text-muted);">{{ r.extra }}</div>{% endif %}
+                </td>
+                <td class="sv-venue {% if r.env == 'live' %}sv-venue--live{% else %}sv-venue--paper{% endif %}">{{ r.env }}</td>
+                <td style="font-size:11px;color:var(--text-muted);">{% if r.last_sync %}{{ r.last_sync|date:"Y-m-d H:i" }}{% else %}—{% endif %}</td>
+                <td style="font-size:11px;">
+                    {% if r.has_adapter %}
+                        {% for c in r.capabilities %}<span class="badge" style="margin-right:4px;">{{ c }}</span>{% empty %}<span style="color:var(--text-muted);">—</span>{% endfor %}
+                    {% else %}
+                        <span style="color:var(--text-muted);">adapter pending — nothing can be asked of it yet</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="form-hint" style="margin:12px 0 0;font-size:11px;color:var(--text-muted);">
+        No broker holds a <strong>time stop</strong>. That exit is Sauron's alone, on every venue, forever.
+    </p>
+</div>
+
+{% if can_edit %}
+<div class="grid grid-2" style="gap:18px;margin-bottom:24px;">
+
+    <div class="card fade-in-up">
+        <div class="card-header"><span class="card-title">Add / Update eToro Keys</span></div>
+        <form method="post" action="{% url 'hq_save_etoro' %}" style="padding:16px;display:grid;gap:10px;">
+            {% csrf_token %}
+            <p class="hq-cred-note">Two long-lived keys from <code>builders.etoro.com</code>, sent as headers on every request. No OAuth, no daily sign-in. They are stored encrypted and probed once on save.</p>
+            <label class="hq-field-label">Account these keys belong to</label>
+            <select name="target_username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+                <option value="">— pick an account —</option>
+                {% for u in users %}<option value="{{ u.username }}">{{ u.username }}{% if u.is_superuser %} · admin{% endif %}</option>{% endfor %}
+            </select>
+            <input type="password" name="etoro_api_key" placeholder="x-api-key" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="password" name="etoro_user_key" placeholder="x-user-key" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="demo" checked> Demo (virtual) portfolio keys</label>
+            <button type="submit" class="btn btn-primary btn-sm">Save eToro</button>
+        </form>
+    </div>
+
+    <div class="card fade-in-up">
+        <div class="card-header"><span class="card-title">Register Saxo Application</span></div>
+        <form method="post" action="{% url 'hq_save_saxo' %}" style="padding:16px;display:grid;gap:10px;">
+            {% csrf_token %}
+            <p class="hq-cred-note">The application you registered on <code>developer.saxo</code>. This identifies Sauron to Saxo; the session that lets it trade comes from an OAuth sign-in, which is the next build. The redirect URI must match the portal <em>exactly</em>.</p>
+            <label class="hq-field-label">Account this application belongs to</label>
+            <select name="target_username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+                <option value="">— pick an account —</option>
+                {% for u in users %}<option value="{{ u.username }}">{{ u.username }}{% if u.is_superuser %} · admin{% endif %}</option>{% endfor %}
+            </select>
+            <input type="password" name="saxo_app_key" placeholder="App Key" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="password" name="saxo_app_secret" placeholder="App Secret" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <input type="text" name="saxo_redirect_uri" placeholder="https://your-host/brokers/saxo/callback/" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="sim" checked> SIM environment keys</label>
+            <button type="submit" class="btn btn-primary btn-sm">Save Saxo</button>
+        </form>
+    </div>
+
+</div>
+{% else %}
+<p class="form-hint" style="font-size:11px;color:var(--text-muted);">Adding or changing keys needs a superuser.</p>
+{% endif %}
+
+{% endblock %}

@@ -357,6 +357,115 @@ class AlpacaAccount(models.Model):
         return f"{self.user.username} · Alpaca ({'paper' if self.paper else 'live'})"
 
 
+class EtoroAccount(models.Model):
+    """Encrypted eToro API credentials (2026-09-17).
+
+    eToro authenticates with two LONG-LIVED keys sent as headers on every
+    request — `x-api-key` and `x-user-key` — not with OAuth. So unlike Saxo
+    below there is no token to refresh and no daily human: a server holds
+    the two strings and is done. That is the property IBKR refuses retail
+    clients, and the reason this row exists.
+
+    `demo` mirrors `paper` / `practice` / `testnet` on the other rows: the
+    row is one account, and the flag says which of eToro's two worlds the
+    keys open. It is NOT a mode switch on a live account.
+    """
+    user = models.OneToOneField(User, on_delete=models.CASCADE,
+                                related_name="etoro_account")
+    label = models.CharField(max_length=60, default="Main")
+    api_key_enc = models.TextField(blank=True)
+    user_key_enc = models.TextField(blank=True)
+    demo = models.BooleanField(
+        default=True, help_text="Keys for eToro's demo (virtual) portfolio.")
+    connected = models.BooleanField(default=False)
+    last_sync = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def set_credentials(self, api_key: str, user_key: str):
+        f = _fernet()
+        self.api_key_enc = f.encrypt(api_key.encode()).decode()
+        self.user_key_enc = f.encrypt(user_key.encode()).decode()
+
+    def get_credentials(self) -> "tuple[str, str] | tuple[None, None]":
+        if not self.api_key_enc:
+            return (None, None)
+        key = _decrypt(self.api_key_enc)
+        user_key = _decrypt(self.user_key_enc)
+        return (key, user_key) if key and user_key else (None, None)
+
+    def __str__(self):
+        return f"{self.user.username} · eToro ({'demo' if self.demo else 'live'})"
+
+
+class SaxoAccount(models.Model):
+    """Encrypted Saxo OpenAPI application + OAuth session (2026-09-17).
+
+    Two layers, and they must not be confused:
+
+      * The APPLICATION — `app_key` / `app_secret` / `redirect_uri` — is
+        what the operator registers once on Saxo's developer portal. It
+        identifies Sauron to Saxo. It never expires.
+      * The SESSION — `access_token` / `refresh_token` — is what the OAuth
+        authorization-code flow produces after the operator signs in once
+        through a browser. The access token lives ~20 minutes; the refresh
+        token renews it without a human. This is the whole reason Saxo was
+        chosen over IBKR, whose retail API has no such thing.
+
+    The session fields are blank until that flow exists and runs. A blank
+    refresh token means "registered, never connected", and the page says so
+    rather than reporting a broker that has never answered as connected.
+
+    `sim` mirrors the other rows' environment flag. Saxo issues DIFFERENT
+    app keys for SIM and LIVE; the operator registers twice.
+    """
+    user = models.OneToOneField(User, on_delete=models.CASCADE,
+                                related_name="saxo_account")
+    label = models.CharField(max_length=60, default="Main")
+    app_key_enc = models.TextField(blank=True)
+    app_secret_enc = models.TextField(blank=True)
+    # Not a secret: it is printed in the browser's address bar during the
+    # OAuth redirect. Stored plain so a mismatch can be read off the row.
+    redirect_uri = models.CharField(max_length=300, blank=True)
+    sim = models.BooleanField(
+        default=True, help_text="Keys registered on Saxo's SIM environment.")
+    access_token_enc = models.TextField(blank=True)
+    refresh_token_enc = models.TextField(blank=True)
+    token_expires_at = models.DateTimeField(null=True, blank=True)
+    connected = models.BooleanField(default=False)
+    last_sync = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def set_credentials(self, app_key: str, app_secret: str):
+        f = _fernet()
+        self.app_key_enc = f.encrypt(app_key.encode()).decode()
+        self.app_secret_enc = f.encrypt(app_secret.encode()).decode()
+
+    def get_credentials(self) -> "tuple[str, str] | tuple[None, None]":
+        if not self.app_key_enc:
+            return (None, None)
+        key = _decrypt(self.app_key_enc)
+        secret = _decrypt(self.app_secret_enc)
+        return (key, secret) if key and secret else (None, None)
+
+    def set_tokens(self, access_token: str, refresh_token: str, expires_at):
+        f = _fernet()
+        self.access_token_enc = f.encrypt(access_token.encode()).decode()
+        self.refresh_token_enc = f.encrypt(refresh_token.encode()).decode()
+        self.token_expires_at = expires_at
+
+    def get_refresh_token(self) -> "str | None":
+        return _decrypt(self.refresh_token_enc) if self.refresh_token_enc else None
+
+    @property
+    def has_session(self) -> bool:
+        """Registered is not connected. Only a refresh token means the OAuth
+        flow completed once and the server can renew on its own."""
+        return bool(self.refresh_token_enc)
+
+    def __str__(self):
+        return f"{self.user.username} · Saxo ({'sim' if self.sim else 'live'})"
+
+
 class BotConfig(models.Model):
     """One bot configuration per user. Defines strategy weights & risk."""
     MODE_CHOICES = [
