@@ -252,6 +252,26 @@ COMMANDS = [
         "category": "read",
     },
     {
+        "name": "saxo_smoke",
+        "title": "Saxo smoke",
+        "purpose": "Exercise every READ of the Saxo adapter against the real SIM or LIVE for one user and report each in three states — ok, refused by Saxo, unknown — before any order exists. Places no order.",
+        "usage": [
+            "python manage.py saxo_smoke --user mathe",
+            "python manage.py saxo_smoke --user mathe --symbol AAPL",
+        ],
+        "mirrors": "/brokers/",
+        "read_only": True,
+        # No run_args: --user needs a value, and the Run lane cannot ask
+        # for one. The entry is not web-runnable anyway (below).
+        "run_args": [],
+        "category": "read",
+        # Read-only, and still not the web's to run: it presents the
+        # operator's Saxo session to an external service and prints the
+        # account's balance. The shell, with the operator's name typed.
+        "runnable": False,
+        "runnable_reason": "presents the operator's Saxo session to an external service and prints the balance",
+    },
+    {
         "name": "preflight_live",
         "title": "Preflight live",
         "purpose": "Answer, in one pass, whether it is safe to arm real money right now — switches, connection, money, live configs, bars, PIN — from cached columns only.",

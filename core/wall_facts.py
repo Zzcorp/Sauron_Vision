@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # tests/test_wall_facts.py counts the suite and fails when this drifts: the
 # first version of this module shipped a number its own commit had already
 # invalidated, which is exactly the failure it was written to prevent.
-TESTS_GREEN = 7040
+TESTS_GREEN = 7101
 
 # Broker adapters implemented under bot_program/engine/ — one module and one
 # client class each, all reachable from broker_router.client_for_symbol().
@@ -63,6 +63,12 @@ BROKER_ADAPTERS = (
     "ibkr",             # engine/ibkr_client.py             IBKRTrader
     "oanda",            # engine/oanda_client.py            OANDATrader
     "paper",            # engine/paper_trader.py            PaperTrader
+    # 2026-09-18. The class exists and passes the conformance test; the
+    # ROUTER does not route to it yet and the sync does not walk its rows
+    # (tests/test_broker_contract.py records that gap by name). It is
+    # counted as an adapter because it is one — not as a venue the fleet
+    # can trade today.
+    "saxo",             # engine/saxo_client.py             SaxoTrader
 )
 
 CACHE_KEY = "sv:wall_facts:v1"

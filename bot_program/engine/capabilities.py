@@ -94,6 +94,14 @@ ADAPTER_CAPABILITIES: dict = {
     "ibkr": ("market_data", "execution", "orders", "brackets", "account",
              "options"),
     "oanda": ("market_data", "execution", "orders", "brackets", "fills"),
+    # 2026-09-17. The full contract, every method read off developer.saxo
+    # by two independent readers (scratchpad saxo_spec.md). "fills" is
+    # earned by /port/v1/closedpositions and the audit log's FinalFill;
+    # "orders" by DELETE /trade/v2/orders; "brackets" by PATCH on the
+    # related legs. Four facts only SIM can settle are named in the
+    # adapter and probed by `saxo_smoke` before any order exists.
+    "saxo": ("market_data", "execution", "orders", "brackets", "fills",
+             "account"),
     # The simulator deliberately fills only what it can honestly simulate.
     # It is what a live config falls back to when credentials are missing,
     # and `asset_engine` REFUSES to trade when it gets one — so a PaperTrader

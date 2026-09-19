@@ -51,6 +51,7 @@ ADAPTERS = {
     "ibkr": ("bot_program.engine.ibkr_client", "IBKRTrader"),
     "oanda": ("bot_program.engine.oanda_client", "OANDATrader"),
     "paper": ("bot_program.engine.paper_trader", "PaperTrader"),
+    "saxo": ("bot_program.engine.saxo_client", "SaxoTrader"),
 }
 
 
@@ -61,7 +62,8 @@ def _klass(name):
 
 
 class TheListAndTheTableAgreeTests(SimpleTestCase):
-    """Three lists name the adapters. They must name the same six."""
+    """Three lists name the adapters. They must name the same set —
+    six on 2026-09-16, eight since Saxo joined on 2026-09-18."""
 
     def test_every_published_adapter_has_a_capability_row(self):
         from core.wall_facts import BROKER_ADAPTERS
@@ -143,16 +145,19 @@ class TheFactsBehindTheTableTests(SimpleTestCase):
 
     def test_which_adapters_can_be_asked_for_the_account(self):
         """Until 2026-09-17 only IBKR could answer net_liquidation, which is
-        why `sync_broker_account` walks IBKRAccount and nothing else. eToro
-        can now — and the sync STILL walks only IBKR rows. That gap is
-        recorded here on purpose: an eToro account's equity will not reach
-        the pages, the drawdown governor or the preflight until the sync
-        learns to walk EtoroAccount. The next adapter that joins this set
-        should make the same note, or fix the sync."""
+        why `sync_broker_account` walked IBKRAccount and nothing else.
+        eToro joined that day and `sync_etoro_accounts` walks it since
+        eaa68da. Saxo joined with its adapter — and the sync does NOT walk
+        SaxoAccount yet, the router does not route to it, and the book
+        cannot be a Saxo row. That gap is recorded here on purpose, as the
+        eToro one was: a Saxo account's equity will not reach the pages,
+        the drawdown governor or the preflight until the wiring commit.
+        The next adapter that joins this set should make the same note,
+        or fix the sync."""
         able = {n for n in ADAPTERS
                 if cap.has_capability(_klass(n), "account")}
         self.assertEqual(
-            able, {"ibkr", "etoro"},
+            able, {"ibkr", "etoro", "saxo"},
             "the set of adapters that can read an account changed; decide "
             "here whether the broker sync walks the newcomer, rather than "
             "letting its equity go unread in silence")

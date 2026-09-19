@@ -629,11 +629,18 @@ def refresh_saxo_sessions():
     return out
 
 
+#: Row class -> the `broker` value its readings and miss keys are filed
+#: under. A class missing here would file as "ibkr" and its outage would
+#: count against IBKR's alert — so every account row that the sync can
+#: reach belongs in this table.
+_BROKER_KINDS = {"EtoroAccount": "etoro", "SaxoAccount": "saxo"}
+
+
 def _broker_kind(acct) -> str:
     """The `broker` value this row's readings and miss keys are filed under.
     Mirrors capital_truth.broker_kind; duplicated here rather than imported
     so the miss helpers stay importable when capital_truth is not."""
-    return "etoro" if type(acct).__name__ == "EtoroAccount" else "ibkr"
+    return _BROKER_KINDS.get(type(acct).__name__, "ibkr")
 
 
 @shared_task

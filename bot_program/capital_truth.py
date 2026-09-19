@@ -216,7 +216,8 @@ def broker_backed(user):
 def broker_kind(acct) -> str:
     """The `broker` value a reading for this account row is stored under.
     One place, so the writer and both readers cannot spell it differently."""
-    return "etoro" if type(acct).__name__ == "EtoroAccount" else "ibkr"
+    return {"EtoroAccount": "etoro",
+            "SaxoAccount": "saxo"}.get(type(acct).__name__, "ibkr")
 
 
 def account_equity(user):
