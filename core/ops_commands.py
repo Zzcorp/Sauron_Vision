@@ -252,6 +252,19 @@ COMMANDS = [
         "category": "read",
     },
     {
+        "name": "tresor",
+        "title": "Le trésor",
+        "purpose": "Every broker, its capital, what it says it holds, what the platform believes is open, and the divergence between the two. Cached columns only — no broker call, nothing written. An em dash is never a zero.",
+        "usage": [
+            "python manage.py tresor",
+            "python manage.py tresor --user mathe",
+        ],
+        "mirrors": "/tresor/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+    },
+    {
         "name": "saxo_smoke",
         "title": "Saxo smoke",
         "purpose": "Exercise every READ of the Saxo adapter against the real SIM or LIVE for one user and report each in three states — ok, refused by Saxo, unknown — before any order exists. Places no order.",

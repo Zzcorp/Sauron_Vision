@@ -131,6 +131,55 @@ def _ibkr_overrides(user, asset_class: str) -> bool:
 
 # ── public ─────────────────────────────────────────────────────────────────
 
+#: The order the three flagged venues are consulted in. One tuple, read by
+#: the router, by capital_truth.broker_backed and by the pages, so "which
+#: broker carries this class" has exactly one answer everywhere.
+VENUE_PRECEDENCE = ("saxo", "etoro", "ibkr")
+
+
+def _saxo_overrides(user, asset_class: str) -> bool:
+    """True iff the user has a SaxoAccount that is_primary_for(asset_class).
+
+    Checked FIRST (2026-09-19): Saxo holds the real listing where eToro
+    holds a CFD on it, so when both are flagged for a class Saxo carries
+    it. A keyed row with no flag carries nothing.
+    """
+    try:
+        acct = getattr(user, "saxo_account", None)
+        return bool(acct and acct.is_primary_for(asset_class))
+    except Exception:
+        return False
+
+
+def _saxo_client_for(user, cfg, symbol: str):
+    """SaxoTrader from the user's row, or PaperTrader when it cannot be.
+
+    Same posture as the eToro branch: no application, no live session, or
+    an unreadable row means paper — and a live-mode config handed a
+    PaperTrader is refused by asset_engine, loudly, rather than trading
+    somewhere the operator did not choose.
+
+    The ROW decides the world, not the config: a SIM application serves a
+    live config with SIM, because the keys are what Saxo authenticates.
+    """
+    try:
+        from bot_program.models import SaxoAccount
+        acct: SaxoAccount = user.saxo_account
+        if not acct.get_credentials()[0]:
+            log.info("[router] %s: no Saxo application — paper", symbol)
+            return _paper_client(cfg)
+        if not acct.session_alive():
+            log.warning("[router] %s: Saxo session not alive — paper. Sign "
+                        "in again at /brokers/", symbol)
+            return _paper_client(cfg)
+        from .saxo_client import SaxoTrader
+        return SaxoTrader(acct)
+    except Exception as e:
+        log.warning("[router] %s: SaxoAccount unavailable (%s) — paper",
+                    symbol, e)
+        return _paper_client(cfg)
+
+
 def _etoro_overrides(user, asset_class: str) -> bool:
     """True iff the user has an EtoroAccount that is_primary_for(asset_class).
 
@@ -193,6 +242,10 @@ def client_for_symbol(user, symbol: str, cfg=None, purpose: str = "trade"):
     # eToro opt-in, before IBKR's: the newer broker wins when both are set.
     # options / cfd never reach here with a True — EtoroAccount has no flag
     # for either — so the forced-IBKR rule below still holds for them.
+    # VENUE_PRECEDENCE in code: Saxo, then eToro, then IBKR.
+    if _saxo_overrides(user, asset_class):
+        return _saxo_client_for(user, cfg, symbol)
+
     if _etoro_overrides(user, asset_class):
         return _etoro_client_for(user, cfg, symbol)
 
@@ -271,6 +324,8 @@ def broker_name_for_symbol(user, symbol: str, cfg=None) -> str:
     if inst is None:
         return "paper"
     asset_class = inst.asset_class
+    if _saxo_overrides(user, asset_class):
+        return "saxo"
     if _etoro_overrides(user, asset_class):
         return "etoro"
     if asset_class in ("options", "cfd") or _ibkr_overrides(user, asset_class):

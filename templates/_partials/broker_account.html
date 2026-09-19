@@ -22,8 +22,8 @@ currency (a UK ISA is GBP, the book defaults to EUR, and this platform
 has no FX conversion anywhere by design).
 {% endcomment %}
 {% if broker %}
-<div class="bk-card" title="What IBKR reports for this account — written by the broker sync every 15 min, never by this page. The platform book beside it is what the risk gates divide by; the two are different facts and both are meant to be visible.">
-    <span class="bk-id">IBKR · {{ broker.label }} ·
+<div class="bk-card" title="What {{ broker.name }} reports for this account — written by the broker sync every 15 min, never by this page. The platform book beside it is what the risk gates divide by; the two are different facts and both are meant to be visible.">
+    <span class="bk-id">{{ broker.name }} · {{ broker.label }} ·
         <span class="bk-env{% if 'LIVE' in broker.env %} bk-env--live{% endif %}">{{ broker.env }}</span>
     </span>
     {% if broker.equity %}

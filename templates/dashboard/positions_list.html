@@ -72,7 +72,7 @@ rows are written by the 15-min broker sync, and the age stamp is the
 honest freshness claim.{% endcomment %}
 <div class="card" style="margin-bottom:18px;">
     <div class="card-header">
-        <span class="card-title">⌂ At the broker · IBKR {{ broker.label }} · {{ broker.env }}</span>
+        <span class="card-title">⌂ At the broker · {{ broker.name }} {{ broker.label }} · {{ broker.env }}</span>
         {% if broker.positions %}
         <span class="bk-age sv-age" data-sv-at="{{ broker.positions.at|date:'c' }}">{{ broker.positions.at|timesince }} ago</span>
         {% endif %}

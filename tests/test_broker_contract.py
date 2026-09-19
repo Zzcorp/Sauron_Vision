@@ -88,6 +88,19 @@ class TheListAndTheTableAgreeTests(SimpleTestCase):
         self.assertEqual(set(ADAPTERS), set(BROKER_ADAPTERS),
                          "a broker was added and this guard does not walk it")
 
+    def test_every_adapter_has_a_broker_key(self):
+        """A live row records WHICH broker carried it, from the client that
+        placed the order (capabilities.adapter_key). An adapter missing from
+        that table records nothing, and /tresor/ then compares the row
+        against the wrong broker's holdings — or against none."""
+        missing = {n for n in ADAPTERS
+                   if cap.adapter_key(_klass(n)) != n}
+        self.assertEqual(
+            missing, set(),
+            f"{sorted(missing)}: capabilities.ADAPTER_CLASS_KEYS does not map "
+            f"this adapter's class to its broker key, so a position it "
+            f"carries cannot say so")
+
     def test_no_capability_is_declared_that_does_not_exist(self):
         for adapter, tiers in cap.ADAPTER_CAPABILITIES.items():
             for tier in tiers:

@@ -444,6 +444,13 @@ app.conf.beat_schedule = {
     # Ten minutes gives four refreshes per token lifetime; one missed cycle
     # costs nothing. Cadence pinned against the lifetime by
     # tests/test_saxo_oauth.py.
+    # 2026-09-19 — the third broker the book can be. Same cadence and
+    # same switch as the eToro walk; offset by nothing, because each loop
+    # reads a different broker and they do not contend.
+    "sync-saxo-accounts": {
+        "task": "bot_program.tasks.sync_saxo_accounts",
+        "schedule": 900.0,
+    },
     "refresh-saxo-sessions": {
         "task": "bot_program.tasks.refresh_saxo_sessions",
         "schedule": 600.0,

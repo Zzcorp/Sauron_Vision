@@ -158,6 +158,30 @@ def _saxo_session_line(saxo, now=None):
     return "session: renewable", False
 
 
+def _class_conflicts(user) -> dict:
+    """{asset_class: [broker keys that claim it]} for every class claimed
+    more than once.
+
+    The router picks one (VENUE_PRECEDENCE: saxo, etoro, ibkr) and that is
+    deterministic, but silence about it is how an operator's stock orders
+    move venue without anyone deciding to move them.
+    """
+    claims: dict = {}
+    for key, attr in (("saxo", "saxo_account"), ("etoro", "etoro_account"),
+                      ("ibkr", "ibkr_account")):
+        acct = getattr(user, attr, None)
+        fn = getattr(acct, "is_primary_for", None)
+        if acct is None or not callable(fn):
+            continue
+        for cls in ROUTABLE_CLASSES:
+            try:
+                if fn(cls):
+                    claims.setdefault(cls, []).append(key)
+            except Exception:  # noqa: BLE001 — an unreadable row claims nothing
+                continue
+    return {cls: who for cls, who in claims.items() if len(who) > 1}
+
+
 def _rows(user) -> list:
     from bot_program.engine.capabilities import declared
 
@@ -177,6 +201,7 @@ def _rows(user) -> list:
             "has_adapter": has_adapter,
             "extra": extra,
             "primary_for": _primary_classes(acct),
+            "loses": loses.get(key, []),
         }
 
     ibkr = getattr(user, "ibkr_account", None)
@@ -189,6 +214,17 @@ def _rows(user) -> list:
     saxo_extra, saxo_needs_signin = "", False
     if saxo is not None:
         saxo_extra, saxo_needs_signin = _saxo_session_line(saxo)
+
+    # Who loses a contested asset class, named on the losing row.
+    from bot_program.engine.broker_router import VENUE_PRECEDENCE
+    conflicts = _class_conflicts(user)
+    loses: dict = {}
+    for cls, who in conflicts.items():
+        ranked = sorted(who, key=lambda k: VENUE_PRECEDENCE.index(k)
+                        if k in VENUE_PRECEDENCE else 99)
+        winner = ranked[0]
+        for key in ranked[1:]:
+            loses.setdefault(key, []).append(f"{cls} → {winner}")
 
     return [
         row("ibkr", "Interactive Brokers", ibkr,
@@ -311,10 +347,19 @@ def save_saxo_credentials(request):
                                 f"was saved.")
         return redirect("brokers_page")
 
-    acct, _ = SaxoAccount.objects.get_or_create(user=user)
+    acct, _created = SaxoAccount.objects.get_or_create(user=user)
+    was_sim = None if _created else acct.sim
     acct.set_credentials(app_key, app_secret)
     acct.redirect_uri = redirect_uri
     acct.sim = sim
+    # Which asset classes this account carries. Default off, and off is
+    # what an unchecked box means: a keyed Saxo row nobody has claimed a
+    # class for is read and traded on by nothing.
+    acct.is_primary_for_stocks = request.POST.get("primary_stocks") == "on"
+    acct.is_primary_for_forex = request.POST.get("primary_forex") == "on"
+    acct.is_primary_for_commodity = (
+        request.POST.get("primary_commodity") == "on")
+    acct.is_primary_for_crypto = request.POST.get("primary_crypto") == "on"
     # A session belongs to ONE application on ONE environment: a re-saved
     # key, secret, URI or sim flag closes whatever session was open, or the
     # keeper would present a SIM token to the live host (or an old app's
@@ -323,12 +368,26 @@ def save_saxo_credentials(request):
     acct.clear_session()
     acct.session_lost_at = None
     acct.session_lost_reason = ""
+    # A reading taken on SIM describes a different account from the one a
+    # LIVE key reaches. Keeping it would put a simulated balance in a real
+    # book's cells — so the cells are dropped and the next sync refills
+    # them. The HISTORY rows stay and carry their own `env`.
+    if was_sim is not None and was_sim != sim:
+        acct.last_equity = None
+        acct.last_equity_currency = ""
+        acct.last_equity_at = None
+        acct.broker_positions = []
+        acct.broker_positions_at = None
+        env_note = (" The environment changed, so the stored equity and "
+                    "holdings were dropped: they described the other one.")
+    else:
+        env_note = ""
     acct.save()
     messages.warning(request, f"Saxo application saved for {target_username} "
                               f"({'sim' if sim else 'live'}). Not yet "
                               f"connected: press 'Connect Saxo — sign in "
                               f"once' on the row to open the session. Any "
-                              f"session that was open is closed.")
+                              f"session that was open is closed.{env_note}")
     return redirect("brokers_page")
 
 

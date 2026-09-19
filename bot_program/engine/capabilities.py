@@ -111,6 +111,35 @@ ADAPTER_CAPABILITIES: dict = {
 }
 
 
+#: Adapter CLASS NAME -> broker key. The engine holds a client, not a
+#: name, and a live row must be able to record WHICH broker carried it —
+#: an attribution the platform can otherwise only infer from today's
+#: routing rule, which is wrong for every row opened before a flag moved.
+#: Held against the published adapter list by tests/test_broker_contract.py.
+ADAPTER_CLASS_KEYS = {
+    "AlpacaTrader": "alpaca",
+    "BinanceClient": "binance",
+    "BinanceFuturesClient": "binance_futures",
+    "EtoroTrader": "etoro",
+    "IBKRTrader": "ibkr",
+    "OANDATrader": "oanda",
+    "PaperTrader": "paper",
+    "SaxoTrader": "saxo",
+}
+
+
+def adapter_key(client_or_class) -> str:
+    """The broker key for a client instance or class, or "" when unknown.
+
+    An empty string rather than a guess: a row that records the wrong
+    broker is worse than one that records none, because the divergence
+    view would then confidently compare it against the wrong holdings.
+    """
+    name = getattr(client_or_class, "__name__", None) \
+        or type(client_or_class).__name__
+    return ADAPTER_CLASS_KEYS.get(name, "")
+
+
 def capabilities_of(client_or_class) -> tuple:
     """The capabilities actually present on a client, by inspection.
 

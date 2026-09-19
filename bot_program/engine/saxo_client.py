@@ -64,6 +64,11 @@ CHART_MAX = 1200               # documented cap on Count
 FILL_ATTEMPTS = 5
 FILL_DELAY_S = 0.6
 TIMEOUT_S = 20
+#: Order writes wait longer than Saxo's own sixty-second broker deadline,
+#: so its 202 TradeNotCompleted (which carries an OrderId) always arrives
+#: before this client gives up. A client-side timeout on a placement is
+#: the worst state there is: the order may be live and nothing names it.
+ORDER_TIMEOUT_S = 75
 
 #: Chart samples for these asset types carry bid/ask legs only.
 BID_ASK_BARS = {"FxSpot", "CfdOnIndex", "CfdOnFutures"}
@@ -101,6 +106,24 @@ class SaxoApiError(RuntimeError):
 class SaxoAuthError(SaxoApiError):
     """401 — the bearer was refused. The body is EMPTY (observed), so it
     is never parsed; the keeper decides whether the session is lost."""
+
+
+class SaxoOrderInDoubt(SaxoApiError):
+    """A placement whose outcome is unknown: the request did not come back.
+
+    Distinct from a refusal on purpose — a caller that retried this would
+    double the position. It carries the ExternalReference the order was
+    sent with, which is what the operator searches on in SaxoTraderGO or
+    in /cs/v1/audit/orderactivities.
+    """
+
+    def __init__(self, reference: str, detail: str):
+        super().__init__(0, "OrderInDoubt",
+                         f"the order request did not come back ({detail}). "
+                         f"It MAY be live at Saxo under ExternalReference "
+                         f"{reference!r}. Do not resend it: check "
+                         f"/brokers/ and the order list first.")
+        self.reference = reference
 
 
 class SaxoRateLimited(SaxoApiError):
@@ -243,9 +266,10 @@ class SaxoTrader:
         return r.json() or {}
 
     def _write(self, method: str, path: str, body: Optional[dict] = None,
-               params: Optional[dict] = None):
+               params: Optional[dict] = None, timeout: Optional[float] = None):
         fn = getattr(self._sess(), method)
-        kw = {"headers": self._headers(write=True), "timeout": self.timeout}
+        kw = {"headers": self._headers(write=True),
+              "timeout": timeout or self.timeout}
         if body is not None:
             kw["json"] = body
         r = fn(self._url(path, params), **kw)
@@ -544,6 +568,21 @@ class SaxoTrader:
         return self._get("port/v1/balances", {"ClientKey": ident["client_key"],
                                               "AccountKey": ident["account_key"]})
 
+    def balance_usdt(self) -> float:
+        """Total account value as a bare float, 0.0 when unreadable.
+
+        The name is capital_truth.broker_equity()'s probe — every adapter
+        has it — and without it capital_mismatches, pool_oversubscription,
+        the engine's pool note and /health/'s capital check were all blind
+        on a Saxo-routed config. The currency is the account's;
+        net_liquidation() is the pair when the caller needs both.
+        """
+        try:
+            return float((self.balances() or {}).get("TotalValue") or 0.0)
+        except Exception as e:  # noqa: BLE001 — 0.0 is the documented contract
+            log.warning("saxo balance_usdt failed: %s", e)
+            return 0.0
+
     def net_liquidation(self) -> "tuple[float, str] | None":
         """(TotalValue, Currency) or None when unreadable — IBKRTrader's
         contract, so the sync can file a BrokerEquityReading."""
@@ -741,7 +780,13 @@ class SaxoTrader:
         if children:
             body["Orders"] = children
 
-        r = self._write("post", "trade/v2/orders", body)
+        try:
+            r = self._write("post", "trade/v2/orders", body,
+                            timeout=ORDER_TIMEOUT_S)
+        except requests.RequestException as e:
+            # The request did not come back. Saxo may have taken the order.
+            raise SaxoOrderInDoubt(reference,
+                                   f"{type(e).__name__}: {e}") from e
         accepted = {}
         try:
             accepted = r.json() or {}

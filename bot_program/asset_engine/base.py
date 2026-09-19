@@ -2688,6 +2688,17 @@ class AssetBot(ABC):
                     return self._skip(symbol, skips.ORDER_REJECTED,
                                       f"broker status {status}")
 
+                # WHICH BROKER carried this. Recorded from the client
+                # that actually placed the order, because the alternative
+                # — inferring it from the routing rule when the row is
+                # read — is wrong for every row opened before an operator
+                # moved a primary-for flag, and /tresor/ compares these
+                # rows against that broker's holdings.
+                from bot_program.engine.capabilities import adapter_key
+                _carried_by = adapter_key(client)
+                if _carried_by:
+                    entry_meta["broker"] = _carried_by
+
                 # Real fills: prefer the broker's average fill price and
                 # filled quantity over the pre-order ticker, so slippage
                 # flows into P&L and grading.

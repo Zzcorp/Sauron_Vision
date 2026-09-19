@@ -177,7 +177,8 @@ def capital_mismatches(user) -> list:
 
 
 def broker_backed(user):
-    """The IBKRAccount that makes this user's book broker-backed, or None.
+    """The account row that makes this user's book broker-backed, or None —
+    a SaxoAccount, an EtoroAccount or an IBKRAccount, in that order.
 
     INTERFACED is a durable configuration fact: an IBKRAccount row whose
     account id decrypts to something non-empty. Deliberately NOT
@@ -186,7 +187,24 @@ def broker_backed(user):
     True forever. Reachability is a different question and it is answered
     by the AGE of the last reading, never by a stored flag.
     """
-    # eToro first, since 2026-09-17, by the router's own rule: the row is
+    # Saxo first, since 2026-09-19, then eToro, then IBKR — the router's
+    # VENUE_PRECEDENCE, and the same test of carriage: keyed AND flagged
+    # primary for at least one asset class. A registered Saxo row that has
+    # never connected can therefore be the book and show an em dash for
+    # equity, which is the honest reading: nothing has been measured, and
+    # the preflight refuses to arm money against an unmeasured book.
+    saxo = getattr(user, "saxo_account", None)
+    if saxo is not None:
+        try:
+            keyed = bool(saxo.get_credentials()[0])
+            carries = any(saxo.is_primary_for(c)
+                          for c in ("stock", "forex", "commodity", "crypto"))
+        except Exception:  # noqa: BLE001 — an unreadable row is not backed
+            keyed, carries = False, False
+        if keyed and carries:
+            return saxo
+
+    # eToro next, since 2026-09-17, by the router's own rule: the row is
     # the book when it is keyed AND flagged primary for at least one asset
     # class. A keyed row with no flag carries nothing and is therefore not
     # the book, and a user who has flipped no flag sees IBKR exactly as
@@ -387,7 +405,13 @@ def broker_view(user):
         return None
     return {
         "label": acct.label,
-        "env": acct.env_label,
+        # WHICH broker. Three pages printed the literal "IBKR" over
+        # whatever book they were handed, because this builder never said.
+        "kind": broker_kind(acct),
+        "name": {"saxo": "Saxo Bank", "etoro": "eToro",
+                 "ibkr": "IBKR"}.get(broker_kind(acct), "broker"),
+        # getattr, because a row that cannot say is not a page that breaks.
+        "env": getattr(acct, "env_label", "") or "",
         "equity": account_equity(user),
         "positions": broker_positions(user),
     }

@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% comment %}
+LE TRÉSOR — the page twin of `manage.py tresor`. Every number comes from
+bot_program.broker_vision.vision(): cached columns only, no broker call on
+this render path. An em dash means NEVER MEASURED and is never a zero —
+"flat, measured" is written out in words where it is true.
+{% endcomment %}
+{% block content %}
+<div style="margin-bottom:18px;">
+    <h1 style="font-family:var(--font-mono);font-size:20px;letter-spacing:1px;margin:0;">⛁ LE TRÉSOR</h1>
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:4px;">
+        Où est l'argent, ce que chaque courtier dit détenir, et où le courtier et la plateforme ne sont pas d'accord.
+        Colonnes en cache uniquement — aucun appel courtier sur cette page.
+        {% if v %}Mesuré {{ v.at|date:"Y-m-d H:i" }} UTC.{% endif %}
+    </div>
+</div>
+
+{% if not v %}
+<div class="card fade-in-up"><div style="padding:16px;font-family:var(--font-mono);font-size:12px;color:var(--accent-gold);">
+    Cette vue n'a pas pu être calculée. Le détail est dans le journal du serveur ; <code>python manage.py tresor</code> dira la même chose dans le terminal.
+</div></div>
+{% else %}
+
+{% if v.blockers %}
+<div class="card fade-in-up" style="margin-bottom:18px;border-color:var(--danger,#c0392b);">
+    <div class="card-header"><span class="card-title">La plateforme et l'argent ne sont pas d'accord</span></div>
+    <ol style="padding:12px 16px 16px 34px;margin:0;font-family:var(--font-mono);font-size:12px;line-height:1.7;">
+        {% for b in v.blockers %}<li>{{ b }}</li>{% endfor %}
+    </ol>
+</div>
+{% endif %}
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Le livre</span></div>
+    <div style="padding:14px 16px;font-family:var(--font-mono);font-size:12px;">
+    {% if not v.book %}
+        <span style="color:var(--accent-gold);">— aucune ligne n'est le livre : <code>capital_truth</code> n'a rien à lire, et le préflight refusera d'armer de l'argent.</span>
+    {% else %}
+        <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:baseline;">
+            <div><strong>{{ v.book.name }}</strong> <span class="sv-venue {% if v.book.env == 'live' %}sv-venue--live{% else %}sv-venue--paper{% endif %}">{{ v.book.env }}</span></div>
+            <div>capital
+                {% if v.book.equity %}<strong>{{ v.book.equity.value_text }} {{ v.book.equity.currency }}</strong>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+            </div>
+            <div style="color:var(--text-muted);">
+                {% if v.book.equity %}lu il y a {{ v.book.equity.age_seconds }} s{% else %}jamais lu{% endif %}
+            </div>
+            <div>plus haut
+                {% if v.high_water %}{{ v.high_water.hwm|floatformat:2 }} {{ v.high_water.currency }}{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+            </div>
+            <div>repli
+                {% if v.drawdown %}{{ v.drawdown.drawdown_pct|floatformat:4 }} ({{ v.drawdown.n }} lignes d'historique){% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+            </div>
+        </div>
+    {% endif %}
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Chaque courtier</span></div>
+    <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:12px;">
+        <thead><tr style="text-align:left;color:var(--text-muted);font-size:11px;">
+            <th style="padding:8px 10px;">Courtier</th><th>Env</th><th style="text-align:right;">Capital</th>
+            <th style="text-align:right;">Âge</th><th style="text-align:right;">Lignes détenues</th>
+            <th>Porte</th><th>Session</th>
+        </tr></thead>
+        <tbody>
+        {% for r in v.brokers %}
+            <tr style="border-top:1px solid var(--border);">
+                <td style="padding:8px 10px;"><strong>{{ r.name }}</strong>{% if r.is_book %} <span style="color:var(--accent-gold);">· le livre</span>{% endif %}</td>
+                <td class="sv-venue {% if r.env == 'live' %}sv-venue--live{% else %}sv-venue--paper{% endif %}">{{ r.env }}</td>
+                <td style="text-align:right;">{% if r.equity %}{{ r.equity.value_text }} {{ r.equity.currency }}{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+                <td style="text-align:right;{% if r.equity_stale %}color:var(--accent-gold);{% endif %}">{% if r.equity %}{{ r.equity.age_seconds }} s{% else %}—{% endif %}</td>
+                <td style="text-align:right;">{% if r.held_n is None %}<span style="color:var(--text-muted);">—</span>{% else %}{{ r.held_n }}{% endif %}</td>
+                <td>{% if r.claims %}{{ r.claims|join:", " }}{% else %}<span style="color:var(--text-muted);">rien</span>{% endif %}</td>
+                <td style="color:var(--text-muted);">{{ r.session }}</td>
+            </tr>
+        {% empty %}
+            <tr><td colspan="7" style="padding:12px 10px;color:var(--accent-gold);">Aucune ligne courtier. Ajoutez des clés sur <a href="{% url 'brokers_page' %}">/brokers/</a>.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Où irait un nouvel ordre</span></div>
+    <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:12px;">
+        <tbody>
+        {% for r in v.routing %}
+            <tr style="border-top:1px solid var(--border);">
+                <td style="padding:6px 10px;width:140px;">{{ r.asset_class }}</td>
+                <td style="width:120px;"><strong>{{ r.winner }}</strong></td>
+                <td style="color:{% if r.contested %}var(--accent-gold){% else %}var(--text-muted){% endif %};">
+                    {% if r.contested %}revendiqué par {{ r.claimants|join:", " }} — {{ r.winner }} l'emporte{% elif r.by_default %}par défaut{% else %}revendiqué{% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Ce que la plateforme croit ouvert · {{ v.platform.live|length }} en réel, {{ v.platform.paper_n }} en papier</span></div>
+    {% if not v.platform.live %}
+    <div style="padding:12px 16px;font-family:var(--font-mono);font-size:12px;color:var(--text-muted);">Aucune ligne réelle ouverte. Les {{ v.platform.paper_n }} lignes papier sont comptées à part — réel et papier ne sont jamais mélangés.</div>
+    {% else %}
+    <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:12px;">
+        <thead><tr style="text-align:left;color:var(--text-muted);font-size:11px;">
+            <th style="padding:8px 10px;">Symbole</th><th>Sens</th><th style="text-align:right;">Quantité</th>
+            <th style="text-align:right;">Entrée</th><th>Courtier</th><th>Attribution</th><th>Protection</th><th>Config</th>
+        </tr></thead>
+        <tbody>
+        {% for p in v.platform.live %}
+            <tr style="border-top:1px solid var(--border);">
+                <td style="padding:8px 10px;">{{ p.symbol }}</td><td>{{ p.side }}</td>
+                <td style="text-align:right;">{{ p.qty|floatformat:4 }}</td>
+                <td style="text-align:right;">{{ p.entry|floatformat:4 }}</td>
+                <td>{{ p.broker }}</td>
+                <td style="color:{% if p.attribution == 'routing' %}var(--accent-gold){% else %}var(--text-muted){% endif %};">{{ p.attribution }}</td>
+                <td>{% if p.working %}en attente{% elif p.protected %}chez le courtier{% else %}<span style="color:var(--accent-gold);">côté bot</span>{% endif %}</td>
+                <td style="color:var(--text-muted);">{{ p.config }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div style="padding:8px 16px 12px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+        « routing » : la ligne ne dit pas quel courtier l'a portée, l'attribution suit la règle de routage d'aujourd'hui — une supposition si un drapeau a bougé depuis. « recorded » : la ligne le dit elle-même.
+    </div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up">
+    <div class="card-header"><span class="card-title">Divergence — le courtier contre la plateforme</span></div>
+    <div style="padding:8px 16px 16px;font-family:var(--font-mono);font-size:12px;">
+    {% for d in v.divergence %}
+        <div style="margin-top:12px;">
+            <strong>{{ d.name }}</strong> —
+            {% if not d.known %}
+                <span style="color:var(--text-muted);">— impossible à comparer : {{ d.reason }}</span>
+                {% if d.platform_n %}<span style="color:var(--accent-gold);"> · {{ d.platform_n }} ligne(s) réelle(s) lui sont attribuées</span>{% endif %}
+            {% else %}
+                {{ d.agree|length }} d'accord · {{ d.only_broker|length }} seulement chez le courtier · {{ d.only_platform|length }} seulement dans la plateforme
+                <span style="color:var(--text-muted);">(instantané vieux de {{ d.age_seconds }} s)</span>
+                {% for p in d.only_platform %}
+                <div style="color:var(--danger,#c0392b);margin-left:14px;">PLATEFORME SEULE · {{ p.symbol }} {{ p.side }} {{ p.qty|floatformat:4 }} ({{ p.config }}) — fermée chez le courtier sans que la ligne soit soldée, ou jamais ouverte</div>
+                {% endfor %}
+                {% for h in d.only_broker %}
+                <div style="color:var(--accent-gold);margin-left:14px;">COURTIER SEUL · {{ h.symbol }} {{ h.side }} {{ h.qty|floatformat:4 }} — placée à la main, ou une jambe restée après la fermeture d'une ligne</div>
+                {% endfor %}
+            {% endif %}
+        </div>
+    {% empty %}
+        <span style="color:var(--text-muted);">Aucun courtier à comparer.</span>
+    {% endfor %}
+    </div>
+</div>
+
+{% if v.notes %}
+<div class="card fade-in-up" style="margin-top:18px;">
+    <div class="card-header"><span class="card-title">À lire</span></div>
+    <ol style="padding:12px 16px 16px 34px;margin:0;font-family:var(--font-mono);font-size:12px;line-height:1.7;">
+        {% for n in v.notes %}<li>{{ n }}</li>{% endfor %}
+    </ol>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

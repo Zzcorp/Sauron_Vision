@@ -452,6 +452,7 @@
             <div class="nav-section">Le livre &middot; l'argent</div>
             <a href="{% url 'portfolio_overview' %}" class="nav-link {% if page_id == 'portfolio' %}active{% endif %}"><span class="icon">◎</span> <span class="label-text">Portfolio</span></a>
             <a href="{% url 'brokers_page' %}" class="nav-link {% if page_id == 'brokers' %}active{% endif %}"><span class="icon">⌁</span> <span class="label-text">Les courtiers</span></a>
+            <a href="{% url 'tresor_page' %}" class="nav-link {% if page_id == 'tresor' %}active{% endif %}"><span class="icon">⛁</span> <span class="label-text">Le trésor</span></a>
             <a href="{% url 'positions_list' %}" data-nav-id="positions" class="nav-link {% if page_id == 'positions' %}active{% endif %}"><span class="icon">▣</span> <span class="label-text">Positions</span></a>
             <a href="{% url 'tax_lots_dashboard' %}" class="nav-link {% if page_id == 'tax_lots' %}active{% endif %}"><span class="icon">▦</span> <span class="label-text">Tax Lots</span></a>
             <a href="{% url 'bot_home' %}" class="nav-link {% if page_id == 'bot_program' %}active{% endif %}"><span class="icon">⟳</span> <span class="label-text">Bot Program</span></a>

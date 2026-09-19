@@ -158,10 +158,11 @@ class Command(BaseCommand):
         self.stdout.write(f"share allocator {self._mode()}")
         self.stdout.write(f"horizon prior: {self._horizon_line()}")
         User = get_user_model()
+        # Every interfaced book, not only IBKR's — see
+        # bot_program.tasks._users_with_a_broker_row.
+        from bot_program.tasks import _users_with_a_broker_row
         users = ([self._user(username)] if username else
-                 list(User.objects.filter(
-                     pk__in=IBKRAccount.objects.exclude(account_id_enc="")
-                     .values_list("user_id", flat=True)).order_by("username")))
+                 list(_users_with_a_broker_row()))
         for user in users:
             reading = account_equity(user)
             followers = followers_of(user)

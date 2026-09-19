@@ -111,6 +111,7 @@ from core.views import rate_limiter_stats, system_status
 from .views_brokers import (  # noqa: E402 — 2026-09-17, les courtiers
     brokers_page, disconnect_etoro, disconnect_saxo, save_etoro_credentials,
     save_saxo_credentials, saxo_callback, saxo_connect)
+from .views_tresor import tresor_page  # noqa: E402 — 2026-09-19, le trésor
 
 urlpatterns = [
     # ── Command Center (unified Dashboard + Eye merge) ───────
@@ -235,6 +236,7 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     #    hold; plus the eToro and Saxo forms, added before their adapters so
     #    keys obtained today have somewhere encrypted to go.
     path("brokers/", brokers_page, name="brokers_page"),
+    path("tresor/", tresor_page, name="tresor_page"),
     path("admin-dashboard/brokers/etoro/save/", save_etoro_credentials, name="hq_save_etoro"),
     path("admin-dashboard/brokers/saxo/save/", save_saxo_credentials, name="hq_save_saxo"),
     path("admin-dashboard/brokers/saxo/disconnect/", disconnect_saxo, name="hq_disconnect_saxo"),

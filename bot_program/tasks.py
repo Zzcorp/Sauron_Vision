@@ -564,6 +564,101 @@ BROKER_MISS_ALERT_COOLDOWN = 6 * 3600
 
 
 @shared_task
+@guarded_task("broker_account_sync")
+def sync_saxo_accounts():
+    """Read every Saxo account with a live session: equity, holdings, one
+    history row.
+
+    The Saxo twin of sync_etoro_accounts. A row whose session is not alive
+    is skipped, not attempted: the keeper (refresh_saxo_sessions) owns the
+    session's health and the page already says "sign in again", so
+    attempting it here would count a known sign-in as an unreachable
+    broker and raise the staff alert twice for one fact.
+
+    `attempted` and `stored` are the gate's work/done counters.
+    """
+    from django.utils import timezone
+
+    from .engine.saxo_client import SaxoTrader
+    from .models import SaxoAccount
+
+    out = {"attempted": 0, "stored": 0, "unreachable": 0, "no_session": 0}
+    for acct in SaxoAccount.objects.exclude(app_key_enc=""):
+        if not acct.session_alive():
+            out["no_session"] += 1
+            continue
+        user = acct.user
+        out["attempted"] += 1
+        reading, rows = None, None
+        try:
+            client = SaxoTrader(acct)
+            reading = client.net_liquidation()
+            rows = client.broker_portfolio()
+        except Exception as e:  # noqa: BLE001 — one account must not stop the rest
+            logger.warning("broker sync: %s (saxo) unreadable: %s",
+                           acct.label, e)
+            reading, rows = None, None
+
+        if reading is None and rows is None:
+            out["unreachable"] += 1
+            _note_broker_miss(acct, user)
+            continue
+        _clear_broker_miss(acct)
+
+        now = timezone.now()
+        fields = []
+        if reading is not None:
+            value, currency = reading
+            acct.last_equity = value
+            acct.last_equity_currency = currency
+            acct.last_equity_at = now
+            fields += ["last_equity", "last_equity_currency", "last_equity_at"]
+        if rows is not None:
+            acct.broker_positions = rows
+            acct.broker_positions_at = now
+            fields += ["broker_positions", "broker_positions_at"]
+        acct.connected = True
+        acct.last_sync = now
+        fields += ["connected", "last_sync"]
+        acct.save(update_fields=fields)
+
+        if reading is not None:
+            from .equity_models import BrokerEquityReading
+            try:
+                BrokerEquityReading.objects.get_or_create(
+                    broker="saxo", account_pk=acct.pk, at=now,
+                    # Saxo's SIM and LIVE are two worlds on ONE row: without
+                    # this, a simulated balance and a real one are
+                    # indistinguishable in the same account's history.
+                    defaults={"value": value, "currency": currency,
+                              "env": "paper" if acct.sim else "live",
+                              "account": None})
+            except Exception as e:  # noqa: BLE001 — a history row is not the sync
+                logger.warning("broker sync: %s (saxo) history row failed: %s",
+                               acct.label, e)
+
+        # The gate's DONE counter: a pass that wrote the cells has stored
+        # something whether or not the history row landed and whether or
+        # not there was an equity reading. Counting it inside the history
+        # try graded the component "handled N rows and stored none".
+        out["stored"] += 1
+
+        # A pool that tracks the account is re-sized by the sync and by
+        # nothing else, and tracking_freeze_reason refuses every entry
+        # once the reading ages past an hour — so a Saxo book that never
+        # ran these two would quietly stop trading. Gated on being THE
+        # BOOK: two brokers retuning the same pools would fight.
+        if reading is not None:
+            from .capital_truth import broker_backed
+            book = broker_backed(user)
+            if book is not None and type(book) is type(acct) \
+                    and book.pk == acct.pk:
+                _follow_the_account(user, value, currency)
+                _shock_trigger(user, now)
+    return out
+
+
+@shared_task
 def refresh_saxo_sessions():
     """Rotate every Saxo row's tokens. Ungated — see the module note in
     engine/saxo_oauth.py and the docstring of this patch.
@@ -634,6 +729,27 @@ def refresh_saxo_sessions():
 #: count against IBKR's alert — so every account row that the sync can
 #: reach belongs in this table.
 _BROKER_KINDS = {"EtoroAccount": "etoro", "SaxoAccount": "saxo"}
+
+
+def _users_with_a_broker_row():
+    """Every user who has keyed ANY broker, once each.
+
+    One place, because three callers had written "IBKRAccount.objects.
+    exclude(account_id_enc='')" and each of them silently skipped a Saxo
+    or an eToro book.
+    """
+    from django.contrib.auth import get_user_model
+
+    from .models import EtoroAccount, IBKRAccount, SaxoAccount
+
+    ids = set(IBKRAccount.objects.exclude(account_id_enc="")
+              .values_list("user_id", flat=True))
+    ids |= set(EtoroAccount.objects.exclude(api_key_enc="")
+               .values_list("user_id", flat=True))
+    ids |= set(SaxoAccount.objects.exclude(app_key_enc="")
+               .values_list("user_id", flat=True))
+    return (get_user_model().objects
+            .filter(pk__in=[i for i in ids if i]).order_by("username"))
 
 
 def _broker_kind(acct) -> str:
@@ -716,10 +832,21 @@ def sync_etoro_accounts():
                     broker="etoro", account_pk=acct.pk, at=now,
                     defaults={"value": value, "currency": currency,
                               "env": "paper" if acct.demo else "live"})
-                out["stored"] += 1
             except Exception as e:  # noqa: BLE001 — the cell is written; history must not fail the sync
                 logger.warning("broker sync: %s (etoro) history row failed: "
                                "%s", acct.label, e)
+
+        # Same two corrections as the Saxo walk, for the same reasons: the
+        # gate's DONE counter belongs to the pass, and a pool that tracks
+        # an eToro book has never been re-sized by anything.
+        out["stored"] += 1
+        if reading is not None:
+            from .capital_truth import broker_backed
+            book = broker_backed(user)
+            if book is not None and type(book) is type(acct) \
+                    and book.pk == acct.pk:
+                _follow_the_account(user, value, currency)
+                _shock_trigger(user, now)
     return out
 
 
@@ -817,9 +944,10 @@ def propose_share_plans() -> dict:
     graded = grade_plans()
     users = proposals = not_proposed = errors = 0
     last_error = ""
-    for acct in (IBKRAccount.objects.exclude(account_id_enc="")
-                 .select_related("user")):
-        user = acct.user
+    # Every user with an INTERFACED BROKER ROW, not just an IBKR one:
+    # walking IBKRAccount alone meant the allocator was silently dead for
+    # a Saxo or an eToro book. broker_backed() is still the real gate.
+    for user in _users_with_a_broker_row():
         if broker_backed(user) is None:
             continue
         users += 1

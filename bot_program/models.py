@@ -405,6 +405,18 @@ class EtoroAccount(models.Model):
     broker_positions_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    @property
+    def env_label(self) -> str:
+        """What to print beside this connection, for humans.
+
+        Every row that can be the book needs it: capital_truth.broker_view()
+        reads it with NO guard, and this row has been bookable since
+        2026-09-17 without it — which would have raised AttributeError on
+        /portfolio/, /positions/, /setup/, /command/ and in preflight_live
+        the moment an operator ticked one primary-for box.
+        """
+        return "DEMO" if self.demo else "LIVE"
+
     def is_primary_for(self, asset_class: str) -> bool:
         return bool({
             "stock": self.is_primary_for_stocks,
@@ -464,6 +476,18 @@ class SaxoAccount(models.Model):
     redirect_uri = models.CharField(max_length=300, blank=True)
     sim = models.BooleanField(
         default=True, help_text="Keys registered on Saxo's SIM environment.")
+    # WHICH ASSET CLASSES THIS ACCOUNT HOLDS. Default OFF, every one: a
+    # keyed and connected Saxo row that no operator has claimed anything
+    # for is READ (its equity is a fact worth storing) and TRADED ON BY
+    # NOTHING. The router consults is_primary_for(); the page shows which
+    # classes are claimed; two rows claiming the same class is reported as
+    # the configuration mistake it is, and Saxo wins — see
+    # bot_program/engine/broker_router.py.
+    is_primary_for_stocks = models.BooleanField(
+        default=False, help_text="Route stock and ETF orders to Saxo.")
+    is_primary_for_forex = models.BooleanField(default=False)
+    is_primary_for_commodity = models.BooleanField(default=False)
+    is_primary_for_crypto = models.BooleanField(default=False)
     access_token_enc = models.TextField(blank=True)
     refresh_token_enc = models.TextField(blank=True)
     token_expires_at = models.DateTimeField(null=True, blank=True)
@@ -481,7 +505,44 @@ class SaxoAccount(models.Model):
     session_lost_reason = models.CharField(max_length=120, blank=True)
     connected = models.BooleanField(default=False)
     last_sync = models.DateTimeField(null=True, blank=True)
+    # THE READING CELLS, in IBKRAccount's exact shape. The sync task is
+    # the only writer; every reader — capital_truth, the share allocator's
+    # drawdown governor, the preflight, /brokers/, /tresor/ — reads these
+    # cached columns and never the broker, because a broker round trip
+    # does not belong on a render path. NULL means "never measured", which
+    # is not zero: the pages render an em dash.
+    last_equity = models.DecimalField(max_digits=18, decimal_places=2,
+                                      null=True, blank=True)
+    last_equity_currency = models.CharField(max_length=8, blank=True,
+                                            default="")
+    last_equity_at = models.DateTimeField(null=True, blank=True)
+    broker_positions = models.JSONField(default=list, blank=True)
+    broker_positions_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def env_label(self) -> str:
+        """What to print beside this connection, for humans.
+
+        IBKRAccount has had this since the beginning and
+        capital_truth.broker_view() reads it with NO guard — so every row
+        that can be the book must have it, or /portfolio/, /positions/,
+        /setup/, /command/ and `preflight_live` raise AttributeError the
+        moment that row becomes the book. Saxo's environment is the app
+        key's, not a port's.
+        """
+        return "SIM" if self.sim else "LIVE"
+
+    def is_primary_for(self, asset_class: str) -> bool:
+        """Does this account hold `asset_class`? The router's question, and
+        the one the page renders. Unknown classes are never claimed."""
+        return bool({
+            "stock": self.is_primary_for_stocks,
+            "etf": self.is_primary_for_stocks,
+            "forex": self.is_primary_for_forex,
+            "commodity": self.is_primary_for_commodity,
+            "crypto": self.is_primary_for_crypto,
+        }.get(asset_class, False))
 
     def set_credentials(self, app_key: str, app_secret: str):
         f = _fernet()
