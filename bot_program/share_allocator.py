@@ -179,7 +179,7 @@ def drop_24h(user, *, now=None):
     of the max, so the answer is never negative; a history in another
     currency is an exchange rate, not a drop, and does not count."""
     from bot_program.capital_truth import (account_equity, broker_backed,
-                                           broker_kind)
+                                           broker_env, broker_kind)
     from bot_program.equity_models import BrokerEquityReading
     now = now or timezone.now()
     acct = broker_backed(user)
@@ -187,10 +187,18 @@ def drop_24h(user, *, now=None):
     if acct is None or reading is None:
         return None
     current = float(reading["value"])
-    rows = BrokerEquityReading.objects.filter(
+    history = BrokerEquityReading.objects.filter(
         broker=broker_kind(acct), account_pk=acct.pk,
         currency=reading["currency"] or "",
-        at__gte=now - timedelta(hours=24)).values_list("value", flat=True)
+        at__gte=now - timedelta(hours=24))
+    # Not a reading from the OTHER environment: the governor that de-risks
+    # on this number must not see a simulated balance beside a real one.
+    # A row with no recorded env is kept — see capital_truth.broker_env.
+    env_now = broker_env(acct)
+    if env_now:
+        from django.db.models import Q
+        history = history.filter(Q(env="") | Q(env=env_now))
+    rows = history.values_list("value", flat=True)
     values = [float(v) for v in rows]
     if not values:
         return None

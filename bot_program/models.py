@@ -507,7 +507,7 @@ class SaxoAccount(models.Model):
     last_sync = models.DateTimeField(null=True, blank=True)
     # THE READING CELLS, in IBKRAccount's exact shape. The sync task is
     # the only writer; every reader — capital_truth, the share allocator's
-    # drawdown governor, the preflight, /brokers/, /tresor/ — reads these
+    # drawdown governor, the preflight, /brokers/, /treasury/ — reads these
     # cached columns and never the broker, because a broker round trip
     # does not belong on a render path. NULL means "never measured", which
     # is not zero: the pages render an em dash.

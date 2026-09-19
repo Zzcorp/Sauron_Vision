@@ -62,7 +62,7 @@ class OculusShapeTests(TestCase):
 
         dead = [c for c in data["cycles"] if c.get("dead")]
         self.assertEqual(len(dead), 1)
-        self.assertIn("n'est pas un zéro", dead[0]["caveat"])
+        self.assertIn("is not a zero", dead[0]["caveat"])
         self.assertIn("_cycle_boom", data["degraded"])
 
     def test_an_unreadable_counter_is_none_and_never_zero(self):
@@ -91,18 +91,18 @@ class OculusShapeTests(TestCase):
         cycles = {c["key"]: c for c in oculus()["cycles"]}
 
         research = next(f for f in cycles["ladder"]["facts"]
-                        if "recherche" in f["label"])
+                        if "research" in f["label"])
         self.assertTrue(research["qualifier"])
         self.assertIn("vote", research["qualifier"])
         self.assertEqual(research["tone"], "inert")
 
         shadow = next(f for f in cycles["allocation"]["facts"]
-                      if "ombre" in f["label"])
+                      if "shadow" in f["label"])
         self.assertTrue(shadow["qualifier"])
         self.assertEqual(shadow["tone"], "inert")
 
         worn = [f for f in cycles["personas"]["facts"]
-                if "dont réellement activées" in f["label"]]
+                if "of which actually enabled" in f["label"]]
         self.assertTrue(worn, "the enabled qualifier row is gone")
         for fact in worn:
             self.assertTrue(fact["qualifier"])
@@ -168,10 +168,10 @@ class OculusPageTests(TestCase):
         # Django escapes the apostrophe to &#x27;, so compare unescaped —
         # four of these ten titles start with "L'".
         body = _html.unescape(resp.content.decode())
-        for title in ("Les interrupteurs", "Le scan", "L'échelle de promotion",
-                      "Les signaux", "L'évolution", "Les personnalités",
-                      "L'allocation", "L'horizon", "Les backtests",
-                      "La confiance"):
+        for title in ("The switches", "The scan", "The promotion ladder",
+                      "The signals", "Evolution", "Personalities",
+                      "Allocation", "The horizon", "The backtests",
+                      "Confidence"):
             self.assertIn(title, body)
 
     def test_the_page_explains_the_em_dash_rule_in_words(self):
@@ -180,8 +180,8 @@ class OculusPageTests(TestCase):
         import html as _html
         self.client.force_login(self.user)
         body = _html.unescape(self.client.get(self.url).content.decode())
-        self.assertIn("un tiret n'est pas un zéro", body)
-        self.assertIn("non mesurable", body)
+        self.assertIn("a dash is not a zero", body)
+        self.assertIn("not measurable", body)
 
     def test_it_writes_nothing(self):
         """Read-only, like /shares/ and /personas/. A GET on an overview
@@ -279,21 +279,21 @@ class TheBookIsPerViewerAndNeverPooledTests(TestCase):
         book = self._book(oculus(user=self.user))
         by_venue = {v["venue"]: [f["label"] for f in v["facts"]]
                     for v in book["venues"]}
-        self.assertTrue(any("gouverneur" in l for l in by_venue["live"]))
-        self.assertFalse(any("gouverneur" in l for l in by_venue["paper"]))
+        self.assertTrue(any("drawdown governor" in l for l in by_venue["live"]))
+        self.assertFalse(any("drawdown governor" in l for l in by_venue["paper"]))
 
     def test_the_governor_says_that_100_is_ambiguous(self):
         """1.00 means EITHER no drawdown OR no equity reading at all, and an
         operator acts differently on each."""
         book = self._book(oculus(user=self.user))
         live = next(v for v in book["venues"] if v["venue"] == "live")
-        gov = next(f for f in live["facts"] if "gouverneur" in f["label"])
-        self.assertIn("DEUX", gov["qualifier"])
+        gov = next(f for f in live["facts"] if "drawdown governor" in f["label"])
+        self.assertIn("TWO", gov["qualifier"])
 
     def test_the_caveat_says_the_panel_is_yours_and_not_the_fleet(self):
         book = self._book(oculus(user=self.user))
-        self.assertIn("VOUS", book["caveat"])
-        self.assertIn("jamais additionnés", book["caveat"])
+        self.assertIn("YOU", book["caveat"])
+        self.assertIn("never summed", book["caveat"])
 
     def test_a_venue_that_cannot_be_read_costs_only_itself(self):
         """One unreadable column must not take the other, nor the page."""
@@ -396,9 +396,9 @@ class TheExpectancyGapIsRenderedHonestlyTests(TestCase):
         finally:
             mod._cycle_book = original
 
-        self.assertIn("Négatif est la direction normale", body)
+        self.assertIn("Negative is the normal direction", body)
         # And the distinction that decides what the operator does about it.
-        self.assertIn("plus petit que ses coûts", body)
+        self.assertIn("smaller than its costs", body)
 
 
 class EveryCycleOffersAWayIntoItTests(TestCase):

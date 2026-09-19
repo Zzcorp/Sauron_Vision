@@ -1,4 +1,4 @@
-"""LES COURTIERS — one page, every broker, what each one can hold (2026-09-17)
+"""BROKERS — one page, every broker, what each one can hold (2026-09-17)
 
 Before this page the platform's brokers were configured in three places
 (the admin HQ page for OANDA / Alpaca / IBKR, Django admin for the rest) and

@@ -1048,6 +1048,26 @@ class SaxoTrader:
 
     # ── closing ────────────────────────────────────────────────────────────
 
+    def close_needs_position_id(self) -> bool:
+        """True when an opposite market order would NOT flatten a position.
+
+        Under the FifoEndOfDay netting profile Saxo keeps BOTH lots Open
+        until the evening netting — so the engine's default close (an
+        opposite market order) would leave the position live at the broker
+        while the platform booked the row CLOSED: double exposure, and a
+        P&L from a fill that closed nothing. Under the real-time profiles
+        the netting is immediate and the default close is correct.
+
+        The engine asks this before every close; a raise or an unreadable
+        identity answers False, which is the pre-2026-09-20 behaviour.
+        """
+        try:
+            return self.identity().get("netting_profile") == "FifoEndOfDay"
+        except Exception as e:  # noqa: BLE001 — unknown profile: keep the old path
+            log.warning("saxo: netting profile unreadable (%s) — closing with "
+                        "an opposite market order", e)
+            return False
+
     def close_position(self, position_id: str, symbol: str,
                        units: Optional[float] = None) -> dict:
         """Close at market. Under FifoEndOfDay the order names the

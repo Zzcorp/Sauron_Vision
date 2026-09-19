@@ -449,10 +449,10 @@
                they answer one question at four zooms: each pool's share of the ACCOUNT, one TICK's entries against one budget,
                per-RULE multipliers, and the correlation depth behind all three. One row named "allocator" once hid the
                second (2026-09-12), which is why all four are named for what they size.{% endcomment %}
-            <div class="nav-section">Le livre &middot; l'argent</div>
+            <div class="nav-section">The book &middot; the money</div>
             <a href="{% url 'portfolio_overview' %}" class="nav-link {% if page_id == 'portfolio' %}active{% endif %}"><span class="icon">◎</span> <span class="label-text">Portfolio</span></a>
-            <a href="{% url 'brokers_page' %}" class="nav-link {% if page_id == 'brokers' %}active{% endif %}"><span class="icon">⌁</span> <span class="label-text">Les courtiers</span></a>
-            <a href="{% url 'tresor_page' %}" class="nav-link {% if page_id == 'tresor' %}active{% endif %}"><span class="icon">⛁</span> <span class="label-text">Le trésor</span></a>
+            <a href="{% url 'brokers_page' %}" class="nav-link {% if page_id == 'brokers' %}active{% endif %}"><span class="icon">⌁</span> <span class="label-text">Brokers</span></a>
+            <a href="{% url 'treasury_page' %}" class="nav-link {% if page_id == 'treasury' %}active{% endif %}"><span class="icon">⛁</span> <span class="label-text">Treasury</span></a>
             <a href="{% url 'positions_list' %}" data-nav-id="positions" class="nav-link {% if page_id == 'positions' %}active{% endif %}"><span class="icon">▣</span> <span class="label-text">Positions</span></a>
             <a href="{% url 'tax_lots_dashboard' %}" class="nav-link {% if page_id == 'tax_lots' %}active{% endif %}"><span class="icon">▦</span> <span class="label-text">Tax Lots</span></a>
             <a href="{% url 'bot_home' %}" class="nav-link {% if page_id == 'bot_program' %}active{% endif %}"><span class="icon">⟳</span> <span class="label-text">Bot Program</span></a>
@@ -475,7 +475,7 @@
                admin lane has done to it, and what kind of trader carries it. These pages deep-link into each other and were
                scattered across two sections; four of them were in no menu at all until recently, reachable only from the admin
                dashboard — and a page nobody can find is a page that does not exist.{% endcomment %}
-            <div class="nav-section">Ce qui peut agir</div>
+            <div class="nav-section">What can act</div>
             <a href="{% url 'signals_list' %}" data-nav-id="signals" class="nav-link {% if page_id == 'signals' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Signals</span></a>
             <a href="{% url 'strategies_list' %}" class="nav-link {% if page_id == 'strategies' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategies</span></a>
             {# ◧ — the half-filled square: /opportunities/ shows the matches a setup MADE, /setups/ answers for the ones it never made. No data-nav-id: the dot probe's table is the seven sections in tests/test_nothing_unseen.py, and a diagnosis has no "new since your last visit". #}
@@ -496,7 +496,7 @@
                is a count that reads as strength while meaning the opposite, and these are the pages that settle it: the ledger,
                the two levels of self-grading (signal and fill), the one-fill autopsy, the two simulators, and how reliable each
                agent has actually been.{% endcomment %}
-            <div class="nav-section">Ce qui est mesur&eacute;</div>
+            <div class="nav-section">What is measured</div>
             <a href="{% url 'evidence_ledger' %}" class="nav-link {% if page_id == 'evidence' %}active{% endif %}"><span class="icon">⊨</span> <span class="label-text">Evidence Ledger</span></a>
             <a href="{% url 'performance_dashboard' %}" class="nav-link {% if page_id == 'performance' %}active{% endif %}"><span class="icon">◮</span> <span class="label-text">Signal Performance</span></a>
             <a href="{% url 'bot_performance_dashboard' %}" class="nav-link {% if page_id == 'bot_performance' %}active{% endif %}"><span class="icon">▲</span> <span class="label-text">Bot Performance</span></a>
@@ -507,9 +507,9 @@
 
             {% comment %}WHAT IS BEING INVENTED. The research half: what the miner proposes, what the generator writes, what the
                brain believes and how long it has believed it. NOTHING in this section can place an order — every path out of it
-               runs through the ladder in "ce qui peut agir" first, which is the whole reason the two are separate sections and
+               runs through the ladder in "What can act" first, which is the whole reason the two are separate sections and
                not one.{% endcomment %}
-            <div class="nav-section">Ce qui est invent&eacute;</div>
+            <div class="nav-section">What is invented</div>
             <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon">⟲</span> <span class="label-text">Strategy Evolution</span></a>
             <a href="{% url 'discoveries_dashboard' %}" class="nav-link {% if page_id == 'discoveries' %}active{% endif %}"><span class="icon">⊛</span> <span class="label-text">Discoveries</span></a>
             <a href="{% url 'generated_dashboard' %}" data-nav-id="generated" class="nav-link {% if page_id == 'generated' %}active{% endif %}"><span class="icon">⊞</span> <span class="label-text">Generated Strategies</span></a>
@@ -527,7 +527,7 @@
             <a href="{% url 'ai_journal_dashboard' %}" class="nav-link {% if page_id == 'ai_insights' %}active{% endif %}"><span class="icon">✎</span> <span class="label-text">AI Journal</span></a>
             <a href="{% url 'ai_insights' %}" class="nav-link {% if page_id == 'ai' %}active{% endif %}"><span class="icon">◬</span> <span class="label-text">AI Insights</span></a>
 
-            <div class="nav-section">Les march&eacute;s</div>
+            <div class="nav-section">The markets</div>
             <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' or page_id == 'quotes' %}active{% endif %}"><span class="icon">⌗</span> <span class="label-text">Instruments & Quotes</span></a>
             <a href="{% url 'economic_calendar' %}" class="nav-link {% if page_id == 'calendar' %}active{% endif %}"><span class="icon">◇</span> <span class="label-text">Economic Calendar</span></a>
             <a href="{% url 'news_feed' %}" data-nav-id="news" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon">▤</span> <span class="label-text">News & Sentiment</span></a>
@@ -535,7 +535,7 @@
             {% comment %}IS IT RUNNING — not "is it switched on". /health/ and the system map exist because six scraper components
                once sat at last_status='success' with zero rows between them. These pages answer whether data is actually
                MOVING.{% endcomment %}
-            <div class="nav-section">La machine</div>
+            <div class="nav-section">The machine</div>
             <a href="{% url 'system_health' %}" class="nav-link {% if page_id == 'system_health' %}active{% endif %}"><span class="icon">✚</span> <span class="label-text">System Health</span></a>
             <a href="{% url 'ai_tasks_list' %}" class="nav-link {% if page_id == 'ai_tasks' %}active{% endif %}"><span class="icon">▸</span> <span class="label-text">Agent Tasks</span></a>
             {% if request.user.is_staff %}<a href="{% url 'ai_models_dashboard' %}" class="nav-link {% if page_id == 'ai_models' %}active{% endif %}"><span class="icon">⊚</span> <span class="label-text">Model Selection</span></a>{% endif %}
@@ -543,7 +543,7 @@
             <a href="{% url 'admin_dashboard' %}" class="nav-link {% if page_id == 'admin_dashboard' %}active{% endif %}"><span class="icon">⬢</span> <span class="label-text">Admin Panel</span></a>
             {% if user.is_staff %}<a href="{% url 'audit_dashboard' %}" class="nav-link {% if page_id == 'audit' %}active{% endif %}"><span class="icon">⊠</span> <span class="label-text">Audit Log</span></a>{% endif %}
             <a href="{% url 'admin_newsletters' %}" class="nav-link {% if page_id == 'admin_newsletters' %}active{% endif %}"><span class="icon">▭</span> <span class="label-text">Newsletters</span></a>
-            {% endif %}<div class="nav-section">Vous</div>
+            {% endif %}<div class="nav-section">You</div>
 
             <a href="{% url 'profile' %}" class="nav-link {% if page_id == 'profile' %}active{% endif %}"><span class="icon">◐</span> <span class="label-text">Profile</span></a>
             <a href="{% url 'notifications_inbox' %}" class="nav-link {% if page_id == 'notifications_inbox' or page_id == 'notifications' %}active{% endif %}"><span class="icon">◌</span> <span class="label-text">Notifications</span></a>

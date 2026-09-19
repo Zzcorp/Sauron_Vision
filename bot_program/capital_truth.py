@@ -231,6 +231,23 @@ def broker_backed(user):
     return acct if account_id else None
 
 
+def broker_env(acct) -> str:
+    """"live", "paper", or "" when the row cannot say.
+
+    The environment a reading belongs to. Saxo and eToro carry two worlds
+    on ONE row (an app key / a key pair per environment), so without this a
+    simulated balance and a real one are the same number in the same
+    account's history — and the drawdown governor de-risks against that
+    history.
+    """
+    kind = broker_kind(acct)
+    if kind == "saxo":
+        return "paper" if getattr(acct, "sim", False) else "live"
+    if kind == "etoro":
+        return "paper" if getattr(acct, "demo", False) else "live"
+    return getattr(acct, "env", "") or ""
+
+
 def broker_kind(acct) -> str:
     """The `broker` value a reading for this account row is stored under.
     One place, so the writer and both readers cannot spell it differently."""
@@ -538,6 +555,13 @@ def equity_high_water(user, *, window_days=90):
             .filter(broker=broker_kind(acct), account_pk=acct.pk,
                     currency=currency, at__gte=since)
             .order_by("-value", "-at"))
+    # NOT a reading from the OTHER environment. A row that never recorded
+    # one is kept: excluding it would drop every reading written before
+    # `env` was stored, and "unknown provenance" is not "the wrong world".
+    env_now = broker_env(acct)
+    if env_now:
+        from django.db.models import Q
+        rows = rows.filter(Q(env="") | Q(env=env_now))
     hwm, hwm_at = float(reading["value"]), reading["at"]
     n = 0
     for r in rows:

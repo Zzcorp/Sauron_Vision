@@ -5,7 +5,7 @@ place in a runtime image. The consequence nobody had accounted for is
 that the running application could not answer the simplest question about
 itself, and on 2026-09-13 that cost a day: the box served the previous
 commit, `/personas/` and `/setups/` answered 404, the operator reported
-"il manque beaucoup de choses", and the only way to find out was probing
+that a great deal was missing, and the only way to find out was probing
 the public site route by route from outside. Nothing on the platform
 could say "I am stale".
 

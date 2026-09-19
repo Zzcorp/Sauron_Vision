@@ -4,7 +4,7 @@
 accounted for is that the running application could not answer the
 simplest question about itself, and it cost a day: the box served the
 previous commit, `/personas/` and `/setups/` answered 404, the operator
-reported "il manque beaucoup de choses", and the only way to find out was
+reported that a great deal was missing, and the only way to find out was
 probing the public site route by route from OUTSIDE. Nothing on the
 platform could say "I am stale".
 
@@ -161,7 +161,7 @@ class TheForgeReportsItTests(TestCase):
         self.client.force_login(user)
         body = _html.unescape(
             self.client.get(reverse("oculus_dashboard")).content.decode())
-        self.assertIn("La forge", body)
+        self.assertIn("The forge", body)
         # As TEXT, not as an attribute: `.ocu-gate.unknown` is a legitimate
         # CSS class for a component with no row, and a blanket search for
         # the word matches it. What must never appear is the word rendered
@@ -178,4 +178,4 @@ class TheForgeReportsItTests(TestCase):
         a fresh-looking sha reads as 'up to date'."""
         from dashboard.oculus import oculus
         forge = next(c for c in oculus()["cycles"] if c["key"] == "forge")
-        self.assertIn("ne peut pas savoir", forge["caveat"])
+        self.assertIn("cannot know", forge["caveat"])

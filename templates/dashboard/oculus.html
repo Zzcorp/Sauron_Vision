@@ -89,19 +89,19 @@
 {% block content %}
 
 <div class="card fade-in-up" style="margin-bottom: 20px;">
-  <div class="card-header"><span class="card-title">Ce que cette page promet, et ce qu'elle refuse de faire</span></div>
+  <div class="card-header"><span class="card-title">What this page promises, and what it refuses to do</span></div>
   <p style="color: var(--text-muted); padding: 0 16px 8px; max-width: 100ch; line-height: 1.55;">
-    Trente tableaux répondent chacun bien à leur question. Celui-ci répond à celle qu'aucun ne pouvait porter seul :
-    <strong>la machine tourne-t-elle, et lesquelles de ses roues sont réellement engagées ?</strong>
-    Il ne possède aucune donnée et n'invente aucun calcul — il met les cycles côte à côte sans laisser la comparaison mentir.
+    Thirty dashboards each answer their own question well. This one answers the question none of them could carry alone:
+    <strong>is the machine turning, and which of its wheels are actually engaged?</strong>
+    It owns no data and invents no calculation — it puts the cycles side by side without letting the comparison lie.
   </p>
   <p style="color: var(--text-muted); padding: 0 16px 16px; max-width: 100ch; line-height: 1.55;">
-    Trois règles tiennent toute la page. <strong>L'interrupteur est affiché à côté du chiffre</strong> : un compte produit par une tâche
-    que personne n'a allumée mesure l'interrupteur, pas le marché. <strong>Le qualificatif est dans la même phrase que le chiffre</strong> :
-    ici la panne courante n'est pas un nombre faux, c'est un nombre juste qui se lit à l'envers — « 26 règles enregistrées » sonne
-    comme de la couverture alors qu'une règle en recherche ne peut pas passer d'ordre <em>et</em> voit ses signaux retirés du vote.
-    Et <strong>un tiret n'est pas un zéro</strong> : « — » veut dire non mesurable, <code>0</code> veut dire mesuré à zéro, et on n'agit pas
-    pareil sur les deux.
+    Three rules hold the whole page. <strong>The switch is shown beside the number</strong>: a count produced by a task
+    nobody turned on measures the switch, not the market. <strong>The qualifier is in the same sentence as the number</strong>:
+    the common failure here is not a wrong number, it is a right number that reads backwards — "26 rules registered" sounds
+    like coverage when a research-stage rule cannot place an order <em>and</em> has its signals dropped from the vote.
+    And <strong>a dash is not a zero</strong>: "—" means not measurable, <code>0</code> means measured at zero, and you do not
+    act the same way on the two.
   </p>
 </div>
 
@@ -131,13 +131,13 @@
     <div class="ocu-book">
       {% for v in c.venues %}
       <div class="ocu-venue {% if v.venue == 'live' %}ocu-venue--live{% endif %}">
-        <div class="ocu-venue-head">{% if v.venue == 'live' %}LIVE · ARGENT RÉEL{% else %}PAPIER · SIMULATION{% endif %}</div>
+        <div class="ocu-venue-head">{% if v.venue == 'live' %}LIVE · REAL MONEY{% else %}PAPER · SIMULATION{% endif %}</div>
         {% if v.facts %}
         <table class="ocu-facts">
           {% for f in v.facts %}
           <tr class="{{ f.tone }}">
             {% if f.value is None %}
-              <td class="ocu-v dash" title="non mesurable — ce n'est pas un zéro">—</td>
+              <td class="ocu-v dash" title="not measurable — this is not a zero">—</td>
             {% elif f.text %}
               <td class="ocu-v ocu-v--text">{{ f.value }}</td>
             {% else %}
@@ -148,7 +148,7 @@
           {% endfor %}
         </table>
         {% else %}
-        <p class="ocu-dead">Ce livre n'a pas pu être lu. Aucun chiffre n'est affiché plutôt qu'un chiffre faux.</p>
+        <p class="ocu-dead">This book could not be read. No number is shown rather than a wrong one.</p>
         {% endif %}
       </div>
       {% endfor %}
@@ -156,14 +156,14 @@
 
     {% if c.gaps %}
     <div class="ocu-venue-head" style="border-top: 1px solid var(--border, #2a2a2a); padding-top: 12px;">
-      CE QUE LE SIMULATEUR PROMETTAIT, CONTRE CE QUE L'EXÉCUTION A RENDU
+      WHAT THE SIMULATOR PROMISED, AGAINST WHAT EXECUTION RETURNED
     </div>
     <div style="overflow-x: auto;">
       <table class="ocu-gaps">
         <tr>
-          <th>règle</th><th>classe</th>
-          <th>n papier</th><th>espérance papier</th>
-          <th>n live</th><th>espérance live</th><th>écart (R)</th>
+          <th>rule</th><th>class</th>
+          <th>n paper</th><th>paper expectancy</th>
+          <th>n live</th><th>live expectancy</th><th>gap (R)</th>
         </tr>
         {% for g in c.gaps %}
         <tr>
@@ -179,10 +179,10 @@
       </table>
     </div>
     <p class="ocu-caveat">
-      L'écart est <strong>live moins papier</strong>, en multiples de R. Négatif est la direction normale : le remplissage simulé paie un demi-spread modélisé
-      mais ne subit jamais une file d'attente, un saut au travers du stop, ni une exécution partielle. Un écart largement négatif ne signale pas une règle
-      qui a cessé de fonctionner — mais une règle dont l'avantage est plus petit que ses coûts, et les deux appellent des correctifs opposés.
-      Un tiret veut dire qu'une des deux venues n'a rien clôturé : ce n'est pas un petit écart, c'est l'absence de mesure.
+      The gap is <strong>live minus paper</strong>, in multiples of R. Negative is the normal direction: a simulated fill pays a modelled
+      half-spread but never queues, never gaps through the stop, and is never partially executed. A heavily negative gap does not mean a rule
+      that stopped working — it means a rule whose edge is smaller than its costs, and the two call for opposite fixes.
+      A dash means one of the two venues closed nothing: that is not a small gap, it is the absence of measurement.
     </p>
     {% endif %}
 
@@ -208,7 +208,7 @@
       <div class="ocu-gates">
         {% for g in c.gate %}
           {% if not g.known %}
-            <span class="ocu-gate unknown" title="aucune ligne en base : la barrière lit « éteint »">{{ g.key }} · absent</span>
+            <span class="ocu-gate unknown" title="no row in the database: the gate reads off">{{ g.key }} · absent</span>
           {% elif g.on %}
             <span class="ocu-gate on">{{ g.key }} · on</span>
           {% else %}
@@ -222,7 +222,7 @@
         {% for f in c.facts %}
         <tr class="{{ f.tone }}">
           {% if f.value is None %}
-            <td class="ocu-v dash" title="non mesurable — ce n'est pas un zéro">—</td>
+            <td class="ocu-v dash" title="not measurable — this is not a zero">—</td>
           {% elif f.text %}
             <td class="ocu-v ocu-v--text">{{ f.value }}</td>
           {% else %}
@@ -246,7 +246,7 @@
           {% endif %}
         {% endfor %}
       </div>
-      <p class="ocu-sparkcap">{{ oculus.window_days }} derniers jours · pic {{ c.max_n }}/jour · une barre grise est un vrai zéro</p>
+      <p class="ocu-sparkcap">last {{ oculus.window_days }} days · peak {{ c.max_n }}/day · a grey bar is a real zero</p>
       {% endif %}
 
       <p class="ocu-caveat">{{ c.caveat }}</p>
@@ -256,16 +256,16 @@
     {% endif %}
   </div>
   {% endif %}{% empty %}
-  <div class="card fade-in-up"><p class="ocu-dead">Aucun cycle n'a pu être lu.</p></div>
+  <div class="card fade-in-up"><p class="ocu-dead">No cycle could be read.</p></div>
   {% endfor %}
 </div>
 
 {% if oculus.degraded %}
 <div class="card fade-in-up" style="margin-top: 20px;">
-  <div class="card-header"><span class="card-title">Ce qui n'a pas pu être mesuré — {{ oculus.degraded|length }}</span></div>
+  <div class="card-header"><span class="card-title">What could not be measured — {{ oculus.degraded|length }}</span></div>
   <p style="color: var(--text-muted); padding: 0 16px 14px; max-width: 100ch; line-height: 1.5;">
-    Chacun de ces compteurs rend « — » ci-dessus. Les causes normales sont une table qu'une migration n'a pas encore créée,
-    ou un sous-système qui n'a jamais tourné sur ce déploiement. Ce bloc existe pour qu'un tiret ne passe jamais pour un zéro discret :
+    Each of these counters renders "—" above. The normal causes are a table a migration has not created yet,
+    or a subsystem that has never run on this deployment. This block exists so that a dash never passes for a quiet zero:
     <code style="font-size: 11px;">{{ oculus.degraded|join:" · " }}</code>
   </p>
 </div>
@@ -273,7 +273,7 @@
 
 {% if oculus.generated_at %}
 <p style="color: var(--text-muted); font-size: 11px; padding: 14px 4px;">
-  Lu le {{ oculus.generated_at|date:"Y-m-d H:i" }} UTC. Aucune valeur n'est mise en cache : chaque chiffre est compté au chargement.
+  Read {{ oculus.generated_at|date:"Y-m-d H:i" }} UTC. Nothing is cached: every number is counted at load time.
 </p>
 {% endif %}
 

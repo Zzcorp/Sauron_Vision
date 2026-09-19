@@ -91,7 +91,7 @@ class TheListAndTheTableAgreeTests(SimpleTestCase):
     def test_every_adapter_has_a_broker_key(self):
         """A live row records WHICH broker carried it, from the client that
         placed the order (capabilities.adapter_key). An adapter missing from
-        that table records nothing, and /tresor/ then compares the row
+        that table records nothing, and /treasury/ then compares the row
         against the wrong broker's holdings — or against none."""
         missing = {n for n in ADAPTERS
                    if cap.adapter_key(_klass(n)) != n}

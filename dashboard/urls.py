@@ -108,10 +108,10 @@ from .views_tax_lots import tax_lots_dashboard, tax_lots_export
 from .api import market_views, signal_views, strategy_views, portfolio_views, ai_views
 from core.views import rate_limiter_stats, system_status
 
-from .views_brokers import (  # noqa: E402 — 2026-09-17, les courtiers
+from .views_brokers import (  # noqa: E402 — 2026-09-17, the brokers page
     brokers_page, disconnect_etoro, disconnect_saxo, save_etoro_credentials,
     save_saxo_credentials, saxo_callback, saxo_connect)
-from .views_tresor import tresor_page  # noqa: E402 — 2026-09-19, le trésor
+from .views_treasury import treasury_page  # noqa: E402 — 2026-09-19
 
 urlpatterns = [
     # ── Command Center (unified Dashboard + Eye merge) ───────
@@ -232,11 +232,11 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("admin-dashboard/bots/seed/", hq_seed_bots, name="hq_seed_bots"),
     path("admin-dashboard/brokers/oanda/save/", save_oanda_credentials, name="hq_save_oanda"),
     path("admin-dashboard/brokers/alpaca/save/", save_alpaca_credentials, name="hq_save_alpaca"),
-    # ── Les courtiers (2026-09-17): one page, every broker, what each can
+    # ── The brokers page (2026-09-17): one page, every broker, what each can
     #    hold; plus the eToro and Saxo forms, added before their adapters so
     #    keys obtained today have somewhere encrypted to go.
     path("brokers/", brokers_page, name="brokers_page"),
-    path("tresor/", tresor_page, name="tresor_page"),
+    path("treasury/", treasury_page, name="treasury_page"),
     path("admin-dashboard/brokers/etoro/save/", save_etoro_credentials, name="hq_save_etoro"),
     path("admin-dashboard/brokers/saxo/save/", save_saxo_credentials, name="hq_save_saxo"),
     path("admin-dashboard/brokers/saxo/disconnect/", disconnect_saxo, name="hq_disconnect_saxo"),

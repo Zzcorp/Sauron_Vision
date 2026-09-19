@@ -321,8 +321,8 @@ class TheRunPersistsWhatItCouldNotMeasureTests(TestCase):
 
         cycle = next(c for c in oculus()["cycles"] if c["key"] == "backtests")
         facts = {f["label"]: f["value"] for f in cycle["facts"]}
-        stale = next(v for k, v in facts.items() if "avant le correctif" in k)
-        dropped = next(v for k, v in facts.items() if "n'a pas pu simuler" in k)
+        stale = next(v for k, v in facts.items() if "before the 09-14 fix" in k)
+        dropped = next(v for k, v in facts.items() if "could not simulate" in k)
         self.assertEqual(stale, 1)
         self.assertEqual(dropped, 4)
 

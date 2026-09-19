@@ -52,8 +52,8 @@ def oculus_dashboard(request):
         data = oculus(user=request.user)
     except Exception as exc:  # noqa: BLE001 — oculus() is fenced, this is the belt
         logger.warning("[oculus] unreadable: %s", exc)
-        error = (f"L'Occulus n'a pas pu être assemblé ({exc}). Aucun chiffre "
-                 f"n'est affiché plutôt qu'un chiffre faux.")
+        error = (f"The Oculus could not be assembled ({exc}). No number is "
+                 f"shown rather than a wrong one.")
         data = {"generated_at": None, "window_days": 0,
                 "cycles": [], "degraded": []}
 

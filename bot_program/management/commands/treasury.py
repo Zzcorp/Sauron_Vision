@@ -1,14 +1,14 @@
 """Where the money is, what each broker holds, and where the platform and
 the broker disagree — in one screen.
 
-The shell twin of /tresor/. Both render bot_program/broker_vision.vision(),
+The shell twin of /treasury/. Both render bot_program/broker_vision.vision(),
 so the page and the terminal cannot tell different stories. Reads cached
 columns only: it makes NO broker call and writes nothing.
 
 Run with:
 
-    python manage.py tresor
-    python manage.py tresor --user mathe
+    python manage.py treasury
+    python manage.py treasury --user mathe
 """
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
@@ -57,7 +57,7 @@ class Command(BaseCommand):
 
     def _one(self, w, user, v):
         w("=" * 78)
-        w(f"LE TRESOR {DASH} {user.username} {DASH} "
+        w(f"TREASURY {DASH} {user.username} {DASH} "
           f"{v['at'].strftime('%Y-%m-%d %H:%M')} UTC")
         w("=" * 78)
 

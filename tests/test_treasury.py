@@ -1,4 +1,4 @@
-"""LE TRÉSOR — where the money is, and whether the broker agrees.
+"""TREASURY — where the money is, and whether the broker agrees.
 
 capital_truth answers every capital question for ONE broker: the book.
 With three wired venues that stopped being the operator's question, and
@@ -328,7 +328,7 @@ class TheCommandTests(TestCase):
 
     def _run(self, **kw):
         out = StringIO()
-        call_command("tresor", stdout=out, **kw)
+        call_command("treasury", stdout=out, **kw)
         return out.getvalue()
 
     def test_it_refuses_when_no_user_has_a_broker_row(self):
@@ -341,7 +341,7 @@ class TheCommandTests(TestCase):
         a_trade(self.user, "AAPL", broker="saxo")
         a_trade(self.user, "TSLA", broker="saxo")
         body = self._run(user="tr_cmd")
-        for head in ("LE TRESOR", "1. THE BOOK", "2. EVERY BROKER",
+        for head in ("TREASURY", "1. THE BOOK", "2. EVERY BROKER",
                      "3. WHERE A NEW TRADE WOULD GO",
                      "4. POSITIONS THE PLATFORM BELIEVES ARE OPEN",
                      "5. WHAT EACH BROKER SAYS IT HOLDS",
@@ -371,11 +371,11 @@ class TheCommandTests(TestCase):
 
     def test_it_is_registered_read_only_and_runnable(self):
         from core import ops_commands
-        entry = ops_commands.get("tresor")
+        entry = ops_commands.get("treasury")
         self.assertIsNotNone(entry)
         self.assertTrue(entry["read_only"])
         self.assertEqual(entry["category"], "read")
-        self.assertIn("tresor", ops_commands.runnable_names())
+        self.assertIn("treasury", ops_commands.runnable_names())
 
 
 class ThePageTests(TestCase):
@@ -384,20 +384,20 @@ class ThePageTests(TestCase):
         self.user = User.objects.create_user("tr_page", password="x")
 
     def test_it_needs_a_login(self):
-        self.assertNotEqual(self.client.get(reverse("tresor_page")).status_code,
+        self.assertNotEqual(self.client.get(reverse("treasury_page")).status_code,
                             200)
 
     def test_the_page_and_the_command_tell_the_same_story(self):
         a_saxo(self.user, held=[HELD_AAPL])
         a_trade(self.user, "TSLA", broker="saxo")
         self.client.login(username="tr_page", password="x")
-        page = self.client.get(reverse("tresor_page"))
+        page = self.client.get(reverse("treasury_page"))
         self.assertEqual(page.status_code, 200)
-        self.assertContains(page, "LE TRÉSOR")
-        self.assertContains(page, "PLATEFORME SEULE")
+        self.assertContains(page, "TREASURY")
+        self.assertContains(page, "PLATFORM ONLY")
         self.assertContains(page, "TSLA")
         out = StringIO()
-        call_command("tresor", user="tr_page", stdout=out)
+        call_command("treasury", user="tr_page", stdout=out)
         self.assertIn("TSLA", out.getvalue())
         self.assertIn("PLATFORM ONLY", out.getvalue())
 
@@ -407,11 +407,11 @@ class ThePageTests(TestCase):
         from django.conf import settings
         base = (Path(settings.BASE_DIR) / "templates" / "base.html").read_text(
             encoding="utf-8")
-        self.assertIn("tresor_page", base)
+        self.assertIn("treasury_page", base)
         self.assertEqual(base.count("⛁"), 1)
 
     def test_a_user_with_no_broker_sees_the_blocker_not_a_crash(self):
         self.client.login(username="tr_page", password="x")
-        page = self.client.get(reverse("tresor_page"))
+        page = self.client.get(reverse("treasury_page"))
         self.assertEqual(page.status_code, 200)
         self.assertContains(page, "No broker row exists")

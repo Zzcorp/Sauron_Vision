@@ -1437,6 +1437,58 @@ class AssetBot(ABC):
         fast one-sided markets. Overrides must return it too; one that
         returns None degrades to a mark-priced exit, flagged as such.
         """
+        # A VENUE WHERE AN OPPOSITE ORDER DOES NOT FLATTEN. Saxo under
+        # the FifoEndOfDay netting profile keeps both lots Open until the
+        # evening netting, so the default close below would book the row
+        # CLOSED against a position the broker still holds. The adapter
+        # answers for itself — only Saxo defines this — and a client that
+        # does not is closed exactly as before.
+        needs_pid = getattr(client, "close_needs_position_id", None)
+        if callable(needs_pid):
+            try:
+                answer = needs_pid()
+            except Exception as e:  # noqa: BLE001 — unknown: the old path
+                logger.warning("[%s_bot] %s: could not ask the broker how it "
+                               "nets (%s) — closing with an opposite order",
+                               self.asset_class, trade.symbol, e)
+                answer = None
+            # A yes or a no, nothing else. Anything truthy would otherwise
+            # send the close down a path nobody asked for on the strength
+            # of a value the adapter never defined.
+            if answer is not None and not isinstance(answer, bool):
+                logger.warning("[%s_bot] %s: the adapter answered %r when "
+                               "asked how the venue nets, which is neither "
+                               "yes nor no — closing with an opposite order",
+                               self.asset_class, trade.symbol, answer)
+            must = answer is True
+
+            # str() of anything at all returns a non-empty string, and an
+            # id we invented is worse than no id: it closes some OTHER
+            # position, or nothing, and the row books CLOSED either way.
+            meta = trade.metadata if isinstance(trade.metadata, dict) else {}
+            raw = (meta.get("protective_trade_id")
+                   or meta.get("broker_position_id"))
+            pid = ""
+            if isinstance(raw, str):
+                pid = raw.strip()
+            elif isinstance(raw, int) and not isinstance(raw, bool):
+                pid = str(raw)
+
+            closer = getattr(client, "close_position", None)
+            if must:
+                if pid and callable(closer):
+                    return closer(pid, trade.symbol, float(trade.qty))
+                # Nothing to close BY, so the opposite order below will
+                # leave two lots open until the venue nets them. Said out
+                # loud rather than discovered on the broker's screen.
+                logger.error(
+                    "[%s_bot] %s: this venue does not net an opposite order "
+                    "and %s — the close will leave BOTH lots open until "
+                    "the venue nets them. Check /treasury/ after it settles.",
+                    self.asset_class, trade.symbol,
+                    "the row carries no broker position id" if not pid
+                    else "the adapter carries no close_position")
+
         close_side = "SELL" if trade.side == "BUY" else "BUY"
         return client.market_order(trade.symbol, close_side, float(trade.qty),
                                    client_order_id=client_order_id)
@@ -2692,7 +2744,7 @@ class AssetBot(ABC):
                 # that actually placed the order, because the alternative
                 # — inferring it from the routing rule when the row is
                 # read — is wrong for every row opened before an operator
-                # moved a primary-for flag, and /tresor/ compares these
+                # moved a primary-for flag, and /treasury/ compares these
                 # rows against that broker's holdings.
                 from bot_program.engine.capabilities import adapter_key
                 _carried_by = adapter_key(client)

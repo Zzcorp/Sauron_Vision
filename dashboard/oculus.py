@@ -245,30 +245,30 @@ def _venue_facts(user, venue):
         return lambda: b.get(key)
 
     facts = [
-        _fact("capital du pool", _f("capital"),
-              qualifier="le dénominateur que le dimensionnement divise"),
-        _fact("positions ouvertes", _f("n_open")),
-        _fact("risque au stop engagé", _f("book_risk"),
-              qualifier="somme de qty × |entrée − stop d'ouverture|, "
-                        "les clôtures en attente comprises"),
-        _fact("budget restant", _f("budget"), tone="caution",
-              qualifier="brut moins le risque déjà au livre"),
+        _fact('pool capital', _f("capital"),
+              qualifier='the denominator sizing divides'),
+        _fact("open positions", _f("n_open")),
+        _fact('risk to stop committed', _f("book_risk"),
+              qualifier='sum of qty × |entry − opening stop|, pending '
+                        'closes included'),
+        _fact("budget left", _f("budget"), tone="caution",
+              qualifier='gross minus the risk already booked'),
     ]
     if b.get("unmeasured_open"):
         facts.append(_fact(
-            "positions au risque NON mesuré", _f("unmeasured_open"),
+            'positions whose risk is NOT measured', _f("unmeasured_open"),
             tone="caution",
-            qualifier="ouvertes sans stop initial lisible : elles pèsent sur "
-                      "le livre et ne pèsent sur aucun budget"))
+            qualifier='open with no readable initial stop: they weigh on '
+                      'the book and on no budget'))
     if venue == "live":
         # The governor exists on the live venue only — a drawdown brake on a
         # simulation would throttle a book that cannot lose anything.
         facts.append(_fact(
-            "gouverneur de drawdown (×100)",
+            "drawdown governor (×100)",
             lambda: round(float(b.get("governor") or 0) * 100),
             tone="caution",
-            qualifier="100 veut dire DEUX choses : aucun drawdown, ou aucune "
-                      "lecture d'équité. Le plancher est 40."))
+            qualifier='100 means TWO things: no drawdown, or no equity '
+                      'reading at all. The floor is 40.'))
     return facts
 
 
@@ -309,20 +309,21 @@ def _cycle_book(user):
 
     return {
         "key": "book",
-        "title": "Le livre",
-        "question": "Combien d'argent réel est engagé, et combien n'est qu'une simulation ?",
+        "title": 'The book',
+        "question": 'How much real money is committed, and how much is only '
+                    'a simulation?',
         "gate": _gate("platform_master", "broker_account_sync"),
         "facts": [],
         "venues": venues,
         "gaps": gaps,
         "caveat": (
-            "Le seul panneau de cette page qui ne parle que de VOUS : tous "
-            "les autres cycles comptent la plateforme entière. Live et papier "
-            "ne sont jamais additionnés — un pool simulé gonfle le total et "
-            "aucune entrée réelle ne peut y puiser. L'écart d'espérance vaut "
-            "None quand une des deux venues n'a rien clôturé : un écart "
-            "contre une venue non mesurée n'est pas un petit écart, c'est "
-            "l'absence de mesure."),
+            'The only panel on this page that speaks about YOU alone: every '
+            'other cycle counts the whole platform. Live and paper are '
+            'never summed — a simulated pool inflates the total and no real '
+            'entry can draw on it. The expectancy gap is None when one of '
+            'the two venues closed nothing: a gap measured against an '
+            'unmeasured venue is not a small gap, it is the absence of '
+            'measurement.'),
         "series": [],
     }
 
@@ -345,22 +346,24 @@ def _cycle_gates():
 
     return {
         "key": "gates",
-        "title": "Les interrupteurs",
-        "question": "Qu'est-ce qui a le droit de tourner ?",
+        "title": 'The switches',
+        "question": 'What is allowed to run?',
         "gate": _gate("platform_master"),
         "facts": [
-            _fact("composants allumés", _on),
-            _fact("composants éteints", _off, tone="inert",
-                  qualifier="éteint ne veut pas dire cassé — c'est souvent le bon défaut"),
-            _fact("allumés mais jamais exécutés", _never_ran, tone="caution",
-                  qualifier="allumé et jamais lancé : le planificateur ne l'atteint pas"),
-            _fact("dernier passage en erreur", _errored, tone="caution"),
+            _fact('components on', _on),
+            _fact('components off', _off, tone="inert",
+                  qualifier='off does not mean broken — it is often the '
+                            'right default'),
+            _fact('on but never run', _never_ran, tone="caution",
+                  qualifier='on and never launched: the scheduler does not '
+                            'reach it'),
+            _fact('last pass in error', _errored, tone="caution"),
         ],
         "caveat": (
-            "Le maître-interrupteur coupe tout en amont. Un composant sans "
-            "ligne en base se lit « éteint » : c'est ce que fait la barrière, "
-            "et c'est ainsi que trois tâches n'ont jamais tourné jusqu'au "
-            "2026-09-13."),
+            'The master switch cuts everything upstream. A component with '
+            'no row in the database reads OFF — that is what the gate does, '
+            'and it is how three tasks had never run at all until '
+            '2026-09-13.'),
         "series": [],
     }
 
@@ -373,31 +376,33 @@ def _cycle_scan():
 
     return {
         "key": "scan",
-        "title": "Le scan",
-        "question": "Que la plateforme regarde-t-elle, et que trouve-t-elle ?",
+        "title": 'The scan',
+        "question": 'What is the platform watching, and what does it find?',
         "gate": _gate("pipeline_opportunity_scanner"),
         "facts": [
-            _fact("setups armés", lambda: OpportunitySetup.objects.filter(
+            _fact('setups armed', lambda: OpportunitySetup.objects.filter(
                 is_active=True).count(),
-                qualifier="armé = is_active seul ; le scan ne consulte aucune échelle"),
-            _fact("setups désarmés", lambda: OpportunitySetup.objects.filter(
+                qualifier='armed = is_active alone; the scan consults no '
+                          'ladder'),
+            _fact('setups disarmed', lambda: OpportunitySetup.objects.filter(
                 is_active=False).count(), tone="inert",
-                qualifier="jamais évalués, et sans verdict de diagnostic"),
-            _fact("détections sur 7 jours", lambda: OpportunityFlag.objects.filter(
+                qualifier='never evaluated, and with no diagnostic verdict'),
+            _fact('detections over 7 days', lambda: OpportunityFlag.objects.filter(
                 scanned_at__gte=week).count(),
-                qualifier="une ligne par passage tant que la correspondance dure, "
-                          "pas une par opportunité"),
-            _fact("détections encore non résolues", lambda: OpportunityFlag.objects.filter(
+                qualifier='one row per pass while the match lasts, not one '
+                          'per opportunity'),
+            _fact('detections still unresolved', lambda: OpportunityFlag.objects.filter(
                 outcome="").count(), tone="caution",
-                qualifier="si le résolveur est éteint, elles ne le seront jamais"),
-            _fact("détections notées « sans prix »", lambda: OpportunityFlag.objects.filter(
+                qualifier='if the resolver is off, they never will be'),
+            _fact('detections graded "no price"', lambda: OpportunityFlag.objects.filter(
                 outcome="expired").count(), tone="caution",
-                qualifier="expired = aucune donnée de prix à l'échéance, pas « fenêtre passée »"),
+                qualifier='expired = no price data at the deadline, not '
+                          '"window passed"'),
         ],
         "caveat": (
-            "Le scan tourne une fois par jour à 09:00 UTC sur environ 179 "
-            "instruments. Le nombre de détections suit la persistance d'une "
-            "correspondance, pas le nombre d'occasions distinctes."),
+            'The scan runs once a day at 09:00 UTC over about 179 '
+            'instruments. The detection count follows how long a match '
+            'persists, not the number of distinct opportunities.'),
         "series": _series(OpportunityFlag, "scanned_at"),
     }
 
@@ -410,26 +415,27 @@ def _cycle_ladder():
 
     return {
         "key": "ladder",
-        "title": "L'échelle de promotion",
-        "question": "Qu'est-ce qui a le droit d'agir sur ce qui est trouvé ?",
+        "title": 'The promotion ladder',
+        "question": 'What is allowed to act on what it finds?',
         "gate": _gate("pipeline_actuator", "pipeline_promotion"),
         "facts": [
-            _fact("règles en recherche", _stage("research"), tone="inert",
-                  qualifier="ne peut pas passer d'ordre ET ses signaux sont retirés "
-                            "du vote : enregistrer une règle la rétrograde"),
-            _fact("règles en papier", _stage("paper"), tone="inert"),
-            _fact("règles en live réduit", _stage("live_small"), tone="caution"),
-            _fact("règles en live plein", _stage("live_full"), tone="caution"),
-            _fact("règles en pause", lambda: RuleControl.objects.filter(
+            _fact('rules at research', _stage("research"), tone="inert",
+                  qualifier='cannot place an order AND its signals are '
+                            'dropped from the vote: registering a rule '
+                            'demotes it'),
+            _fact('rules at paper', _stage("paper"), tone="inert"),
+            _fact('rules at live reduced', _stage("live_small"), tone="caution"),
+            _fact('rules at live full', _stage("live_full"), tone="caution"),
+            _fact('rules paused', lambda: RuleControl.objects.filter(
                 status="paused").count(), tone="inert"),
-            _fact("transitions sur 30 jours", lambda: PromotionEvent.objects.filter(
+            _fact("transitions over 30 days", lambda: PromotionEvent.objects.filter(
                 created_at__gte=timezone.now() - timedelta(days=30)).count(),
-                qualifier="la seule série honnête du mouvement de l'échelle"),
+                qualifier="the only honest series of the ladder's movement"),
         ],
         "caveat": (
-            "Une règle SANS ligne d'échelle n'est pas non gouvernée : elle est "
-            "traitée comme du papier à taille pleine. Le compte des lignes "
-            "mesure donc ce qui est bridé, pas ce qui est couvert."),
+            'A rule with NO ladder row is not ungoverned: it is treated as '
+            'full-size paper. So the row count measures what is throttled, '
+            'not what is covered.'),
         "series": _series(PromotionEvent, "created_at"),
     }
 
@@ -442,23 +448,23 @@ def _cycle_signals():
 
     return {
         "key": "signals",
-        "title": "Les signaux",
-        "question": "Combien d'opinions, et combien ont reçu une réponse ?",
+        "title": 'The signals',
+        "question": 'How many opinions, and how many got an answer?',
         "gate": _gate("pipeline_signals"),
         "facts": [
-            _fact("signaux vivants", lambda: Signal.objects.filter(
+            _fact("live signals", lambda: Signal.objects.filter(
                 is_active=True).count()),
-            _fact("notés : objectif atteint", _outcome("hit_target")),
-            _fact("notés : stop touché", _outcome("stopped_out")),
-            _fact("notés : expirés", _outcome("expired")),
-            _fact("notés : clôture manuelle", _outcome("manual_close")),
-            _fact("jamais notés", _outcome(""), tone="caution",
-                  qualifier="une opinion sans réponse n'est pas une preuve"),
+            _fact('graded: target hit', _outcome("hit_target")),
+            _fact('graded: stopped out', _outcome("stopped_out")),
+            _fact('graded: expired', _outcome("expired")),
+            _fact('graded: closed by hand', _outcome("manual_close")),
+            _fact('never graded', _outcome(""), tone="caution",
+                  qualifier='an opinion with no answer is not evidence'),
         ],
         "caveat": (
-            "Un setup qui correspond trente passages de suite produit UN "
-            "signal réutilisé, pas trente. Les détections et les signaux ne "
-            "se comparent pas terme à terme."),
+            'A setup that matches thirty passes in a row produces ONE '
+            'reused signal, not thirty. Detections and signals do not '
+            'compare term for term.'),
         "series": _series(Signal, "created_at"),
     }
 
@@ -473,27 +479,28 @@ def _cycle_evolution():
 
     return {
         "key": "evolution",
-        "title": "L'évolution",
-        "question": "La plateforme invente-t-elle, et qu'advient-il de ses idées ?",
+        "title": 'Evolution',
+        "question": 'Does the platform invent, and what becomes of its ideas?',
         "gate": _gate("pipeline_evolution", "generator_auto_research"),
         "facts": [
-            _fact("propositions en attente", _status("pending"), tone="caution"),
-            _fact("propositions approuvées", _status("approved")),
-            _fact("propositions refusées", _status("rejected"),
-                  qualifier="une ligne de refus est écrite exprès : une idée "
-                            "payée puis refusée doit rester visible"),
-            _fact("propositions expirées", _status("expired"), tone="inert"),
-            _fact("mutations réellement backtestées", lambda: RuleMutation.objects.filter(
+            _fact('proposals pending', _status("pending"), tone="caution"),
+            _fact('proposals approved', _status("approved")),
+            _fact('proposals refused', _status("rejected"),
+                  qualifier='a refusal row is written on purpose: an idea '
+                            'paid for and then refused must stay visible'),
+            _fact('proposals expired', _status("expired"), tone="inert"),
+            _fact('mutations actually backtested', lambda: RuleMutation.objects.filter(
                 score_method="walk_forward").count(),
-                qualifier="seul walk_forward signifie qu'un backtest a tourné"),
-            _fact("mutations jamais backtestées", lambda: RuleMutation.objects.exclude(
+                qualifier='only walk_forward means a backtest ran'),
+            _fact('mutations never backtested', lambda: RuleMutation.objects.exclude(
                 score_method="walk_forward").count(), tone="caution",
-                qualifier="score_method « heuristic » : un avis, pas une mesure"),
+                qualifier='score_method "heuristic": an opinion, not a '
+                          'measurement'),
         ],
         "caveat": (
-            "Compter les mutations comme des preuves de backtest est le "
-            "sur-engagement que cette page refuse : la colonne dit "
-            "laquelle a vraiment été simulée."),
+            'Counting mutations as evidence of a backtest is the over-claim '
+            'this page refuses: the column says which one was actually '
+            'simulated.'),
         "series": _series(GeneratedSetupProposal, "created_at"),
     }
 
@@ -527,29 +534,29 @@ def _cycle_personas():
             asset_class__in=personas.PERSONA_ASSET_CLASSES).count()
         return max(0, total - worn)
 
-    facts = [_fact("personnalités définies", lambda: len(personas.PERSONAS),
-                   qualifier="une constante de code, pas une requête")]
+    facts = [_fact('personalities defined', lambda: len(personas.PERSONAS),
+                   qualifier='a code constant, not a query')]
     for key in ("scalp", "swing", "position"):
-        facts.append(_fact(f"configs portant « {key} »", _count_for(key)))
-        facts.append(_fact(f"… dont réellement activées", _count_for(key, True),
+        facts.append(_fact(f'configs carrying "{key}"', _count_for(key)))
+        facts.append(_fact("… of which actually enabled", _count_for(key, True),
                            tone="caution",
-                           qualifier="porter une personnalité sans être activé "
-                                     "ne fait rien tourner"))
-    facts.append(_fact("configs éligibles sans personnalité", _eligible_without,
-                       qualifier="dénominateur honnête : les options ne peuvent "
-                                 "jamais en porter"))
+                           qualifier='carrying a personality without being '
+                                     'enabled runs nothing'))
+    facts.append(_fact('eligible configs with no personality', _eligible_without,
+                       qualifier='honest denominator: options can never '
+                                 'carry one'))
 
     return {
         "key": "personas",
-        "title": "Les personnalités",
-        "question": "Quel genre de trader chaque poche est-elle ?",
+        "title": 'Personalities',
+        "question": 'What kind of trader is each pool?',
         "gate": _gate("pipeline_asset_bots"),
         "facts": facts,
         "caveat": (
-            "Aucune transaction ne porte de personnalité : l'attribution se "
-            "fait par la personnalité ACTUELLE de la config, donc changer de "
-            "personnalité réattribue le passé. Une personnalité mal orthographiée "
-            "se lit partout « n'en porte aucune », sans la moindre alerte."),
+            'No trade carries a personality: attribution goes by the '
+            "config's CURRENT personality, so changing personality "
+            'reattributes the past. A misspelled personality reads '
+            'everywhere as "carries none", without a single alert.'),
         "series": [],
     }
 
@@ -560,31 +567,30 @@ def _cycle_allocation():
 
     return {
         "key": "allocation",
-        "title": "L'allocation",
-        "question": "Le capital bouge-t-il, ou est-ce une répétition ?",
+        "title": 'Allocation',
+        "question": 'Is capital moving, or is this a rehearsal?',
         "gate": _gate("pipeline_share_allocator", "share_allocator_mode_live",
                       "pipeline_capital_desk", "capital_desk_mode_live"),
         "facts": [
-            _fact("plans de part proposés", lambda: SharePlan.objects.filter(
+            _fact('share plans proposed', lambda: SharePlan.objects.filter(
                 state="proposed").count(), tone="inert"),
-            _fact("plans de part réellement appliqués", lambda: SharePlan.objects.filter(
+            _fact('share plans actually applied', lambda: SharePlan.objects.filter(
                 applied_at__isnull=False).count(),
-                qualifier="mesuré sur applied_at, pas sur l'état : un plan annulé "
-                          "a bel et bien bougé une part"),
-            _fact("plans de part expirés", lambda: SharePlan.objects.filter(
+                qualifier='measured on applied_at, not on state: a '
+                          'cancelled plan did move a share'),
+            _fact('share plans expired', lambda: SharePlan.objects.filter(
                 state="expired").count(), tone="inert",
-                qualifier="surtout des remplacements, pas de la négligence"),
-            _fact("passes du bureau en ombre", lambda: DeskPlan.objects.filter(
+                qualifier='mostly replacements, not neglect'),
+            _fact('desk passes in shadow', lambda: DeskPlan.objects.filter(
                 mode="shadow").count(), tone="inert",
-                qualifier="en ombre, un candidat « déplacé » n'a rien déplacé : "
-                          "tout s'exécute à taille pleine"),
-            _fact("passes du bureau en live", lambda: DeskPlan.objects.filter(
+                qualifier='in shadow, a "moved" candidate moved nothing: '
+                          'everything runs at full size'),
+            _fact('desk passes live', lambda: DeskPlan.objects.filter(
                 mode="live").count(), tone="caution"),
         ],
         "caveat": (
-            "Rien ici ne déplace d'argent sans humain tant que les deux "
-            "interrupteurs live ne sont pas allumés. Papier et live ne sont "
-            "jamais additionnés, nulle part."),
+            'Nothing here moves money without a human until both live '
+            'switches are on. Paper and live are never summed, anywhere.'),
         "series": _series(DeskPlan, "created_at"),
     }
 
@@ -604,24 +610,26 @@ def _cycle_horizon():
 
     return {
         "key": "horizon",
-        "title": "L'horizon",
-        "question": "La vue à cinq-dix ans existe-t-elle, et l'allocateur s'en sert-il ?",
+        "title": 'The horizon',
+        "question": 'Does the five-to-ten-year view exist, and does the '
+                    'allocator use it?',
         "gate": _gate("agent_horizon", "pipeline_calibration"),
         "facts": [
-            _fact("vues abouties", _status("ok")),
-            _fact("vues refusées", _status("rejected"), tone="inert"),
-            _fact("vues en erreur", _status("error"), tone="caution"),
-            _fact("vues restées « en cours »", _status("running"), tone="caution",
-                  qualifier="aucun ramasseur : un worker tué laisse la ligne ainsi "
-                            "pour toujours"),
-            _fact("âge en jours de la vue utilisée", _age_days,
-                  qualifier="au-delà de 45 jours l'allocateur l'ignore et retombe à 1.00"),
+            _fact("views completed", _status("ok")),
+            _fact('views refused', _status("rejected"), tone="inert"),
+            _fact('views in error', _status("error"), tone="caution"),
+            _fact('views left "in progress"', _status("running"), tone="caution",
+                  qualifier='no reaper: a killed worker leaves the row that '
+                            'way forever'),
+            _fact('age in days of the view in use', _age_days,
+                  qualifier='past 45 days the allocator ignores it and '
+                            'falls back to 1.00'),
         ],
         "caveat": (
-            "Les appels de l'horizon portent à 6 et 12 mois et la première vue "
-            "date du 2026-09-12 : zéro noté est honnête jusqu'en mars 2027. "
-            "Le rendre en « 0 % de justesse » transformerait « pas encore dû » "
-            "en « faux »."),
+            "The horizon's calls come due at 6 and 12 months and the first "
+            'view dates from 2026-09-12: zero graded is honest until March '
+            '2027. Rendering that as "0% accuracy" would turn "not due yet" '
+            'into "wrong".'),
         "series": [],
     }
 
@@ -666,48 +674,46 @@ def _cycle_backtests():
 
     return {
         "key": "backtests",
-        "title": "Les backtests",
-        "question": "Qu'est-ce qui a été simulé avant d'être cru ?",
+        "title": 'The backtests',
+        "question": 'What was simulated before it was believed?',
         "gate": [],
         "facts": [
-            _fact("runs moteur v1", lambda: BacktestRun.objects.count()),
-            _fact("… aboutis", lambda: BacktestRun.objects.filter(
+            _fact("engine v1 runs", lambda: BacktestRun.objects.count()),
+            _fact("… completed", lambda: BacktestRun.objects.filter(
                 status="completed").count(),
-                qualifier="le littéral est « completed »"),
-            _fact("… aboutis sans la moindre transaction", lambda: BacktestRun.objects.filter(
+                qualifier='the literal is "completed"'),
+            _fact('… completed with no trade at all', lambda: BacktestRun.objects.filter(
                 status="completed", total_trades=0).count(), tone="caution",
-                qualifier="un résultat, pas un échec"),
-            _fact("… portant un taux de réussite MESURÉ", lambda: BacktestRun.objects.filter(
+                qualifier='a result, not a failure'),
+            _fact('… carrying a MEASURED win rate', lambda: BacktestRun.objects.filter(
                 win_rate__isnull=False).count(),
-                qualifier="les NULL sont inconnus, jamais 0 %"),
-            _fact("runs de bots", lambda: BotBacktestRun.objects.count()),
-            _fact("… aboutis", lambda: BotBacktestRun.objects.filter(
+                qualifier='NULLs are unknown, never 0%'),
+            _fact('bot runs', lambda: BotBacktestRun.objects.count()),
+            _fact("… complete", lambda: BotBacktestRun.objects.filter(
                 status="complete").count(),
-                qualifier="ici le littéral est « complete », sans -d : "
-                          "un filtre partagé renverrait 0 pour toujours"),
-            _fact("… calculés avant le correctif du 14/09",
+                qualifier='here the literal is "complete", with no -d: a '
+                          'shared filter would return 0 forever'),
+            _fact('… computed before the 09-14 fix',
                   _bot_runs_before_the_fix, tone="caution",
-                  qualifier="un signal sans barre y valait −50 R et le "
-                            "plafond de durée n'existait pas : ces chiffres "
-                            "ne se comparent pas aux suivants"),
-            _fact("signaux qu'un run n'a pas pu simuler",
+                  qualifier='a signal with no bar was worth −50 R there and '
+                            'the time cap did not exist: these numbers do '
+                            'not compare with the later ones'),
+            _fact('signals a run could not simulate',
                   _signals_no_run_could_price, tone="caution",
-                  qualifier="aucune barre après le signal — écartés et "
-                            "comptés, jamais moyennés"),
+                  qualifier='no bar after the signal — set aside and '
+                            'counted, never averaged'),
         ],
         "caveat": (
-            "Deux tables, deux vocabulaires de statut à une lettre près, et "
-            "deux unités pour le taux de réussite (pourcentage d'un côté, "
-            "fraction de l'autre). Elles ne sont jamais additionnées ici. "
-            "Aucun backtest ne conditionne une promotion : la barrière "
-            "automatique tourne en mémoire et n'écrit aucune ligne. "
-            "Le 14/09 le simulateur de bots a changé sur quatre points : un "
-            "signal sans barre n'est plus une perte de −50 R mais un signal "
-            "écarté et compté, un gap à travers le stop se remplit à "
-            "l'ouverture et non au stop, « expiré » ne recouvre plus « le "
-            "flux de barres s'arrête ici », et le plafond de durée du bot "
-            "est enfin respecté. Les runs d'avant ne mesuraient pas le même "
-            "bot."),
+            'Two tables, two status vocabularies one letter apart, and two '
+            'units for the win rate (a percentage on one side, a fraction '
+            'on the other). They are never summed here. No backtest gates a '
+            'promotion: the automatic ladder runs in memory and writes no '
+            'row. On 09-14 the bot simulator changed in four ways: a signal '
+            'with no bar is no longer a −50 R loss but a signal set aside '
+            'and counted, a gap through the stop fills at the open rather '
+            'than at the stop, "expired" no longer covers "the bar feed '
+            'stops here", and the bot\'s own time cap is finally honoured. '
+            'Earlier runs were not measuring the same bot.'),
         "series": [],
     }
 
@@ -719,40 +725,40 @@ def _cycle_trust():
 
     return {
         "key": "trust",
-        "title": "La confiance",
-        "question": "Ce que la plateforme affirme s'est-il vérifié ?",
+        "title": 'Confidence',
+        "question": 'Did what the platform asserted turn out to be true?',
         "gate": _gate("pipeline_calibration"),
         "facts": [
-            _fact("appels de direction notés justes",
+            _fact('direction calls graded right',
                   lambda: base.filter(was_correct=True).count()),
-            _fact("appels de direction notés faux",
+            _fact('direction calls graded wrong',
                   lambda: base.filter(was_correct=False).count()),
-            _fact("appels en attente de note",
+            _fact('calls awaiting a grade',
                   lambda: base.filter(was_correct__isnull=True,
                                       evaluated_at__isnull=True).count(),
                   tone="caution",
-                  qualifier="si le noteur est éteint, « en attente » veut dire "
-                            "« personne ne note », pas « le marché n'a pas répondu »"),
-            _fact("appels que le marché n'a pas pu trancher",
+                  qualifier='if the grader is off, "pending" means "nobody '
+                            'is grading", not "the market did not answer"'),
+            _fact('calls the market could not settle',
                   lambda: base.filter(was_correct__isnull=True,
                                       evaluated_at__isnull=False).count(),
                   tone="inert",
-                  qualifier="résolus et définitivement non mesurables"),
-            _fact("agents portant au moins un appel",
+                  qualifier='resolved and permanently unmeasurable'),
+            _fact('agents carrying at least one call',
                   lambda: base.values("agent").distinct().count()),
         ],
         "caveat": (
-            "Une confiance de 1,00 veut dire deux choses opposées : bien "
-            "calibré, ou moins de dix appels notés. Un taux de justesse sans "
-            "sa taille d'échantillon n'est pas un fait. Le plat compte comme "
-            "faux, donc la ligne de base n'est pas 50 %."),
+            'A confidence of 1.00 means two opposite things: well '
+            'calibrated, or fewer than ten graded calls. An accuracy rate '
+            'without its sample size is not a fact. Flat counts as wrong, '
+            'so the baseline is not 50%.'),
         "series": _series(AgentPrediction, "created_at",
                           extra={"prediction_type": "direction"}),
     }
 
 
 def _cycle_forge():
-    """LA FORGE — the state of the code that is running, not of the market.
+    """THE FORGE — the state of the code that is running, not of the market.
 
     Every other cycle answers a question about trading. This one answers
     the question the platform could not answer about ITSELF, and the one
@@ -811,37 +817,39 @@ def _cycle_forge():
 
     return {
         "key": "forge",
-        "title": "La forge",
-        "question": "De quel code cette plateforme tourne-t-elle, et est-ce celui qui a été écrit ?",
+        "title": 'The forge',
+        "question": 'Which code is this platform running, and is it the '
+                    'code that was written?',
         "gate": [],
         "facts": [
-            _text_fact("commit de cette image", lambda: st["sha"],
-                       qualifier="posé au build par deploy/dc ; un tiret veut "
-                                 "dire que l'image n'a pas été estampillée, "
-                                 "jamais un sha inventé"),
-            _fact("âge du build, en heures", lambda: st["age_hours"],
+            _text_fact('commit of this image', lambda: st["sha"],
+                       qualifier='stamped at build time by deploy/dc; a '
+                                 'dash means the image was not stamped, '
+                                 'never an invented sha'),
+            _fact('build age, in hours', lambda: st["age_hours"],
                   tone="caution",
-                  qualifier="l'âge est le fait qui compte : un sha ne dit rien "
-                            "à un humain, « construit il y a 31 h » sur une "
-                            "branche qui a bougé ce matin dit tout"),
-            _fact("migrations en attente", _pending_migrations, tone="caution",
-                  qualifier="non appliquées sur CETTE base : un déploiement "
-                            "sans elles sert des pages contre un schéma absent"),
-            _fact("tests publiés sur le mur", _tests_published,
-                  qualifier="le chiffre que la page publique affiche ; "
-                            "tests/test_wall_facts échoue quand il dérive"),
-            _fact("tâches gardées sans interrupteur", _unregistered_guards,
+                  qualifier='the age is the fact that matters: a sha tells '
+                            'a human nothing, "built 31 h ago" on a branch '
+                            'that moved this morning tells everything'),
+            _fact('migrations pending', _pending_migrations, tone="caution",
+                  qualifier='not applied on THIS database: a deploy without '
+                            'them serves pages against a schema that is not '
+                            'there'),
+            _fact('tests published on the wall', _tests_published,
+                  qualifier='the number the public page shows; '
+                            'tests/test_wall_facts fails when it drifts'),
+            _fact('guarded tasks with no switch', _unregistered_guards,
                   tone="caution",
-                  qualifier="une clé guarded_task sans ligne se lit « éteint » "
-                            "et la tâche ne tourne jamais — trois l'étaient "
-                            "depuis toujours, découvertes le 2026-09-13"),
+                  qualifier='a guarded_task key with no row reads OFF and '
+                            'the task never runs — three were, from the '
+                            'beginning, found on 2026-09-13'),
         ],
         "caveat": (
-            "Cette lane REND COMPTE, elle n'agit pas encore, et c'est l'état "
-            "honnête de la forge aujourd'hui. Elle sait de quel commit l'image "
-            "a été construite ; elle ne peut pas savoir si ce commit est "
-            "toujours le dernier — l'image n'a ni git ni réseau garanti. "
-            "C'était déjà tout ce qui manquait le 13 septembre."),
+            'This lane REPORTS; it does not act yet, and that is the honest '
+            'state of the forge today. It knows which commit the image was '
+            'built from; it cannot know whether that commit is still the '
+            'latest — the image has neither git nor guaranteed network. '
+            'That was already all that was missing on 13 September.'),
         "series": [],
     }
 
@@ -892,8 +900,8 @@ def oculus(user=None) -> dict:
                 "question": "",
                 "gate": [],
                 "facts": [],
-                "caveat": "Ce cycle n'a pas pu être lu. Le chiffre absent "
-                          "n'est pas un zéro.",
+                "caveat": 'This cycle could not be read. The missing number '
+                          'is not a zero.',
                 "series": [],
                 "dead": True,
             })

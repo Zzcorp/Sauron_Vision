@@ -152,13 +152,13 @@ class RegistryTests(TestCase):
         # at a screen rather than a terminal. The set stays PINNED because
         # this lane is a shell on the web and every addition to it is a
         # security decision, not a convenience.
-        # `tresor` joined on 2026-09-19 for the same reason
+        # `treasury` joined on 2026-09-19 for the same reason
         # `paper_readiness` did: it reads cached columns, makes no broker
         # call and writes nothing. It prints money, as `preflight_live`
         # already does on this same lane.
         self.assertEqual(ops_commands.runnable_names(),
                          {"open_trades", "paper_readiness", "preflight_live",
-                          "why_no_trade", "signals", "tresor"})
+                          "why_no_trade", "signals", "treasury"})
         self.assertIsNone(ops_commands.get("nope"))
         self.assertEqual([k for k, _l, _r in ops_commands.by_category()],
                          ["read", "decide", "ops"])

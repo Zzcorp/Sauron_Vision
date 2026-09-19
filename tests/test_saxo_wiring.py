@@ -615,3 +615,212 @@ class TheSweepReadsAnyBookTests(TestCase):
         T.assert_called_once()
         self.assertEqual(out["checked"], 1)
         self.assertEqual(out["errors"], 0)
+
+
+class TheDrawdownGovernorIgnoresTheOtherWorldTests(TestCase):
+    """A simulated balance must never sit in a real account's high-water
+    mark. Saxo and eToro carry two environments on ONE row, so without a
+    filter the governor that de-risks real money reads readings taken in
+    a simulator — and the number it de-risks against is the highest of
+    both.
+
+    A row that never recorded an `env` is KEPT: excluding it would drop
+    every reading written before the column was filled, and "unknown
+    provenance" is not "the wrong world".
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user("wire_env", password="x")
+
+    def _reading(self, acct, value, *, env, minutes_ago=10, currency="EUR"):
+        from bot_program.capital_truth import broker_kind
+        from bot_program.equity_models import BrokerEquityReading
+        return BrokerEquityReading.objects.create(
+            broker=broker_kind(acct), account_pk=acct.pk, env=env,
+            value=Decimal(str(value)), currency=currency,
+            at=timezone.now() - timedelta(minutes=minutes_ago))
+
+    def _live_row(self, value=1000.0, currency="EUR"):
+        """A LIVE Saxo row carrying a current reading."""
+        acct = saxo(self.user, flags=("stock",), sim=False)
+        acct.last_equity = Decimal(str(value))
+        acct.last_equity_currency = currency
+        acct.last_equity_at = timezone.now()
+        acct.save()
+        return acct
+
+    def test_broker_env_reads_each_rows_own_flag(self):
+        from bot_program.capital_truth import broker_env
+        self.assertEqual(broker_env(saxo(self.user, sim=True)), "paper")
+        SaxoAccount.objects.all().delete()
+        self.assertEqual(broker_env(saxo(self.user, sim=False)), "live")
+        u2 = User.objects.create_user("wire_env2", password="x")
+        self.assertEqual(broker_env(etoro(u2)), "paper")     # demo default
+        u3 = User.objects.create_user("wire_env3", password="x")
+        self.assertEqual(broker_env(ibkr(u3)),
+                         IBKRAccount.objects.get(user=u3).env or "")
+
+    def test_a_simulated_high_water_mark_is_not_a_live_one(self):
+        from bot_program.capital_truth import equity_high_water
+        acct = self._live_row(value=1000.0)
+        self._reading(acct, 9000.0, env="paper")     # a SIM fortune
+        self._reading(acct, 1100.0, env="live")
+        hw = equity_high_water(_fresh(self.user))
+        self.assertEqual(hw["hwm"], 1100.0)
+        self.assertEqual(hw["n"], 1)
+
+    def test_a_reading_with_no_recorded_environment_still_counts(self):
+        from bot_program.capital_truth import equity_high_water
+        acct = self._live_row(value=1000.0)
+        self._reading(acct, 1200.0, env="")
+        self.assertEqual(equity_high_water(_fresh(self.user))["hwm"], 1200.0)
+
+    def test_the_24h_drop_ignores_the_other_world_too(self):
+        from bot_program.share_allocator import drop_24h
+        acct = self._live_row(value=900.0)
+        self._reading(acct, 9000.0, env="paper", minutes_ago=30)
+        self._reading(acct, 1000.0, env="live", minutes_ago=30)
+        drop = drop_24h(_fresh(self.user))
+        # Against the live top of 1000, not the simulator's 9000.
+        self.assertAlmostEqual(drop, (1000.0 - 900.0) / 1000.0, places=6)
+
+    def test_with_no_live_history_the_drop_is_unmeasured_not_zero(self):
+        from bot_program.share_allocator import drop_24h
+        acct = self._live_row(value=900.0)
+        self._reading(acct, 9000.0, env="paper", minutes_ago=30)
+        self.assertIsNone(drop_24h(_fresh(self.user)))
+
+
+class TheCloseAsksTheVenueTests(TestCase):
+    """An opposite market order does not flatten a Saxo position under the
+    FifoEndOfDay netting profile: both lots stay open until the evening
+    netting, so the platform would book the row CLOSED against a position
+    the broker still holds."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("wire_close", password="x")
+
+    def _trade(self, **meta):
+        from bot_program.asset_models import AssetBotConfig, AssetBotTrade
+        cfg, _ = AssetBotConfig.objects.get_or_create(
+            user=self.user, name="close_pool",
+            defaults={"asset_class": "stock", "mode": "live",
+                      "symbols": ["AAPL"], "capital": Decimal("1000"),
+                      "base_currency": "EUR", "enabled": True})
+        return AssetBotTrade.objects.create(
+            config=cfg, asset_class="stock", symbol="AAPL", side="BUY",
+            qty=Decimal("10"), entry_price=Decimal("200"), status="OPEN",
+            paper=False, metadata=dict(meta))
+
+    def _close(self, trade, client):
+        from bot_program.asset_engine.base import AssetBot
+        return AssetBot._submit_close_order(
+            mock.Mock(asset_class="stock"), trade, client, "cid")
+
+    def test_a_client_that_does_not_answer_is_closed_exactly_as_before(self):
+        """Every adapter but Saxo. The old path, untouched."""
+        client = mock.Mock(spec=["market_order"])
+        client.market_order.return_value = {"status": "FILLED"}
+        self._close(self._trade(protective_trade_id="P1"), client)
+        client.market_order.assert_called_once()
+        self.assertEqual(client.market_order.call_args.args[1], "SELL")
+
+    def test_a_venue_that_needs_a_position_id_gets_one(self):
+        client = mock.Mock(spec=["market_order", "close_position",
+                                 "close_needs_position_id"])
+        client.close_needs_position_id.return_value = True
+        client.close_position.return_value = {"status": "FILLED"}
+        self._close(self._trade(protective_trade_id="P9"), client)
+        client.close_position.assert_called_once_with("P9", "AAPL", 10.0)
+        client.market_order.assert_not_called()
+
+    def test_a_venue_that_nets_immediately_uses_the_ordinary_close(self):
+        client = mock.Mock(spec=["market_order", "close_position",
+                                 "close_needs_position_id"])
+        client.close_needs_position_id.return_value = False
+        client.market_order.return_value = {"status": "FILLED"}
+        self._close(self._trade(protective_trade_id="P9"), client)
+        client.market_order.assert_called_once()
+        client.close_position.assert_not_called()
+
+    def test_a_broker_that_cannot_say_keeps_the_old_path(self):
+        client = mock.Mock(spec=["market_order", "close_position",
+                                 "close_needs_position_id"])
+        client.close_needs_position_id.side_effect = RuntimeError("no session")
+        client.market_order.return_value = {"status": "FILLED"}
+        with self.assertLogs("bot_program.asset_engine.base", level="WARNING"):
+            self._close(self._trade(protective_trade_id="P9"), client)
+        client.market_order.assert_called_once()
+
+    def test_no_position_id_says_out_loud_what_the_close_will_leave(self):
+        client = mock.Mock(spec=["market_order", "close_position",
+                                 "close_needs_position_id"])
+        client.close_needs_position_id.return_value = True
+        client.market_order.return_value = {"status": "FILLED"}
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="ERROR") as cm:
+            self._close(self._trade(), client)
+        self.assertTrue(any("BOTH lots open" in m for m in cm.output))
+        client.market_order.assert_called_once()
+        client.close_position.assert_not_called()
+
+    # ── the two ways the chooser used to be fooled ──────────────────────
+
+    def test_an_answer_that_is_neither_yes_nor_no_keeps_the_old_path(self):
+        """The first version asked `bool(answer)`, so ANY truthy object sent
+        the close down the position-id path. A mock, a Sentinel, a stray
+        dict — none of them answered the question, and the reading of no
+        answer is the one the exception branch already made."""
+        client = mock.Mock(spec=["market_order", "close_position",
+                                 "close_needs_position_id"])
+        client.close_needs_position_id.return_value = object()
+        client.market_order.return_value = {"status": "FILLED"}
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="WARNING") as cm:
+            self._close(self._trade(protective_trade_id="P9"), client)
+        self.assertTrue(any("neither" in m for m in cm.output))
+        client.market_order.assert_called_once()
+        client.close_position.assert_not_called()
+
+    def test_a_position_id_is_never_invented_out_of_a_non_string(self):
+        """metadata is a JSONField: it can hold a dict, a list, anything.
+        str() of all of them is a long non-empty string that reads like a
+        venue id, and closing BY an invented id closes some other position
+        or nothing while the row still books CLOSED."""
+        client = mock.Mock(spec=["market_order", "close_position",
+                                 "close_needs_position_id"])
+        client.close_needs_position_id.return_value = True
+        client.market_order.return_value = {"status": "FILLED"}
+        trade = self._trade(protective_trade_id={"id": 7})
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="ERROR") as cm:
+            self._close(trade, client)
+        self.assertTrue(any("BOTH lots open" in m for m in cm.output))
+        client.close_position.assert_not_called()
+        client.market_order.assert_called_once()
+
+    def test_a_numeric_position_id_is_still_a_position_id(self):
+        """Saxo PositionIds are decimal, and a JSON round-trip can leave one
+        as an int. Rejecting it would flatten nothing on the venue that
+        needs it most."""
+        client = mock.Mock(spec=["market_order", "close_position",
+                                 "close_needs_position_id"])
+        client.close_needs_position_id.return_value = True
+        client.close_position.return_value = {"status": "FILLED"}
+        self._close(self._trade(broker_position_id=4001234567), client)
+        client.close_position.assert_called_once_with("4001234567", "AAPL",
+                                                      10.0)
+        client.market_order.assert_not_called()
+
+    def test_an_adapter_that_needs_an_id_and_cannot_close_by_one_says_so(self):
+        """It would otherwise fall through to the opposite order in
+        silence — the same double-lot outcome as a missing id, so it earns
+        the same ERROR."""
+        client = mock.Mock(spec=["market_order", "close_needs_position_id"])
+        client.close_needs_position_id.return_value = True
+        client.market_order.return_value = {"status": "FILLED"}
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="ERROR") as cm:
+            self._close(self._trade(protective_trade_id="P9"), client)
+        self.assertTrue(any("no close_position" in m for m in cm.output))
+        client.market_order.assert_called_once()
