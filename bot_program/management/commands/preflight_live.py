@@ -245,6 +245,63 @@ def _bar_findings(sym, row, newest, now, blockers, warnings) -> None:
             f"position can be marked, until {name} reopens")
 
 
+#: Every class a broker row can be flagged primary for. "options" is in
+#: the list because the router sends options and CFDs to IBKR before it
+#: consults any flag at all.
+_VENUE_CLASSES = ("stock", "forex", "commodity", "crypto", "options")
+
+
+def _venue_for(user, asset_class: str):
+    """(row, kind) that will carry a LIVE order for `asset_class`.
+
+    (None, "") means nothing carries it. That is not an absence of a broker:
+    broker_router always returns some client and falls back to the
+    PaperTrader, so a live pool in that class books SIMULATED fills while
+    calling itself live, which is the failure this exists to name.
+
+    The order is broker_router.VENUE_PRECEDENCE, imported rather than
+    restated, and tests/test_preflight_venue.py walks every class against
+    the router's own predicates — a second copy of this rule that drifted
+    would make the preflight confidently name the wrong broker.
+    """
+    from bot_program.capital_truth import broker_kind
+    from bot_program.engine.broker_router import VENUE_PRECEDENCE
+
+    rows = {"saxo": getattr(user, "saxo_account", None),
+            "etoro": getattr(user, "etoro_account", None),
+            "ibkr": getattr(user, "ibkr_account", None)}
+    for kind in VENUE_PRECEDENCE:
+        row = rows.get(kind)
+        try:
+            if row is not None and row.is_primary_for(asset_class):
+                return row, broker_kind(row)
+        except Exception:  # noqa: BLE001 — an unreadable row carries nothing
+            continue
+    # The router's one exception, and it is not flag-driven.
+    if asset_class in ("options", "cfd") and rows["ibkr"] is not None:
+        return rows["ibkr"], "ibkr"
+    return None, ""
+
+
+def _primary_classes(row) -> str:
+    out = []
+    for c in _VENUE_CLASSES:
+        try:
+            if row.is_primary_for(c):
+                out.append(c)
+        except Exception:  # noqa: BLE001
+            return "UNREADABLE"
+    return ", ".join(out) or "nothing"
+
+
+def _saxo_alive(row, now) -> bool:
+    """A Saxo row that can still reach the venue without a new sign-in."""
+    try:
+        return bool(row.has_session and row.session_alive(now))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class Command(BaseCommand):
     help = "Check whether it is safe to arm live trading. Read-only."
 
@@ -260,7 +317,10 @@ class Command(BaseCommand):
         from django.contrib.auth.models import User
         from django.utils import timezone
 
-        from bot_program.capital_truth import account_equity
+        from django.db.models import Q
+
+        from bot_program.capital_truth import (account_equity, broker_backed,
+                                               broker_env, broker_kind)
         from bot_program.models import AssetBotConfig, IBKRAccount
         from core.platform_control import PlatformComponent, is_component_enabled
         from market_data.models import PriceData
@@ -300,57 +360,96 @@ class Command(BaseCommand):
                          "entry until a reading lands")
                 blockers.append(f"{key} is OFF{extra}")
 
+        # ANY broker row, keyed or not. Keyed-only would skip the
+        # half-configured row this command exists to name, and IBKR-only
+        # reported a blocker on a box that is deliberately without one.
         users = (User.objects.filter(username=opts["user"])
                  if opts["user"] else
-                 User.objects.filter(ibkr_account__isnull=False))
+                 User.objects.filter(
+                     Q(ibkr_account__isnull=False)
+                     | Q(etoro_account__isnull=False)
+                     | Q(saxo_account__isnull=False)).distinct())
         if opts["user"] and not users.exists():
             w(f"\n   no user named {opts['user']!r}")
             return
         if not users.exists():
-            w("\n   NO IBKR ACCOUNT ON ANY USER — nothing to arm.")
-            blockers.append("no IBKRAccount row exists")
+            w("\n   NO BROKER ROW ON ANY USER — nothing to arm.")
+            blockers.append("no broker row exists on any user — "
+                            "IBKR, eToro or Saxo")
 
         for user in users.order_by("username"):
             acct = IBKRAccount.objects.filter(user=user).first()
 
-            # ── 2. the connection, and which account it points at ───────
-            w(f"\n2. IBKR CONNECTION — {user.username}")
-            if acct is None:
-                w("   NONE — set one up on /admin-dashboard/")
-                blockers.append(f"{user.username} has no IBKRAccount")
-                continue
-            w(f"   label        {acct.label}")
-            w(f"   env          {acct.env_label}")
-            w(f"   socket       {acct.host}:{acct.port}  "
-              f"(slot {acct.gateway_slot} -> {acct.gateway_host})")
-            w(f"   client_id    {acct.client_id}")
-            w(f"   login stored {acct.has_login}")
-            # Labelled for what it is. Left bare it reads as live status, and
-            # it is not: nothing but the TEST IBKR button and a form save ever
-            # writes it. Section 3 answers reachability.
-            w(f"   last manual probe: {acct.connected}  at="
-              f"{_age(acct.last_sync, now)}  (not live status — see THE MONEY)")
+            # ── 2. the venue that will carry the orders ──────────────────
+            # Not "the IBKR connection" since 2026-09-20: the book can be a
+            # Saxo or an eToro row, and this section used to end in `continue`
+            # on any box without an IBKRAccount — skipping every check below
+            # for the broker that was actually going to trade.
+            book = broker_backed(user)
+            w(f"\n2. THE BROKERS — {user.username}")
+            for kind, row in (("saxo", getattr(user, "saxo_account", None)),
+                              ("etoro", getattr(user, "etoro_account", None)),
+                              ("ibkr", acct)):
+                if row is None:
+                    w(f"   {kind:<6} no row")
+                    continue
+                w(f"   {kind:<6} {(row.label or '-')[:20]:<20} "
+                  f"env={(broker_env(row) or 'UNKNOWN'):<7} "
+                  f"primary={_primary_classes(row)}")
+            if book is None:
+                # Not a blocker on its own: a paper-only box is a legitimate
+                # state, and section 4 blocks the live configs that have
+                # nowhere to go.
+                w("   book   NOTHING — no keyed row is primary for any class, "
+                  "so every order falls back to the PaperTrader")
+            else:
+                w(f"   book   {broker_kind(book)} "
+                  f"({broker_env(book) or 'ENV UNKNOWN'}) — this is the "
+                  f"account every share and every limit is measured against")
 
-            if not acct.env_is_certain:
-                # None is NOT paper. Everything that renders this must show
-                # the unknown as an unknown and refuse to call it safe.
-                blockers.append(
-                    f"{user.username}: port {acct.port} is not a port IBKR "
-                    f"ships — the platform cannot tell paper from live")
-            if acct.paper_flag_disagrees:
-                warnings.append(
-                    f"{user.username}: the stored paper flag says "
-                    f"{acct.paper} and the port says {acct.env} — somebody "
-                    f"believes something false about which account this is")
-            if not acct.has_login:
-                blockers.append(f"{user.username}: no Gateway login stored — "
-                                f"the container cannot sign in")
-            if acct.host in ("127.0.0.1", "localhost") and acct.gateway_host:
-                warnings.append(
-                    f"{user.username}: host is {acct.host}, but in the compose "
-                    f"stack the Gateway is reachable as "
-                    f"{acct.gateway_host!r} — 127.0.0.1 inside a worker "
-                    f"container is the worker itself")
+            saxo = getattr(user, "saxo_account", None)
+            if saxo is not None and not _saxo_alive(saxo, now):
+                # Stated once here, and turned into a blocker in section 4
+                # only for the live configs that route to it.
+                why = (saxo.session_lost_reason or "never signed in"
+                       if not saxo.has_session else "past its life")
+                w(f"   saxo   session NOT alive ({why}) — sign in again at "
+                  f"/brokers/. The refresh token lives 40 minutes and "
+                  f"rotates, so a box down longer than that always needs one")
+
+            if acct is not None:
+                w(f"   label        {acct.label}")
+                w(f"   env          {acct.env_label}")
+                w(f"   socket       {acct.host}:{acct.port}  "
+                  f"(slot {acct.gateway_slot} -> {acct.gateway_host})")
+                w(f"   client_id    {acct.client_id}")
+                w(f"   login stored {acct.has_login}")
+                # Labelled for what it is. Left bare it reads as live status, and
+                # it is not: nothing but the TEST IBKR button and a form save ever
+                # writes it. Section 3 answers reachability.
+                w(f"   last manual probe: {acct.connected}  at="
+                  f"{_age(acct.last_sync, now)}  (not live status — see THE MONEY)")
+
+                if not acct.env_is_certain:
+                    # None is NOT paper. Everything that renders this must show
+                    # the unknown as an unknown and refuse to call it safe.
+                    blockers.append(
+                        f"{user.username}: port {acct.port} is not a port IBKR "
+                        f"ships — the platform cannot tell paper from live")
+                if acct.paper_flag_disagrees:
+                    warnings.append(
+                        f"{user.username}: the stored paper flag says "
+                        f"{acct.paper} and the port says {acct.env} — somebody "
+                        f"believes something false about which account this is")
+                if not acct.has_login:
+                    blockers.append(f"{user.username}: no Gateway login stored — "
+                                    f"the container cannot sign in")
+                if acct.host in ("127.0.0.1", "localhost") and acct.gateway_host:
+                    warnings.append(
+                        f"{user.username}: host is {acct.host}, but in the compose "
+                        f"stack the Gateway is reachable as "
+                        f"{acct.gateway_host!r} — 127.0.0.1 inside a worker "
+                        f"container is the worker itself")
 
             # ── 3. the money, with its currency ─────────────────────────
             w(f"\n3. THE MONEY — {user.username}")
@@ -386,18 +485,25 @@ class Command(BaseCommand):
             # proof the socket answered; nothing else here is.
             age_h = (None if reading is None
                      else reading["age_seconds"] / 3600.0)
-            if acct.is_live and (age_h is None
-                                 or age_h > BROKER_READING_STALE_HOURS):
+            if (book is not None and broker_env(book) == "live"
+                    and (age_h is None
+                         or age_h > BROKER_READING_STALE_HOURS)):
+                kind = broker_kind(book)
                 blockers.append(
-                    f"{user.username}: pointed at a LIVE port and no equity "
-                    f"reading has landed "
+                    f"{user.username}: the book is a LIVE {kind} account and "
+                    f"no equity reading has landed "
                     + ("at all" if age_h is None else f"for {age_h:.1f}h")
                     + f" (limit {BROKER_READING_STALE_HOURS:.0f}h) — the "
-                    f"broker is not answering, whatever the connected flag "
-                    f"says. Is the Gateway logged in?")
+                    f"broker is not answering, whatever a stored flag says."
+                    + (" Is the Gateway logged in?" if kind == "ibkr" else
+                       " Is the session still alive on /brokers/?"))
 
             # ── IBKR's floor, read BEFORE the order rather than after ───
-            if reading is not None and reading["currency"]:
+            # IBKR's rule (Error 201), not a property of money: printing it
+            # against a Saxo or eToro book would state a limit that venue
+            # does not have.
+            if (reading is not None and reading["currency"]
+                    and book is not None and broker_kind(book) == "ibkr"):
                 floor = _ibkr_floor(reading["value"], reading["currency"])
                 live_all = list(AssetBotConfig.objects.filter(
                     user=user, mode="live"))
@@ -460,25 +566,38 @@ class Command(BaseCommand):
             w(f"\n4. LIVE CONFIGS — {user.username}")
             if not live:
                 w("   none — every config is in paper mode. Nothing is armed.")
-            primary = {
-                "stock": acct.is_primary_for_stocks,
-                "forex": acct.is_primary_for_forex,
-                "option": acct.is_primary_for_options,
-                "options": acct.is_primary_for_options,
-                "commodity": acct.is_primary_for_commodity,
-            }
             for cfg in live:
                 w(f"   [{cfg.id}] {cfg.name[:20]:<20} {cfg.asset_class:<9} "
                   f"enabled={str(cfg.enabled):<5} "
                   f"pool={cfg.capital} {cfg.base_currency}")
-                routed = primary.get(cfg.asset_class)
-                if routed is False:
-                    w(f"        ^ IBKR is NOT primary for {cfg.asset_class} — "
-                      f"this config routes elsewhere, and to PaperTrader if "
-                      f"that broker has no account row")
-                    warnings.append(
-                        f"config {cfg.id} ({cfg.name}) is LIVE but IBKR is not "
-                        f"primary for {cfg.asset_class}")
+                venue, kind = _venue_for(user, cfg.asset_class)
+                if venue is None:
+                    w(f"        ^ NO BROKER is primary for "
+                      f"{cfg.asset_class} — the router falls back to the "
+                      f"PaperTrader")
+                    (blockers if cfg.enabled else warnings).append(
+                        f"config {cfg.id} ({cfg.name}) is LIVE"
+                        + (" and ENABLED" if cfg.enabled else "")
+                        + f" for {cfg.asset_class} and no broker is primary "
+                        f"for it — every order routes to the PaperTrader, so "
+                        f"the pool books SIMULATED fills while calling itself "
+                        f"live")
+                else:
+                    env = broker_env(venue) or "UNKNOWN"
+                    w(f"        ^ routes to {kind} ({env})")
+                    if env == "paper" and cfg.enabled:
+                        blockers.append(
+                            f"config {cfg.id} ({cfg.name}) is LIVE and "
+                            f"ENABLED and routes to the {kind} DEMO account — "
+                            f"the orders reach a simulator while the platform "
+                            f"books the fills as REAL money")
+                    if (kind == "saxo" and cfg.enabled
+                            and not _saxo_alive(venue, now)):
+                        blockers.append(
+                            f"config {cfg.id} ({cfg.name}) is LIVE and "
+                            f"ENABLED and routes to Saxo, whose session is "
+                            f"not alive — nothing can leave for the venue "
+                            f"until somebody signs in again at /brokers/")
 
                 # THE POOL AGAINST THE ACCOUNT. The direction matters: a pool
                 # larger than the account loosens every limit derived from it.

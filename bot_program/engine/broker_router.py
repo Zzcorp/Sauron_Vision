@@ -160,7 +160,11 @@ def _saxo_client_for(user, cfg, symbol: str):
     somewhere the operator did not choose.
 
     The ROW decides the world, not the config: a SIM application serves a
-    live config with SIM, because the keys are what Saxo authenticates.
+    live config with SIM, because the keys are what Saxo authenticates. That
+    rule is kept on purpose — refusing it would mean no order can ever reach
+    Saxo SIM, and the facts only SIM can settle would stay unsettled until
+    real money was on the line — but it is announced, here and at the entry,
+    because the row it books says paper=False either way.
     """
     try:
         from bot_program.models import SaxoAccount
@@ -172,6 +176,12 @@ def _saxo_client_for(user, cfg, symbol: str):
             log.warning("[router] %s: Saxo session not alive — paper. Sign "
                         "in again at /brokers/", symbol)
             return _paper_client(cfg)
+        if acct.sim and getattr(cfg, "mode", "") == "live":
+            log.warning("[router] %s: live config %s is placing on the Saxo "
+                        "SIMULATOR — the fill is a rehearsal and the row is "
+                        "booked as live history. preflight_live blocks on "
+                        "this; untick SIM on /brokers/ for real orders",
+                        symbol, getattr(cfg, "id", "?"))
         from .saxo_client import SaxoTrader
         return SaxoTrader(acct)
     except Exception as e:
@@ -209,6 +219,12 @@ def _etoro_client_for(user, cfg, symbol: str):
         if not (k and u):
             log.info("[router] %s: no eToro creds — paper", symbol)
             return _paper_client(cfg)
+        if acct.demo and getattr(cfg, "mode", "") == "live":
+            log.warning("[router] %s: live config %s is placing on the eToro "
+                        "DEMO portfolio — the fill is a rehearsal and the row "
+                        "is booked as live history. preflight_live blocks on "
+                        "this; untick Demo on /brokers/ for real orders",
+                        symbol, getattr(cfg, "id", "?"))
         from .etoro_client import EtoroTrader
         return EtoroTrader(k, u, env="demo" if acct.demo else "live")
     except Exception as e:

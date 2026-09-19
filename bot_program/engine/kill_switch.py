@@ -454,13 +454,43 @@ def _close_asset_trade(trade, now):
             # Cancel resting broker-side SL/TP first: a stop left behind after
             # we flatten would fire against a flat book and open a reverse
             # position — the opposite of what a kill switch is for.
+            # AND READ THE ANSWER. SaxoTrader.cancel_order returns a bool
+            # for exactly this reason — a dict is always truthy, and a stop
+            # still resting that reads as cancelled is the failure the return
+            # type exists to prevent. Throwing the answer away made the
+            # switch book the row CLOSED over a stop that was never cancelled.
+            left_resting = []
             for oid in (trade.metadata or {}).get("protective_order_ids") or []:
                 cancel = getattr(client, "cancel_order", None)
                 if callable(cancel):
                     try:
-                        cancel(oid)
+                        answer = cancel(oid)
                     except Exception as e:  # noqa: BLE001
                         logger.warning("[KILL SWITCH] cancel %s failed: %s", oid, e)
+                        left_resting.append(str(oid))
+                        continue
+                    # False is a REFUSAL, not a cancel. None is an adapter
+                    # that does not say, which is the old behaviour and stays
+                    # trusted: only an explicit no counts as a no.
+                    if answer is False:
+                        logger.error("[KILL SWITCH] %s refused the cancel of "
+                                     "%s — the leg is still resting",
+                                     trade.symbol, oid)
+                        left_resting.append(str(oid))
+            if left_resting:
+                # The flatten still goes ahead: a live position during a kill
+                # is the larger risk. But an unflagged resting stop fires
+                # against a flat book and OPENS a reverse position, so the
+                # row carries it and the log names it.
+                meta = trade.metadata or {}
+                meta["kill_left_resting_orders"] = left_resting
+                trade.metadata = meta
+                logger.error("[KILL SWITCH] %s: flattening with %d protective "
+                             "order(s) still resting (%s) — they fire against "
+                             "a flat book and OPEN a reverse position. Cancel "
+                             "them at the broker NOW",
+                             trade.symbol, len(left_resting),
+                             ", ".join(left_resting))
             if is_options:
                 # A plain market_order here would trade the underlying's STOCK,
                 # opening a new position instead of closing the option.

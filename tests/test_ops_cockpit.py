@@ -405,7 +405,11 @@ class PageGetTests(_Fixture):
         self.assertTrue(pf["ok"], pf)
         self.assertEqual(pf["verdict"], "blocked")
         self.assertTrue(pf["lines"][0].startswith("BLOCKERS"))
-        self.assertTrue(any("IBKRAccount" in l for l in pf["lines"]), pf["lines"])
+        # NOT "no IBKRAccount row exists": that blocker was the preflight
+        # refusing to arm for the absence of a broker this box may never
+        # have. What the card must carry is the real command's own list.
+        self.assertTrue(any("is OFF" in l or "no PlatformComponent row" in l
+                            for l in pf["lines"]), pf["lines"])
         self.assertFalse(pf["cached"])
         self.assertContains(resp, "BLOCKERS")
         self.assertContains(resp, "preflight_live --user ops_admin")

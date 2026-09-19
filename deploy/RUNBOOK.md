@@ -672,6 +672,110 @@ the mix the platform has actually learned.
 
 ---
 
+## The brokers (`/brokers/`)
+
+One page, one row per broker, and for each row: what it can hold, whether it
+is keyed, whether its session is alive, and which asset classes it is the
+**primary** venue for. Nothing on the platform reads a broker the operator
+has not made primary for something — a keyed, connected row with every box
+unticked is read by nothing and traded on by nothing. That is the default.
+
+**Precedence, when two rows claim one class:** `saxo`, then `etoro`, then
+`ibkr`. Saxo holds the real listing where eToro holds a CFD on it. Two
+brokers flagged for one class is a configuration mistake rather than a
+strategy, so the page names the conflict and says which venue wins instead
+of letting the router resolve it in silence.
+
+**Keys are never typed anywhere but this page.** They are encrypted with the
+platform's `FERNET_KEY` and stored in the database; they are not in `.env`,
+not in the compose file, and not in any log. A key pasted into a terminal
+is a key in that shell's history.
+
+### eToro
+
+Paste the **API key** and the **user key** from eToro's developer portal, and
+tick **demo** for their virtual account. Then tick the classes this account
+is primary for. eToro is a CFD venue: what it can hold is what its row says.
+
+### Saxo, in two halves
+
+Saxo is OAuth, so half of it happens at Saxo and half here, and the two must
+agree character for character.
+
+1. **At Saxo's Developer Portal**, create an application and register its
+   redirect URI as exactly:
+
+   ```
+   https://<your-host>/brokers/saxo/callback/
+   ```
+
+   The path is fixed by `dashboard/urls.py`. A URI that lands anywhere else
+   still *matches the portal*, so Saxo accepts the sign-in, the browser
+   returns to a page that ignores `?code=`, and nothing happens — the
+   failure is silent. The page refuses a URI whose path is not that one, and
+   refuses `http://` outside localhost, because the authorization code would
+   travel in clear text.
+
+2. **On `/brokers/`**, save the app key, the app secret and that same
+   redirect URI, tick **sim** for the simulator, tick the classes this
+   account is primary for, then press **Connect Saxo**. You are sent to
+   Saxo, you sign in, and the callback stores the session.
+
+### SIM and LIVE are one row and two worlds
+
+The same row serves both, and the `sim` box says which. Re-saving the key,
+the secret, the URI or the sim box closes whatever session was open — a
+session belongs to one application on one environment. Flipping the box
+additionally **clears the stored equity, cash and position readings**,
+because a simulated balance read as a live one is the kind of number that
+sizes a real order. The history rows keep their own environment and are
+never mixed; the drawdown governor reads only the environment in force.
+
+### The session, and the forty-minute fact
+
+The access token lives 1200 s and the refresh token 2400 s, and the refresh
+token **rotates** on every use. `refresh_saxo_sessions` runs every 600 s —
+four chances per token lifetime — and one missed cycle costs nothing.
+
+The consequence worth knowing before it happens: **a box that is down or
+paused for more than forty minutes comes back with a dead Saxo session.**
+Nothing is broken and nothing is lost; the row will say `session: LOST`
+with the time and the reason, and it needs one sign-in. That is a state,
+not an error to wait out. The row distinguishes five of them: `none`,
+`renewable`, `renewable (access expired, renewing next cycle)`, `EXPIRED`
+and `LOST — <reason>`.
+
+### Verify, in this order
+
+```bash
+./deploy/dc exec web python manage.py saxo_smoke --user <you>   # read-only, places NO order
+./deploy/dc exec web python manage.py treasury                  # what every broker holds
+```
+
+`saxo_smoke` exercises every read the adapter makes against the real SIM and
+reports each in three states: `ok`, `refused` (Saxo answered and said no)
+and `unknown` (the adapter, the network or the session is at fault). The
+three are never collapsed, because "Saxo refused" and "our adapter is wrong"
+call for opposite fixes. It is deliberately not runnable from `/ops/`: it
+presents your Saxo session to an external service and prints the account's
+balance.
+
+`treasury` is the shell twin of **`/treasury/`** — both render the same
+computation, so the page and the terminal cannot tell different stories.
+Neither one calls a broker: they read the cached columns the sync task
+writes, because a broker round trip does not belong on a render path. A
+**dash** means never measured. It is not a zero, and the two are not acted
+on the same way.
+
+### One exit that is not like the others
+
+Saxo under the `FifoEndOfDay` netting profile does not flatten on an
+opposite market order — both lots stay open until the evening netting. The
+engine asks the adapter and closes by `PositionId` on that venue. If the log
+ever says a close **will leave BOTH lots open**, the row had no broker
+position id: check `/treasury/` after the netting settles, because that is
+one position the platform's own row cannot see.
+
 ## The Oculus (/oculus/)
 
 The page above the other thirty. They each answer their own subsystem's

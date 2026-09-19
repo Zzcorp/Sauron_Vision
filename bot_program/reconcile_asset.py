@@ -447,104 +447,120 @@ def reconcile_unknown_positions(user) -> dict:
     # in the sweep that exists to catch it. An interfaced IBKR account
     # is swept whether or not any config routes there.
     from .capital_truth import broker_backed, broker_kind
-    acct = broker_backed(user)
-    _kind = None if acct is None else broker_kind(acct)
-    _CLASS = {"saxo": "SaxoTrader", "etoro": "EtoroTrader",
-              "ibkr": "IBKRTrader"}
-    venue_name = {"saxo": "Saxo", "etoro": "eToro",
-                  "ibkr": "IBKR"}.get(_kind, "broker")
-    # IBKR keeps its old skip: without the library there is nothing to
-    # ask, and counting that as an error would change what every existing
-    # caller and test sees.
-    _skip = False
-    if _kind == "ibkr":
-        from .engine.ibkr_client import is_ibkr_available
-        _skip = not is_ibkr_available()
+    # EVERY KEYED ROW, not only the book. Keyed is tested on the column the
+    # way tasks._users_with_a_broker_row tests it — no decryption, and an
+    # unkeyed row carries nothing to ask.
+    _book = broker_backed(user)
+    _rows = [r for r in (getattr(user, "saxo_account", None),
+                         getattr(user, "etoro_account", None),
+                         getattr(user, "ibkr_account", None))
+             if r is not None and (getattr(r, "app_key_enc", "")
+                                   or getattr(r, "api_key_enc", "")
+                                   or getattr(r, "account_id_enc", ""))]
+    # The book first: an error later in the walk must not cost it its pass.
+    _rows.sort(key=lambda r: 0 if (_book is not None
+                                   and type(r) is type(_book)
+                                   and r.pk == _book.pk) else 1)
 
-    if acct is not None and not _skip:
-        # Not swept already by the config loop above, whichever adapter
-        # this book speaks through.
-        if _CLASS.get(_kind, "IBKRTrader") not in {v for (_cls, v)
-                                                   in seen_clients}:
-                client = None
-                try:
-                    if _kind == "saxo":
-                        # Read from the ROW: no session slot, no clientId,
-                        # no host or port. The IBKR branch below could only
-                        # ever raise AttributeError on a Saxo book and
-                        # count the broker unavailable — so this sweep was
-                        # blind on the two newest venues.
-                        from .engine.saxo_client import SaxoTrader
-                        if not acct.session_alive():
-                            raise RuntimeError(
-                                "no live Saxo session — sign in again at "
-                                "/brokers/")
-                        client = SaxoTrader(acct)
-                    elif _kind == "etoro":
-                        from .engine.etoro_client import EtoroTrader
-                        k, u = acct.get_credentials()
-                        if not (k and u):
-                            raise RuntimeError("no eToro keys on the book")
-                        client = EtoroTrader(
-                            k, u, env="demo" if acct.demo else "live")
+    for acct in _rows:
+        _kind = None if acct is None else broker_kind(acct)
+        _CLASS = {"saxo": "SaxoTrader", "etoro": "EtoroTrader",
+                  "ibkr": "IBKRTrader"}
+        venue_name = {"saxo": "Saxo", "etoro": "eToro",
+                      "ibkr": "IBKR"}.get(_kind, "broker")
+        # IBKR keeps its old skip: without the library there is nothing to
+        # ask, and counting that as an error would change what every existing
+        # caller and test sees.
+        _skip = False
+        if _kind == "ibkr":
+            from .engine.ibkr_client import is_ibkr_available
+            _skip = not is_ibkr_available()
+
+        # A row that cannot be asked is skipped, not counted clean.
+        if not _skip:
+            # Not swept already by the config loop above, whichever adapter
+            # this book speaks through.
+            if _CLASS.get(_kind, "IBKRTrader") not in {v for (_cls, v)
+                                                       in seen_clients}:
+                    client = None
+                    try:
+                        if _kind == "saxo":
+                            # Read from the ROW: no session slot, no clientId,
+                            # no host or port. The IBKR branch below could only
+                            # ever raise AttributeError on a Saxo book and
+                            # count the broker unavailable — so this sweep was
+                            # blind on the two newest venues.
+                            from .engine.saxo_client import SaxoTrader
+                            if not acct.session_alive():
+                                raise RuntimeError(
+                                    "no live Saxo session — sign in again at "
+                                    "/brokers/")
+                            client = SaxoTrader(acct)
+                        elif _kind == "etoro":
+                            from .engine.etoro_client import EtoroTrader
+                            k, u = acct.get_credentials()
+                            if not (k and u):
+                                raise RuntimeError("no eToro keys on the book")
+                            client = EtoroTrader(
+                                k, u, env="demo" if acct.demo else "live")
+                        else:
+                            # The probe id, never the trade id — IBKR refuses a
+                            # second connection on a held clientId (error 326),
+                            # so a sweep on the trading id would fail against
+                            # the trader or hold the id against it. The session
+                            # comes from ibkr_sessions on this process's own
+                            # slot; disconnecting below closes the socket and
+                            # keeps the slot for the next pass.
+                            from .engine.ibkr_sessions import acquire_trader
+                            client = acquire_trader(
+                                acct.host, acct.port, acct.client_id, "probe",
+                                account_id=acct.get_account_id() or "",
+                                paper=bool(acct.paper))
+                            if client is None:
+                                raise RuntimeError("no free IBKR clientId slot")
+                        out["checked"] += 1
+                        state = _broker_open_symbols(client,
+                                                     asset_class="stock")
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("unknown-position sweep: account-entry "
+                                       "%s read failed: %s", venue_name, e)
+                        state = None
+                        out["errors"] += 1
+                    finally:
+                        disconnect = getattr(client, "disconnect", None)
+                        if callable(disconnect):
+                            try:
+                                disconnect()
+                            except Exception:  # noqa: BLE001
+                                pass
+                    if state is None:
+                        out["broker_unavailable"] += 1
+                        logger.warning("unknown-position sweep: %s account "
+                                       "%s unreadable — not reporting a clean "
+                                       "sweep of a book nobody could read",
+                                       venue_name, acct.label)
                     else:
-                        # The probe id, never the trade id — IBKR refuses a
-                        # second connection on a held clientId (error 326),
-                        # so a sweep on the trading id would fail against
-                        # the trader or hold the id against it. The session
-                        # comes from ibkr_sessions on this process's own
-                        # slot; disconnecting below closes the socket and
-                        # keeps the slot for the next pass.
-                        from .engine.ibkr_sessions import acquire_trader
-                        client = acquire_trader(
-                            acct.host, acct.port, acct.client_id, "probe",
-                            account_id=acct.get_account_id() or "",
-                            paper=bool(acct.paper))
-                        if client is None:
-                            raise RuntimeError("no free IBKR clientId slot")
-                    out["checked"] += 1
-                    state = _broker_open_symbols(client,
-                                                 asset_class="stock")
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("unknown-position sweep: account-entry "
-                                   "%s read failed: %s", venue_name, e)
-                    state = None
-                    out["errors"] += 1
-                finally:
-                    disconnect = getattr(client, "disconnect", None)
-                    if callable(disconnect):
-                        try:
-                            disconnect()
-                        except Exception:  # noqa: BLE001
-                            pass
-                if state is None:
-                    out["broker_unavailable"] += 1
-                    logger.warning("unknown-position sweep: %s account "
-                                   "%s unreadable — not reporting a clean "
-                                   "sweep of a book nobody could read",
-                                   venue_name, acct.label)
-                else:
-                    held = {str(x).upper()
-                            for x in (state.get("symbols") or set())}
-                    unclaimed = sorted(held - claimed)
-                    if unclaimed:
-                        out["unclaimed"] += len(unclaimed)
-                        out["symbols"].extend(unclaimed)
-                        logger.error(
-                            "unknown-position sweep: %s %s holds %d "
-                            "position(s) no row claims: %s", venue_name,
-                            acct.label, len(unclaimed),
-                            ", ".join(unclaimed[:8]))
-                        try:
-                            from bot_program.notifications import (
-                                notify_unclaimed_position)
-                            notify_unclaimed_position(
-                                user, symbols=unclaimed,
-                                venue=f"{venue_name} {acct.label}")
-                        except Exception as e:  # noqa: BLE001
-                            logger.warning("unknown-position sweep: alert "
-                                           "failed: %s", e)
-                            out["errors"] += 1
+                        held = {str(x).upper()
+                                for x in (state.get("symbols") or set())}
+                        unclaimed = sorted(held - claimed)
+                        if unclaimed:
+                            out["unclaimed"] += len(unclaimed)
+                            out["symbols"].extend(unclaimed)
+                            logger.error(
+                                "unknown-position sweep: %s %s holds %d "
+                                "position(s) no row claims: %s", venue_name,
+                                acct.label, len(unclaimed),
+                                ", ".join(unclaimed[:8]))
+                            try:
+                                from bot_program.notifications import (
+                                    notify_unclaimed_position)
+                                notify_unclaimed_position(
+                                    user, symbols=unclaimed,
+                                    venue=f"{venue_name} {acct.label}")
+                            except Exception as e:  # noqa: BLE001
+                                logger.warning("unknown-position sweep: alert "
+                                               "failed: %s", e)
+                                out["errors"] += 1
 
     return out
 

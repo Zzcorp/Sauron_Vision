@@ -1493,6 +1493,12 @@ class AssetBot(ABC):
         return client.market_order(trade.symbol, close_side, float(trade.qty),
                                    client_order_id=client_order_id)
 
+    #: What each adapter's own `env` string means in the two words the
+    #: platform's money side uses. Unlisted is UNKNOWN, never "live":
+    #: entry_meta carries no world at all rather than a guessed one.
+    VENUE_WORLDS = {"live": "live", "paper": "paper", "sim": "paper",
+                    "demo": "paper", "practice": "paper", "testnet": "paper"}
+
     # A broker that ANSWERS with a refusal has not closed anything. Only
     # an exception used to reach the failure path, so a client that
     # returns {"status": "REJECTED"} instead of raising — which is
@@ -2750,6 +2756,18 @@ class AssetBot(ABC):
                 _carried_by = adapter_key(client)
                 if _carried_by:
                     entry_meta["broker"] = _carried_by
+                # AND IN WHICH OF ITS TWO WORLDS. Saxo and eToro serve SIM
+                # and live from one row, so the broker's name cannot tell a
+                # rehearsal fill from a real one — while the readings side
+                # already tags itself (the sync files a SIM reading under
+                # env="paper"). Read from the client that placed the order,
+                # because the row's flag can be flipped afterwards. An
+                # adapter that does not say is left unrecorded: an unknown
+                # world is not a live one.
+                _world = self.VENUE_WORLDS.get(
+                    str(getattr(client, "env", "") or "").lower())
+                if _world:
+                    entry_meta["broker_env"] = _world
 
                 # Real fills: prefer the broker's average fill price and
                 # filled quantity over the pre-order ticker, so slippage

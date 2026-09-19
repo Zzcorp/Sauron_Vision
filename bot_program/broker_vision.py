@@ -51,6 +51,22 @@ def _age(when) -> "int | None":
         (timezone.now() - when).total_seconds())
 
 
+def _age_text(seconds) -> str:
+    """Seconds, minutes, hours — the three the shell twin already prints.
+
+    The page rendered `age_seconds` raw, so a reading eight hours old read
+    "28800 s" and the operator divided by 3600 under pressure. `age_seconds`
+    stays for anything that compares; this is what a human reads.
+    """
+    if seconds is None:
+        return "—"
+    if seconds < 90:
+        return f"{seconds}s"
+    if seconds < 5400:
+        return f"{seconds // 60}m"
+    return f"{seconds / 3600:.1f}h"
+
+
 def _reading(acct) -> "dict | None":
     """The equity reading on a row, in capital_truth.account_equity's exact
     shape — so a template that can render one can render all three. None
@@ -62,7 +78,8 @@ def _reading(acct) -> "dict | None":
     value = float(value)
     return {"value": value, "value_text": f"{value:,.2f}",
             "currency": getattr(acct, "last_equity_currency", "") or "",
-            "at": at, "age_seconds": _age(at)}
+            "at": at, "age_seconds": _age(at),
+            "age_text": _age_text(_age(at))}
 
 
 def _held(acct) -> "dict | None":
@@ -71,7 +88,8 @@ def _held(acct) -> "dict | None":
     at = getattr(acct, "broker_positions_at", None)
     if rows is None or at is None:
         return None
-    return {"rows": list(rows or []), "at": at, "age_seconds": _age(at)}
+    return {"rows": list(rows or []), "at": at, "age_seconds": _age(at),
+            "age_text": _age_text(_age(at))}
 
 
 def _keyed(kind: str, acct) -> bool:
@@ -135,6 +153,8 @@ def brokers(user) -> list:
     """
     from bot_program.capital_truth import broker_backed
 
+    from bot_program.capital_truth import broker_env
+
     book = broker_backed(user)
     out = []
     for kind, attr, name in BROKER_ROWS:
@@ -149,6 +169,13 @@ def brokers(user) -> list:
         out.append({
             "kind": kind, "name": name, "label": getattr(acct, "label", ""),
             "env": env,
+            # THE WORD THE TEMPLATE COMPARES, beside the label a human reads.
+            # env_label is uppercase and venue-shaped ("SIM", "LIVE · 4003"),
+            # so every `env == 'live'` test on the page was false and painted
+            # a real account in the simulator's colour. broker_env is the
+            # function the readings are already filed under, and it has three
+            # answers: live, paper, and "" for a row that cannot say.
+            "world": broker_env(acct) or "unknown",
             "keyed": _keyed(kind, acct),
             "session": _session_line(kind, acct),
             "equity": reading,
@@ -270,6 +297,7 @@ def divergence(user, rows=None, platform=None) -> list:
             "kind": row["kind"], "name": row["name"], "known": True,
             "reason": "",
             "age_seconds": row["held"]["age_seconds"],
+            "age_text": row["held"]["age_text"],
             "only_broker": [held[s] for s in sorted(set(held) - set(ours))],
             "only_platform": [ours[s] for s in sorted(set(ours) - set(held))],
             "agree": [{"symbol": s, "broker": held[s], "platform": ours[s]}

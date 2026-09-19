@@ -99,15 +99,35 @@ class ThePageTests(TestCase):
     def test_a_broker_without_an_adapter_is_never_connected(self):
         """However good the keys, nothing can be asked of a broker the engine
         has no client for. Showing it green would send an operator to arm a
-        live config against it."""
-        # Saxo is the example now: eToro grew an adapter on 2026-09-17.
-        acct = SaxoAccount.objects.create(user=self.user, connected=False)
+        live config against it.
+
+        Tested on the rule rather than through a row, because since
+        2026-09-19 every broker on the page HAS an adapter — eToro grew one
+        on 09-17 and Saxo on 09-19. The rule is for the next one keyed
+        before its client exists, and the page's own green is pinned below
+        by test_a_keyed_saxo_row_with_a_session_is_green."""
+        from dashboard.views_brokers import _status
+
+        acct = SaxoAccount.objects.create(user=self.user, connected=True)
+        acct.set_credentials(RAW_APP, RAW_SECRET)
+        acct.save()
+        self.assertEqual(_status(acct, has_adapter=False),
+                         "session open — adapter pending")
+        acct.connected = False
+        self.assertEqual(_status(acct, has_adapter=False),
+                         "recorded — adapter pending")
+        self.assertEqual(_status(None, has_adapter=True), "no row")
+
+    def test_a_keyed_saxo_row_with_a_session_is_green(self):
+        """The other half of the same rule: a broker that CAN be asked, and
+        has a session, is green. It painted "adapter pending" for three days
+        after the adapter shipped."""
+        acct = SaxoAccount.objects.create(user=self.user, connected=True)
         acct.set_credentials(RAW_APP, RAW_SECRET)
         acct.save()
         self.client.force_login(self.user)
         body = self.client.get(reverse("brokers_page")).content.decode()
-        self.assertIn("adapter pending", body)
-        self.assertNotIn("● connected", body)
+        self.assertNotIn("adapter pending", body)
 
     def test_the_capabilities_column_is_the_enforced_table(self):
         from bot_program.engine.capabilities import declared

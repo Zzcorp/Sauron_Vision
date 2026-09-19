@@ -874,13 +874,16 @@ class ThePageTests(TestCase):
         self.assertContains(r, reverse("saxo_connect"))
         self.assertContains(r, "not yet done")
 
-    def test_with_a_live_session_the_button_is_gone_and_nothing_is_green(self):
+    def test_with_a_live_session_the_button_is_gone_and_the_row_is_green(self):
+        """Green means "can be asked of". Until 2026-09-19 that was false for
+        Saxo whatever its session said, and the row read "adapter pending";
+        the adapter landed, so a signed-in row is now green — and the page
+        said otherwise for three days after."""
         with_session(registered(self.user), ahead())
         r = self._page()
         self.assertNotContains(r, reverse("saxo_connect"))
         self.assertContains(r, "session: renewable")
-        self.assertContains(r, "session open — adapter pending")
-        self.assertNotContains(r, "● connected")
+        self.assertNotContains(r, "adapter pending")
 
     def test_unregistered_shows_no_connect(self):
         SaxoAccount.objects.create(user=self.user)

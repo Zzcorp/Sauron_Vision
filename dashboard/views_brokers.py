@@ -90,7 +90,10 @@ def _status(acct, *, has_adapter: bool) -> str:
     if getattr(acct, "connected", False):
         # A session is not an adapter: the page's rule is that a broker
         # nothing can be asked of is never painted green, however good its
-        # keys or its session. Saxo sits here until SaxoTrader lands.
+        # keys or its session. Saxo sat here until SaxoTrader landed
+        # (2026-09-19) and every row now has an adapter — the rule stays for
+        # the next broker keyed before its client exists, and is held by
+        # tests/test_brokers_page on _status itself.
         return "connected" if has_adapter else "session open — adapter pending"
     if not has_adapter:
         return "recorded — adapter pending"
@@ -239,10 +242,14 @@ def _rows(user) -> list:
         # capabilities column now reads the enforced table for it.
         row("etoro", "eToro", etoro,
             _env(etoro, "demo", "demo", "live") if etoro else "—"),
+        # Adapter landed 2026-09-19 (engine/saxo_client.py) and
+        # capabilities.declared("saxo") answers for it. has_adapter=False
+        # survived here for three days, so a completed sign-in painted the
+        # row as a broker nothing can be asked of — on the page the sign-in
+        # returns to.
         row("saxo", "Saxo Bank", saxo,
             _env(saxo, "sim", "sim", "live") if saxo else "—",
-            has_adapter=False, extra=saxo_extra,
-            needs_signin=saxo_needs_signin),
+            extra=saxo_extra, needs_signin=saxo_needs_signin),
     ]
 
 
@@ -284,10 +291,27 @@ def save_etoro_credentials(request):
         messages.error(request, f"eToro: user '{target_username}' not found.")
         return redirect("brokers_page")
 
-    acct, _ = EtoroAccount.objects.get_or_create(user=user)
+    acct, _created = EtoroAccount.objects.get_or_create(user=user)
+    was_demo = None if _created else acct.demo
     acct.set_credentials(api_key, user_key)
     acct.demo = demo
     env = "demo" if demo else "live"
+    # A reading taken on the VIRTUAL portfolio describes a different account
+    # from the one a real key reaches. The demo box ships checked, so the
+    # ordinary sequence — save as demo, notice the env column, re-save as
+    # live — would leave a virtual balance on a row now flagged LIVE, with a
+    # timestamp minutes old: fresh enough for tracking_freeze_reason to pass
+    # it and for every follower pool to be sized against it. The same drop
+    # the Saxo save does. The HISTORY rows stay and carry their own `env`.
+    env_note = ""
+    if was_demo is not None and was_demo != demo:
+        acct.last_equity = None
+        acct.last_equity_currency = ""
+        acct.last_equity_at = None
+        acct.broker_positions = []
+        acct.broker_positions_at = None
+        env_note = (" The environment changed, so the stored equity and "
+                    "holdings were dropped: they described the other one.")
     # Routing opt-ins. Unchecked = absent = off, so a save that omits them
     # leaves eToro carrying nothing — the safe default when keys are new.
     acct.is_primary_for_stocks = request.POST.get("primary_stocks") == "on"
@@ -302,20 +326,35 @@ def save_etoro_credentials(request):
         acct.last_sync = timezone.now()
     acct.save()
 
+    # BEING THE BOOK IS NOT THE PROBE'S VERDICT. broker_backed asks only
+    # "keyed AND primary for something" — deliberately, because `connected`
+    # is a flag with no expiry — so a row eToro has just refused becomes the
+    # account every pool and every limit is measured against, and its equity
+    # reads as an em dash everywhere the real book used to show a number.
+    # Saying "saved but REFUSED" did not say that.
+    carried = [c for c in ("stock", "forex", "commodity", "crypto")
+               if acct.is_primary_for(c)]
+    book_note = ""
+    if carried and not acct.connected:
+        book_note = (f" It is flagged primary for {', '.join(carried)}, so it "
+                     f"is now the book: every pool and every limit is "
+                     f"measured against an account that just refused us. "
+                     f"Untick those boxes or fix the keys.")
+
     if verdict == "ok":
         messages.success(request, f"eToro keys saved and verified for "
-                                  f"{target_username} ({env}).")
+                                  f"{target_username} ({env}).{env_note}")
     elif verdict == "refused":
         messages.error(request, f"eToro keys saved for {target_username} "
                                 f"({env}) but REFUSED by eToro ({detail}). "
                                 f"Check both keys, and that the account is "
-                                f"verified.")
+                                f"verified.{book_note}{env_note}")
     else:
         messages.warning(request, f"eToro keys saved for {target_username} "
                                   f"({env}) but could not be verified — the "
                                   f"probe answered {detail}. That may be the "
                                   f"probe, not your keys. They are recorded, "
-                                  f"not connected.")
+                                  f"not connected.{book_note}{env_note}")
     return redirect("brokers_page")
 
 
@@ -349,6 +388,16 @@ def save_saxo_credentials(request):
 
     acct, _created = SaxoAccount.objects.get_or_create(user=user)
     was_sim = None if _created else acct.sim
+    # WHAT ACTUALLY CHANGED, compared DECRYPTED: Fernet returns a different
+    # ciphertext for the same plaintext every time, so comparing the stored
+    # columns would answer "changed" on every single save.
+    try:
+        old_key, old_secret = acct.get_credentials()
+    except Exception:  # noqa: BLE001 — an unreadable row counts as changed
+        old_key, old_secret = "", ""
+    app_changed = bool(
+        _created or old_key != app_key or old_secret != app_secret
+        or (acct.redirect_uri or "") != redirect_uri or acct.sim != sim)
     acct.set_credentials(app_key, app_secret)
     acct.redirect_uri = redirect_uri
     acct.sim = sim
@@ -365,9 +414,18 @@ def save_saxo_credentials(request):
     # keeper would present a SIM token to the live host (or an old app's
     # token under the new app's credentials) every ten minutes. An app key
     # cannot be verified on its own — Saxo answers only after the sign-in.
-    acct.clear_session()
-    acct.session_lost_at = None
-    acct.session_lost_reason = ""
+    #
+    # ONLY when one of those four actually changed. This view is also the
+    # ONLY writer of the primary-for flags anywhere in the platform, and the
+    # form posts every field at once, so clearing unconditionally meant
+    # "tick a routing box, lose the session you just signed in for" — with
+    # no other way to tick it, and nothing able to recover the session: the
+    # keeper skips rows with no refresh token, and saxo_smoke stops at "no
+    # live Saxo session".
+    if app_changed:
+        acct.clear_session()
+        acct.session_lost_at = None
+        acct.session_lost_reason = ""
     # A reading taken on SIM describes a different account from the one a
     # LIVE key reaches. Keeping it would put a simulated balance in a real
     # book's cells — so the cells are dropped and the next sync refills
@@ -383,11 +441,18 @@ def save_saxo_credentials(request):
     else:
         env_note = ""
     acct.save()
-    messages.warning(request, f"Saxo application saved for {target_username} "
-                              f"({'sim' if sim else 'live'}). Not yet "
-                              f"connected: press 'Connect Saxo — sign in "
-                              f"once' on the row to open the session. Any "
-                              f"session that was open is closed.{env_note}")
+    if app_changed:
+        messages.warning(request,
+                         f"Saxo application saved for {target_username} "
+                         f"({'sim' if sim else 'live'}). Not yet connected: "
+                         f"press 'Connect Saxo — sign in once' on the row to "
+                         f"open the session. Any session that was open is "
+                         f"closed.{env_note}")
+    else:
+        messages.success(request,
+                         f"Saxo routing saved for {target_username}: the "
+                         f"application itself is unchanged, so the open "
+                         f"session was left alone.")
     return redirect("brokers_page")
 
 

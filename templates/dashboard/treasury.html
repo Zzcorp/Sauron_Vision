@@ -37,12 +37,12 @@ this render path. An em dash means NEVER MEASURED and is never a zero —
         <span style="color:var(--accent-gold);">— no row is the book: <code>capital_truth</code> has nothing to read, and the preflight will refuse to arm money.</span>
     {% else %}
         <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:baseline;">
-            <div><strong>{{ v.book.name }}</strong> <span class="sv-venue {% if v.book.env == 'live' %}sv-venue--live{% else %}sv-venue--paper{% endif %}">{{ v.book.env }}</span></div>
+            <div><strong>{{ v.book.name }}</strong> <span class="sv-venue {% if v.book.world == 'live' %}sv-venue--live{% else %}sv-venue--paper{% endif %}">{{ v.book.env }}</span></div>
             <div>capital
                 {% if v.book.equity %}<strong>{{ v.book.equity.value_text }} {{ v.book.equity.currency }}</strong>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
             </div>
             <div style="color:var(--text-muted);">
-                {% if v.book.equity %}read {{ v.book.equity.age_seconds }} s ago{% else %}never read{% endif %}
+                {% if v.book.equity %}read {{ v.book.equity.age_text }} ago{% else %}never read{% endif %}
             </div>
             <div>high water
                 {% if v.high_water %}{{ v.high_water.hwm|floatformat:2 }} {{ v.high_water.currency }}{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
@@ -67,9 +67,9 @@ this render path. An em dash means NEVER MEASURED and is never a zero —
         {% for r in v.brokers %}
             <tr style="border-top:1px solid var(--border);">
                 <td style="padding:8px 10px;"><strong>{{ r.name }}</strong>{% if r.is_book %} <span style="color:var(--accent-gold);">· the book</span>{% endif %}</td>
-                <td class="sv-venue {% if r.env == 'live' %}sv-venue--live{% else %}sv-venue--paper{% endif %}">{{ r.env }}</td>
+                <td class="sv-venue {% if r.world == 'live' %}sv-venue--live{% else %}sv-venue--paper{% endif %}">{{ r.env }}</td>
                 <td style="text-align:right;">{% if r.equity %}{{ r.equity.value_text }} {{ r.equity.currency }}{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
-                <td style="text-align:right;{% if r.equity_stale %}color:var(--accent-gold);{% endif %}">{% if r.equity %}{{ r.equity.age_seconds }} s{% else %}—{% endif %}</td>
+                <td style="text-align:right;{% if r.equity_stale %}color:var(--accent-gold);{% endif %}">{% if r.equity %}{{ r.equity.age_text }}{% else %}—{% endif %}</td>
                 <td style="text-align:right;">{% if r.held_n is None %}<span style="color:var(--text-muted);">—</span>{% else %}{{ r.held_n }}{% endif %}</td>
                 <td>{% if r.claims %}{{ r.claims|join:", " }}{% else %}<span style="color:var(--text-muted);">nothing</span>{% endif %}</td>
                 <td style="color:var(--text-muted);">{{ r.session }}</td>
@@ -139,7 +139,7 @@ this render path. An em dash means NEVER MEASURED and is never a zero —
                 {% if d.platform_n %}<span style="color:var(--accent-gold);"> · {{ d.platform_n }} live row(s) attributed to it</span>{% endif %}
             {% else %}
                 {{ d.agree|length }} agree · {{ d.only_broker|length }} only at the broker · {{ d.only_platform|length }} only in the platform
-                <span style="color:var(--text-muted);">(snapshot {{ d.age_seconds }} s old)</span>
+                <span style="color:var(--text-muted);">(snapshot {{ d.age_text }} old)</span>
                 {% for p in d.only_platform %}
                 <div style="color:var(--danger,#c0392b);margin-left:14px;">PLATFORM ONLY · {{ p.symbol }} {{ p.side }} {{ p.qty|floatformat:4 }} ({{ p.config }}) — closed at the broker without the row being finalised, or never opened</div>
                 {% endfor %}

@@ -424,7 +424,12 @@ class TheRoutingIsCheckedTests(TestCase):
         _pin(u)
         _bars()
         out = _run()
-        self.assertIn("IBKR is NOT primary for stock", out)
+        # It named IBKR because IBKR was all it could see. The question is
+        # which broker carries the class, and the answer here is none — so
+        # the router falls back to the PaperTrader and the live pool books
+        # simulated fills while calling itself live.
+        self.assertIn("NO BROKER is primary for stock", out)
+        self.assertIn("PaperTrader", out)
 
     def test_a_routed_config_is_not_flagged(self):
         u = _user()
@@ -448,7 +453,14 @@ class ACleanVerdictDoesNotClaimSafetyTests(TestCase):
         from core.platform_control import PlatformComponent
         PlatformComponent.objects.all().update(is_enabled=True)
         u = _user()
-        _acct(u, equity=50000, currency="GBP", is_primary_for_stocks=True)
+        # PORT 4003, the docker Gateway's LIVE relay. This fixture used to
+        # sit on 4004 — its PAPER twin — so the "clean run" it describes was
+        # a live-mode config pointed at a paper account, booking simulated
+        # fills as real history. The venue check names that now, correctly,
+        # so a fixture that means "nothing is wrong" has to actually be a
+        # live account.
+        _acct(u, port=4003, equity=50000, currency="GBP",
+              is_primary_for_stocks=True)
         _cfg(u, capital="1000", base_currency="GBP")
         _pin(u)
         _bars()

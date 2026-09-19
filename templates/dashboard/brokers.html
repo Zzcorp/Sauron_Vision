@@ -83,7 +83,7 @@
             <input type="password" name="etoro_api_key" placeholder="x-api-key" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="password" name="etoro_user_key" placeholder="x-user-key" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="demo" checked> Demo (virtual) portfolio keys</label>
-            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:4px;">Carry as primary broker — wins over IBKR's flag for the same class:</div>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:4px;">Carry as primary broker — wins over IBKR's flag for the same class. <strong>An unticked box is an OFF box:</strong> this form posts every field at once, so a save made for any other reason turns off every class you do not re-tick.</div>
             <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_stocks"> stocks · ETFs · indices</label>
             <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_forex"> forex</label>
             <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_commodity"> commodities</label>
@@ -106,7 +106,7 @@
             <input type="password" name="saxo_app_secret" placeholder="App Secret" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="text" name="saxo_redirect_uri" placeholder="https://your-host/brokers/saxo/callback/" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="sim" checked> SIM environment keys</label>
-            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:4px;">Carry as primary broker — wins over eToro's and IBKR's flag for the same class:</div>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:4px;">Carry as primary broker — wins over eToro's and IBKR's flag for the same class. <strong>An unticked box is an OFF box:</strong> this form posts every field at once, so a save made for any other reason turns off every class you do not re-tick. Re-saving the same application no longer closes the session.</div>
             <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_stocks"> stocks · ETFs</label>
             <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_forex"> forex</label>
             <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_commodity"> commodities (CFD)</label>

@@ -433,8 +433,19 @@ def sync_broker_account() -> dict:
                 ).delete()
             except Exception as e:  # noqa: BLE001 — history is beside the sync, not in it
                 logger.warning("broker sync: history row failed: %s", e)
-            _follow_the_account(user, value, currency)
-            _shock_trigger(user, now)
+            # ONLY WHEN THIS ROW IS THE BOOK. Both newer walks carry this
+            # guard — "two brokers retuning the same pools would fight" — and
+            # this one did not: from the moment a Saxo or eToro box was
+            # ticked, every follower pool was still being resized from IBKR's
+            # NetLiquidation while capital_truth gated the entries on the
+            # other broker's reading. Pools sized from one account, entries
+            # refused on another, and once both readings land the pools take
+            # whichever walk finished last.
+            book = broker_backed(user)
+            if book is not None and type(book) is type(acct) \
+                    and book.pk == acct.pk:
+                _follow_the_account(user, value, currency)
+                _shock_trigger(user, now)
         out["stored"] += 1
     return out
 
