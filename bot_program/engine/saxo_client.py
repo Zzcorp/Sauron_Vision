@@ -70,6 +70,17 @@ TIMEOUT_S = 20
 #: the worst state there is: the order may be live and nothing names it.
 ORDER_TIMEOUT_S = 75
 
+#: Saxo's own names for "this order is on its way to a fill". A cancel
+#: refused with one of these is NOT a cancel that was unnecessary: the order
+#: is locked for execution, which means it is already off the working-order
+#: list while its fill is still coming. Listed rather than pattern-matched so
+#: a spelling nobody here has seen fails CLOSED — an unknown code goes on to
+#: the reads, which refuse whenever they cannot prove the leg harmless.
+CANCEL_TOO_LATE_CODES = frozenset({
+    "TooLateToCancelOrder", "OrderCannotBeCancelledAtThisTime",
+    "OrderNotCancellable", "OrderLocked",
+})
+
 #: Chart samples for these asset types carry bid/ask legs only.
 BID_ASK_BARS = {"FxSpot", "CfdOnIndex", "CfdOnFutures"}
 #: The platform's asset classes, as Saxo names them. Commodities and
@@ -704,10 +715,17 @@ class SaxoTrader:
         FILLED / PARTIALLY_FILLED / CANCELLED / EXPIRED / REJECTED /
         PENDING — PENDING is honest for "not yet", never a fill."""
         last_rows: list = []
+        read_ok = False          # did ANY poll actually come back?
         for i in range(max(1, attempts)):
             try:
                 rows = self._order_activities(order_id)
+                read_ok = True
             except SaxoApiError as e:
+                # SWALLOWED, as before — a fill that cannot be read is not a
+                # failed order — but REMEMBERED. Reporting an unreadable log
+                # as "no activity" let order_status compute `dead` from two
+                # absences when one of them was a 429, and a caller then read
+                # "nothing is resting" off a read that never happened.
                 log.debug("saxo orderactivities(%s): %s", order_id, e)
                 rows = []
             last_rows = rows
@@ -756,7 +774,11 @@ class SaxoTrader:
             if i < attempts - 1:
                 time.sleep(delay)
         return {"status": "PENDING", "executedQty": 0.0, "avgPrice": 0.0,
-                "positionId": "", "rows": last_rows}
+                "positionId": "", "rows": last_rows,
+                # PENDING means "not yet" when the log was read and "nobody
+                # knows" when it was not, and the two must not look alike to
+                # a caller deciding whether an order is dead.
+                "unreadable": not read_ok}
 
     def _child(self, ident: dict, uic: int, atype: str, opposite: str,
                amount: float, order_type: str, price: Optional[float],
@@ -978,6 +1000,88 @@ class SaxoTrader:
 
     # ── orders ─────────────────────────────────────────────────────────────
 
+    def _cancel_proved_moot(self, order_id: str, refusal) -> bool:
+        """Was the cancel refused because NOTHING IS RESTING any more?
+
+        True only when Saxo's own working-order list came back and this id is
+        not in it. That is the read the platform already trusts for this
+        question — base._protection_vanished uses it to decide whether a stop
+        still exists — and it has three states: the ids, [] for nothing
+        resting, None for "could not ask".
+
+        NOT proved from order_status's `dead` verdict, which is the
+        else-branch of two absences and can be manufactured by a failed audit
+        read. And not proved from the ErrorCode either: "OrderNotFound" on a
+        DELETE is the commonest way a FifoEndOfDay close reports a leg that
+        came down with the position, but Saxo is free to spell a live
+        refusal that way too, and this bool exists precisely so that a leg
+        still resting can never read as cancelled.
+
+        So: the list decides, and nothing else. Unreadable is False.
+        """
+        code = str(getattr(refusal, "code", "") or "")
+        if code in CANCEL_TOO_LATE_CODES:
+            # SAXO SAID THE ORDER IS EXECUTING. It is off the working list
+            # already — locked, not gone — so the reads below would "prove" it
+            # moot and be wrong in the one direction that costs money: a
+            # protective leg that fills after our own close leaves a position
+            # the other way.
+            log.error("saxo cancel_order(%s) refused as %s — the order is "
+                      "EXECUTING, not gone: its fill is on the way",
+                      order_id, code)
+            return False
+        try:
+            resting = self.resting_order_ids()
+        except Exception as e:  # noqa: BLE001 — unreadable proves nothing
+            log.error("saxo cancel_order(%s) refused (%s) and the working-order "
+                      "list could not be read (%s) — treated as STILL "
+                      "RESTING", order_id, refusal, e)
+            return False
+        if resting is None:
+            log.error("saxo cancel_order(%s) refused (%s) and the working-order "
+                      "list could not be read — treated as STILL RESTING",
+                      order_id, refusal)
+            return False
+        if str(order_id) in {str(o) for o in resting}:
+            log.error("saxo cancel_order(%s) refused (%s) and the order IS "
+                      "still working — the leg is resting (GTC)",
+                      order_id, refusal)
+            return False
+
+        # NOT RESTING IS NOT HARMLESS. Saxo locks an order shortly before it
+        # executes and answers TooLateToCancelOrder; such an order is already
+        # off the working list while its fill is on the way, and for a
+        # protective leg that is the DANGEROUS case — a stop that fills after
+        # our own close leaves a position the other way. So the audit log is
+        # asked, in the refusing direction only: a fill means not moot, and a
+        # log that could not be read proves nothing.
+        try:
+            st = self.order_status(order_id)
+        except Exception as e:  # noqa: BLE001 — unreadable proves nothing
+            log.error("saxo cancel_order(%s) refused (%s) and its state could "
+                      "not be read (%s) — treated as NOT moot",
+                      order_id, refusal, e)
+            return False
+        if st.get("state") == "unknown":
+            log.error("saxo cancel_order(%s) refused (%s) and its state is "
+                      "UNKNOWN — treated as NOT moot", order_id, refusal)
+            return False
+        if st.get("state") == "filled" or float(st.get("filled") or 0) > 0:
+            log.error("saxo cancel_order(%s) refused (%s) because it was "
+                      "EXECUTING — it filled %s, so the position has moved "
+                      "and this leg is not merely gone",
+                      order_id, refusal, st.get("filled"))
+            return False
+        # Refused, and absent from a list that was read: there is nothing
+        # left to cancel. Under FifoEndOfDay that is the ordinary healthy
+        # close — the legs ride the position and Saxo takes them down with
+        # it — and answering False here stamped the row and logged CRITICAL
+        # on every one of them.
+        log.info("saxo cancel_order(%s) refused (%s) but the order is not in "
+                 "the working list — nothing is resting, so the cancel is "
+                 "moot", order_id, refusal)
+        return True
+
     def order_status(self, order_id: str) -> dict:
         """Where one order stands: {state, status, filled, avgPrice}.
 
@@ -1020,7 +1124,11 @@ class SaxoTrader:
         fill, fill_answered = None, False
         try:
             fill = self._await_fill(oid, attempts=1)
-            fill_answered = True
+            # ANSWERED means the log came back, not that the call returned.
+            # _await_fill swallows a refused read into rows=[] by design, so
+            # without this `dead` — which is the else-branch of two absences
+            # — could be computed from a 429.
+            fill_answered = not fill.get("unreadable")
         except Exception as e:  # noqa: BLE001
             log.warning("saxo: activities unreadable for %s (%s: %s)",
                         oid, type(e).__name__, e)
@@ -1100,10 +1208,17 @@ class SaxoTrader:
                         params={"AccountKey": ident["account_key"]})
         try:
             self._raise_for(r)
-        except SaxoApiError as e:
-            log.error("saxo cancel_order(%s) refused: %s — the leg may "
-                      "still be resting (GTC)", order_id, e)
+        except (SaxoAuthError, SaxoRateLimited) as e:
+            # NEITHER of these says anything about the order: the session was
+            # refused or the window was exhausted, so the request never
+            # reached the order book. There is nothing to prove and nothing
+            # to read back — "could not ask" is not an answer. Caught BEFORE
+            # the generic clause because both subclass SaxoApiError.
+            log.error("saxo cancel_order(%s) could not be sent (%s) — the leg "
+                      "may still be resting (GTC)", order_id, e)
             return False
+        except SaxoApiError as e:
+            return self._cancel_proved_moot(order_id, e)
         body = {}
         if r.status_code not in (202, 204):
             try:

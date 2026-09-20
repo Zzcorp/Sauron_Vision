@@ -516,3 +516,266 @@ class EtoroClosesByPositionIdOrNotAtAllTests(TestCase):
             retry_trade_close(trade)
         client.close_position.assert_called_once()
         client.market_order.assert_not_called()
+
+
+# ── a refused cancel, proved one way or the other ───────────────────────
+
+class ARefusedCancelIsProvedNotGuessedTests(TestCase):
+    """Under FifoEndOfDay the bracket legs ride the position and Saxo cancels
+    them WITH it, so the DELETE the close path sends next is refused for an
+    order that is already gone. Answering False there stamped the row and
+    logged CRITICAL on essentially every healthy close, and the one signal
+    that means "a full-size GTC exit is loose at the broker" became routine."""
+
+    def _trader(self, extra_routes):
+        from tests.test_saxo_client import (ACCOUNTS_ME, CLIENT_ME, _Acct,
+                                            _FakeSession)
+        from bot_program.engine.saxo_client import SaxoTrader
+        sess = _FakeSession(routes=[CLIENT_ME, ACCOUNTS_ME] + extra_routes)
+        return SaxoTrader(_Acct(), token="t", session=sess), sess
+
+    REFUSED = ("DELETE", "trade/v2/orders", 404,
+               {"ErrorCode": "OrderNotFound", "Message": "no such order"})
+
+    def test_refused_and_gone_from_the_working_list_is_a_moot_cancel(self):
+        t, _ = self._trader([self.REFUSED,
+                             ("GET", "port/v1/orders", 200, {"Data": []})])
+        with self.assertLogs("bot_program.engine.saxo_client", level="INFO"):
+            self.assertIs(t.cancel_order("55"), True)
+
+    def test_refused_while_still_working_is_a_refusal(self):
+        t, _ = self._trader([self.REFUSED,
+                             ("GET", "port/v1/orders", 200,
+                              {"Data": [{"OrderId": "55"}]})])
+        with self.assertLogs("bot_program.engine.saxo_client", level="ERROR"):
+            self.assertIs(t.cancel_order("55"), False)
+
+    def test_refused_with_an_unreadable_working_list_is_a_refusal(self):
+        """"Could not ask" is not proof, and this bool exists so that a leg
+        still resting can never read as cancelled."""
+        t, _ = self._trader([self.REFUSED,
+                             ("GET", "port/v1/orders", 500, {})])
+        with self.assertLogs("bot_program.engine.saxo_client", level="ERROR"):
+            self.assertIs(t.cancel_order("55"), False)
+
+    def test_a_refused_session_proves_nothing_and_reads_nothing(self):
+        """A 401 says the request never reached the order book, so there is
+        nothing to prove — and no point spending a read to look."""
+        t, sess = self._trader([("DELETE", "trade/v2/orders", 401, {}),
+                                ("GET", "port/v1/orders", 200, {"Data": []})])
+        with self.assertLogs("bot_program.engine.saxo_client", level="ERROR"):
+            self.assertIs(t.cancel_order("55"), False)
+        self.assertFalse(any("port/v1/orders" in u for _m, u, _k in sess.calls))
+
+    def test_a_clean_cancel_needs_no_proof(self):
+        t, sess = self._trader([("DELETE", "trade/v2/orders", 200, {})])
+        self.assertIs(t.cancel_order("55"), True)
+        self.assertFalse(any("port/v1/orders" in u for _m, u, _k in sess.calls))
+
+    def test_an_unreadable_audit_log_is_unknown_and_never_dead(self):
+        """order_status computes `dead` as the else-branch of two absences,
+        and _await_fill swallows a refused read into rows=[] — so without the
+        unreadable flag a 429 on the audit log manufactured `dead`, and base.py
+        cancels a row on `dead`."""
+        t, _ = self._trader([("GET", "port/v1/orders/CK==/55", 404, {}),
+                             ("GET", "cs/v1/audit/orderactivities", 429,
+                              {"ErrorCode": "RateLimited"})])
+        self.assertEqual(t.order_status("55")["state"], "unknown")
+
+
+class ALooseProtectiveLegReachesAHumanTests(TestCase):
+    """The flag was written at six places in base.py and read by no view,
+    template, alert or task — while the identical event on the entry path
+    pages a human. A resting exit against a flat book OPENS a position when it
+    fires, and no row here describes it."""
+
+    def setUp(self):
+        self.user = _user("loose_u")
+        self.cfg = _cfg(self.user, name="LOOSE")
+
+    def _closing(self):
+        client = _client({"status": "FILLED", "avgPrice": "97",
+                          "executedQty": "10"}, last="98")
+        client.cancel_order = mock.MagicMock(return_value=False)
+        return client
+
+    def _row(self):
+        return _trade(self.cfg, metadata={"initial_stop_loss": 98.0,
+                                          "protective_order_ids": ["S1", "T1"],
+                                          "protected": True})
+
+    def test_the_operator_is_paged_and_the_row_names_the_legs(self):
+        from bot_program.asset_engine.stock_bot import StockBot
+        trade = self._row()
+        with mock.patch("bot_program.notifications.notify_staff") as paged:
+            with self.assertLogs("bot_program.asset_engine.base",
+                                 level="CRITICAL"):
+                StockBot(self.cfg)._close_trade(trade, Decimal("98"),
+                                                self._closing(), reason="SL")
+        paged.assert_called_once()
+        self.assertIn("still rest", paged.call_args.kwargs["title"])
+        trade.refresh_from_db()
+        self.assertEqual(trade.metadata["protective_legs_unconfirmed_ids"],
+                         ["S1", "T1"])
+        self.assertIn("protective_legs_unconfirmed_at", trade.metadata)
+        # The exit really happened, so the row is CLOSED and the alert is the
+        # only thing left to do.
+        self.assertEqual(trade.status, "CLOSED")
+
+    def test_an_alert_that_fails_does_not_turn_the_close_into_pending(self):
+        """It runs inside _close_trade's try, whose handler marks the row
+        CLOSE_PENDING — so a raising alert would turn a completed close into a
+        pending one: the failure mode of the warning about the failure."""
+        from bot_program.asset_engine.stock_bot import StockBot
+        trade = self._row()
+        with mock.patch("bot_program.notifications.notify_staff",
+                        side_effect=RuntimeError("no channel")):
+            with self.assertLogs("bot_program.asset_engine.base",
+                                 level="CRITICAL"):
+                StockBot(self.cfg)._close_trade(trade, Decimal("98"),
+                                                self._closing(), reason="SL")
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+
+
+# ── every handle, and a row that says when none of them works ───────────
+
+class TheStopMoveTriesEveryHandleTests(TestCase):
+    """On Saxo protective_trade_id is the PositionId, which resolves the legs
+    under FifoEndOfDay and resolves NOTHING under the real-time netting
+    profiles — where the row's own protective_stop_id is what would work. So
+    stopping at the first handle meant break-even and trailing never moved a
+    broker-held stop again on those accounts, for the life of every position,
+    with nothing on the row saying so."""
+
+    def setUp(self):
+        self.user = _user("walk_u")
+        self.cfg = _cfg(self.user, name="WALK")
+        self.cfg.extras = {**(self.cfg.extras or {}), "breakeven_at_r": 0.5}
+        self.cfg.save(update_fields=["extras"])
+
+    def _row(self, **meta):
+        return _trade(self.cfg, metadata={"initial_stop_loss": 98.0,
+                                          "protected": True, **meta})
+
+    def _mover(self, ok_for=()):
+        """A client whose stop mover accepts only the ids in `ok_for`."""
+        client = mock.MagicMock(spec=["modify_protective", "ticker"])
+        client.ticker.return_value = {"lastPrice": "104"}
+
+        def move(oid, price):
+            if str(oid) in {str(x) for x in ok_for}:
+                return {"ok": True, "price": price}
+            return {"ok": False, "reason": f"leg {oid} is not a stop"}
+
+        client.modify_protective.side_effect = move
+        return client
+
+    def _manage(self, trade, client):
+        from bot_program.asset_engine.stock_bot import StockBot
+        bot = StockBot(self.cfg)
+        # (trade, price, client) — the price comes second.
+        return bot._manage_broker_stop(trade, Decimal("104"), client)
+
+    def test_the_named_leg_is_tried_after_the_position_handle(self):
+        trade = self._row(protective_trade_id="P1", protective_stop_id="S1")
+        client = self._mover(ok_for=["S1"])
+        self._manage(trade, client)
+        asked = [c.args[0] for c in client.modify_protective.call_args_list]
+        self.assertEqual(asked[:2], ["P1", "S1"])
+
+    def test_the_flat_list_is_tried_last_of_all(self):
+        trade = self._row(protective_trade_id="P1", protective_stop_id="S1",
+                          protective_order_ids=["X9"])
+        client = self._mover(ok_for=["X9"])
+        self._manage(trade, client)
+        asked = [c.args[0] for c in client.modify_protective.call_args_list]
+        self.assertEqual(asked, ["P1", "S1", "X9"])
+
+    def test_the_same_id_under_two_keys_is_asked_once(self):
+        trade = self._row(protective_trade_id="P1", protective_stop_id="P1",
+                          protective_order_ids=["P1"])
+        client = self._mover(ok_for=[])
+        self._manage(trade, client)
+        self.assertEqual(client.modify_protective.call_count, 1)
+
+    def test_a_single_id_stored_as_a_string_is_not_split_into_characters(self):
+        trade = self._row(protective_order_ids="77")
+        client = self._mover(ok_for=["77"])
+        self._manage(trade, client)
+        asked = [c.args[0] for c in client.modify_protective.call_args_list]
+        self.assertEqual(asked, ["77"])
+
+    def test_the_walk_is_bounded_in_wall_clock(self):
+        """Three handles must not be able to triple a transport outage for
+        every position queued behind this one."""
+        from bot_program.asset_engine.stock_bot import StockBot
+        trade = self._row(protective_trade_id="P1", protective_stop_id="S1",
+                          protective_order_ids=["X9"])
+        client = self._mover(ok_for=["X9"])
+        with mock.patch.object(StockBot, "STOP_MOVE_WALK_BUDGET_S", 0.0):
+            self._manage(trade, client)
+        asked = [c.args[0] for c in client.modify_protective.call_args_list]
+        self.assertEqual(asked, ["P1"], "the first handle is always asked")
+        trade.refresh_from_db()
+        self.assertIn("within the walk budget",
+                      trade.metadata["stop_move_last_error"])
+
+    def test_a_refusal_is_counted_and_carries_the_venues_own_words(self):
+        trade = self._row(protective_trade_id="P1")
+        client = self._mover(ok_for=[])
+        self._manage(trade, client)
+        trade.refresh_from_db()
+        self.assertEqual(trade.metadata["stop_move_failures"], 1)
+        self.assertIn("is not a stop", trade.metadata["stop_move_last_error"])
+        self.assertNotIn("stop_rules_inert", trade.metadata)
+
+    def test_three_refusals_stamp_the_row_inert_with_its_reason(self):
+        """One failure is a blip — an expired session, a 202 the venue never
+        confirmed. Three consecutive attempts are a fact about the ROW."""
+        from bot_program.asset_engine.stock_bot import StockBot
+        trade = self._row(protective_trade_id="P1")
+        client = self._mover(ok_for=[])
+        for _ in range(StockBot.STOP_MOVE_FAILURES_BEFORE_INERT):
+            self._manage(trade, client)
+            trade.refresh_from_db()
+        self.assertEqual(trade.metadata["stop_rules_inert"], "legs_unmovable")
+        self.assertIn("is not a stop",
+                      trade.metadata["stop_rules_inert_detail"])
+
+    def test_a_leg_that_moves_clears_the_whole_record_of_failure(self):
+        """Leaving the count would make the next single failure look like the
+        fourth and stamp the row on a blip."""
+        trade = self._row(protective_trade_id="P1", protective_stop_id="S1")
+        self._manage(trade, self._mover(ok_for=[]))
+        trade.refresh_from_db()
+        self.assertEqual(trade.metadata["stop_move_failures"], 1)
+        self._manage(trade, self._mover(ok_for=["S1"]))
+        trade.refresh_from_db()
+        self.assertNotIn("stop_move_failures", trade.metadata)
+        self.assertNotIn("stop_rules_inert", trade.metadata)
+
+    def test_the_operator_lane_walks_the_same_handles(self):
+        """A row the bot's rules can move and the operator's dialog cannot is
+        a row whose behaviour depends on which lane touched it."""
+        from bot_program.adjust_levels import _move_broker_leg
+        trade = self._row(protective_trade_id="P1", protective_stop_id="S1")
+        client = self._mover(ok_for=["S1"])
+        with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                        return_value=client):
+            ok, _note = _move_broker_leg(self.user, trade, Decimal("104"),
+                                         leg="stop")
+        self.assertTrue(ok)
+        asked = [c.args[0] for c in client.modify_protective.call_args_list]
+        self.assertEqual(asked, ["P1", "S1"])
+
+    def test_the_operator_is_told_what_every_handle_said(self):
+        from bot_program.adjust_levels import _move_broker_leg
+        trade = self._row(protective_trade_id="P1", protective_stop_id="S1")
+        with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                        return_value=self._mover(ok_for=[])):
+            ok, note = _move_broker_leg(self.user, trade, Decimal("104"),
+                                        leg="stop")
+        self.assertFalse(ok)
+        self.assertIn("P1:", note)
+        self.assertIn("S1:", note)

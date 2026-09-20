@@ -163,7 +163,15 @@ class ARefusedLegIsNotProtectionTests(SimpleTestCase):
                             {"OrderId": "2000002"}]}),
                        FILLED,
                        ("DELETE", "trade/v2/orders", 400,
-                        {"ErrorCode": "OrderNotFound"})])
+                        {"ErrorCode": "OrderNotFound"}),
+                       # AND THE LEG IS STILL IN SAXO'S WORKING LIST. Since
+                       # the cancel proof landed, "refused" alone no longer
+                       # means "still resting": an id absent from a list that
+                       # WAS read is proved gone, which is the ordinary
+                       # FifoEndOfDay close. This fixture is the other case —
+                       # the one this test is about — so it says so.
+                       ("GET", "port/v1/orders", 200,
+                        {"Data": [{"OrderId": "2000002"}]})])
         out = t.market_order("EURUSD", "BUY", 5000, stop_loss=1.09,
                              take_profit=1.12)
         self.assertEqual(out.get("protectiveOrders"), ["2000002"])

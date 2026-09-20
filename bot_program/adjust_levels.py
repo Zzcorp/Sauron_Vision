@@ -323,28 +323,45 @@ def _move_broker_leg(user, trade, price, *, leg: str):
                        f"{leg}")
 
     meta = trade.metadata or {}
-    # The same precedence the bot's own stop rules use (asset_engine/base.py):
-    # a trade-level handle first, because on OANDA the SL/TP ride the TRADE
-    # and `protective_order_ids` is deliberately empty — so this function saw
-    # nothing to move and every operator edit on an OANDA position failed with
-    # "no protective leg". Then a NAMED stop leg, where the venue said which
-    # one it is. The flat list last, because it does not say — and on Alpaca
-    # its first entry is the TAKE-PROFIT.
     named = ("protective_stop_id" if leg == "stop"
              else "protective_target_id")
-    handle = meta.get("protective_trade_id") or meta.get(named)
-    ids = [handle] if handle else (meta.get("protective_order_ids") or [])
+    # EVERY handle, in the SAME order _manage_broker_stop walks — a row the
+    # bot's stop rules can move and the operator's dialog cannot (or the
+    # reverse) is a row whose behaviour depends on which lane touched it.
+    # On Saxo the trade handle is the PositionId, which resolves nothing under
+    # the real-time netting profiles, so stopping there meant every operator
+    # edit on such a position failed for ever with "no stop leg".
+    #
+    # The safety property is the venue's refusal, not this ordering: Alpaca,
+    # IBKR and Saxo read the resting order's own type before writing, while
+    # OANDA and eToro write a field on the TRADE and are safe here only
+    # because they report no child order ids at all.
+    flat = meta.get("protective_order_ids") or []
+    if isinstance(flat, (str, bytes)):
+        flat = [flat]
+    ids, seen = [], set()
+    for cand in (meta.get("protective_trade_id"), meta.get(named), *flat):
+        key = str(cand) if cand else ""
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        ids.append(key)
     if not ids:
         return False, "the row records no resting protective orders"
 
-    last = "no leg matched"
+    # WHAT EACH HANDLE SAID, prefixed by the handle: the operator reads this
+    # string in the dialog, and with three handles "leg T1 is a take-profit"
+    # would otherwise be the only thing they are told about a stop leg that is
+    # actually gone. No walk budget here — an operator waiting on a dialog is
+    # not a position queue.
+    notes = []
     for oid in ids:
         try:
             res = mover(str(oid), float(price))
         except Exception as e:  # noqa: BLE001
-            last = str(e)
+            notes.append(f"{oid}: {e}")
             continue
         if res and res.get("ok"):
             return True, f"leg {oid} moved to {res.get('price')}"
-        last = (res or {}).get("reason") or last
-    return False, last
+        notes.append(f"{oid}: {(res or {}).get('reason') or 'no leg matched'}")
+    return False, "; ".join(notes) or "no leg matched"

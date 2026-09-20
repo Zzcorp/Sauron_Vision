@@ -1346,40 +1346,97 @@ class AssetBot(ABC):
             return False
 
         meta_now = trade.metadata or {}
-        # A trade-level handle wins: on OANDA the stop is not a standalone
-        # order at all, and the trade id is the only thing that can move it.
-        # Then a NAMED stop leg, where the venue told us which one it is.
-        # The flat list is the last resort, and it is a list precisely
-        # because it does not say which id is which — which is why the
-        # venue client must refuse a leg that is not a stop rather than
-        # move whatever it is handed.
-        handle = (meta_now.get("protective_trade_id")
-                  or meta_now.get("protective_stop_id"))
-        ids = [handle] if handle else (
-            meta_now.get("protective_order_ids") or [])
+        # EVERY handle is tried, in the order most likely to be right — not
+        # the first one that happens to be set, which is the defect this
+        # replaces. The three keys state three different things and only the
+        # venue knows which one its bracket answers to:
+        #
+        #   protective_trade_id — the position/trade handle. On OANDA the stop
+        #     is not a standalone order at all and this is the only thing that
+        #     can move it. On Saxo it is the PositionId, which resolves the
+        #     legs under FifoEndOfDay and resolves NOTHING under the real-time
+        #     netting profiles, where the brackets are free-standing orders.
+        #   protective_stop_id — the NAMED leg, where the venue said which
+        #     order is the stop.
+        #   protective_order_ids LAST, because it does not say which is which:
+        #     on an Alpaca or IBKR long bracket its first entry is the
+        #     TAKE-PROFIT.
+        #
+        # Stopping at the first handle meant a Saxo real-time-netting row,
+        # which carries both a PositionId and a stop OrderId, only ever
+        # offered the PositionId: no leg resolved, and break-even and trailing
+        # never moved that stop again for the life of the position.
+        #
+        # THE SAFETY PROPERTY IS THE VENUE'S REFUSAL, not this ordering.
+        # Alpaca, IBKR and Saxo read the RESTING order's own type before they
+        # write, so a stop request can never land on a target. OANDA and eToro
+        # do not type-check at all — their movers write a field on the TRADE —
+        # and they are safe here only because both report protectiveOrders as
+        # empty, so their rows carry the trade handle and nothing else. If
+        # either ever records child order ids, that refusal must be added
+        # first.
+        flat = meta_now.get("protective_order_ids") or []
+        if isinstance(flat, (str, bytes)):
+            # One id, not a sequence of characters: splatting a string would
+            # ask the venue to move legs named "7" and "7".
+            flat = [flat]
+        ids, seen = [], set()
+        for cand in (meta_now.get("protective_trade_id"),
+                     meta_now.get("protective_stop_id"), *flat):
+            key = str(cand) if cand else ""
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            ids.append(key)
         if not ids:
             self._note_stop_rules_inert(trade)
             return False
 
-        moved, note, accepted = False, "no leg matched", None
+        # WHAT EACH HANDLE SAID, not only the last one: with three handles,
+        # "leg T1 is a take-profit" from the flat list would otherwise be the
+        # only thing recorded about a stop leg that is actually gone.
+        #
+        # And a WALL-CLOCK ceiling on one walk. Saxo's client timeout is 20s
+        # and its leg resolution costs two GETs per handle, so a transport
+        # stall turns a three-handle walk into a minute for ONE position —
+        # while manage_positions runs every row in one task, delaying the EXIT
+        # checks of every position behind it. Three handles are cheap when the
+        # venue answers; they must not be able to triple an outage. The FIRST
+        # handle is always asked: a slow but working venue still gets its move.
+        walk_started = timezone.now()
+        moved, notes, accepted = False, [], None
         for oid in ids:
+            if notes and ((timezone.now() - walk_started).total_seconds()
+                          > self.STOP_MOVE_WALK_BUDGET_S):
+                notes.append("remaining handles not asked: the venue did not "
+                             "answer within the walk budget")
+                break
             try:
                 res = mover(str(oid), float(candidate))
             except Exception as e:  # noqa: BLE001
-                note = str(e)
+                notes.append(f"{oid}: {e}")
                 continue
             if res and res.get("ok"):
-                moved, note = True, str(res.get("price"))
+                moved = True
                 accepted = res.get("price")
                 break
-            note = (res or {}).get("reason") or note
+            notes.append(
+                f"{oid}: {(res or {}).get('reason') or 'no leg matched'}")
 
         if not moved:
+            note = "; ".join(notes) or "no leg matched"
             logger.warning(
                 "[%s_bot] %s: %s wanted the stop at %s but the broker leg "
                 "could not be moved (%s) — the position is still protected "
                 "at its old level",
                 self.asset_class, trade.symbol, why, candidate, note)
+            # EVERY handle the row carries was refused, and that used to be
+            # completely silent: _note_stop_rules_inert is not reached from
+            # here (a mover EXISTS), so the row carried no stamp and every
+            # surface kept reading "protected, managed" while the stop rules
+            # had stopped reaching the venue. Nothing is sent here — this only
+            # writes down what already happened.
+            self._note_stop_move_failed(trade, note)
             return False
 
         # The venue accepted it, so the row may now say so — and it says
@@ -1403,8 +1460,16 @@ class AssetBot(ABC):
         meta["stop_moves"] = moves[-20:]
         if why == "breakeven":
             meta["breakeven_armed"] = True
-        # A leg that MOVED is proof the rules are not inert after all.
+        # A leg that MOVED is proof the rules are not inert after all — and
+        # the run of failures that led to the stamp is over, so the count and
+        # the venue's last words go with it. Leaving the count would make the
+        # next single failure look like the fourth and stamp the row on a
+        # blip; leaving the detail would print a stale reason on the page.
         meta.pop("stop_rules_inert", None)
+        meta.pop("stop_rules_inert_detail", None)
+        meta.pop("stop_move_failures", None)
+        meta.pop("stop_move_last_error", None)
+        meta.pop("stop_move_last_at", None)
         trade.stop_loss = resting
         trade.metadata = meta
         trade.save(update_fields=["stop_loss", "metadata"])
@@ -1413,26 +1478,92 @@ class AssetBot(ABC):
                     resting, candidate, price)
         return True
 
-    def _note_stop_rules_inert(self, trade) -> None:
-        """Warn once per trade that its stop rules cannot run.
+    #: Consecutive attempted moves — ticks on which a candidate existed AND
+    #: was an improvement — where EVERY recorded handle was refused, before
+    #: the row is stamped inert. A tick that wanted no move neither counts nor
+    #: clears. One failure is a blip: an expired session, a 202 the venue
+    #: never confirmed, a leg momentarily unroutable. Three are a fact about
+    #: the ROW rather than about the network. THREE STATES, deliberately: no
+    #: count means nothing has failed, a count below this means it failed and
+    #: we are not yet calling it dead, the stamp means dead until a leg moves.
+    STOP_MOVE_FAILURES_BEFORE_INERT = 3
+
+    #: A wall-clock ceiling on ONE walk of the handles, in seconds. See the
+    #: comment at the walk: three handles must not be able to triple a
+    #: transport outage for every position behind this one.
+    STOP_MOVE_WALK_BUDGET_S = 25.0
+
+    def _note_stop_move_failed(self, trade, note: str) -> None:
+        """Record an attempted move where every handle refused.
+
+        The old code logged one warning per tick and wrote nothing at all, so
+        the position card, the forensics timeline and the operator all kept
+        reading a managed position while break-even and trailing had stopped
+        reaching the venue for good.
+        """
+        try:
+            meta = dict(trade.metadata or {})
+            fails = int(meta.get("stop_move_failures") or 0) + 1
+            meta["stop_move_failures"] = fails
+            # The venue's OWN words, not our summary of them: "leg 3 is not
+            # among the open orders" and "no session" call for opposite
+            # actions from the operator.
+            meta["stop_move_last_error"] = str(note)[:300]
+            meta["stop_move_last_at"] = timezone.now().isoformat()
+            trade.metadata = meta
+            trade.save(update_fields=["metadata"])
+        except Exception as e:  # pragma: no cover — never block the tick
+            logger.warning("[%s_bot] could not record a failed stop move on "
+                           "%s: %s", self.asset_class, trade.symbol, e)
+            return
+        if fails >= self.STOP_MOVE_FAILURES_BEFORE_INERT:
+            self._note_stop_rules_inert(trade, reason="legs_unmovable",
+                                        detail=str(note)[:200])
+
+    def _note_stop_rules_inert(self, trade, reason: str = "broker_protected",
+                               detail: str = "") -> None:
+        """Warn once per trade, PER REASON, that its stop rules cannot run.
 
         Only for positions whose config actually asked for one: a config
         with no stop rules configured is not owed a warning about them.
+
+        The two reasons are not the same fact. "broker_protected" means no
+        client here can move a resting order at all — nothing to do at the
+        venue. "legs_unmovable" means the client CAN and every handle this row
+        carries was refused — a leg to go and look at. Collapsing them would
+        leave the operator unable to tell a missing capability from protection
+        that has come adrift.
         """
         if not (self._extras_float("breakeven_at_r") > 0
                 or self._extras_float("trail_pct") > 0):
             return
         meta = trade.metadata or {}
-        if meta.get("stop_rules_inert"):
+        if meta.get("stop_rules_inert") == reason:
             return
-        logger.warning(
-            "[%s_bot] %s: break-even/trailing are configured but this "
-            "position's stop RESTS AT THE BROKER, which no client can "
-            "modify yet - the stop stays where the bracket put it",
-            self.asset_class, trade.symbol)
+        if reason == "broker_protected":
+            logger.warning(
+                "[%s_bot] %s: break-even/trailing are configured but this "
+                "position's stop RESTS AT THE BROKER, which no client can "
+                "modify yet - the stop stays where the bracket put it",
+                self.asset_class, trade.symbol)
+        else:
+            logger.warning(
+                "[%s_bot] %s: break-even/trailing are configured and this "
+                "position's stop RESTS AT THE BROKER, but EVERY recorded leg "
+                "handle was refused (%s) - the stop rules are inert for this "
+                "position until a leg moves again",
+                self.asset_class, trade.symbol, detail or "no leg matched")
         try:
             meta = dict(meta)
-            meta["stop_rules_inert"] = "broker_protected"
+            meta["stop_rules_inert"] = reason
+            if detail:
+                meta["stop_rules_inert_detail"] = str(detail)[:200]
+            else:
+                # Re-stamped with a DIFFERENT reason and no detail of its own:
+                # the detail on the row belongs to the reason being replaced,
+                # and leaving it prints legs_unmovable's venue words beside a
+                # broker_protected stamp.
+                meta.pop("stop_rules_inert_detail", None)
             trade.metadata = meta
             trade.save(update_fields=["metadata"])
         except Exception as e:  # pragma: no cover - never block the tick
@@ -1756,6 +1887,56 @@ class AssetBot(ABC):
         trade.metadata = meta
         trade.save(update_fields=["metadata"])
 
+    def _flag_unconfirmed_legs(self, trade, why: str) -> None:
+        """Record and ANNOUNCE a protective leg that may still rest.
+
+        protective_legs_unconfirmed was written at six places in this file and
+        read by no view, template, alert or task, while the identical event on
+        the entry-withdrawal path pages a human. A resting exit against a flat
+        book OPENS a position when it fires, and nothing in the platform
+        describes that position — so this is not a log line, it is an
+        incident.
+
+        Every line is fenced: this runs inside _close_trade's try, whose
+        handler marks the row CLOSE_PENDING, so an alert that raised would
+        turn a completed close into a pending one.
+        """
+        legs = []
+        try:
+            meta = dict(trade.metadata or {})
+            legs = [str(x) for x in (meta.get("protective_order_ids") or [])]
+            meta["protective_legs_unconfirmed"] = True
+            # WHICH legs, and when. The bare boolean sent the operator to the
+            # log to find out, and by then the log had rolled.
+            meta["protective_legs_unconfirmed_ids"] = legs
+            meta["protective_legs_unconfirmed_at"] = timezone.now().isoformat()
+            trade.metadata = meta
+            trade.save(update_fields=["metadata"])
+        except Exception as e:  # noqa: BLE001 — never fail the close
+            logger.critical("[%s_bot] %s: could not record an unconfirmed "
+                            "protective leg (%s) — the leg may be resting",
+                            self.asset_class, trade.symbol, e)
+        logger.critical("[%s_bot] %s: a protective leg could not be confirmed "
+                        "cancelled %s — check the broker for a resting order "
+                        "(%s)", self.asset_class, trade.symbol, why,
+                        ", ".join(legs) or "no ids recorded")
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title=f"⚠ {trade.symbol}: a protective order may still rest "
+                      f"at the broker",
+                body=(f"{self.asset_class.upper()} {trade.symbol}: {why}, and "
+                      f"leg(s) {', '.join(legs) or '(none recorded)'} could "
+                      f"not be confirmed cancelled. They are GOOD-TILL-"
+                      f"CANCELLED: if one fires against a flat book it OPENS "
+                      f"a position the other way, at full size, and no row "
+                      f"here describes it. Cancel them at the broker."),
+                url="/treasury/")
+        except Exception as e:  # noqa: BLE001 — never fail the close
+            logger.critical("[%s_bot] %s: the loose-leg alert failed (%s) — "
+                            "the leg may be resting and nobody has been told",
+                            self.asset_class, trade.symbol, e)
+
     def _close_trade(self, trade, price, client, *, reason: str) -> bool:
         """Close a trade — pnl is realised in the config's base_currency.
 
@@ -1907,16 +2088,8 @@ class AssetBot(ABC):
                     # A resting exit against a flat book does not close
                     # anything - it opens a position the other way.
                     if not self._cancel_protective_orders(trade, client):
-                        meta = dict(trade.metadata or {})
-                        meta["protective_legs_unconfirmed"] = True
-                        trade.metadata = meta
-                        trade.save(update_fields=["metadata"])
-                        logger.critical(
-                            "[%s_bot] %s: a protective leg could not be "
-                            "confirmed cancelled while clearing the way "
-                            "for a close retry - check the broker for a "
-                            "resting order",
-                            self.asset_class, trade.symbol)
+                        self._flag_unconfirmed_legs(
+                            trade, "while clearing the way for a close retry")
                     # From here the position has no broker-side stop. If the
                     # retry also fails the row goes CLOSE_PENDING with a live,
                     # UNPROTECTED position behind it — a materially worse
@@ -1933,18 +2106,10 @@ class AssetBot(ABC):
                     # position in the opposite direction — unmonitored,
                     # because no row in our database describes it.
                     if not self._cancel_protective_orders(trade, client):
-                        # Say so on the row: a leg we could not confirm
-                        # gone is the operator's problem now, and a
-                        # silent flag would hide it forever.
-                        meta = dict(trade.metadata or {})
-                        meta["protective_legs_unconfirmed"] = True
-                        trade.metadata = meta
-                        trade.save(update_fields=["metadata"])
-                        logger.critical(
-                            "[%s_bot] %s closed, but a protective leg could "
-                            "not be confirmed cancelled — check the broker "
-                            "for a resting order",
-                            self.asset_class, trade.symbol)
+                        # The row goes CLOSED — the exit really happened — so
+                        # reaching somebody is the only thing left to do.
+                        self._flag_unconfirmed_legs(
+                            trade, "after the position was closed")
             except Exception as e:
                 logger.error("[%s_bot] live close order failed for %s: %s — "
                              "marking CLOSE_PENDING",
