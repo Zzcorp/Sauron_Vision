@@ -409,37 +409,90 @@ class AssetBot(ABC):
                     self._poll_working_entry(trade, client)
                     continue
 
-                price = self._mark_price(trade, client)
-                if price is None or price <= 0:
-                    # NOT SILENT. Everything below this line is skipped for
-                    # the life of the position — the time stop, the vanished-
-                    # stop net, break-even, trailing, bot-side SL/TP — and a
-                    # Saxo SIM quote of 0 (NoAccess on an unlinked demo, which
-                    # is every CFD) reaches here on every tick. The time stop
-                    # needs no price and should run above this gate; that
-                    # reorder is the next step, and this is the line that
-                    # makes its absence visible instead of silent.
-                    logger.warning("[%s_bot] %s: no usable mark from the "
-                                   "broker — NOTHING is managed on this "
-                                   "position this tick (no time stop, no "
-                                   "stop move, no bot-side SL/TP)",
-                                   self.asset_class, trade.symbol)
-                    try:
-                        skips.record(self.cfg, trade.symbol, skips.NO_PRICE,
-                                     "open position unmanaged: the broker "
-                                     "priced it at 0")
-                    except Exception:  # noqa: BLE001
-                        pass
-                    continue
+                # THE MARK IS READ HERE, FIRST, exactly as before — only
+                # the GATE below it moved, past the two checks that never look
+                # at a price. Nothing between this line and the gate is
+                # reordered, so a position the broker CAN price runs the same
+                # calls in the same order and ends the tick in the same state.
+                #
+                # And the read is not allowed to be fatal: a ticker that
+                # RAISES (a dead session, a 429) used to land in this loop's
+                # own handler and skip the position whole — killing the clock
+                # exit for the very reason it exists. An unreadable mark is
+                # None, which is what everything below is written for.
+                try:
+                    price = self._mark_price(trade, client)
+                except Exception as e:  # noqa: BLE001 — unreadable is None
+                    logger.warning("[%s_bot] %s: the mark could not be read "
+                                   "(%s: %s) — the clock exit still runs",
+                                   self.asset_class, trade.symbol,
+                                   type(e).__name__, e)
+                    price = None
 
-                # The time stop runs for protected trades too. It is the one
-                # exit the broker knows nothing about: a bracket holds SL and
-                # TP, but nothing at the broker will release capital from a
-                # thesis that simply never moved. _close_trade cancels the
-                # resting legs if the flatten is rejected, so there is no
-                # window where the position sits live and unprotected.
+                # The time stop runs for protected trades too — AND FOR
+                # UNPRICED ONES, which is the point of this ordering. It is
+                # the one exit the broker knows nothing about: a bracket holds
+                # SL and TP, but nothing at the broker releases capital from a
+                # thesis that simply never moved. It compares CLOCKS, not
+                # prices — _time_stop_hit reads opened_at against the config's
+                # ceiling and never touches a mark — so behind the mark gate
+                # it could never fire on a Saxo CFD, whose SIM quote is 0
+                # (NoAccess on a demo not linked to a funded live account).
+                # Those positions were held for ever, in silence.
+                #
+                # NOT a claim that the close is seamless: _close_trade strips
+                # the resting bracket and then goes to market, and between
+                # those two the position is live with no stop at the broker.
+                # That window is the close path's, it is stated where it
+                # happens, and it is the same window every other exit takes.
                 if self._time_stop_hit(trade):
-                    if self._close_trade(trade, price, client, reason="TIME"):
+                    # The close needs no mark: _submit_close_order sends a
+                    # MARKET order (symbol, side, qty — no price), and
+                    # _close_trade books the exit off the broker's OWN fill,
+                    # falling back to what we pass only when the broker
+                    # reports none. So this is a FALLBACK, never the order.
+                    exit_basis = price
+                    if exit_basis is None or exit_basis <= 0:
+                        # UNMEASURED IS NOT ZERO, AND NOT A GUESS EITHER. A
+                        # live row passes None on purpose: resolve_exit_fill
+                        # owns that case already — it books the ENTRY price
+                        # and says so, which realises exactly 0 rather than a
+                        # number nobody quoted. Inventing a mark here would
+                        # collapse "could not be priced" into "priced".
+                        exit_basis = None
+                        if trade.paper:
+                            # Except on paper, where the modelled fill does
+                            # float(price) and float(None) raises TypeError
+                            # out of _close_trade — the row would stay OPEN
+                            # for ever, which is this bug re-entering by the
+                            # paper door. The entry price is the row's own
+                            # real number, and it is already what the options
+                            # expiry close falls back to.
+                            exit_basis = trade.entry_price
+                        # AND THE LEDGER RECORDS THE DECISION, not the fill:
+                        # the clock fired with no live mark, which stays true
+                        # for ever even if the broker reports a fill a second
+                        # later. Three states, read beside exit_fill_source:
+                        # the key absent means the exit had a live mark;
+                        # present with source "broker" means the fill was
+                        # measured anyway; present with source "mark" means
+                        # the entry price stood in and the P&L is an
+                        # accounting placeholder, not a measured round trip.
+                        # Saved BEFORE the close, because a failed close
+                        # saves only its own fields and would drop this.
+                        meta = dict(trade.metadata or {})
+                        meta["time_stop_unpriced"] = True
+                        trade.metadata = meta
+                        trade.save(update_fields=["metadata"])
+                        logger.warning(
+                            "[%s_bot] %s: the clock exit fires with NO usable "
+                            "mark — the exit books at the broker's own fill, "
+                            "or at the entry price if it reports none, and "
+                            "the row carries metadata.time_stop_unpriced so "
+                            "that 0 is not read as a measured round trip",
+                            self.asset_class, trade.symbol)
+                    if self._close_trade(trade, exit_basis, client,
+                                         reason="TIME"):
                         closed += 1
                     continue
 
@@ -447,9 +500,44 @@ class AssetBot(ABC):
                 # that was stopped for a week comes back to positions already
                 # past their ceiling, and "this will close soon" arriving in
                 # the same tick as "this closed" is noise, not a warning.
+                # Above the gate for the same reason as the stop itself:
+                # _time_stop_status takes no client and no price, and the
+                # warning an operator most needs is the one about a position
+                # nobody can price.
                 ts = self._time_stop_status(trade)
                 if ts["approaching"]:
                     self._warn_time_stop_near(trade, ts)
+
+                # NOW THE GATE. Everything from here down compares AGAINST a
+                # price: the vanished-stop net acts only to hand the position
+                # to bot-side SL/TP, break-even and trailing measure the move
+                # in R, and the SL/TP tests are literally price <= stop_loss.
+                # None of it can run on a mark that does not exist — and the
+                # net in particular must NOT run here, because its action is
+                # to cancel the last resting exit and hand the row to a
+                # bot-side stop that cannot compare anything either.
+                if price is None or price <= 0:
+                    logger.warning("[%s_bot] %s: no usable mark from the "
+                                   "broker — the clock exit ran, but NOTHING "
+                                   "price-based is managed on this position "
+                                   "this tick (no vanished-stop net, no stop "
+                                   "move, no bot-side SL/TP)",
+                                   self.asset_class, trade.symbol)
+                    try:
+                        # IMPORTED HERE. `skips` is not a module-level name in
+                        # this file — every other user imports it locally — so
+                        # the call added on 2026-09-20 raised NameError into
+                        # the bare except below and the ledger recorded
+                        # nothing: loud in the log, silent on the page.
+                        from bot_program.asset_engine import skips as _skips
+                        _skips.record(self.cfg, trade.symbol, _skips.NO_PRICE,
+                                      "open position only clock-managed: the "
+                                      "broker priced it at 0")
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("[%s_bot] could not record the "
+                                       "unpriced skip for %s: %s",
+                                       self.asset_class, trade.symbol, e)
+                    continue
 
                 # `protected` is a claim about the BROKER, and the broker is
                 # asked whether it still holds. A stop leg that expired,
@@ -1515,73 +1603,24 @@ class AssetBot(ABC):
         fast one-sided markets. Overrides must return it too; one that
         returns None degrades to a mark-priced exit, flagged as such.
         """
-        # A VENUE WHERE AN OPPOSITE ORDER DOES NOT FLATTEN. Saxo under
-        # the FifoEndOfDay netting profile keeps both lots Open until the
-        # evening netting, so the default close below would book the row
-        # CLOSED against a position the broker still holds. The adapter
-        # answers for itself — only Saxo defines this — and a client that
-        # does not is closed exactly as before.
-        needs_pid = getattr(client, "close_needs_position_id", None)
-        if callable(needs_pid):
-            try:
-                answer = needs_pid()
-            except Exception as e:  # noqa: BLE001 — unknown: the old path
-                logger.warning("[%s_bot] %s: could not ask the broker how it "
-                               "nets (%s) — closing with an opposite order",
-                               self.asset_class, trade.symbol, e)
-                answer = None
-            # A yes or a no, nothing else. Anything truthy would otherwise
-            # send the close down a path nobody asked for on the strength
-            # of a value the adapter never defined.
-            if answer is not None and not isinstance(answer, bool):
-                logger.warning("[%s_bot] %s: the adapter answered %r when "
-                               "asked how the venue nets, which is neither "
-                               "yes nor no — closing with an opposite order",
-                               self.asset_class, trade.symbol, answer)
-            must = answer is True
-
-            # str() of anything at all returns a non-empty string, and an
-            # id we invented is worse than no id: it closes some OTHER
-            # position, or nothing, and the row books CLOSED either way.
-            meta = trade.metadata if isinstance(trade.metadata, dict) else {}
-            raw = (meta.get("protective_trade_id")
-                   or meta.get("broker_position_id"))
-            pid = ""
-            if isinstance(raw, str):
-                pid = raw.strip()
-            elif isinstance(raw, int) and not isinstance(raw, bool):
-                pid = str(raw)
-
-            closer = getattr(client, "close_position", None)
-            if must:
-                if pid and callable(closer):
-                    # The caller's deterministic id, when the adapter takes
-                    # one: three call sites in this platform say "the broker
-                    # itself refuses the second copy", and at Saxo that is
-                    # only true when the close carries the same reference.
-                    kw = {}
-                    try:
-                        import inspect
-                        if "client_order_id" in inspect.signature(
-                                closer).parameters:
-                            kw["client_order_id"] = client_order_id
-                    except (TypeError, ValueError):  # a builtin or a mock
-                        kw = {}
-                    return closer(pid, trade.symbol, float(trade.qty), **kw)
-                # Nothing to close BY, so the opposite order below will
-                # leave two lots open until the venue nets them. Said out
-                # loud rather than discovered on the broker's screen.
-                logger.error(
-                    "[%s_bot] %s: this venue does not net an opposite order "
-                    "and %s — the close will leave BOTH lots open until "
-                    "the venue nets them. Check /treasury/ after it settles.",
-                    self.asset_class, trade.symbol,
-                    "the row carries no broker position id" if not pid
-                    else "the adapter carries no close_position")
+        # A VENUE WHERE AN OPPOSITE ORDER DOES NOT FLATTEN — Saxo under the
+        # FifoEndOfDay netting profile, and eToro ALWAYS, whose market_order
+        # has no close branch at all and answers a SELL with `sellShort`. The
+        # decision is in engine/venue_close.py rather than here because the
+        # retry drain and the kill switch send closes too, and for the
+        # platform's whole life all three sent an opening order on those
+        # venues: the row booked CLOSED at that fill while the account held
+        # DOUBLE, hedged, paying both spreads.
+        #
+        # It RAISES rather than send an opening order when the venue needs a
+        # position id and the row has none. The refusal is the point: the row
+        # goes CLOSE_PENDING, where the drain reads the broker's own book.
+        from bot_program.engine.venue_close import close_or_refuse
 
         close_side = "SELL" if trade.side == "BUY" else "BUY"
-        return client.market_order(trade.symbol, close_side, float(trade.qty),
-                                   client_order_id=client_order_id)
+        return close_or_refuse(trade, client, float(trade.qty),
+                               close_side=close_side,
+                               client_order_id=client_order_id)
 
     #: What each adapter's own `env` string means in the two words the
     #: platform's money side uses. Unlisted is UNKNOWN, never "live":
@@ -1675,8 +1714,57 @@ class AssetBot(ABC):
                              self.asset_class, oid, e)
         return ok
 
-    def _close_trade(self, trade, price: Decimal, client, *, reason: str) -> bool:
+    #: How often an unresolvable in-doubt close repeats itself. Once is
+    #: not enough — nothing else resolves such a row and it holds a live
+    #: position — and every tick is noise nobody reads.
+    CLOSE_DOUBT_REALERT_HOURS = 1.0
+
+    def _warn_close_in_doubt_unresolved(self, trade, doubt) -> None:
+        """Say — and keep saying — that a close may be live and cannot be
+        proved either way. The row is NOT closed and no order is sent."""
+        meta = dict(trade.metadata or {})
+        last = meta.get("close_doubt_alerted_at")
+        if last:
+            try:
+                from datetime import datetime as _dt
+                age_h = ((timezone.now() - _dt.fromisoformat(last))
+                         .total_seconds() / 3600.0)
+                if age_h < self.CLOSE_DOUBT_REALERT_HOURS:
+                    return
+            except (TypeError, ValueError):
+                pass
+        ref = (doubt or {}).get("reference") or "(none)"
+        logger.error("[%s_bot] %s: a close MAY be live under reference %s and "
+                     "the broker cannot be read — nothing is sent and the row "
+                     "stays OPEN", self.asset_class, trade.symbol, ref)
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title=f"⚠ {trade.symbol}: a close may be live and cannot be "
+                      f"resolved",
+                body=(f"{self.asset_class.upper()} {trade.symbol}: the close "
+                      f"under reference {ref} did not come back, and the "
+                      f"broker's positions cannot be read — so the platform "
+                      f"cannot tell whether it filled. NOTHING is being sent "
+                      f"(a second close would reverse the position) and the "
+                      f"row stays OPEN. Check the broker by hand."),
+                url="/positions/")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] in-doubt close alert failed: %s",
+                           self.asset_class, e)
+        meta["close_doubt_alerted_at"] = timezone.now().isoformat()
+        trade.metadata = meta
+        trade.save(update_fields=["metadata"])
+
+    def _close_trade(self, trade, price, client, *, reason: str) -> bool:
         """Close a trade — pnl is realised in the config's base_currency.
+
+        `price` is the FALLBACK exit price, never the order: the broker order
+        is a MARKET order and a live exit books at the fill the broker
+        reports. It is None when nothing could price the position — the clock
+        exit fires on those, because it reads the clock — and resolve_exit_fill
+        then books the entry price and records that it had to. A PAPER close
+        must still be handed a number: its modelled fill does float(price).
 
         The broker order is attempted FIRST; the row is finalised CLOSED only
         when that succeeded (or the trade is paper). On broker failure the row
@@ -1684,6 +1772,53 @@ class AssetBot(ABC):
         and the retry_pending_closes beat task drains it. Returns True when
         the trade ended CLOSED.
         """
+        # A CLOSE THAT MAY ALREADY BE LIVE IS RESOLVED BEFORE ANOTHER IS
+        # SENT. The row carries close_in_doubt when its close request never
+        # came back, and a second close turns a closed long into a full-size
+        # short — while the clock exit above would fire on every pass. So ask
+        # the broker what it holds, and act on the answer rather than on hope.
+        doubt = (trade.metadata or {}).get("close_in_doubt")
+        if doubt and not trade.paper:
+            held = None
+            try:
+                positions = self._broker_snapshot(client, "positions")
+                held = (None if positions is None
+                        else self._broker_still_holds(trade, positions))
+            except Exception as e:  # noqa: BLE001 — cannot say stays None
+                logger.warning("[%s_bot] %s: could not resolve the in-doubt "
+                               "close (%s)", self.asset_class, trade.symbol, e)
+            if held is False:
+                # The in-doubt close LANDED. Sending another would open a
+                # position. Nothing is sent: the row is flat at the broker,
+                # and reconciliation finalises it from the broker's own fill
+                # — which is a measured exit, not the mark we would book here.
+                logger.error("[%s_bot] %s: the in-doubt close (reference %s) "
+                             "DID land — the broker is flat and nothing is "
+                             "sent. Reconciliation books the exit from its "
+                             "own fill.", self.asset_class, trade.symbol,
+                             (doubt or {}).get("reference") or "(none)")
+                return False
+            if held is True:
+                # It did NOT land. The marker goes, and the close proceeds
+                # exactly as any other — this is the only branch that may.
+                meta = dict(trade.metadata or {})
+                meta.pop("close_in_doubt", None)
+                meta["close_in_doubt_resolved"] = "the broker still held it"
+                trade.metadata = meta
+                trade.save(update_fields=["metadata"])
+                logger.warning("[%s_bot] %s: the in-doubt close did NOT land "
+                               "— the broker still holds the position, so the "
+                               "close is sent once more",
+                               self.asset_class, trade.symbol)
+            else:
+                # COULD NOT ASK. Not proof of either, so nothing is sent: an
+                # unresolvable doubt that sends anyway is the double-close
+                # this marker exists to prevent. Said out loud once an hour,
+                # because a row nobody can resolve needs a human, and an
+                # alert every tick is an alert nobody reads.
+                self._warn_close_in_doubt_unresolved(trade, doubt)
+                return False
+
         stripped = False
         close_result = None
         if not trade.paper:
@@ -2952,6 +3087,17 @@ class AssetBot(ABC):
                 # names its legs must name the stop; one that reports
                 # protection on the TRADE (OANDA) gives the trade handle;
                 # protectedOnFill is the venue asserting it outright.
+                # THE HANDLE A CLOSE MAY NEED, whatever the protection
+                # turned out to be. `broker_position_id` is read by
+                # _submit_close_order and by SaxoTrader.closing_fill and was
+                # written NOWHERE in this repo — so on a venue where an
+                # opposite order does not flatten (eToro always, Saxo under
+                # FifoEndOfDay) a row whose bracket was refused had nothing
+                # to close by, and the close fell through to an order that
+                # OPENS a second position.
+                _pos_id = res.get("positionId") or res.get("protectiveTradeId")
+                if _pos_id:
+                    entry_meta["broker_position_id"] = str(_pos_id)
                 if (res.get("protectiveStopId") or res.get("protectiveTradeId")
                         or res.get("protectedOnFill")):
                     entry_meta["protected"] = True

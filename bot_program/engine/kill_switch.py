@@ -211,7 +211,8 @@ def _kill_order_id(trade) -> str:
         return ""
 
 
-def _try_broker_close(client, symbol, side, qty, client_order_id=""):
+def _try_broker_close(client, symbol, side, qty, client_order_id="",
+                      trade=None):
     """Submit a closing market order if the client supports it. Best-effort:
     raises on broker error so the caller can record it.
 
@@ -224,6 +225,19 @@ def _try_broker_close(client, symbol, side, qty, client_order_id=""):
     if not hasattr(client, "market_order"):
         return None
     close_side = "SELL" if side == "BUY" else "BUY"
+    # THE VENUE DECIDES WHAT A CLOSE IS. On eToro market_order only ever
+    # OPENS — a SELL is `sellShort` — and under Saxo's FifoEndOfDay an
+    # opposite order leaves both lots live. This is the worst place in the
+    # platform to get that wrong: the switch fires because something is
+    # already wrong, and the "flatten" would have doubled the exposure it was
+    # pressed to remove. `trade` is threaded in for the position id; without
+    # one venue_close raises and the caller records the failure, exactly as
+    # it already does for a broker refusal.
+    if trade is not None:
+        from bot_program.engine.venue_close import close_or_refuse
+        return close_or_refuse(trade, client, float(qty),
+                               close_side=close_side,
+                               client_order_id=client_order_id)
     # The kill switch is the WORST place to send an anonymous order.
     # It fires when something is already wrong, it can be triggered
     # twice by two operators or by a retry, and it flattens at
@@ -262,7 +276,7 @@ def _close_legacy_trade(trade, now):
                                         client=client)
         result = _try_broker_close(
             client, trade.symbol, trade.side, trade.qty,
-            client_order_id=_kill_order_id(trade))
+            client_order_id=_kill_order_id(trade), trade=trade)
     except Exception as e:  # noqa: BLE001
         logger.warning("[KILL SWITCH] broker close failed for %s: %s", trade.symbol, e)
         raise
@@ -506,7 +520,7 @@ def _close_asset_trade(trade, now):
             else:
                 result = _try_broker_close(
                     client, trade.symbol, trade.side, outstanding,
-                    client_order_id=_kill_order_id(trade))
+                    client_order_id=_kill_order_id(trade), trade=trade)
     except Exception as e:  # noqa: BLE001
         logger.warning("[KILL SWITCH] broker close failed for %s: %s", trade.symbol, e)
         raise

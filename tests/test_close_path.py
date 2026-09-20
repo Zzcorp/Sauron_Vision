@@ -1,0 +1,518 @@
+"""The close path, between "the engine decides" and "the row says CLOSED".
+
+Designed and refuted by a fleet of readers over the real code; every test
+here is a failure one of them proved reachable, and several are failures the
+FIRST draft of the fix would itself have shipped.
+
+THE CLOCK EXIT WAS BEHIND THE MARK GATE
+
+manage_positions read the mark and skipped the whole position when it was
+unusable, and SaxoTrader.ticker answers lastPrice 0 for Saxo's NoAccess —
+which is every CFD on a demo account not linked to a funded live one. So on
+exactly those positions the time stop, the one exit the broker knows nothing
+about, could never fire: they were held for ever, in silence. It compares
+CLOCKS, so it now runs above the gate; everything that compares against a
+price stays below it.
+
+AND A CLOCK EXIT WOULD HAVE DOUBLED AN IN-DOUBT CLOSE
+
+A row whose close request never came back carries close_in_doubt, and the
+whole point of that marker is that a second close turns a closed long into a
+full-size short. The clock does not care — it would have fired on every pass.
+So the close now RESOLVES the doubt before it sends anything: flat means the
+first close landed and nothing is sent; still held means it did not, so the
+marker goes and the close proceeds; and "cannot say" sends nothing at all.
+
+THE RETRY LOOP COULD NEVER CONCLUDE FLAT
+
+Its safety valve was "is this symbol in the book", with no side and no size.
+Under FifoEndOfDay the closing lot sits Open beside the lot it closed until
+the evening netting, so the answer was "still held" all day, and the size came
+off whichever lot the venue listed first — which can be the closing one.
+remaining then equalled the whole position, nothing counted as filled, and a
+third full-size market order went out: original long, closing short, retry
+short, net short one full size, with the row stamped CLOSED at the third fill.
+
+The reading is now netted per side in three states, and it is deliberately
+timid about the difference between UNMEASURED (fall back to the row's own
+arithmetic, as before) and AMBIGUOUS (an offsetting lot, or a sibling row
+claiming the same units — send nothing at all).
+"""
+from decimal import Decimal
+from unittest import mock
+
+from django.test import TestCase
+from django.utils import timezone
+
+from tests.test_exit_truth import _cfg, _client, _trade, _user
+
+
+def _tick(cfg, *, price="101", raises=False):
+    """One manage_positions pass, with a mark the test chooses."""
+    from bot_program.asset_engine.stock_bot import StockBot
+    client = mock.MagicMock()
+    if raises:
+        client.ticker = mock.MagicMock(side_effect=RuntimeError("no session"))
+    else:
+        client.ticker = mock.MagicMock(return_value={"lastPrice": price})
+    client.market_order = mock.MagicMock(
+        return_value={"status": "FILLED", "avgPrice": "97",
+                      "executedQty": "10"})
+    client.get_positions = mock.MagicMock(return_value=[])
+    with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                    return_value=client):
+        out = StockBot(cfg).manage_positions()
+    return out, client
+
+
+def _stale(cfg, **meta):
+    """An OPEN row whose holding ceiling is long past."""
+    trade = _trade(cfg, metadata={"initial_stop_loss": 98.0, **meta})
+    trade.opened_at = timezone.now() - timezone.timedelta(days=400)
+    trade.save(update_fields=["opened_at"])
+    return trade
+
+
+class TheClockExitRunsWithoutAMarkTests(TestCase):
+
+    def setUp(self):
+        self.user = _user("clock_u")
+        self.cfg = _cfg(self.user, name="CLOCK")
+        self.cfg.extras = {**(self.cfg.extras or {}), "max_hold_days": 5}
+        self.cfg.save(update_fields=["extras"])
+
+    def test_a_position_the_broker_prices_at_zero_still_times_out(self):
+        """Saxo's NoAccess answer IS lastPrice 0, on every CFD of an unlinked
+        demo account. Behind the gate those positions were held for ever."""
+        trade = _stale(self.cfg)
+        _out, client = _tick(self.cfg, price="0")
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        client.market_order.assert_called_once()
+
+    def test_the_row_says_the_decision_had_no_mark(self):
+        """A statement about the DECISION, which stays true for ever — not
+        about the fill, which the broker may report a second later."""
+        trade = _stale(self.cfg)
+        _tick(self.cfg, price="0")
+        trade.refresh_from_db()
+        self.assertTrue(trade.metadata.get("time_stop_unpriced"))
+
+    def test_a_priced_position_carries_no_such_flag(self):
+        trade = _stale(self.cfg)
+        _tick(self.cfg, price="101")
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        self.assertNotIn("time_stop_unpriced", trade.metadata)
+
+    def test_a_ticker_that_raises_does_not_stop_the_clock(self):
+        """The read used to land in the loop's own handler and skip the
+        position whole — killing the clock exit for the very reason it
+        exists."""
+        trade = _stale(self.cfg)
+        _tick(self.cfg, raises=True)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+
+    def test_a_fresh_unpriced_position_is_left_open(self):
+        """The reorder must not close anything the clock does not."""
+        trade = _trade(self.cfg, metadata={"initial_stop_loss": 98.0})
+        _tick(self.cfg, price="0")
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+
+    def test_the_unpriced_skip_reaches_the_ledger(self):
+        """`skips` is not a module-level name in base.py, so the record()
+        added with the loud branch raised NameError into its own bare except:
+        loud in the log, silent on the page the operator reads."""
+        from bot_program.asset_engine import skips
+        _trade(self.cfg, metadata={"initial_stop_loss": 98.0})
+        _tick(self.cfg, price="0")
+        self.cfg.refresh_from_db()
+        self.assertIn(skips.NO_PRICE, str(self.cfg.extras or {}))
+
+
+class AnInDoubtCloseIsResolvedNotRepeatedTests(TestCase):
+
+    def setUp(self):
+        self.user = _user("doubt_u")
+        self.cfg = _cfg(self.user, name="DOUBT")
+
+    def _close(self, trade, client):
+        from bot_program.asset_engine.stock_bot import StockBot
+        return StockBot(self.cfg)._close_trade(trade, Decimal("98"), client,
+                                               reason="TIME")
+
+    def _row(self):
+        return _trade(self.cfg, metadata={
+            "initial_stop_loss": 98.0,
+            "close_in_doubt": {"reference": "EXIT-9", "at":
+                               timezone.now().isoformat()}})
+
+    def test_a_flat_broker_means_it_landed_and_nothing_is_sent(self):
+        trade = self._row()
+        client = _client({"status": "FILLED"}, last="98")
+        client.get_positions = mock.MagicMock(return_value=[])
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="ERROR") as cm:
+            self.assertFalse(self._close(trade, client))
+        client.market_order.assert_not_called()
+        self.assertTrue(any("DID land" in m for m in cm.output))
+
+    def test_a_broker_that_still_holds_it_means_it_did_not_land(self):
+        trade = self._row()
+        client = _client({"status": "FILLED", "avgPrice": "98",
+                          "executedQty": "10"}, last="98")
+        client.get_positions = mock.MagicMock(
+            return_value=[{"symbol": "AAPL", "qty": "10", "side": "BUY"}])
+        with self.assertLogs("bot_program.asset_engine.base", level="WARNING"):
+            self._close(trade, client)
+        client.market_order.assert_called_once()
+        trade.refresh_from_db()
+        self.assertNotIn("close_in_doubt", trade.metadata)
+        self.assertIn("close_in_doubt_resolved", trade.metadata)
+
+    def test_a_book_that_cannot_be_read_sends_nothing(self):
+        """"Could not ask" is not proof of either, and an unresolvable doubt
+        that sends anyway is the double close the marker exists to prevent."""
+        trade = self._row()
+        client = _client({"status": "FILLED"}, last="98")
+        client.get_positions = mock.MagicMock(
+            side_effect=RuntimeError("429 rate limited"))
+        with mock.patch("bot_program.notifications.notify_staff") as paged:
+            self.assertFalse(self._close(trade, client))
+        client.market_order.assert_not_called()
+        paged.assert_called_once()
+        trade.refresh_from_db()
+        self.assertIn("close_doubt_alerted_at", trade.metadata)
+
+    def test_the_alert_does_not_repeat_every_tick(self):
+        trade = self._row()
+        client = _client({"status": "FILLED"}, last="98")
+        client.get_positions = mock.MagicMock(side_effect=RuntimeError("429"))
+        with mock.patch("bot_program.notifications.notify_staff") as paged:
+            self._close(trade, client)
+            trade.refresh_from_db()
+            self._close(trade, client)
+        self.assertEqual(paged.call_count, 1)
+
+    def test_a_paper_row_is_unaffected(self):
+        """Nothing is live at a broker, so there is no doubt to resolve."""
+        trade = _trade(self.cfg, paper=True, metadata={
+            "initial_stop_loss": 98.0,
+            "close_in_doubt": {"reference": "X", "at":
+                               timezone.now().isoformat()}})
+        client = _client({"status": "FILLED"}, last="98")
+        self.assertTrue(self._close(trade, client))
+
+
+class TheBookIsReadInThreeStatesTests(TestCase):
+
+    def setUp(self):
+        self.user = _user("expo_u")
+        self.cfg = _cfg(self.user, name="EXPO")
+
+    def _read(self, rows, **meta):
+        from bot_program.pending_closes import broker_exposure
+        trade = _trade(self.cfg, status="CLOSE_PENDING",
+                       metadata={"initial_stop_loss": 98.0, **meta})
+        client = mock.MagicMock()
+        client.get_positions = mock.MagicMock(return_value=rows)
+        return broker_exposure(trade, client), trade
+
+    def test_one_lot_on_our_side_is_held_with_its_size(self):
+        out, _ = self._read([{"symbol": "AAPL", "qty": "7", "side": "BUY"}])
+        self.assertEqual(out["state"], "held")
+        self.assertEqual(out["qty"], Decimal("7"))
+
+    def test_one_lot_needs_no_side_at_all(self):
+        """Most feeds sign the quantity instead of naming a side, and a lone
+        lot has nothing to offset — demanding a side read an ordinary book as
+        unmeasured and stopped the reconciliation."""
+        out, _ = self._read([{"symbol": "AAPL", "qty": "7"}])
+        self.assertEqual(out["state"], "held")
+        self.assertEqual(out["qty"], Decimal("7"))
+
+    def test_an_empty_book_is_flat_and_that_is_a_measurement(self):
+        out, _ = self._read([])
+        self.assertEqual(out["state"], "flat")
+        self.assertEqual(out["qty"], Decimal(0))
+
+    def test_both_sides_open_is_ambiguous_and_never_a_number(self):
+        """THE FINDING. Under FifoEndOfDay the closing lot sits Open beside
+        the lot it closed all day, and netting it to a number hands a market
+        order a size nobody measured."""
+        out, _ = self._read([{"symbol": "AAPL", "qty": "10", "side": "BUY"},
+                             {"symbol": "AAPL", "qty": "10", "side": "SELL"}])
+        self.assertEqual(out["state"], "unknown")
+        self.assertIsNone(out["qty"])
+        self.assertTrue(out["ambiguous"])
+        self.assertIn("OTHER side", out["why"])
+
+    def test_an_unmeasured_lot_on_the_other_side_is_ambiguous_too(self):
+        """Read as nothing it would leave the offsetting total at 0 while a
+        real opposing position is open."""
+        out, _ = self._read([{"symbol": "AAPL", "qty": "10", "side": "BUY"},
+                             {"symbol": "AAPL", "side": "SELL"}])
+        self.assertEqual(out["state"], "unknown")
+        self.assertTrue(out["ambiguous"])
+
+    def test_a_short_row_signed_by_its_quantity_is_the_other_side(self):
+        out, _ = self._read([{"symbol": "AAPL", "qty": "-10"}])
+        self.assertEqual(out["state"], "unknown")
+        self.assertTrue(out["ambiguous"])
+
+    def test_an_alpaca_long_is_our_side(self):
+        out, _ = self._read([{"symbol": "AAPL", "qty": "4", "side": "long"}])
+        self.assertEqual(out["state"], "held")
+        self.assertEqual(out["qty"], Decimal("4"))
+
+    def test_an_unreadable_book_is_unknown_and_not_flat(self):
+        from bot_program.pending_closes import broker_exposure
+        trade = _trade(self.cfg, status="CLOSE_PENDING",
+                       metadata={"initial_stop_loss": 98.0})
+        client = mock.MagicMock()
+        client.get_positions = mock.MagicMock(side_effect=RuntimeError("500"))
+        out = broker_exposure(trade, client)
+        self.assertEqual(out["state"], "unknown")
+        self.assertIsNone(out["qty"])
+
+    def test_an_option_under_the_same_symbol_is_not_this_position(self):
+        out, _ = self._read([{"symbol": "AAPL", "qty": "3", "side": "BUY",
+                              "sec_type": "OPT"}])
+        self.assertEqual(out["state"], "flat")
+
+    def test_a_sibling_row_makes_the_size_unattributable(self):
+        """The account total cannot say whose units are whose, and a resubmit
+        sized off it would sell units belonging to another row."""
+        from bot_program.pending_closes import broker_exposure
+        mine = _trade(self.cfg, status="CLOSE_PENDING",
+                      metadata={"initial_stop_loss": 98.0})
+        _trade(self.cfg, status="OPEN", metadata={"initial_stop_loss": 98.0})
+        client = mock.MagicMock()
+        client.get_positions = mock.MagicMock(
+            return_value=[{"symbol": "AAPL", "qty": "20", "side": "BUY"}])
+        out = broker_exposure(mine, client)
+        self.assertEqual(out["state"], "unknown")
+        self.assertTrue(out["ambiguous"])
+        self.assertIn("another live row", out["why"])
+
+    def test_presence_without_a_number_falls_back_rather_than_blocking(self):
+        """Unmeasured is not ambiguous: the size comes from the row's own
+        arithmetic, exactly as it did before the reader could net."""
+        from bot_program.pending_closes import broker_position_qty
+        trade = _trade(self.cfg, status="CLOSE_PENDING",
+                       metadata={"initial_stop_loss": 98.0})
+        client = mock.MagicMock()
+        client.get_positions = mock.MagicMock(
+            return_value=[{"symbol": "AAPL", "market_value": "900"},
+                          {"symbol": "AAPL", "market_value": "100"}])
+        self.assertIsNone(broker_position_qty(trade, client))
+
+
+class TheRetryLoopRefusesToStackACloseTests(TestCase):
+
+    def setUp(self):
+        self.user = _user("stack_u")
+        self.cfg = _cfg(self.user, name="STACK")
+
+    def test_an_unknown_status_is_in_doubt_and_a_filled_one_is_not(self):
+        from bot_program.pending_closes import order_in_doubt
+        self.assertTrue(order_in_doubt({"status": "UNKNOWN"}))
+        self.assertTrue(order_in_doubt({"inDoubt": True, "status": ""}))
+        self.assertFalse(order_in_doubt({"status": "FILLED"}))
+        self.assertFalse(order_in_doubt(None))
+
+    def test_a_202_marks_the_row_where_the_answer_arrives(self):
+        from bot_program.pending_closes import (CLOSE_IN_DOUBT_KEY,
+                                                resolve_exit_fill)
+        trade = _trade(self.cfg, status="CLOSE_PENDING",
+                       metadata={"initial_stop_loss": 98.0})
+        fill = resolve_exit_fill(trade, {"status": "UNKNOWN", "orderId": "77",
+                                         "executedQty": "0"},
+                                mark=Decimal("98"))
+        self.assertIn(CLOSE_IN_DOUBT_KEY, fill["metadata"])
+        self.assertEqual(fill["metadata"][CLOSE_IN_DOUBT_KEY]["order_id"],
+                         "77")
+
+    def test_a_marked_row_sends_nothing_and_spends_no_budget(self):
+        """The cancel-and-resend path cannot help: a cancel proves nothing
+        about an order the venue never admitted holding."""
+        from bot_program.pending_closes import retry_trade_close
+        trade = _trade(self.cfg, status="CLOSE_PENDING", metadata={
+            "initial_stop_loss": 98.0,
+            "close_in_doubt": {"order_id": "77", "reference": "EXIT-7",
+                               "at": timezone.now().isoformat()}})
+        client = _client({"status": "FILLED"}, last="98")
+        client.get_positions = mock.MagicMock(
+            return_value=[{"symbol": "AAPL", "qty": "10", "side": "BUY"}])
+        with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                        return_value=client):
+            self.assertFalse(retry_trade_close(trade))
+        client.market_order.assert_not_called()
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertIn("may already be live",
+                      trade.metadata["close_blocked_why"])
+        self.assertNotIn("close_retry_attempts", trade.metadata)
+
+    def test_an_ambiguous_book_sends_nothing(self):
+        from bot_program.pending_closes import retry_trade_close
+        trade = _trade(self.cfg, status="CLOSE_PENDING",
+                       metadata={"initial_stop_loss": 98.0})
+        client = _client({"status": "FILLED"}, last="98")
+        client.get_positions = mock.MagicMock(
+            return_value=[{"symbol": "AAPL", "qty": "10", "side": "BUY"},
+                          {"symbol": "AAPL", "qty": "10", "side": "SELL"}])
+        with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                        return_value=client):
+            self.assertFalse(retry_trade_close(trade))
+        client.market_order.assert_not_called()
+        trade.refresh_from_db()
+        self.assertIn("OTHER side", trade.metadata["close_blocked_why"])
+
+    def test_a_flat_book_still_finalises_without_an_order(self):
+        from bot_program.pending_closes import retry_trade_close
+        trade = _trade(self.cfg, status="CLOSE_PENDING",
+                       metadata={"initial_stop_loss": 98.0,
+                                 "close_in_doubt": {"reference": "X", "at":
+                                                    timezone.now().isoformat()}})
+        client = _client({"status": "FILLED"}, last="97")
+        client.get_positions = mock.MagicMock(return_value=[])
+        with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                        return_value=client):
+            retry_trade_close(trade)
+        client.market_order.assert_not_called()
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+
+    def test_a_blocked_row_says_so_once_an_hour_not_every_pass(self):
+        from bot_program.pending_closes import _note_close_blocked
+        trade = _trade(self.cfg, status="CLOSE_PENDING",
+                       metadata={"initial_stop_loss": 98.0})
+        with self.assertLogs("bot_program.pending_closes", level="ERROR"):
+            _note_close_blocked(trade, "because")
+        trade.refresh_from_db()
+        first = trade.metadata["close_blocked_logged_at"]
+        _note_close_blocked(trade, "because")
+        trade.refresh_from_db()
+        self.assertEqual(trade.metadata["close_blocked_logged_at"], first)
+        self.assertEqual(trade.metadata["close_blocked_passes"], 2)
+
+
+# ── the close a venue actually understands ──────────────────────────────
+
+class EtoroClosesByPositionIdOrNotAtAllTests(TestCase):
+    """EtoroTrader.market_order sends {"action": "open", ...} and has no close
+    branch, so the engine's "opposite market order" OPENED a short beside the
+    long: the row booked CLOSED at that fill while the account held DOUBLE,
+    hedged, paying both spreads. Every exit did it — stop-out, take-profit,
+    clock exit, the operator's own close, the kill switch, the retry drain."""
+
+    def setUp(self):
+        self.user = _user("etclose_u")
+        self.cfg = _cfg(self.user, name="ETCLOSE")
+
+    def test_the_adapter_says_an_opposite_order_would_not_close(self):
+        from bot_program.engine.etoro_client import EtoroTrader
+        self.assertIs(EtoroTrader("k", "u", env="demo")
+                      .close_needs_position_id(), True)
+
+    def test_the_adapter_reports_its_position_id_on_every_fill(self):
+        """Not only beside an accepted bracket: a handle that exists only when
+        eToro accepted a stop is a handle missing on exactly the rows whose
+        stop it refused — and at this venue no handle means no close."""
+        import inspect
+
+        from bot_program.engine.etoro_client import EtoroTrader
+        src = inspect.getsource(EtoroTrader.market_order)
+        head = src.split('if protected and filled_units > 0 and position_id:')[0]
+        self.assertIn('out["positionId"] = str(position_id)', head)
+
+    def test_the_engine_stores_the_handle_the_close_needs(self):
+        import ast
+        import inspect
+        import textwrap
+
+        from bot_program.asset_engine.base import AssetBot
+        src = textwrap.dedent(inspect.getsource(AssetBot.execute_entry))
+        keys = {n.slice.value for n in ast.walk(ast.parse(src))
+                if isinstance(n, ast.Subscript)
+                and isinstance(getattr(n, "slice", None), ast.Constant)
+                and isinstance(n.value, ast.Name)
+                and n.value.id == "entry_meta"
+                and isinstance(n.slice.value, str)}
+        self.assertIn("broker_position_id", keys)
+
+    def _etoro_like(self):
+        client = mock.MagicMock(spec=["market_order", "close_position",
+                                      "close_needs_position_id", "ticker"])
+        client.close_needs_position_id.return_value = True
+        client.close_position.return_value = {"orderId": "c1",
+                                              "status": "PENDING"}
+        client.ticker.return_value = {"lastPrice": "98"}
+        return client
+
+    def test_the_close_goes_through_the_position_endpoint(self):
+        from bot_program.engine.venue_close import close_or_refuse
+        trade = _trade(self.cfg, metadata={"broker_position_id": "P77"})
+        client = self._etoro_like()
+        close_or_refuse(trade, client, 10.0, close_side="SELL",
+                        client_order_id="EXIT-1")
+        client.close_position.assert_called_once()
+        self.assertEqual(client.close_position.call_args.args[0], "P77")
+        client.market_order.assert_not_called()
+
+    def test_with_no_handle_nothing_is_sent_at_all(self):
+        from bot_program.engine.venue_close import close_or_refuse
+        trade = _trade(self.cfg, metadata={})
+        client = self._etoro_like()
+        with self.assertLogs("bot_program.engine.venue_close", level="ERROR"):
+            with self.assertRaises(RuntimeError):
+                close_or_refuse(trade, client, 10.0, close_side="SELL")
+        client.market_order.assert_not_called()
+        client.close_position.assert_not_called()
+
+    def test_a_venue_that_nets_is_closed_the_ordinary_way(self):
+        from bot_program.engine.venue_close import close_or_refuse
+        trade = _trade(self.cfg, metadata={})
+        client = mock.MagicMock(spec=["market_order"])
+        client.market_order.return_value = {"status": "FILLED"}
+        close_or_refuse(trade, client, 10.0, close_side="SELL",
+                        client_order_id="EXIT-2")
+        client.market_order.assert_called_once()
+        self.assertEqual(client.market_order.call_args.args[1], "SELL")
+
+    def test_the_kill_switch_closes_by_position_id_too(self):
+        """The worst place in the platform to send the opposite trade: the
+        switch fires because something is already wrong, and its flatten
+        would have doubled the exposure it was pressed to remove."""
+        from bot_program.engine.kill_switch import _close_asset_trade
+        trade = _trade(self.cfg, metadata={"broker_position_id": "P88",
+                                           "initial_stop_loss": 98.0})
+        client = self._etoro_like()
+        client.close_position.return_value = {"status": "FILLED",
+                                              "avgPrice": "97",
+                                              "executedQty": "10"}
+        with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                        return_value=client):
+            _close_asset_trade(trade, timezone.now())
+        client.close_position.assert_called_once()
+        client.market_order.assert_not_called()
+
+    def test_the_retry_drain_closes_by_position_id_too(self):
+        from bot_program.pending_closes import retry_trade_close
+        trade = _trade(self.cfg, status="CLOSE_PENDING",
+                       metadata={"broker_position_id": "P99",
+                                 "initial_stop_loss": 98.0})
+        client = self._etoro_like()
+        client.close_position.return_value = {"status": "FILLED",
+                                              "avgPrice": "97",
+                                              "executedQty": "10"}
+        client.get_positions = mock.MagicMock(
+            return_value=[{"symbol": "AAPL", "qty": "10", "side": "BUY"}])
+        with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                        return_value=client):
+            retry_trade_close(trade)
+        client.close_position.assert_called_once()
+        client.market_order.assert_not_called()

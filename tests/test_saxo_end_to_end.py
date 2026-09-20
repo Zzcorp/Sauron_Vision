@@ -343,14 +343,24 @@ class TheWholeMoneyPathTests(TestCase):
         self.assertIn("executedQty", res)
         self.assertEqual(res["side"], "SELL")
 
-    def test_no_position_id_says_the_close_will_leave_two_lots(self):
+    def test_no_position_id_sends_nothing_at_all(self):
+        """It used to log the disaster and send the opposite order anyway —
+        which under FifoEndOfDay leaves BOTH lots live while the row books
+        CLOSED. Now nothing is sent and the row goes to the retry drain,
+        which reads Saxo's own book."""
         client = router.client_for_symbol(self._fresh(), SYMBOL)
         trade = a_trade(self.user)          # no protective_trade_id
+        before = len([1 for m, u in self.wire.calls
+                      if m == "POST" and "trade/v2/orders" in u])
         with mock.patch("bot_program.engine.saxo_client.time.sleep"):
-            with self.assertLogs("bot_program.asset_engine.base",
+            with self.assertLogs("bot_program.engine.venue_close",
                                  level="ERROR") as cm:
-                self._close(trade, client)
-        self.assertTrue(any("BOTH lots open" in m for m in cm.output))
+                with self.assertRaises(RuntimeError):
+                    self._close(trade, client)
+        self.assertTrue(any("NOTHING has been sent" in m for m in cm.output))
+        after = len([1 for m, u in self.wire.calls
+                     if m == "POST" and "trade/v2/orders" in u])
+        self.assertEqual(after, before, "no order reached the wire")
 
     # ── 6. the exit price comes from the broker ─────────────────────────
     def test_closing_fill_reads_the_exit_out_of_closed_positions(self):

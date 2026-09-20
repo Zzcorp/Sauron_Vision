@@ -748,20 +748,29 @@ class TheCloseAsksTheVenueTests(TestCase):
                                  "close_needs_position_id"])
         client.close_needs_position_id.side_effect = RuntimeError("no session")
         client.market_order.return_value = {"status": "FILLED"}
-        with self.assertLogs("bot_program.asset_engine.base", level="WARNING"):
+        # The decision moved to engine/venue_close.py, where the retry drain
+        # and the kill switch read it too; the reading itself is unchanged.
+        with self.assertLogs("bot_program.engine.venue_close",
+                             level="WARNING"):
             self._close(self._trade(protective_trade_id="P9"), client)
         client.market_order.assert_called_once()
 
-    def test_no_position_id_says_out_loud_what_the_close_will_leave(self):
+    def test_no_position_id_sends_NOTHING_rather_than_an_opening_order(self):
+        """It used to log the disaster and send the opposite order anyway. On a
+        venue that does not net, that order OPENS a second position — at eToro
+        a short beside the long — and the row then booked CLOSED over double
+        exposure. Refusing sends the row to CLOSE_PENDING instead, where the
+        drain reads the broker's own book."""
         client = mock.Mock(spec=["market_order", "close_position",
                                  "close_needs_position_id"])
         client.close_needs_position_id.return_value = True
         client.market_order.return_value = {"status": "FILLED"}
-        with self.assertLogs("bot_program.asset_engine.base",
+        with self.assertLogs("bot_program.engine.venue_close",
                              level="ERROR") as cm:
-            self._close(self._trade(), client)
-        self.assertTrue(any("BOTH lots open" in m for m in cm.output))
-        client.market_order.assert_called_once()
+            with self.assertRaises(RuntimeError):
+                self._close(self._trade(), client)
+        self.assertTrue(any("NOTHING has been sent" in m for m in cm.output))
+        client.market_order.assert_not_called()
         client.close_position.assert_not_called()
 
     # ── the two ways the chooser used to be fooled ──────────────────────
@@ -775,7 +784,7 @@ class TheCloseAsksTheVenueTests(TestCase):
                                  "close_needs_position_id"])
         client.close_needs_position_id.return_value = object()
         client.market_order.return_value = {"status": "FILLED"}
-        with self.assertLogs("bot_program.asset_engine.base",
+        with self.assertLogs("bot_program.engine.venue_close",
                              level="WARNING") as cm:
             self._close(self._trade(protective_trade_id="P9"), client)
         self.assertTrue(any("neither" in m for m in cm.output))
@@ -792,12 +801,13 @@ class TheCloseAsksTheVenueTests(TestCase):
         client.close_needs_position_id.return_value = True
         client.market_order.return_value = {"status": "FILLED"}
         trade = self._trade(protective_trade_id={"id": 7})
-        with self.assertLogs("bot_program.asset_engine.base",
-                             level="ERROR") as cm:
-            self._close(trade, client)
-        self.assertTrue(any("BOTH lots open" in m for m in cm.output))
+        with self.assertLogs("bot_program.engine.venue_close", level="ERROR"):
+            with self.assertRaises(RuntimeError):
+                self._close(trade, client)
         client.close_position.assert_not_called()
-        client.market_order.assert_called_once()
+        # And no opening order in its place: an invented id and no id at all
+        # lead to the same refusal.
+        client.market_order.assert_not_called()
 
     def test_a_numeric_position_id_is_still_a_position_id(self):
         """Saxo PositionIds are decimal, and a JSON round-trip can leave one
@@ -819,8 +829,9 @@ class TheCloseAsksTheVenueTests(TestCase):
         client = mock.Mock(spec=["market_order", "close_needs_position_id"])
         client.close_needs_position_id.return_value = True
         client.market_order.return_value = {"status": "FILLED"}
-        with self.assertLogs("bot_program.asset_engine.base",
+        with self.assertLogs("bot_program.engine.venue_close",
                              level="ERROR") as cm:
-            self._close(self._trade(protective_trade_id="P9"), client)
+            with self.assertRaises(RuntimeError):
+                self._close(self._trade(protective_trade_id="P9"), client)
         self.assertTrue(any("no close_position" in m for m in cm.output))
-        client.market_order.assert_called_once()
+        client.market_order.assert_not_called()

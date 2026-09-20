@@ -119,6 +119,21 @@ TERMINAL_ORDER_STATUSES = frozenset({
     "DONE_FOR_DAY", "REPLACED", "STOPPED", "SUSPENDED", "INACTIVE", "ERROR",
 })
 
+#: Statuses that mean the venue DOES NOT KNOW whether the order exists.
+#: Deliberately NOT part of TERMINAL_ORDER_STATUSES above: an order nobody
+#: has resolved is not finished, and calling it finished would let this loop
+#: read it as dead and send a second close beside it. Saxo answers 202
+#: TradeNotCompleted when its broker leg has not confirmed within sixty
+#: seconds, and its adapter reports that as UNKNOWN with the note "this order
+#: may exist — it is not retried".
+IN_DOUBT_ORDER_STATUSES = frozenset({"UNKNOWN"})
+
+#: The row's own note that a close MAY already be live at the broker. The
+#: SAME key AssetBot._close_trade writes when the close request does not come
+#: back, so the bot path and this loop read one flag rather than two that can
+#: disagree.
+CLOSE_IN_DOUBT_KEY = "close_in_doubt"
+
 
 def dust_qty(asset_class) -> Decimal:
     """Largest residual that is broker rounding rather than a position."""
@@ -211,6 +226,29 @@ def order_still_working(result) -> bool:
         return False
     status = str(result.get("status") or "").strip().upper()
     return bool(status) and status not in TERMINAL_ORDER_STATUSES
+
+
+def order_in_doubt(result) -> bool:
+    """Did the venue refuse to say whether this order exists at all?
+
+    A DIFFERENT question from `order_still_working`, and the difference
+    decides whether this module may cancel and resend. A working order can be
+    taken off the book and replaced, and the cancel is the proof. An in-doubt
+    order cannot be: the venue answered 202 for the PLACEMENT, so "cancelled"
+    and "no such order" are the same sentence about a broker leg that may
+    still print — and sending another close beside it is the second live
+    close for one intent that this module exists to prevent.
+
+    Two spellings, because one 202 reaches us two ways: an explicit inDoubt
+    flag (SaxoTrader.close_position) and the UNKNOWN status
+    (SaxoTrader.market_order, which is what this loop calls).
+    """
+    if not isinstance(result, dict):
+        return False
+    if result.get("inDoubt"):
+        return True
+    status = str(result.get("status") or "").strip().upper()
+    return status in IN_DOUBT_ORDER_STATUSES
 
 
 def is_paper_client(client) -> bool:
@@ -395,6 +433,16 @@ def resolve_exit_fill(trade, result, *, mark) -> dict:
         CLOSE_WORKING_ORDER_ID_KEY: (str(result.get("orderId") or "")
                                      if working else ""),
     }
+    if order_in_doubt(result):
+        # THE VENUE WOULD NOT SAY WHETHER THIS CLOSE EXISTS. Written here,
+        # where the answer arrives, because the pass that learns of the doubt
+        # is never the pass that would resend.
+        meta[CLOSE_IN_DOUBT_KEY] = {
+            "at": timezone.now().isoformat(),
+            "order_id": str(result.get("orderId") or ""),
+            "reference": str(result.get("reference") or ""),
+            "status": str(result.get("status") or ""),
+        }
     if qty_assumed:
         # The price may still be the broker's; it is the SIZE we had to
         # assume. Kept next to the numbers it qualifies, the same way
@@ -459,30 +507,103 @@ def _pnl(trade, price: Decimal) -> Decimal:
     return pnl
 
 
-def broker_still_holds(trade, client):
-    """Does the broker still report this position? None = cannot tell.
+# ── what the broker holds, in three states ──────────────────────────────
+#
+# HELD / FLAT / UNKNOWN, never two of them collapsed. A live market order is
+# sized off this reading, so each state carries its own consequence: HELD
+# sizes the resubmit, FLAT lets the row be booked without sending anything,
+# and UNKNOWN sends nothing AND books nothing.
+POS_HELD = "held"
+POS_FLAT = "flat"
+POS_UNKNOWN = "unknown"
 
-    Resubmitting a market close blindly is how a retry turns into a NEW
-    naked position in the opposite direction: if the original close
-    actually filled (and only the response was lost), or a protective leg
-    fired in between, the account is already flat.
+#: A position row's side, in the two dialects the wired venues speak:
+#: BUY/SELL (IBKR, OANDA, eToro, Saxo, PaperTrader) and LONG/SHORT (Alpaca
+#: answers side "long"). A reader that knew only the first would read every
+#: Alpaca short as "not this row's side" — that is, as FLAT — and book a
+#: live position CLOSED.
+_LONG_SIDES = frozenset({"BUY", "LONG"})
+_SHORT_SIDES = frozenset({"SELL", "SHORT"})
+
+#: Below this, a netted size is the residue of decimal arithmetic rather
+#: than a position. Fractional venues trade to eight places, so the floor
+#: sits under the smallest real size any of them will accept.
+_POSITION_DUST = Decimal("0.00000001")
+
+
+def _row_field(p, *names):
+    """One field off a position row, dict or object, or None."""
+    for name in names:
+        value = (p.get(name) if isinstance(p, dict)
+                 else getattr(p, name, None))
+        if value is not None:
+            return value
+    return None
+
+
+def _position_size_and_side(p):
+    """(size, direction) for one position row; either may be None.
+
+    `size` is ABSOLUTE, and None means the row named a symbol and no usable
+    quantity — presence without a number, which has to stay unmeasured: a 0
+    there reads as "nothing held" and a guess sizes a live order.
+    `direction` is +1 long, -1 short, None when the feed names no side.
+
+    A NEGATIVE quantity is the venue signing the direction itself (Alpaca
+    hands back "-10" for a short) and it wins over the side word, which may
+    be absent or spelled in the other dialect.
     """
-    fn = getattr(client, "get_positions", None)
-    if not callable(fn):
-        return None
-    try:
-        positions = list(fn() or [])
-    except Exception as e:
-        logger.warning("close retry: get_positions() failed for %s: %s",
-                       trade.symbol, e)
-        return None
+    amount = _decimal(_row_field(p, "qty", "quantity", "position", "size",
+                                 "positionAmt"))
+    word = str(_row_field(p, "side") or "").strip().upper()
+    direction = (Decimal(1) if word in _LONG_SIDES
+                 else Decimal(-1) if word in _SHORT_SIDES else None)
+    if amount is not None and amount < 0:
+        direction = Decimal(-1)
+    return (None if amount is None else abs(amount)), direction
 
+
+def _unknown_exposure(why: str) -> dict:
+    return {"state": POS_UNKNOWN, "qty": None, "ambiguous": True, "why": why}
+
+
+def _siblings_claim(trade) -> bool:
+    """Does another live row of this user claim the same symbol and side?
+
+    The gate AssetBot._broker_still_holds applies, for the same reason: the
+    account total cannot say whose units are whose, so a resubmit sized off
+    it would sell units belonging to another row. WORKING rows are excluded —
+    their quantity sits on the row while the order is still queued, and the
+    broker holds nothing for them.
+    """
+    try:
+        from bot_program.models import AssetBotTrade
+        others = (AssetBotTrade.objects
+                  .filter(config__user=trade.config.user, symbol=trade.symbol,
+                          side=trade.side, paper=False,
+                          asset_class=trade.asset_class,
+                          status__in=("OPEN", "CLOSE_PENDING"))
+                  .exclude(pk=trade.pk))
+        return any(not (t.metadata or {}).get("entry_working") for t in others)
+    except Exception as e:  # noqa: BLE001 — unreadable siblings are a doubt
+        logger.warning("close retry: could not check sibling rows for %s: %s",
+                       trade.symbol, e)
+        return True
+
+
+def _options_exposure(trade, positions) -> dict:
+    """The options reading — the presence test, unchanged in substance.
+
+    An option CANNOT be netted off a position list: IBKR reports every option
+    under its UNDERLYING symbol with no strike, expiry or right, so two rows
+    that look identical here can be different instruments and their sizes
+    must never be added up. Presence answers HELD with no size, which makes
+    the caller fall back to its own recorded arithmetic.
+    """
     symbols, opt_underlyings, typed = set(), set(), False
     for p in positions:
-        sym = (p.get("symbol") if isinstance(p, dict)
-               else getattr(p, "symbol", None))
-        sec = (p.get("sec_type") if isinstance(p, dict)
-               else getattr(p, "sec_type", None))
+        sym = _row_field(p, "symbol")
+        sec = _row_field(p, "sec_type")
         if not sym:
             continue
         symbols.add(str(sym).upper())
@@ -490,17 +611,143 @@ def broker_still_holds(trade, client):
             typed = True
             if str(sec).upper() == "OPT":
                 opt_underlyings.add(str(sym).upper())
+    occ = str((trade.metadata or {}).get("occ_symbol") or "").upper()
+    if (occ and occ in symbols) or trade.symbol.upper() in opt_underlyings:
+        return {"state": POS_HELD, "qty": None, "ambiguous": False, "why": ""}
+    # Same rule as reconciliation: without an OCC symbol or a sec-typed feed
+    # we cannot see options at all — don't guess.
+    if occ or typed:
+        return {"state": POS_FLAT, "qty": Decimal(0), "ambiguous": False,
+                "why": ""}
+    return _unknown_exposure("this feed names no option contracts, so an "
+                             "options position cannot be seen at all")
+
+
+def broker_exposure(trade, client) -> dict:
+    """{"state", "qty", "ambiguous", "why"} — what the broker holds for THIS row.
+
+    The reading the whole retry loop turns on, and it is deliberately timid.
+    Its predecessor asked "is this symbol in the book", with no side and no
+    size: under Saxo's FifoEndOfDay the CLOSING lot sits Open beside the lot
+    it closed until the evening netting, so that answer was "still held" all
+    day and the size came off whichever lot Saxo listed first — which can be
+    the closing one. remaining then equalled the whole position, nothing was
+    counted as filled, and a third full-size market order went out.
+
+    So: netted per side, and ANY of these is UNKNOWN rather than a number —
+    an offsetting lot, a row that names the symbol without a usable quantity
+    or side, a sibling row of this user claiming the same symbol, or a feed
+    that cannot be read at all. UNKNOWN means this module sends nothing and
+    books nothing.
+    """
+    fn = getattr(client, "get_positions", None)
+    if not callable(fn):
+        return _unknown_exposure("this broker client cannot list positions")
+    try:
+        positions = list(fn() or [])
+    except Exception as e:  # noqa: BLE001 — an unreadable book is not a crash
+        logger.warning("close retry: get_positions() failed for %s: %s",
+                       trade.symbol, e)
+        return _unknown_exposure(f"the position list could not be read ({e})")
 
     if trade.asset_class == "options":
-        occ = str((trade.metadata or {}).get("occ_symbol") or "").upper()
-        if occ and occ in symbols:
-            return True
-        if trade.symbol.upper() in opt_underlyings:
-            return True
-        # Same rule as reconciliation: without an OCC symbol or a sec-typed
-        # feed we cannot see options at all — don't guess.
-        return False if (occ or typed) else None
-    return trade.symbol.upper() in symbols
+        return _options_exposure(trade, positions)
+
+    mine = Decimal(1) if str(trade.side).upper() == "BUY" else Decimal(-1)
+    want = trade.symbol.upper()
+    lots = []
+    for p in positions:
+        sym = _row_field(p, "symbol")
+        if not sym or str(sym).upper() != want:
+            continue
+        sec = _row_field(p, "sec_type")
+        if sec is not None and str(sec).upper() == "OPT":
+            # An option under the same underlying symbol is a different
+            # instrument, and its size must never join this sum.
+            continue
+        lots.append(_position_size_and_side(p))
+
+    ours, against = Decimal(0), Decimal(0)
+    unmeasured = False          # named, and nothing here could size it
+    unsized_against = False     # named, no number, on the OTHER side
+
+    if len(lots) == 1:
+        # ONE LOT NEEDS NO SIDE. A direction decides something only when
+        # there is another lot to net against, and most feeds sign the
+        # quantity rather than naming a side — so demanding one here would
+        # read a perfectly ordinary book as unmeasured and stop the
+        # reconciliation that removes a phantom residual. A negative quantity
+        # is still honoured: _position_size_and_side reads the sign as the
+        # direction, and a lone SHORT lot against a long row is the
+        # offsetting case below.
+        size, direction = lots[0]
+        if size is None:
+            unmeasured = True
+        elif direction is None or direction == mine:
+            ours = size
+        else:
+            against = size
+    else:
+        for size, direction in lots:
+            if size is None:
+                # PRESENCE WITHOUT A NUMBER, beside at least one other lot.
+                # Unmeasured — and on the OTHER side it is evidence, because
+                # read as nothing it leaves `against` at 0 while a real
+                # offsetting position is open.
+                unmeasured = True
+                if direction is not None and direction != mine:
+                    unsized_against = True
+                continue
+            if direction is None:
+                # A size with no side, beside other lots: it cannot be
+                # attributed to a direction, so this book cannot be netted.
+                unmeasured = True
+                continue
+            if direction == mine:
+                ours += size
+            else:
+                against += size
+
+    if unsized_against:
+        return _unknown_exposure(
+            "the book holds this symbol on the OTHER side with no usable "
+            "quantity — an unmeasured offsetting lot read as nothing is how a "
+            "second live close gets sent")
+    if against > _POSITION_DUST:
+        return _unknown_exposure(
+            f"the broker holds {against} of {trade.symbol} on the OTHER side "
+            f"as well as {ours} on ours — under end-of-day netting the "
+            f"closing lot sits beside the lot it closed until the evening, so "
+            f"the book cannot say what is still this row's")
+    if ours > _POSITION_DUST and _siblings_claim(trade):
+        return _unknown_exposure(
+            f"another live row of this user claims {trade.symbol} on the same "
+            f"side, so the {ours} in the book cannot be attributed to this row")
+    if ours > _POSITION_DUST:
+        return {"state": POS_HELD, "qty": ours, "ambiguous": False, "why": ""}
+    if unmeasured:
+        # The symbol IS in the book and nothing here could size it. Not flat
+        # — that would book the row as fully filled — and not ambiguous
+        # either: the caller sizes from its own recorded arithmetic, which is
+        # what this function answered before it could net at all.
+        return {"state": POS_UNKNOWN, "qty": None, "ambiguous": False,
+                "why": "the book names this symbol with no usable quantity"}
+    return {"state": POS_FLAT, "qty": Decimal(0), "ambiguous": False, "why": ""}
+
+
+def broker_still_holds(trade, client):
+    """Does the broker still report this position? None = cannot tell.
+
+    Resubmitting a market close blindly is how a retry turns into a NEW naked
+    position in the opposite direction: if the original close actually filled
+    (and only the response was lost), or a protective leg fired in between,
+    the account is already flat. The three states of `broker_exposure`, in
+    this function's older two-and-a-half shape, for the callers that only
+    need presence.
+    """
+    state = broker_exposure(trade, client)["state"]
+    return (True if state == POS_HELD
+            else False if state == POS_FLAT else None)
 
 
 def broker_position_qty(trade, client):
@@ -527,33 +774,20 @@ def broker_position_qty(trade, client):
                        trade.symbol, e)
         return None
 
-    occ = str((trade.metadata or {}).get("occ_symbol") or "").upper()
-    want = {trade.symbol.upper()} | ({occ} if occ else set())
-    for p in positions:
-        sym = (p.get("symbol") if isinstance(p, dict)
-               else getattr(p, "symbol", None))
-        if not sym or str(sym).upper() not in want:
-            continue
-        for key in ("qty", "quantity", "position", "size"):
-            raw = (p.get(key) if isinstance(p, dict) else getattr(p, key, None))
-            amount = _decimal(raw)
-            if amount is not None:
-                # Absolute: a short is reported negative and the close order
-                # is sized in units, not in direction.
-                return abs(amount)
-        return None
-
-    # The symbol is not in the book the broker just handed us. That is a
-    # MEASUREMENT — zero held — not a failure to read, and conflating the two
-    # costs an order: a close that finished while we were cancelling its
-    # predecessor would report None, the residual would stay at its pre-cancel
-    # value, and a full-size market order would go out against a flat account.
-    #
-    # `broker_still_holds` owns the one case where absence really is unknown:
-    # an options row with no OCC symbol and an untyped feed cannot be seen at
-    # all, and it answers None there. Deferring to it keeps that judgement in
-    # one place instead of two that can drift.
-    return Decimal(0) if broker_still_holds(trade, client) is False else None
+    exposure = broker_exposure(trade, client)
+    if exposure["state"] == POS_FLAT:
+        # The symbol is not in the book the broker just handed us. That is a
+        # MEASUREMENT — zero held — not a failure to read, and conflating the
+        # two costs an order: a close that finished while we were cancelling
+        # its predecessor would report None, the residual would stay at its
+        # pre-cancel value, and a full-size market order would go out against
+        # a flat account.
+        return Decimal(0)
+    # HELD carries the size — itself None for a feed that names the symbol and
+    # no quantity, and for every options row — and UNKNOWN has no size by
+    # definition. Neither may become a 0 here: an unmeasured size read as zero
+    # remaining would book the whole position as filled.
+    return exposure["qty"] if exposure["state"] == POS_HELD else None
 
 
 def _submit_close(trade, client):
@@ -599,9 +833,16 @@ def _submit_close(trade, client):
         from bot_program.asset_engine.options_bot import submit_option_close
         return submit_option_close(client, trade,
                                    client_order_id=client_order_id)
+    # THROUGH venue_close, never straight to market_order. On eToro an
+    # "opposite market order" is an OPENING order — its API separates opening
+    # from closing — and on Saxo under FifoEndOfDay it leaves both lots live,
+    # so this resubmit used to add a second position while the row booked
+    # CLOSED over double exposure. venue_close raises rather than send one,
+    # and _after_failed_attempt already knows what to do with a raise.
+    from bot_program.engine.venue_close import close_or_refuse
     close_side = "SELL" if trade.side == "BUY" else "BUY"
-    return client.market_order(trade.symbol, close_side, float(qty),
-                               client_order_id=client_order_id)
+    return close_or_refuse(trade, client, float(qty), close_side=close_side,
+                           client_order_id=client_order_id)
 
 
 def _cancel_working_close(trade, client) -> bool:
@@ -803,6 +1044,75 @@ def _note_session_busy(trade) -> None:
         trade.save(update_fields=["metadata"])
     except Exception as e:  # noqa: BLE001
         logger.warning("session-busy alert failed for #%s: %s", trade.id, e)
+
+
+#: How long a row may go on refusing to send a close before the operator is
+#: told, and how often the log repeats while it does. A drain that never even
+#: ATTEMPTS is as stuck as one the broker refuses, and silence there is the
+#: failure this module exists to prevent.
+CLOSE_BLOCKED_ALERT_AFTER_MINUTES = 45
+CLOSE_BLOCKED_RELOG_MINUTES = 60
+
+
+def _note_close_blocked(trade, why: str) -> None:
+    """Record a pass that deliberately sent NOTHING, and escalate a stall.
+
+    Deliberately NOT `_after_failed_attempt`: nothing was sent and nothing
+    was refused, so this must not spend the MAX_RETRY_ATTEMPTS budget. That
+    matters, because both things that block here resolve themselves later in
+    the day — an offsetting lot nets at the evening netting, an in-doubt
+    order gets an answer — and a row driven to ERROR first would be left
+    permanently unbooked: no exit price, no pnl, no grade, and "stranded,
+    STILL OPEN at the broker" printed about a position that is already flat.
+
+    The log repeats hourly rather than once: a single line at 03:00 about a
+    row that is still blocked at noon is a line nobody sees.
+    """
+    from datetime import datetime as _dt
+
+    meta = dict(trade.metadata or {})
+    now = timezone.now()
+    first = meta.get("close_blocked_since")
+    if not first:
+        meta["close_blocked_since"] = now.isoformat()
+        first = meta["close_blocked_since"]
+    meta["close_blocked_at"] = now.isoformat()
+    meta["close_blocked_why"] = str(why)[:300]
+    meta["close_blocked_passes"] = int(meta.get("close_blocked_passes") or 0) + 1
+
+    def _minutes_since(stamp):
+        try:
+            return (now - _dt.fromisoformat(str(stamp))).total_seconds() / 60.0
+        except (TypeError, ValueError):
+            return None
+
+    said = meta.get("close_blocked_logged_at")
+    since_log = _minutes_since(said) if said else None
+    if since_log is None or since_log >= CLOSE_BLOCKED_RELOG_MINUTES:
+        logger.error("close retry #%s for %s: sending NOTHING — %s",
+                     trade.id, trade.symbol, why)
+        meta["close_blocked_logged_at"] = now.isoformat()
+
+    stalled = _minutes_since(first)
+    if (stalled is not None and stalled >= CLOSE_BLOCKED_ALERT_AFTER_MINUTES
+            and not meta.get("close_blocked_alerted")):
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title=f"⚠ {trade.symbol}: the close is being held back",
+                body=(f"Trade #{trade.id} has been CLOSE_PENDING for "
+                      f"{int(stalled)} minutes and every pass has refused to "
+                      f"send a close: {why}. NOTHING has been sent — a second "
+                      f"order here would reverse the position rather than "
+                      f"close it. Read the broker's own position list and "
+                      f"order list before acting."),
+                url="/positions/")
+            meta["close_blocked_alerted"] = True
+        except Exception as e:  # noqa: BLE001 — an alert must not block a drain
+            logger.warning("close-blocked alert failed for #%s: %s",
+                           trade.id, e)
+    trade.metadata = meta
+    trade.save(update_fields=["metadata"])
 
 
 def _after_failed_attempt(trade, error: str) -> int:
@@ -1064,12 +1374,42 @@ def retry_trade_close(trade) -> bool:
     # If the broker says the position is already gone, the original close
     # (or a protective leg) did fill — finalise instead of sending another
     # order that would open a naked reverse position.
-    if broker_still_holds(trade, client) is False:
+    #
+    # THIS RUNS FIRST ON EVERY PASS, before the two blocks below, because a
+    # book with the position gone is the best possible resolution of both:
+    # under end-of-day netting it is exactly what the evening produces.
+    exposure = broker_exposure(trade, client)
+    if exposure["state"] == POS_FLAT:
         logger.info("close retry: broker no longer holds #%s (%s) — "
                     "finalising without a new order", trade.id, trade.symbol)
         # No order was sent, so there is no fill to read: the remainder is
         # booked at the current mark and flagged as such.
         return _finalise_flat(trade, client, reason="RETRY_ALREADY_FLAT")
+
+    # A CLOSE THE VENUE NEVER CONFIRMED OUTRANKS EVERY MOVE BELOW. The venue
+    # answered 202 for the placement — "this order may exist" — and the
+    # cancel-and-resend path below cannot help, because a cancel proves
+    # nothing about an order the venue never admitted holding: the resend
+    # would be a second live close for one intent. Nothing here can retire
+    # the doubt either; the only thing that does is the book going flat,
+    # which the escape above reads on every pass.
+    doubt = (trade.metadata or {}).get(CLOSE_IN_DOUBT_KEY)
+    if isinstance(doubt, dict) and doubt:
+        _note_close_blocked(
+            trade, f"a close for this row may already be live at the broker "
+                   f"(order {doubt.get('order_id') or '(none)'}, reference "
+                   f"{doubt.get('reference') or '(none)'}) and the venue has "
+                   f"not resolved it")
+        return False
+
+    # THE BOOK WAS READ AND IT CANNOT SAY WHAT IS STILL THIS ROW'S — both
+    # sides of the symbol are open, or a lot names no size, or a sibling row
+    # claims the same units. Sending here is precisely what turned a flatten
+    # into a THIRD full-size order. Nothing is sent and nothing is booked; a
+    # later pass reads `flat` once the netting has run.
+    if exposure["state"] == POS_UNKNOWN and exposure["ambiguous"]:
+        _note_close_blocked(trade, exposure["why"])
+        return False
 
     # The previous attempt may have left an order alive at the broker (an
     # accepted market close that had not printed when we read it). Clear it

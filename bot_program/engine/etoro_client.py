@@ -499,6 +499,14 @@ class EtoroTrader:
                     "statusName": STATUS_NAMES.get(status_id, str(status_id))},
         }
         position_id = first.get("positionId") or first.get("positionID")
+        if position_id:
+            # THE HANDLE THE CLOSE NEEDS, on every fill. It used to be
+            # reported only beside an accepted bracket (below), so exactly
+            # the rows whose bracket eToro refused had nothing to close BY —
+            # and at this venue a close without a position id cannot be sent
+            # at all. Reported under its own key rather than as
+            # protectiveTradeId, because it is not a claim about protection.
+            out["positionId"] = str(position_id)
         if protected and filled_units > 0 and position_id:
             # Protection rides the POSITION, as on OANDA: nothing to cancel,
             # and the position id is the handle for moving the legs later.
@@ -544,6 +552,22 @@ class EtoroTrader:
         return res
 
     # ── closing ────────────────────────────────────────────────────────────
+
+    def close_needs_position_id(self) -> bool:
+        """ALWAYS true here, and it is not a netting profile.
+
+        market_order sends {"action": "open", ...} and has no close branch —
+        eToro's API separates the two — so an "opposite market order", which
+        is what the engine's default close is, OPENS a position instead of
+        closing one: a SELL becomes `sellShort` beside the long. The row then
+        books CLOSED at that fill while the account holds DOUBLE, hedged,
+        paying both spreads.
+
+        The engine asks this before every close and closes by PositionId when
+        the answer is yes, through close_position below — the market-close
+        endpoint, which is the only thing at eToro that reduces a position.
+        """
+        return True
 
     def close_position(self, position_id: str, symbol: str,
                        units: Optional[float] = None) -> dict:
