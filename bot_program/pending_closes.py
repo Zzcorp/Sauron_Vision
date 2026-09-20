@@ -323,7 +323,7 @@ def paper_exit_fill(trade, price: Decimal) -> dict:
     }
 
 
-def resolve_exit_fill(trade, result, *, mark) -> dict:
+def resolve_exit_fill(trade, result, *, mark, mark_info=None) -> dict:
     """What a LIVE close actually got — price AND quantity — from the broker.
 
     Mirrors the entry path: prefer what the broker reports, fall back to the
@@ -433,6 +433,19 @@ def resolve_exit_fill(trade, result, *, mark) -> dict:
         CLOSE_WORKING_ORDER_ID_KEY: (str(result.get("orderId") or "")
                                      if working else ""),
     }
+    # THE QUALITY OF THE PRICE THIS ROW BOOKED, and only when the MARK is what
+    # it booked: a row whose exit came from the broker's own fill must not
+    # carry a delay that belonged to a mark nobody used. Cleared on the broker
+    # branch for the same reason — an earlier attempt may have written it.
+    # Named mark_info rather than mark_quality: the reader of
+    # that name is the module-level function, and a parameter
+    # shadowing it here is a trap for the next edit.
+    _quality = dict(mark_info or {})
+    if source == EXIT_SOURCE_MARK and _quality:
+        meta.update(_quality)
+    else:
+        meta[MARK_DELAY_MINUTES_KEY] = None
+        meta[MARK_DELAYED_KEY] = None
     if order_in_doubt(result):
         # THE VENUE WOULD NOT SAY WHETHER THIS CLOSE EXISTS. Written here,
         # where the answer arrives, because the pass that learns of the doubt
@@ -455,6 +468,63 @@ def resolve_exit_fill(trade, result, *, mark) -> dict:
 
 
 # ── the CLOSE_PENDING retry loop ────────────────────────────────────────
+
+#: What the exit metadata says about the quality of a mark it booked.
+#: THREE STATES, because the feeds answer in three ways: a number of minutes
+#: when the venue says how stale the print is (Saxo's DelayedByMinutes), the
+#: bare flag when it says stale without saying how much (IBKR falling back to
+#: delayed data), and the ABSENCE of both when the feed never mentioned delay —
+#: which is not the same as real-time and must not be written as 0.
+MARK_DELAY_MINUTES_KEY = "mark_delayed_minutes"
+MARK_DELAYED_KEY = "mark_delayed"
+
+
+def mark_quality(tick) -> dict:
+    """{} , {"mark_delayed_minutes": n} or {"mark_delayed": True} from a tick.
+
+    Read off whatever the adapter reports beside the price. Saxo names the
+    minutes; IBKR names only that it fell back to delayed data; the paper
+    trader and the rest say nothing, and saying nothing stays nothing.
+    """
+    if not isinstance(tick, dict):
+        return {}
+    raw = tick.get("delayed_minutes")
+    if raw is not None:
+        try:
+            minutes = int(raw)
+        except (TypeError, ValueError):
+            minutes = None
+        if minutes is not None and minutes > 0:
+            return {MARK_DELAY_MINUTES_KEY: minutes}
+        if minutes is not None:
+            return {}          # the venue said 0: a real-time print
+    if tick.get("delayed"):
+        return {MARK_DELAYED_KEY: True}
+    return {}
+
+
+def mark_with_quality(trade, client):
+    """(mark, quality) — the price this module would book, and what it is.
+
+    Exists because three paths here book the mark AS the exit price, and a
+    number whose staleness nobody recorded cannot be told afterwards from a
+    live print. `_mark_price` keeps its own signature and delegates.
+    """
+    if trade.asset_class == "options":
+        # The premium reader owns its own sourcing and reports no delay.
+        return _mark_price(trade, client), {}
+    try:
+        tick = client.ticker(trade.symbol) or {}
+    except Exception:  # noqa: BLE001 — an unreadable tick is no mark
+        return None, {}
+    try:
+        last = float(tick.get("lastPrice", 0) or 0)
+    except (TypeError, ValueError):
+        return None, mark_quality(tick)
+    if last <= 0:
+        return None, mark_quality(tick)
+    return Decimal(str(last)), mark_quality(tick)
+
 
 def _mark_price(trade, client) -> Optional[Decimal]:
     """Current price on the trade's own scale, or None when there isn't one.
@@ -1319,7 +1389,8 @@ def _finalise_flat(trade, client, *, reason: str) -> bool:
 
     It waits with a voice, not in silence — hourly, and with the truth.
     """
-    mark = _decimal(_mark_price(trade, client))
+    mark, mark_q = mark_with_quality(trade, client)
+    mark = _decimal(mark)
     if mark is None or mark <= 0:
         logger.error(
             "close retry #%s: the broker is flat but no price could be read "
@@ -1329,7 +1400,8 @@ def _finalise_flat(trade, client, *, reason: str) -> bool:
         _alert_unpriced(trade)
         return False
     _finalise_closed(trade,
-                     fill=resolve_exit_fill(trade, None, mark=mark),
+                     fill=resolve_exit_fill(trade, None, mark=mark,
+                                            mark_info=mark_q),
                      reason=reason)
     return True
 
@@ -1456,7 +1528,9 @@ def retry_trade_close(trade) -> bool:
         _after_failed_attempt(trade, str(e))
         return False
 
-    fill = resolve_exit_fill(trade, result, mark=_mark_price(trade, client))
+    _retry_mark, _retry_q = mark_with_quality(trade, client)
+    fill = resolve_exit_fill(trade, result, mark=_retry_mark,
+                             mark_info=_retry_q)
     if not fill["complete"]:
         logger.error("close retry #%s for %s filled %s of %s — %s is still "
                      "open at the broker; staying CLOSE_PENDING",

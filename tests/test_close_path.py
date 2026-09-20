@@ -779,3 +779,98 @@ class TheStopMoveTriesEveryHandleTests(TestCase):
         self.assertFalse(ok)
         self.assertIn("P1:", note)
         self.assertIn("S1:", note)
+
+
+# ── a delayed print, recorded as one ────────────────────────────────────
+
+class ADelayedMarkSaysSoTests(TestCase):
+    """SaxoTrader returns the delay beside every price and the platform read
+    neither field, so a 15-minute-old print became the recorded exit price with
+    nothing saying it was an estimate. On SIM that delay is the NORMAL state of
+    every CFD: FX is real-time, everything else is delayed or NoAccess unless
+    the demo account is linked to a funded live one."""
+
+    def setUp(self):
+        self.user = _user("delay_u")
+        self.cfg = _cfg(self.user, name="DELAY")
+
+    def test_the_three_states_of_a_tick(self):
+        from bot_program.pending_closes import mark_quality
+        self.assertEqual(mark_quality({"lastPrice": "1", "delayed_minutes": 15}),
+                         {"mark_delayed_minutes": 15})
+        self.assertEqual(mark_quality({"lastPrice": "1", "delayed": True}),
+                         {"mark_delayed": True})
+        # The venue SAID zero: a real-time print, and nothing to record.
+        self.assertEqual(mark_quality({"lastPrice": "1", "delayed_minutes": 0}),
+                         {})
+        # The feed never mentioned delay, which is not the same as real-time —
+        # and still nothing to claim.
+        self.assertEqual(mark_quality({"lastPrice": "1"}), {})
+        self.assertEqual(mark_quality(None), {})
+
+    def test_an_exit_booked_from_a_delayed_mark_records_the_delay(self):
+        from bot_program.pending_closes import resolve_exit_fill
+        trade = _trade(self.cfg, status="CLOSE_PENDING",
+                       metadata={"initial_stop_loss": 98.0})
+        fill = resolve_exit_fill(trade, None, mark=Decimal("97"),
+                                 mark_info={"mark_delayed_minutes": 15})
+        self.assertEqual(fill["source"], "mark")
+        self.assertEqual(fill["metadata"]["mark_delayed_minutes"], 15)
+
+    def test_an_exit_booked_from_the_brokers_own_fill_carries_no_delay(self):
+        """A row whose exit came from the fill must not carry a delay that
+        belonged to a mark nobody used."""
+        from bot_program.pending_closes import resolve_exit_fill
+        trade = _trade(self.cfg, status="CLOSE_PENDING",
+                       metadata={"initial_stop_loss": 98.0})
+        fill = resolve_exit_fill(trade, {"status": "FILLED", "avgPrice": "96",
+                                         "executedQty": "10"},
+                                 mark=Decimal("97"),
+                                 mark_info={"mark_delayed_minutes": 15})
+        self.assertEqual(fill["source"], "broker")
+        self.assertIsNone(fill["metadata"]["mark_delayed_minutes"])
+
+    def test_the_reader_carries_the_delay_off_the_tick(self):
+        from bot_program.pending_closes import mark_with_quality
+        trade = _trade(self.cfg, metadata={"initial_stop_loss": 98.0})
+        client = mock.MagicMock(spec=["ticker"])
+        client.ticker.return_value = {"lastPrice": "97.5",
+                                      "delayed_minutes": 15}
+        mark, quality = mark_with_quality(trade, client)
+        self.assertEqual(mark, Decimal("97.5"))
+        self.assertEqual(quality, {"mark_delayed_minutes": 15})
+
+    def test_an_unpriced_tick_still_reports_what_it_knew(self):
+        """lastPrice 0 is Saxo's NoAccess answer, and the delay it reported
+        beside it is still a fact about the feed."""
+        from bot_program.pending_closes import mark_with_quality
+        trade = _trade(self.cfg, metadata={"initial_stop_loss": 98.0})
+        client = mock.MagicMock(spec=["ticker"])
+        client.ticker.return_value = {"lastPrice": "0", "delayed_minutes": 20}
+        mark, quality = mark_with_quality(trade, client)
+        self.assertIsNone(mark)
+        self.assertEqual(quality, {"mark_delayed_minutes": 20})
+
+    def test_a_ticker_that_raises_is_no_mark_and_no_claim(self):
+        from bot_program.pending_closes import mark_with_quality
+        trade = _trade(self.cfg, metadata={"initial_stop_loss": 98.0})
+        client = mock.MagicMock(spec=["ticker"])
+        client.ticker.side_effect = RuntimeError("no session")
+        self.assertEqual(mark_with_quality(trade, client), (None, {}))
+
+    def test_the_flat_finalise_records_the_delay_it_booked(self):
+        """This is the path the finding names: the broker is already flat,
+        there is no fill to read, and the mark IS the exit price."""
+        from bot_program.pending_closes import retry_trade_close
+        trade = _trade(self.cfg, status="CLOSE_PENDING",
+                       metadata={"initial_stop_loss": 98.0})
+        client = _client({"status": "FILLED"}, last="97")
+        client.ticker = mock.MagicMock(return_value={"lastPrice": "97",
+                                                     "delayed_minutes": 15})
+        client.get_positions = mock.MagicMock(return_value=[])
+        with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                        return_value=client):
+            retry_trade_close(trade)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        self.assertEqual(trade.metadata["mark_delayed_minutes"], 15)
