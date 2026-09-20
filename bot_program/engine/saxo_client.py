@@ -436,12 +436,28 @@ class SaxoTrader:
         _DETAILS_CACHE[key] = out
         return out
 
-    def _symbol_for(self, uic, atype: str, display: Optional[dict] = None) -> str:
+    def _symbol_and_named(self, uic, atype: str,
+                          display: Optional[dict] = None) -> tuple:
+        """(name, did anything actually name it).
+
+        Saxo normally does name it: `_positions` asks for DisplayAndFormat
+        and the module-level map survives the client, so this venue does not
+        have eToro's cold-read problem. The fallback `UIC{n}` is the same
+        shape of answer though, and a name nothing can match is read
+        downstream as "the position is gone" — so the contract is uniform
+        here rather than left for the next reader to find. `_symbol_for`
+        keeps its signature and delegates.
+        """
         cached = _SYMBOL_BY_UIC.get((int(uic or 0), str(atype)))
         if cached:
-            return cached
+            return cached, True
         s = str((display or {}).get("Symbol") or "")
-        return s.split(":")[0].upper() if s else f"UIC{uic}"
+        if s:
+            return s.split(":")[0].upper(), True
+        return f"UIC{uic}", False
+
+    def _symbol_for(self, uic, atype: str, display: Optional[dict] = None) -> str:
+        return self._symbol_and_named(uic, atype, display)[0]
 
     @staticmethod
     def _tick(details: dict, kind: str, price: float) -> Optional[float]:
@@ -660,15 +676,21 @@ class SaxoTrader:
             amt = float(base.get("Amount") or 0)
             if amt == 0:
                 continue
-            out.append({
-                "symbol": self._symbol_for(base.get("Uic"), base.get("AssetType"),
-                                           p.get("DisplayAndFormat")),
+            sym, named = self._symbol_and_named(
+                base.get("Uic"), base.get("AssetType"),
+                p.get("DisplayAndFormat"))
+            row = {
+                "symbol": sym,
                 "qty": abs(amt), "side": "BUY" if amt > 0 else "SELL",
                 "position_id": str(p.get("PositionId") or ""),
                 "entry": float(base.get("OpenPrice") or 0),
                 "current": float(view.get("CurrentPrice") or 0),
                 "pnl": float(view.get("ProfitLossOnTrade") or 0),
-            })
+            }
+            if not named:
+                # Unmeasured, not absent — see EtoroTrader._named.
+                row["symbol_unresolved"] = True
+            out.append(row)
         return out
 
     def broker_portfolio(self) -> "list[dict] | None":

@@ -1050,7 +1050,18 @@ class AssetBot(ABC):
         cache = getattr(self, "_tick_broker_cache", None)
         if cache is None:
             cache = self._tick_broker_cache = {}
-        key = (what, id(client))
+        # KEYED ON THE VENUE, NEVER ON THE OBJECT'S ADDRESS. `client` is
+        # rebound per row inside manage_positions and this cache keeps no
+        # reference to the old one, so a freed client's id() can be handed
+        # straight to the next — CPython reuses addresses for same-size
+        # objects — and the hit would then answer one venue's row out of
+        # another venue's book. The worst consumer of that is the in-doubt
+        # close, which reads False as "flat, send nothing". One venue, one
+        # read per pass is also exactly what the docstring above promises.
+        # adapter_key answers "" for a class it does not know, so the class
+        # name is the fallback rather than one shared empty bucket.
+        from bot_program.engine.capabilities import adapter_key
+        key = (what, adapter_key(client) or type(client).__name__)
         if key in cache:
             return cache[key]
         value = None
@@ -1102,6 +1113,14 @@ class AssetBot(ABC):
                 and (not want_types or not p.get("sec_type")
                      or str(p.get("sec_type", "")).upper() in want_types)]
         if not mine:
+            # NOT NAMED IS NOT NOT THERE. False is read by the in-doubt
+            # branch as a positive "the broker is flat and nothing is sent",
+            # so a close that may never have landed would never be re-sent.
+            # None is this docstring's own "cannot say" and every caller
+            # already handles it.
+            if any(p.get("symbol_unresolved") is True for p in positions
+                   if isinstance(p, dict)):
+                return None
             return False
         # Side matters: a SELL row is not held by a long position, and
         # closing it would double the long rather than flatten a short.

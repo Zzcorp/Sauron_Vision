@@ -26,7 +26,7 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
-def _broker_open_symbols(client, *, asset_class: str) -> dict:
+def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
     """Best-effort broker open-position state.
 
     Returns None if the broker doesn't expose enough state (we won't
@@ -38,10 +38,34 @@ def _broker_open_symbols(client, *, asset_class: str) -> dict:
                          (IBKR provides sec_type per position).
       has_sec_types    — True when the client annotates security types,
                          i.e. opt_underlyings is a meaningful signal.
+      unnamed          — how many open positions this client could not put
+                         a platform symbol on. NOT in `symbols`, because
+                         matching on `ETORO:1001` is matching on nothing —
+                         and counted, because every caller reads a miss in
+                         `symbols` as "the broker is flat" and closes the
+                         row on it.
+
+    `warm` is the symbols this reader is about to ask about. eToro names a
+    position only from the reverse map the client itself filled and the
+    router hands out a fresh client per call, so without the warm a reader
+    that placed no order can never confirm a position IS open either — it
+    would answer "unreadable" for ever, which is its own kind of blind.
     """
     # Alpaca exposes /v2/positions; OANDA via /v3/accounts/.../openPositions;
     # IBKR via positions(); Binance via positionRisk. The exact API varies —
     # we use a duck-typed `get_positions()` if present, else None.
+    # WARM THE VENUE'S NAME FIRST, through the adapter's own method — the
+    # same one an order uses. Failures are not fatal and are not silent
+    # either: whatever the warm missed is counted as `unnamed` below.
+    name_it = getattr(client, "instrument_id", None)
+    if callable(name_it):
+        for sym in (warm or ()):
+            try:
+                name_it(sym)
+            except Exception as e:  # noqa: BLE001 — the count is the net
+                logger.debug("reconcile: %s cannot name %s (%s)",
+                             type(client).__name__, sym, e)
+
     fn = getattr(client, "get_positions", None)
     if not callable(fn):
         return None
@@ -52,12 +76,19 @@ def _broker_open_symbols(client, *, asset_class: str) -> dict:
                        type(client).__name__, e)
         return None
     symbols, opt_underlyings, has_sec_types = set(), set(), False
+    unnamed = 0
     for p in positions:
         if isinstance(p, dict):
             sym, sec = p.get("symbol"), p.get("sec_type")
+            unresolved = p.get("symbol_unresolved") is True
         else:
             sym, sec = getattr(p, "symbol", None), getattr(p, "sec_type", None)
-        if not sym:
+            unresolved = getattr(p, "symbol_unresolved", None) is True
+        # `is True` and not a truth test: a MagicMock answers any attribute
+        # with a truthy object, and a reader that believed it would report
+        # every position in every test as unnameable.
+        if not sym or unresolved:
+            unnamed += 1
             continue
         sym = str(sym).upper()
         symbols.add(sym)
@@ -66,7 +97,7 @@ def _broker_open_symbols(client, *, asset_class: str) -> dict:
             if str(sec).upper() == "OPT":
                 opt_underlyings.add(sym)
     return {"symbols": symbols, "opt_underlyings": opt_underlyings,
-            "has_sec_types": has_sec_types}
+            "has_sec_types": has_sec_types, "unnamed": unnamed}
 
 
 def _options_row_open_at_broker(trade, state: dict):
@@ -108,6 +139,14 @@ def reconcile_user(user) -> dict:
     # trades share the same broker, no need to query per row.
     cache: dict = {}
 
+    # WHAT TO WARM BEFORE ASKING, per class, because the read below is
+    # cached across rows and only the first row would otherwise warm
+    # anything. The queryset is already evaluated by this second walk.
+    by_class: dict = {}
+    for _row in qs:
+        if _row.symbol:
+            by_class.setdefault(_row.asset_class, set()).add(_row.symbol)
+
     for trade in qs:
         # A WORKING entry is an ORDER, not a position: the broker correctly
         # reports no position for it, and closing it as an orphan would
@@ -124,7 +163,8 @@ def reconcile_user(user) -> dict:
             cache_key = (trade.asset_class, type(client).__name__)
             if cache_key not in cache:
                 cache[cache_key] = _broker_open_symbols(
-                    client, asset_class=trade.asset_class)
+                    client, asset_class=trade.asset_class,
+                    warm=by_class.get(trade.asset_class, ()))
             state = cache[cache_key]
             if state is None:
                 # Broker doesn't expose state — can't reconcile this row.
@@ -138,6 +178,21 @@ def reconcile_user(user) -> dict:
                     continue
             else:
                 open_at_broker = trade.symbol.upper() in state["symbols"]
+
+            if not open_at_broker and state.get("unnamed"):
+                # A MISS AGAINST A BOOK WE COULD NOT READ IS NOT AN ABSENCE.
+                # The venue listed positions this client could not name, so
+                # one of them may be this row. Orphan-closing here books a
+                # live position CLOSED, labelled manual_close, at a mark
+                # nobody filled at — and the label then means nothing on
+                # this venue for ever after.
+                out["broker_unavailable"] += 1
+                logger.warning(
+                    "reconcile: #%s (%s/%s) NOT orphan-closed — %s listed %d "
+                    "position(s) it could not name, so a miss proves nothing",
+                    trade.id, trade.asset_class, trade.symbol,
+                    type(client).__name__, state["unnamed"])
+                continue
 
             if not open_at_broker:
                 # DB says OPEN but broker says no position — orphan close.
@@ -409,7 +464,8 @@ def reconcile_unknown_positions(user) -> dict:
         seen_clients.add(key)
         out["checked"] += 1
 
-        state = _broker_open_symbols(client, asset_class=cfg.asset_class)
+        state = _broker_open_symbols(client, asset_class=cfg.asset_class,
+                                     warm=symbols)
         if state is None:
             # UNREADABLE is not EMPTY. Treating an unreachable broker as
             # "no positions" would report a clean sweep of a book nobody
@@ -419,6 +475,18 @@ def reconcile_unknown_positions(user) -> dict:
                            "not reporting a clean sweep of a book nobody "
                            "could read", venue)
             continue
+
+        if state.get("unnamed"):
+            # UNNAMED IS NOT UNCLAIMED. A position this client could not name
+            # cannot be compared to any row, and reporting it as
+            # "ETORO:1001 is unclaimed" hands a human a name they cannot look
+            # up — which is how the one true alarm stops being believed. The
+            # named part of the book is still compared below: part measured,
+            # part not, which is the honest shape.
+            out["broker_unavailable"] += 1
+            logger.error("unknown-position sweep: %s holds %d position(s) it "
+                         "could not name — that part of the book is "
+                         "unreadable, not clean", venue, state["unnamed"])
 
         held = {str(x).upper() for x in (state.get("symbols") or set())}
         unclaimed = sorted(held - claimed)

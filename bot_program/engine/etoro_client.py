@@ -230,6 +230,23 @@ class EtoroTrader:
             return str(instrument_id)
         return self._symbols.get(iid, f"ETORO:{iid}")
 
+    def _named(self, instrument_id) -> bool:
+        """Can THIS client put a platform symbol on that instrument id?
+
+        The reverse map is warm only for the symbols this instance itself
+        resolved, and the router builds a fresh client for every call
+        (broker_router.py:229) — so a reader that placed no order sees a
+        book it cannot name. `get_positions` says so beside the name
+        instead of letting `ETORO:1001` travel as though it were a symbol:
+        every consumer compares that name against the platform's spelling
+        and reads a miss as "the position is gone", which books a live row
+        CLOSED.
+        """
+        try:
+            return int(instrument_id) in self._symbols
+        except (TypeError, ValueError):
+            return False
+
     # ── market data ────────────────────────────────────────────────────────
 
     def ping(self) -> bool:
@@ -357,14 +374,21 @@ class EtoroTrader:
             qty = float(p.get("units") or 0)
             if qty == 0:
                 continue
-            out.append({
-                "symbol": self._symbol_for(p.get("instrumentID")
-                                           or p.get("instrumentId")),
+            iid = p.get("instrumentID") or p.get("instrumentId")
+            row = {
+                "symbol": self._symbol_for(iid),
                 "qty": abs(qty),
                 "side": "BUY" if p.get("isBuy", True) else "SELL",
                 "position_id": str(p.get("positionID") or p.get("positionId")
                                    or ""),
-            })
+            }
+            if not self._named(iid):
+                # THREE STATES. eToro holds this; what it is called HERE is
+                # unmeasured. Not a symbol, and above all not an absence —
+                # the readers that compare this name book a row CLOSED on a
+                # miss.
+                row["symbol_unresolved"] = True
+            out.append(row)
         return out
 
     def broker_portfolio(self) -> "list[dict] | None":

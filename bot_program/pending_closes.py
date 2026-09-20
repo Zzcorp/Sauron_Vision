@@ -710,6 +710,19 @@ def broker_exposure(trade, client) -> dict:
     that cannot be read at all. UNKNOWN means this module sends nothing and
     books nothing.
     """
+    # WARM THE NAME BEFORE ASKING. eToro answers with instrumentIds and
+    # names them only from the map this client filled; the router builds a
+    # fresh client per call, so without this the book reads ETORO:1001 and
+    # the symbol compare below can never match — which resolves as FLAT and
+    # books this row CLOSED. `instrument_id` is the adapter's own method.
+    name_it = getattr(client, "instrument_id", None)
+    if callable(name_it):
+        try:
+            name_it(trade.symbol)
+        except Exception as e:  # noqa: BLE001 — the unnamed count is the net
+            logger.debug("close retry: %s cannot name %s (%s)",
+                         type(client).__name__, trade.symbol, e)
+
     fn = getattr(client, "get_positions", None)
     if not callable(fn):
         return _unknown_exposure("this broker client cannot list positions")
@@ -726,8 +739,14 @@ def broker_exposure(trade, client) -> dict:
     mine = Decimal(1) if str(trade.side).upper() == "BUY" else Decimal(-1)
     want = trade.symbol.upper()
     lots = []
+    unnamed = 0
     for p in positions:
         sym = _row_field(p, "symbol")
+        # `is True` deliberately: _row_field falls back to getattr, and a
+        # MagicMock answers any attribute with a truthy object.
+        if _row_field(p, "symbol_unresolved") is True:
+            unnamed += 1
+            continue
         if not sym or str(sym).upper() != want:
             continue
         sec = _row_field(p, "sec_type")
@@ -802,6 +821,15 @@ def broker_exposure(trade, client) -> dict:
         # what this function answered before it could net at all.
         return {"state": POS_UNKNOWN, "qty": None, "ambiguous": False,
                 "why": "the book names this symbol with no usable quantity"}
+    if unnamed:
+        # NOTHING MATCHED, AND PART OF THE BOOK WAS UNREADABLE. FLAT here is
+        # a measurement the caller acts on: `_finalise_flat` books the row
+        # CLOSED at the current mark without sending anything. One of the
+        # positions this client could not name may be the one this row is
+        # waiting to see gone.
+        return _unknown_exposure(
+            f"{unnamed} position(s) in the book could not be named by this "
+            f"client, so nothing here proves this row is flat")
     return {"state": POS_FLAT, "qty": Decimal(0), "ambiguous": False, "why": ""}
 
 
