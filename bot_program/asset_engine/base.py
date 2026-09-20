@@ -411,6 +411,25 @@ class AssetBot(ABC):
 
                 price = self._mark_price(trade, client)
                 if price is None or price <= 0:
+                    # NOT SILENT. Everything below this line is skipped for
+                    # the life of the position — the time stop, the vanished-
+                    # stop net, break-even, trailing, bot-side SL/TP — and a
+                    # Saxo SIM quote of 0 (NoAccess on an unlinked demo, which
+                    # is every CFD) reaches here on every tick. The time stop
+                    # needs no price and should run above this gate; that
+                    # reorder is the next step, and this is the line that
+                    # makes its absence visible instead of silent.
+                    logger.warning("[%s_bot] %s: no usable mark from the "
+                                   "broker — NOTHING is managed on this "
+                                   "position this tick (no time stop, no "
+                                   "stop move, no bot-side SL/TP)",
+                                   self.asset_class, trade.symbol)
+                    try:
+                        skips.record(self.cfg, trade.symbol, skips.NO_PRICE,
+                                     "open position unmanaged: the broker "
+                                     "priced it at 0")
+                    except Exception:  # noqa: BLE001
+                        pass
                     continue
 
                 # The time stop runs for protected trades too. It is the one
@@ -534,6 +553,46 @@ class AssetBot(ABC):
             return 0.0
         return (timezone.now() - started).total_seconds() / 3600.0
 
+    #: How long a symbol whose order MAY be live is left alone. Long
+    #: enough for a human to look, short enough that the bot is not
+    #: silently retired by one network blip. The alert says the number.
+    IN_DOUBT_QUIET_HOURS = 12
+
+    def _remember_in_doubt(self, symbol: str, reference: str) -> None:
+        """Note on the config that `symbol` has an order nobody can account
+        for. Read by propose_entry, which refuses the symbol while it is
+        fresh — because the idempotency key buckets by the minute, so the
+        next tick would send a SECOND order under a new reference."""
+        try:
+            extras = dict(self.cfg.extras or {})
+            book = dict(extras.get("entry_in_doubt") or {})
+            book[str(symbol).upper()] = {
+                "reference": reference,
+                "at": timezone.now().isoformat(),
+            }
+            extras["entry_in_doubt"] = book
+            self.cfg.extras = extras
+            self.cfg.save(update_fields=["extras"])
+        except Exception as e:  # noqa: BLE001 — a lost note must not raise
+            logger.warning("[%s_bot] could not record the in-doubt order for "
+                           "%s: %s", self.asset_class, symbol, e)
+
+    def _in_doubt_note(self, symbol: str):
+        """The fresh in-doubt note for `symbol`, or None. Expires by itself:
+        a note that never expired would retire the symbol permanently, which
+        is the failure mode this whole file argues against."""
+        try:
+            book = (self.cfg.extras or {}).get("entry_in_doubt") or {}
+            note = book.get(str(symbol).upper())
+            if not note:
+                return None
+            from datetime import datetime as _dt
+            age_h = ((timezone.now() - _dt.fromisoformat(note["at"]))
+                     .total_seconds() / 3600.0)
+            return note if age_h < self.IN_DOUBT_QUIET_HOURS else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def _poll_working_entry(self, trade, client) -> None:
         """Ask the broker where a WORKING entry stands, and act on it.
 
@@ -548,9 +607,26 @@ class AssetBot(ABC):
         status_fn = getattr(client, "order_status", None)
         if not callable(status_fn):
             logger.error("[%s_bot] %s: entry %s is WORKING but this broker "
-                         "client cannot report an order's state — the row "
-                         "stays pending; check the broker by hand",
+                         "client cannot report an order's state — check the "
+                         "broker by hand",
                          self.asset_class, trade.symbol, trade.broker_order_id)
+            # AND STILL WITHDRAW IT when it has outlived the limit. Returning
+            # here made a venue that cannot be polled a venue whose queued
+            # orders live forever: the row holds a concurrency slot, blocks
+            # its symbol in propose_entry, and reconciliation skips
+            # entry_working rows by design. The alert repeats daily.
+            self._warn_working_entry_unresolved(
+                trade, None,
+                detail=("this broker client cannot report an order's state, "
+                        "so nothing here can tell a fill from a cancel"))
+            if (self._working_entry_age_hours(trade)
+                    > self.ENTRY_WORKING_MAX_HOURS):
+                cancel_working_entry(
+                    trade, client,
+                    reason=(f"still working after "
+                            f"{self.ENTRY_WORKING_MAX_HOURS}h and this broker "
+                            f"cannot report an order's state"),
+                    cancel_parent=True)
             return
         try:
             st = status_fn(trade.broker_order_id)
@@ -667,7 +743,8 @@ class AssetBot(ABC):
     # sees. Daily, until a human acts.
     UNRESOLVED_REALERT_HOURS = 24
 
-    def _warn_working_entry_unresolved(self, trade, held) -> None:
+    def _warn_working_entry_unresolved(self, trade, held,
+                                       detail: str = "") -> None:
         """Say — and keep saying — that a working entry cannot be resolved."""
         meta = dict(trade.metadata or {})
         last = meta.get("entry_unresolved_notified_at")
@@ -684,7 +761,8 @@ class AssetBot(ABC):
             # A row stamped by the earlier once-only version: re-alert now
             # and start keeping the timestamp.
             pass
-        detail = ("the broker does not recognise the order and the account's "
+        detail = detail or (
+                 "the broker does not recognise the order and the account's "
                   "position cannot be attributed to this row"
                   if held is None else
                   "the broker does not recognise the order and the account "
@@ -1477,7 +1555,19 @@ class AssetBot(ABC):
             closer = getattr(client, "close_position", None)
             if must:
                 if pid and callable(closer):
-                    return closer(pid, trade.symbol, float(trade.qty))
+                    # The caller's deterministic id, when the adapter takes
+                    # one: three call sites in this platform say "the broker
+                    # itself refuses the second copy", and at Saxo that is
+                    # only true when the close carries the same reference.
+                    kw = {}
+                    try:
+                        import inspect
+                        if "client_order_id" in inspect.signature(
+                                closer).parameters:
+                            kw["client_order_id"] = client_order_id
+                    except (TypeError, ValueError):  # a builtin or a mock
+                        kw = {}
+                    return closer(pid, trade.symbol, float(trade.qty), **kw)
                 # Nothing to close BY, so the opposite order below will
                 # leave two lots open until the venue nets them. Said out
                 # loud rather than discovered on the broker's screen.
@@ -1518,6 +1608,19 @@ class AssetBot(ABC):
                 filled = float(res.get("executedQty") or 0)
             except (TypeError, ValueError):
                 filled = 0.0
+            # A CLOSE NOBODY CONFIRMED. An adapter that says inDoubt has
+            # placed an order it cannot vouch for; booking the row CLOSED on
+            # that is how a live position ends up with no owner, and
+            # re-sending it is how a closed long becomes a short. Marked so
+            # the in-doubt branch in _close_trade owns it.
+            if res.get("inDoubt") and filled <= 0:
+                err = RuntimeError(
+                    "the broker did not confirm the close"
+                    + (f" (reference {res.get('reference')})"
+                       if res.get("reference") else ""))
+                err.in_doubt = True
+                err.reference = str(res.get("reference") or "")
+                raise err
             if status in self.CLOSE_REFUSED_STATUSES and filled <= 0:
                 reason = ""
                 raw = res.get("raw")
@@ -1617,7 +1720,44 @@ class AssetBot(ABC):
                 try:
                     close_result = self._submit_close_or_raise(
                         trade, client, client_order_id)
-                except Exception:
+                except Exception as _e:
+                    # IN DOUBT IS NOT REFUSED. Cancelling the legs and
+                    # re-sending a close that may already be live turns a
+                    # closed long into a full-size short. The row keeps its
+                    # legs, carries the reference, and is left for a human
+                    # and for the retry loop's own position read.
+                    if getattr(_e, "in_doubt", False):
+                        ref = str(getattr(_e, "reference", "") or "")
+                        meta = dict(trade.metadata or {})
+                        meta["close_in_doubt"] = {
+                            "reference": ref,
+                            "at": timezone.now().isoformat(),
+                        }
+                        trade.metadata = meta
+                        trade.save(update_fields=["metadata"])
+                        logger.error(
+                            "[%s_bot] %s: the CLOSE request did not come back "
+                            "— it MAY be live at the broker under reference "
+                            "%s. The protective legs are untouched and "
+                            "nothing is re-sent.",
+                            self.asset_class, trade.symbol, ref or "(none)")
+                        try:
+                            from bot_program.notifications import notify_staff
+                            notify_staff(
+                                title=f"⚠ {trade.symbol}: a close may be live",
+                                body=(f"The close of {trade.symbol} did not "
+                                      f"come back. Reference {ref or '(none)'}. "
+                                      f"If it filled, the position is flat at "
+                                      f"the broker and this row still says "
+                                      f"OPEN; if it did not, the position is "
+                                      f"live with its brackets intact. Check "
+                                      f"before closing it by hand — a second "
+                                      f"close reverses the position."),
+                                url="/positions/")
+                        except Exception as e2:  # noqa: BLE001
+                            logger.warning("[%s_bot] in-doubt close alert "
+                                           "failed: %s", self.asset_class, e2)
+                        return False
                     if not (trade.metadata or {}).get("protective_order_ids"):
                         raise
                     logger.warning(
@@ -2142,6 +2282,19 @@ class AssetBot(ABC):
                 status__in=("OPEN", "CLOSE_PENDING")).exists():
             return self._skip(symbol, skips.ALREADY_OPEN,
                               "a position is already on")
+
+        # AND SKIP IF AN ORDER FOR IT MAY ALREADY BE LIVE. There is no row to
+        # find — that is the whole problem — so the note lives on the config.
+        # Without this the next tick sends a SECOND order: the idempotency key
+        # buckets by the minute, so the broker's duplicate guard does not see
+        # the first one either.
+        doubt = self._in_doubt_note(symbol)
+        if doubt:
+            return self._skip(
+                symbol, skips.ORDER_IN_DOUBT,
+                f"an order under reference "
+                f"{doubt.get('reference') or '(none)'} may already be live "
+                f"(since {doubt.get('at')})")
 
         # Cooldown: skip if a CLOSED trade for this symbol was created within cool_down_minutes.
         cool = self.cfg.cool_down_minutes or 0
@@ -2779,6 +2932,9 @@ class AssetBot(ABC):
                     entry_meta["fill_source"] = "broker"
                 else:
                     entry_meta["fill_source"] = "ticker"
+                # WHAT WE ASKED FOR, before the broker's answer replaces
+                # it: a partial that is still working needs both numbers.
+                requested_qty = float(qty)
                 if fill_qty > 0:
                     qty = fill_qty
 
@@ -2786,9 +2942,20 @@ class AssetBot(ABC):
                 # skipped by bot-side SL/TP management (no double-close).
                 protective_ids = [str(x) for x in
                                   (res.get("protectiveOrders") or [])]
-                if protective_ids or res.get("protectedOnFill"):
-                    entry_meta["protected"] = True
+                if protective_ids:
                     entry_meta["protective_order_ids"] = protective_ids
+                # PROTECTED MEANS A STOP IS RESTING. The flag switches
+                # bot-side SL/TP off completely, so stamping it on any
+                # protective id let a bracket whose STOP was refused and
+                # whose LIMIT was accepted claim protection it did not have —
+                # and run with no stop anywhere, unmanaged. A venue that
+                # names its legs must name the stop; one that reports
+                # protection on the TRADE (OANDA) gives the trade handle;
+                # protectedOnFill is the venue asserting it outright.
+                if (res.get("protectiveStopId") or res.get("protectiveTradeId")
+                        or res.get("protectedOnFill")):
+                    entry_meta["protected"] = True
+                if protective_ids or res.get("protectedOnFill"):
                     # Venues where protection rides the TRADE rather than
                     # standalone orders (OANDA) report the trade instead.
                     # It is the handle for moving the stop later, and it
@@ -2822,14 +2989,53 @@ class AssetBot(ABC):
                 # until it fills, dies or is cancelled. Booking it as OPEN
                 # at the pre-order ticker is what let reconcile strip its
                 # bracket and let it fill naked.
-                if res.get("working") and fill_qty <= 0:
+                if res.get("working"):
                     entry_meta["entry_working"] = True
                     entry_meta["entry_working_since"] = timezone.now().isoformat()
-                    entry_meta["qty_requested"] = float(qty)
-                    entry_meta["fill_source"] = "pending"
+                    entry_meta["qty_requested"] = requested_qty
                     entry_meta["protected"] = False
                     entry_meta["protected_on_fill_expected"] = bool(protective_ids)
+                    if fill_qty > 0:
+                        # A PARTIAL THAT IS STILL WORKING. The remainder is
+                        # live at the broker, both legs were sized for the
+                        # whole order, and the poll is the only thing that
+                        # withdraws a remainder — booking this as a finished
+                        # position left those units with no owner and a stop
+                        # that would close what printed and OPEN the rest.
+                        entry_meta["entry_working_partial"] = float(fill_qty)
+                    else:
+                        entry_meta["fill_source"] = "pending"
             except Exception as e:
+                # IN DOUBT IS NOT REFUSED. The adapter marks a placement
+                # whose request never came back (`in_doubt`) and carries the
+                # reference the operator searches on; the engine reads the
+                # marker duck-typed, exactly as it reads every other adapter
+                # promise, rather than importing one venue's exception.
+                if getattr(e, "in_doubt", False):
+                    ref = str(getattr(e, "reference", "") or "")
+                    self._remember_in_doubt(symbol, ref)
+                    logger.error("[%s_bot] %s: the order request did not come "
+                                 "back — it MAY be live at the broker under "
+                                 "reference %s. NOT retried.",
+                                 self.asset_class, symbol, ref or "(none)")
+                    try:
+                        from bot_program.notifications import notify_staff
+                        notify_staff(
+                            title=f"⚠ {symbol}: an order may be live with no row",
+                            body=(f"{self.asset_class.upper()} placement for "
+                                  f"{symbol} did not come back. Search the "
+                                  f"broker for reference {ref or '(none)'}: if "
+                                  f"that order exists, this platform has no "
+                                  f"row for it and nothing is managing it. "
+                                  f"{symbol} is not retried for "
+                                  f"{self.IN_DOUBT_QUIET_HOURS}h."),
+                            url="/positions/")
+                    except Exception as e2:  # noqa: BLE001
+                        logger.warning("[%s_bot] in-doubt alert failed: %s",
+                                       self.asset_class, e2)
+                    return self._skip(symbol, skips.ORDER_IN_DOUBT,
+                                      f"reference {ref or '(none)'} may be "
+                                      f"live at the broker")
                 logger.error("[%s_bot] live order failed for %s: %s",
                              self.asset_class, symbol, e)
                 # The other bare `return None`: an order the broker threw

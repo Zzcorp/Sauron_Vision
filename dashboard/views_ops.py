@@ -309,6 +309,13 @@ def _broker(user, now) -> dict:
             reading["age_text"] = _age_text(reading["at"], now)
             out["reading_stale"] = reading["age_seconds"] > TRACKING_FRESH_SECONDS
         out["reading"] = reading
+        # WHICH ACCOUNT THAT NUMBER IS. This page is acted on: the drawdown
+        # percentage, the governor and every share below are derived from
+        # this reading, and with two brokers keyed it can change account
+        # under the operator without a word. broker_view is the one builder
+        # that answers kind, name, label and env together.
+        from bot_program.capital_truth import broker_view
+        out["book"] = broker_view(user)
     except Exception as e:  # noqa: BLE001
         out["reading_error"] = f"{type(e).__name__}: {e}"[:160]
     try:

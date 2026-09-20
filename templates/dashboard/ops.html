@@ -41,7 +41,7 @@
         <span class="oc-strip-label">ACCOUNT</span>
         {% if broker.reading %}
         <span class="oc-strip-value {% if broker.reading_stale %}down{% endif %}">{{ broker.reading.value_text }} {{ broker.reading.currency }}</span>
-        <span class="oc-strip-sub">{% if broker.reading_stale %}STALE · {% endif %}broker sync read {{ broker.reading.age_text }}</span>
+        <span class="oc-strip-sub">{% if broker.reading_stale %}STALE · {% endif %}{% if broker.book %}<span class="bk-env{% if 'LIVE' in broker.book.env %} bk-env--live{% endif %}">{{ broker.book.name }} · {{ broker.book.env }}</span> · {% endif %}broker sync read {{ broker.reading.age_text }}</span>
         {% else %}
         <span class="oc-strip-value">—</span>
         <span class="oc-strip-sub">{% if broker.reading_error %}{{ broker.reading_error }}{% else %}no broker reading yet{% endif %}</span>
@@ -178,7 +178,7 @@
         <table class="sv-perf-table">
           <tbody>
             <tr><td>Equity</td><td class="num">{% if broker.reading %}<span class="{% if broker.reading_stale %}down{% endif %}">{{ broker.reading.value_text }} {{ broker.reading.currency }}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
-                <td style="font-size:11px;color:var(--text-muted);">{% if broker.reading %}capital_truth.account_equity · read {{ broker.reading.age_text }}{% if broker.reading_stale %} · <span class="down">STALE</span> (over the tracking window){% endif %}{% elif broker.reading_error %}{{ broker.reading_error }}{% else %}no reading has ever landed — the sync writes it{% endif %}</td></tr>
+                <td style="font-size:11px;color:var(--text-muted);">{% if broker.reading %}{% if broker.book %}{{ broker.book.name }} · {{ broker.book.label }} · <span class="bk-env{% if 'LIVE' in broker.book.env %} bk-env--live{% endif %}">{{ broker.book.env }}</span> · {% endif %}capital_truth.account_equity · read {{ broker.reading.age_text }}{% if broker.reading_stale %} · <span class="down">STALE</span> (over the tracking window){% endif %}{% elif broker.reading_error %}{{ broker.reading_error }}{% else %}no reading has ever landed — the sync writes it{% endif %}</td></tr>
             <tr><td>Broker sync</td><td class="num">{% if broker.sync %}<span class="badge badge-{% if broker.sync.is_enabled %}bullish{% else %}bearish{% endif %}">{% if broker.sync.is_enabled %}ON{% else %}OFF{% endif %}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
                 <td style="font-size:11px;color:var(--text-muted);">{% if broker.sync %}broker_account_sync · last run {{ broker.sync_age }} · {{ broker.sync.last_status|default:"no run yet" }}{% else %}no broker_account_sync row — seed_components{% endif %}</td></tr>
             <tr><td>Drawdown</td><td class="num">{% if broker.drawdown %}<span class="{% if broker.drawdown.drawdown_pct > 0.05 %}down{% endif %}">{{ broker.drawdown.pct_text }}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>

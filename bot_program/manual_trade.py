@@ -2036,13 +2036,27 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
                               f"absent, or the account disconnected). "
                               f"Nothing was armed")}
 
-        routes_ibkr = (type(client).__name__ == "IBKRTrader")
-        if want_track and not routes_ibkr:
-            return {"error": (f"Following the account tracks the IBKR "
-                              f"reading, but {cls} orders route to "
-                              f"{type(client).__name__} — arm without "
-                              f"tracking, or route this class to IBKR "
-                              f"first")}
+        # WHICH VENUE THIS CLASS ACTUALLY REACHES, and which row the
+        # platform measures money from. They are not the same question:
+        # broker_backed is user-scoped and returns ONE row, while the router
+        # chooses per asset class.
+        from bot_program.capital_truth import broker_backed, broker_kind
+        from bot_program.engine.capabilities import adapter_key
+        venue = adapter_key(client)
+        venue_row = {"saxo": getattr(user, "saxo_account", None),
+                     "etoro": getattr(user, "etoro_account", None),
+                     "ibkr": getattr(user, "ibkr_account", None)}.get(venue)
+        book = broker_backed(user)
+        book_kind = broker_kind(book) if book is not None else ""
+        if want_track and (not venue or venue != book_kind):
+            return {"error": (f"Following the account means taking a share "
+                              f"of {book_kind or 'the book'}'s reading, but "
+                              f"{cls} orders route to "
+                              f"{venue or type(client).__name__} — the pool "
+                              f"would be sized from one account and traded "
+                              f"on another. Arm without tracking, or make "
+                              f"the venue that carries {cls} the book on "
+                              f"/brokers/")}
         if want_track:
             # Every follower takes a SHARE of the account, explicit or
             # automatic, and the shares must fit in 100% — one rule, in
@@ -2064,9 +2078,13 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
         # On a broker-backed route, the pool is measured against the
         # broker's own cached reading — written only by the sync beat,
         # never fetched here.
-        if routes_ibkr:
-            from bot_program.capital_truth import broker_backed
-            acct = broker_backed(user)
+        # ANY venue with reading cells, not IBKR alone. Skipping this for
+        # Saxo and eToro meant real money armed against an account nobody
+        # had measured. The row is the ROUTED venue's, because comparing a
+        # pool against a different broker's balance is worse than not
+        # comparing it at all: it reports agreement.
+        if venue_row is not None:
+            acct = venue_row
             reading = getattr(acct, "last_equity", None) if acct else None
             read_at = getattr(acct, "last_equity_at", None) if acct else None
             if reading is None or read_at is None:

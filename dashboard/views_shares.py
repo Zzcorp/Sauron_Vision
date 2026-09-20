@@ -38,6 +38,15 @@ def shares_dashboard(request):
     # ── the account: reading, drawdown, governor ─────────────────────
     reading, drawdown, governor = None, None, None
     reading_stale = False
+
+    def _book_view(u):
+        try:
+            from bot_program.capital_truth import broker_view
+            return broker_view(u)
+        except Exception as e:  # noqa: BLE001 — the page renders regardless
+            logger.warning("[shares page] book unreadable: %s", e)
+            return None
+
     try:
         from bot_program.capital_truth import (TRACKING_FRESH_SECONDS,
                                                account_equity)
@@ -199,6 +208,9 @@ def shares_dashboard(request):
         "horizon": horizon,
         "reading": reading,
         "reading_stale": reading_stale,
+        # Same reason as /ops/: every share on this page is a fraction of
+        # that reading, so the page must say which account it belongs to.
+        "book": _book_view(user),
         "drawdown": drawdown,
         "governor": governor,
         "plan": plan,

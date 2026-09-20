@@ -527,3 +527,200 @@ class TheMoneyPageSaysWhichWorldTests(TestCase):
         html = (Path(settings.BASE_DIR) / "templates" / "dashboard"
                 / "treasury.html").read_text(encoding="utf-8")
         self.assertNotIn("age_seconds }} s", html)
+
+
+# ── one account for the pool and the orders ─────────────────────────────
+
+class ThePoolIsSizedFromTheAccountItTradesOnTests(TestCase):
+    """broker_backed is USER-scoped and returns ONE row; the router chooses
+    per ASSET CLASS. Saxo SIM reading 100,000 while a live forex config
+    routes to an IBKR account holding 2,000 means a 1% risk of 1,000 per
+    trade and a daily-loss floor of -2,000 on 2,000 — uncapped on the first
+    trade, and invisible: the freeze reads the same single book, and the
+    preflight compares the pool against that same book, where a follower's
+    share can never exceed the whole."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("pv_pool", password="x")
+        saxo(self.user, flags=("stock",))          # the book
+        ibkr(self.user, flags=("forex",))          # where forex really goes
+        from instruments.models import Instrument
+        for sym, cls in (("AAPL", "stock"), ("EURUSD", "forex")):
+            Instrument.objects.get_or_create(
+                symbol=sym, defaults={"name": sym, "asset_class": cls})
+
+    def _follower(self, name, asset_class, symbol):
+        cfg = _cfg(self.user, asset_class=asset_class, symbols=(symbol,))
+        cfg.name = name
+        cfg.extras = {"capital_tracks_broker": True}
+        cfg.save()
+        return cfg
+
+    def test_only_the_books_own_followers_are_retuned(self):
+        from bot_program.tasks import _follow_the_account
+        stock = self._follower("stock_pool", "stock", "AAPL")
+        forex = self._follower("forex_pool", "forex", "EURUSD")
+        before = forex.capital
+        with self.assertLogs("bot_program.tasks", level="WARNING") as cm:
+            _follow_the_account(_fresh(self.user), 100000.0, "USD")
+        stock.refresh_from_db()
+        forex.refresh_from_db()
+        self.assertNotEqual(stock.capital, Decimal("1000"),
+                            "the book's own follower is retuned")
+        self.assertEqual(forex.capital, before,
+                         "a pool that trades at another broker is left alone")
+        self.assertTrue(any("NOT retuned" in m for m in cm.output))
+
+    def test_a_pool_with_no_symbols_keeps_the_old_behaviour(self):
+        """The manual pools carry empty symbol lists by construction, so
+        "cannot tell" must not mean "refuse"."""
+        from bot_program.tasks import _follow_the_account
+        blind = self._follower("manual_pool", "stock", "AAPL")
+        blind.symbols = []
+        blind.save()
+        before = blind.capital
+        _follow_the_account(_fresh(self.user), 100000.0, "USD")
+        blind.refresh_from_db()
+        self.assertNotEqual(blind.capital, before)
+
+    def test_the_preflight_measures_the_pool_against_that_account(self):
+        acct = IBKRAccount.objects.get(user=self.user)
+        acct.last_equity = Decimal("2000")
+        acct.last_equity_currency = "EUR"
+        acct.last_equity_at = timezone.now()
+        acct.save()
+        cfg = self._follower("forex_pool", "forex", "EURUSD")
+        cfg.capital = Decimal("50000")          # against 2,000 at IBKR
+        cfg.save()
+        body = _preflight("pv_pool")
+        self.assertIn("trades at ibkr", body)
+        self.assertIn("looser than it reads", body)
+
+    def test_a_venue_that_was_never_measured_is_a_blocker(self):
+        self._follower("forex_pool", "forex", "EURUSD")
+        body = _preflight("pv_pool")
+        self.assertIn("NEVER been measured", body)
+        self.assertIn("cannot fail", body)
+
+
+class TheUnreachableAlertNamesTheRightRemedyTests(TestCase):
+    """An alert whose remedy is wrong is worse than no alert: it sends an
+    operator to read the logs of a component that is not involved, at the
+    moment something real is broken."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("al_u", "a@x", "x")
+
+    def _body(self, broker):
+        from bot_program import notifications
+        with mock.patch.object(notifications, "dispatch_notification",
+                               return_value=True) as d:
+            notifications.notify_broker_unreachable(
+                self.user, label="Saxo Main", host="api", port=0, misses=3,
+                broker=broker)
+        return d.call_args.kwargs
+
+    def test_saxo_is_told_to_sign_in_not_to_read_gateway_logs(self):
+        kw = self._body("saxo")
+        self.assertIn("Connect Saxo", kw["body"])
+        self.assertNotIn("ibgateway", kw["body"])
+        self.assertNotIn("api:0", kw["body"])
+        self.assertEqual(kw["url"], "/brokers/")
+
+    def test_etoro_is_told_about_its_keys(self):
+        kw = self._body("etoro")
+        self.assertIn("re-save them", kw["body"])
+        self.assertNotIn("ibgateway", kw["body"])
+        self.assertEqual(kw["url"], "/brokers/")
+
+    def test_ibkr_keeps_the_gateway_text_and_its_socket(self):
+        kw = self._body("ibkr")
+        self.assertIn("ibgateway", kw["body"])
+        self.assertIn("api:0", kw["body"])
+        self.assertEqual(kw["url"], "/system-health/")
+    def test_the_miss_log_names_each_venue_own_diagnosis(self):
+        """It regressed once already: a venue-aware rewrite kept the fact and
+        dropped the remedy, and tests/test_gateway_stall caught it because it
+        pins `ibkr-doctor`. A miss an operator can only learn about from an
+        alert they have already been shown is a miss they cannot follow — and
+        a remedy for the wrong component is worse than none."""
+        from pathlib import Path
+
+        from django.conf import settings
+        src = (Path(settings.BASE_DIR) / "bot_program" / "tasks.py").read_text(
+            encoding="utf-8")
+        block = src.split("def _note_broker_miss(")[1].split("\ndef ")[0]
+        self.assertIn("ibkr-doctor", block)
+        self.assertIn("/brokers/", block)
+        self.assertIn("refresh token lives", block)
+        self.assertIn("refused or unverified", block)
+
+
+class TheManualLaneMeasuresEveryVenueTests(SimpleTestCase):
+    """Read off the source: arm_manual_lane refuses first and returns early
+    at a dozen points, so the cheapest honest pin is that the IBKR-only test
+    is gone and the reading is taken from the routed venue's row."""
+
+    def test_the_equity_block_is_no_longer_ibkr_only(self):
+        import inspect
+
+        from bot_program.manual_trade import arm_manual_lane
+        src = inspect.getsource(arm_manual_lane)
+        self.assertNotIn("routes_ibkr", src)
+        self.assertIn("adapter_key(client)", src)
+        # The reading comes from the row the ORDERS reach, not from the book.
+        self.assertIn("if venue_row is not None:", src)
+        block = src.split("if venue_row is not None:")[1]
+        self.assertIn("has not arrived yet", block)
+        self.assertIn("ARM_EQUITY_MAX_AGE_SECONDS", block)
+
+    def test_following_no_longer_tells_the_operator_to_undo_saxo(self):
+        import inspect
+
+        from bot_program.manual_trade import arm_manual_lane
+        src = inspect.getsource(arm_manual_lane)
+        self.assertNotIn("route this class to IBKR", src)
+        self.assertIn("sized from one account and traded", src)
+
+
+class ThePagesActedOnNameTheAccountTests(TestCase):
+    """/ops/ and /shares/ are the two pages an operator acts FROM, and both
+    printed the book's equity with no venue and no world — so the evening a
+    Saxo SIM box is ticked, the headline equity, the drawdown percentage and
+    the governor switch from a funded live account to a simulated balance
+    with nothing saying so, and every share is proposed against it."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("ops_book", "a@x", "x")
+        self.client.force_login(self.user)
+        self.acct = saxo(self.user, flags=("stock",), sim=True)
+        self.acct.last_equity = Decimal("100000")
+        self.acct.last_equity_currency = "USD"
+        self.acct.last_equity_at = timezone.now()
+        self.acct.save()
+
+    def _live(self):
+        self.acct.sim = False
+        self.acct.save()
+
+    def test_ops_names_the_broker_and_its_world(self):
+        body = self.client.get("/ops/").content.decode()
+        self.assertIn("Saxo Bank", body)
+        self.assertIn("SIM", body)
+
+    def test_shares_names_them_too(self):
+        body = self.client.get("/shares/").content.decode()
+        self.assertIn("Saxo Bank", body)
+        self.assertIn("SIM", body)
+
+    def test_a_live_book_is_badged_live_on_ops(self):
+        """Case-safe: env_label is uppercase and venue-shaped, and an
+        equality test against 'live' is exactly the comparison that silently
+        failed on /treasury/ for three days."""
+        self._live()
+        body = self.client.get("/ops/").content.decode()
+        self.assertIn("bk-env--live", body)
+
+    def test_a_sim_book_is_not_badged_live_on_ops(self):
+        body = self.client.get("/ops/").content.decode()
+        self.assertNotIn("bk-env--live", body)

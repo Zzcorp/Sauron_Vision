@@ -20,7 +20,7 @@
         <span class="oc-strip-label">ACCOUNT</span>
         {% if reading %}
         <span class="oc-strip-value {% if reading_stale %}down{% endif %}">{{ reading.value_text }} {{ reading.currency }}</span>
-        <span class="oc-strip-sub">{% if reading_stale %}STALE · {% endif %}read {{ reading.age_text }} ago</span>
+        <span class="oc-strip-sub">{% if reading_stale %}STALE · {% endif %}{% if book %}<span class="bk-env{% if 'LIVE' in book.env %} bk-env--live{% endif %}">{{ book.name }} · {{ book.env }}</span> · {% endif %}read {{ reading.age_text }} ago</span>
         {% else %}
         <span class="oc-strip-value">—</span>
         <span class="oc-strip-sub">no broker reading yet</span>

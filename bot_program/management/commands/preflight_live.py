@@ -585,6 +585,48 @@ class Command(BaseCommand):
                 else:
                     env = broker_env(venue) or "UNKNOWN"
                     w(f"        ^ routes to {kind} ({env})")
+                    # AND MEASURED AGAINST THAT ACCOUNT. The pool check
+                    # below uses the BOOK's reading, and when the routed
+                    # venue is a different broker that comparison reports
+                    # agreement by construction: a follower's pool is a
+                    # share of the book, so it can never exceed it.
+                    if book is not None and kind != broker_kind(book):
+                        v_val = getattr(venue, "last_equity", None)
+                        v_at = getattr(venue, "last_equity_at", None)
+                        v_ccy = getattr(venue, "last_equity_currency", "") or ""
+                        if v_val is None or v_at is None:
+                            blockers.append(
+                                f"config {cfg.id} ({cfg.name}) is LIVE and "
+                                f"routes to {kind}, which has NEVER been "
+                                f"measured — its pool of {cfg.capital} "
+                                f"{cfg.base_currency} is compared against "
+                                f"{broker_kind(book)}'s balance instead, and "
+                                f"that comparison cannot fail")
+                        else:
+                            try:
+                                pool_v = float(cfg.capital)
+                            except (TypeError, ValueError):
+                                pool_v = 0.0
+                            w(f"          {kind} holds {float(v_val):,.2f} "
+                              f"{v_ccy or '(currency UNLABELLED)'} "
+                              f"({_age(v_at, now)})")
+                            if pool_v > float(v_val):
+                                blockers.append(
+                                    f"config {cfg.id} ({cfg.name}) declares a "
+                                    f"pool of {pool_v:,.0f} and trades at "
+                                    f"{kind}, which holds "
+                                    f"{float(v_val):,.0f} {v_ccy} — every "
+                                    f"risk limit derived from `capital` is "
+                                    f"{pool_v / max(float(v_val), 1e-9):.1f}x "
+                                    f"looser than it reads")
+                            if (v_ccy and cfg.base_currency
+                                    and v_ccy.upper()
+                                    != cfg.base_currency.upper()):
+                                blockers.append(
+                                    f"config {cfg.id} ({cfg.name}) declares "
+                                    f"its pool in {cfg.base_currency} while "
+                                    f"{kind} — the venue it trades at — is in "
+                                    f"{v_ccy}, and nothing here converts")
                     if env == "paper" and cfg.enabled:
                         blockers.append(
                             f"config {cfg.id} ({cfg.name}) is LIVE and "

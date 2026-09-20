@@ -117,12 +117,21 @@ class SaxoOrderInDoubt(SaxoApiError):
     in /cs/v1/audit/orderactivities.
     """
 
+    #: Read by asset_engine/base.py without importing this module — the
+    #: same duck-typed contract as the client interface itself. An engine
+    #: that treats an in-doubt placement as a refusal retries it.
+    in_doubt = True
+
     def __init__(self, reference: str, detail: str):
+        # THE REFERENCE FIRST. skips.record stores str(detail)[:200] and
+        # why_no_trade truncates again to 88, and a requests timeout string
+        # alone runs past both — so a reference at the end of this message
+        # is a reference the operator never sees.
         super().__init__(0, "OrderInDoubt",
-                         f"the order request did not come back ({detail}). "
-                         f"It MAY be live at Saxo under ExternalReference "
-                         f"{reference!r}. Do not resend it: check "
-                         f"/brokers/ and the order list first.")
+                         f"ExternalReference {reference!r} MAY be live at "
+                         f"Saxo: the order request did not come back "
+                         f"({detail}). Do not resend it: check /brokers/ and "
+                         f"the order list first.")
         self.reference = reference
 
 
@@ -159,6 +168,20 @@ def _iso_to_ms(ts: str) -> int:
 def _is_fx(symbol: str) -> bool:
     s = (symbol or "").upper()
     return len(s) == 6 and s.isalpha()
+
+
+def _request_id(reference: str) -> str:
+    """A stable X-Request-ID for one logical order.
+
+    Saxo's fifteen-second duplicate guard only fires when this header
+    repeats, so a retry of the SAME order must carry the same value —
+    which is exactly what the callers' deterministic client_order_id is
+    for. Hashed rather than passed through, because the header has its own
+    length and charset rules and a reference does not.
+    """
+    import hashlib
+
+    return hashlib.sha256((reference or "").encode("utf-8")).hexdigest()[:32]
 
 
 def _round_to_tick(price: float, tick: Optional[float]) -> float:
@@ -212,12 +235,20 @@ class SaxoTrader:
                 log.debug("saxo: could not re-read the account row (%s)", e)
         return saxo_oauth.ensure_access_token(acct, session=self._session)
 
-    def _headers(self, write: bool = False) -> dict:
+    def _headers(self, write: bool = False,
+                 request_id: str = "") -> dict:
         h = {"Authorization": f"Bearer {self._bearer()}",
              "Accept": "application/json"}
         if write:
             h["Content-Type"] = "application/json"
-            h["X-Request-ID"] = uuid.uuid4().hex
+            # SAXO'S ONLY DUPLICATE GUARD: an identical body inside fifteen
+            # seconds is a 409 unless this header differs. A fresh uuid4 on
+            # every write therefore DISABLED it — and three call sites in
+            # this platform ("the broker itself refuses the second copy")
+            # were relying on it. An order placement passes the caller's own
+            # idempotency key; everything else keeps a fresh one, because
+            # two identical reads or cancels must both be allowed to land.
+            h["X-Request-ID"] = (request_id or uuid.uuid4().hex)[:100]
         return h
 
     def _url(self, path: str, params: Optional[dict] = None) -> str:
@@ -266,9 +297,10 @@ class SaxoTrader:
         return r.json() or {}
 
     def _write(self, method: str, path: str, body: Optional[dict] = None,
-               params: Optional[dict] = None, timeout: Optional[float] = None):
+               params: Optional[dict] = None, timeout: Optional[float] = None,
+               request_id: str = ""):
         fn = getattr(self._sess(), method)
-        kw = {"headers": self._headers(write=True),
+        kw = {"headers": self._headers(write=True, request_id=request_id),
               "timeout": timeout or self.timeout}
         if body is not None:
             kw["json"] = body
@@ -700,13 +732,18 @@ class SaxoTrader:
                 got = [p for p in rows if p.get("Status") in ("Fill", "FinalFill")]
                 if got:
                     p = got[-1]
+                    # TERMINAL: the cancel or the expiry is IN the log, so
+                    # the remainder was pulled and nothing is left working.
+                    # The other PARTIALLY_FILLED below — the one where this
+                    # poll simply ran out of time — is the opposite, and the
+                    # caller must be able to tell them apart.
                     return {"status": "PARTIALLY_FILLED",
                             "executedQty": float(p.get("FilledAmount")
                                                  or p.get("FillAmount") or 0),
                             "avgPrice": float(p.get("AveragePrice")
                                               or p.get("ExecutionPrice") or 0),
                             "positionId": str(p.get("PositionId") or ""),
-                            "rows": rows}
+                            "terminal": True, "rows": rows}
                 return {"status": status, "executedQty": 0.0, "avgPrice": 0.0,
                         "positionId": "", "rows": rows}
             partial = [r for r in rows if r.get("Status") == "Fill"]
@@ -782,7 +819,8 @@ class SaxoTrader:
 
         try:
             r = self._write("post", "trade/v2/orders", body,
-                            timeout=ORDER_TIMEOUT_S)
+                            timeout=ORDER_TIMEOUT_S,
+                            request_id=_request_id(reference))
         except requests.RequestException as e:
             # The request did not come back. Saxo may have taken the order.
             raise SaxoOrderInDoubt(reference,
@@ -870,10 +908,41 @@ class SaxoTrader:
         # or no fill: they are GTC and already resting. Withholding them
         # until a fill left the engine holding a position whose legs it
         # could neither move nor cancel.
-        if child_ids:
+        if child_ids and child_errors:
+            # A BRACKET WITH A REFUSED LEG IS NOT PROTECTION. Reporting the
+            # accepted sibling made base.py stamp protected=True, which
+            # switches bot-side SL/TP off entirely — so a row whose stop was
+            # refused ran with no stop at all, and _protection_vanished
+            # cannot see it on this venue. The accepted children are
+            # withdrawn and bot-side management owns the exit, which is what
+            # IBKRTrader._retract does for the same reason.
+            #
+            # A child that will NOT confirm its cancel is still resting, so
+            # it is still reported — the engine must be able to cancel it at
+            # the close — and the protection ids are withheld either way, so
+            # nothing reads it as a stop.
+            left = []
+            for oid in child_ids:
+                try:
+                    if self.cancel_order(oid) is not True:
+                        left.append(oid)
+                except Exception as e:  # noqa: BLE001 — unconfirmed is resting
+                    log.warning("saxo: could not withdraw leg %s of a refused "
+                                "bracket (%s)", oid, e)
+                    left.append(oid)
+            note_bits.append("bracket withdrawn after a refused leg: "
+                             "bot-side SL/TP owns this position")
+            if left:
+                note_bits.append("legs NOT confirmed cancelled: "
+                                 + ",".join(left))
+                out["protectiveOrders"] = left
+            out["protectedOnFill"] = False
+            stop_id = target_id = ""
+        elif child_ids:
             out["protectiveOrders"] = child_ids
             out["protectedOnFill"] = (not child_errors
                                       and polled["executedQty"] > 0)
+        if child_ids and not child_errors:
             if polled["positionId"]:
                 out["protectiveTradeId"] = polled["positionId"]
             if stop_id:
@@ -886,11 +955,129 @@ class SaxoTrader:
             # it the engine booked a full-size OPEN position at the
             # pre-order ticker for an order that had not filled.
             out["working"] = True
+        elif (polled["status"] == "PARTIALLY_FILLED"
+              and not polled.get("terminal")
+              and 0 < float(polled["executedQty"]) < float(amount)):
+            # THE REMAINDER MAY STILL BE LIVE. _await_fill answers
+            # PARTIALLY_FILLED both when a cancel arrived after a partial
+            # (the rest is gone) and when its three-second budget ran out
+            # (the rest is working), and it cannot tell them apart. The safe
+            # reading is the second: base.py's poll asks order_status,
+            # withdraws whatever is still working — proven, not assumed —
+            # and books what printed. Booking the partial as a finished
+            # position left those units with no owner, invisible to a
+            # reconciliation that walks rows, with both legs sized for the
+            # whole order: the stop would close what filled and OPEN the
+            # rest the other way.
+            out["working"] = True
+            note_bits.append(f"partial at placement: {polled['executedQty']} "
+                             f"of {amount} — the remainder is being withdrawn")
         if note_bits:
             out["protectionNote"] = " · ".join(note_bits)
         return out
 
     # ── orders ─────────────────────────────────────────────────────────────
+
+    def order_status(self, order_id: str) -> dict:
+        """Where one order stands: {state, status, filled, avgPrice}.
+
+        IBKRTrader's contract, and the only thing that lets base.py resolve
+        a WORKING row. `state` is one of:
+
+            filled   — the audit log has a fill
+            working  — Saxo's order list still holds it
+            dead     — Saxo answered BOTH questions and it is neither
+            unknown  — a read failed; "could not ask" is not an answer
+
+        Two reads, both already made elsewhere in this file: the order row
+        (port/v1/orders/{ClientKey}/{OrderId}, as _related_legs reads it)
+        and the audit log (one pass — the caller is a five-minute tick, not
+        a placement). A 400 or 404 from the order list is Saxo SAYING the
+        order is not working, which is an answer; any other error is not.
+        """
+        oid = str(order_id or "")
+        if not oid:
+            return {"state": "unknown", "status": "", "filled": 0.0,
+                    "avgPrice": 0.0, "reason": "no order id"}
+        listed, listing_answered = None, False
+        try:
+            ident = self.identity()
+            data = self._get(f"port/v1/orders/{ident['client_key']}/{oid}",
+                             {"FieldGroups": "DisplayAndFormat"})
+            rows = data.get("Data") or []
+            listed = rows[0] if rows else None
+            listing_answered = True
+        except SaxoApiError as e:
+            if e.status in (400, 404):
+                listing_answered = True      # answered: not a working order
+            else:
+                log.warning("saxo: order %s not readable in the order list "
+                            "(%s)", oid, e)
+        except Exception as e:  # noqa: BLE001
+            log.warning("saxo: order list unreadable for %s (%s: %s)",
+                        oid, type(e).__name__, e)
+
+        fill, fill_answered = None, False
+        try:
+            fill = self._await_fill(oid, attempts=1)
+            fill_answered = True
+        except Exception as e:  # noqa: BLE001
+            log.warning("saxo: activities unreadable for %s (%s: %s)",
+                        oid, type(e).__name__, e)
+        fill = fill or {"status": "", "executedQty": 0.0, "avgPrice": 0.0,
+                        "positionId": "", "rows": []}
+        filled = float(fill.get("executedQty") or 0)
+        status = str(fill.get("status") or "")
+
+        if status == "FILLED":
+            state = "filled"
+        elif status in ("CANCELLED", "EXPIRED", "REJECTED"):
+            # A cancel AFTER a partial reports PARTIALLY_FILLED, not this,
+            # so `dead` here really means nothing printed.
+            state = "dead"
+        elif listed is not None:
+            state = "working"
+        elif listing_answered and fill_answered:
+            # Not in the order list, and the log shows no fill: both
+            # questions answered, so this is not an unknown. A partial that
+            # is no longer working counts as filled for what printed.
+            state = "filled" if filled > 0 else "dead"
+        else:
+            state = "unknown"
+        return {"state": state,
+                "status": status or ("Working" if state == "working" else ""),
+                "filled": filled,
+                "avgPrice": float(fill.get("avgPrice") or 0),
+                "positionId": str(fill.get("positionId") or ""),
+                "raw": {"listed": listed, "activities": fill.get("rows") or []}}
+
+    def resting_order_ids(self) -> "list | None":
+        """Every order id still working on this account.
+
+        THREE ANSWERS, and the third is the one that matters: a list, [] for
+        nothing resting, and None for "could not ask". base._broker_snapshot
+        treats [] as an ANSWER — only None or a raise mean the broker could
+        not be reached — and _protection_vanished then reads "no stop is
+        resting" and hands a live position to bot-side SL/TP. One 500 from
+        the order list must not do that: its own rule is never to turn
+        "could not look" into "gone".
+
+        IBKRTrader's contract, and the net that takes a row back when its
+        broker-side stop disappears: it returned False immediately on any
+        client without this method, so the net did not exist on this venue.
+        """
+        try:
+            ident = self.identity()
+            data = self._get("port/v1/orders", {
+                "ClientKey": ident["client_key"],
+                "AccountKey": ident["account_key"], "Status": "Working"})
+            return [str(o.get("OrderId")) for o in (data.get("Data") or [])
+                    if o.get("OrderId")]
+        except Exception as e:  # noqa: BLE001 — unreadable is not empty
+            log.warning("saxo: working-order list unreadable (%s: %s) — "
+                        "reported as UNKNOWN, not as an empty book",
+                        type(e).__name__, e)
+            return None
 
     def cancel_order(self, order_id: str) -> bool:
         """DELETE one order. True only when Saxo CONFIRMED the cancel.
@@ -1069,7 +1256,8 @@ class SaxoTrader:
             return False
 
     def close_position(self, position_id: str, symbol: str,
-                       units: Optional[float] = None) -> dict:
+                       units: Optional[float] = None,
+                       client_order_id: str = "") -> dict:
         """Close at market. Under FifoEndOfDay the order names the
         PositionId (Saxo's explicit close); under the real-time profiles
         an opposite market order is netted immediately. Returns the
@@ -1090,12 +1278,47 @@ class SaxoTrader:
             body = {"PositionId": str(position_id), "Orders": [leg]}
         else:
             body = leg
-        r = self._write("post", "trade/v2/orders", body)
-        self._raise_for(r)
-        acc = r.json() or {}
+        reference = str(client_order_id or uuid.uuid4().hex)[:50]
+        leg["ExternalReference"] = reference
+        try:
+            # THE SAME DEADLINE AS THE ENTRY. Saxo's own broker deadline is
+            # sixty seconds before it answers 202, so a 20-second client
+            # timeout here turned a live closing order into an exception —
+            # which _close_trade reads as a refusal, cancels the brackets
+            # for, and re-sends. Both fill: a closed long becomes a
+            # full-size short with the row stamped CLOSED.
+            r = self._write("post", "trade/v2/orders", body,
+                            timeout=ORDER_TIMEOUT_S,
+                            request_id=_request_id(reference))
+        except requests.RequestException as e:
+            raise SaxoOrderInDoubt(reference,
+                                   f"{type(e).__name__}: {e}") from e
+        acc = {}
+        try:
+            acc = r.json() or {}
+        except Exception:  # noqa: BLE001 — judged below
+            acc = {}
         order_id = str(acc.get("OrderId") or
                        next((o.get("OrderId") for o in acc.get("Orders") or []
                              if o.get("OrderId")), "") or "")
+        # AN ORDER THAT EXISTS IS NOT A REFUSAL — the rule market_order
+        # carries, and this body is the same multi-order shape that answers
+        # 400 WITH an OrderId. Raising first meant a placed closing order
+        # was reported as rejected, and the engine sent another.
+        if r.status_code >= 400 and not order_id:
+            self._raise_for(r)
+        if not order_id:
+            info = acc.get("ErrorInfo") or {}
+            raise SaxoApiError(r.status_code,
+                               str(info.get("ErrorCode") or "NoOrderId"),
+                               str(info.get("Message")
+                                   or "Saxo named no closing order"))
+        if r.status_code == 202:
+            # Saxo did not hear from the broker within sixty seconds. The
+            # close may exist; it is never resent.
+            return {"orderId": order_id, "positionId": str(position_id),
+                    "status": "UNKNOWN", "executedQty": "0", "avgPrice": "0",
+                    "inDoubt": True, "reference": reference, "raw": acc}
         polled = self._await_fill(order_id, attempts=3) if order_id else {
             "status": "REJECTED", "executedQty": 0.0, "avgPrice": 0.0, "rows": []}
         return {"orderId": order_id, "positionId": str(position_id),

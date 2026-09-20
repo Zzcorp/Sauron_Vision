@@ -45,6 +45,11 @@ ERROR = "error"                       # an exception on the entry path
 # split for the capital desk (2026-09-12). Both looked, from outside, like a
 # quiet market.
 BRAIN_PAUSED = "brain_paused"         # the brain advised pause_recommended
+# An order that MAY BE LIVE. Distinct from order_error on purpose: that
+# one means "no order exists", and this one means "nobody knows" — the
+# request did not come back. A caller that treats them alike retries, and
+# doubles the position.
+ORDER_IN_DOUBT = "order_in_doubt"
 ORDER_ERROR = "order_error"           # the live order raised (never sent, or unknown)
 # The capital desk ranked this candidate below the tick's budget, a rule or
 # class share cap, or an open position it correlates with — and the desk was
@@ -129,6 +134,10 @@ def diagnose(cfg) -> str:
         SHADOW: "shadow mode is on: everything is computed, nothing submitted",
         BRAIN_PAUSED: "the brain has this rule on pause_recommended — read "
                       "the latest BrainReport before overriding it",
+        ORDER_IN_DOUBT: "the order request did not come back, so the order "
+                        "MAY be live at the broker with no row here — "
+                        "search the broker for the reference in the detail "
+                        "before arming this symbol again",
         ORDER_ERROR: "the broker client raised on the order — check the "
                      "gateway and the bot log; nothing was booked",
         DESK_DISPLACED: "the capital desk is ranking these entries below "

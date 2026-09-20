@@ -763,10 +763,15 @@ class PartialAcceptanceTests(SimpleTestCase):
                                  take_profit=1.12)
         self.assertEqual(out["orderId"], "74994594")
         self.assertEqual(out["status"], "FILLED")
-        self.assertEqual(out["protectiveOrders"], ["74994595"])
-        # The stop was accepted and the LIMIT refused: the surviving leg
-        # must be labelled the stop, not the target.
-        self.assertEqual(out["protectiveStopId"], "74994595")
+        # NO PROTECTION IS REPORTED AT ALL when a leg was refused, and
+        # the accepted sibling is withdrawn rather than kept: reporting it is
+        # what made base.py stamp `protected`, which switches bot-side SL/TP
+        # off — over a position whose stop does not exist. IBKRTrader._retract
+        # has always taken this posture. What this test holds is the rule it
+        # is named for: an order that EXISTS is not a refusal, whatever the
+        # status code.
+        self.assertNotIn("protectiveOrders", out)
+        self.assertNotIn("protectiveStopId", out)
         self.assertNotIn("protectiveTargetId", out)
         self.assertIs(out["protectedOnFill"], False)
         self.assertIn("TooFarFromEntryOrder", out["protectionNote"])
@@ -785,7 +790,11 @@ class PartialAcceptanceTests(SimpleTestCase):
         with mock.patch.object(sc.time, "sleep"):
             out = t.market_order("EURUSD", "BUY", 5000, stop_loss=1.09,
                                  take_profit=1.12)
-        self.assertEqual(out["protectiveTargetId"], "1000003")
+        # Neither handle is reported now: with a refused leg there is no
+        # protection to name. The failure this test was written for — the
+        # LIMIT labelled as the stop, so the stop rules moved the target down
+        # onto the market — is impossible either way.
+        self.assertNotIn("protectiveTargetId", out)
         self.assertNotIn("protectiveStopId", out)
         self.assertIn("TooCloseToMarket", out["protectionNote"])
 

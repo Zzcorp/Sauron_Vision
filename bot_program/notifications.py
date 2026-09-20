@@ -704,8 +704,28 @@ def notify_staff(*, title: str, body: str = "", url: str = "",
             "n_skipped_cooldown": 0}
 
 
+#: What to DO, per venue, when the sync stops answering. The remedy is
+#: the whole point of the alert: a Gateway instruction sent to a Saxo
+#: operator is an instruction to read the logs of a component that is not
+#: involved, at the moment something real is broken.
+BROKER_REMEDY = {
+    "ibkr": ("A Gateway container that is up is not one that is logged in — "
+             "check `dc ps` for (unhealthy) and `dc logs ibgateway` for a "
+             "'Gateway' dialog IBC could not read.", "/system-health/"),
+    "saxo": ("Saxo answers the sync only while the OAuth session is alive, "
+             "and its refresh token lives forty minutes and rotates. Open "
+             "/brokers/ and press 'Connect Saxo — sign in once'. A box that "
+             "was down longer than forty minutes always needs this.",
+             "/brokers/"),
+    "etoro": ("eToro answers with two long-lived keys and no sign-in, so this "
+              "is the keys or the account: re-save them on /brokers/, which "
+              "probes them once and reports ok, refused or unverified — three "
+              "states, not two.", "/brokers/"),
+}
+
+
 def notify_broker_unreachable(user, *, label: str, host: str, port: int,
-                              misses: int) -> bool:
+                              misses: int, broker: str = "ibkr") -> bool:
     """The interfaced broker has not answered for several syncs running.
 
     Filed under system_health because that is what it is. The operator's
@@ -715,16 +735,19 @@ def notify_broker_unreachable(user, *, label: str, host: str, port: int,
     The sync task is the one thing that asks every 15 minutes, so it is
     the one thing that can.
     """
+    remedy, url = BROKER_REMEDY.get(broker or "ibkr",
+                                    BROKER_REMEDY["ibkr"])
+    # A socket only where there is one. Saxo and eToro have no host and no
+    # port, and "api:0 has not answered" is a fact about nothing.
+    where = f"{host}:{port}" if (broker or "ibkr") == "ibkr" else label
     return dispatch_notification(
         user, "system_health",
         title=f"▲ {label}: broker unreachable for {misses} syncs running",
-        body=(f"{host}:{port} has not answered the account sync since "
-              f"{misses * 15} minutes ago. A Gateway container that is up "
-              f"is not one that is logged in — check `dc ps` for "
-              f"(unhealthy) and `dc logs ibgateway` for a 'Gateway' dialog "
-              f"IBC could not read. Equity and holdings on every page are "
-              f"showing their last reading with its age, not a live one."),
-        url="/system-health/",
+        body=(f"{where} has not answered the account sync since "
+              f"{misses * 15} minutes ago. {remedy} Equity and holdings on "
+              f"every page are showing their last reading with its age, not "
+              f"a live one."),
+        url=url,
     )
 
 

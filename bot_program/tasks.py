@@ -536,7 +536,34 @@ def _follow_the_account(user, value, currency) -> None:
                          user.username, alloc["reason"])
             _alert_over_allocation(user, alloc["reason"])
             return
+        # WHICH BROKER EACH FOLLOWER ACTUALLY REACHES. One book, one
+        # reading, but the router picks per asset class — so a follower that
+        # trades somewhere else must not be sized from here.
+        from .capital_truth import broker_backed, broker_kind
+        from .engine.broker_router import broker_name_for_symbol
+        _book = broker_backed(user)
+        _book_kind = broker_kind(_book) if _book is not None else ""
+
         for cfg in followers:
+            routed = ""
+            try:
+                symbols = list(cfg.symbols or [])
+                if symbols:
+                    routed = broker_name_for_symbol(user, symbols[0], cfg)
+            except Exception as e:  # noqa: BLE001 — unknown is not a mismatch
+                logger.debug("broker sync: cannot tell %s's venue (%s)",
+                             cfg.name, e)
+            # Only a KNOWN and DIFFERENT venue refuses. "paper", "" and the
+            # symbol-less manual pools mean "cannot tell", and cannot-tell
+            # keeps the behaviour it has always had.
+            if (routed in ("saxo", "etoro", "ibkr") and _book_kind
+                    and routed != _book_kind):
+                logger.warning(
+                    "broker sync: %s pool %r NOT retuned — it trades at %s "
+                    "while the book is %s, and sizing it from the book would "
+                    "measure one account and trade another",
+                    user.username, cfg.name, routed, _book_kind)
+                continue
             share = float(alloc["plan"].get(cfg.pk, 0.0))
             new = Decimal(str(round(float(value) * share, 2)))
             if cfg.capital == new:
@@ -890,13 +917,24 @@ def _note_broker_miss(acct, user) -> None:
     # for six hours. The log does neither: a failure an operator can only
     # learn about from an alert they have already been shown is a failure
     # they cannot follow.
+    _kind = _broker_kind(acct)
+    _WHERE = {
+        "ibkr": "Check `dc ps` for (unhealthy) and `./deploy/ibkr-doctor`",
+        "saxo": "Check the session on /brokers/ — the refresh token lives "
+                "40 minutes and rotates, so a box down longer than that "
+                "needs a new sign-in",
+        "etoro": "Re-save the keys on /brokers/ — the probe answers ok, "
+                 "refused or unverified",
+    }
     logger.warning(
-        "broker sync: %s (%s:%s) returned no equity AND no holdings — "
+        "broker sync: %s [%s] (%s) returned no equity AND no holdings — "
         "consecutive miss %d. Neither read raised; both answered None, "
-        "which is what an unauthenticated Gateway looks like. Check "
-        "`dc ps` for (unhealthy) and `./deploy/ibkr-doctor`",
-        acct.label, getattr(acct, "host", "api"),
-        getattr(acct, "port", ""), misses)
+        "which is what an unauthenticated session looks like at any of the "
+        "three venues. %s",
+        acct.label, _kind,
+        f"{getattr(acct, 'host', '')}:{getattr(acct, 'port', '')}"
+        if _kind == "ibkr" else "no socket — a session, a key or a sign-in",
+        misses, _WHERE.get(_kind, _WHERE["ibkr"]))
 
     if misses < BROKER_MISS_ALERT_AFTER:
         return
@@ -907,7 +945,7 @@ def _note_broker_miss(acct, user) -> None:
         notify_broker_unreachable(user, label=acct.label,
                                   host=getattr(acct, "host", "api"),
                                   port=getattr(acct, "port", 0),
-                                  misses=misses)
+                                  misses=misses, broker=_kind)
         cache.set(gate, 1, BROKER_MISS_ALERT_COOLDOWN)
     except Exception as e:  # noqa: BLE001 — an alert must never fail the sync
         logger.warning("broker sync: stall alert failed for %s: %s",
