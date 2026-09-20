@@ -15,6 +15,11 @@ git pull
 ./deploy/dc logs -f migrate   # must exit 0
 ```
 
+Retiring a broker has its own document: **[`deploy/IBKR_RETIREMENT.md`](deploy/IBKR_RETIREMENT.md)**
+— the staged plan for taking IBKR out, in the order that keeps the platform
+able to SEE an account it can no longer trade. Read its first rule before
+running any of it.
+
 This file used to be a Render.com blueprint guide. That era is over — the
 platform runs on a single VPS from the compose stack above, and a second
 deployment document disagreeing with the runbook was worth more as a bug
