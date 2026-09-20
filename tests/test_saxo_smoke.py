@@ -19,6 +19,9 @@ from django.test import TestCase
 from django.utils import timezone
 
 from bot_program.engine.saxo_client import SaxoApiError, SaxoAuthError
+# Imported BEFORE any patch replaces the module attribute, so the stub below
+# can borrow the real arithmetic instead of inventing a second copy of it.
+from bot_program.engine.saxo_client import SaxoTrader as _RealSaxoTrader
 from bot_program.models import SaxoAccount
 
 
@@ -35,6 +38,13 @@ def _registered(user, session=True):
 
 class _Stub:
     """A SaxoTrader that answers from a script."""
+
+    # The command asks the adapter for the venue's own size floor. The
+    # ARITHMETIC stays the real one — only the transport is stubbed — so the
+    # smoke line exercises what ships, against the payload `resolve` below
+    # returns. That payload carries neither LotSize nor MinimumTradeSize, so
+    # the honest answer is UNMEASURED and the line reports ok.
+    _size_floor = staticmethod(_RealSaxoTrader._size_floor)
 
     def __init__(self, acct):
         self.acct = acct

@@ -3154,6 +3154,47 @@ class AssetBot(ABC):
         if stage.get("stage"):
             entry_meta["promotion_stage"] = stage["stage"]
         if not paper:
+            # THE VENUE'S OWN FLOOR, BEFORE THE ORDER. `qty` above is the
+            # risk the operator chose, rounded by a `_round_qty` that knows
+            # the asset class and nothing about the venue. Saxo already
+            # refuses a size under its MinimumTradeSize rather than upsizing
+            # it — correctly, and on every tick, as an ORDER_ERROR whose
+            # advice is "check the gateway". Asking here turns that into ONE
+            # recorded decision carrying both numbers.
+            #
+            # An UNMEASURED floor refuses nothing, and the log line does not
+            # claim the adapter will catch it either — that is true when the
+            # instrument publishes no floor and FALSE when the reference
+            # read failed, because `_details` caches the empty payload and
+            # `_amount` then has nothing left to check. What arrives in that
+            # case is Saxo's own rejection. Refusing here on an unmeasured
+            # floor would stop a venue trading for want of a lookup.
+            # qty > 0 is guaranteed: _judge_final_size above refuses a
+            # non-positive size with SIZED_TO_ZERO and returns first.
+            _floor, _why = self._venue_size_floor(client, symbol)
+            if _floor is None:
+                logger.info("[%s_bot] %s: no venue size floor measured (%s) "
+                            "— an under-minimum order, if this venue has "
+                            "one, will be refused at the order instead",
+                            self.asset_class, symbol, _why)
+            elif float(qty) < _floor - 1e-9:
+                # NOT resized. Raising it to the floor is a different trade
+                # and lowering it sends nothing; the house answer is to
+                # refuse loudly and name both numbers.
+                logger.error(
+                    "[%s_bot] %s REFUSED: sized %g units from the stop, the "
+                    "venue minimum here is %g (%.1fx the intended risk). "
+                    "Nothing sent, nothing resized.",
+                    self.asset_class, symbol, float(qty), _floor,
+                    _floor / float(qty))
+                self._notify_venue_min_size(symbol, qty=float(qty),
+                                            floor=_floor)
+                return self._skip(
+                    symbol, skips.VENUE_MIN_SIZE,
+                    f"sized {float(qty):g} units from the stop distance; "
+                    f"this venue's minimum is {_floor:g}. Refused rather "
+                    f"than traded at {_floor:g}, which is "
+                    f"{_floor / float(qty):.1f}x the chosen risk")
             # Phase-33 idempotency — deterministic clientOrderId derived from
             # (config, symbol, signal/rule, minute-bucket). Retrying the same
             # logical entry within the bucket reuses the id, so the broker
@@ -3453,6 +3494,122 @@ class AssetBot(ABC):
     def _is_paper_client(client) -> bool:
         from bot_program.engine.paper_trader import PaperTrader
         return isinstance(client, PaperTrader)
+
+    # ── the venue's own size floor ──────────────────────────────────────
+    #
+    # `_round_qty` knows the ASSET CLASS and nothing about the venue: the
+    # forex bot's 100-unit boundary is OANDA/IBKR granularity and its own
+    # comment calls it tidiness, not any venue's rule. The venue is known
+    # only through broker_router, and the one step holding the client an
+    # order actually goes through is `execute_entry`. So the question is
+    # asked there, on that client, and answered in three states.
+    #
+    # NOT gated by any PlatformComponent key: this rides the entry path, so
+    # there is no row whose absence turns it off. And it is never the
+    # enforcer — SaxoTrader._amount still raises on a too-small order at the
+    # client. This only moves the refusal one step earlier so it can be
+    # recorded as a DECISION with both numbers in it.
+    #
+    # It covers the AssetBotConfig lane only. runner.py:166-170, the legacy
+    # BotConfig loop, reaches the same clients through the same
+    # client_for_symbol and swallows the adapter's refusal in a bare log
+    # line — no skip code, no counter, no alert. Left alone, named here.
+
+    @staticmethod
+    def _venue_size_floor(client, symbol: str) -> tuple:
+        """(floor, unmeasured_reason) — the smallest size this venue takes.
+
+        THREE STATES, and a 0 would be a fourth this must never give:
+
+          (1000.0, "")   the venue was asked and said 1000
+          (None, "...")  this adapter cannot be asked at all: it declares no
+                         `size_floor` capability, because nothing it already
+                         reads from the venue carries a minimum size. eToro
+                         is the standing example — its search payload is
+                         read for `instrumentId` and the spelling, and
+                         inventing an eToro minimum here would be a number
+                         with no anchor anywhere.
+          (None, "...")  the venue could be asked and did not answer: no
+                         session, an unknown spelling, or a payload without
+                         the field.
+
+        The last two are both None on purpose — from the entry path's point
+        of view unmeasured is ONE state, and the reason string is what tells
+        them apart in the log. What must never happen is either being read
+        as "any size is fine", which is why this returns None and not 0.0.
+        """
+        from bot_program.engine.capabilities import has_capability
+        if not has_capability(client, "size_floor"):
+            return None, (f"{type(client).__name__} declares no size_floor "
+                          f"capability: this venue publishes no minimum "
+                          f"trade size that the adapter already reads")
+        try:
+            floor = client.min_tradable(symbol)
+        except Exception as e:  # noqa: BLE001 — could not ask IS an answer
+            return None, (f"min_tradable({symbol}) raised "
+                          f"{type(e).__name__}: {e}")
+        if floor is None:
+            return None, (f"{type(client).__name__} could not state a "
+                          f"minimum trade size for {symbol}")
+        try:
+            floor = float(floor)
+        except (TypeError, ValueError):
+            return None, (f"min_tradable({symbol}) answered {floor!r}, "
+                          f"which is not a number")
+        if floor <= 0:
+            return None, (f"min_tradable({symbol}) answered {floor}: a "
+                          f"floor of zero or less is not a measurement")
+        return floor, ""
+
+    def _notify_venue_min_size(self, symbol: str, *, qty: float,
+                               floor: float) -> None:
+        """Say it ONCE, not once per tick.
+
+        The floor is a property of the instrument at the venue, so it will
+        refuse this size on every tick until the operator changes something.
+        Deduped per CONFIG per symbol per day: notify_staff and this table
+        de-dupe on the title, so a title carrying only the symbol would
+        silence a second pool refused on the same symbol for a day and the
+        operator would fund the wrong one. Two symbols with two floors are
+        two facts, and two pools with two sizes are two more. The skip
+        counter keeps counting either way — the alert is the once, the
+        counter is the frequency.
+        """
+        try:
+            from datetime import timedelta as _td
+
+            from alerts.models import Notification as _N
+            title = (f"✕ {self.cfg.name} · {symbol}: the venue will not "
+                     f"take this size")[:200]
+            recent = _N.objects.filter(
+                user=self.user, notification_type="bot", title=title,
+                created_at__gte=timezone.now() - _td(hours=24),
+            ).exists()
+            if recent:
+                return
+            times = (floor / qty) if qty > 0 else 0.0
+            _N.objects.create(
+                user=self.user, notification_type="bot", title=title,
+                body=(f"{self.asset_class} config '{self.cfg.name}' sized "
+                      f"{qty:g} units of {symbol} from its stop distance. "
+                      f"The venue's minimum there is {floor:g}, so nothing "
+                      f"was sent — and nothing was resized: trading "
+                      f"{floor:g} would be {times:.1f}x the risk this entry "
+                      f"was sized for, which is a different trade. What "
+                      f"raises the unit count is more capital, a higher "
+                      f"extras['risk_per_trade_pct'], or a TIGHTER stop — "
+                      f"widening the stop buys FEWER units and makes this "
+                      f"worse. Moving the whole asset class off this venue "
+                      f"on /brokers/ also works, but it moves every symbol "
+                      f"in the class and an open position there would have "
+                      f"its exit routed to a venue that does not hold it, "
+                      f"so close those first. Said once per pool per symbol "
+                      f"per day; the skip counter keeps counting."),
+                url="/asset-bots/",
+            )
+        except Exception as e:  # noqa: BLE001 — an alert must not cost a tick
+            logger.warning("[%s_bot] venue-minimum notification failed: %s",
+                           self.asset_class, e)
 
     def _notify_paper_fallback(self, symbol: str, *, busy: bool = False):
         """Best-effort alert, deduped to at most one per config per hour.

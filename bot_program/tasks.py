@@ -544,25 +544,43 @@ def _follow_the_account(user, value, currency) -> None:
         _book = broker_backed(user)
         _book_kind = broker_kind(_book) if _book is not None else ""
 
+        # One lookup per SYMBOL per sync, shared across pools: every
+        # follower is non-paper, so the routing of a symbol does not differ
+        # between them.
+        _venue_of: dict = {}
+
         for cfg in followers:
-            routed = ""
+            foreign = ""
             try:
-                symbols = list(cfg.symbols or [])
-                if symbols:
-                    routed = broker_name_for_symbol(user, symbols[0], cfg)
+                # EVERY SYMBOL, NOT THE FIRST. The router routes per symbol
+                # (runner.py asks client_for_symbol inside the symbol loop),
+                # so a pool holding one Saxo symbol and one eToro symbol
+                # reaches two venues. Reading symbols[0] made this refusal
+                # depend on which one the operator typed first — cfg.symbols
+                # is a list in typing order — so the same pool was retuned or
+                # skipped by an accident of data entry. The first FOREIGN
+                # venue decides: that only ever refuses more, and it can
+                # never size a pool from an account it does not trade.
+                for sym in list(cfg.symbols or []):
+                    if sym not in _venue_of:
+                        _venue_of[sym] = broker_name_for_symbol(user, sym, cfg)
+                    venue = _venue_of[sym]
+                    if (venue in ("saxo", "etoro", "ibkr") and _book_kind
+                            and venue != _book_kind):
+                        foreign = venue
+                        break
             except Exception as e:  # noqa: BLE001 — unknown is not a mismatch
                 logger.debug("broker sync: cannot tell %s's venue (%s)",
                              cfg.name, e)
-            # Only a KNOWN and DIFFERENT venue refuses. "paper", "" and the
-            # symbol-less manual pools mean "cannot tell", and cannot-tell
-            # keeps the behaviour it has always had.
-            if (routed in ("saxo", "etoro", "ibkr") and _book_kind
-                    and routed != _book_kind):
+            # Only a KNOWN and DIFFERENT venue refuses. "paper", the
+            # unflagged venues and the symbol-less manual pools mean "cannot
+            # tell", and cannot-tell keeps the behaviour it has always had.
+            if foreign:
                 logger.warning(
                     "broker sync: %s pool %r NOT retuned — it trades at %s "
                     "while the book is %s, and sizing it from the book would "
                     "measure one account and trade another",
-                    user.username, cfg.name, routed, _book_kind)
+                    user.username, cfg.name, foreign, _book_kind)
                 continue
             share = float(alloc["plan"].get(cfg.pk, 0.0))
             new = Decimal(str(round(float(value) * share, 2)))

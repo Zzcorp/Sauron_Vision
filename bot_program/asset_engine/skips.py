@@ -51,6 +51,18 @@ BRAIN_PAUSED = "brain_paused"         # the brain advised pause_recommended
 # doubles the position.
 ORDER_IN_DOUBT = "order_in_doubt"
 ORDER_ERROR = "order_error"           # the live order raised (never sent, or unknown)
+# 2026-09-20. THE SIZE IS FINE AND THE VENUE WILL NOT TAKE IT. Distinct from
+# sized_to_zero, which means the risk budget bought less than one unit of the
+# bot's OWN rounding granularity, and from order_error, whose advice sends
+# the operator to the gateway. This is neither: the quantity is positive,
+# judged and correct, and the venue's floor is above it. A forex bot sizing
+# 400 units from its stop distance (_round_qty snaps to 100, which is
+# OANDA/IBKR granularity and no venue's rule) was refused by the adapter on
+# every tick and recorded as order_error, so a repeated line read as a broken
+# connection instead of a decision to make. NOTHING IS RESIZED: raising the
+# size to the floor is a different trade (see SaxoTrader._amount), so the
+# operator is handed both numbers and chooses.
+VENUE_MIN_SIZE = "venue_min_size"
 # The capital desk ranked this candidate below the tick's budget, a rule or
 # class share cap, or an open position it correlates with — and the desk was
 # in LIVE mode, so nothing was sent. A CHOICE, not a fault: the detail names
@@ -140,6 +152,20 @@ def diagnose(cfg) -> str:
                         "before arming this symbol again",
         ORDER_ERROR: "the broker client raised on the order — check the "
                      "gateway and the bot log; nothing was booked",
+        # The remedies raise the UNIT COUNT, and a wider stop lowers it:
+        # units = risk budget / stop distance. This advice said "widen the
+        # stop" first, which would drive the size further below the floor it
+        # is meant to clear.
+        VENUE_MIN_SIZE: "the venue's minimum trade size is above the size "
+                        "the stop distance buys — nothing is wrong with the "
+                        "connection and nothing was resized. Raise the "
+                        "pool's capital, raise extras['risk_per_trade_pct'], "
+                        "or TIGHTEN the stop: a tighter stop buys more "
+                        "units, a wider one buys fewer. Moving the whole "
+                        "asset class off this venue on /brokers/ also works, "
+                        "but it moves every symbol in the class — close any "
+                        "position still open there first. The detail carries "
+                        "both numbers",
         DESK_DISPLACED: "the capital desk is ranking these entries below "
                         "others — read the ladder on /desk/ to see what "
                         "took the risk budget instead",

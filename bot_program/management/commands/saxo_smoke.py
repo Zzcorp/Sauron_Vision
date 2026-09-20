@@ -92,6 +92,12 @@ class Command(BaseCommand):
             (f"order_book {symbol} (MarketDepth)",
              lambda: (lambda b: f"{len(b['bids'])} bid / {len(b['asks'])} ask levels"
                                 f"{' (synthetic — no depth on this feed)' if b['bids'] and b['bids'][0][1] == '1000000' else ''}")(t.order_book(symbol, 5))),
+            (f"size floor {symbol} (LotSize/MinimumTradeSize)",
+             lambda: (lambda f: f"{f:g} minimum"
+                      if f else "no floor published — UNMEASURED, and an "
+                                "under-minimum order would be refused at "
+                                "the order")(
+                 SaxoTrader._size_floor(t.resolve(symbol)[2] or {}))),
             ("get_positions (port/v1/positions)",
              lambda: f"{len(t.get_positions())} open"),
             ("broker_portfolio",

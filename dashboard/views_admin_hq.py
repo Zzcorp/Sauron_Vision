@@ -943,6 +943,41 @@ def hq_follow_asset_bot(request):
                                 "broker_account_sync and let it store one "
                                 "first.")
         return redirect("asset_bots_dashboard")
+    # THE SAME REFUSAL THE ARMING PATH ALREADY MAKES. manual_trade.py:2051
+    # will not arm a following pool whose orders route to a venue other than
+    # the book — "the pool would be sized from one account and traded on
+    # another" — and this handler, which is where the operator actually ticks
+    # Follow, had no venue test anywhere in it. It wrote cfg.capital from the
+    # book's reading below, and the sync then correctly refused to retune
+    # that row for ever (tasks.py), so the pool sat on a number derived from
+    # an account it does not trade and nothing said so again.
+    #
+    # EVERY symbol, not the first: the router routes per symbol, so a pool
+    # can reach two venues. The first foreign one decides, which only ever
+    # refuses more.
+    from bot_program.capital_truth import broker_backed, broker_kind
+    from bot_program.engine.broker_router import broker_name_for_symbol
+    _book = broker_backed(request.user)
+    _book_kind = broker_kind(_book) if _book is not None else ""
+    _foreign = ""
+    for _sym in list(cfg.symbols or []):
+        try:
+            _venue = broker_name_for_symbol(request.user, _sym, cfg)
+        except Exception:  # noqa: BLE001 — cannot tell is not a mismatch
+            continue
+        if (_venue in ("saxo", "etoro", "ibkr") and _book_kind
+                and _venue != _book_kind):
+            _foreign = _venue
+            break
+    if _foreign:
+        messages.error(
+            request,
+            f"'{cfg.name}' cannot follow the account: its {cfg.asset_class} "
+            f"orders route to {_foreign} while the book is {_book_kind}, so "
+            f"the pool would be sized from one account and traded on "
+            f"another. Make {_foreign} the book on /brokers/, or leave this "
+            f"pool at the capital you typed.")
+        return redirect("asset_bots_dashboard")
     alloc = allocate_shares(followers_of(request.user, include=cfg),
                             shares={cfg.pk: share})
     if not alloc["ok"]:

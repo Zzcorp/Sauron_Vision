@@ -71,6 +71,17 @@ CAPABILITIES: dict = {
     # Reading the account itself — what `sync_broker_account` needs.
     "account": ("net_liquidation", "broker_portfolio"),
     "options": ("option_chain", "option_greeks", "market_order_option"),
+    # 2026-09-20. Asking a venue the smallest size it will accept, BEFORE an
+    # order exists. Saxo alone can answer: its instrument details carry
+    # LotSize/LotSizeType and MinimumTradeSize, and `_amount` already
+    # enforces them by RAISING rather than upsizing. eToro cannot — the only
+    # per-instrument payload its adapter reads is the market-data search
+    # result, read for `instrumentId` and the symbol spelling, and it
+    # carries no size field. So an eToro floor CANNOT BE KNOWN before the
+    # order and must not be invented here. OANDA, Alpaca, IBKR, Binance and
+    # PaperTrader go unasked for the same reason: no method, which the
+    # engine reads as unmeasured and never as zero.
+    "size_floor": ("min_tradable",),
     "leverage": ("set_leverage", "set_margin_type"),
 }
 
@@ -100,8 +111,12 @@ ADAPTER_CAPABILITIES: dict = {
     # "orders" by DELETE /trade/v2/orders; "brackets" by PATCH on the
     # related legs. Four facts only SIM can settle are named in the
     # adapter and probed by `saxo_smoke` before any order exists.
+    # "size_floor" 2026-09-20: the ONLY venue that can be asked its
+    # minimum trade size before an order. The tier above says why eToro
+    # cannot be; asset_engine/base.py::_venue_size_floor says what the
+    # engine does with an unmeasured answer, which is refuse nothing.
     "saxo": ("market_data", "execution", "orders", "brackets", "fills",
-             "account"),
+             "account", "size_floor"),
     # The simulator deliberately fills only what it can honestly simulate.
     # It is what a live config falls back to when credentials are missing,
     # and `asset_engine` REFUSES to trade when it gets one — so a PaperTrader

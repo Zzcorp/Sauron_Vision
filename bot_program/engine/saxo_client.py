@@ -514,6 +514,74 @@ class SaxoTrader:
         return round(qty, int(decimals)) if decimals is not None else qty
 
     @staticmethod
+    def _size_floor(details: dict) -> "float | None":
+        """The smallest quantity `_amount` above will let through, or None.
+
+        Read off the SAME instrument-details payload `_amount` enforces on —
+        LotSize / LotSizeType and MinimumTradeSize, no other field and no
+        second endpoint — so the two readers cannot drift. `_amount` floors
+        to the lot grid BEFORE it checks the minimum, so where lots are
+        enforced the smallest ACCEPTABLE size is the first multiple of the
+        lot at or above the minimum, not the minimum itself: on a 400 grid
+        with a 1,000 minimum it is 1,200. Reporting 1,000 would report a
+        size Saxo refuses.
+
+        None means UNMEASURED and never "any size is fine". `_details`
+        returns {} when the reference call failed, and an instrument may
+        publish neither field. A caller reading None as 0 would be
+        announcing that a one-unit order is safe here.
+        """
+        lot_raw = details.get("LotSize")
+        lots = bool(lot_raw) and details.get("LotSizeType") not in (
+            None, "NotUsed")
+        try:
+            lot = float(lot_raw) if lot_raw else 0.0
+            minimum = float(details.get("MinimumTradeSize") or 0.0)
+        except (TypeError, ValueError):
+            return None
+        floor = max(lot if lots else 0.0, minimum)
+        if floor <= 0:
+            return None
+        if lots and lot > 0:
+            steps = int(floor / lot)
+            if steps * lot < floor - 1e-9:
+                steps += 1
+            floor = steps * lot
+        return floor
+
+    def min_tradable(self, symbol: str) -> "float | None":
+        """The smallest size Saxo will accept in `symbol`, or None.
+
+        Costs nothing extra on the entry path: `resolve` caches (Uic,
+        AssetType, details) per process and `market_order` resolves the same
+        symbol a moment later anyway.
+
+        None is the honest answer to could-not-ask, and it is NOT a floor of
+        zero. WHAT ENFORCES in each unmeasured case is different, and the
+        engine's log line must not claim otherwise: when the instrument
+        publishes neither field there is nothing to enforce, and the order
+        will be accepted; when the reference read FAILED, `_details` caches
+        the empty payload for this process, so `_amount` has no LotSize and
+        no MinimumTradeSize left to check and Saxo's own rejection is what
+        arrives — as an ORDER_REJECTED or ORDER_ERROR. Either way this
+        method exists so the engine can refuse a too-small size BEFORE the
+        order instead of reading Saxo's refusal off an ORDER_ERROR on every
+        tick, for ever.
+
+        It SWALLOWS deliberately, because on the entry path could-not-ask is
+        an answer. A command whose job is three honest states must not call
+        this — `saxo_smoke` reads `resolve` and `_size_floor` directly so the
+        raise reaches its own verdict.
+        """
+        try:
+            _uic, _atype, details = self.resolve(symbol)
+        except Exception as e:  # noqa: BLE001 — could not ask IS an answer
+            log.warning("saxo: cannot read a size floor for %s (%s: %s)",
+                        symbol, type(e).__name__, e)
+            return None
+        return self._size_floor(details or {})
+
+    @staticmethod
     def _pick(details: dict, preference: tuple) -> Optional[str]:
         supported = details.get("SupportedOrderTypes") or []
         for name in preference:
