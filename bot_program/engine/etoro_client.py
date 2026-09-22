@@ -389,25 +389,68 @@ class EtoroTrader:
         r.raise_for_status()
         return r.json() or {}
 
+    #: WHERE THE MONEY IS IN THE AGGREGATE PAYLOAD. Measured 2026-09-22
+    #: against a live real account: `account()` returns accountCurrency at
+    #: the TOP level and every figure one level down, under `accountTotals`
+    #: — accountTotalValue, accountAvailableCash, accountBalance,
+    #: accountCurrentPnl, accountFrozenCash, accountTotalUsedMargin, all
+    #: numeric. This adapter read the first two at the top level and found
+    #: neither: the URLs were corrected in ea0bb54 and the field names were
+    #: still wrong, so the sync ran clean and wrote no equity at all.
+    @staticmethod
+    def _totals(info: dict) -> dict:
+        """The nested totals block, or {} when the payload has no such shape.
+
+        {} rather than a raise: a caller reading a missing figure gets None
+        from `.get`, which is already every caller's unmeasured answer.
+        """
+        if not isinstance(info, dict):
+            return {}
+        block = info.get("accountTotals")
+        return block if isinstance(block, dict) else {}
+
     def balance_usdt(self) -> float:
         """Available cash in the ACCOUNT currency, not USDT — the name is the
-        contract's, the unit is eToro's. Caller converts if it must."""
+        contract's, the unit is eToro's. Caller converts if it must.
+
+        A FAILED READ ANSWERS 0.0, which cannot be told from an empty
+        account. That is not a choice made here: six adapters return a bare
+        float on this method and `capital_truth` reads it duck-typed, so one
+        of them answering None would break the contract the other five keep.
+        The consumer is honest about it — capital_truth treats a zero from a
+        live broker as unmeasured, "this module cannot tell which" — so the
+        gap is contained rather than corrected, and it is named here so the
+        next reader meets it before they trust the number.
+        """
         try:
-            return float(self.account().get("accountAvailableCash") or 0)
+            return float(self._totals(self.account())
+                         .get("accountAvailableCash") or 0)
         except Exception as e:  # noqa: BLE001
             log.warning("eToro balance fetch failed: %s", e)
             return 0.0
 
     def net_liquidation(self) -> "tuple[float, str] | None":
         """(total value, currency) or None when unreadable — the same
-        contract as IBKRTrader, so sync_broker_account can read it."""
+        contract as IBKRTrader, so sync_broker_account can read it.
+
+        The value comes from the nested totals block; the CURRENCY does not
+        — eToro puts accountCurrency at the top level, and that read was
+        always right.
+
+        A zero answers None, deliberately and in step with SaxoTrader's
+        identical rule: capital_truth states the reasoning, that a zero from
+        a live broker cannot be told from an API answering badly. It means an
+        empty account reads as unmeasured, which is this platform's
+        convention and not eToro's peculiarity; changing it belongs in a
+        change that moves every adapter at once.
+        """
         try:
             info = self.account()
         except Exception as e:  # noqa: BLE001
             log.warning("eToro net_liquidation failed: %s", e)
             return None
         try:
-            value = float(info.get("accountTotalValue"))
+            value = float(self._totals(info).get("accountTotalValue"))
         except (TypeError, ValueError):
             return None
         if value <= 0:

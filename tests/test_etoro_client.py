@@ -418,12 +418,21 @@ class TheBracketMoversTests(SimpleTestCase):
 class TheAccountReadsTests(SimpleTestCase):
 
     def test_net_liquidation_is_total_value_with_its_currency(self):
+        """The payload shape here is the one eToro actually returns, measured
+        2026-09-22 against a live real account. It used to be flat — every
+        figure at the top level — which is what the adapter looked for and
+        what eToro does not send. The URLs were fixed first and the sync
+        still wrote no equity; this is the second layer."""
         t, _ = _client([("GET", "/aggregate-portfolio", 200,
-                         {"accountTotalValue": 2012.02,
-                          "accountCurrency": "EUR",
-                          "accountAvailableCash": 400.0})])
+                         {"accountCurrency": "EUR",
+                          "accountTotals": {"accountTotalValue": 2012.02,
+                                            "accountAvailableCash": 400.0}})])
         self.assertEqual(t.net_liquidation(), (2012.02, "EUR"))
-        self.assertEqual(t.balance_usdt(), 400.0)
+        t2, _ = _client([("GET", "/aggregate-portfolio", 200,
+                          {"accountCurrency": "EUR",
+                           "accountTotals": {"accountTotalValue": 2012.02,
+                                             "accountAvailableCash": 400.0}})])
+        self.assertEqual(t2.balance_usdt(), 400.0)
 
     def test_net_liquidation_is_none_when_unreadable_never_zero(self):
         t, _ = _client([("GET", "/aggregate-portfolio", 200, {})])
@@ -472,3 +481,80 @@ class WhatItClaimsIsWhatItHasTests(SimpleTestCase):
         self.assertTrue(hasattr(EtoroTrader, "get_positions"),
                         "reconciliation needs get_positions even without "
                         "the full orders tier")
+
+
+class TheTotalsAreNestedTests(SimpleTestCase):
+    """MEASURED 2026-09-22 against the operator's live real account.
+
+    The path fix made every URL answer 200 and the sync still wrote no
+    equity: the field names were wrong too. `account()` puts accountCurrency
+    at the TOP level and every figure one level down under `accountTotals`.
+    The adapter read the first two at the top and found neither.
+
+    Key names only were read into the session; no amounts. The shape below is
+    what eToro returned:
+
+        account()      -> accountCurrency, accountTotals, cid,
+                          instrumentAggregates, mirrors, timestamp
+        accountTotals  -> accountAvailableCash, accountBalance,
+                          accountCurrentPnl, accountFrozenCash,
+                          accountTotalUsedMargin, accountTotalValue
+    """
+
+    REAL = {
+        "accountCurrency": "USD",
+        "accountTotals": {
+            "accountTotalValue": 1234.56,
+            "accountAvailableCash": 1000.0,
+            "accountBalance": 1200.0,
+            "accountCurrentPnl": 0,
+            "accountFrozenCash": 0,
+            "accountTotalUsedMargin": 0,
+        },
+        "cid": 1, "instrumentAggregates": [], "mirrors": [], "timestamp": "t",
+    }
+
+    def _t(self, payload):
+        from bot_program.engine.etoro_client import EtoroTrader
+        t = EtoroTrader("k", "u", env="live")
+        t.account = lambda: payload
+        return t
+
+    def test_the_total_comes_from_the_nested_block(self):
+        self.assertEqual(self._t(self.REAL).net_liquidation(),
+                         (1234.56, "USD"))
+
+    def test_the_currency_comes_from_the_top_level(self):
+        """eToro really does put it there, and that read was always right."""
+        payload = dict(self.REAL)
+        payload["accountTotals"] = dict(self.REAL["accountTotals"])
+        payload["accountTotals"]["accountCurrency"] = "WRONG"
+        self.assertEqual(self._t(payload).net_liquidation()[1], "USD")
+
+    def test_the_cash_comes_from_the_nested_block(self):
+        self.assertEqual(self._t(self.REAL).balance_usdt(), 1000.0)
+
+    def test_the_old_top_level_shape_is_unmeasured_not_zero(self):
+        """What the adapter used to look for. A payload shaped the old way
+        must not be read as a funded account."""
+        self.assertIsNone(self._t({"accountTotalValue": 99.0,
+                                   "accountCurrency": "USD"}).net_liquidation())
+
+    def test_a_payload_without_the_block_is_unmeasured(self):
+        self.assertIsNone(self._t({"accountCurrency": "USD"}).net_liquidation())
+        self.assertIsNone(self._t({}).net_liquidation())
+
+    def test_a_non_dict_totals_block_does_not_raise(self):
+        self.assertIsNone(
+            self._t({"accountTotals": [], "accountCurrency": "USD"})
+            .net_liquidation())
+
+    def test_a_zero_account_reads_unmeasured_as_saxo_does(self):
+        """Not eToro's peculiarity: SaxoTrader has the identical rule and
+        capital_truth states the reasoning — a zero from a live broker cannot
+        be told from an API answering badly. Pinned so that changing it here
+        alone is a deliberate act, not a drift."""
+        payload = dict(self.REAL)
+        payload["accountTotals"] = dict(self.REAL["accountTotals"],
+                                        accountTotalValue=0.0)
+        self.assertIsNone(self._t(payload).net_liquidation())
