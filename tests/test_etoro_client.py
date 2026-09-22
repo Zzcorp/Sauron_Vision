@@ -120,17 +120,90 @@ class EveryCallCarriesTheHeadersTests(SimpleTestCase):
 
 
 class TheTwoPathRulesTests(SimpleTestCase):
-    """v2 omits the segment for real; v1 writes it. Encoded, not guessed."""
+    """The segment is a TABLE, and every entry below was MEASURED.
 
-    def test_v1_writes_demo_or_real(self):
+    This class used to assert that v1 writes "real", under the docstring
+    "Encoded, not guessed" — and it was guessed. The tests were green because
+    they compared the adapter against this author's belief, never against
+    eToro; a pinned URL string cannot detect that the belief is wrong, and it
+    demonstrably did not. On 2026-09-22 the operator's first real key made
+    the save-time probe answer 404, and these status codes were then measured
+    with that key, read-only, each beside a known-200 control:
+
+        /api/v1/trading/info/aggregate-portfolio             200
+        /api/v1/trading/info/real/aggregate-portfolio        404
+        /api/v1/trading/info/portfolio                       200
+        /api/v1/trading/info/real/portfolio                  404
+        /api/v1/trading/info/pnl                             404
+        /api/v1/trading/info/real/pnl                        200
+        GET /api/v1/trading/execution/market-close-orders/1  405
+        GET /api/v1/trading/execution/real/market-close-*    404
+
+    The 405 attests the close without sending one. The DEMO strings are
+    byte-identical to what the adapter built before this change, so the demo
+    environment carries no behavioural risk here — only the real one moves.
+    """
+
+    def test_real_omits_the_segment_where_etoro_omits_it(self):
         demo, _ = _client([])
         live, _ = _client([], env="live")
         self.assertEqual(demo._v1_info("portfolio"),
                          f"{BASE}/api/v1/trading/info/demo/portfolio")
         self.assertEqual(live._v1_info("portfolio"),
-                         f"{BASE}/api/v1/trading/info/real/portfolio")
-        self.assertIn("/execution/demo/", demo._v1_exec("x"))
-        self.assertIn("/execution/real/", live._v1_exec("x"))
+                         f"{BASE}/api/v1/trading/info/portfolio")
+        self.assertEqual(demo._v1_info("aggregate-portfolio"),
+                         f"{BASE}/api/v1/trading/info/demo/aggregate-portfolio")
+        self.assertEqual(live._v1_info("aggregate-portfolio"),
+                         f"{BASE}/api/v1/trading/info/aggregate-portfolio")
+
+    def test_real_writes_the_segment_where_etoro_writes_it(self):
+        """/info/real/pnl answered 200 and /info/pnl answered 404. A blanket
+        "real omits it" rule would have been right twice and silently wrong
+        here — the same class of bug as the one being fixed."""
+        live, _ = _client([], env="live")
+        self.assertEqual(live._v1_info("pnl"),
+                         f"{BASE}/api/v1/trading/info/real/pnl")
+
+    def test_the_close_path_is_the_one_that_answered_405(self):
+        """The most expensive URL in the adapter. Order placement is v2 and
+        was always right, so a wrong close meant a venue that takes a real
+        position and refuses every exit."""
+        demo, _ = _client([])
+        live, _ = _client([], env="live")
+        tail = "market-close-orders/positions/77"
+        self.assertEqual(
+            live._v1_exec(tail),
+            f"{BASE}/api/v1/trading/execution/market-close-orders/positions/77")
+        self.assertEqual(
+            demo._v1_exec(tail),
+            f"{BASE}/api/v1/trading/execution/demo/"
+            f"market-close-orders/positions/77")
+
+    def test_an_unattested_tail_raises_instead_of_composing_a_url(self):
+        """The guard against repeating this bug. A tail nobody measured is
+        "could not ask", not "probably omits it"."""
+        live, _ = _client([], env="live")
+        with self.assertRaises(LookupError) as caught:
+            live._v1_info("watchlists")
+        self.assertIn("not attested", str(caught.exception))
+        with self.assertRaises(LookupError):
+            live._v1_exec("limit-orders")
+
+    def test_demo_needs_no_attestation_because_demo_writes_it_always(self):
+        """Demo was never wrong, and must not start raising."""
+        demo, _ = _client([])
+        self.assertEqual(demo._v1_info("anything-at-all"),
+                         f"{BASE}/api/v1/trading/info/demo/anything-at-all")
+
+    def test_no_real_segment_survives_on_a_live_client(self):
+        """Except pnl, which eToro genuinely wants it for."""
+        live, _ = _client([], env="live")
+        for url in (live._v1_info("portfolio"),
+                    live._v1_info("aggregate-portfolio"),
+                    live._v1_exec("market-close-orders/positions/1"),
+                    live._v2("positions/1"), live._v2_exec_orders(),
+                    live._v2_lookup()):
+            self.assertNotIn("/real/", url, url)
 
     def test_v2_omits_the_segment_for_real(self):
         demo, _ = _client([])

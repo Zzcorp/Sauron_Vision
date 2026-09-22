@@ -53,11 +53,18 @@ def etoro_probe(api_key: str, user_key: str, demo: bool = True) -> tuple:
     strength of it.
 
     The endpoint is the adapter's own aggregate-portfolio read, built by
-    the adapter's path rule, so the probe and the client can never disagree
+    the adapter's path table, so the probe and the client can never disagree
     about where eToro lives. The first version of this hit a host and path
     taken from an earlier, unverified guess; it would have answered
     "unknown" for every real key. `demo` matters: a demo key against the
     real path is a 401 that reads as "your keys are wrong".
+
+    AND IT EARNED ITS THIRD STATE ON 2026-09-22. The first real key ever
+    presented to this platform made this probe answer 404 — not 401 — and
+    the three-state reading above is what stopped the operator being told
+    their keys were bad. They were not: the paths were, and the 404 was the
+    adapter composing /info/real/aggregate-portfolio, which eToro does not
+    publish. Measured against the same key: the corrected path answers 200.
     """
     from bot_program.engine.etoro_client import EtoroTrader
     url = EtoroTrader(api_key, user_key,

@@ -26,6 +26,54 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+def keyed_venue_count(user) -> int:
+    """How many of this user's broker rows exist AND carry credentials.
+
+    The discriminator for an unattributable row. With one keyed venue a miss
+    there means the position is gone; with two it could equally mean the
+    position lives at the other one, and nothing on a pre-2026-09-19 row says
+    which. Counted rather than assumed, and an unreadable row counts as not
+    keyed — the same reading `broker_vision._keyed` takes.
+    """
+    from bot_program.broker_vision import BROKER_ROWS, _keyed
+    n = 0
+    for kind, attr, _name in BROKER_ROWS:
+        acct = getattr(user, attr, None)
+        if acct is not None and _keyed(kind, acct):
+            n += 1
+    return n
+
+
+def unattributable(trade, client, *, keyed: int) -> str:
+    """Why a MISS at `client` proves nothing about `trade`, or "".
+
+    Two reasons, and they are the same sentence about two different gaps.
+
+      * THE ROW NAMES A DIFFERENT VENUE. `execute_entry` stamps
+        metadata["broker"] with the adapter that carried the entry, and every
+        path that can book a close rebuilds the client from TODAY's
+        primary-for flag instead. One moved checkbox and this asks the wrong
+        venue about a live position.
+      * THE ROW NAMES NOTHING AND MORE THAN ONE VENUE IS KEYED. The stamp
+        only began today, so older rows carry nothing; with two keyed venues
+        a miss cannot tell "gone" from "held at the other one".
+
+    Empty string means the miss IS attributable and the caller may act on it:
+    the venues agree, or only one venue exists to disagree with.
+    """
+    from bot_program.engine.capabilities import adapter_key
+    carried = str((getattr(trade, "metadata", None) or {}).get("broker") or "")
+    now_at = adapter_key(client)
+    if carried and now_at and carried != now_at:
+        return (f"it was carried by {carried} and the router now answers "
+                f"{now_at}, so a miss at the wrong venue is not an absence")
+    if not carried and keyed > 1:
+        return (f"it records no carrier and {keyed} venues are keyed, so a "
+                f"miss here cannot tell a closed position from one held at "
+                f"another venue")
+    return ""
+
+
 def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
     """Best-effort broker open-position state.
 
@@ -148,6 +196,10 @@ def reconcile_user(user) -> dict:
         if _row.symbol:
             by_class.setdefault(_row.asset_class, set()).add(_row.symbol)
 
+    # Counted ONCE per walk, not per row: it cannot change mid-pass and the
+    # credential read decrypts.
+    _keyed_venues = keyed_venue_count(user)
+
     for trade in qs:
         # A WORKING entry is an ORDER, not a position: the broker correctly
         # reports no position for it, and closing it as an orphan would
@@ -198,17 +250,12 @@ def reconcile_user(user) -> dict:
             # 2026-09-19) is cannot-tell and keeps today's behaviour; a
             # client the adapter map does not know answers "" and is also
             # cannot-tell. Only two KNOWN and DIFFERENT names refuse.
-            _carried = str((trade.metadata or {}).get("broker") or "")
-            _now_at = _adapter_key(client)
-            if (not open_at_broker and _carried and _now_at
-                    and _carried != _now_at):
+            _why = unattributable(trade, client, keyed=_keyed_venues)
+            if not open_at_broker and _why:
                 out["broker_unavailable"] += 1
                 logger.error(
-                    "reconcile: #%s (%s) NOT orphan-closed — it was carried "
-                    "by %s and the router now answers %s. A miss at the "
-                    "wrong venue is not an absence, and the leg may still be "
-                    "open at %s",
-                    trade.id, trade.symbol, _carried, _now_at, _carried)
+                    "reconcile: #%s (%s) NOT orphan-closed — %s",
+                    trade.id, trade.symbol, _why)
                 continue
 
             if not open_at_broker and state.get("unnamed"):

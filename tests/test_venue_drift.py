@@ -40,7 +40,13 @@ class _Book:
         self._symbols = list(symbols)
 
     def get_positions(self):
-        return [{"symbol": s} for s in self._symbols]
+        """A bare symbol becomes {"symbol": s}; a dict passes through, so a
+        caller can give qty and side. The CLASS NAME is what adapter_key
+        reads, so these must not be subclassed in a test — a subclass is a
+        name the map has never heard of, and the guard would correctly refuse
+        to compare against it."""
+        return [r if isinstance(r, dict) else {"symbol": r}
+                for r in self._symbols]
 
     def ticker(self, symbol):
         return {"lastPrice": "101"}
@@ -210,3 +216,133 @@ class TheClaimsColumnIsNotDuplicated(TestCase):
         from bot_program.broker_vision import _claims
         acct = saxo(_user("claims_u"), flags=("stock", "forex"), sim=True)
         self.assertEqual(_claims(acct), ["stock", "forex"])
+
+
+class ARowNobodyStampedIsUnattributable(TestCase):
+    """The hole a refuter found in the guard above, before the eToro path fix
+    could walk into it.
+
+    `execute_entry` only began stamping metadata["broker"] on 2026-09-22, so
+    every older row carries nothing and the drift check waived. That was
+    harmless only while the eToro paths were broken — a real key made
+    get_positions RAISE, and a raise is "could not ask". Fix the paths and the
+    same call returns an empty book, `unnamed` reads 0 because eToro names its
+    own book perfectly well, and every carrier-less row is orphan-closed at
+    entry price with P&L zero.
+
+    The rule is deliberately narrow: ambiguous only when MORE THAN ONE venue
+    is keyed. One keyed broker has nothing to be confused with.
+    """
+
+    def setUp(self):
+        from tests.test_saxo_wiring import etoro, saxo
+        self.user = _user("amb_u")
+        self.cfg = _cfg(self.user)
+        self.saxo, self.etoro = saxo, etoro
+
+    def _row(self, **meta):
+        base = {"initial_stop_loss": 98.0}
+        base.update(meta)
+        return _trade(self.cfg, metadata=base)
+
+    def _run(self, client):
+        from bot_program.reconcile_asset import reconcile_user
+        from tests.test_saxo_wiring import _fresh
+        with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                        return_value=client):
+            return reconcile_user(_fresh(self.user))
+
+    def test_two_keyed_venues_make_a_carrier_less_row_unclosable(self):
+        self.saxo(self.user, flags=("stock",), sim=True)
+        self.etoro(self.user, flags=("forex",))
+        trade = self._row()
+        out = self._run(EtoroTrader())
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertEqual(out["closed_as_orphan"], 0)
+        self.assertEqual(out["broker_unavailable"], 1)
+
+    def test_one_keyed_venue_keeps_todays_behaviour(self):
+        """Not "never close old rows" — "do not close a row two venues could
+        explain". With one broker there is nothing to be confused with."""
+        self.etoro(self.user, flags=("stock",))
+        trade = self._row()
+        out = self._run(EtoroTrader())
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        self.assertEqual(out["closed_as_orphan"], 1)
+
+    def test_a_stamped_row_at_its_own_venue_still_closes(self):
+        self.saxo(self.user, flags=("stock",), sim=True)
+        self.etoro(self.user, flags=("forex",))
+        trade = self._row(broker="etoro")
+        out = self._run(EtoroTrader())
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        self.assertEqual(out["closed_as_orphan"], 1)
+
+    def test_the_count_reads_keys_not_rows(self):
+        from bot_program.reconcile_asset import keyed_venue_count
+        from tests.test_saxo_wiring import _fresh
+        self.assertEqual(keyed_venue_count(_fresh(self.user)), 0)
+        self.saxo(self.user, flags=("stock",), sim=True)
+        self.assertEqual(keyed_venue_count(_fresh(self.user)), 1)
+        self.etoro(self.user, flags=("forex",))
+        self.assertEqual(keyed_venue_count(_fresh(self.user)), 2)
+
+    def test_an_unkeyed_row_does_not_count(self):
+        from bot_program.models import EtoroAccount
+        from bot_program.reconcile_asset import keyed_venue_count
+        from tests.test_saxo_wiring import _fresh
+        self.saxo(self.user, flags=("stock",), sim=True)
+        EtoroAccount.objects.create(user=self.user)   # exists, no credentials
+        self.assertEqual(keyed_venue_count(_fresh(self.user)), 1)
+
+
+class TheDrainRefusesAnUnattributableBook(TestCase):
+    """pending_closes had NO drift guard at all — 5078365 claimed every
+    booking path was covered and never touched the file. `_finalise_flat`
+    books a close on POS_FLAT, so the same wrong-venue miss lands there."""
+
+    def setUp(self):
+        from tests.test_saxo_wiring import etoro, saxo
+        self.user = _user("drain_amb_u")
+        self.cfg = _cfg(self.user)
+        saxo(self.user, flags=("stock",), sim=True)
+        etoro(self.user, flags=("forex",))
+        self.trade = _trade(self.cfg, status="CLOSE_PENDING",
+                            metadata={"initial_stop_loss": 98.0,
+                                      "broker": "ibkr"})
+
+    def _client(self, rows=()):
+        """EtoroTrader itself, never a subclass: adapter_key reads the class
+        NAME, so a subclass answers "" and the guard would refuse to compare
+        against a venue it cannot name. A MagicMock fails the same way."""
+        return EtoroTrader(rows)
+
+    def test_a_wrong_venue_miss_is_unknown_not_flat(self):
+        from bot_program.pending_closes import POS_UNKNOWN, broker_exposure
+        state = broker_exposure(self.trade, self._client())
+        self.assertEqual(state["state"], POS_UNKNOWN)
+        self.assertIn("carried by ibkr", state["why"])
+
+    def test_a_positive_identification_still_counts(self):
+        """The guard bites on the ABSENCE only. If the venue answering says it
+        holds the symbol, side and size, that is evidence whoever carried the
+        row — and suppressing it would block a legitimate close."""
+        from bot_program.pending_closes import POS_HELD, broker_exposure
+        state = broker_exposure(self.trade, self._client(
+            [{"symbol": "AAPL", "qty": 10, "side": "BUY"}]))
+        self.assertEqual(state["state"], POS_HELD)
+        self.assertEqual(state["qty"], Decimal("10"))
+
+    def test_an_empty_real_account_does_not_book_a_carrier_less_row(self):
+        """The case the money lens named: a freshly keyed real account holds
+        nothing, so `symbols` is empty AND `unnamed` is 0 — both valves read
+        0, which is the strongest possible false "the broker is flat"."""
+        from bot_program.pending_closes import POS_UNKNOWN, broker_exposure
+        bare = _trade(self.cfg, status="CLOSE_PENDING", symbol="MSFT",
+                      metadata={"initial_stop_loss": 98.0})
+        state = broker_exposure(bare, self._client([]))
+        self.assertEqual(state["state"], POS_UNKNOWN)
+        self.assertIn("no carrier", state["why"])

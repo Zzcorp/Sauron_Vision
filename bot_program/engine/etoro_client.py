@@ -31,13 +31,22 @@ THREE FACTS ABOUT THE API THAT SHAPE EVERYTHING BELOW
    here is the warning: "a completely unfilled order was booked as a
    complete fill on both sides".
 
-2. TWO API VERSIONS, TWO PATH RULES. Opening and modifying are v2, where
-   the REAL account OMITS the environment segment:
+2. THE ENVIRONMENT SEGMENT IS NOT A RULE, IT IS A TABLE. v2 omits it for
+   the real account:
        /api/v2/trading/execution/demo/orders   vs   /api/v2/trading/execution/orders
-   Portfolio, rates and closing are v1, where the real account WRITES it:
-       /api/v1/trading/info/demo/portfolio     vs   /api/v1/trading/info/real/portfolio
-   Encoded in two helpers rather than discovered in production on a real
-   key. Everything under /market-data/ carries no environment at all.
+   v1 omits it for portfolio, aggregate-portfolio and the close — and WRITES
+   it for pnl:
+       /api/v1/trading/info/demo/portfolio     vs   /api/v1/trading/info/portfolio
+       /api/v1/trading/info/demo/pnl           vs   /api/v1/trading/info/real/pnl
+   This header used to claim v1 always wrote "real", and called that "encoded
+   in two helpers rather than discovered in production on a real key". It was
+   discovered in production on a real key: the operator's first live save
+   probed a 404 on 2026-09-22, and every real-account read AND the close were
+   wrong while order placement (v2) was right — a venue that would take an
+   order and refuse every exit. Each entry in `_V1_INFO_REAL_SEG` and
+   `_V1_EXEC_REAL_SEG` now carries the status code that measured it, and an
+   unattested tail raises. Everything under /market-data/ carries no
+   environment at all.
 
 3. EVERYTHING IS KEYED ON AN INTEGER instrumentId — candles, rates,
    closing. Only order creation accepts a ticker. Ids are immutable
@@ -168,14 +177,63 @@ class EtoroTrader:
     def _headers(self, rid: Optional[str] = None) -> dict:
         return {"x-request-id": rid or self._rid()}
 
-    # Path rule 2: v1 writes the environment, v2 omits it for real.
+    #: WHAT THE REAL ACCOUNT DOES WITH THE ENVIRONMENT SEGMENT, PER TAIL.
+    #:
+    #: Not a rule — a TABLE, because eToro is not consistent and a rule would
+    #: be wrong for `pnl`. Every entry was MEASURED on 2026-09-22 with a live
+    #: real key, read-only, each beside a known-200 control:
+    #:
+    #:   /info/aggregate-portfolio        200   /info/real/aggregate-portfolio  404
+    #:   /info/portfolio                  200   /info/real/portfolio            404
+    #:   /info/pnl                        404   /info/real/pnl                  200
+    #:   /execution/market-close-orders/  405   /execution/real/market-close-*  404
+    #:
+    #: The 405 attests the close WITHOUT sending one: the close is a POST, so a
+    #: GET cannot close anything, and Method Not Allowed proves the path exists
+    #: where 404 proves it does not.
+    #:
+    #: DEMO writes "demo/" for every tail measured. An unlisted tail RAISES
+    #: rather than composing a URL nobody has ever seen answer: this adapter's
+    #: previous header called its paths "encoded ... rather than discovered in
+    #: production on a real key", and they were discovered in production on a
+    #: real key. A tail nobody measured is "could not ask", not "probably".
+    _V1_INFO_REAL_SEG = {
+        "aggregate-portfolio": "",
+        "portfolio": "",
+        "pnl": "real/",
+    }
+    _V1_EXEC_REAL_SEG = {
+        "market-close-orders": "",
+    }
+
+    def _seg(self, table: dict, key: str, tail: str) -> str:
+        """The environment segment for `key`, or a raise naming the tail.
+
+        Demo writes "demo/" for everything measured. Real reads the table,
+        and an unattested tail is refused — loudly, at the call, rather than
+        as a 404 nobody connects to a guess made months earlier.
+        """
+        if self.demo:
+            return "demo/"
+        try:
+            return table[key]
+        except KeyError:
+            raise LookupError(
+                f"eToro path not attested: {tail!r}. Nobody has measured "
+                f"whether the real account writes the environment segment "
+                f"for this endpoint, and eToro is not consistent — "
+                f"/info/pnl writes it while /info/portfolio omits it. Check "
+                f"api-portal.etoro.com for your tail and add it to the "
+                f"table, with the status codes you measured."
+            ) from None
+
     def _v1_info(self, tail: str) -> str:
-        env = "demo" if self.demo else "real"
-        return f"{BASE}/api/v1/trading/info/{env}/{tail}"
+        seg = self._seg(self._V1_INFO_REAL_SEG, tail.split("/")[0], tail)
+        return f"{BASE}/api/v1/trading/info/{seg}{tail}"
 
     def _v1_exec(self, tail: str) -> str:
-        env = "demo" if self.demo else "real"
-        return f"{BASE}/api/v1/trading/execution/{env}/{tail}"
+        seg = self._seg(self._V1_EXEC_REAL_SEG, tail.split("/")[0], tail)
+        return f"{BASE}/api/v1/trading/execution/{seg}{tail}"
 
     def _v2(self, tail: str) -> str:
         seg = "demo/" if self.demo else ""

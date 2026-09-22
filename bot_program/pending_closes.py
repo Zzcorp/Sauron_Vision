@@ -821,6 +821,28 @@ def broker_exposure(trade, client) -> dict:
         # what this function answered before it could net at all.
         return {"state": POS_UNKNOWN, "qty": None, "ambiguous": False,
                 "why": "the book names this symbol with no usable quantity"}
+    # THE SAME REFUSAL RECONCILE MAKES, ON THE OTHER PATH THAT BOOKS A
+    # CLOSE — and placed HERE, on the flat conclusion only, so a POSITIVE
+    # identification still counts. If this venue says it holds the symbol,
+    # side and size, that is evidence whoever carried the row; it is only the
+    # ABSENCE that two venues cannot distinguish.
+    #
+    # `_finalise_flat` acts on POS_FLAT, and until now nothing here asked
+    # whether the venue answering is the venue that carried the row — not
+    # even for a row that names its carrier. One moved checkbox and the drain
+    # books a live position CLOSED because a different venue truthfully said
+    # it holds nothing.
+    try:
+        from bot_program.reconcile_asset import (keyed_venue_count,
+                                                 unattributable)
+        _why = unattributable(trade, client,
+                              keyed=keyed_venue_count(trade.config.user))
+    except Exception as e:  # noqa: BLE001 — an unreadable guard refuses nothing
+        logger.debug("close retry: attribution check unavailable (%s)", e)
+        _why = ""
+    if _why:
+        return _unknown_exposure(_why)
+
     if unnamed:
         # NOTHING MATCHED, AND PART OF THE BOOK WAS UNREADABLE. FLAT here is
         # a measurement the caller acts on: `_finalise_flat` books the row
