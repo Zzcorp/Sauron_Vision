@@ -298,6 +298,19 @@ COMMANDS = [
         "category": "read",
     },
     {
+        "name": "probe_routes",
+        "title": "Probe routes",
+        "purpose": "GET every argument-free route as a superuser and report, in three states, which pages answer, which are missing and which raise. Parameterised and mutating routes are counted, not probed. The forge shows the last tally.",
+        "usage": [
+            "python manage.py probe_routes",
+            "python manage.py probe_routes --show",
+        ],
+        "mirrors": "/oculus/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+    },
+    {
         "name": "signals",
         "title": "Signals, filtered",
         "purpose": "The signals page as a command: the same twelve filters, and the six answers per signal — can anything act on it, what the rule is worth, why it fired, what it would cost, whether anyone acted, and its own grade.",

@@ -158,7 +158,10 @@ class RegistryTests(TestCase):
         # already does on this same lane.
         self.assertEqual(ops_commands.runnable_names(),
                          {"open_trades", "paper_readiness", "preflight_live",
-                          "why_no_trade", "signals", "treasury"})
+                          "why_no_trade", "signals", "treasury",
+                          # 2026-09-23: GET-only, no external service,
+                          # prints route names and status codes.
+                          "probe_routes"})
         self.assertIsNone(ops_commands.get("nope"))
         self.assertEqual([k for k, _l, _r in ops_commands.by_category()],
                          ["read", "decide", "ops"])

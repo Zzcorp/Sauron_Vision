@@ -5273,7 +5273,10 @@ Be concise, data-driven, and professional. Use markdown formatting."""
 def ai_chat_stream(request):
     """SSE streaming AI chat endpoint."""
     import json, os
-    from django.http import StreamingHttpResponse
+    # 2026-09-23: JsonResponse was never imported here, so both refusals
+    # below raised NameError and answered 500 — found by probe_routes on
+    # its first run; no test had ever visited this page.
+    from django.http import JsonResponse, StreamingHttpResponse
 
     message = request.GET.get("message", "")
     if not message:

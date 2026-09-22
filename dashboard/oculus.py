@@ -793,6 +793,20 @@ def _cycle_forge():
         from core.wall_facts import TESTS_GREEN
         return TESTS_GREEN
 
+    def _probe(field):
+        """One count from the stored tally, or None when it never ran."""
+        from django.core.cache import cache
+        stored = cache.get("forge:route_probe")
+        if not isinstance(stored, dict) or stored.get("state") != "ran":
+            return None
+        return int((stored.get("counts") or {}).get(field, 0))
+
+    def _probe_broken():
+        return _probe("broken")
+
+    def _probe_missing():
+        return _probe("missing")
+
     def _unregistered_guards():
         """Guarded task keys with no component row — the defect that hid
         three never-running tasks until 2026-09-13."""
@@ -843,6 +857,21 @@ def _cycle_forge():
                   qualifier='a guarded_task key with no row reads OFF and '
                             'the task never runs — three were, from the '
                             'beginning, found on 2026-09-13'),
+            # THE PAGES THEMSELVES. 305 URL patterns and 243 named routes no
+            # test touches (measured 2026-09-23); the suite cannot see a page
+            # that renders 500. `manage.py probe_routes` GETs every
+            # argument-free route as a superuser and leaves its tally in
+            # the cache; these two read it. Never run is a dash — the probe
+            # is a human's command and this lane only reports.
+            _fact('pages that raise, at the last probe', _probe_broken,
+                  tone="caution",
+                  qualifier='5xx or a raise on a GET as a superuser; a dash '
+                            'means probe_routes has not run since the cache '
+                            'was last cleared, never that no page raises'),
+            _fact('pages answering 404, at the last probe', _probe_missing,
+                  tone="caution",
+                  qualifier='a route wired to nothing that answers — the '
+                            'defect that hid for a day on 2026-09-13'),
         ],
         "caveat": (
             'This lane REPORTS; it does not act yet, and that is the honest '
