@@ -182,25 +182,178 @@ def run_bot_tick(user_id: int):
         except Exception as e:
             log.exception("scan fail %s: %s", symbol, e)
 
+#: A `reason` column grows on every retry, and a row an operator leaves
+#: alone for a week must not grow it without bound. The tail is what matters.
+_REASON_MAX = 2000
+
+
+def _append_reason(trade, note: str) -> None:
+    """Append to the one column this schema can carry provenance on.
+
+    BotTrade has no `metadata`, so `reason` is where "was this exit measured
+    or assumed" lives — the same place kill_switch._close_legacy_trade puts
+    it, with the same two words.
+    """
+    joined = ((trade.reason or "") + f" | {note}").strip()
+    trade.reason = joined[-_REASON_MAX:] if len(joined) > _REASON_MAX else joined
+
+
+def _warn_legacy_close_failed(trade, note: str) -> None:
+    """One alert per trade per day. The title IS the dedup key.
+
+    `notify_staff` de-dupes on the exact title, truncated at 200 chars, over
+    its cooldown window — so the trade id has to be in the title and early,
+    or one stuck row would silence every other. The body names the kill
+    switch because this schema has no per-trade close button: the operator's
+    only lever on a legacy row is the emergency flatten.
+    """
+    try:
+        from bot_program.notifications import notify_staff
+        notify_staff(
+            title=(f"⚠ BotTrade #{trade.id} {trade.symbol}: close FAILED, the "
+                   f"position may still be open at the broker")[:200],
+            body=(f"{note} The row was left OPEN because that is the truth — "
+                  f"this legacy schema has no CLOSE_PENDING state, and "
+                  f"booking it CLOSED would hide a live position. There is no "
+                  f"per-trade close button for a legacy row: use the "
+                  f"EMERGENCY FLATTEN on /command/, or close it by hand at "
+                  f"the venue. The next hand-triggered tick will retry, and "
+                  f"the order carries a deterministic id so the venue refuses "
+                  f"a duplicate rather than doubling the position."),
+            url="/command/", cooldown_hours=24)
+    except Exception as e:  # noqa: BLE001 — an alert must never cost a close
+        log.warning("legacy close alert failed for #%s: %s", trade.id, e)
+
+
+def _submit_legacy_close(trade: BotTrade, client, reason: str):
+    """Send the close THIS venue understands, with a name it can refuse twice.
+
+    Raises on anything that is not a sent order, so the caller writes nothing.
+
+    `close_or_refuse` is the guard the kill switch already uses on this model:
+    on eToro `market_order` only ever OPENS (a SELL is sellShort) and under
+    Saxo's FifoEndOfDay an opposite order leaves both lots live — and the
+    router checks the Saxo/eToro/IBKR overrides BEFORE asset-class routing, so
+    a legacy BotTrade really can be handed one of those clients.
+
+    The id is deterministic and intent-scoped. `split_intent` already admits
+    "TP" and "SL", which is what `reason` carries, so a retried TP close
+    reuses its own id and the venue refuses the copy — while a kill-switch
+    flatten on the same row carries "KILL" and is correctly NOT refused.
+    """
+    from bot_program.engine.idempotency import (make_client_order_id,
+                                                split_intent)
+    from bot_program.engine.venue_close import close_or_refuse
+
+    if not hasattr(client, "market_order"):
+        raise RuntimeError(f"{type(client).__name__} cannot place an order")
+    close_side = "SELL" if trade.side == "BUY" else "BUY"
+    order_id = make_client_order_id(
+        config_id=int(getattr(trade, "config_id", 0) or 0),
+        symbol=str(trade.symbol), signal_id=str(trade.id),
+        intent=split_intent(reason))
+    extra = {}
+    if (trade.config.market_type == "futures"
+            and hasattr(client, "ensure_config")):
+        # `reduce_only` is a Binance-Futures-only kwarg, and it must survive
+        # the move to close_or_refuse: without it a close into an already-flat
+        # futures account opens the reverse position.
+        extra["reduce_only"] = True
+    return close_or_refuse(trade, client, float(trade.qty),
+                           close_side=close_side, client_order_id=order_id,
+                           extra=extra or None)
+
+
 def _close(trade: BotTrade, price: Decimal, client, reason: str):
-    """Close a BotTrade. The `client` is the broker that owns the symbol —
-    crypto uses Binance(Futures)Client, forex uses OANDATrader, stocks use
-    AlpacaTrader. Duck-typed: only `market_order` is needed."""
-    pnl = (price - trade.entry_price) * trade.qty if trade.side == "BUY" \
-          else (trade.entry_price - price) * trade.qty
-    trade.exit_price = price
+    """Close a BotTrade — ASKING THE VENUE FIRST, and writing only after.
+
+    The `client` is the broker that owns the symbol: crypto uses
+    Binance(Futures)Client, forex OANDATrader, stocks AlpacaTrader.
+
+    This used to set status CLOSED, write an exit price off the MARK and
+    compute the P&L BEFORE sending anything; then it sent the order inside a
+    try whose except only logged, and saved CLOSED regardless. A live trade
+    whose close failed was booked CLOSED at a price nobody filled, while the
+    position stayed open at the venue. Nothing is written now until the order
+    has been answered.
+
+    Returns True when the row was booked CLOSED, False when it was left OPEN.
+    The only caller today discards it and relies on the log and the alert;
+    the value is here for callers that want to count.
+    """
+    from bot_program.pending_closes import (broker_exit_price,
+                                            broker_filled_qty, dust_qty,
+                                            is_paper_client)
+
+    result = None
+    if not trade.paper:
+        # A LIVE ROW ROUTED TO THE SIMULATOR IS NOT A CLOSE. The router hands
+        # back a PaperTrader on missing credentials, on testnet and on any
+        # exception, and PaperTrader.market_order does NOT raise — it answers
+        # status FILLED with an avgPrice, in exactly the shape a real fill
+        # has. Booking that would stamp a simulated price on a real position
+        # and mark the row CLOSED over it. The entry path in this same file
+        # already refuses this on the way in.
+        if is_paper_client(client):
+            from bot_program.engine.broker_router import session_busy
+            busy = session_busy(client)
+            note = ("the broker session was held by another process, so "
+                    "NOTHING was sent" if busy else
+                    "the broker was unavailable (PaperTrader fallback), so "
+                    "NOTHING was sent")
+            log.error("legacy close #%s %s: %s", trade.id, trade.symbol, note)
+            _append_reason(trade, f"close refused:{reason} ({note})")
+            trade.save(update_fields=["reason"])
+            _warn_legacy_close_failed(trade, note.capitalize() + ".")
+            return False
+        try:
+            result = _submit_legacy_close(trade, client, reason)
+        except Exception as e:  # noqa: BLE001 — a refusal is not a close
+            note = f"the venue did not accept the close ({e})"
+            log.error("legacy close #%s %s FAILED: %s",
+                      trade.id, trade.symbol, e)
+            _append_reason(trade, f"close failed:{reason} ({e})")
+            trade.save(update_fields=["reason"])
+            _warn_legacy_close_failed(trade, note.capitalize() + ".")
+            return False
+
+    # PREFER THE FILL THE BROKER REPORTS over the mark read a moment ago, and
+    # say which was used. `broker_exit_price` is the ONE place the response
+    # keys are spelled — Binance spot reports no average at all, only the
+    # quote total and the base quantity whose ratio IS the average, and it
+    # refuses a non-positive price, which PaperTrader answers for a symbol
+    # with no Instrument row.
+    exit_price = Decimal(str(price))
+    note = "exit:mark"
+    booked = broker_exit_price(result)
+    if booked is not None and booked > 0:
+        exit_price, note = booked, "exit:broker"
+
+    # A PARTIAL FILL HAS NOWHERE TO LIVE ON THIS SCHEMA. No CLOSE_PENDING
+    # state, no residual field — so booking CLOSED would hide a live
+    # remainder. The row stays OPEN and the operator is told. This also
+    # catches a Binance FUTURES accept, whose status is NEW with executedQty
+    # 0: `broker_filled_qty` reads a reported 0 as "nothing gone yet, the
+    # position is live", which is precisely the state this branch is for.
+    filled = broker_filled_qty(result)
+    qty = Decimal(str(trade.qty))
+    if filled is not None and (qty - filled) > dust_qty("crypto"):
+        left = f"the broker filled only {filled} of {qty}"
+        log.error("legacy close #%s %s: %s — row left OPEN",
+                  trade.id, trade.symbol, left)
+        _append_reason(trade, f"close partial:{reason} ({left})")
+        trade.save(update_fields=["reason"])
+        _warn_legacy_close_failed(trade, left.capitalize() + ".")
+        return False
+
+    pnl = ((exit_price - trade.entry_price) * trade.qty
+           if trade.side == "BUY"
+           else (trade.entry_price - exit_price) * trade.qty)
+    _append_reason(trade, f"closed:{reason}")
+    _append_reason(trade, note)
+    trade.exit_price = exit_price
     trade.pnl_usdt = pnl
     trade.status = "CLOSED"
     trade.closed_at = timezone.now()
-    trade.reason = (trade.reason + f" | closed:{reason}").strip()
-    if not trade.paper:
-        try:
-            close_side = "SELL" if trade.side == "BUY" else "BUY"
-            kwargs = {}
-            if trade.config.market_type == "futures" and hasattr(client, "ensure_config"):
-                # `reduce_only` is a Binance-Futures-only kwarg.
-                kwargs["reduce_only"] = True
-            client.market_order(trade.symbol, close_side, float(trade.qty), **kwargs)
-        except Exception as e:
-            log.error("close order fail: %s", e)
     trade.save()
+    return True

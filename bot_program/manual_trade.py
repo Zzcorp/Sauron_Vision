@@ -441,13 +441,20 @@ def _correlation_note(user, inst) -> dict:
 
 
 def _qty_step(bot, price: float) -> float:
-    """The smallest size increment this venue actually keeps.
+    """The smallest size increment THIS PLATFORM keeps — not the venue's.
 
     Probed through the bot's own _round_qty rather than hardcoded, because
     the granularity is per class AND per mode: crypto keeps 8 decimals,
     paper stock 4, LIVE stock whole shares, forex 100-unit boundaries. A
-    hardcoded step would offer the operator a size the venue silently
+    hardcoded step would offer the operator a size this platform silently
     rounds to zero.
+
+    It is NOT a venue minimum and must not be described as one. `_round_qty`
+    has no client and knows nothing about where the order goes; the forex
+    100-unit boundary is OANDA/IBKR granularity and the bot's own tidiness.
+    The venue's real floor is a different question with a different answer,
+    asked of one adapter only — see AssetBot._venue_size_floor and
+    SaxoTrader.min_tradable.
     """
     for step in (1e-8, 1e-6, 1e-4, 1e-2, 0.1, 1.0, 10.0, 100.0, 1000.0):
         try:
@@ -546,8 +553,12 @@ def validate_qty_override(cfg, *, asset_class, raw, entry, stop,
 
     qty = float(round_qty(qty, entry))
     if qty <= 0:
-        return None, ("That size rounds to zero at this venue's minimum "
-                      "increment — nothing would have been sent")
+        # "this platform's", not "this venue's": the step came from the
+        # bot's own _round_qty, which has never asked a venue anything.
+        return None, ("That size rounds to zero at this platform's own size "
+                      "granularity — nothing would have been sent. It is not "
+                      "the venue refusing; the venue's own floor is a "
+                      "separate check")
 
     why = judge_qty(cfg, asset_class=asset_class, qty=qty, entry=entry,
                     stop=stop, value_per_unit=value_per_unit,

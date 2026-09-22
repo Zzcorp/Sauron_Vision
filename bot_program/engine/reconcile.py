@@ -42,18 +42,50 @@ def reconcile_user(user_id):
     found_unknown = 0
     errors = 0
 
+    # A BOOK THAT CANNOT BE READ IS NOT AN EMPTY BOOK.
+    #
+    # `exchange_positions` used to start {} and be filled only for a FUTURES
+    # config whose client has a `positions` method. On a SPOT config — the
+    # default, and the first entry in MARKET_CHOICES — that branch never ran,
+    # the dict stayed empty, and step 1 below read "not in exchange_positions"
+    # for EVERY open row and booked every one of them CLOSED at the ticker
+    # mark, stamped `reconcile:closed_externally`. The whole open book, wiped
+    # in the database, while the positions sat at the venue.
+    #
+    # Binance spot publishes no position list at all — a spot BALANCE is not a
+    # position, which is why BinanceClient has no `positions` method — so the
+    # honest answer is that the question cannot be asked, not that the answer
+    # is nothing. The `except` below already covered a read that RAISED; the
+    # hole was the branch that never ran.
+    if cfg.market_type != "futures" or not hasattr(client, "positions"):
+        logger.warning(
+            "reconcile: %s on %s publishes no position list — %d open row(s) "
+            "left alone. Nothing was closed, because a book nobody can read "
+            "is not a flat book",
+            cfg.market_type, type(client).__name__, len(open_trades))
+        return {
+            "skipped": (f"{cfg.market_type} on {type(client).__name__} "
+                        f"publishes no position list, so nothing could be "
+                        f"reconciled — a book that cannot be read is not an "
+                        f"empty book"),
+            "open_rows": len(open_trades),
+            "closed_orphans": 0,
+            "found_unknown_positions": 0,
+            "errors": 0,
+            "checked_at": timezone.now().isoformat(),
+        }
+
     # Try to fetch current positions
     exchange_positions = {}
     try:
-        if cfg.market_type == "futures" and hasattr(client, "positions"):
-            for pos in client.positions():
-                amt = float(pos.get("positionAmt", 0))
-                if abs(amt) > 0:
-                    exchange_positions[pos["symbol"]] = {
-                        "qty": abs(amt),
-                        "side": "BUY" if amt > 0 else "SELL",
-                        "entry_price": float(pos.get("entryPrice", 0)),
-                    }
+        for pos in client.positions():
+            amt = float(pos.get("positionAmt", 0))
+            if abs(amt) > 0:
+                exchange_positions[pos["symbol"]] = {
+                    "qty": abs(amt),
+                    "side": "BUY" if amt > 0 else "SELL",
+                    "entry_price": float(pos.get("entryPrice", 0)),
+                }
     except Exception as e:
         logger.warning("could not fetch exchange positions: %s", e)
         return {"error": "exchange query failed"}

@@ -1,6 +1,10 @@
 """Platform control — start/stop scrapers, agents, and pipeline components."""
+import logging
+
 from django.db import models
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 class PlatformComponent(models.Model):
@@ -200,8 +204,16 @@ DEFAULT_COMPONENTS = [
      "category": "pipeline"},
 
     # ── Broker account sync ───────────────────────────────────
-    {"key": "broker_account_sync", "name": "Broker Account Sync (IBKR)",
-     "description": "Caches each interfaced IBKR account's NetLiquidation and holdings every 15 min — the source for every 'as the broker sees it' cell. Independent of pipeline_asset_bots (knowing what the account holds is not a bot function). Read-only; touches no gate denominator.",
+    # ONE KEY, THREE WALKS: sync_broker_account (IBKR), sync_saxo_accounts
+    # and sync_etoro_accounts all carry @guarded_task("broker_account_sync")
+    # (tasks.py:300, :605, :801). This row said "(IBKR)" for months after the
+    # other two arrived, so unticking it to stop IBKR stopped Saxo and eToro
+    # with no warning anywhere. The old description also called it read-only
+    # and said it touches no gate denominator: since pools can follow the
+    # account, every follower's capital IS this reading times its share, and
+    # the entry path freezes a follower whose reading has gone stale.
+    {"key": "broker_account_sync", "name": "Broker Account Sync (Saxo · eToro · IBKR)",
+     "description": "Caches equity and holdings for every keyed Saxo, eToro and IBKR account every 15 min — the source of every 'as the broker sees it' cell. ONE switch for all THREE walks: unticking it stops Saxo and eToro too. Every following pool's capital is this reading times its share.",
      "category": "pipeline"},
 
     # ── Share allocator ───────────────────────────────────────
@@ -295,10 +307,34 @@ def seed_components():
     PlatformComponent.objects.filter(key__in=RETIRED_COMPONENT_KEYS).delete()
     created = 0
     for comp in DEFAULT_COMPONENTS:
-        _, was_created = PlatformComponent.objects.get_or_create(
+        row, was_created = PlatformComponent.objects.get_or_create(
             key=comp["key"],
             defaults=comp,
         )
         if was_created:
             created += 1
+            continue
+        # THE LABELS ARE THE CODE'S; THE SWITCH IS THE OPERATOR'S.
+        #
+        # `defaults` applies only on CREATION, so on every deployed database
+        # the name, description and category froze the day the row was first
+        # seeded — and a correction to any of them was inert in the one place
+        # it was needed. `broker_account_sync` went on reading
+        # "Broker Account Sync (IBKR)" for months after it began gating the
+        # Saxo and eToro walks as well, and no edit to the table above could
+        # have changed that.
+        #
+        # `is_enabled` is NEVER touched here, nor any counter or last-run
+        # field. That is the operator's own state: a deploy that silently
+        # flipped a component back ON would be a far worse bug than a stale
+        # label, and a missing row already reads OFF by design.
+        stale = [f for f in ("name", "description", "category")
+                 if f in comp and getattr(row, f) != comp[f]]
+        if stale:
+            for field in stale:
+                setattr(row, field, comp[field])
+            row.save(update_fields=stale + ["updated_at"])
+            logger.info("[components] %s: refreshed %s (the switch was left "
+                        "as the operator set it)", comp["key"],
+                        ", ".join(stale))
     return created
