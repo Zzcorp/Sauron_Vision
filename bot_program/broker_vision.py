@@ -300,11 +300,18 @@ def divergence(user, rows=None, platform=None) -> list:
                 held[sym] = h
         ours = {p["symbol"]: p for p in mine}
         both = sorted(set(held) & set(ours))
+        _age = row["held"]["age_seconds"]
         out.append({
             "kind": row["kind"], "name": row["name"], "known": True,
             "reason": "",
-            "age_seconds": row["held"]["age_seconds"],
+            "age_seconds": _age,
             "age_text": row["held"]["age_text"],
+            # A COMPARISON AGAINST AN OLD SNAPSHOT IS NOT A RECONCILIATION.
+            # "3 agree" was printed against holdings seven days old while the
+            # gateway had been unable to log in for a week; the renderers
+            # read this flag and say so, using the same STALE_AFTER_S the
+            # row's own equity_stale uses.
+            "stale": _age is not None and _age > STALE_AFTER_S,
             "only_broker": [held[s] for s in sorted(set(held) - set(ours))],
             "only_platform": [ours[s] for s in sorted(set(ours) - set(held))],
             "agree": [{"symbol": s, "broker": held[s], "platform": ours[s]}
@@ -342,15 +349,34 @@ def vision(user) -> dict:
                         "unkeyed or claims no asset class, so capital_truth "
                         "has nothing to read and the preflight will refuse "
                         "to arm money.")
+    # HOW MANY LIVE ROWS EACH BROKER IS ANSWERABLE FOR. A stale reading on
+    # a broker with nothing attributed is worth reading; the same reading on
+    # a broker carrying live positions is money the platform cannot see, and
+    # the entry path already refuses to trade on it (tracking_freeze_reason).
+    # The page that exists to show where the money is must not file that
+    # under a green banner — it did, on 2026-09-22, for 182 hours and three
+    # positions: "NO BLOCKERS" over "10948 minutes old".
+    _attributed = {d["kind"]: d["platform_n"] for d in div}
     for r in rows:
         if r["keyed"] and r["equity"] is None:
             notes.append(f"{r['name']}: keyed, and its equity has NEVER been "
                          f"read — an em dash, not a zero. "
                          f"{r['session']}.")
         elif r["equity_stale"]:
-            notes.append(f"{r['name']}: the equity reading is "
-                         f"{r['equity']['age_seconds'] // 60} minutes old; "
-                         f"the sync runs every 15.")
+            _age_min = r["equity"]["age_seconds"] // 60
+            _live = _attributed.get(r["kind"], 0)
+            if _live:
+                blockers.append(
+                    f"{r['name']}: {_live} live position(s) are attributed to "
+                    f"it and its last reading is {_age_min} minutes old — "
+                    f"the sync runs every 15, so the platform has been "
+                    f"blind to that money for {_age_min // 60} hours. "
+                    f"Whatever section 6 says it agrees with is a snapshot, "
+                    f"not the broker. {r['session']}.")
+            else:
+                notes.append(f"{r['name']}: the equity reading is "
+                             f"{_age_min} minutes old; the sync runs "
+                             f"every 15.")
     for d in div:
         if not d["known"] and d["platform_n"]:
             blockers.append(

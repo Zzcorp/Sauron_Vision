@@ -415,3 +415,77 @@ class ThePageTests(TestCase):
         page = self.client.get(reverse("treasury_page"))
         self.assertEqual(page.status_code, 200)
         self.assertContains(page, "No broker row exists")
+
+
+class AStaleReadingWithLiveMoneyIsABlocker(TestCase):
+    """On 2026-09-22 the operator read, under NO BLOCKERS, that the IBKR
+    reading was 10,948 minutes old — 182 hours — with three live positions
+    attributed to it and a gateway that had not logged in for a week. Section
+    6 said "3 agree": agreement with a snapshot seven days old. The entry
+    path would have refused to trade on that reading; the page that exists to
+    show where the money is filed it under "worth reading"."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        self.user = User.objects.create_user("stale_u", password="x")
+
+    def _stale(self, acct, hours=182):
+        old = timezone.now() - timedelta(hours=hours)
+        acct.last_equity_at = old
+        acct.broker_positions_at = old
+        acct.save()
+        return acct
+
+    def test_stale_and_attributed_is_a_blocker(self):
+        self._stale(a_saxo(self.user, held=[HELD_AAPL]))
+        a_trade(self.user, "AAPL", broker="saxo")
+        v = vision(_fresh(self.user))
+        hit = [b for b in v["blockers"] if "blind to that money" in b]
+        self.assertTrue(hit, v["blockers"])
+        self.assertIn("1 live position", hit[0])
+        self.assertIn("182 hours", hit[0])
+        self.assertFalse(any("minutes old; the sync runs" in n
+                             for n in v["notes"]), v["notes"])
+
+    def test_stale_with_nothing_attributed_stays_a_note(self):
+        """No money to be wrong about — worth reading, not blocking."""
+        self._stale(a_saxo(self.user, held=[]))
+        v = vision(_fresh(self.user))
+        self.assertFalse(any("blind to that money" in b for b in v["blockers"]),
+                         v["blockers"])
+        self.assertTrue(any("minutes old" in n for n in v["notes"]), v["notes"])
+
+    def test_a_fresh_reading_with_live_money_is_not_a_blocker(self):
+        a_saxo(self.user, held=[HELD_AAPL])
+        a_trade(self.user, "AAPL", broker="saxo")
+        v = vision(_fresh(self.user))
+        self.assertFalse(any("blind to that money" in b for b in v["blockers"]),
+                         v["blockers"])
+
+    def test_the_comparison_says_it_is_against_a_snapshot(self):
+        from bot_program.broker_vision import divergence
+        self._stale(a_saxo(self.user, held=[HELD_AAPL]))
+        a_trade(self.user, "AAPL", broker="saxo")
+        d = divergence(_fresh(self.user))[0]
+        self.assertTrue(d["known"])
+        self.assertTrue(d["stale"])
+        self.assertEqual(len(d["agree"]), 1, "it still agrees — with a memory")
+
+    def test_a_fresh_comparison_is_not_marked_stale(self):
+        from bot_program.broker_vision import divergence
+        a_saxo(self.user, held=[HELD_AAPL])
+        d = divergence(_fresh(self.user))[0]
+        self.assertFalse(d["stale"])
+
+    def test_the_command_labels_the_memory(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+        self._stale(a_saxo(self.user, held=[HELD_AAPL]))
+        a_trade(self.user, "AAPL", broker="saxo")
+        out = StringIO()
+        call_command("treasury", "--user", "stale_u", stdout=out)
+        body = out.getvalue()
+        self.assertIn("agreement with a memory", body)
+        self.assertIn("BLOCKERS", body)
+        self.assertNotIn("NO BLOCKERS", body)

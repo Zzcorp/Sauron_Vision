@@ -137,9 +137,12 @@ class Command(BaseCommand):
                 w(f"   {d['name']}: {DASH} cannot be compared ({d['reason']}); "
                   f"{d['platform_n']} platform row(s) attributed to it")
                 continue
+            _vs = (f" — against a snapshot {d['age_text']} old, NOT the "
+                   f"broker: this is agreement with a memory"
+                   if d.get("stale") else "")
             w(f"   {d['name']}: {len(d['agree'])} agree, "
               f"{len(d['only_broker'])} only at the broker, "
-              f"{len(d['only_platform'])} only in the platform")
+              f"{len(d['only_platform'])} only in the platform{_vs}")
             for p in d["only_platform"]:
                 w(f"      PLATFORM ONLY  {p['symbol']:<12} {p['side']:<5} "
                   f"{p['qty']:.4f}  ({p['config']})")
