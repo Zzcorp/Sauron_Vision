@@ -38,7 +38,14 @@ BROKER_ROWS = (
 )
 
 #: The classes an account row can claim. "etf" rides with "stock" on every
-#: row's is_primary_for(), and is listed because a config can carry it.
+#: row's is_primary_for(), and is listed because an INSTRUMENT can carry it —
+#: not a config: AssetBotConfig.ASSET_CLASS_CHOICES has no "etf" entry, and
+#: the router keys off the Instrument's class, not the config's
+#: (broker_router: `asset_class = inst.asset_class if inst else "crypto"`).
+#: "index" rides on the same boolean and is deliberately NOT listed here:
+#: `_claims` below skips "etf" for exactly that reason, so adding index would
+#: print one column twice in the treasury claims line. The disclosure lives
+#: on the checkbox label instead.
 ROUTABLE_CLASSES = ("stock", "etf", "forex", "commodity", "crypto")
 
 #: Past this, a reading is old enough that the page says so. Not a limit —

@@ -484,7 +484,15 @@ class SaxoAccount(models.Model):
     # the configuration mistake it is, and Saxo wins — see
     # bot_program/engine/broker_router.py.
     is_primary_for_stocks = models.BooleanField(
-        default=False, help_text="Route stock and ETF orders to Saxo.")
+        default=False,
+        # The label has to say what the box DOES. Indices ride on this one
+        # boolean, and Saxo prices an index as a leveraged CFD — so a box
+        # promising stocks and ETFs would have moved 13 index symbols to a
+        # CFD without saying so. eToro's identical flag already names
+        # indices and Saxo's own commodity box already says CFD.
+        help_text="Route stock, ETF and index orders to Saxo. An index "
+                  "reaches Saxo as a CFD (CfdOnIndex), the way commodities "
+                  "do.")
     is_primary_for_forex = models.BooleanField(default=False)
     is_primary_for_commodity = models.BooleanField(default=False)
     is_primary_for_crypto = models.BooleanField(default=False)
@@ -539,6 +547,16 @@ class SaxoAccount(models.Model):
         return bool({
             "stock": self.is_primary_for_stocks,
             "etf": self.is_primary_for_stocks,
+            # IBKR and eToro have always mapped index onto the stocks
+            # boolean; Saxo was the only one of the three that could not
+            # carry an index symbol at all — at the venue whose own adapter
+            # says "indices are CFDs on Saxo's retail side" and whose
+            # ASSET_TYPE_FOR_CLASS maps index to CfdOnIndex. The divergence
+            # that closes: broker_vision attributes a row by the CONFIG's
+            # class while the router asks the INSTRUMENT's, so a Saxo row
+            # flagged for stocks would have had /treasury/ print "saxo" for
+            # a row holding SPX500 while the close went to IBKR.
+            "index": self.is_primary_for_stocks,
             "forex": self.is_primary_for_forex,
             "commodity": self.is_primary_for_commodity,
             "crypto": self.is_primary_for_crypto,

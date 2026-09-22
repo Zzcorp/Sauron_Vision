@@ -128,6 +128,7 @@ def reconcile_user(user) -> dict:
     """
     from .models import AssetBotTrade
     from .engine.broker_router import client_for_symbol
+    from .engine.capabilities import adapter_key as _adapter_key
 
     qs = (AssetBotTrade.objects
           .filter(config__user=user, status__in=("OPEN", "CLOSE_PENDING"), paper=False)
@@ -178,6 +179,37 @@ def reconcile_user(user) -> dict:
                     continue
             else:
                 open_at_broker = trade.symbol.upper() in state["symbols"]
+
+            # THE VENUE THAT CARRIED THIS ROW IS NOT ALWAYS THE VENUE
+            # THE ROUTER ANSWERS TODAY. `execute_entry` stamps
+            # metadata["broker"] with the adapter that actually carried the
+            # entry, and until now the only reader of that field was the
+            # /treasury/ display — while every path that can BOOK a close
+            # rebuilds the client from today's primary-for flag. So moving
+            # one checkbox makes this loop ask the wrong venue about a live
+            # position, get an honest "I do not hold that", and orphan-close
+            # a row whose leg is still open somewhere else.
+            #
+            # The `unnamed` valve below cannot catch it: the wrong venue can
+            # name everything IT holds, so `unnamed` is 0 and the miss looks
+            # like an absence.
+            #
+            # Three states. No recorded carrier (any row opened before
+            # 2026-09-19) is cannot-tell and keeps today's behaviour; a
+            # client the adapter map does not know answers "" and is also
+            # cannot-tell. Only two KNOWN and DIFFERENT names refuse.
+            _carried = str((trade.metadata or {}).get("broker") or "")
+            _now_at = _adapter_key(client)
+            if (not open_at_broker and _carried and _now_at
+                    and _carried != _now_at):
+                out["broker_unavailable"] += 1
+                logger.error(
+                    "reconcile: #%s (%s) NOT orphan-closed — it was carried "
+                    "by %s and the router now answers %s. A miss at the "
+                    "wrong venue is not an absence, and the leg may still be "
+                    "open at %s",
+                    trade.id, trade.symbol, _carried, _now_at, _carried)
+                continue
 
             if not open_at_broker and state.get("unnamed"):
                 # A MISS AGAINST A BOOK WE COULD NOT READ IS NOT AN ABSENCE.
