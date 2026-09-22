@@ -22,6 +22,11 @@ direction:
     and frozen for hours with no order and no complaint.
   * the port decides paper/live. A port IBKR does not ship makes `env` None,
     which is not paper and not safe.
+  * every alert ends in ONE external sender chosen per user, and the sender
+    refuses silently when its own precondition is missing — a bot token in
+    the WORKER's environment plus a chat id on a row only the notification
+    preferences form creates. A platform can trade for weeks with every
+    alert it raised living in the in-app bell (measured 2026-09-23).
 
 EVERYTHING HERE IS READ-ONLY. It writes nothing, places no order, and makes
 no broker round trip: every number comes from a cached column, because a
@@ -300,6 +305,92 @@ def _saxo_alive(row, now) -> bool:
         return bool(row.has_session and row.session_alive(now))
     except Exception:  # noqa: BLE001
         return False
+
+
+#: Django's non-delivering mail backends. settings.py swaps the console one
+#: in when EMAIL_HOST is empty, so "EMAIL_HOST set" alone proves nothing.
+_NOT_SMTP = ("console.EmailBackend", "locmem.EmailBackend",
+             "dummy.EmailBackend")
+
+
+def _alert_channel(user) -> dict:
+    """What one user's alert channel needs, by NAME, and whether it is there.
+
+    Mirrors the senders in bot_program.notifications exactly: telegram
+    wants TELEGRAM_BOT_TOKEN in the sender's environment and the per-user
+    UserNotificationPrefs.telegram_chat_id — a row only the
+    /notifications/settings/ form creates (NOT TELEGRAM_CHAT_ID, which
+    feeds the price-alert digest, a different sender); email wants a
+    delivering backend and user.email; discord wants DISCORD_WEBHOOK_URL
+    (TraderProfile has no webhook field, so the env fallback IS the path).
+
+    Reads os.environ of THIS process, the only one it can. Never a value.
+    """
+    import os
+    import socket
+    from django.conf import settings
+    from bot_program.notifications import _in_quiet_hours, _user_channel
+
+    prof = getattr(user, "trader_profile", None)
+    prefs = getattr(user, "notification_prefs", None)
+    channel = _user_channel(user) if prof is not None else "no trader profile"
+    missing, facts, notes = [], [], []
+    if channel == "telegram":
+        token = bool(os.environ.get("TELEGRAM_BOT_TOKEN"))
+        facts.append(f"TELEGRAM_BOT_TOKEN   "
+                     f"{'set' if token else 'NOT SET'} in this process")
+        if not token:
+            missing.append("TELEGRAM_BOT_TOKEN is not set (.env)")
+        if prefs is None:
+            facts.append("telegram_chat_id     NO NOTIFICATION-PREFS ROW")
+            missing.append("UserNotificationPrefs.telegram_chat_id has no "
+                           "row (save the /notifications/settings/ form)")
+        elif not prefs.telegram_chat_id:
+            facts.append("telegram_chat_id     EMPTY on the prefs row")
+            missing.append("UserNotificationPrefs.telegram_chat_id is empty "
+                           "(the /notifications/settings/ form)")
+        else:
+            facts.append("telegram_chat_id     set on the prefs row")
+    elif channel == "email":
+        backend = str(getattr(settings, "EMAIL_BACKEND", "") or "")
+        host = bool(getattr(settings, "EMAIL_HOST", ""))
+        facts.append(f"EMAIL_HOST           "
+                     f"{'set' if host else 'NOT SET'} in this process")
+        facts.append(f"EMAIL_BACKEND        {backend or '(unset)'}")
+        facts.append(f"user.email           "
+                     f"{'set' if user.email else 'EMPTY'}")
+        if not host:
+            missing.append("EMAIL_HOST is not set (.env) — settings fall "
+                           "back to the console backend, which prints mail "
+                           "into the container log")
+        elif backend.endswith(_NOT_SMTP):
+            missing.append(f"EMAIL_BACKEND is {backend} — nothing leaves "
+                           f"the box")
+        elif not getattr(settings, "EMAIL_HOST_USER", ""):
+            notes.append("SMTP without credentials (EMAIL_HOST_USER empty) "
+                         "— unverified")
+        if not user.email:
+            missing.append("user.email is empty (the account has no address)")
+    elif channel == "discord":
+        url = bool(os.environ.get("DISCORD_WEBHOOK_URL"))
+        facts.append(f"DISCORD_WEBHOOK_URL  "
+                     f"{'set' if url else 'NOT SET'} in this process")
+        if not url:
+            missing.append("DISCORD_WEBHOOK_URL is not set (.env)")
+    quiet = None
+    if (prefs is not None and prefs.quiet_start is not None
+            and prefs.quiet_end is not None
+            and prefs.quiet_start != prefs.quiet_end):
+        quiet = (prefs.quiet_start, prefs.quiet_end)
+    return {
+        "channel": channel, "missing": missing, "facts": facts,
+        "notes": notes, "prefs": prefs, "quiet": quiet,
+        "quiet_now": bool(quiet) and _in_quiet_hours(user),
+        "ready": (channel in ("telegram", "email", "discord")
+                  and not missing
+                  and (prefs is None or bool(prefs.receive_bot_alerts))),
+        "host": socket.gethostname(),
+    }
 
 
 class Command(BaseCommand):
@@ -780,6 +871,117 @@ class Command(BaseCommand):
                 blockers.append(
                     f"{user.username} has no trading PIN — configuring or "
                     f"arming a live bot is unreachable without one, by design")
+
+            # ── 7. can an alert leave the box ───────────────────────────
+            # Every alert ends in notifications.dispatch_notification: the
+            # bell row, then — outside the user's quiet window — ONE
+            # external sender chosen by TraderProfile.notify_channel. This
+            # reads each sender's own preconditions, by name, never a
+            # value (_alert_channel above), plus the two gates in front of
+            # the channel: receive_bot_alerts, which drops every bot kind
+            # before the bell row is even written, and is_staff, because
+            # the engine's own failures go through notify_staff to staff
+            # users only.
+            #
+            # It can only read THIS process — from /ops/ the web
+            # container, while the senders run in worker-fast, worker-slow
+            # and beat, and compose injects .env when a container is
+            # CREATED. So it says "configured", never "reachable": this
+            # command sends nothing, and the platform has never recorded a
+            # channel answering.
+            #
+            # Why none BLOCKS and quiet hours only WARN: an unattended live
+            # platform whose alerts stay in the bell is the state this
+            # section exists to name, and none is a standing choice; a
+            # quiet window is bounded, and a width past which it would
+            # block would be an invented constant. receive_bot_alerts OFF
+            # blocks because it is strictly more silent than none.
+            ch = _alert_channel(user)
+            prefs = ch["prefs"]
+            armed = any(c.enabled for c in live)
+            severe = blockers if armed else warnings
+            bot_alerts = ("ON, no prefs row (the default)" if prefs is None
+                          else ("ON" if prefs.receive_bot_alerts else "OFF"))
+            w(f"\n7. ALERT CHANNEL — {user.username}: {ch['channel']}  "
+              f"staff={user.is_staff}  bot_alerts={bot_alerts}")
+            for line in ch["facts"]:
+                w(f"   {line}")
+            recreate = (
+                f"Measured in this process only ({ch['host']}); compose "
+                f"injects .env when a container is CREATED, so after "
+                f"filling it run `./deploy/dc up -d --force-recreate "
+                f"worker-fast worker-slow beat web`, then measure the "
+                f"senders' own environment: `./deploy/dc exec worker-fast "
+                f"python manage.py preflight_live --user {user.username}`")
+            if ch["channel"] == "no trader profile":
+                severe.append(
+                    f"{user.username} has no trader profile — the alert "
+                    f"channel is unreadable, the sender answers none, and "
+                    f"the bell is all there is")
+            elif ch["channel"] == "none":
+                severe.append(
+                    f"{user.username}: notify_channel is none — every alert "
+                    f"stays in the in-app bell while this trades; choose "
+                    f"telegram, email or discord on the profile form before "
+                    f"arming")
+            elif ch["missing"]:
+                severe.append(
+                    f"{user.username}: alert channel is {ch['channel']} but "
+                    + "; ".join(ch["missing"])
+                    + f" — nothing can reach you while this trades. "
+                    f"{recreate}")
+            else:
+                w(f"   configured in this process ({ch['host']}) — delivery "
+                  f"UNVERIFIED: this command sends nothing, the platform has "
+                  f"never recorded {ch['channel']} answering, and the senders "
+                  f"run in worker-fast, worker-slow and beat, whose "
+                  f"environment this process cannot read; `./deploy/dc exec "
+                  f"worker-fast python manage.py preflight_live --user "
+                  f"{user.username}` measures theirs")
+            for note in ch["notes"]:
+                warnings.append(f"{user.username}: {note}")
+            if prefs is not None and not prefs.receive_bot_alerts:
+                severe.append(
+                    f"{user.username}: bot alerts are switched OFF "
+                    f"(receive_bot_alerts, /notifications/settings/) — "
+                    f"drawdown, fill and system-health alerts are dropped "
+                    f"before the bell row is written, before any channel; "
+                    f"that is more silent than notify_channel none")
+            if not user.is_staff:
+                warnings.append(
+                    f"{user.username} is not staff — the engine's own "
+                    f"failure alerts (a close that FAILED, an order that may "
+                    f"be live with no row) fan out through notify_staff to "
+                    f"staff users only; another staff user must be "
+                    f"configured, or nobody is told")
+            if ch["quiet"]:
+                q0, q1 = ch["quiet"]
+                warnings.append(
+                    f"{user.username}: quiet hours {q0:%H:%M}–{q1:%H:%M} UTC "
+                    f"mute every external alert in that window, including "
+                    f"the unprotected-position and close-refused ones"
+                    + (" — ACTIVE NOW" if ch["quiet_now"] else "")
+                    + "; an unattended platform is silent there every day")
+
+        # ── 7b. who the engine tells ────────────────────────────────────
+        # notify_staff fans the engine's own failures — a close that
+        # FAILED, an order that may be live with no row — out to every
+        # active is_staff user through the same per-user channel. Zero
+        # staff with a configured channel means those are reported to
+        # nobody, whatever any one user's section 7 said.
+        staff = list(User.objects.filter(is_active=True, is_staff=True)
+                     .order_by("username"))
+        told = [s.username for s in staff if _alert_channel(s)["ready"]]
+        any_armed = AssetBotConfig.objects.filter(
+            mode="live", enabled=True).exists()
+        w(f"\n7b. WHO THE ENGINE TELLS — active staff: {len(staff)}, with a "
+          f"configured channel: {len(told)}"
+          + (f" ({', '.join(told)})" if told else ""))
+        if not told:
+            (blockers if any_armed else warnings).append(
+                "no active staff user has an alert channel configured — a "
+                "close that FAILED (the order may be live with no row) is "
+                "reported to nobody outside the bell")
 
         # ── the verdict ─────────────────────────────────────────────────
         w("\n" + "=" * 70)

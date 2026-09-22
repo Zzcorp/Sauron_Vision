@@ -233,7 +233,7 @@ def _queues(user) -> dict:
 # ── (c) the broker ──────────────────────────────────────────────────────
 def _verdict_lines(output: str) -> list:
     """The BLOCKERS block (or the 'NO BLOCKERS FOUND.' line) out of
-    preflight_live's output — the verdict, not the six sections."""
+    preflight_live's output — the verdict, not the seven sections."""
     lines = output.splitlines()
     out = []
     for i, line in enumerate(lines):

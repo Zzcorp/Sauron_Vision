@@ -17,13 +17,15 @@ making them disagree out loud.
 
 Run with:  python manage.py test tests.test_preflight_live
 """
+import os
 from datetime import timedelta
 from decimal import Decimal
 from io import StringIO
+from unittest import mock
 
 from django.contrib.auth.models import User
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 
@@ -70,6 +72,43 @@ def _pin(user, pin="1234"):
     prof.access_pin_hash = make_password(pin)
     prof.save(update_fields=["access_pin_hash"])
     return prof
+
+
+def _prefs(user, *, chat="1", bot_alerts=True, quiet=None):
+    """The notification-preferences row — the one only the
+    /notifications/settings/ form creates in production."""
+    from alerts.models import UserNotificationPrefs
+    p, _ = UserNotificationPrefs.objects.get_or_create(user=user)
+    p.telegram_chat_id = chat
+    p.receive_bot_alerts = bot_alerts
+    if quiet:
+        p.quiet_start, p.quiet_end = quiet
+    p.save()
+    return p
+
+
+def _channel(user, channel):
+    prof = user.trader_profile
+    prof.notify_channel = channel
+    prof.save(update_fields=["notify_channel"])
+
+
+#: os.environ as the senders would see it — set explicitly both ways so a
+#: developer's own shell cannot decide a test.
+_TOKEN = {"TELEGRAM_BOT_TOKEN": "t", "DISCORD_WEBHOOK_URL": ""}
+_NO_TOKEN = {"TELEGRAM_BOT_TOKEN": "", "DISCORD_WEBHOOK_URL": ""}
+
+
+def _blockers(out):
+    if "BLOCKERS — do not arm" not in out:
+        return ""
+    return out.split("BLOCKERS — do not arm")[1].split("\nWORTH READING")[0]
+
+
+def _worth(out):
+    if "WORTH READING:" not in out:
+        return ""
+    return out.split("WORTH READING:")[1]
 
 
 def _bars(symbol="AAPL", *, age_hours=2.0, n=5):
@@ -464,7 +503,15 @@ class ACleanVerdictDoesNotClaimSafetyTests(TestCase):
         _cfg(u, capital="1000", base_currency="GBP")
         _pin(u)
         _bars()
-        out = _run()
+        # 2026-09-23, section 7: "nothing is wrong" now includes an alert
+        # that can leave the box — a token in the sender's environment and
+        # a chat id on the prefs row — and a staff user for the engine's
+        # own failures to reach.
+        _prefs(u, chat="1")
+        u.is_staff = True
+        u.save(update_fields=["is_staff"])
+        with mock.patch.dict(os.environ, _TOKEN):
+            out = _run()
         self.assertIn("NO BLOCKERS FOUND", out)
         self.assertIn("not the same as safe", out)
         self.assertIn("never seen your broker answer an order", out)
@@ -483,3 +530,162 @@ class ACleanVerdictDoesNotClaimSafetyTests(TestCase):
         out = _run(user="pf_a")
         self.assertIn("pf_a", out)
         self.assertNotIn("pf_b", out)
+
+
+class AnAlertMustBeAbleToLeaveTheBox(TestCase):
+    """Section 7. Every alert ends in dispatch_notification, which hands
+    the title to ONE external sender chosen by TraderProfile.notify_channel;
+    the telegram one wants TELEGRAM_BOT_TOKEN in its environment and the
+    per-user UserNotificationPrefs.telegram_chat_id — a row only the
+    /notifications/settings/ form creates. On 2026-09-23 the operator's
+    deployment had neither, every alert it had ever raised lived only in
+    the bell, and preflight said nothing. The section never says
+    "reachable": it reads its own process, not the workers', and sends
+    nothing."""
+
+    def _armed(self, *, enabled=True, staff=False):
+        u = _user()
+        _acct(u, port=4003, equity=50000, currency="GBP",
+              is_primary_for_stocks=True)
+        _cfg(u, capital="1000", base_currency="GBP", enabled=enabled)
+        _pin(u)
+        _bars()
+        if staff:
+            u.is_staff = True
+            u.save(update_fields=["is_staff"])
+        return u
+
+    def test_the_operators_state_blocks_and_names_both_halves(self):
+        self._armed()
+        with mock.patch.dict(os.environ, _NO_TOKEN):
+            out = _run()
+        b = _blockers(out)
+        self.assertIn("TELEGRAM_BOT_TOKEN is not set", b)
+        self.assertIn("telegram_chat_id has no row", b)
+        self.assertIn("/notifications/settings/", b)
+        self.assertIn("--force-recreate worker-fast worker-slow beat web", b)
+        # the name the first draft guarded, which the sender never reads
+        self.assertNotIn("TELEGRAM_CHAT_ID", out)
+
+    def test_the_same_state_with_nothing_armed_is_worth_reading(self):
+        self._armed(enabled=False)
+        with mock.patch.dict(os.environ, _NO_TOKEN):
+            out = _run()
+        self.assertNotIn("TELEGRAM_BOT_TOKEN", _blockers(out))
+        self.assertIn("TELEGRAM_BOT_TOKEN is not set", _worth(out))
+
+    def test_the_token_alone_does_not_satisfy_it(self):
+        """The remedy the first draft printed — fill .env — leaves the
+        sender returning False at its chat-id check."""
+        self._armed()
+        with mock.patch.dict(os.environ, _TOKEN):
+            out = _run()
+        b = _blockers(out)
+        self.assertNotIn("TELEGRAM_BOT_TOKEN is not set", b)
+        self.assertIn("telegram_chat_id has no row", b)
+
+    def test_an_empty_chat_id_on_the_row_is_its_own_state(self):
+        u = self._armed()
+        _prefs(u, chat="")
+        with mock.patch.dict(os.environ, _TOKEN):
+            out = _run()
+        self.assertIn("telegram_chat_id is empty", _blockers(out))
+        self.assertIn("EMPTY on the prefs row", out)
+
+    def test_configured_is_never_called_reachable(self):
+        u = self._armed(staff=True)
+        _prefs(u, chat="123")
+        with mock.patch.dict(os.environ, _TOKEN):
+            out = _run()
+        self.assertNotIn("alert channel", _blockers(out))
+        self.assertIn("configured in this process", out)
+        self.assertIn("delivery UNVERIFIED", out)
+        self.assertIn("exec worker-fast python manage.py preflight_live", out)
+        seven = out.split("7. ALERT CHANNEL")[1].split("7b.")[0]
+        self.assertNotIn("reachable", seven)
+
+    def test_bot_alerts_off_blocks_because_it_is_more_silent_than_none(self):
+        u = self._armed(staff=True)
+        _prefs(u, chat="123", bot_alerts=False)
+        with mock.patch.dict(os.environ, _TOKEN):
+            out = _run()
+        self.assertIn("receive_bot_alerts", _blockers(out))
+        self.assertIn("bot_alerts=OFF", out)
+
+    def test_not_staff_is_worth_reading_and_no_staff_at_all_blocks(self):
+        u = self._armed(staff=False)
+        _prefs(u, chat="123")
+        with mock.patch.dict(os.environ, _TOKEN):
+            out = _run()
+        self.assertIn("is not staff", _worth(out))
+        self.assertNotIn("is not staff", _blockers(out))
+        self.assertIn("reported to nobody", _blockers(out))
+        self.assertIn("active staff: 0", out)
+
+    def test_a_configured_staff_user_is_who_the_engine_tells(self):
+        u = self._armed(staff=True)
+        _prefs(u, chat="123")
+        with mock.patch.dict(os.environ, _TOKEN):
+            out = _run()
+        self.assertIn("with a configured channel: 1 (pf)", out)
+        self.assertNotIn("reported to nobody", out)
+
+    def test_none_blocks_with_its_own_sentence(self):
+        u = self._armed(staff=True)
+        _channel(u, "none")
+        out = _run()
+        self.assertIn("notify_channel is none", _blockers(out))
+        self.assertNotIn("is not set", _blockers(out))
+
+    @override_settings(
+        EMAIL_HOST="smtp.example",
+        EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend",
+        EMAIL_HOST_USER="u")
+    def test_email_needs_an_address_on_the_account(self):
+        u = self._armed(staff=True)
+        _channel(u, "email")
+        out = _run()
+        self.assertIn("user.email is empty", _blockers(out))
+
+    @override_settings(
+        EMAIL_HOST="",
+        EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend")
+    def test_email_without_a_host_names_the_console_fallback(self):
+        u = self._armed(staff=True)
+        _channel(u, "email")
+        u.email = "a@b.c"
+        u.save(update_fields=["email"])
+        out = _run()
+        self.assertIn("EMAIL_HOST is not set", _blockers(out))
+
+    @override_settings(
+        EMAIL_HOST="smtp.example",
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_a_host_with_a_non_delivering_backend_names_the_backend(self):
+        u = self._armed(staff=True)
+        _channel(u, "email")
+        u.email = "a@b.c"
+        u.save(update_fields=["email"])
+        out = _run()
+        self.assertIn("EMAIL_BACKEND is django.core.mail.backends.locmem"
+                      ".EmailBackend", _blockers(out))
+
+    def test_discord_is_the_env_variable_and_nothing_else(self):
+        u = self._armed(staff=True)
+        _channel(u, "discord")
+        with mock.patch.dict(os.environ, {"DISCORD_WEBHOOK_URL": ""}):
+            out = _run()
+        self.assertIn("DISCORD_WEBHOOK_URL is not set", _blockers(out))
+        with mock.patch.dict(os.environ, {"DISCORD_WEBHOOK_URL": "https://x"}):
+            out = _run()
+        self.assertNotIn("DISCORD_WEBHOOK_URL", _blockers(out))
+
+    def test_quiet_hours_warn_with_the_window_and_never_block(self):
+        from datetime import time
+        u = self._armed(staff=True)
+        _prefs(u, chat="123", quiet=(time(22, 0), time(7, 0)))
+        with mock.patch.dict(os.environ, _TOKEN):
+            out = _run()
+        self.assertIn("quiet hours 22:00–07:00 UTC", _worth(out))
+        self.assertNotIn("quiet hours", _blockers(out))
+        self.assertIn("close-refused", _worth(out))
