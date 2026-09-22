@@ -2761,11 +2761,36 @@ class AssetBot(ABC):
         # levels and sizing, so the stop and the quantity are both relative
         # to the price actually obtained — which is how a real bracket is
         # placed.
+        # ── WHAT THE ROUND TRIP COSTS, MEASURED WHERE POSSIBLE ───────
+        # DEFAULT_COST_BPS is an asset-class ASSUMPTION and `tk` is already in
+        # hand: the venue's own quoted spread was three lines up and unread.
+        # `cost_to_charge` charges the WIDER of the assumption and the
+        # measurement and says which. Computed from the RAW tick and BEFORE
+        # `paper_fill_price` rewrites `price`, so the spread is never divided
+        # by a price that already contains half of it, and so ONE number feeds
+        # the paper fill, the gate and the row — three copies of one cost is
+        # how they start disagreeing.
+        #
+        # AND IT HAS A SECOND-ORDER EFFECT ON THE PAPER PATH, stated rather
+        # than denied: the adversely-adjusted `price` below is the argument to
+        # both `stop_and_target` and `_size_for_entry`, so a wider measured
+        # cost moves the paper stop and the paper size. That is correct and it
+        # is why the haircut sits above the levels at all (see the comment
+        # below) — a paper fill charged the table's half-spread where the
+        # venue quotes four times that flatters precisely the expectancy the
+        # promotion ladder reads to decide whether a rule may touch real
+        # money. Nothing on the LIVE path is resized: there the fill is the
+        # broker's own.
+        from bot_program.asset_engine.risk_levels import cost_to_charge
+        charge = cost_to_charge(self.cfg, symbol, tk)
+
         market_price = price
         paper_now = (self.cfg.mode == "paper")
         if paper_now:
             from bot_program.asset_engine.risk_levels import paper_fill_price
-            price = paper_fill_price(self.cfg, symbol, price, decision.direction)
+            price = paper_fill_price(self.cfg, symbol, price,
+                                     decision.direction,
+                                     cost_fraction=charge["fraction"])
 
         # ── Levels FIRST, because the stop is an input to the size ───────
         # Volatility-normalised levels: a fixed 2% stop is a different bet on
@@ -2781,11 +2806,17 @@ class AssetBot(ABC):
         # A planned move smaller than the round trip is negative-EV however
         # good the signal is.
         ok, cost_reason = passes_cost_filter(self.cfg, symbol, price, tp,
-                                              stop=sl)
+                                             stop=sl,
+                                             cost_fraction=charge["fraction"])
         if not ok:
-            logger.info("[%s_bot] skipping %s — %s",
-                        self.asset_class, symbol, cost_reason)
-            return self._skip(symbol, skips.COST_FILTER, cost_reason)
+            # The provenance travels with the refusal. /signal-surface/ has no
+            # venue client and still shows the assumed table cost, so when it
+            # says a setup clears its costs and the bot refuses it, the
+            # refusal has to say the venue quoted wider than the table.
+            logger.info("[%s_bot] skipping %s — %s (%s)",
+                        self.asset_class, symbol, cost_reason, charge["note"])
+            return self._skip(symbol, skips.COST_FILTER,
+                              f"{cost_reason} — {charge['note']}")
 
         # ── What the promotion stage permits ─────────────────────────────
         # A stage is a venue, not a size. Applying it as a multiplier meant
@@ -2885,7 +2916,8 @@ class AssetBot(ABC):
             decision=decision, price=float(price),
             market_price=float(market_price),
             stop=float(sl), target=float(tp), level_meta=dict(level_meta),
-            cost_reason=cost_reason, stage=dict(stage), sizing=dict(sizing),
+            cost_reason=cost_reason, cost=dict(charge),
+            stage=dict(stage), sizing=dict(sizing),
             qty_default=float(qty), per_unit_risk=per_unit_risk,
             risk_dollars_default=float(qty) * per_unit_risk,
             notional_default=float(qty) * float(price) * vpu,
@@ -3129,18 +3161,47 @@ class AssetBot(ABC):
         order_id = ""
         entry_meta = dict(level_meta)
         entry_meta["cost_check"] = cost_reason
+        # WHAT WAS CHARGED AND WHO MEASURED IT, on every entry and not only
+        # the paper ones — `paper_fill_price`'s docstring gives the reason
+        # ("the fraction applied is recorded on the trade, so it can be
+        # retuned against real fills later") and it holds on the live path
+        # too. THREE STATES a later retune must be able to tell apart: a cost
+        # the venue QUOTED, a cost the table ASSUMED, and an entry that never
+        # came through this path — which is the ABSENCE of these keys, not a
+        # zero and not "assumed". A candidate built by hand (the desk tests do
+        # it) carries no charge and writes none.
+        charge = getattr(cand, "cost", None) or {}
+        if charge:
+            entry_meta["cost_fraction_charged"] = round(charge["fraction"], 8)
+            entry_meta["cost_source"] = charge["source"]
+            entry_meta["cost_note"] = charge["note"]
+            if charge["spread"] is not None:
+                # Written even where the measurement LOST to the table, so the
+                # retune can see the venue's real spread on those rows too.
+                # Absent means nothing was measured; 0.0 means a locked market.
+                entry_meta["cost_spread_fraction"] = round(charge["spread"], 8)
         # Frozen at entry so a trailing stop cannot rewrite the risk
         # denominator that realized_r (and therefore sizing) depends on. This
         # is the POST-floor stop — the one actually placed.
         entry_meta["initial_stop_loss"] = round(float(sl), 8)
         if paper or paper_now:
+            entry_meta["paper_fill"] = True
+            entry_meta["market_price"] = round(float(market_price), 8)
+        # `cost_applied_fraction` means APPLIED, so it is written only where
+        # `paper_fill_price` actually ran — `paper_now` alone. On a LIVE config
+        # whose rule's promotion stage forces paper, `paper` is True and no
+        # haircut was taken, and the first draft of this wrote the key anyway.
+        # `cost_fraction_charged` above carries the gate's number on every row,
+        # so nothing is lost by being strict here. A hand-built candidate
+        # carrying no charge keeps the behaviour this line always had: the
+        # table, halved.
+        if paper_now:
             from bot_program.asset_engine.risk_levels import (
                 round_trip_cost_fraction,
             )
-            entry_meta["paper_fill"] = True
-            entry_meta["market_price"] = round(float(market_price), 8)
-            entry_meta["cost_applied_fraction"] = round(
-                round_trip_cost_fraction(self.cfg, symbol) / 2.0, 8)
+            applied = (charge["fraction"] if charge
+                       else round_trip_cost_fraction(self.cfg, symbol))
+            entry_meta["cost_applied_fraction"] = round(applied / 2.0, 8)
         entry_meta["risk_fraction"] = sizing["risk_fraction"]
         entry_meta["risk_dollars"] = sizing["risk_dollars"]
         entry_meta["notional_fraction"] = sizing["notional_fraction"]

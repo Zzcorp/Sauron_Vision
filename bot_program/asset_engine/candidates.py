@@ -71,6 +71,17 @@ class EntryCandidate:
     risk_dollars_default: float
     notional_default: float
     value_per_unit: float
+    #: What the round trip was judged to cost, from
+    #: `risk_levels.cost_to_charge`: {"fraction", "source", "spread",
+    #: "assumed", "note"}. It belongs beside `cost_reason` above and cannot
+    #: go there — a field with a default may not precede one without — so it
+    #: leads the defaults instead. It exists because `propose_entry` measures
+    #: the charge off the raw tick and `execute_entry` records it on the row,
+    #: and they are two methods: the first draft of this change read a local
+    #: of one inside the other and raised NameError on every entry. An empty
+    #: dict means the candidate was built without going through that path,
+    #: which is a third state and not a cost of zero.
+    cost: dict = field(default_factory=dict)
     corr_scale: float = 1.0
     horizon_hours: float = DEFAULT_HORIZON_HOURS
     created_at: datetime = field(default_factory=timezone.now)
