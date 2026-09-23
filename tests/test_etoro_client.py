@@ -1293,9 +1293,11 @@ class TheMeasuredWireTests(SimpleTestCase):
         sleep.assert_not_called()
 
     def test_a_proven_close_reports_the_units_and_no_price(self):
-        """`UnitsToDeduct` is UNMEASURED — the shell sent InstrumentID alone.
-        The 500 x3 sequence was measured on the 2x close and is played
-        against the 1x close response here: the proof reader is one code."""
+        """`UnitsToDeduct` is NEVER sent (measured 2026-09-23 17:43-17:58
+        UTC: two closes carrying it were accepted and never executed; the
+        same close with InstrumentID alone executed in ~6 s). The 500 x3
+        sequence was measured on the 2x close and is played against the 1x
+        close response here: the proof reader is one code."""
         t, fake = self._closer([(500, {}), (500, {}), (500, {}),
                                 (200, _measured_lookup("closed"))])
         with mock.patch("time.sleep"):
@@ -1312,8 +1314,9 @@ class TheMeasuredWireTests(SimpleTestCase):
         post = [c for c in fake.calls if c[0] == "POST"][0]
         self.assertIn("/api/v1/trading/execution/demo/market-close-orders/"
                       "positions/3603281458", post[1])
-        self.assertEqual(post[2]["json"], {"InstrumentID": 3190,
-                                           "UnitsToDeduct": 1.0})
+        self.assertEqual(post[2]["json"], {"InstrumentID": 3190},
+                         "UnitsToDeduct makes eToro accept a close it never "
+                         "executes (measured 2026-09-23)")
 
     def test_a_close_the_venue_has_not_proven_is_pending_with_nothing_filled(self):
         t, _ = self._closer((500, {}))

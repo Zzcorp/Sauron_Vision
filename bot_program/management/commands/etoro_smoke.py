@@ -415,7 +415,9 @@ class Command(BaseCommand):
                           "close is the OPEN order's positionExecutions[0]"
                           ".state turning 'closed', reached after ~8 s with "
                           "three transient 500s on the way (the 2x close); "
-                          "no executedQty, no closing price")
+                          "no executedQty, no closing price; a body carrying "
+                          "UnitsToDeduct is accepted and never executes - "
+                          "InstrumentID alone closes (measured 17:43-17:58 UTC)")
         elif close_attested:
             close_url = t._v1_exec(f"{close_key}/positions/<positionId>")
             close_note = ("real path attested by GET → 405 on 2026-09-22 "

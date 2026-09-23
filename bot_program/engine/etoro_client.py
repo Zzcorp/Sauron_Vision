@@ -1330,13 +1330,21 @@ class EtoroTrader:
           no open id  (a row with no broker_order_id): status PENDING,
                       executedQty "0.0", no lookup asked; the drain proves
                       it off the book past PORTFOLIO_LAG_S.
-        UNMEASURED and said so: `UnitsToDeduct` (every engine caller passes
-        units; the measured close sent InstrumentID alone), a close below
-        the position, a second close on an already-closed positionId.
+        MEASURED 2026-09-23 17:43-17:58 UTC: a body carrying `UnitsToDeduct`
+        is accepted and NEVER executes; InstrumentID alone executes. So the
+        field is never sent and a close is always the whole position.
+        UNMEASURED and said so: a close below the position (no way to ask
+        for one now), a second close on an already-closed positionId.
         """
+        # NEVER UnitsToDeduct. MEASURED 2026-09-23 (demo, 17:43-17:58 UTC):
+        # two closes carrying {InstrumentID, UnitsToDeduct 1.0} were
+        # ACCEPTED (orderForClose echoed unitsToDeduct 1.0) and NEVER
+        # executed - the position stayed open, margin held, for fifteen
+        # minutes; the same close with InstrumentID alone executed in ~6 s
+        # (two transient 500s on the way). Every engine caller passes the
+        # row's units; on eToro a close is the whole position, so `units`
+        # is accepted, reported back, and not sent.
         body = {"InstrumentID": self.instrument_id(symbol)}
-        if units:
-            body["UnitsToDeduct"] = float(units)
         r = self._sess().post(
             self._v1_exec(f"market-close-orders/positions/{position_id}"),
             json=body, headers=self._headers(), timeout=self.timeout)

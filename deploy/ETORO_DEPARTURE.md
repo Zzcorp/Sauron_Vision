@@ -558,6 +558,8 @@ demo row the book and the venue in one click).
   kill switch leaves the row CLOSE_PENDING and raises, and pressed again on
   that row it refuses — nothing sent, never a second close);
   `venue_close.close_or_refuse` hands the row's `broker_order_id` down;
+  `UnitsToDeduct` is NEVER sent (measured 17:43-17:58 UTC: two closes carrying
+  it were accepted and never executed; InstrumentID alone executed in ~6 s);
   `pending_closes.retry_trade_close` reads the proof before the book — only
   from the venue that carried the row (`unattributable`) —
   (`RETRY_VENUE_PROVED_CLOSED`), BLOCKS while the venue still says open beside
