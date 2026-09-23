@@ -84,6 +84,32 @@ def close_or_refuse(trade, client, qty: float, *, close_side: str,
     close_position — because on that venue the fallback is not a close.
     """
     symbol = trade.symbol
+    # THE ROW'S OWN CARRIER, BEFORE ANYTHING IS SENT. All three callers
+    # rebuild `client` from TODAY's primary-for flag, and until now nothing
+    # on the send side compared it with the venue that carried the row
+    # (metadata["broker"], stamped by AssetBot.venue_stamps): reconcile and
+    # the drain refuse a MISS at the wrong venue, but a moved checkbox still
+    # sent the close itself elsewhere — an opposite order at a venue that
+    # nets OPENS a position there, the row books CLOSED at that fill, and
+    # the real position stays live where it was carried. Three states: a
+    # row with no carrier, or a client the adapter map does not know,
+    # refuses nothing — only two KNOWN and DIFFERENT names do. The raise
+    # lands where this function's other raise lands: CLOSE_PENDING for the
+    # engine, a recorded failure for the kill switch and the drain.
+    from bot_program.engine.capabilities import adapter_key
+    _meta = (trade.metadata
+             if isinstance(getattr(trade, "metadata", None), dict) else {})
+    carried = str(_meta.get("broker") or "")
+    now_at = adapter_key(client)
+    if carried and now_at and carried != now_at:
+        log.error("venue_close: %s was carried by %s and the router now "
+                  "answers %s — NOTHING has been sent, because a close at "
+                  "the wrong venue is an opening order there",
+                  symbol, carried, now_at)
+        raise RuntimeError(
+            f"this row was carried by {carried} and the router now answers "
+            f"{now_at} — a close sent here would open a position at the "
+            f"wrong venue; move the flag back or close it at {carried}")
     if not venue_needs_position_id(client):
         return client.market_order(symbol, close_side, float(qty),
                                    client_order_id=client_order_id,

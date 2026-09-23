@@ -281,6 +281,38 @@ class ARowNobodyStampedIsUnattributable(TestCase):
         self.assertEqual(trade.status, "CLOSED")
         self.assertEqual(out["closed_as_orphan"], 1)
 
+    def test_a_row_filled_live_is_not_compared_against_the_demo_book(self):
+        """broker_router builds the eToro client from the account's Demo
+        flag at call time; a rehearsal week with live rows open must not
+        orphan-close them against the demo portfolio. `env` is set on the
+        INSTANCE: the class name, which adapter_key reads, is unchanged."""
+        from bot_program.reconcile_asset import unattributable
+        self.saxo(self.user, flags=("stock",), sim=True)
+        self.etoro(self.user, flags=("forex",))
+        trade = self._row(broker="etoro", broker_env="live")
+        book = EtoroTrader()
+        book.env = "demo"
+        self.assertIn("filled in the live world",
+                      unattributable(trade, book, keyed=2))
+        out = self._run(book)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertEqual(out["closed_as_orphan"], 0)
+        self.assertEqual(out["broker_unavailable"], 1)
+
+    def test_the_same_world_or_no_world_refuses_nothing(self):
+        """Three states, both sides."""
+        from bot_program.reconcile_asset import unattributable
+        trade = self._row(broker="etoro", broker_env="live")
+        same = EtoroTrader()
+        same.env = "live"
+        self.assertEqual(unattributable(trade, same, keyed=2), "")
+        self.assertEqual(unattributable(trade, EtoroTrader(), keyed=2), "")
+        unstamped = self._row(broker="etoro")
+        demo = EtoroTrader()
+        demo.env = "demo"
+        self.assertEqual(unattributable(unstamped, demo, keyed=2), "")
+
     def test_the_count_reads_keys_not_rows(self):
         from bot_program.reconcile_asset import keyed_venue_count
         from tests.test_saxo_wiring import _fresh

@@ -3326,22 +3326,9 @@ class AssetBot(ABC):
                 # read — is wrong for every row opened before an operator
                 # moved a primary-for flag, and /treasury/ compares these
                 # rows against that broker's holdings.
-                from bot_program.engine.capabilities import adapter_key
-                _carried_by = adapter_key(client)
-                if _carried_by:
-                    entry_meta["broker"] = _carried_by
-                # AND IN WHICH OF ITS TWO WORLDS. Saxo and eToro serve SIM
-                # and live from one row, so the broker's name cannot tell a
-                # rehearsal fill from a real one — while the readings side
-                # already tags itself (the sync files a SIM reading under
-                # env="paper"). Read from the client that placed the order,
-                # because the row's flag can be flipped afterwards. An
-                # adapter that does not say is left unrecorded: an unknown
-                # world is not a live one.
-                _world = self.VENUE_WORLDS.get(
-                    str(getattr(client, "env", "") or "").lower())
-                if _world:
-                    entry_meta["broker_env"] = _world
+                # Plus the world it traded in and the handle a close needs —
+                # ONE rule, shared with the TAKE TRADE lane: venue_stamps.
+                entry_meta.update(self.venue_stamps(client, res))
 
                 # Real fills: prefer the broker's average fill price and
                 # filled quantity over the pre-order ticker, so slippage
@@ -3381,9 +3368,7 @@ class AssetBot(ABC):
                 # FifoEndOfDay) a row whose bracket was refused had nothing
                 # to close by, and the close fell through to an order that
                 # OPENS a second position.
-                _pos_id = res.get("positionId") or res.get("protectiveTradeId")
-                if _pos_id:
-                    entry_meta["broker_position_id"] = str(_pos_id)
+                # (`broker_position_id` is stamped above, by venue_stamps.)
                 if (res.get("protectiveStopId") or res.get("protectiveTradeId")
                         or res.get("protectedOnFill")):
                     entry_meta["protected"] = True
@@ -3548,6 +3533,57 @@ class AssetBot(ABC):
         return {"trade_id": trade.id, "symbol": symbol,
                 "side": decision.direction, "qty": float(qty),
                 "entry": price, "score": decision.score}
+
+    # ── the venue stamps a LIVE row carries ─────────────────────────────
+
+    @classmethod
+    def venue_stamps(cls, client, res) -> dict:
+        """The three marks a LIVE row carries about the venue that filled
+        it — read from the CLIENT that placed the order and the FILL it
+        answered, never from today's routing rule, which is wrong for every
+        row opened before an operator moved a primary-for flag.
+
+          broker              capabilities.adapter_key(client). An adapter
+                              the map does not know answers "" and the key
+                              is left ABSENT: a wrong carrier is worse than
+                              none, because reconcile_asset.unattributable
+                              would then compare the row against the wrong
+                              book. A MagicMock or a subclass answers "".
+          broker_env          VENUE_WORLDS[client.env]. Saxo and eToro serve
+                              SIM and live from one row, so the name alone
+                              cannot tell a rehearsal fill from a real one.
+                              An adapter that does not say leaves the key
+                              ABSENT: an unknown world is not a live one.
+          broker_position_id  the handle a close may need on a venue where
+                              an opposite order OPENS a second position:
+                              `positionId` (eToro, on every fill) or
+                              `protectiveTradeId` (OANDA, Saxo). ABSENT when
+                              the fill offered neither — venue_close
+                              .position_id_for then answers "" and
+                              close_or_refuse refuses rather than opens.
+
+        ONE rule for both lanes. execute_entry has written these since
+        1da56db / d3c735f; the TAKE TRADE lane (manual_trade._execute)
+        wrote none of them, so a hand-taken eToro row recorded no carrier,
+        no handle and no world. Absent is a state: nothing here invents a
+        value the client or the fill did not give. For a non-dict `res`
+        nothing is stamped — the inline code used to stamp str(obj) for
+        any object answering .get; no test depends on that reading.
+        """
+        from bot_program.engine.capabilities import adapter_key
+        stamps: dict = {}
+        carried_by = adapter_key(client)
+        if carried_by:
+            stamps["broker"] = carried_by
+        world = cls.VENUE_WORLDS.get(
+            str(getattr(client, "env", "") or "").lower())
+        if world:
+            stamps["broker_env"] = world
+        fill = res if isinstance(res, dict) else {}
+        pos_id = fill.get("positionId") or fill.get("protectiveTradeId")
+        if pos_id:
+            stamps["broker_position_id"] = str(pos_id)
+        return stamps
 
     # ── live-mode paper-fallback guard ───────────────────────────────────
 

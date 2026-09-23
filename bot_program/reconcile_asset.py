@@ -71,6 +71,25 @@ def unattributable(trade, client, *, keyed: int) -> str:
         return (f"it records no carrier and {keyed} venues are keyed, so a "
                 f"miss here cannot tell a closed position from one held at "
                 f"another venue")
+    # THE ROW NAMES A WORLD AND THE CLIENT ANSWERS FROM THE OTHER ONE.
+    # execute_entry — and the TAKE TRADE lane, through AssetBot.venue_stamps
+    # — stamp metadata["broker_env"] from the client that placed the order;
+    # broker_router builds the eToro and Saxo clients from the account
+    # row's Demo/SIM flag AT CALL TIME (broker_router._etoro_client_for).
+    # Tick Demo on /brokers/ with live rows open and this function would
+    # compare them against the demo book, whose honest "I hold nothing" is
+    # not an absence. Three states: a row with no world, or a client that
+    # does not say, refuses nothing — an unknown world is not a different
+    # one. Reconcile and the drain inherit this through the one function.
+    from .asset_engine.base import AssetBot
+    filled_in = str((getattr(trade, "metadata", None) or {})
+                    .get("broker_env") or "")
+    answers_from = AssetBot.VENUE_WORLDS.get(
+        str(getattr(client, "env", "") or "").lower(), "")
+    if filled_in and answers_from and filled_in != answers_from:
+        return (f"it was filled in the {filled_in} world and the router now "
+                f"answers the {answers_from} world, so a miss here is not an "
+                f"absence")
     return ""
 
 

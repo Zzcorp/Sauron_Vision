@@ -1868,12 +1868,36 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         # so no stop is assumed either.
         from bot_program.asset_engine.base import AssetBot as _AB
         out["working"] = True
-        out["protection_note"] = (
-            f"The broker accepted the order and has NOT filled it — no "
-            f"position is open yet. The 5-minute tick watches it and books "
-            f"the fill when it prints; it is withdrawn if it is still "
-            f"unfilled after {_AB.ENTRY_WORKING_MAX_HOURS}h. You can also "
-            f"withdraw it from the positions page.")
+        # THE PROMISE MUST MATCH THE ADAPTER. The tick books the fill only
+        # through `order_status` and withdraws only through `cancel_order`
+        # (AssetBot._poll_working_entry, cancel_working_entry); eToro has
+        # neither, so a WORKING eToro ticket is polled by nobody and
+        # withdrawn by nobody — it is watched and closed AT eToro, and the
+        # confirmation says so rather than promise a poll nothing can make.
+        # `client` is the adapter that placed this order (bound above,
+        # because only the live branch books a WORKING row).
+        _can_poll = callable(getattr(client, "order_status", None))
+        _can_pull = callable(getattr(client, "cancel_order", None))
+        if _can_poll and _can_pull:
+            out["protection_note"] = (
+                f"The broker accepted the order and has NOT filled it — no "
+                f"position is open yet. The 5-minute tick watches it and "
+                f"books the fill when it prints; it is withdrawn if it is "
+                f"still unfilled after {_AB.ENTRY_WORKING_MAX_HOURS}h. You "
+                f"can also withdraw it from the positions page.")
+        else:
+            _gap = ("read an order's state or withdraw it"
+                    if not (_can_poll or _can_pull)
+                    else ("read an order's state" if not _can_poll
+                          else "withdraw an order"))
+            out["protection_note"] = (
+                f"The broker accepted the order and has NOT filled it — no "
+                f"position is open yet. This broker's adapter cannot {_gap}, "
+                f"so the platform will NOT see the fill and cannot cancel "
+                f"the order: watch it at the broker, and when it fills, "
+                f"manage and close the position THERE. The row stays "
+                f"WORKING and alerts daily while this lane's tick runs, "
+                f"until it is resolved by hand.")
     elif live and not (trade.metadata or {}).get("protected"):
         # The one honest degradation: the entry went in, the bracket did
         # not rest. The operator must hear it from the confirmation, not

@@ -213,6 +213,32 @@ class TheLiveFillIsTheBrokersTests(TestCase):
                 self.user, signal or _signal(self.inst), pin_ok=True)
         return out, fake
 
+    def test_a_working_ticket_keeps_the_promise_when_the_adapter_can_poll(self):
+        held = {"orderId": "7", "symbol": "BTCUSD", "side": "BUY",
+                "executedQty": "0.0", "avgPrice": "0.0",
+                "status": "PENDING", "working": True, "raw": {}}
+        out, _ = self._execute(held)          # a MagicMock has order_status and cancel_order
+        self.assertTrue(out.get("working"), out)
+        self.assertIn("5-minute tick watches it", out["protection_note"])
+
+    def test_a_working_ticket_tells_the_truth_when_the_adapter_cannot(self):
+        """eToro's shape: the order is accepted, the adapter has neither
+        order_status nor cancel_order. The confirmation must not promise a
+        poll nothing here can make."""
+        from bot_program.manual_trade import execute_take_trade
+        held = {"orderId": "7", "symbol": "BTCUSD", "side": "BUY",
+                "executedQty": "0.0", "avgPrice": "0.0",
+                "status": "PENDING", "working": True, "raw": {}}
+        mute = MagicMock(spec=["ticker", "market_order"])
+        mute.ticker.return_value = {"lastPrice": "60000"}
+        mute.market_order.return_value = held
+        with patch(ROUTER, return_value=mute):
+            out = execute_take_trade(self.user, _signal(self.inst), pin_ok=True)
+        self.assertTrue(out.get("working"), out)
+        self.assertIn("cannot read an order's state or withdraw it",
+                      out["protection_note"])
+        self.assertNotIn("5-minute tick", out["protection_note"])
+
     def test_a_live_fill_is_booked_from_the_brokers_own_numbers(self):
         from bot_program.manual_trade import MANUAL_RULE
         from bot_program.models import AssetBotTrade

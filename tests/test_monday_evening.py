@@ -330,15 +330,25 @@ class TheEntryRecordsWhichWorldItTradedTests(SimpleTestCase):
         import textwrap
 
         from bot_program.asset_engine.base import AssetBot
-        src = textwrap.dedent(inspect.getsource(AssetBot.execute_entry))
+        # ONE rule for both lanes now: the keys are read off
+        # AssetBot.venue_stamps, and the CALL is read off execute_entry
+        # below — the entry no longer spells the keys itself.
+        src = textwrap.dedent(inspect.getsource(AssetBot.venue_stamps))
         keys = {n.slice.value for n in ast.walk(ast.parse(src))
                 if isinstance(n, ast.Subscript)
                 and isinstance(getattr(n, "slice", None), ast.Constant)
                 and isinstance(n.value, ast.Name)
-                and n.value.id == "entry_meta"
+                and n.value.id == "stamps"
                 and isinstance(n.slice.value, str)}
         self.assertIn("broker", keys)
         self.assertIn("broker_env", keys)
+        self.assertIn("broker_position_id", keys)
+        # ...and execute_entry is what calls it.
+        entry = textwrap.dedent(inspect.getsource(AssetBot.execute_entry))
+        called = {n.func.attr for n in ast.walk(ast.parse(entry))
+                  if isinstance(n, ast.Call)
+                  and isinstance(n.func, ast.Attribute)}
+        self.assertIn("venue_stamps", called)
 
 
 class TheSweepWalksEveryKeyedRowTests(TestCase):

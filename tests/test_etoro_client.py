@@ -375,6 +375,37 @@ class AnAcceptanceIsNotAFillTests(SimpleTestCase):
         polls = [c for c in fake.calls if "orders:lookup" in c[1]]
         self.assertEqual(len(polls), 5, "polling is bounded at five")
 
+    def test_still_pending_is_reported_working_not_booked(self):
+        """The engine books an ORDER on this flag, not a position at the
+        pre-order ticker (the row reconcile then orphan-closed)."""
+        out, _ = self._order([{"status": 2}])
+        self.assertIs(out["working"], True)
+
+    def test_waiting_for_market_is_working_too(self):
+        out, _ = self._order([{"status": 11}])
+        self.assertIs(out["working"], True)
+        self.assertEqual(out["executedQty"], "0.0")
+
+    def test_an_unreadable_poll_is_working_never_a_fill(self):
+        """Three states: five polls that could not be read are "could not
+        ask" — reported working (loud, never CLOSED), never booked."""
+        out, _ = self._order([{}])
+        self.assertIs(out["working"], True)
+        self.assertEqual(out["status"], "PENDING")
+
+    def test_a_fill_and_a_refusal_are_not_working(self):
+        out, _ = self._order([_lookup(3)])
+        self.assertNotIn("working", out)
+        out, _ = self._order([_lookup(4, units=0, avg=0)])
+        self.assertNotIn("working", out)
+
+    def test_the_tier_it_cannot_fill_stays_absent(self):
+        """`working` is a report; order_status/cancel_order would be
+        claims. They stay absent until orders:lookup has met a real key
+        under an id this platform persists."""
+        self.assertFalse(hasattr(EtoroTrader, "order_status"))
+        self.assertFalse(hasattr(EtoroTrader, "cancel_order"))
+
     def test_polling_stops_early_on_a_terminal_status(self):
         out, fake = self._order([{"status": 2}, _lookup(3)])
         self.assertEqual(out["status"], "FILLED")

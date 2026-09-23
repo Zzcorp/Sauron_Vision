@@ -435,14 +435,22 @@ class EtoroClosesByPositionIdOrNotAtAllTests(TestCase):
         import textwrap
 
         from bot_program.asset_engine.base import AssetBot
-        src = textwrap.dedent(inspect.getsource(AssetBot.execute_entry))
+        # The handle is stamped by AssetBot.venue_stamps (shared with the
+        # TAKE TRADE lane); the keys are read off the helper and the call
+        # off execute_entry below.
+        src = textwrap.dedent(inspect.getsource(AssetBot.venue_stamps))
         keys = {n.slice.value for n in ast.walk(ast.parse(src))
                 if isinstance(n, ast.Subscript)
                 and isinstance(getattr(n, "slice", None), ast.Constant)
                 and isinstance(n.value, ast.Name)
-                and n.value.id == "entry_meta"
+                and n.value.id == "stamps"
                 and isinstance(n.slice.value, str)}
         self.assertIn("broker_position_id", keys)
+        entry = textwrap.dedent(inspect.getsource(AssetBot.execute_entry))
+        called = {n.func.attr for n in ast.walk(ast.parse(entry))
+                  if isinstance(n, ast.Call)
+                  and isinstance(n.func, ast.Attribute)}
+        self.assertIn("venue_stamps", called)
 
     def _etoro_like(self):
         client = mock.MagicMock(spec=["market_order", "close_position",
@@ -472,6 +480,35 @@ class EtoroClosesByPositionIdOrNotAtAllTests(TestCase):
                 close_or_refuse(trade, client, 10.0, close_side="SELL")
         client.market_order.assert_not_called()
         client.close_position.assert_not_called()
+
+    def test_a_close_at_a_venue_that_did_not_carry_the_row_is_refused(self):
+        """The stamp steers the SEND, not only reconcile's refusal: a moved
+        primary-for flag must not turn a close into an opening order at the
+        other venue. Same-named stubs of test_venue_drift — the class NAME
+        is what adapter_key reads; nothing is subclassed."""
+        from bot_program.engine.venue_close import close_or_refuse
+        from tests.test_venue_drift import IBKRTrader as IBKRBook
+        trade = _trade(self.cfg, metadata={"broker": "etoro",
+                                           "broker_position_id": "P77"})
+        with self.assertLogs("bot_program.engine.venue_close", level="ERROR"):
+            with self.assertRaises(RuntimeError):
+                close_or_refuse(trade, IBKRBook(), 10.0, close_side="SELL")
+
+    def test_the_carrying_venue_still_closes_and_an_unmapped_client_is_not_refused(self):
+        from bot_program.engine.venue_close import close_or_refuse
+        from tests.test_venue_drift import EtoroTrader as EtoroBook
+        trade = _trade(self.cfg, metadata={"broker": "etoro",
+                                           "broker_position_id": "P77"})
+        book = EtoroBook()                      # class name "EtoroTrader"
+        book.close_needs_position_id = lambda: True
+        book.close_position = mock.MagicMock(return_value={"status": "PENDING"})
+        close_or_refuse(trade, book, 10.0, close_side="SELL")
+        self.assertEqual(book.close_position.call_args.args[0], "P77")
+        # A MagicMock's class is not in the map: "" refuses nothing, which
+        # is why every older test in this class still passes unchanged.
+        client = self._etoro_like()
+        close_or_refuse(trade, client, 10.0, close_side="SELL")
+        client.close_position.assert_called_once()
 
     def test_a_venue_that_nets_is_closed_the_ordinary_way(self):
         from bot_program.engine.venue_close import close_or_refuse

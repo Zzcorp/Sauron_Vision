@@ -785,6 +785,28 @@ class EtoroTrader:
             out["protectedOnFill"] = True
             out["protectiveOrders"] = []
             out["protectiveTradeId"] = str(position_id)
+        if status == "PENDING":
+            # AN ACCEPTANCE IS NOT A POSITION. Every non-terminal lookup
+            # status (Received, Placed, WaitingForMarket, PendingTriggered
+            # Rate) — and a poll that could not be read at all, which also
+            # lands here — has nothing filled. base.py and manual_trade book
+            # a WORKING row on this flag, the contract IBKR (ibkr_client
+            # .market_order) and Saxo (saxo_client.market_order) already
+            # keep; without it both lanes booked a full-size OPEN position
+            # at the pre-order ticker for an order eToro was merely holding,
+            # and the pre-open reconcile (13:00/13:15 UTC) then orphan-
+            # closed the row at a mark while the order filled at 13:30 with
+            # a bracket the platform never saw.
+            #
+            # WHAT THIS ADAPTER CANNOT DO NEXT, said here so nobody reads
+            # "working" as "watched": it has no order_status — orders:lookup
+            # is keyed by the x-request-id, which neither lane persists —
+            # and no cancel_order ("WHAT IT REFUSES TO CLAIM" above). A
+            # WORKING eToro row is therefore polled by nobody and withdrawn
+            # by nobody: it stays WORKING, alerts daily while its tick runs,
+            # and is resolved at eToro by hand. Loud and never CLOSED is the
+            # better of the two wrongs.
+            out["working"] = True
         return out
 
     # ── brackets ───────────────────────────────────────────────────────────
