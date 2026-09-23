@@ -39,8 +39,11 @@ What it prints, in order:
     Then how many of the user's live platform rows are OPEN without an
     etoro stamp — rows this book says nothing about.
   * with --other-world only: a ping of the OTHER world with the SAME pair.
-    Nothing in the tree says whether a real pair opens the demo portfolio
-    or what eToro does with a mismatched-world request; off by default.
+    MEASURED 2026-09-23 (--user Sauron --other-world): the pair saved with
+    Demo ticked answered 200 on the live world too — one eToro pair opens
+    both worlds, and the Demo tick on /brokers/ alone picks the URL
+    segment. Off by default so the ordinary run touches one world; kept so
+    the operator can re-measure it.
   * the write URLs by name — composed, never called — each with what the
     tree records about it: the real close path was attested by a GET
     answering 405; the demo close path and the v2 paths carry no
@@ -231,10 +234,10 @@ class Command(BaseCommand):
                             default=False,
                             help="also ping the OTHER world (demo for a live "
                                  "row, live for a demo row) with the SAME "
-                                 "pair — a measurement nothing in the tree "
-                                 "has; off by default because what eToro "
-                                 "does with a mismatched-world request is "
-                                 "unmeasured")
+                                 "pair — measured 2026-09-23: one pair opens "
+                                 "both worlds; off by default so the ordinary "
+                                 "run touches one world; pass it to "
+                                 "re-measure")
 
     def handle(self, *args, **opts):
         from bot_program.engine import capabilities as cap
@@ -391,9 +394,10 @@ class Command(BaseCommand):
                  lambda: f"200 — this pair opens the {other} world too · keys: "
                          + ", ".join(sorted(t2.account().keys())))
         else:
-            w(f"  skipped  {other} ping with the SAME pair — pass "
-              f"--other-world to measure it (what eToro does with a "
-              f"mismatched-world request is unmeasured)")
+            w(f"  skipped  {other} ping with the SAME pair — measured "
+              f"2026-09-23: one pair opens both worlds (the Demo tick on "
+              f"/brokers/ alone picks the world); pass --other-world to "
+              f"re-measure")
 
         w("-" * 70)
         w("  write path — composed and named here, NEVER called:")

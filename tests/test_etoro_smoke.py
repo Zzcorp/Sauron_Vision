@@ -303,10 +303,15 @@ class SmokeTests(TestCase):
                 self.assertNotIn(forbidden, url, url)
 
     def test_the_other_world_is_not_pinged_by_default(self):
+        """Off by default so one run touches one world — and the skipped
+        line carries the measurement of 2026-09-23 (one pair opens both
+        worlds), never the "unmeasured" it said before that day."""
         _keyed(self.user)
         body, fake = self._run()
         self.assertIn("skipped  demo ping with the SAME pair", body)
         self.assertIn("--other-world", body)
+        self.assertIn("measured 2026-09-23: one pair opens both worlds", body)
+        self.assertNotIn("mismatched-world request is unmeasured", body)
         self.assertNotIn("demo ping with the SAME pair (measurement)", body)
         for _m, url, _k in fake.calls:
             self.assertNotIn("/info/demo/", url, url)

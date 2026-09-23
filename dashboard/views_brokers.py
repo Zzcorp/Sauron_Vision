@@ -10,8 +10,10 @@ The page answers three things per broker, side by side:
   * Is there an account row, and did its keys ever reach the broker?
     Three states — no row, recorded, connected — because "recorded" and
     "connected" send an operator to different places.
-  * Which environment the keys open — demo, paper, practice, testnet, sim.
-    The flag is a property of the KEYS, never a switch on a live account.
+  * Which environment the row opens — demo, paper, practice, testnet, sim.
+    On four brokers the flag describes the KEYS. On eToro it does not
+    (measured 2026-09-23): one pair opens both worlds and the Demo tick
+    alone picks the world, so the untick is guarded — see below.
   * What the adapter can be asked for, read from
     `bot_program.engine.capabilities` — the same table the conformance test
     holds — so the page cannot describe a broker the engine does not have.
@@ -29,6 +31,20 @@ refused, or could-not-verify. The last exists because the probe endpoint was
 taken from public documentation and not yet exercised against a live key; a
 404 there is this author's error, not the operator's, and must not be shown
 as "your keys are wrong".
+
+THE DEMO UNTICK IS THE SWITCH TO REAL MONEY (measured 2026-09-23)
+
+`etoro_smoke --user Sauron --other-world`: the pair eToro's portal calls
+"virtual", saved here with Demo ticked, answered 200 on the DEMO
+aggregate-portfolio (virtual balance 332,449.10 USD) AND 200 on the LIVE
+aggregate-portfolio with the SAME pair. There is no demo-only pair. The
+`demo/` URL segment alone picks the world (etoro_client._seg), that segment
+is EtoroAccount.demo, and this form is the only page that writes it. So the
+save that flips demo -> live is refused — nothing written — while any live
+AssetBotConfig of the target user is enabled, while any class box is ticked
+on that same save, or without the acting superuser's trading PIN (the same
+`_pin_ok` that arms a live bot). demo -> demo, live -> live and live -> demo
+saves are untouched: the guard is one-directional, toward real money.
 """
 import logging
 
@@ -37,7 +53,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
-from .views_admin_hq import _admin_only
+from .views_admin_hq import _admin_only, _pin_ok
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +72,10 @@ def etoro_probe(api_key: str, user_key: str, demo: bool = True) -> tuple:
     the adapter's path table, so the probe and the client can never disagree
     about where eToro lives. The first version of this hit a host and path
     taken from an earlier, unverified guess; it would have answered
-    "unknown" for every real key. `demo` matters: a demo key against the
-    real path is a 401 that reads as "your keys are wrong".
+    "unknown" for every real key. `demo` picks the PATH, not the keys:
+    measured 2026-09-23, the same pair answers 200 on both worlds, so a 401
+    here is eToro refusing the pair on the world asked — never "these keys
+    belong to the other world".
 
     AND IT EARNED ITS THIRD STATE ON 2026-09-22. The first real key ever
     presented to this platform made this probe answer 404 — not 401 — and
@@ -284,6 +302,65 @@ def brokers_page(request):
     return render(request, "dashboard/brokers.html", context)
 
 
+#: The measurement, in the words the flash prints. One eToro pair opens
+#: both worlds (etoro_smoke --user Sauron --other-world, 2026-09-23: demo
+#: aggregate-portfolio 200 AND live aggregate-portfolio 200, same pair).
+DEMO_UNTICK_MEASURED = (
+    "measured 2026-09-23: the same eToro pair answered 200 on the demo AND "
+    "the live aggregate-portfolio, so unticking Demo is the one click "
+    "between a virtual order and a real one — the keys do not change")
+
+#: The four class boxes the form posts, and the word the flash uses.
+_CLASS_BOXES = (("primary_stocks", "stocks"), ("primary_forex", "forex"),
+                ("primary_commodity", "commodities"),
+                ("primary_crypto", "crypto"))
+
+
+def demo_untick_refusals(request, user) -> list:
+    """Why THIS save may not flip the target user's row from demo to live —
+    every reason that applies, in order, or [] when the flip may proceed.
+
+    Three checks, all of them, so the operator reads the whole list once:
+
+      * an ENABLED live AssetBotConfig of the target user — the router
+        would send its next entry to the live world on the next beat,
+        with the pair that was placing virtual orders a minute ago;
+      * a class box ticked on the SAME save — a tick makes the live row
+        the book and the venue (broker_backed) in the click that made it
+        live; the flip and the tick are two saves, in that order;
+      * the acting superuser's trading PIN, checked by the same `_pin_ok`
+        that arms a live bot and flattens the book. A superuser with no
+        PIN set cannot untick Demo at all, which is the intended reading.
+
+    The caller is the only writer of EtoroAccount.demo (the row is not in
+    Django admin); a shell bypasses this, and every demo write snippet in
+    deploy/ETORO_DEPARTURE.md asserts the world for that reason.
+    """
+    from bot_program.models import AssetBotConfig
+
+    reasons = []
+    live = list(AssetBotConfig.objects.filter(
+        user=user, enabled=True, mode="live").order_by("id")
+        .values_list("id", "name"))
+    if live:
+        named = ", ".join(f"[{i}] {n}" for i, n in live)
+        reasons.append(f"live config(s) ENABLED for {user.username}: {named} "
+                       f"— the next beat would place a real order; disable "
+                       f"them first (bot off <id>)")
+    ticked = [word for field, word in _CLASS_BOXES
+              if request.POST.get(field) == "on"]
+    if ticked:
+        reasons.append(f"class box(es) ticked on the same save "
+                       f"({', '.join(ticked)}) — a tick makes the live row "
+                       f"the book and the venue in this click; untick Demo "
+                       f"with every box OFF, then tick one class on a "
+                       f"second save")
+    if not _pin_ok(request):
+        reasons.append("the trading PIN was not supplied or is wrong — the "
+                       "same PIN that arms a live bot")
+    return reasons
+
+
 @_admin_only
 def save_etoro_credentials(request):
     from django.contrib.auth.models import User
@@ -308,11 +385,25 @@ def save_etoro_credentials(request):
 
     acct, _created = EtoroAccount.objects.get_or_create(user=user)
     was_demo = None if _created else acct.demo
+    # THE UNTICK. A demo -> live flip is the one click between a virtual
+    # order and a real one with the SAME pair (module docstring, measured
+    # 2026-09-23). Refused before anything is written — the keys are not
+    # re-encrypted, the flags are not read, the probe is not sent.
+    if was_demo is True and not demo:
+        refusals = demo_untick_refusals(request, user)
+        if refusals:
+            why = " ".join(f"({i}) {r}." for i, r in enumerate(refusals, 1))
+            messages.error(request, f"eToro: REFUSED to untick Demo for "
+                                    f"{target_username} — nothing was saved. "
+                                    f"{DEMO_UNTICK_MEASURED}. Refused because: "
+                                    f"{why}")
+            return redirect("brokers_page")
     acct.set_credentials(api_key, user_key)
     acct.demo = demo
     env = "demo" if demo else "live"
     # A reading taken on the VIRTUAL portfolio describes a different account
-    # from the one a real key reaches. The demo box ships checked, so the
+    # from the one the same pair reaches on the live world. The demo box
+    # ships checked, so the
     # ordinary sequence — save as demo, notice the env column, re-save as
     # live — would leave a virtual balance on a row now flagged LIVE, with a
     # timestamp minutes old: fresh enough for tracking_freeze_reason to pass
@@ -327,6 +418,9 @@ def save_etoro_credentials(request):
         acct.broker_positions_at = None
         env_note = (" The environment changed, so the stored equity and "
                     "holdings were dropped: they described the other one.")
+        if not demo:
+            env_note += (" Demo UNTICKED: from this save the same pair "
+                         "places REAL orders.")
     # Routing opt-ins. Unchecked = absent = off, so a save that omits them
     # leaves eToro carrying nothing — the safe default when keys are new.
     acct.is_primary_for_stocks = request.POST.get("primary_stocks") == "on"

@@ -77,9 +77,11 @@ class NothingChangesUntilAFlagIsFlippedTests(TestCase):
         self.assertEqual(broker_name_for_symbol(self.user, "AAPL", self.live),
                          "etoro")
 
-    def test_the_keys_decide_the_world_not_the_config(self):
-        """Demo keys go to eToro's demo even for a live-mode config —
-        exactly OANDA practice's rule. Live keys go live."""
+    def test_the_demo_flag_decides_the_world_not_the_config(self):
+        """A row flagged Demo goes to eToro's demo even for a live-mode
+        config — OANDA practice's rule in shape. Not the keys' rule: one
+        pair opens both worlds (measured 2026-09-23), so the flag alone
+        picks the world, and unticking it sends the same pair live."""
         _etoro(self.user, is_primary_for_stocks=True, demo=True)
         self.assertEqual(client_for_symbol(self.user, "AAPL", self.live).env,
                          "demo")

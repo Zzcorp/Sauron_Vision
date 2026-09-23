@@ -209,8 +209,12 @@ def _etoro_client_for(user, cfg, symbol: str):
 
     Same posture as the OANDA branch: no credentials means paper, and a
     live-mode config gets a PaperTrader back — which asset_engine refuses
-    to trade against, loudly. Demo keys route to eToro's demo world even
-    for a live config, because the KEYS decide the world, not the config.
+    to trade against, loudly. A row flagged Demo routes to eToro's demo
+    world even for a live config: the row's Demo flag decides the world,
+    not the config — and not the keys either. Measured 2026-09-23: one
+    eToro pair answered 200 on BOTH worlds, so the flag alone picks the
+    `demo/` URL segment (etoro_client._seg), and the same pair trades real
+    money the moment Demo is unticked on /brokers/ (a guarded save).
     """
     try:
         from bot_program.models import EtoroAccount
@@ -223,7 +227,9 @@ def _etoro_client_for(user, cfg, symbol: str):
             log.warning("[router] %s: live config %s is placing on the eToro "
                         "DEMO portfolio — the fill is a rehearsal and the row "
                         "is booked as live history. preflight_live blocks on "
-                        "this; untick Demo on /brokers/ for real orders",
+                        "this; unticking Demo on /brokers/ sends the SAME "
+                        "pair to the live world and the next order is real "
+                        "money",
                         symbol, getattr(cfg, "id", "?"))
         from .etoro_client import EtoroTrader
         return EtoroTrader(k, u, env="demo" if acct.demo else "live")

@@ -366,9 +366,12 @@ class EtoroAccount(models.Model):
     the two strings and is done. That is the property IBKR refuses retail
     clients, and the reason this row exists.
 
-    `demo` mirrors `paper` / `practice` / `testnet` on the other rows: the
-    row is one account, and the flag says which of eToro's two worlds the
-    keys open. It is NOT a mode switch on a live account.
+    `demo` mirrors `paper` / `practice` / `testnet` on the other rows in
+    shape only. Measured 2026-09-23: ONE eToro pair opens both worlds, so
+    this flag does not describe the keys — it IS the switch, the `demo/`
+    URL segment the adapter writes (etoro_client._seg). The /brokers/ save
+    is the only page that writes it, and its demo -> live flip is guarded
+    (dashboard/views_brokers.demo_untick_refusals).
     """
     user = models.OneToOneField(User, on_delete=models.CASCADE,
                                 related_name="etoro_account")

@@ -19,6 +19,10 @@ WHAT THESE TESTS HOLD
   * Saving is superuser-and-POST, reusing `_admin_only` rather than a copy.
   * The capabilities column is the table the conformance test enforces, not
     a second list typed into a template.
+  * The Demo untick is the switch to real money (measured 2026-09-23: one
+    pair opens both worlds), and the save that unticks it is refused without
+    the trading PIN, with a class ticked on the same save, or while a live
+    config is enabled — nothing written on a refusal.
 """
 from unittest import mock
 
@@ -232,6 +236,173 @@ class SavingEtoroTests(TestCase):
             self.assertEqual(etoro_probe("k", "u")[0], "unknown")
         with mock.patch("requests.get", side_effect=OSError("down")):
             self.assertEqual(etoro_probe("k", "u")[0], "unknown")
+
+
+class TheDemoUntickIsGuardedTests(TestCase):
+    """The untick is the switch to real money. Measured 2026-09-23: the pair
+    eToro's portal calls "virtual", saved with Demo ticked, answered 200 on
+    the demo AND the live aggregate-portfolio — one pair opens both worlds,
+    and the Demo tick alone picks the URL segment. So a demo -> live flip is
+    refused, nothing written, without the acting superuser's trading PIN,
+    with a class box ticked on the same save, or while any live config of
+    the target user is enabled. Every other direction is untouched."""
+
+    PIN = "4321"
+
+    def setUp(self):
+        self.user = User.objects.create_user("gd_u", password="x")
+        self.admin = User.objects.create_superuser("gd_admin", "a@x", "x")
+        acct = EtoroAccount.objects.create(user=self.user, demo=True,
+                                           connected=True,
+                                           is_primary_for_forex=True)
+        acct.set_credentials(RAW_KEY, RAW_USER)
+        acct.save()
+        self.client.force_login(self.admin)
+
+    def _give_the_admin_a_pin(self):
+        from portfolio.trader_profile import get_or_create_profile
+        prof = get_or_create_profile(self.admin)
+        prof.set_pin(self.PIN)
+        prof.save()
+
+    def _cfg(self, *, enabled, mode="live", name="megacaps"):
+        from bot_program.models import AssetBotConfig
+        return AssetBotConfig.objects.create(
+            user=self.user, asset_class="stock", name=name, mode=mode,
+            enabled=enabled, symbols=["AAPL"])
+
+    def _post(self, **extra):
+        """A save of NEW keys, Demo absent (= live) unless given; the probe
+        is patched so a refusal can be told from a send."""
+        data = {"target_username": "gd_u", "etoro_api_key": "k2",
+                "etoro_user_key": "u2"}
+        data.update(extra)
+        with mock.patch("dashboard.views_brokers.etoro_probe",
+                        return_value=("ok", "200")) as probe:
+            r = self.client.post(reverse("hq_save_etoro"), data, follow=True)
+        return r.content.decode(), probe
+
+    def _row(self):
+        return EtoroAccount.objects.get(user=self.user)
+
+    def assertNothingWasSaved(self, probe):
+        """Still demo, the flags not read, the keys not re-encrypted, and
+        nothing sent to eToro."""
+        acct = self._row()
+        self.assertTrue(acct.demo)
+        self.assertTrue(acct.is_primary_for_forex)
+        self.assertEqual(acct.get_credentials(), (RAW_KEY, RAW_USER))
+        probe.assert_not_called()
+
+    def test_the_flip_is_refused_without_the_pin(self):
+        body, probe = self._post()
+        self.assertNothingWasSaved(probe)
+        self.assertIn("REFUSED to untick Demo for gd_u", body)
+        self.assertIn("nothing was saved", body)
+        self.assertIn("measured 2026-09-23: the same eToro pair answered 200 "
+                      "on the demo AND the live aggregate-portfolio", body)
+        self.assertIn("the trading PIN was not supplied or is wrong", body)
+
+    def test_a_wrong_pin_is_no_pin(self):
+        self._give_the_admin_a_pin()
+        body, probe = self._post(pin="0000")
+        self.assertNothingWasSaved(probe)
+        self.assertIn("the trading PIN was not supplied or is wrong", body)
+
+    def test_the_flip_is_refused_while_a_live_config_is_enabled(self):
+        self._give_the_admin_a_pin()
+        cfg = self._cfg(enabled=True)
+        body, probe = self._post(pin=self.PIN)
+        self.assertNothingWasSaved(probe)
+        self.assertIn(f"live config(s) ENABLED for gd_u: [{cfg.id}] megacaps",
+                      body)
+        self.assertIn("bot off &lt;id&gt;", body)     # the page escapes it
+        # the PIN was right: that reason must not be on the list
+        self.assertNotIn("trading PIN was not supplied", body)
+
+    def test_the_flip_is_refused_with_a_class_ticked_on_the_same_save(self):
+        self._give_the_admin_a_pin()
+        body, probe = self._post(pin=self.PIN, primary_stocks="on")
+        self.assertNothingWasSaved(probe)
+        self.assertIn("class box(es) ticked on the same save (stocks)", body)
+        self.assertIn("second save", body)
+
+    def test_every_reason_that_applies_is_printed_at_once(self):
+        """One flash, the whole list — an operator who fixes one reason and
+        meets the next on the following click learns to distrust the page."""
+        self._cfg(enabled=True)
+        body, probe = self._post(primary_stocks="on", primary_crypto="on")
+        self.assertNothingWasSaved(probe)
+        self.assertIn("(1) live config(s) ENABLED", body)
+        self.assertIn("(2) class box(es) ticked on the same save "
+                      "(stocks, crypto)", body)
+        self.assertIn("(3) the trading PIN was not supplied", body)
+
+    def test_the_flip_is_allowed_with_the_pin_and_nothing_enabled(self):
+        """A DISABLED live config and an ENABLED paper config count for
+        nothing: neither can place a real order."""
+        self._give_the_admin_a_pin()
+        self._cfg(enabled=False, name="disabled_live")
+        self._cfg(enabled=True, mode="paper", name="enabled_paper")
+        body, probe = self._post(pin=self.PIN)
+        acct = self._row()
+        self.assertFalse(acct.demo)
+        self.assertFalse(acct.is_primary_for_forex)    # unticked = OFF
+        self.assertEqual(acct.get_credentials(), ("k2", "u2"))
+        probe.assert_called_once_with("k2", "u2", demo=False)
+        self.assertNotIn("REFUSED to untick", body)
+        self.assertIn("(live)", body)
+        self.assertIn("Demo UNTICKED: from this save the same pair places "
+                      "REAL orders", body)
+
+    def test_a_demo_to_demo_re_save_needs_no_pin(self):
+        """The guard is one-directional. A re-save that keeps Demo ticked —
+        with a live config enabled AND a class ticked — goes through as it
+        always did, and the flags are read."""
+        self._cfg(enabled=True)
+        body, probe = self._post(demo="on", primary_stocks="on")
+        acct = self._row()
+        self.assertTrue(acct.demo)
+        self.assertTrue(acct.is_primary_for_stocks)
+        self.assertFalse(acct.is_primary_for_forex)
+        self.assertEqual(acct.get_credentials(), ("k2", "u2"))
+        probe.assert_called_once_with("k2", "u2", demo=True)
+        self.assertNotIn("REFUSED to untick", body)
+
+    def test_a_live_to_demo_re_save_needs_no_pin(self):
+        """Toward the virtual world there is no gate: the flip that STOPS
+        real orders stays frictionless, like disabling a bot."""
+        EtoroAccount.objects.filter(user=self.user).update(demo=False)
+        self._cfg(enabled=True)
+        body, probe = self._post(demo="on")
+        self.assertTrue(self._row().demo)
+        probe.assert_called_once_with("k2", "u2", demo=True)
+        self.assertNotIn("REFUSED to untick", body)
+
+    def test_a_fresh_row_saved_live_is_not_a_flip(self):
+        """No row yet: nothing to flip from. The first save of a pair with
+        Demo unticked is the operator's declared choice, as it was before
+        the guard — the guard is on the CHANGE of world, where a virtual
+        habit meets a real order."""
+        EtoroAccount.objects.filter(user=self.user).delete()
+        body, probe = self._post()
+        self.assertFalse(self._row().demo)
+        probe.assert_called_once_with("k2", "u2", demo=False)
+        self.assertNotIn("REFUSED to untick", body)
+
+    def test_the_pin_gate_is_the_platforms_not_a_copy(self):
+        from dashboard import views_brokers
+        from dashboard.views_admin_hq import _pin_ok
+        self.assertIs(views_brokers._pin_ok, _pin_ok)
+
+    def test_the_form_carries_the_pin_field_and_names_the_measurement(self):
+        body = self.client.get(reverse("brokers_page")).content.decode()
+        form = body[body.index("Add / Update eToro Keys"):
+                    body.index("Register Saxo Application")]
+        self.assertIn('name="pin"', form)
+        self.assertIn("same pair opens both worlds", form)
+        self.assertIn("Unticking it sends real orders", form)
+        self.assertNotIn("portfolio keys", form)
 
 
 class SavingSaxoTests(TestCase):

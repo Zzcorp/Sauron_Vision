@@ -171,9 +171,16 @@ class TheEtoroSaveTellsTheTruthTests(TestCase):
         acct.broker_positions = [{"symbol": "AAPL"}]
         acct.broker_positions_at = timezone.now()
         acct.save()
+        # The flip is guarded since 2026-09-23 (one pair opens both worlds,
+        # tests/test_brokers_page.TheDemoUntickIsGuardedTests): the acting
+        # superuser's PIN, and no class box on the save that unticks Demo.
+        from portfolio.trader_profile import get_or_create_profile
+        prof = get_or_create_profile(self.admin)
+        prof.set_pin("4321")
+        prof.save()
         with mock.patch("dashboard.views_brokers.etoro_probe",
                         return_value=("ok", "")):
-            self._post(primary_stocks="on")          # demo absent = live
+            self._post(pin="4321")                   # demo absent = live
         acct = EtoroAccount.objects.get(user=self.user)
         self.assertFalse(acct.demo)
         self.assertIsNone(acct.last_equity)

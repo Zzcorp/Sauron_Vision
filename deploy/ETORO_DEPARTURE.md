@@ -347,8 +347,10 @@ id (a lone /search result spelled differently is `unknown`, never `ok`), the
 rate as "no rate" whenever lastPrice is not > 0, the bars on the config's
 timeframe, the book, how many live platform rows are OPEN without an etoro
 stamp, the four write URLs it never calls, and the floor line. Add
-`--other-world` to measure whether the real pair opens the demo portfolio —
-nothing in the tree knows. Add `--symbol X` for a spelling that belongs to no
+`--other-world` to re-measure the other world with the same pair — measured
+2026-09-23: the pair saved with Demo ticked answered 200 on the live
+aggregate-portfolio too, so ONE pair opens both worlds and only the Demo tick
+on /brokers/ picks which. Add `--symbol X` for a spelling that belongs to no
 config. Read every `unknown` before blaming the keys.
 
 ## 4. Demo write proof — the first order ever, on the virtual portfolio, with NO row and NO tick
@@ -358,10 +360,19 @@ and stays so; enabled, it would book a paper=False row on the venue that is
 about to trade unattended) and never with a class ticked (a tick makes the
 demo row the book and the venue in one click).
 
-- D1. On /brokers/ save the DEMO key pair from eToro's developer portal, Demo
-  ticked (it ships ticked), all four class boxes UNTICKED. With no box ticked
-  eToro is neither book nor venue; the 900 s sync stores a virtual balance
-  under env "paper" and re-sizes nothing.
+- D1. On /brokers/ save the key pair from eToro's developer portal (the portal
+  calls it "virtual"; measured 2026-09-23 with `etoro_smoke --user Sauron
+  --other-world`, the SAME pair answered 200 on the demo AND the live
+  aggregate-portfolio — there is no demo-only pair, the Demo tick alone picks
+  the world), Demo ticked (it ships ticked), all four class boxes UNTICKED.
+  With no box ticked eToro is neither book nor venue; the 900 s sync stores a
+  virtual balance under env "paper" and re-sizes nothing. THE WORLD CHECK:
+  every demo write snippet in this section asserts, in this order and before
+  any order, `t.demo`, `t.ping()` True, and `net_liquidation` above 100,000
+  (the virtual balance measured 332,449.10 USD; the real one 1.40 USD). A
+  demo-shaped snippet on a row someone unticked would otherwise place a REAL
+  order with the same pair — the assert on the balance is the one that cannot
+  be fooled by the flag.
 - D2. One round trip, printed values only:
 
   ```
@@ -371,7 +382,9 @@ demo row the book and the venue in one click).
   a = EtoroAccount.objects.get(user__username='Sauron'); k, u = a.get_credentials()
   t = EtoroTrader(k, u, env='demo' if a.demo else 'live')
   assert t.demo, 'REFUSING: the row is not demo'
-  print('env', t.env, 'net_liquidation', t.net_liquidation())
+  assert t.ping(), 'REFUSING: the demo world did not answer'
+  nl = t.net_liquidation(); print('env', t.env, 'net_liquidation', nl)
+  assert nl and nl[0] > 100000, f'REFUSING: {nl} is not the virtual balance (332,449.10 USD measured 2026-09-23; the real one 1.40 USD)'
   print('GLDM instrumentId', t.instrument_id('GLDM'))
   tk = t.ticker('GLDM'); print('ticker', tk)
   last = float(tk.get('lastPrice') or 0); assert last > 0, 'REFUSING: no price'
@@ -405,7 +418,7 @@ demo row the book and the venue in one click).
   order sent off hours lands WaitingForMarket — the shape a WORKING levered
   row needs, measured for free on funding night — and the filled round trip
   needs a market day. Through the adapter, printed values only, one unit at
-  leverage 2 with both legs; every snippet asserts `t.demo` first.
+  leverage 2 with both legs; every snippet runs D1's WORLD CHECK first.
   - D2b-i — OFF HOURS. Print `MARGIN before` (`t.margin_cells()`); the RAW
     ELIGIBILITY read (`t._sess().post(f'{BASE}/api/v2/trading/info/eligibility',
     json={'instrumentIds': [t.instrument_id('GLDM')]}, headers=t._headers(),
@@ -458,7 +471,7 @@ demo row the book and the venue in one click).
 - D2c. FRACTIONS — on the DEMO row, after D2 has closed flat and before any
   class is ticked or the `fractional_units_live` switch is flipped. Every
   answer written down by NAME; the shell idiom of D2 (values printed, never a
-  key; `assert t.demo` first).
+  key; D1's WORLD CHECK first).
   - D2c-0 THE ELIGIBILITY READ FIRST, for the 18 stock symbols of configs 6
     and 14, by hand through the adapter's own session
     (`t._sess().post(<url>, json={'symbols': [...], 'currency': 'USD'},
@@ -507,8 +520,13 @@ demo row the book and the venue in one click).
 - D3. Any divergence from the adapter's assumptions is recorded in
   tests/test_etoro_client.py by name, with the real class and a patched
   session — never a subclass.
-- D4. Re-save the LIVE keys on /brokers/, Demo UNTICKED, all four boxes still
-  UNTICKED. The environment flip drops the demo reading cells on purpose.
+- D4. Re-save the SAME pair on /brokers/ with Demo UNTICKED — the switch to
+  live is the checkbox, not a key change (measured 2026-09-23) — all four
+  boxes still UNTICKED, and the trading PIN typed in the form's PIN field. The
+  save is refused, nothing written, while any live config is enabled, while
+  any class box is ticked on that same save, or without the PIN; the flash
+  names which. The environment flip drops the demo reading cells on purpose.
+  From this save every order the platform routes to eToro is real money.
 
 ## 5. Funding, and the pool arithmetic
 
@@ -545,7 +563,10 @@ sends that class to eToro before IBKR; on the next 900 s beat every ENABLED
 follower is re-sized from the eToro reading in USD (capital only — the rows
 keep saying EUR until §8).
 
-Tick ONE class at a time on /brokers/, re-entering both keys each time. Stocks
+Tick ONE class at a time on /brokers/, re-entering both keys each time, with
+Demo left UNTICKED (the live row — re-ticking it is the §10 must-not). Never on
+the save that unticks Demo: the form refuses a demo -> live flip with a class
+ticked, so D4 and the first tick are two saves, in that order. Stocks
 first (configs 6 and 14; 10 stays disabled), forex second (config 1). Options
 and CFD have no eToro box and fall to paper by design; no live options config
 exists. Crypto routes nothing until a crypto config exists.
@@ -641,3 +662,9 @@ retirement then continues at deploy/IBKR_RETIREMENT.md Stage 3.
 - Never re-save the eToro form with Demo ticked by accident: it ships ticked,
   the row flips to demo, the live cells are dropped, and every save rewrites
   all four class boxes — an unticked box is OFF.
+- Never treat the key pair as demo-only: measured 2026-09-23, the SAME pair
+  opens both worlds and the Demo tick alone picks which. Unticking it sends
+  real orders; the form refuses that flip while a live config is enabled,
+  with a class ticked on the same save, or without the trading PIN — and a
+  shell bypasses the form, which is why every demo snippet runs D1's WORLD
+  CHECK (`t.demo`, `t.ping()`, net_liquidation above 100,000).
