@@ -749,6 +749,7 @@ and `LOST — <reason>`.
 
 ```bash
 ./deploy/dc exec web python manage.py saxo_smoke --user <you>   # read-only, places NO order
+./deploy/dc exec web python manage.py etoro_smoke --user <you>  # read-only, places NO order; names the write URLs it never calls
 ./deploy/dc exec web python manage.py treasury                  # what every broker holds
 ```
 

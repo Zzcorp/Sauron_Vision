@@ -285,6 +285,27 @@ COMMANDS = [
         "runnable_reason": "presents the operator's Saxo session to an external service and prints the balance",
     },
     {
+        "name": "etoro_smoke",
+        "title": "eToro smoke",
+        "purpose": "Exercise the READS of the eToro adapter with one user's stored key pair — the row, its world's ping, equity and book, every live config's symbols (id, eToro's spelling, rate, bars), optionally the other world with the same pair, and which write URLs have ever been attested — as ok, refused, no-such or unknown. Places no order.",
+        "usage": [
+            "python manage.py etoro_smoke --user Sauron",
+            "python manage.py etoro_smoke --user Sauron --symbol GLDM",
+            "python manage.py etoro_smoke --user Sauron --other-world",
+        ],
+        "mirrors": "/brokers/",
+        "read_only": True,
+        # No run_args: --user needs a value, and the Run lane cannot ask
+        # for one. The entry is not web-runnable anyway (below).
+        "run_args": [],
+        "category": "read",
+        # Read-only, and still not the web's to run: it presents the
+        # operator's eToro keys to an external service and prints the
+        # account's balance. The shell, with the operator's name typed.
+        "runnable": False,
+        "runnable_reason": "presents the operator's eToro keys to an external service and prints the balance",
+    },
+    {
         "name": "preflight_live",
         "title": "Preflight live",
         "purpose": "Answer, in one pass, whether it is safe to arm real money right now — switches, connection, money, live configs, bars, PIN — from cached columns only.",

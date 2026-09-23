@@ -208,6 +208,11 @@ class EtoroTrader:
         # symbol -> instrumentId, and the reverse for reading positions back.
         self._ids: dict = {}
         self._symbols: dict = {}
+        # instrumentId -> the spelling eToro itself answered on /search.
+        # Kept because instrument_id accepts a LONE result of any
+        # spelling; a reader (etoro_smoke) shows the mismatch instead
+        # of painting the id green. No consumer reads it.
+        self._venue_spelling: dict = {}
 
     # ── plumbing ───────────────────────────────────────────────────────────
 
@@ -334,6 +339,7 @@ class EtoroTrader:
                 iid = int(iid)
                 self._ids[key] = iid
                 self._symbols[iid] = key
+                self._venue_spelling[iid] = sym
                 return iid
         raise LookupError(f"eToro knows no instrument spelled {key!r}")
 

@@ -250,6 +250,19 @@ class TheInstrumentIdIsResolvedOnceTests(SimpleTestCase):
         with self.assertRaises(LookupError):
             t.instrument_id("NOPE")
 
+    def test_a_lone_result_of_any_spelling_is_accepted_and_kept(self):
+        """instrument_id accepts a single /search item whatever it is
+        spelled — a conscious act, pinned here rather than hidden. The
+        venue's own spelling is kept beside the id so a reader
+        (etoro_smoke) can show the mismatch instead of painting the id
+        green. Whether eToro's search is exact or prefix is unmeasured."""
+        t, _ = _client([("GET", "/search", 200,
+                         [{"instrumentId": 1004,
+                           "internalSymbolFull": "SLVX"}])])
+        self.assertEqual(t.instrument_id("SLV"), 1004)
+        self.assertEqual(t._venue_spelling[1004], "SLVX")
+        self.assertEqual(t._symbols[1004], "SLV")
+
     def test_the_reverse_cache_names_positions_it_opened(self):
         t, _ = _client([SEARCH_AAPL])
         t.instrument_id("AAPL")
