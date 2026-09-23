@@ -147,10 +147,37 @@ revert in this repo (deploy/RUNBOOK.md §10 restores the whole database).
 
 ## 2. Withdraw, then retire IBKR at runtime — only after §1 shows IBKR flat
 
-The withdrawal is the operator's act at IBKR. Then, in this order:
+Designed and refuted on 2026-09-23 (three lenses and a critic on the runtime
+sequence, read against 8eddee1). No code changes; nothing here moves money.
+The withdrawal is the operator's act at IBKR, before 2a.
 
-- **2a. Untick the five IBKR routing flags** — the retirement's Stage 1, whose
-  gate is "every live row CLOSED":
+**Gate — all of it, or STOP.** #93, #94 and #95 CLOSED; no live row OPEN or
+CLOSE_PENDING; no live options/cfd row; §1's read of the venue answered
+`positions []` and `resting set()`; the cash withdrawn. While an UNSTAMPED
+live row is OPEN, dropping `keyed_venue_count` to 1 (2b) hands the reconcile
+beat a PaperTrader whose `get_positions()` is the paper table, and the row is
+orphan-closed against a simulator — the one thing this order exists to
+prevent. Read the gate in one shell:
+
+```
+./deploy/dc exec worker-fast python manage.py shell -c "
+from bot_program.models import AssetBotTrade
+from bot_program.equity_models import BrokerEquityReading
+for t in AssetBotTrade.objects.filter(id__in=(93, 94, 95)).order_by('id'):
+    m = t.metadata or {}
+    print(t.id, t.symbol, t.side, t.status, 'exit', t.exit_price, 'pnl', t.pnl, 'closed', t.closed_at, 'src', m.get('exit_fill_source'), 'inferred', m.get('exit_price_inferred'), 'unpriced', m.get('exit_price_unavailable'))
+print('live rows OPEN/CLOSE_PENDING', list(AssetBotTrade.objects.filter(status__in=('OPEN', 'CLOSE_PENDING'), paper=False).values_list('id', 'metadata__broker')))
+print('live options/cfd rows', list(AssetBotTrade.objects.filter(status__in=('OPEN', 'CLOSE_PENDING'), paper=False, asset_class__in=('options', 'cfd')).values_list('id', flat=True)))
+print('ibkr readings', BrokerEquityReading.objects.filter(broker='ibkr').count())
+"
+```
+
+Expect three CLOSED rows (#95 with `unpriced True` and pnl None — unmeasured,
+not zero; #93/#94 with the broker's fill and `src broker`), `live rows []`,
+`options/cfd []`. Write down `ibkr readings` N — 2b must reproduce it.
+
+- **2a. Untick the five IBKR routing flags** — the retirement's Stage 1,
+  whose gate is "every live row CLOSED". Reversible (set them back):
 
   ```
   ./deploy/dc exec worker-fast python manage.py shell -c "
@@ -163,29 +190,149 @@ The withdrawal is the operator's act at IBKR. Then, in this order:
   "
   ```
 
-  Expect `after False False False False False`. Once unticked, the router
-  answers alpaca/paper for a stock row and the carrier guard refuses every
-  future miss on an unstamped row for ever — which is why this comes AFTER the
-  rows are CLOSED.
-- **2b. Clear the IBKR account id, keep the row.** HQ Disconnect on the IBKR row
-  of /admin-dashboard/ (posts broker=ibkr to admin-dashboard/brokers/disconnect/)
-  clears `account_id_enc` and nothing else: the sync stops walking the row
-  (bot_program/tasks.py excludes an empty account id), the 6-hourly "unreachable"
-  alert stops, `broker_backed` no longer returns it, `keyed_venue_count` drops
-  to 1. The row and the 400-day BrokerEquityReading road stay (the FK is
-  CASCADE — **never delete the IBKRAccount row**). The form renders only while
-  `row.ibkr.connected` is True; if it is not there, say so before touching the
-  column by hand.
-- **2c. Stop the Gateway container:** `./deploy/dc --profile ibkr stop ibgateway`.
-- **2d. Proofs:** `./deploy/dc exec worker-fast python manage.py shell -c "from bot_program.tasks import sync_broker_account as s; print(s())"`
-  → `{'attempted': 0, 'stored': 0, 'unreachable': 0}`;
-  `./deploy/dc exec worker-fast python manage.py preflight_live --user Sauron` →
-  section 2 with no book until an eToro class is ticked, and no stale-reading
-  blocker; `./deploy/dc exec worker-fast python manage.py treasury --user Sauron`
-  → no IBKR row under "positions the platform believes are open".
+  Expect `before True True True True False` then `after False False False
+  False False`; treasury section 3 then reads stock/forex/commodity/crypto
+  "by default" and the IBKR claims column is a dash. The row is still keyed,
+  still the book, still swept — nothing is blinded yet. Once unticked, the
+  router answers alpaca/paper for a stock row and the carrier guard refuses
+  every future miss on an unstamped row for ever — which is why this comes
+  AFTER the rows are CLOSED.
+- **2b. Un-key the row — the two writes HQ Disconnect makes, and nothing
+  else.** The shell twin is preferred over the × IBKR button because it
+  writes exactly two columns and prints the reading cells it leaves intact
+  (the page's flash does not), and because it works when the button is not
+  rendered. This is the step that makes `broker_backed()` return None — IBKR
+  is the book on its account id ALONE, eToro needs keyed AND a class — and
+  empties the IBKR sync's queryset, drops the row from the sweep and zeroes
+  the data feed's walk. **Never delete the IBKRAccount row**: the FK from
+  BrokerEquityReading is CASCADE and the 400-day road goes with it; un-keying
+  is a column write on the same row and cascades nothing. Never null the
+  cells either — the aged reading is the honest record.
 
-Never untick `broker_account_sync` to silence IBKR: one switch guards the
-eToro sync too.
+  ```
+  ./deploy/dc exec worker-fast python manage.py shell -c "
+  from bot_program.models import IBKRAccount
+  from bot_program.equity_models import BrokerEquityReading
+  a = IBKRAccount.objects.get(user__username='Sauron')
+  n_before = BrokerEquityReading.objects.filter(broker='ibkr', account_pk=a.pk).count()
+  a.account_id_enc = ''
+  a.connected = False
+  a.save(update_fields=['account_id_enc', 'connected'])
+  a.refresh_from_db()
+  print('pk', a.pk, 'keyed', bool(a.account_id_enc), 'connected', a.connected)
+  print('cells kept: equity', a.last_equity, a.last_equity_currency, a.last_equity_at, '| held', None if a.broker_positions is None else len(a.broker_positions), a.broker_positions_at, '| login stored', a.has_login)
+  print('ibkr readings', n_before, '->', BrokerEquityReading.objects.filter(broker='ibkr', account_pk=a.pk).count())
+  "
+  ```
+
+  ```
+  ./deploy/dc exec worker-fast python manage.py shell -c "from django.contrib.auth.models import User; from bot_program.capital_truth import broker_backed; print(broker_backed(User.objects.get(username='Sauron')))"
+  ```
+
+  Expect `keyed False connected False`, the cells line with the last reading
+  and its timestamp, `ibkr readings N -> N`, and `None`. Re-keying later is
+  re-saving the HQ IBKR form with the account id (it is in the dump).
+- **2c. Stop AND remove the Gateway container, and take `ibkr` out of
+  `COMPOSE_PROFILES`** so the one-command deploy (`./deploy/dc up -d --build`)
+  cannot recreate it — a recreated Gateway restart-loops on the IB Key push
+  nobody will approve and pings the phone for weeks. Done AFTER 2b so no beat
+  still opens a socket toward it. Never a bare `dc stop` or `dc rm` — without
+  a service name compose stops the whole stack.
+
+  ```
+  cd ~/Sauron_Vision && docker ps -a --format '{{.Names}} {{.Status}}' | grep -i gateway
+  ```
+
+  ```
+  cd ~/Sauron_Vision && ./deploy/dc --profile ibkr stop ibgateway && ./deploy/dc --profile ibkr rm -f ibgateway
+  ```
+
+  ```
+  cd ~/Sauron_Vision && cp -p .env .env.bak.$(date +%F) && chmod 600 .env.bak.$(date +%F) && grep -nE '^COMPOSE_PROFILES=|sauron: IBKR' .env && nano .env
+  ```
+
+  In nano: remove `ibkr` from `COMPOSE_PROFILES`; delete the managed block
+  from `# >>> sauron: IBKR gateway logins` through `# <<< sauron: IBKR gateway
+  logins` and any hand-typed `IBKR_USERNAME=` / `IBKR_PASSWORD=` lines. Proof:
+  `docker ps -a --format '{{.Names}}' | grep -ci gateway` prints 0;
+  `./deploy/dc config --services | grep -i gateway` prints nothing;
+  `grep -c 'sauron: IBKR' .env` prints 0. From now on: never
+  `./deploy/ibkr-apply`, never `./deploy/dc --profile ibkr … up`. The
+  Gateway login stored on the row (`has_login`) stays: preflight blocks on a
+  missing login until the coded Stage 6 removes that block; if the password
+  must leave the database, change it at IBKR.
+- **2d. Verify the walks:**
+
+  ```
+  ./deploy/dc exec worker-fast python manage.py shell -c "
+  from django.contrib.auth.models import User
+  from bot_program.tasks import sync_broker_account, sync_etoro_accounts
+  from bot_program.reconcile_asset import reconcile_unknown_positions, keyed_venue_count
+  u = User.objects.get(username='Sauron')
+  print('ibkr sync', sync_broker_account())
+  print('etoro sync', sync_etoro_accounts())
+  print('keyed venues', keyed_venue_count(u))
+  print('sweep', reconcile_unknown_positions(u))
+  "
+  ```
+
+  Expect `ibkr sync {'attempted': 0, 'stored': 0, 'unreachable': 0}`,
+  `etoro sync {'attempted': 1, 'stored': 1, 'unreachable': 0}`, `keyed
+  venues 1`, and a sweep with `broker_unavailable 0, errors 0` that names
+  eToro only. The 6-hourly "IBKR unreachable" alert stops here.
+- **2e. Verify the pages print the retired state honestly:**
+
+  ```
+  ./deploy/dc exec worker-fast python manage.py treasury --user Sauron
+  ```
+
+  ```
+  ./deploy/dc exec worker-fast python manage.py preflight_live --user Sauron
+  ```
+
+  Treasury: section 1 reads "no row is the book"; the IBKR line stays with
+  its aged reading and the session note "no account id", NOT `*book`; exactly
+  one BLOCKER — "No broker row is the book … the preflight will refuse to arm
+  money" — which is the honest retired state until an eToro class is ticked
+  (§6). Preflight: section 2 `ibkr … primary=nothing`, `book NOTHING`; NO
+  stale-reading blocker (it needs a book), NO IBKR floor line; each disabled
+  config "NO BROKER is primary … PaperTrader" as worth-reading. Three prints
+  stay dishonest in this state and are named rather than hidden: preflight
+  section 3 says "NEVER MEASURED" where the truth is "no book"; a follower's
+  `tracking_freeze_reason` says "no reading has landed yet — enable
+  broker_account_sync" where the sync is ON and the missing thing is a book
+  (it bites the moment config 14 is re-enabled before §6); and treasury's
+  worth-reading note says the IBKR row "holds N position(s)" in the present
+  tense over whatever snapshot the last sync left. Wording patches for the
+  three are designed (count-1 anchors) and ship with the next coded batch,
+  not alone.
+- **2f. Record what was done**, beside the equity export — the flags' prior
+  values, the un-key time, the container removal, the profile edit, N:
+
+  ```
+  ./deploy/dc exec worker-fast python manage.py shell -c "
+  from bot_program.models import IBKRAccount, AssetBotTrade
+  from bot_program.equity_models import BrokerEquityReading
+  from core.models import PlatformComponent
+  a = IBKRAccount.objects.get(user__username='Sauron')
+  print('ibkr row', a.pk, 'keyed', bool(a.account_id_enc), 'flags', a.is_primary_for_stocks, a.is_primary_for_forex, a.is_primary_for_commodity, a.is_primary_for_options, a.is_primary_for_cfd, 'connected', a.connected, 'login', a.has_login)
+  print('cells', a.last_equity, a.last_equity_currency, a.last_equity_at, None if a.broker_positions is None else len(a.broker_positions), a.broker_positions_at)
+  print('readings ibkr', BrokerEquityReading.objects.filter(broker='ibkr').count(), 'etoro', BrokerEquityReading.objects.filter(broker='etoro').count())
+  print('closed ibkr-era rows', list(AssetBotTrade.objects.filter(id__in=(93, 94, 95)).values_list('id', 'status', 'exit_price', 'pnl')))
+  print('components', list(PlatformComponent.objects.filter(key__in=('broker_account_sync', 'pipeline_asset_bots', 'platform_master')).values_list('key', 'is_enabled', 'last_status')))
+  " | tee -a ~/ibkr_retirement_$(date +%F).log
+  ```
+
+What still reads IBKR afterwards, and is ended only by the coded stages of
+deploy/IBKR_RETIREMENT.md (3 → 4 → 5 → 6, none of them while the operator is
+away): the IBKR sync walk returns attempted 0 and task_gate grades it
+"ran and produced nothing" on the SHARED `broker_account_sync` row every 15
+minutes, alternating with eToro's success — true and useless; the ibkr quote
+feed stays red for ever (the feed row exists, nothing writes it); the router
+and the preflight still NAME IBKR for options/cfd while the router hands back
+paper — never arm a live options or cfd config before Stage 4. Never untick
+`broker_account_sync` (it guards the eToro sync too) or `pipeline_asset_bots`
+(it guards the tick, the reconcile and the sweep) to quiet any of this.
 
 ## 3. The eToro read-only probe
 
