@@ -1890,9 +1890,10 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         # THE PROMISE MUST MATCH THE ADAPTER. The tick books the fill only
         # through `order_status` and withdraws only through `cancel_order`
         # (AssetBot._poll_working_entry, cancel_working_entry); eToro has
-        # neither, so a WORKING eToro ticket is polled by nobody and
-        # withdrawn by nobody — it is watched and closed AT eToro, and the
-        # confirmation says so rather than promise a poll nothing can make.
+        # both since D3b (2026-09-24): the demo segment withdraws, the real
+        # segment raises on the unmeasured DELETE spelling and alerts daily.
+        # The else branch stays for an adapter with neither, and the
+        # confirmation says what the adapter can do rather than promise.
         # `client` is the adapter that placed this order (bound above,
         # because only the live branch books a WORKING row).
         _can_poll = callable(getattr(client, "order_status", None))
@@ -1904,6 +1905,12 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 f"books the fill when it prints; it is withdrawn if it is "
                 f"still unfilled after {_AB.ENTRY_WORKING_MAX_HOURS}h. You "
                 f"can also withdraw it from the positions page.")
+            from bot_program.engine.capabilities import adapter_key
+            if adapter_key(client) == "etoro" and not getattr(client, "demo", True):
+                out["protection_note"] += (
+                    " On eToro's live segment the withdrawal is NOT attested "
+                    "(the v3 DELETE spelling is unmeasured and refused), so "
+                    "the tick alerts daily instead of withdrawing.")
         else:
             _gap = ("read an order's state or withdraw it"
                     if not (_can_poll or _can_pull)

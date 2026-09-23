@@ -77,6 +77,9 @@ class _FakeSession:
     def patch(self, url, **kw):
         return self._hit("PATCH", url, **kw)
 
+    def delete(self, url, **kw):
+        return self._hit("DELETE", url, **kw)
+
 
 SEARCH_AAPL = ("GET", "/market-data/search", 200,
                [{"instrumentId": 1001, "internalSymbolFull": "AAPL"}])
@@ -232,6 +235,52 @@ def _lookup_router(fake, *, by_order, by_reference=LOOKUP_404_BY_REFERENCE,
 
     fake._hit = hit
     return fake
+
+
+
+# ── D2b-i, MEASURED 2026-09-23 20:29 UTC (demo): the held order and its DELETE ──
+def _held_lookup(status_id=11, name="WaitingForMarket"):
+    """orders:lookup of order 383459788 while WaitingForMarket: status 11,
+    positionExecutions [], the legs NOT shown (openStopLossRate 0.0),
+    requestedAmount 42.37, frozenAmount 42.5. Every other key is
+    _measured_lookup's literal, not captured on the held body."""
+    b = _measured_lookup(order_id=383459788, leverage=2, stop=82.17,
+                         target=87.25, requested=42.37, frozen=42.5)
+    b["status"] = {"id": status_id, "name": name, "errorCode": 0}
+    b["positionExecutions"] = []
+    b["openStopLossRate"] = 0.0
+    b["openTakeProfitRate"] = 0.0
+    b["totalCosts"] = 0.0
+    return b
+
+
+def _rewritten_fill():
+    """The SHAPE measured on BTC (N2, 2026-09-23): openStopLossRate stays the
+    SENT level, positionExecutions[0].stopLossRate is the HELD one. The
+    GLDM levels are composed; GLDM itself was never rewritten."""
+    b = _measured_lookup(order_id=383459788, leverage=2, stop=82.17,
+                         target=87.25, avg=84.79)
+    b["positionExecutions"][0]["stopLossRate"] = 83.06
+    return b
+
+
+REJECTED_720 = {**_held_lookup(4, "Rejected"),
+                "status": {"id": 4, "name": "Rejected", "errorCode": 720,
+                           "errorMessage": "Error opening position - Initial "
+                                           "Leveraged Position Amount is under "
+                                           "the minimum defined Leveraged Amount "
+                                           "in the system. leveraged "
+                                           "InitialPositionAmount: 8.44 "
+                                           "MinimumPositionAmount: 10 (Dollars)"}}
+HELD_ACCEPTED = {"token": "<not captured>", "orderId": 383459788,
+                 "referenceId": "<not captured>"}
+POST_HELD = ("POST", "/execution/demo/orders", 200, HELD_ACCEPTED)
+CANCELED_LOOKUP = _held_lookup(7, "Canceled")
+DELETE_202 = ("DELETE", "/api/v3/trading/execution/demo/orders/383459788", 202,
+              {"orderId": 383459788, "referenceId": ""})
+LOOKUP_404_NOT_INDEXED = (404, {})                    # body not captured
+LOOKUP_404_CLOSE_ID = (404, {"message": "Order category for 383413813 not found"})
+HELD_TOTALS = _totals(332448.59, 332406.09, 42.5, frozen=42.5)
 
 
 class EveryCallCarriesTheHeadersTests(SimpleTestCase):
@@ -591,16 +640,13 @@ class AnAcceptanceIsNotAFillTests(SimpleTestCase):
         out, _ = self._order([_lookup(4, units=0, avg=0)])
         self.assertNotIn("working", out)
 
-    def test_the_tier_it_cannot_fill_stays_absent(self):
-        """`working` is a report; order_status/cancel_order would be
-        claims. orders:lookup HAS met a real key under the id both lanes
-        persist (broker_order_id, 2026-09-23); they stay absent because the
-        one WORKING shape a poller must read (WaitingForMarket, status 11)
-        has not, and the DELETE the public reference documents
-        (deploy/ETORO_DEPARTURE.md §4 D2b-i,
-        /api/v3/trading/execution/orders/<id>) has met no key (D3b)."""
-        self.assertFalse(hasattr(EtoroTrader, "order_status"))
-        self.assertFalse(hasattr(EtoroTrader, "cancel_order"))
+    def test_the_tier_it_fills_since_d3b_is_present(self):
+        """`working` was a report until the WORKING shape and the DELETE
+        met a key (D2b-i, 2026-09-23 20:29 UTC: status 11, DELETE v3 -> 202,
+        lookup 7). Since D3b both are claims the adapter can keep, on the
+        demo segment; the real DELETE spelling still raises."""
+        self.assertTrue(hasattr(EtoroTrader, "order_status"))
+        self.assertTrue(hasattr(EtoroTrader, "cancel_order"))
 
     def test_polling_stops_early_on_a_terminal_status(self):
         out, fake = self._order([{"status": 2}, _lookup(3)])
@@ -716,19 +762,19 @@ class TheAccountReadsTests(SimpleTestCase):
 
 class WhatItClaimsIsWhatItHasTests(SimpleTestCase):
 
-    def test_the_derived_tiers_are_the_five_intended(self):
-        """fractional_units joined 2026-09-23 as a labelled belief; the
-        tier is derived from the one method on the class, and it is the
-        only tier here that a demo order can refute rather than confirm."""
+    def test_the_derived_tiers_are_the_six_intended(self):
+        """fractional_units joined 2026-09-23 as a labelled belief (measured
+        the same night on BTC); orders joined with D3b off the measured
+        DELETE. Every tier is derived from the methods on the class."""
         self.assertEqual(cap.capabilities_of(EtoroTrader),
-                         ("market_data", "execution", "brackets", "account",
-                          "fractional_units"))
+                         ("market_data", "execution", "orders", "brackets",
+                          "account", "fractional_units"))
 
-    def test_orders_and_fills_are_absent_by_design(self):
-        """No documented cancel for a pending order; no documented closed-
-        position history. A method that existed and could not act would
-        pass the conformance test and lie."""
-        self.assertFalse(hasattr(EtoroTrader, "cancel_order"))
+    def test_fills_is_absent_by_design_and_orders_is_measured(self):
+        """No closed-position history is documented, so `fills` stays
+        absent; the cancel met a key on 2026-09-23 (DELETE v3 -> 202 ->
+        lookup 7), so `orders` is claimed."""
+        self.assertTrue(hasattr(EtoroTrader, "cancel_order"))
         self.assertFalse(hasattr(EtoroTrader, "closing_fill"))
         self.assertTrue(hasattr(EtoroTrader, "get_positions"),
                         "reconciliation needs get_positions even without "
@@ -1425,6 +1471,222 @@ class TheMeasuredWireTests(SimpleTestCase):
         self.assertEqual(body["positionExecutions"][0]["takeProfitRate"], 87.3)
 
 
+
+
+# ── the held order, its poll and its withdrawal (D3b) ──────────────────────
+
+class TheHeldOrderTests(SimpleTestCase):
+    """D2b-i measured 2026-09-23 20:29 UTC on the demo segment, byte for byte,
+    with the real EtoroTrader over a patched session: status 11 while held,
+    the pre-index 404, DELETE v3 -> 202 -> lookup 7, the margin pledged by a
+    held order; and the floor refusal (status 4 / 720) on the poll path."""
+
+    def _t(self, by_order, routes=None):
+        t, fake = _client(list(routes if routes is not None
+                               else [SEARCH_GLDM, POST_HELD]))
+        _lookup_router(fake, by_order=by_order)
+        return t, fake
+
+    def _deletes(self, fake):
+        return [c for c in fake.calls if c[0] == "DELETE"]
+
+    def test_a_held_order_reads_404_then_waiting_for_market_and_books_working(self):
+        """The 404 cost one attempt, the second read WaitingForMarket, the
+        poll ran its whole budget and answered working: the ride-through pin
+        is `pollFailed` absent, not a count of two."""
+        from bot_program.engine.etoro_client import FILL_ATTEMPTS
+        t, fake = self._t([LOOKUP_404_NOT_INDEXED, (200, _held_lookup())])
+        with mock.patch("time.sleep"):
+            out = t.market_order("GLDM", "BUY", 1, stop_loss=82.17,
+                                 take_profit=87.25, leverage=2)
+        self.assertEqual(out["status"], "PENDING")
+        self.assertTrue(out.get("working"))
+        self.assertNotIn("pollFailed", out)
+        self.assertEqual(out["raw"]["statusName"], "WaitingForMarket")
+        self.assertEqual(out["executedQty"], "0.0")
+        for absent in ("positionId", "venueStopLoss", "protectedOnFill"):
+            self.assertNotIn(absent, out)
+        self.assertEqual(len(_polls(fake)), FILL_ATTEMPTS)
+
+    def test_order_status_maps_eleven_working_three_filled_seven_dead_four_dead(self):
+        t, fake = self._t((200, _held_lookup()))
+        st = t.order_status("383459788")
+        self.assertEqual((st["state"], st["status"], st["statusId"],
+                          st["filled"], st["avgPrice"]),
+                         ("working", "WaitingForMarket", 11, 0.0, 0.0))
+        self.assertNotIn("positionId", st)
+        self.assertNotIn("refusal", st)
+        self.assertEqual(len(_polls(fake)), 1)
+        t, _ = self._t((200, _measured_lookup()))
+        st = t.order_status("383454450")
+        self.assertEqual((st["state"], st["filled"], st["avgPrice"],
+                          st["positionId"], st["venueStopLoss"],
+                          st["venueTakeProfit"]),
+                         ("filled", 1.0, 84.8, "3603281458", 82.22, 87.3))
+        t, _ = self._t((200, _rewritten_fill()))
+        st = t.order_status("383459788")
+        self.assertEqual(st["venueStopLoss"], 83.06,
+                         "the HELD stop lives in positionExecutions[0], never "
+                         "on the top-level openStopLossRate")
+        t, _ = self._t((200, CANCELED_LOOKUP))
+        st = t.order_status("383459788")
+        self.assertEqual((st["state"], st["filled"]), ("dead", 0.0))
+        self.assertNotIn("refusal", st)
+        t, _ = self._t((200, REJECTED_720))
+        st = t.order_status("383455967")
+        self.assertEqual(st["state"], "dead")
+        self.assertTrue(st["refusal"].startswith(
+            "errorCode 720: Error opening position"))
+        self.assertLessEqual(len(st["refusal"]), len("errorCode 720: ") + 120,
+                             "_status_of cuts the message at 120 chars")
+
+    def test_order_status_three_states(self):
+        t, fake = self._t((404, {"message": "Order category for x not found"}))
+        self.assertEqual(t.order_status("383413813")["state"], "unknown")
+        t, _ = self._t((500, {}))
+        self.assertIsNone(t.order_status("383459788"))
+        t, _ = self._t((429, {}))
+        self.assertIsNone(t.order_status("383459788"))
+        t, _ = self._t((200, {"status": {"id": 3}, "positionExecutions": []}))
+        st = t.order_status("383459788")
+        self.assertEqual(st["state"], "unknown")
+        self.assertIn("nobody has seen", st["reason"])
+        t, fake = self._t((200, _held_lookup()))
+        st = t.order_status("")
+        self.assertEqual(st["state"], "unknown")
+        self.assertEqual(_polls(fake), [])
+        t, _ = self._t((200, _lookup(5, units=0.4)))
+        st = t.order_status("1")
+        self.assertEqual((st["state"], st["filled"]), ("working", 0.4))
+
+    def test_the_delete_is_proven_by_the_lookup_reading_canceled(self):
+        t, fake = self._t([(200, _held_lookup()), (200, CANCELED_LOOKUP)],
+                          routes=[SEARCH_GLDM, DELETE_202])
+        with mock.patch("time.sleep"):
+            self.assertIs(t.cancel_order("383459788"), True)
+        kinds = [c[0] for c in fake.calls]
+        self.assertEqual(kinds, ["GET", "DELETE", "GET"])
+        d = self._deletes(fake)[0]
+        self.assertIn("/api/v3/trading/execution/demo/orders/383459788", d[1])
+        self.assertIn("x-request-id", d[2]["headers"])
+        self.assertNotIn("json", d[2])
+
+    def test_a_close_order_id_is_refused_before_any_delete(self):
+        t, fake = self._t(LOOKUP_404_CLOSE_ID, routes=[SEARCH_GLDM, DELETE_202])
+        with self.assertLogs("bot_program.engine.etoro_client", level="ERROR") as cm:
+            self.assertIs(t.cancel_order("383413813"), False)
+        self.assertEqual(len(_polls(fake)), 1)
+        self.assertEqual(self._deletes(fake), [])
+        self.assertTrue(any("383413813" in line for line in cm.output))
+
+    def test_an_unreadable_gate_sends_nothing(self):
+        t, fake = self._t((500, {}), routes=[SEARCH_GLDM, DELETE_202])
+        with mock.patch("time.sleep"):
+            self.assertIs(t.cancel_order("383459788"), False)
+        self.assertEqual(self._deletes(fake), [])
+
+    def test_an_already_terminal_order_is_not_deleted(self):
+        """3 filled, 4/10 refused: nothing to cancel; 7/8/9: the lookup IS the
+        proof. Status 5 is OPEN and is not here."""
+        for body, expect in (((200, _measured_lookup()), False),
+                             ((200, REJECTED_720), False),
+                             ((200, _lookup(10)), False),
+                             ((200, CANCELED_LOOKUP), True),
+                             ((200, _lookup(8)), True),
+                             ((200, _lookup(9, units=0.4)), True)):
+            t, fake = self._t(body, routes=[SEARCH_GLDM, DELETE_202])
+            with mock.patch("time.sleep"):
+                self.assertIs(t.cancel_order("383459788"), expect)
+            self.assertEqual(self._deletes(fake), [], str(body[1].get("status")))
+
+    def test_a_delete_the_venue_refuses_is_false(self):
+        """The DELETE's refusal shape is UNMEASURED; any code but 200/202/204
+        is a refusal."""
+        for code in (400, 404):
+            t, fake = self._t((200, _held_lookup()), routes=[
+                SEARCH_GLDM, ("DELETE", "/api/v3/trading/execution/demo/orders/",
+                              code, {})])
+            with mock.patch("time.sleep"):
+                self.assertIs(t.cancel_order("383459788"), False)
+            self.assertEqual(len(self._deletes(fake)), 1)
+
+    def test_an_unproven_delete_is_never_true(self):
+        """After a 202 only a lookup reading 7/8/9 is True; a held reading, a
+        fill in the race, an unreadable body (id 0) and a refusal are False;
+        every proof read failing is None."""
+        held = (200, _held_lookup())
+        for proofs in ([held, held], [held, (200, _measured_lookup(order_id=383459788))],
+                       [held, (200, {"status": {"id": 0}})],
+                       [held, (200, REJECTED_720)]):
+            t, fake = self._t(proofs, routes=[SEARCH_GLDM, DELETE_202])
+            with mock.patch("time.sleep"), \
+                    self.assertLogs("bot_program.engine.etoro_client",
+                                    level="ERROR") as cm:
+                self.assertIs(t.cancel_order("383459788"), False)
+            self.assertTrue(any("not proven" in line for line in cm.output))
+        t, fake = self._t([held, (500, {})], routes=[SEARCH_GLDM, DELETE_202])
+        with mock.patch("time.sleep"):
+            self.assertIsNone(t.cancel_order("383459788"))
+        self.assertEqual(len(self._deletes(fake)), 1)
+
+    def test_a_delete_that_raises_is_still_proven_by_the_lookup(self):
+        import requests
+        t, fake = self._t([(200, _held_lookup()), (200, CANCELED_LOOKUP)],
+                          routes=[SEARCH_GLDM])
+        real_hit = fake._hit
+
+        def hit(method, url, **k):
+            if method == "DELETE":
+                raise requests.ConnectionError("reset")
+            return real_hit(method, url, **k)
+
+        fake._hit = hit
+        with mock.patch("time.sleep"):
+            self.assertIs(t.cancel_order("383459788"), True)
+        t, fake = self._t([(200, _held_lookup()), (500, {})], routes=[SEARCH_GLDM])
+        real_hit = fake._hit
+
+        def hit2(method, url, **k):
+            if method == "DELETE":
+                raise requests.ConnectionError("reset")
+            return real_hit(method, url, **k)
+
+        fake._hit = hit2
+        with mock.patch("time.sleep"):
+            self.assertIsNone(t.cancel_order("383459788"))
+
+    def test_the_live_delete_spelling_is_unattested_and_raises(self):
+        live, fake = _client([], env="live")
+        with self.assertRaises(LookupError):
+            live._v3_exec_order("1")
+        _lookup_router(fake, by_order=(200, _held_lookup()))
+        with self.assertRaises(LookupError):
+            live.cancel_order("383459788")
+        self.assertEqual(self._deletes(fake), [])
+        demo, _ = _client([])
+        self.assertEqual(demo._v3_exec_order("383459788"),
+                         f"{BASE}/api/v3/trading/execution/demo/orders/383459788")
+
+    def test_a_held_order_pledges_margin_and_frozen_cash(self):
+        t, _ = _client([("GET", "/aggregate-portfolio", 200, HELD_TOTALS)])
+        self.assertEqual(t.margin_cells()["used_margin"], 42.5)
+        self.assertEqual(t._totals(t.account())["accountFrozenCash"], 42.5)
+
+    def test_a_partially_filled_order_is_open_and_its_withdrawal_is_proven_by_nine(self):
+        """5 and 9 have met no key: the public table, kept as a belief."""
+        t, fake = self._t([(200, _lookup(5, units=0.4)), (200, _lookup(9, units=0.4))],
+                          routes=[SEARCH_GLDM, DELETE_202])
+        with mock.patch("time.sleep"):
+            self.assertIs(t.cancel_order("383459788"), True)
+        self.assertEqual(len(self._deletes(fake)), 1)
+        t, fake = self._t((200, _lookup(5, units=0.4)),
+                          routes=[SEARCH_GLDM, DELETE_202])
+        with mock.patch("time.sleep"), \
+                self.assertLogs("bot_program.engine.etoro_client", level="ERROR"):
+            self.assertIs(t.cancel_order("383459788"), False)
+        self.assertEqual(len(self._deletes(fake)), 1)
+
+
 class ConsumerKeyTests(SimpleTestCase):
     """The keys the adapter answers are the keys the engine reads — read out
     of the consumers themselves (the tests/test_saxo_client.py rule)."""
@@ -1449,6 +1711,12 @@ class ConsumerKeyTests(SimpleTestCase):
         self.assertIn('"protectiveTradeId"', manual)
         # D3b, pinned as a gap: the hand lane does not stamp the carrier yet
         self.assertNotIn("venue_stamps(", manual)
+        # D3b: the live-segment caveat rides the TAKE TRADE note, which lives
+        # in manual_trade._execute - execute_take_trade is a wrapper, so
+        # inspect.getsource(execute_take_trade) would never carry it; the
+        # file text does
+        self.assertIn('adapter_key(client) == "etoro" and not getattr(client, "demo", True)', manual)
+        self.assertIn("the tick alerts daily instead of withdrawing", manual)
 
     def test_the_close_path_hands_the_open_order_id_and_reads_the_proof(self):
         import inspect
@@ -1486,3 +1754,34 @@ class ConsumerKeyTests(SimpleTestCase):
             {"status": "PENDING", "executedQty": "0.0"}), Decimal(0))
         self.assertIsNone(pending_closes.broker_filled_qty(
             {"status": "PENDING"}))
+
+    def test_the_working_entry_keys_are_the_ones_the_poller_reads(self):
+        import inspect
+        from pathlib import Path
+        from django.conf import settings
+        from bot_program.asset_engine.base import (AssetBot,
+                                                   cancel_working_entry)
+        poll = inspect.getsource(AssetBot._poll_working_entry)
+        for needle in ('st.get("state")', 'st.get("filled")',
+                       'st.get("avgPrice")', "st.get('refusal')", "venue=st",
+                       "venue=after or st", "if not cancel_working_entry("):
+            self.assertIn(needle, poll, needle)
+        fin = inspect.getsource(AssetBot._finish_working_entry)
+        for needle in ("venue_stamps(client, venue)", '"venueStopLoss"',
+                       '"positionId"', "protective_trade_id",
+                       "venue_stop_unread", "stop_rewritten_by_venue",
+                       'adapter_key(client) == "etoro"'):
+            self.assertIn(needle, fin, needle)
+        cancel = inspect.getsource(cancel_working_entry)
+        self.assertIn("sent is False", cancel)
+        self.assertIn('state != "dead"', cancel)
+        base = Path(settings.BASE_DIR) / "bot_program"
+        pc = (base / "pending_closes.py").read_text(encoding="utf-8")
+        self.assertIn("cancelled is False or cancelled is None", pc)
+        ec = (base / "engine" / "etoro_client.py").read_text(encoding="utf-8")
+        for needle in ("def order_status", "def cancel_order",
+                       "def _v3_exec_order", "_V3_EXEC_REAL_SEG",
+                       "self._await_fill(oid)", "in (7, 8, 9)", '"refusal"'):
+            self.assertIn(needle, ec, needle)
+        capf = (base / "engine" / "capabilities.py").read_text(encoding="utf-8")
+        self.assertIn('"execution", "orders", "brackets"', capf)

@@ -264,7 +264,9 @@ class TheLiveFillIsTheBrokersTests(TestCase):
         self.assertIn("5-minute tick watches it", out["protection_note"])
 
     def test_a_working_ticket_tells_the_truth_when_the_adapter_cannot(self):
-        """eToro's shape: the order is accepted, the adapter has neither
+        """An adapter with neither order_status nor cancel_order (the legacy
+        crypto tick's shape; eToro had it until D3b): the order is accepted,
+        the adapter has neither
         order_status nor cancel_order. The confirmation must not promise a
         poll nothing here can make."""
         from bot_program.manual_trade import execute_take_trade

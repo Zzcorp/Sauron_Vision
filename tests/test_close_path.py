@@ -601,6 +601,10 @@ class TheCloseIsProvenByTheOpenOrderTests(TestCase):
         venue.market_order = market_order
         venue.position_state = position_state
         venue.close_position = close_position
+        venue.deletes = []
+        # the real adapter's answer for a CLOSE order id: read once,
+        # findable nowhere, False without a DELETE
+        venue.cancel_order = lambda oid: (venue.deletes.append(oid), False)[1]
         return venue
 
     def _row(self, age_s=600, broker="etoro", **kw):
@@ -750,8 +754,9 @@ class TheCloseIsProvenByTheOpenOrderTests(TestCase):
         self.assertEqual(len(venue.closes), 1)
 
     def test_the_kill_switch_never_resends_over_a_queued_etoro_close(self):
-        """kill_switch: a queued eToro close has no cancel_order, so the
-        switch refuses — nothing sent, never a second close."""
+        """kill_switch: cancel_order refuses (False) the close order id —
+        findable nowhere — so the switch refuses; nothing sent, no
+        DELETE."""
         from bot_program.engine.kill_switch import _close_asset_trade
         trade = self._working()
         venue = self._venue(state="open", book=self._held())
@@ -762,6 +767,7 @@ class TheCloseIsProvenByTheOpenOrderTests(TestCase):
         trade.refresh_from_db()
         self.assertEqual(trade.status, "CLOSE_PENDING")
         self.assertEqual(venue.closes, [])
+        self.assertEqual(venue.deletes, ["383413813"])
         self.assertTrue(trade.metadata.get("close_order_working"))
 
     def test_a_venue_that_says_open_is_never_finalised_on_a_flat_list(self):
@@ -788,6 +794,65 @@ class TheCloseIsProvenByTheOpenOrderTests(TestCase):
         self.assertEqual(venue.proofs, [])
         self.assertEqual(venue.closes, [])
 
+
+
+    def _working_aged(self, broker="etoro"):
+        """A queued close sent 120 s ago: outside the venue's lag window, so
+        the drain reaches its cancel-before-resend step."""
+        return self._row(status="CLOSE_PENDING", broker=broker, metadata={
+            "close_order_working": True,
+            "close_working_order_id": "383413813",
+            "close_sent_at": (timezone.now()
+                              - timezone.timedelta(seconds=120)).isoformat()})
+
+    def test_the_drain_blocks_on_a_queued_close_when_cancel_is_false(self):
+        from bot_program.pending_closes import retry_trade_close
+        trade = self._working_aged()
+        venue = self._venue(state=None, book=self._held())
+        venue.cancel_order = lambda oid: False
+        with mock.patch(self.ROUTER, return_value=venue):
+            self.assertFalse(retry_trade_close(trade))
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertTrue(trade.metadata.get("close_order_working"))
+        self.assertEqual(venue.closes, [])
+
+    def test_a_cancel_that_cannot_say_is_not_a_confirmation(self):
+        from bot_program.pending_closes import retry_trade_close
+        trade = self._working_aged()
+        venue = self._venue(state=None, book=self._held())
+        venue.cancel_order = lambda oid: None
+        with mock.patch(self.ROUTER, return_value=venue):
+            self.assertFalse(retry_trade_close(trade))
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertTrue(trade.metadata.get("close_order_working"))
+        self.assertEqual(venue.closes, [])
+        # the control: a confirmed cancel clears the flag and a close is sent
+        # (the first row goes first: a sibling live row on the same symbol
+        # makes the book unattributable and blocks the send by design)
+        trade.delete()
+        trade = self._working_aged()
+        venue = self._venue(state=None, book=self._held())
+        venue.cancel_order = lambda oid: True
+        with mock.patch(self.ROUTER, return_value=venue):
+            retry_trade_close(trade)
+        self.assertEqual(len(venue.closes), 1)
+
+    def test_the_real_adapter_never_deletes_a_close_order_id(self):
+        from bot_program.pending_closes import _cancel_working_close
+        from tests.test_etoro_client import (LOOKUP_404_CLOSE_ID, _client,
+                                             _lookup_router)
+        trade = self._working_aged()
+        t, fake = _client([])
+        _lookup_router(fake, by_order=LOOKUP_404_CLOSE_ID)
+        self.assertIs(_cancel_working_close(trade, t), False)
+        polls = [c for c in fake.calls if "orders:lookup" in c[1]]
+        self.assertEqual(len(polls), 1)
+        self.assertEqual(polls[0][2]["params"], {"orderId": "383413813"})
+        self.assertEqual([c for c in fake.calls if c[0] == "DELETE"], [])
+        trade.refresh_from_db()
+        self.assertTrue(trade.metadata.get("close_order_working"))
 
 # ── a refused cancel, proved one way or the other ───────────────────────
 

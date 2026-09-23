@@ -47,7 +47,7 @@ What it prints, in order:
     segment. Off by default so the ordinary run touches one world; kept so
     the operator can re-measure it.
   * the write URLs by name — composed, never called — each with what the
-    tree records about it: on the DEMO segment all four answered on
+    tree records about it: on the DEMO segment all five answered on
     2026-09-23 (the measured facts are printed beside each); on the real
     segment the close path was attested by a GET answering 405 and the v2
     paths carry no measurement at all.
@@ -427,6 +427,20 @@ class Command(BaseCommand):
         else:
             close_url = "(real path not in _V1_EXEC_REAL_SEG — _seg raises)"
             close_note = "NOT attested"
+        try:
+            delete_url = t._v3_exec_order("<orderId>")
+        except LookupError:
+            delete_url = ("(real v3 spelling not attested — _seg raises; demo "
+                          "measured 2026-09-23)")
+        delete_note = (("measured 2026-09-23 20:29 UTC on the demo segment: 202 "
+                        "{orderId, referenceId ''} on a WaitingForMarket order "
+                        "(status 11, positionExecutions [], legs not shown, used "
+                        "margin 42.5 AND accountFrozenCash 42.5 pledged); the "
+                        "lookup then read status {id 7, Canceled} and both cells "
+                        "returned to 0.0; never sent on a CLOSE order id")
+                       if t.demo else
+                       "real segment never sent; measured 2026-09-23 on the demo "
+                       "segment")
         segment_note = ("measured 2026-09-23 on the demo segment"
                         if t.demo else
                         "real segment never sent; measured 2026-09-23 on "
@@ -439,9 +453,11 @@ class Command(BaseCommand):
             ("orders:lookup GET", t._v2_lookup(),
              f"{segment_note}: 200 by ?orderId=<int>, 404 by ?referenceId= "
              f"(eToro keeps no client reference), 400 by ?token=; status is "
-             f"an object {{id, name, errorCode}} — only 3/Filled seen; the "
+             f"an object {{id, name, errorCode}} — 3/Filled, 11/WaitingForMarket, "
+             f"7/Canceled and 4/Rejected (errorCode 720) seen; the "
              f"fill facts ride positionExecutions[0]"),
             ("market-close POST", close_url, close_note),
+            ("order DELETE v3", delete_url, delete_note),
             ("stop mover PATCH", t._v2("positions/<positionId>"),
              f"{segment_note}: ok on {{stopLossRate}} (tighter only), the "
              f"new stop echoed on the next lookup; 200 vs 202 not recorded; "

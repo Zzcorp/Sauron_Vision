@@ -1002,7 +1002,12 @@ def _cancel_working_close(trade, client) -> bool:
     # — filled, or cancelled by someone else. Either way we did not confirm
     # it, and the next beat re-reads the position before doing anything, so
     # waiting costs one cycle and stacking costs a reverse position.
-    if cancelled is False:
+    # THREE STATES (D3b): None is a DELETE sent and unproven - EtoroTrader
+    # answers it when no lookup answered after the DELETE; clearing the
+    # flag on it is how one flatten becomes two. No adapter answered None
+    # before D3b. For a CLOSE order id (findable on no read path)
+    # EtoroTrader answers False, nothing sent, after one lookup GET.
+    if cancelled is False or cancelled is None:
         return False
 
     # Clear the flag the moment the order is off the book, not when the
@@ -1591,7 +1596,8 @@ def retry_trade_close(trade) -> bool:
         _note_close_blocked(
             trade, "the venue's own order read still shows the position OPEN "
                    "and a close order is queued there that this adapter can "
-                   "neither list nor cancel — waiting for the lookup to "
+                   "neither list nor cancel (its cancel_order refuses an id the "
+                   "lookup cannot read, nothing sent) — waiting for the lookup to "
                    "prove the close; nothing sent")
         return False
 

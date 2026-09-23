@@ -432,7 +432,16 @@ demo row the book and the venue in one click).
   row needs, measured for free on funding night — and the filled round trip
   needs a market day. Through the adapter, printed values only, one unit at
   leverage 2 with both legs; every snippet runs D1's WORLD CHECK first.
-  - D2b-i — OFF HOURS. Print `MARGIN before` (`t.margin_cells()`); the RAW
+  - D2b-i — OFF HOURS. MEASURED 2026-09-23 20:29 UTC (order 383459788, GLDM
+    BUY 1 @2x, stop 82.17, take 87.25): first lookup 404 ~0.6 s after the
+    POST, then 200 status {11, WaitingForMarket}; positionExecutions [];
+    openStopLossRate/openTakeProfitRate 0.0 (legs not shown while held);
+    requestedAmount 42.37, frozenAmount 42.5; used margin 42.5 AND
+    accountFrozenCash 42.5; /portfolio []; DELETE
+    /api/v3/trading/execution/demo/orders/<id> → 202 {orderId, referenceId
+    ''}; lookup → {7, Canceled}; both cells 0.0. Pinned:
+    tests/test_etoro_client.py::TheHeldOrderTests. Live DELETE spelling
+    untried. As run: Print `MARGIN before` (`t.margin_cells()`); the RAW
     ELIGIBILITY read (`t._sess().post(f'{BASE}/api/v2/trading/info/eligibility',
     json={'instrumentIds': [t.instrument_id('GLDM')]}, headers=t._headers(),
     timeout=t.timeout)` and, on 404, the `.../trading/info/demo/eligibility`
@@ -478,11 +487,14 @@ demo row the book and the venue in one click).
     object, the fill facts at 1x and 2x, the stop echo after the PATCH, the
     margin cells at the five moments, the close response, the close proof
     through 500s, the /portfolio row. STILL TO PIN, unmeasured: D2b-i's
-    WaitingForMarket, the DELETE answer, the costs rows, a HELD order's
-    frozen cash; the refusal shape; the 2x /portfolio row.
+    the costs rows (recorded in the measured doc §12, not yet in this plan);
+    the floor refusal (measured: status 4 / errorCode 720 — its poll-path
+    booking pinned by D3b, the un-truncated message pending); the DELETE's
+    refusal body; the 2x /portfolio row.
   - THE FLIP, by hand, never by a deploy, and only when ALL of: D2b-i and
     D2b-ii are pinned; the costs rows for GLDM at 1x and 2x are written into
-    this plan; the DELETE answer is written down; every levered config's
+    this plan; the DELETE answer is written down (D2b-i: 202 → Canceled);
+    every levered config's
     `max_hold_hours` has been set by the operator with the printed overnight
     fee in mind (or the fee accepted here in writing); the operator's own
     book is saved on /setup/. Command:
@@ -564,23 +576,44 @@ demo row the book and the venue in one click).
   from the venue that carried the row (`unattributable`) —
   (`RETRY_VENUE_PROVED_CLOSED`), BLOCKS while the venue still says open beside
   a queued close, refuses a FLAT list while the venue says open, and never
-  polls, cancels or proves by the close order's id.
+  proves by the close order's id; since D3b the drain's cancel-before-resend
+  hands that id to EtoroTrader.cancel_order, whose lookup-first gate reads it
+  once (404 — findable nowhere) and answers False without a DELETE, so the
+  queued-close block stands.
   (3) `EtoroTrader.PORTFOLIO_LAG_S = 60`: `reconcile_asset.venue_lag_window`
   refuses a miss inside the window (reconcile_user), the drain spends no
   attempt on a FLAT or HELD read inside it, and the sweep keeps a symbol
   claimed for `SWEEP_CLOSED_GRACE_S` after a close. `etoro_smoke` prints the
   measured facts beside each write URL.
-  STILL UNMEASURED, therefore unpinned: WaitingForMarket (status 11) and a
-  HELD order's accountFrozenCash; the refusal shape; the DELETE of a held
-  order; fractional units, the floor and the over-fill; the 429 body; the
+  D3c LANDED c5375f5: UnitsToDeduct is never sent (a close carrying it is
+  accepted and never executes; InstrumentID alone closes).
+  D3b LANDED (2026-09-24): `order_status` (11 working / 3 filled / 7 dead / 4
+  dead with the refusal words / 404 unknown / 5xx None), `cancel_order`
+  (lookup-first; DELETE v3; True only on a lookup reading 7/8/9; False on any
+  other read; False, nothing sent, for any id it cannot read — the drain's
+  queued-close block stands and a None there is no longer a confirmation;
+  the live spelling raises until measured — on live the tick alerts daily
+  instead of withdrawing), the tier `orders`, `_finish_working_entry(venue=)`
+  stamping the carrier and the close handle on eToro rows only, comparing
+  the held stop with the sent one, alerting on NO stop read; the dead branch
+  books the refusal words; the age branch alerts when a withdrawal is not
+  confirmed. Measured the same night on BTC: fractional units fill (0.001
+  BTC), eToro REWRITES a stop in both directions (3 % → 10 % at 1x, 60 % →
+  25 % at 2x) and the held level lives in positionExecutions[0], the floor
+  refusal is status 4 / errorCode 720 with the numbers in errorMessage.
+  STILL UNMEASURED, therefore unpinned: whether a held order's legs attach
+  at the fill; the live DELETE spelling; a DELETE on a close order id; the
+  DELETE's refusal body; status ids 5 and 9; the over-fill; the 429 body; the
   2x /portfolio row; a closing rate (the exit stays mark-priced);
-  `UnitsToDeduct` (every engine close sends it; the shell sent none) and a
+  `UnitsToDeduct` (never sent since D3c; measured accepted-and-never-executed) and a
   close below the position; a second close on a closed positionId; a
   stop-out's execution state; what eToro answers a lookup for an id another
-  venue issued; any live (non-demo) write. D3b, not started:
-  `order_status` off the same lookup once status 11 is written down; the
+  venue issued; any live (non-demo) write. Still in D3b, not started: the
   TAKE TRADE lane calling `venue_stamps` (a hand-taken eToro row records no
-  `broker`, `broker_env` or `broker_position_id`; it closes only through
+  `broker`, `broker_env` or `broker_position_id` at placement — since D3b a
+  hand-taken row that fills FROM WORKING gains all three at the fill through
+  `_finish_working_entry(venue=)`; one placed and filled in-hours still records
+  none; it closes only through
   `protective_trade_id`, so a hand-taken row with both legs and a read fill
   IS closable, while one taken without a stop or whose poll failed has no
   handle); the WORDING of the three consumers that meet the unproven shape —

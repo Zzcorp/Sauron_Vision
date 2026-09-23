@@ -1,7 +1,7 @@
 """eToro public API trading client (2026-09-17).
 
 Conforms to the duck-typed adapter contract in `engine/capabilities.py`,
-declaring: market_data, execution, brackets, account, fractional_units.
+declaring: market_data, execution, orders, brackets, account, fractional_units.
 
     ping, ticker, klines, order_book            market_data
     market_order                                execution
@@ -9,7 +9,9 @@ declaring: market_data, execution, brackets, account, fractional_units.
     net_liquidation, broker_portfolio           account
     takes_fractional_units                      fractional_units (BELIEVED;
                                                  sent only while the switch is on)
-    account, balance_usdt, get_positions        (used, not a tier on their own)
+    cancel_order, get_positions                 orders (MEASURED 2026-09-23 20:29 UTC,
+                                                 demo; order_status is in no tier)
+    order_status, account, balance_usdt         (used, not a tier on their own)
 
 NOT declared, on purpose — see "What it refuses to claim" below.
 
@@ -33,7 +35,8 @@ THREE FACTS ABOUT THE API THAT SHAPE EVERYTHING BELOW
    zeros; `?referenceId=` answers 404 every time), which is how every order
    of the first demo night read PENDING/pollFailed although each filled in
    200 ms. `status` on the lookup is an OBJECT {id, name, errorCode}; only
-   id 3 / "Filled" / errorCode 0 has met a key — the twelve-value table
+   ids 3, 11 and 7 (D2b-i, 2026-09-23) and 4 with errorCode 720 (the floor
+   refusal, BTC, same night) have met a key — the twelve-value table
    (3 and 5 fills, 4/7/8/9/10 refusals) is the public reference. This
    client polls — bounded, best-effort, the way `AlpacaTrader._await_fill`
    does — and NEVER reports an acceptance as a fill. OANDA's own history
@@ -68,11 +71,16 @@ THREE FACTS ABOUT THE API THAT SHAPE EVERYTHING BELOW
 
 WHAT IT REFUSES TO CLAIM
 
-  * `orders` — the reference documents no way to cancel a pending order
-    (`positionIds` / `action: close` are marked "not yet supported").
-    `get_positions` exists because reconciliation needs it; `cancel_order`
-    does not, so the tier is honestly absent. A method that existed and
-    could not act would pass the conformance test and lie.
+  * `orders` — CLAIMED since D3b (2026-09-24). MEASURED 2026-09-23 20:29 UTC
+    on the demo segment: an order sent off hours reads status 11
+    WaitingForMarket, `DELETE /api/v3/trading/execution/demo/orders/<id>`
+    answers 202 {orderId, referenceId ""}, and the lookup then reads 7
+    Canceled with the margin released. `cancel_order` is LOOKUP-FIRST: it
+    answers False, nothing sent, for any id the lookup cannot read (a close
+    order id is findable on no read path — read once, never DELETEd), True
+    only when a lookup reads 7/8/9, False on any other read after the
+    DELETE, None only when a DELETE went out and no lookup answered. The
+    live spelling is refused by `_seg` until measured.
   * `fills` — no closed-position history is documented anywhere. The
     close-confirmation SHAPE met a real key on 2026-09-23 (`close_position`:
     orderForClose{orderID, orderType 19, statusID 1}) and so did the close
@@ -141,6 +149,8 @@ INTERVAL_SECONDS = {
 }
 CANDLES_MAX = 1000
 
+#: Met on the wire: 3, 11, 7 (2026-09-23 D2b-i) and 4 with errorCode 720
+#: (the floor refusal); the rest is the public table (5 and 9 never seen).
 #: eToro order status ids (orders:lookup). Two fills, five refusals, the
 #: rest pending. Mapped onto the vocabulary `asset_engine` already refuses
 #: on: REJECTED / CANCELLED / EXPIRED with no fill is a skipped entry.
@@ -295,9 +305,12 @@ def _status_of(polled) -> tuple:
     """(status id, refusal words) off an orders:lookup payload.
 
     `status` is an OBJECT {id, name, errorCode} on the wire — MEASURED
-    2026-09-23: {"id": 3, "name": "Filled", "errorCode": 0}; an
-    `errorMessage` beside a refusal is the public reference's claim, still
-    unmeasured (no refusal has been provoked). The INT form is the suite's
+    2026-09-23: {"id": 3, "name": "Filled", "errorCode": 0}, then 11
+    WaitingForMarket and 7 Canceled (D2b-i), then 4 Rejected with
+    errorCode 720 and an errorMessage naming the amount and the minimum
+    (the floor refusal, BTC) — cut here at 120 chars; since D3b the
+    working-entry poller writes the words into entry_withdrawn_reason,
+    and un-truncating them is the next batch. The INT form is the suite's
     older fixture and is still read. The wire's `name` is not promoted
     over STATUS_NAMES: the only name measured agrees with the table, and a
     differing one would be a shape nobody has seen. Anything else is 0 —
@@ -406,6 +419,12 @@ class EtoroTrader:
     _V1_EXEC_REAL_SEG = {
         "market-close-orders": "",
     }
+    #: v3 execution, the order DELETE. DEMO measured 2026-09-23 20:29 UTC
+    #: (/api/v3/trading/execution/demo/orders/<id> -> 202). The real
+    #: spelling the public reference documents, /api/v3/trading/execution/
+    #: orders/<id>, has met no key: the table is EMPTY so `_seg` raises on
+    #: the real segment until it is measured and "orders": "" is added.
+    _V3_EXEC_REAL_SEG: dict = {}
 
     def _seg(self, table: dict, key: str, tail: str) -> str:
         """The environment segment for `key`, or a raise naming the tail.
@@ -443,6 +462,12 @@ class EtoroTrader:
     def _v2_exec_orders(self) -> str:
         seg = "demo/" if self.demo else ""
         return f"{BASE}/api/v2/trading/execution/{seg}orders"
+
+    def _v3_exec_order(self, order_id: str) -> str:
+        """The DELETE of one order. Demo = the measured spelling; real raises
+        through `_seg` (LookupError) until the real spelling is measured."""
+        seg = self._seg(self._V3_EXEC_REAL_SEG, "orders", f"orders/{order_id}")
+        return f"{BASE}/api/v3/trading/execution/{seg}orders/{order_id}"
 
     def _v2_lookup(self) -> str:
         seg = "demo/" if self.demo else ""
@@ -972,6 +997,78 @@ class EtoroTrader:
                 return last
         return last
 
+    def order_status(self, order_id: str) -> Optional[dict]:
+        """The engine's working-entry vocabulary off ONE orders:lookup GET.
+
+        MEASURED 2026-09-23 (demo): 11 WaitingForMarket -> working (the held
+        order, positionExecutions []); 3 Filled -> filled with the units and
+        price off positionExecutions[0].openingData; 7 Canceled -> dead;
+        4 Rejected with errorCode 720 -> dead + `refusal` (the floor). The
+        rest of the table is the public reference (5 -> working with units,
+        8/9/10 -> dead, 1/2/6/12 -> working; 5 and 9 have met no key).
+        THREE STATES: a dict is a reading; {"state": "unknown"} is an id eToro
+        does not know (404 - a close order id, or an entry not yet indexed
+        ~0.6 s after the POST); None is could-not-ask (5xx, 429, transport,
+        non-JSON). Never raises, never sleeps. `positionId` and
+        `venueStopLoss`/`venueTakeProfit` ride positionExecutions[0] exactly as
+        market_order reports them - the HELD stop lives there, never on the
+        top-level openStopLossRate (which stays the SENT level, measured on
+        BTC 2026-09-23: 33758.56 sent, 63304.47 held).
+        """
+        oid = str(order_id or "")
+        empty = {"state": "unknown", "status": "", "statusId": 0,
+                 "filled": 0.0, "avgPrice": 0.0, "raw": {}}
+        if not oid:
+            return {**empty, "reason": "no order id"}
+        read, code = self._lookup_once({"orderId": oid})
+        if read is None:
+            if code == 404:
+                return {**empty,
+                        "reason": f"eToro does not know order {oid} (404)"}
+            return None
+        sid, refusal = _status_of(read)
+        executions = read.get("positionExecutions") or []
+        first = (executions[0]
+                 if executions and isinstance(executions[0], dict) else {})
+        opening = first.get("openingData") or {}
+        try:
+            filled = float(opening.get("units")
+                           or first.get("remainingUnits") or 0)
+        except (TypeError, ValueError):
+            filled = 0.0
+        try:
+            avg = float(opening.get("avgPrice") or 0)
+        except (TypeError, ValueError):
+            avg = 0.0
+        out = {"state": "working", "status": STATUS_NAMES.get(sid, str(sid)),
+               "statusId": sid, "filled": 0.0, "avgPrice": 0.0, "raw": read}
+        if sid == 3:
+            if not first:
+                out["state"] = "unknown"
+                out["reason"] = ("status Filled with no positionExecutions "
+                                 "- a shape nobody has seen")
+                return out
+            out.update(state="filled", filled=filled, avgPrice=avg)
+        elif sid == 5:
+            out.update(state="working", filled=filled, avgPrice=avg)
+        elif sid in STATUS_REFUSED:
+            out.update(state="dead", filled=filled, avgPrice=avg)
+        if refusal:
+            out["refusal"] = refusal
+        pid = first.get("positionId") or first.get("positionID")
+        if pid:
+            out["positionId"] = str(pid)
+        for key, wire in (("venueStopLoss", "stopLossRate"),
+                          ("venueTakeProfit", "takeProfitRate")):
+            raw_level = first.get(wire)
+            if raw_level is None:
+                continue
+            try:
+                out[key] = float(raw_level)
+            except (TypeError, ValueError):
+                pass
+        return out
+
     def position_state(self, order_id: str, *, until: Optional[str] = None,
                        attempts: int = CLOSE_PROOF_ATTEMPTS,
                        delay: float = CLOSE_PROOF_DELAY_S) -> Optional[str]:
@@ -1218,23 +1315,17 @@ class EtoroTrader:
             # closed the row at a mark while the order filled at 13:30 with
             # a bracket the platform never saw.
             #
-            # WHAT THIS ADAPTER CANNOT DO NEXT, said here so nobody reads
-            # "working" as "watched": it has no order_status and no
-            # cancel_order ("WHAT IT REFUSES TO CLAIM" above). NOT because
-            # the handle is lost — orders:lookup is keyed by orderId
-            # (measured 2026-09-23) and both lanes persist it as
-            # AssetBotTrade.broker_order_id — but because the one WORKING
-            # shape a poller would have to read (WaitingForMarket, status
-            # 11, off hours) has met no key, and the DELETE the public
-            # reference documents (deploy/ETORO_DEPARTURE.md §4 D2b-i) has
-            # met none either. Since the fix in _await_fill this branch is
-            # reached only by a real non-filled status or by EVERY lookup
-            # failing. A WORKING eToro row is therefore polled by nobody
-            # and withdrawn by nobody: it stays WORKING, alerts daily while
-            # its tick runs, and is resolved at eToro by hand. Loud and
-            # never CLOSED is the better of the two wrongs. (D3b:
-            # order_status off the same lookup, once status 11 is written
-            # down.)
+            # WHAT HAPPENS NEXT (D3b, 2026-09-24): the row is WATCHED by
+            # base._poll_working_entry through order_status (one lookup by
+            # the orderId both lanes persist as broker_order_id) and
+            # WITHDRAWN by cancel_working_entry through cancel_order (DELETE
+            # v3 -> 202 -> lookup 7) after ENTRY_WORKING_MAX_HOURS on the
+            # demo segment; on the real segment the DELETE spelling is
+            # unmeasured, `_v3_exec_order` raises, and the tick alerts daily
+            # instead. A held order refused at the open (status 4) is booked
+            # CANCELED with its errorCode words. Since the fix in
+            # _await_fill this branch is reached only by a real non-filled
+            # status (11 measured) or by EVERY lookup failing.
             out["working"] = True
         return out
 
@@ -1279,6 +1370,67 @@ class EtoroTrader:
         return res
 
     # ── closing ────────────────────────────────────────────────────────────
+
+    # ── orders (D3b) ───────────────────────────────────────────────────────────────
+
+    def cancel_order(self, order_id: str) -> Optional[bool]:
+        """Withdraw a held ENTRY order - LOOKUP FIRST, DELETE, PROVE.
+
+        MEASURED 2026-09-23 20:29 UTC (demo, order 383459788, WaitingForMarket):
+        DELETE /api/v3/trading/execution/demo/orders/<id> -> 202
+        {orderId, referenceId ""}; the lookup then read {7, Canceled} and the
+        pledged margin and frozen cash returned to 0.
+
+        THREE ANSWERS. True = a lookup read Canceled (7, 8 or 9; 7 measured,
+        8/9 the public table). False = nothing was cancelled: nothing sent
+        (an id the lookup cannot read - a CLOSE order id is findable on no
+        read path and is read once, never DELETEd; an order already filled
+        or refused), refused (a DELETE answering anything but 200/202/204;
+        the refusal body is unmeasured), or not proven (a DELETE accepted
+        and the lookup reading anything else afterwards, including a body
+        the adapter cannot read). None = a DELETE went out and no lookup
+        answered at all. Status 5 (PartiallyFilled) is OPEN: the DELETE is
+        sent and a 9 read proves it (belief - neither has met a key). The
+        real segment's spelling is unmeasured: `_v3_exec_order` raises there
+        and every consumer books "not confirmed".
+        """
+        oid = str(order_id or "")
+        if not oid:
+            return False
+        read, code = self._lookup_once({"orderId": oid})
+        if read is None:
+            log.error("eToro cancel_order NOT SENT: eToro cannot read %s as an "
+                      "order (HTTP %s) - a close order id is findable on no "
+                      "read path", oid, code)
+            return False
+        sid, _ = _status_of(read)
+        if sid in (7, 8, 9):
+            return True
+        if sid in (3, 4, 10):
+            log.info("eToro cancel_order: order %s reads %s - nothing to "
+                     "cancel", oid, STATUS_NAMES.get(sid, sid))
+            return False
+        url = self._v3_exec_order(oid)          # raises on the real segment
+        try:
+            r = self._sess().delete(url, headers=self._headers(),
+                                    timeout=self.timeout)
+            code2 = int(getattr(r, "status_code", 0) or 0)
+            if code2 not in (200, 202, 204):
+                log.error("eToro cancel_order refused (%s): %s", code2,
+                          str(getattr(r, "text", "") or "")[:160])
+                return False
+        except Exception as e:  # noqa: BLE001 - the DELETE may have landed
+            log.warning("eToro cancel_order: DELETE %s raised (%s) - reading "
+                        "the lookup anyway", oid, e)
+        proof = self._await_fill(oid)
+        if proof is None:
+            return None
+        sid2, _ = _status_of(proof)
+        if sid2 in (7, 8, 9):
+            return True
+        log.error("eToro cancel_order: DELETE accepted, lookup reads %s - not "
+                  "proven", STATUS_NAMES.get(sid2, f"id {sid2}"))
+        return False
 
     def close_needs_position_id(self) -> bool:
         """ALWAYS true here, and it is not a netting profile.

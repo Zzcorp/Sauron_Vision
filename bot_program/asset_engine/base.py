@@ -947,13 +947,16 @@ class AssetBot(ABC):
         if state == "filled" or (filled > 0 and state == "dead"):
             self._finish_working_entry(
                 trade, client, qty=filled or requested,
-                price=float(st.get("avgPrice") or 0), source="broker")
+                price=float(st.get("avgPrice") or 0), source="broker",
+                venue=st)
             return
         if state == "dead":
             cancel_working_entry(
                 trade, client,
-                reason=f"broker reported {st.get('status') or 'cancelled'} "
-                       f"with nothing filled",
+                reason=(f"broker reported {st.get('status') or 'cancelled'}"
+                        + (f" \u2014 {st.get('refusal')}"
+                           if st.get("refusal") else "")
+                        + " with nothing filled"),
                 cancel_parent=False)
             return
         if state == "working" and filled > 0:
@@ -1001,7 +1004,7 @@ class AssetBot(ABC):
                 float(st.get("avgPrice") or 0)
             self._finish_working_entry(
                 trade, client, qty=final_filled, price=final_px,
-                source="broker")
+                source="broker", venue=after or st)
             return
         if state == "unknown":
             # The broker does not recognise the id. Two causes it cannot
@@ -1036,10 +1039,19 @@ class AssetBot(ABC):
             self._warn_working_entry_unresolved(trade, held)
             return
         if self._working_entry_age_hours(trade) > self.ENTRY_WORKING_MAX_HOURS:
-            cancel_working_entry(
-                trade, client,
-                reason=f"still working after {self.ENTRY_WORKING_MAX_HOURS}h",
-                cancel_parent=True)
+            if not cancel_working_entry(
+                    trade, client,
+                    reason=f"still working after {self.ENTRY_WORKING_MAX_HOURS}h",
+                    cancel_parent=True):
+                # An unconfirmed withdrawal is said daily, not logged once
+                # a tick: on eToro's real segment the DELETE spelling is
+                # unmeasured and refused, so the row stays WORKING there.
+                self._warn_working_entry_unresolved(
+                    trade, None,
+                    detail=(f"still working after "
+                            f"{self.ENTRY_WORKING_MAX_HOURS}h and the "
+                            f"withdrawal was not confirmed \u2014 cancel it "
+                            f"at the broker"))
 
     # How often to repeat the "this queued order cannot be resolved" alert.
     # Once is not enough: nothing else resolves such a row, it holds a
@@ -1093,7 +1105,8 @@ class AssetBot(ABC):
         trade.save(update_fields=["metadata"])
 
     def _finish_working_entry(self, trade, client, *, qty: float, price: float,
-                              source: str) -> None:
+                              source: str,
+                              venue: Optional[dict] = None) -> None:
         """A WORKING entry filled: the row becomes a position.
 
         Size and price come from the broker. Protection is claimed only if
@@ -1211,6 +1224,80 @@ class AssetBot(ABC):
                             "cancel — NOT arming bot-side exits beside them",
                             self.asset_class, trade.symbol,
                             ", ".join(stuck))
+        # THE VENUE'S OWN WORD ON THE FILL (D3b, eToro only). `venue` is the
+        # poller's order_status reading. Read only for a row eToro carried
+        # (adapter_key): eToro's stop rides the POSITION, not a resting leg,
+        # and only its order_status carries venueStopLoss/positionId off
+        # positionExecutions[0]. An IBKR/Saxo legless fill keeps today's
+        # silent protected=False. Stamps the carrier and the close handle
+        # through venue_stamps with setdefault: a hand-taken row (no
+        # carrier at placement) gains broker/broker_env/broker_position_id
+        # here; an engine row is never overwritten. Compares the HELD stop
+        # with the SENT one (MEASURED 2026-09-23 on BTC: eToro rewrites a
+        # stop in both directions) and refuses protected=True when no stop
+        # was read: whether a held order's legs attach at the fill is
+        # UNMEASURED (openStopLossRate was 0.0 while held).
+        from bot_program.engine.capabilities import adapter_key
+        if (isinstance(venue, dict) and not legs
+                and adapter_key(client) == "etoro"):
+            for k, v in self.venue_stamps(client, venue).items():
+                meta.setdefault(k, v)
+            pid = venue.get("positionId")
+            held = venue.get("venueStopLoss")
+            try:
+                held = float(held) if held is not None else None
+            except (TypeError, ValueError):
+                held = None
+            sent = float(meta.get("initial_stop_loss")
+                         or trade.stop_loss or 0)
+            if held is not None and held > 0.0001 and pid:
+                protected = True
+                meta["protective_trade_id"] = str(pid)
+                if abs(held - sent) > 1e-9:
+                    meta["stop_rewritten_by_venue"] = {"sent": sent,
+                                                       "held": held}
+                    logger.error("[%s_bot] %s: the venue holds the stop at "
+                                 "%s, not the %s sent - the risk of this "
+                                 "position is not the one budgeted",
+                                 self.asset_class, trade.symbol, held, sent)
+                    try:
+                        from bot_program.notifications import notify_staff
+                        notify_staff(
+                            title=f"\u26a0 {trade.symbol}: the venue rewrote the stop",
+                            body=(f"Trade #{trade.id} filled from a held order "
+                                  f"and eToro holds the stop at {held}, not "
+                                  f"the {sent} sent. The risk of this "
+                                  f"position is not the one budgeted; read "
+                                  f"it and decide."),
+                            url="/positions/")
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("[%s_bot] rewrite alert failed: %s",
+                                       self.asset_class, e)
+                if venue.get("venueTakeProfit") is None:
+                    meta["protection_note"] = ("stop held at the venue; no "
+                                               "target read at the venue")
+            else:
+                protected = False
+                meta["venue_stop_unread"] = True
+                meta["protection_note"] = (
+                    "filled from a held order and the venue reports NO stop "
+                    "on the position (openStopLossRate was 0.0 while held; "
+                    "whether the legs attach at the fill is UNMEASURED) - "
+                    "bot-side management; read the position at eToro")
+                logger.error("[%s_bot] %s: filled at eToro with NO stop read "
+                             "on the position - bot-side management",
+                             self.asset_class, trade.symbol)
+                try:
+                    from bot_program.notifications import notify_staff
+                    notify_staff(
+                        title=f"\u26a0 {trade.symbol}: filled at eToro with no stop read",
+                        body=(f"Trade #{trade.id} filled from a held order and "
+                              f"the venue reports no stop on the position. "
+                              f"Bot-side exits manage it; read it at eToro."),
+                        url="/positions/")
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[%s_bot] no-stop alert failed: %s",
+                                   self.asset_class, e)
         meta["protected"] = protected
         trade.metadata = meta
         trade.save(update_fields=["qty", "entry_price", "metadata"])
@@ -3821,10 +3908,12 @@ class AssetBot(ABC):
                         # fill".
                         entry_meta["entry_poll_failed"] = True
                     if leverage is not None and leverage > 1:
-                        # A LEVERED order eToro holds is a financed position
-                        # nobody here can poll or withdraw (etoro_client has
-                        # no order_status / cancel_order). Said NOW, not in
-                        # tomorrow's daily line.
+                        # A LEVERED order eToro holds is a financed position.
+                        # Since D3b the tick polls it and, on the demo
+                        # segment, withdraws it after ENTRY_WORKING_MAX_HOURS;
+                        # on the real segment the DELETE spelling is
+                        # unmeasured, so the tick alerts daily instead. Said
+                        # NOW, not in tomorrow's daily line.
                         try:
                             from bot_program.notifications import notify_staff
                             notify_staff(
@@ -3838,10 +3927,15 @@ class AssetBot(ABC):
                                          "or refused"
                                          if res.get("pollFailed") else
                                          " — eToro is holding it")
-                                      + ". This platform cannot poll or "
-                                        "withdraw it; resolve it on the eToro "
-                                        "portal. The stop rides the order "
-                                        "body."),
+                                      + ". The 5-minute tick polls it; on the "
+                                        "demo segment it is withdrawn after "
+                                        f"{self.ENTRY_WORKING_MAX_HOURS}h - "
+                                        "the live DELETE spelling is unmeasured "
+                                        "and refused, so on live the tick alerts "
+                                        "daily instead. The legs ride the order "
+                                        "body and are NOT shown while held - the "
+                                        "fill alert says whether the venue holds "
+                                        "the stop."),
                                 url="/positions/")
                         except Exception as e2:  # noqa: BLE001
                             logger.warning("[%s_bot] levered-working alert "

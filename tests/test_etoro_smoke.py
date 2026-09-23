@@ -328,6 +328,7 @@ class SmokeTests(TestCase):
         self.assertIn(f"{BASE}/api/v1/trading/execution/market-close-orders/"
                       f"positions/<positionId>", body)
         self.assertIn(f"{BASE}/api/v2/trading/positions/<positionId>", body)
+        self.assertIn("real v3 spelling not attested", body)
         self.assertIn("GET → 405", body)
         self.assertIn("the POST itself has never been sent", body)
         self.assertNotIn("documented, never measured", body)
@@ -335,6 +336,8 @@ class SmokeTests(TestCase):
                       "demo segment", body)
         self.assertIn("200 by ?orderId=<int>, 404 by ?referenceId=", body)
         self.assertIn("status is an object {id, name, errorCode}", body)
+        self.assertIn("11/WaitingForMarket", body)
+        self.assertNotIn("only 3/Filled seen", body)
         self.assertNotIn("no GET of it is recorded", body)
         self.assertNotIn("/real/", body)
 
@@ -357,6 +360,10 @@ class SmokeTests(TestCase):
                       body)
         self.assertIn("orderType 19", body)
         self.assertIn("positionExecutions[0].state turning 'closed'", body)
+        self.assertIn(f"{BASE}/api/v3/trading/execution/demo/orders/<orderId>",
+                      body)
+        self.assertIn("202", body)
+        self.assertIn("Canceled", body)
         self.assertNotIn("no GET of it is recorded in the tree", body)
         self.assertNotIn("documented, never measured", body)
         self.assertNotIn("GET → 405", body)
@@ -440,6 +447,7 @@ class SmokeTests(TestCase):
         src = Path(etoro_smoke.__file__).read_text(encoding="utf-8")
         for word in ("market_order", "close_position", "modify_protective",
                      "modify_target", "_patch_position", "_await_fill",
-                     ".post(", ".patch("):
+                     ".post(", ".patch(", ".delete(", "cancel_order",
+                     "order_status"):
             self.assertNotIn(word, src, word)
 

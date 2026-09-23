@@ -956,3 +956,293 @@ class AnUnreadableSnapshotDoesNotDisarmTheBrokerTests(TestCase):
         self.assertTrue(trade.metadata["protected"])
         self.assertTrue(trade.metadata["protective_legs_unconfirmed"])
         client.cancel_order.assert_any_call("12")
+
+
+# ── an eToro held order, polled and withdrawn through the real adapter (D3b) ──
+
+class AnEtoroHeldOrderIsPolledAndWithdrawnTests(TestCase):
+    """The working-entry state machine over the REAL EtoroTrader on a fake
+    wire, in the shapes D2b-i measured on 2026-09-23 (status 11 while held,
+    DELETE v3 -> 202 -> 7) and the floor refusal (status 4 / 720)."""
+
+    def setUp(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from instruments.models import Instrument
+        Instrument.objects.get_or_create(
+            symbol="NVDA", defaults={"name": "NVDA", "asset_class": "stock"})
+        self.user = _user("held_u")
+        self.cfg = _cfg(self.user, name="HELD")
+        User.objects.create_user("held_staff", password="x", is_staff=True)
+        self.YOUNG = dict(entry_working_since=timezone.now().isoformat())
+        self.AGED = dict(entry_working_since=(
+            timezone.now() - timedelta(hours=27)).isoformat())
+
+    def _row(self, stamps, **meta):
+        base = dict(protective_order_ids=[], protective_stop_id="",
+                    qty_requested=1.0, initial_stop_loss=82.17,
+                    broker="etoro", broker_env="paper")
+        base.update(stamps)
+        base.update(meta)
+        trade = _working_trade(self.cfg, **base)
+        trade.broker_order_id = "383459788"
+        trade.stop_loss = Decimal("82.17")
+        trade.qty = Decimal("1")
+        trade.save(update_fields=["broker_order_id", "stop_loss", "qty"])
+        return trade
+
+    def _venue(self, by_order, env="demo"):
+        from tests.test_etoro_client import (DELETE_202, _client,
+                                             _lookup_router)
+        t, fake = _client([("GET", "/info/demo/portfolio", 200,
+                            {"clientPortfolio": {"positions": []}}),
+                           DELETE_202], env=env)
+        _lookup_router(fake, by_order=by_order)
+        return t, fake
+
+    def _tick(self, client):
+        from bot_program.asset_engine.stock_bot import StockBot
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                   return_value=client), patch("time.sleep"):
+            return StockBot(self.cfg).manage_positions()
+
+    def _deletes(self, fake):
+        return [c for c in fake.calls if c[0] == "DELETE"]
+
+    def _notes(self, needle=""):
+        from alerts.models import Notification
+        qs = Notification.objects.all()
+        if needle:
+            qs = qs.filter(title__icontains=needle)
+        return qs.count()
+
+    def _titles(self):
+        from alerts.models import Notification
+        return list(Notification.objects.values_list("title", "body"))
+
+    def test_a_young_held_order_is_left_working(self):
+        from tests.test_etoro_client import _held_lookup
+        trade = self._row(self.YOUNG)
+        t, fake = self._venue((200, _held_lookup()))
+        self._tick(t)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertTrue(trade.metadata.get("entry_working"))
+        self.assertEqual(self._deletes(fake), [])
+        self.assertEqual(self._notes(), 0)
+
+    def test_an_aged_held_order_is_withdrawn_and_proven(self):
+        from tests.test_etoro_client import CANCELED_LOOKUP, _held_lookup
+        trade = self._row(self.AGED)
+        t, fake = self._venue([(200, _held_lookup()), (200, _held_lookup()),
+                               (200, CANCELED_LOOKUP)])
+        self._tick(t)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CANCELED")
+        self.assertIn("still working after 26h",
+                      trade.metadata["entry_withdrawn_reason"])
+        self.assertEqual(len(self._deletes(fake)), 1)
+        self.assertEqual(self._notes(), 0)
+
+    def test_an_unconfirmed_withdrawal_alerts_once_a_day(self):
+        from tests.test_etoro_client import (_client, _held_lookup,
+                                             _lookup_router)
+        trade = self._row(self.AGED)
+        t, fake = _client([("GET", "/info/demo/portfolio", 200,
+                            {"clientPortfolio": {"positions": []}}),
+                           ("DELETE", "/api/v3/trading/execution/demo/orders/",
+                            404, {})])
+        _lookup_router(fake, by_order=(200, _held_lookup()))
+        self._tick(t)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertEqual(len(self._deletes(fake)), 1)
+        self.assertEqual(self._notes("cannot be resolved"), 1)
+        self.assertTrue(trade.metadata.get("entry_unresolved_notified_at"))
+        self._tick(t)
+        self.assertEqual(self._notes("cannot be resolved"), 1)
+
+    def test_a_fill_from_a_held_order_books_the_venue_stop_and_the_handle(self):
+        from tests.test_etoro_client import _measured_lookup
+        trade = self._row(self.YOUNG)
+        t, _ = self._venue((200, _measured_lookup(
+            order_id=383459788, leverage=2, stop=82.17, target=87.25,
+            avg=84.79)))
+        self._tick(t)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertNotIn("entry_working", trade.metadata)
+        self.assertEqual(float(trade.qty), 1.0)
+        self.assertEqual(float(trade.entry_price), 84.79)
+        self.assertEqual(trade.metadata["broker_position_id"], "3603281458")
+        self.assertEqual(trade.metadata["protective_trade_id"], "3603281458")
+        self.assertTrue(trade.metadata["protected"])
+        self.assertNotIn("stop_rewritten_by_venue", trade.metadata)
+        self.assertEqual(trade.metadata["fill_source"], "broker")
+        self.assertEqual(trade.metadata["broker"], "etoro")
+        self.assertEqual(trade.metadata["broker_env"], "paper")
+
+    def test_a_hand_taken_row_gains_its_carrier_at_the_fill(self):
+        """The TAKE TRADE lane stamps no carrier at placement (its own gap,
+        pinned in test_etoro_client); a row of that shape that fills FROM
+        WORKING gains broker / broker_env / broker_position_id here, from
+        base.py, at the fill."""
+        from tests.test_etoro_client import _measured_lookup
+        trade = _working_trade(self.cfg, protective_order_ids=[],
+                               protective_stop_id="", qty_requested=1.0,
+                               initial_stop_loss=82.17, **self.YOUNG)
+        trade.broker_order_id = "383459788"
+        trade.save(update_fields=["broker_order_id"])
+        self.assertNotIn("broker", trade.metadata)
+        t, _ = self._venue((200, _measured_lookup(
+            order_id=383459788, leverage=2, stop=82.17, target=87.25,
+            avg=84.79)))
+        self._tick(t)
+        trade.refresh_from_db()
+        self.assertEqual(trade.metadata["broker"], "etoro")
+        self.assertEqual(trade.metadata["broker_env"], "paper")
+        self.assertEqual(trade.metadata["broker_position_id"], "3603281458")
+
+    def test_a_pre_stamped_handle_is_never_overwritten(self):
+        from tests.test_etoro_client import _measured_lookup
+        trade = self._row(self.YOUNG, broker_position_id="999")
+        t, _ = self._venue((200, _measured_lookup(
+            order_id=383459788, leverage=2, stop=82.17, target=87.25,
+            avg=84.79)))
+        self._tick(t)
+        trade.refresh_from_db()
+        self.assertEqual(trade.metadata["broker_position_id"], "999",
+                         "setdefault never overwrites a carrier stamp")
+        self.assertEqual(trade.metadata["protective_trade_id"], "3603281458",
+                         "the venue block writes the close handle it read")
+
+    def test_a_rewritten_stop_is_recorded_and_told(self):
+        from tests.test_etoro_client import _rewritten_fill
+        trade = self._row(self.YOUNG)
+        t, _ = self._venue((200, _rewritten_fill()))
+        self._tick(t)
+        trade.refresh_from_db()
+        self.assertEqual(trade.metadata["stop_rewritten_by_venue"],
+                         {"sent": 82.17, "held": 83.06})
+        self.assertEqual(float(trade.metadata["initial_stop_loss"]), 82.17)
+        self.assertTrue(trade.metadata["protected"])
+        self.assertEqual(self._notes("rewrote the stop"), 1)
+
+    def test_a_fill_with_no_stop_read_is_managed_by_the_bot_and_told(self):
+        from tests.test_etoro_client import _measured_lookup
+        body = _measured_lookup(order_id=383459788, leverage=2, stop=82.17,
+                                target=87.25, avg=84.79)
+        body["positionExecutions"][0].pop("stopLossRate")
+        body["positionExecutions"][0].pop("takeProfitRate")
+        trade = self._row(self.YOUNG)
+        t, _ = self._venue((200, body))
+        self._tick(t)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertFalse(trade.metadata["protected"])
+        self.assertTrue(trade.metadata["venue_stop_unread"])
+        self.assertIn("NO stop", trade.metadata["protection_note"])
+        self.assertEqual(trade.metadata["broker_position_id"], "3603281458")
+        self.assertEqual(self._notes("no stop read"), 1)
+
+    def test_an_unknown_id_waits_and_tells_once_a_day(self):
+        trade = self._row(self.YOUNG)
+        t, fake = self._venue((404, {"message": "Order category for x not found"}))
+        self._tick(t)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertTrue(trade.metadata.get("entry_working"))
+        self.assertTrue(trade.metadata.get("entry_unresolved_notified_at"))
+        self.assertEqual(self._deletes(fake), [])
+        n = self._notes()
+        self._tick(t)
+        self.assertEqual(self._notes(), n)
+
+    def test_an_unreadable_lookup_changes_nothing(self):
+        trade = self._row(self.YOUNG)
+        t, fake = self._venue((500, {}))
+        before = dict(trade.metadata)
+        self._tick(t)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertEqual(trade.metadata, before)
+        self.assertEqual(self._notes(), 0)
+
+    def test_the_kill_switch_withdraws_a_held_order_and_never_posts(self):
+        from django.utils import timezone
+
+        from bot_program.engine.kill_switch import _close_asset_trade
+        from tests.test_etoro_client import (CANCELED_LOOKUP, _client,
+                                             _held_lookup, _lookup_router)
+        trade = self._row(self.AGED)
+        t, fake = self._venue([(200, _held_lookup()), (200, CANCELED_LOOKUP)])
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                   return_value=t), patch("time.sleep"):
+            _close_asset_trade(trade, timezone.now())
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CANCELED")
+        self.assertEqual([c for c in fake.calls if c[0] == "POST"], [])
+        self.assertEqual(len(self._deletes(fake)), 1)
+        self.assertEqual(trade.metadata.get("protective_order_ids"), [])
+        trade2 = self._row(self.AGED)
+        t2, fake2 = _client([("GET", "/info/demo/portfolio", 200,
+                              {"clientPortfolio": {"positions": []}}),
+                             ("DELETE", "/api/v3/trading/execution/demo/orders/",
+                              404, {})])
+        _lookup_router(fake2, by_order=(200, _held_lookup()))
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                   return_value=t2), patch("time.sleep"), \
+                self.assertRaises(RuntimeError) as cm:
+            _close_asset_trade(trade2, timezone.now())
+        self.assertIn("withdrawn", str(cm.exception))
+        trade2.refresh_from_db()
+        self.assertEqual(trade2.status, "OPEN")
+
+    def test_a_live_held_order_is_polled_alerted_daily_and_never_withdrawn(self):
+        from tests.test_etoro_client import _held_lookup
+        trade = self._row(self.AGED)
+        t, fake = self._venue((200, _held_lookup()), env="live")
+        self._tick(t)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertEqual(self._deletes(fake), [])
+        self.assertEqual(self._notes("cannot be resolved"), 1)
+        self.assertTrue(trade.metadata.get("entry_unresolved_notified_at"))
+        self._tick(t)
+        self.assertEqual(self._notes("cannot be resolved"), 1)
+
+    def test_a_legless_ibkr_working_row_keeps_todays_silent_fill(self):
+        trade = _working_trade(self.cfg, protective_order_ids=[],
+                               protective_stop_id="", broker="ibkr",
+                               **self.YOUNG)
+        client = _client({"state": "filled", "filled": 10.0,
+                          "avgPrice": 100.0, "status": "Filled"},
+                         resting=set())
+        self._tick(client)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertFalse(trade.metadata["protected"])
+        self.assertNotIn("venue_stop_unread", trade.metadata)
+        self.assertNotIn("broker_position_id", trade.metadata)
+        # the ordinary "opened" notice is not an alert: no stop alert
+        self.assertEqual(self._notes("stop"), 0)
+        self.assertEqual(self._notes("rewrote"), 0)
+
+    def test_a_held_order_refused_at_the_open_is_booked_with_its_refusal_words(self):
+        """_status_of cuts the message at 120 chars, so the numbers are NOT
+        on the row yet - a measured fact of this tree; un-truncating is the
+        next batch."""
+        from tests.test_etoro_client import REJECTED_720
+        trade = self._row(self.YOUNG)
+        t, fake = self._venue((200, REJECTED_720))
+        self._tick(t)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CANCELED")
+        self.assertEqual(self._deletes(fake), [])
+        reason = trade.metadata["entry_withdrawn_reason"]
+        for needle in ("Rejected", "errorCode 720", "Initial Leveraged Position"):
+            self.assertIn(needle, reason, needle)
+        self.assertTrue(reason.endswith("with nothing filled"))
+        self.assertNotIn("MinimumPositionAmount", reason)

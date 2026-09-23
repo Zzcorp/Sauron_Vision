@@ -129,8 +129,12 @@ ADAPTER_CAPABILITIES: dict = {
     # tests/test_etoro_leverage.py. `margin_cells` belongs to no tier.
     # "fractional_units" 2026-09-23: a belief, see the tier — sent only
     # while fractional_units_live is ON; D2c measures it.
-    "etoro": ("market_data", "execution", "brackets", "account",
-              "fractional_units"),
+    # "orders" 2026-09-24 (D3b): MEASURED 2026-09-23 20:29 UTC on the demo
+    # segment - DELETE v3 -> 202, the lookup then 7 Canceled. cancel_order
+    # is lookup-first and refuses (False) any id it cannot read; the real
+    # spelling raises until measured; order_status is in no tier.
+    "etoro": ("market_data", "execution", "orders", "brackets",
+              "account", "fractional_units"),
     "ibkr": ("market_data", "execution", "orders", "brackets", "account",
              "options"),
     "oanda": ("market_data", "execution", "orders", "brackets", "fills"),
