@@ -29,6 +29,7 @@ from decimal import Decimal
 from unittest import mock
 
 from django.test import TestCase
+from django.utils import timezone
 
 from tests.test_exit_truth import _cfg, _trade, _user
 
@@ -125,6 +126,50 @@ class AMissAtTheWrongVenueIsNotAnAbsence(TestCase):
         trade.refresh_from_db()
         self.assertEqual(trade.status, "OPEN")
         self.assertEqual(out["closed_as_orphan"], 0)
+
+    def test_a_miss_inside_the_venues_portfolio_lag_is_not_an_absence(self):
+        """eToro lists a filled position ~2 s late (measured 2026-09-23): a
+        reconcile pass inside PORTFOLIO_LAG_S counts the venue unavailable
+        and reads again; past the window today's rule stands."""
+        from bot_program.models import AssetBotTrade
+        trade = self._row(broker="etoro")
+        venue = EtoroTrader()
+        venue.PORTFOLIO_LAG_S = 60
+        out = self._run(venue)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertEqual(out["closed_as_orphan"], 0)
+        self.assertEqual(out["broker_unavailable"], 1)
+        AssetBotTrade.objects.filter(pk=trade.pk).update(
+            opened_at=timezone.now() - timezone.timedelta(seconds=120))
+        out = self._run(venue)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        self.assertEqual(out["closed_as_orphan"], 1)
+
+    def test_the_sweep_does_not_page_for_a_row_closed_seconds_ago(self):
+        from bot_program.models import AssetBotTrade
+        from bot_program.reconcile_asset import reconcile_unknown_positions
+        self.cfg.enabled = True
+        self.cfg.save(update_fields=["enabled"])
+        trade = _trade(self.cfg, status="CLOSED", closed_at=timezone.now(),
+                       metadata={"initial_stop_loss": 98.0, "broker": "etoro"})
+        with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                        return_value=EtoroTrader(["AAPL"])), \
+                mock.patch("bot_program.notifications."
+                           "notify_unclaimed_position") as paged:
+            out = reconcile_unknown_positions(self.user)
+        self.assertEqual(out["unclaimed"], 0)
+        paged.assert_not_called()
+        AssetBotTrade.objects.filter(pk=trade.pk).update(
+            closed_at=timezone.now() - timezone.timedelta(seconds=600))
+        with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                        return_value=EtoroTrader(["AAPL"])), \
+                mock.patch("bot_program.notifications."
+                           "notify_unclaimed_position") as paged:
+            out = reconcile_unknown_positions(self.user)
+        self.assertEqual(out["unclaimed"], 1)
+        paged.assert_called_once()
 
 
 class SaxoCanCarryAnIndex(TestCase):

@@ -61,6 +61,13 @@ CLOSE_QTY_ASSUMED_KEY = "close_qty_assumed"
 # another, so one flatten never becomes two.
 CLOSE_ORDER_WORKING_KEY = "close_order_working"
 CLOSE_WORKING_ORDER_ID_KEY = "close_working_order_id"
+# WHEN a close last LEFT for the venue and was answered (isoformat) — stamped
+# by resolve_exit_fill on every result that came from a send, never on the
+# None of _finalise_flat. Read through reconcile_asset.venue_lag_window: a
+# venue whose position list lags its account (EtoroTrader.PORTFOLIO_LAG_S,
+# measured 2026-09-23) may still LIST a position seconds after closing it,
+# and a book read inside that window spends no attempt and books nothing.
+CLOSE_SENT_AT_KEY = "close_sent_at"
 
 # What `exit_fill_source` can say, and what each answer means:
 #   broker — every unit was booked at a price the broker reported filling at.
@@ -433,6 +440,11 @@ def resolve_exit_fill(trade, result, *, mark, mark_info=None) -> dict:
         CLOSE_WORKING_ORDER_ID_KEY: (str(result.get("orderId") or "")
                                      if working else ""),
     }
+    if isinstance(result, dict):
+        # A CLOSE WAS SENT AND ANSWERED on this pass (None is "nothing was
+        # sent": _finalise_flat, a paper row). The stamp is the last SEND,
+        # not the last look.
+        meta[CLOSE_SENT_AT_KEY] = timezone.now().isoformat()
     # THE QUALITY OF THE PRICE THIS ROW BOOKED, and only when the MARK is what
     # it booked: a row whose exit came from the broker's own fill must not
     # carry a delay that belonged to a mark nobody used. Cleared on the broker
@@ -1033,6 +1045,23 @@ def _reconcile_filled_against_broker(trade, client) -> None:
     sourced as such, which correctly degrades the blended exit's provenance
     to "mark" rather than letting it claim a broker fill it never saw.
     """
+    # NOT OFF A LIST READ INSIDE THE VENUE'S LAG (eToro, measured 2026-09-23:
+    # a filled position is absent from /portfolio ~2 s after the fill). A
+    # FLAT read there implies the WHOLE size filled, books a mark-priced
+    # slice for it, and the caller — the kill switch first of all — then
+    # finds nothing left to send and books CLOSED over a position the venue
+    # still holds. Inside the window the arithmetic we have stands; the
+    # next pass reads a settled list.
+    try:
+        from bot_program.reconcile_asset import venue_lag_window
+        _lag_why = venue_lag_window(trade, client)
+    except Exception:  # noqa: BLE001 — an unreadable guard revises nothing
+        _lag_why = ""
+    if _lag_why:
+        logger.warning("close retry: not revising #%s's fill off a position "
+                       "list read inside the venue's lag — %s",
+                       trade.id, _lag_why)
+        return
     remaining = broker_position_qty(trade, client)
     if remaining is None:
         return
@@ -1456,6 +1485,49 @@ def _finalise_flat(trade, client, *, reason: str) -> bool:
     return True
 
 
+def venue_position_state(trade, client):
+    """"closed" / "open" / None — the venue's OWN word on the position
+    behind `trade`, read through the OPEN order's id, one GET, no sleep.
+
+    Only an adapter with `position_state` can say (EtoroTrader, measured
+    2026-09-23: the open order's positionExecutions[0].state; the close
+    order's own id is findable nowhere), only for a row that stored its
+    open order id (AssetBotTrade.broker_order_id — both lanes do), and only
+    when the client answering is the venue that CARRIED the row.
+    Everything else is None: could not ask. A raise is None too — the drain
+    must never read a failed lookup as either answer. A MagicMock answers a
+    MagicMock, which is neither word. The close_working_order_id is never
+    handed here: it is the unfindable id.
+    """
+    fn = getattr(client, "position_state", None)
+    oid = str(getattr(trade, "broker_order_id", "") or "")
+    if not callable(fn) or not oid:
+        return None
+    # ONLY THE VENUE THAT CARRIED THE ROW MAY PROVE ITS CLOSE. The same
+    # guard broker_exposure applies to a MISS applies to a proof: an id
+    # handed to a venue that never issued it answers something unmeasured,
+    # and a "closed" from the wrong venue would book a live row CLOSED.
+    try:
+        from bot_program.reconcile_asset import (keyed_venue_count,
+                                                 unattributable)
+        _why = unattributable(trade, client,
+                              keyed=keyed_venue_count(trade.config.user))
+    except Exception as e:  # noqa: BLE001 — an unreadable guard proves nothing
+        logger.debug("close retry: attribution check unavailable (%s)", e)
+        _why = ""
+    if _why:
+        logger.warning("close retry: not asking %s to prove #%s — %s",
+                       type(client).__name__, trade.id, _why)
+        return None
+    try:
+        state = fn(oid, attempts=1, delay=0.0)
+    except Exception as e:  # noqa: BLE001 — could not ask
+        logger.warning("close retry: position_state(%s) failed for #%s: %s",
+                       oid, trade.id, e)
+        return None
+    return state if state in ("open", "closed") else None
+
+
 def retry_trade_close(trade) -> bool:
     """Retry one CLOSE_PENDING trade. True when it ended CLOSED."""
     from bot_program.engine.broker_router import client_for_symbol
@@ -1497,10 +1569,63 @@ def retry_trade_close(trade) -> bool:
     # (or a protective leg) did fill — finalise instead of sending another
     # order that would open a naked reverse position.
     #
+    # THE VENUE'S OWN WORD OUTRANKS ITS POSITION LIST, where it has one
+    # (eToro, measured 2026-09-23: /portfolio lags both ways, ~60 s; the
+    # OPEN order's execution state is the earliest proof, and the close
+    # order's own id can be looked up nowhere — nothing to cancel, nothing
+    # to poll but this). "closed" finalises at the mark, at the row's size
+    # (no closing rate and no closed units are on the wire). "open" beside
+    # a queued close BLOCKS the row — nothing sent, no attempt spent, the
+    # hourly blocked line and its alert — because a second close on top of
+    # a queued one is unmeasured and ERROR after twelve passes would print
+    # "close it by hand" about a close that may still execute. None falls
+    # through to the book, with the lag rule beside it.
+    proof = venue_position_state(trade, client)
+    if proof == "closed":
+        logger.info("close retry: the venue reports the position behind #%s "
+                    "(%s) CLOSED by its open order %s — finalising without a "
+                    "new order", trade.id, trade.symbol, trade.broker_order_id)
+        return _finalise_flat(trade, client,
+                              reason="RETRY_VENUE_PROVED_CLOSED")
+    if proof == "open" and (trade.metadata or {}).get(CLOSE_ORDER_WORKING_KEY):
+        _note_close_blocked(
+            trade, "the venue's own order read still shows the position OPEN "
+                   "and a close order is queued there that this adapter can "
+                   "neither list nor cancel — waiting for the lookup to "
+                   "prove the close; nothing sent")
+        return False
+
     # THIS RUNS FIRST ON EVERY PASS, before the two blocks below, because a
     # book with the position gone is the best possible resolution of both:
     # under end-of-day netting it is exactly what the evening produces.
     exposure = broker_exposure(trade, client)
+    # THE VENUE'S OWN WORD OUTRANKS ITS LIST IN BOTH DIRECTIONS: an order
+    # read that says OPEN beside a position list that does not show it is
+    # the measured lag (row absent ~2 s after a fill), never an absence.
+    # Booking RETRY_ALREADY_FLAT here would CLOSE a row the venue just said
+    # is open. Nothing sent, no attempt spent, whatever the row's age.
+    if proof == "open" and exposure["state"] == POS_FLAT:
+        logger.warning("close retry #%s for %s: the venue's order read says "
+                       "the position is OPEN but its position list does not "
+                       "show it — a lagging list, not an absence; sending "
+                       "NOTHING and spending no attempt",
+                       trade.id, trade.symbol)
+        return False
+    # ...UNLESS THE BOOK WAS READ INSIDE THE VENUE'S OWN LAG WINDOW and the
+    # venue could not say either way. A FLAT read seconds after the fill is
+    # a position not yet listed; a HELD read seconds after the close is one
+    # not yet delisted. Neither is acted on and neither spends an attempt:
+    # the next beat reads a settled book. A client that declares no
+    # PORTFOLIO_LAG_S answers "" here and keeps the path below unchanged.
+    if proof is None and exposure["state"] in (POS_FLAT, POS_HELD):
+        from bot_program.reconcile_asset import venue_lag_window
+        _lag_why = venue_lag_window(trade, client)
+        if _lag_why:
+            logger.warning("close retry #%s for %s: the book reads %s but %s "
+                           "— sending NOTHING and spending no attempt",
+                           trade.id, trade.symbol, exposure["state"],
+                           _lag_why)
+            return False
     if exposure["state"] == POS_FLAT:
         logger.info("close retry: broker no longer holds #%s (%s) — "
                     "finalising without a new order", trade.id, trade.symbol)

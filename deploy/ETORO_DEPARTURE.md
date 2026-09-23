@@ -66,8 +66,9 @@ weeks; IBKR is retired.
 - **eToro row:** keyed, live, no class ticked, 1.40 USD. Reads measured against
   the real key on 2026-09-22 (aggregate-portfolio 200, portfolio 200, real/pnl
   200, GET market-close-orders 405). The WRITE path — the v2 order POST, the
-  orders:lookup poll, the market-close POST, the PATCH stop mover — has never met
-  eToro.
+  orders:lookup poll, the market-close POST, the PATCH stop mover — met eToro on
+  2026-09-23 on the DEMO segment (§4 D2, D2b-ii: three defects found, fixed in
+  D3); on the LIVE segment it has never been sent.
 - **Alerts:** telegram proven end to end (`_send_telegram` from worker-fast
   returned True; preflight section 7 reads token and prefs row).
 - **Backup + export:** pg_dump `sauron-20260923T053524Z.dump` (39,641,466 B) and
@@ -393,23 +394,35 @@ demo row the book and the venue in one click).
   print('LOOKUP', r['raw'].get('lookup'))
   print('POSITIONS', t.get_positions())
   pid = r.get('positionId') or ''
-  print('CLOSE', t.close_position(pid, 'GLDM') if pid else 'no positionId reported - close on the eToro portal by hand')
-  import time; time.sleep(3); print('POSITIONS after', t.get_positions())
+  print('CLOSE', t.close_position(pid, 'GLDM', open_order_id=r['orderId']) if pid else 'no positionId reported - close on the eToro portal by hand')
+  print('CLOSE PROOF', t.position_state(r['orderId'], until='closed'), 'MARGIN after', t.margin_cells()); import time; time.sleep(60); print('POSITIONS after 60 s (the /portfolio lag)', t.get_positions())
   "
   ```
 
-  Read it in three states: ORDER with status FILLED and a positionId is a
-  measurement; REJECTED/CANCELLED/EXPIRED is eToro refusing; PENDING with
-  `working: True` is an order eToro is HOLDING — the adapter cannot poll or
-  cancel it, so it is watched and resolved on the portal; a ValueError starting
-  "eToro NOT SENT" is the adapter refusing a level that is not a price (nothing
-  left the box); a raise at the POST is eToro refusing the body (the response
-  text is logged) or could-not-ask. `close_position` answers PENDING with no
-  executedQty — the proof of the close is `POSITIONS after []`, never the
-  answer. Write down: the orderId shape; the lookup status id; the
-  positionExecutions shape; whether protectedOnFill landed; what the close
-  returned. If the position filled, one PATCH before the close:
-  `t.modify_protective(pid, <new stop>)`.
+  MEASURED 2026-09-23 14:06 UTC (D2, 1x, GLDM, 1 unit), pinned in
+  tests/test_etoro_client.py::TheMeasuredWireTests: ORDER accepted as
+  `{token, orderId 383454450 (INT), referenceId <our uuid>}`, filled in 200 ms
+  (requestTime .263Z → executionTime .463Z). DEFECT 1/2: the adapter at
+  aa5cfb2 polled `orders:lookup?referenceId=` → 404 "No external operation was
+  found for referenceId …" (eToro keeps no client reference — the v1 order read
+  shows referenceID all zeros) and answered PENDING/working/pollFailed for a
+  filled order; `?orderId=383454450` → 200: `status` is an OBJECT `{id 3, name
+  "Filled", errorCode 0}`; the fill rides `positionExecutions[0]` (positionId
+  3603281458 camel, state "open", stopLossRate 82.22 / takeProfitRate 87.3 as
+  sent, openingData.units 1.0 / avgPrice 84.8 / fees 0.13 / markup 0.2 /
+  marketSpread 0.01, marginAccountCurrency 84.8 = accountTotalUsedMargin,
+  initialExposureAccountCurrency 84.8, asset.settlementType "CFD"). CLOSE
+  answered `{orderForClose: {orderID 383413813, orderType 19, statusID 1, …},
+  token}` — no executedQty ever — and that orderID is findable NOWHERE (lookup
+  404 "Order category … not found", v1 404). DEFECT 3: `POSITIONS after` is
+  NOT the proof — /portfolio still listed the row 3 s after the close (and had
+  not listed it 2 s after the fill); the proof is the OPEN order's lookup
+  turning `state "closed"` (measured on the 2x close, D2b-ii: ~8 s, three
+  transient 500s on the way; the 1x close's own lookup timing was not printed)
+  and the margin cells (accountTotalUsedMargin 84.8 → 0.0 in the same second).
+  Read it in three states still: FILLED with a positionId is a measurement; a
+  refusal is eToro refusing; PENDING with `working: True` is a real non-filled
+  status or every lookup failing (`pollFailed`). D3 fixes all three defects.
 - D2b. THE LEVERAGED ROUND TRIP — on the DEMO row, after D2 printed
   `POSITIONS after []`, BEFORE D4, and before the component
   `etoro_leverage_live` is ever ON. It ships OFF: while it is OFF every
@@ -434,31 +447,39 @@ demo row the book and the venue in one click).
     row: markup, marketSpread, overnightFee, overWeekendFee); then the
     DELETE (`t._sess().delete(f'{BASE}/api/v3/trading/execution/orders/{r["orderId"]}',
     headers=t._headers(), timeout=t.timeout)` and its demo spelling) → record
-    the status code and text; LOOKUP again by referenceId to prove status
+    the status code and text; LOOKUP again by orderId to prove status
     7/8; `MARGIN after delete`. A 404/405 on the DELETE is a measurement:
     the WORKING-row hole then stands and the flip's precondition is unmet.
     If the order cannot be withdrawn it fills at the open at 2x — close it
     by position id in D2b-ii, first thing.
-  - D2b-ii — IN HOURS. `MARGIN before`; the same order → FILLED; print
-    LOOKUP and compare `positionExecutions[0].stopLossRate` with the SENT
-    stop (the THIRD state: accepted, filled, stop REWRITTEN — record both
-    numbers and whether 0.0001 appears); the raw `t._open_positions()` row:
-    `leverage`, `amount`, `settlementTypeID`, `isNoStopLoss`, and whether
-    `amount` is units × openRate / 2 or the full notional; `MARGIN after
-    open`; `t.modify_protective(pid, round(last*0.98, 2))` (TIGHTER only — a
-    widening PATCH moves cash into margin per the public reference,
-    unmeasured); `t.close_position(pid, 'GLDM')`; `POSITIONS after []`;
-    `MARGIN after close`; then ONE deliberate refusal: a second levered order
-    whose stop lies outside the printed band — refused at the POST (4xx,
-    text logged) or accepted and landed status 4 with an errorCode (record
-    whether `status` is an int or an object). A refusal of the FIRST order
-    (status 4/10 or a raise at the POST) IS the measurement — record it, do
-    not retry with another number, do not flip.
-  - PIN every shape in tests/test_etoro_client.py with the real class and a
-    patched session (D3's rule): the lookup's leverage placement and status
-    shape, the /portfolio row's leverage/amount/settlementTypeID, the totals
-    arithmetic before/after, the DELETE answer, the costs rows, the stop
-    echo.
+  - D2b-ii — IN HOURS. MEASURED 2026-09-23 between 14:06 and 14:13 UTC (order
+    383458277, 2x, GLDM, 1 unit; its positionId was not printed — 3603285267,
+    the PATCH target of §6, is paired with it by timing only): FILLED;
+    `asset.leverage 2`, requestedAmount 42.4 = notional / 2, frozenAmount
+    42.53 = 42.4 + fees 0.13, marginAccountCurrency 42.39 =
+    accountTotalUsedMargin, initialExposureAccountCurrency 84.79,
+    openingData.avgPrice 84.79 / units 1.0 (units are units at any leverage),
+    markup 0.01; positionExecutions[0].stopLossRate 82.22 = the SENT stop, TP
+    87.3 held — the THIRD state (a rewrite, 0.0001) did NOT occur; MARGIN
+    before / after open / after close: used 0.0 → 42.39 → 0.0, available
+    332448.87 → 332406.35 → 332448.59 (accountTotalValue 332448.87 → 332448.71
+    → 332448.59; the cells move within the second; available fell by 42.52 =
+    margin 42.39 + fees 0.13). The /portfolio row at 2x was NOT captured
+    (absent 1 s after the fill — the lag; closed before listing): `leverage`,
+    `amount`, `settlementTypeID` at 2x stay unmeasured. FIRST PATCH EVER:
+    `t.modify_protective('3603285267', 83.06)` → `{'ok': True, 'reason': '',
+    'price': 83.06}`, the lookup then showed stopLossRate 83.06 (TIGHTER only;
+    a widening PATCH stays unsent; 200 vs 202 not recorded). Close by id:
+    proof `state "closed"` after ~8 s with three 500s on the way. The
+    deliberate REFUSAL was NOT provoked: the refusal shape (POST 4xx vs
+    status.id 4 + errorCode) stays unmeasured.
+  - PINNED by D3 in tests/test_etoro_client.py::TheMeasuredWireTests, real
+    class over a patched session: the acceptance, the lookup key, the status
+    object, the fill facts at 1x and 2x, the stop echo after the PATCH, the
+    margin cells at the five moments, the close response, the close proof
+    through 500s, the /portfolio row. STILL TO PIN, unmeasured: D2b-i's
+    WaitingForMarket, the DELETE answer, the costs rows, a HELD order's
+    frozen cash; the refusal shape; the 2x /portfolio row.
   - THE FLIP, by hand, never by a deploy, and only when ALL of: D2b-i and
     D2b-ii are pinned; the costs rows for GLDM at 1x and 2x are written into
     this plan; the DELETE answer is written down; every levered config's
@@ -517,9 +538,60 @@ demo row the book and the venue in one click).
     measured shape, the over-fill, the status wire shape; then and only
     then the operator flips fractional_units_live on /health/, ticks
     the class, and enables ONE config.
-- D3. Any divergence from the adapter's assumptions is recorded in
-  tests/test_etoro_client.py by name, with the real class and a patched
-  session — never a subclass.
+- D3. LANDED after D2/D2b-ii: the three defects the first orders exposed,
+  fixed adapter-first and pinned by name with the real class and a patched
+  session — never a subclass (tests/test_etoro_client.py::TheMeasuredWireTests
+  and ::ConsumerKeyTests; the engine halves in tests/test_etoro_leverage.py,
+  tests/test_close_path.py::TheCloseIsProvenByTheOpenOrderTests and
+  tests/test_venue_drift.py).
+  (1) `_await_fill` polls `orders:lookup?orderId=` (the acceptance's INT id,
+  which both lanes already store as `AssetBotTrade.broker_order_id`), keeps
+  polling through a failed GET, and answers `pollFailed` only when EVERY
+  lookup failed; `status` is read as the object `{id, name, errorCode}` (only
+  id 3 measured; `raw.statusName` stays the table's word, which the one
+  measured name agrees with); the fill facts come off `positionExecutions[0]`.
+  (2) `EtoroTrader.position_state(order_id, until="closed")` reads the OPEN
+  order's execution state through the 500s (5 × 2 s);
+  `close_position(..., open_order_id=)` proves what it sent and answers FILLED
+  with executedQty and NO avgPrice, or PENDING with executedQty "0.0" (the
+  engine then books CLOSE_PENDING — never CLOSED on an unproven close; the
+  kill switch leaves the row CLOSE_PENDING and raises, and pressed again on
+  that row it refuses — nothing sent, never a second close);
+  `venue_close.close_or_refuse` hands the row's `broker_order_id` down;
+  `pending_closes.retry_trade_close` reads the proof before the book — only
+  from the venue that carried the row (`unattributable`) —
+  (`RETRY_VENUE_PROVED_CLOSED`), BLOCKS while the venue still says open beside
+  a queued close, refuses a FLAT list while the venue says open, and never
+  polls, cancels or proves by the close order's id.
+  (3) `EtoroTrader.PORTFOLIO_LAG_S = 60`: `reconcile_asset.venue_lag_window`
+  refuses a miss inside the window (reconcile_user), the drain spends no
+  attempt on a FLAT or HELD read inside it, and the sweep keeps a symbol
+  claimed for `SWEEP_CLOSED_GRACE_S` after a close. `etoro_smoke` prints the
+  measured facts beside each write URL.
+  STILL UNMEASURED, therefore unpinned: WaitingForMarket (status 11) and a
+  HELD order's accountFrozenCash; the refusal shape; the DELETE of a held
+  order; fractional units, the floor and the over-fill; the 429 body; the
+  2x /portfolio row; a closing rate (the exit stays mark-priced);
+  `UnitsToDeduct` (every engine close sends it; the shell sent none) and a
+  close below the position; a second close on a closed positionId; a
+  stop-out's execution state; what eToro answers a lookup for an id another
+  venue issued; any live (non-demo) write. D3b, not started:
+  `order_status` off the same lookup once status 11 is written down; the
+  TAKE TRADE lane calling `venue_stamps` (a hand-taken eToro row records no
+  `broker`, `broker_env` or `broker_position_id`; it closes only through
+  `protective_trade_id`, so a hand-taken row with both legs and a read fill
+  IS closable, while one taken without a stop or whose poll failed has no
+  handle); the WORDING of the three consumers that meet the unproven shape —
+  manual_close "The broker rejected the close" (false: the venue accepted it
+  and the drain proves it, never resends), base.py _notify_partial_close
+  "filled only 0 of N" (the unproven close, not a partial), the kill switch's
+  "needs closing by hand" raise over a queued close — every one of them is
+  loud and none moves money; after D3 those sentences mean "accepted, not
+  yet proven; the drain proves it by the open order"; the legacy crypto tick
+  (engine/runner.py) reads only `orderId` off market_order and books a
+  BotTrade at the pre-order price whatever the status says: NOT in D3, and
+  the crypto box on the eToro row stays UNTICKED until that reader reads
+  status/working/pollFailed.
 - D4. Re-save the SAME pair on /brokers/ with Demo UNTICKED — the switch to
   live is the checkbox, not a key change (measured 2026-09-23) — all four
   boxes still UNTICKED, and the trading PIN typed in the form's PIN field. The
@@ -634,6 +706,10 @@ retirement then continues at deploy/IBKR_RETIREMENT.md Stage 3.
   is OPEN or CLOSE_PENDING.
 - Never tick a class on /brokers/ before the demo write proof: the tick makes
   eToro the book and the venue in one click.
+- Never tick crypto on the eToro row: the legacy tick (engine/runner.py)
+  books a live BotTrade on an unread eToro answer, with no stop.
+- Never tick crypto on the eToro row: the legacy tick (engine/runner.py)
+  books a live BotTrade on an unread eToro answer, with no stop.
 - Never flip fractional_units_live before D2c's pins are in
   tests/test_etoro_client.py, and never with more than one config enabled
   until the 20-per-60-s quota's 429 shape is written down (D2c-4).

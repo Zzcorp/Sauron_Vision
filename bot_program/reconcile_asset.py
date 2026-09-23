@@ -25,6 +25,13 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+#: How long a row that just CLOSED keeps claiming its symbol for the sweep
+#: (reconcile_unknown_positions). eToro lists a closed position for up to
+#: ~60 s after the close (measured 2026-09-23); the sweep only REPORTS, so
+#: claiming for twice that, at every venue, costs nothing and stops a page
+#: saying "UNCLAIMED" about a position that is closing.
+SWEEP_CLOSED_GRACE_S = 120
+
 
 def keyed_venue_count(user) -> int:
     """How many of this user's broker rows exist AND carry credentials.
@@ -90,6 +97,51 @@ def unattributable(trade, client, *, keyed: int) -> str:
         return (f"it was filled in the {filled_in} world and the router now "
                 f"answers the {answers_from} world, so a miss here is not an "
                 f"absence")
+    return ""
+
+
+def venue_lag_window(trade, client) -> str:
+    """Why ONE read of this venue's position list cannot yet speak for
+    `trade`, or "".
+
+    The venue says how long its list lags, on the client, as
+    PORTFOLIO_LAG_S (EtoroTrader: 60 — MEASURED 2026-09-23: a filled
+    position absent ~2 s after the fill, a closed one still listed 3 s after
+    the close, both settled by ~60 s). Only a NUMBER declares a window: a
+    client with none, 0, or a MagicMock's attribute lags for nobody and the
+    reader acts as before. Inside the window the row's own stamps say what
+    just happened: opened_at (the bot lane creates the row right after the
+    fill), entry_filled_at (a WORKING row that filled later), close_sent_at
+    (a close sent and answered) and close_retry_last_at (a resend). A naive
+    stamp is refused, not localised. Three states: the reason, or "" —
+    never a guess about which way the list is wrong. Read by reconcile_user
+    and by pending_closes.retry_trade_close.
+    """
+    from datetime import datetime as _dt
+    lag = getattr(client, "PORTFOLIO_LAG_S", 0)
+    if isinstance(lag, bool) or not isinstance(lag, (int, float)) or lag <= 0:
+        return ""
+    meta = (trade.metadata
+            if isinstance(getattr(trade, "metadata", None), dict) else {})
+    now = timezone.now()
+    stamps = (("opened", getattr(trade, "opened_at", None)),
+              ("filled", meta.get("entry_filled_at")),
+              ("sent a close", meta.get("close_sent_at")),
+              ("retried a close", meta.get("close_retry_last_at")))
+    for what, raw in stamps:
+        if not raw:
+            continue
+        try:
+            at = raw if isinstance(raw, _dt) else _dt.fromisoformat(str(raw))
+        except (TypeError, ValueError):
+            continue
+        if timezone.is_naive(at):
+            continue
+        age = (now - at).total_seconds()
+        if 0 <= age < float(lag):
+            return (f"{what} {int(age)} s ago, and {type(client).__name__}'s "
+                    f"position list lags up to {int(lag)} s "
+                    f"(measured 2026-09-23)")
     return ""
 
 
@@ -290,6 +342,22 @@ def reconcile_user(user) -> dict:
                     "position(s) it could not name, so a miss proves nothing",
                     trade.id, trade.asset_class, trade.symbol,
                     type(client).__name__, state["unnamed"])
+                continue
+
+            _lag_why = (venue_lag_window(trade, client)
+                        if not open_at_broker else "")
+            if _lag_why:
+                # A MISS INSIDE THE VENUE'S OWN LAG WINDOW IS NOT AN ABSENCE.
+                # eToro lists a filled position ~2 s late (measured
+                # 2026-09-23); a */15 reconcile landing in that gap would
+                # book a live, stop-protected position CLOSED with
+                # exit_price_inferred and leave the venue holding it. Counted
+                # unavailable, read again next pass. (The entry_working skip
+                # above shielded every eToro row by accident under DEFECT 1;
+                # this is the real shield.)
+                out["broker_unavailable"] += 1
+                logger.warning("reconcile: #%s (%s) NOT orphan-closed — %s",
+                               trade.id, trade.symbol, _lag_why)
                 continue
 
             if not open_at_broker:
@@ -535,6 +603,16 @@ def reconcile_unknown_positions(user) -> dict:
         # order creates when it fills — the sweep exists to find units no
         # row accounts for, and an unfilled order accounts for none.
         if row.symbol and not is_entry_working(row):
+            claimed.add(str(row.symbol).upper())
+    # A ROW CLOSED SECONDS AGO STILL CLAIMS ITS SYMBOL HERE (the lag; see
+    # SWEEP_CLOSED_GRACE_S). Report-only, every venue.
+    from datetime import timedelta as _td
+    for row in (AssetBotTrade.objects
+                .filter(config__user=user, status="CLOSED", paper=False,
+                        closed_at__gte=timezone.now()
+                        - _td(seconds=SWEEP_CLOSED_GRACE_S))
+                .only("symbol")):
+        if row.symbol:
             claimed.add(str(row.symbol).upper())
 
     configs = (AssetBotConfig.objects

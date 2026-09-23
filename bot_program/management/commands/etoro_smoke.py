@@ -1,8 +1,10 @@
 """Prove each READ of the eToro adapter with the stored key pair, read-only.
 
 The WRITE path — the v2 order POST, the orders:lookup poll, the market-close
-POST and the PATCH stop mover — has never met eToro (engine/etoro_client.py,
-"WHAT IT REFUSES TO CLAIM"). Of the reads, five have, on 2026-09-22, with a
+POST and the PATCH stop mover — met eToro on 2026-09-23 on the DEMO segment
+only (deploy/ETORO_DEPARTURE.md §4 D2 / D2b-ii, pinned in
+tests/test_etoro_client.py::TheMeasuredWireTests); on the LIVE segment it has
+never been sent a byte. Of the reads, five have, on 2026-09-22, with a
 live real key: aggregate-portfolio 200, portfolio 200, real/pnl 200, a GET
 of the market-close path 405, and /market-data/search 200 — the adapter's
 path table and tests/test_etoro_client.py record the first four. Two have
@@ -45,9 +47,10 @@ What it prints, in order:
     segment. Off by default so the ordinary run touches one world; kept so
     the operator can re-measure it.
   * the write URLs by name — composed, never called — each with what the
-    tree records about it: the real close path was attested by a GET
-    answering 405; the demo close path and the v2 paths carry no
-    measurement at all.
+    tree records about it: on the DEMO segment all four answered on
+    2026-09-23 (the measured facts are printed beside each); on the real
+    segment the close path was attested by a GET answering 405 and the v2
+    paths carry no measurement at all.
   * the size floor: cannot be asked before an order (capabilities.py).
 
 Run with:
@@ -405,26 +408,42 @@ class Command(BaseCommand):
         close_attested = close_key in EtoroTrader._V1_EXEC_REAL_SEG
         if t.demo:
             close_url = t._v1_exec(f"{close_key}/positions/<positionId>")
-            close_note = ("demo path composed by the table's demo rule "
-                          "(etoro_client._seg); no GET of it is recorded in "
-                          "the tree")
+            close_note = ("measured 2026-09-23 on the demo segment: POST 2xx, "
+                          "body orderForClose{positionID, instrumentID, "
+                          "orderID (orderType 19, statusID 1)}; that orderID "
+                          "is findable on no read path — the proof of the "
+                          "close is the OPEN order's positionExecutions[0]"
+                          ".state turning 'closed', reached after ~8 s with "
+                          "three transient 500s on the way (the 2x close); "
+                          "no executedQty, no closing price")
         elif close_attested:
             close_url = t._v1_exec(f"{close_key}/positions/<positionId>")
             close_note = ("real path attested by GET → 405 on 2026-09-22 "
                           "(_V1_EXEC_REAL_SEG); the POST itself has never "
-                          "been sent")
+                          "been sent on the real segment (demo: measured "
+                          "2026-09-23)")
         else:
             close_url = "(real path not in _V1_EXEC_REAL_SEG — _seg raises)"
             close_note = "NOT attested"
+        segment_note = ("measured 2026-09-23 on the demo segment"
+                        if t.demo else
+                        "real segment never sent; measured 2026-09-23 on "
+                        "the demo segment")
         for name, url, note in (
             ("order POST", t._v2_exec_orders(),
-             "documented, never measured — no table entry and no status "
-             "code in the adapter; the first real order attests it"),
+             f"{segment_note}: 2xx, body {{token, orderId (int), "
+             f"referenceId}}; filled in 200 ms in NYSE hours; a 2x order "
+             f"locked notional / 2 as margin, units untouched"),
             ("orders:lookup GET", t._v2_lookup(),
-             "documented, never measured — same"),
+             f"{segment_note}: 200 by ?orderId=<int>, 404 by ?referenceId= "
+             f"(eToro keeps no client reference), 400 by ?token=; status is "
+             f"an object {{id, name, errorCode}} — only 3/Filled seen; the "
+             f"fill facts ride positionExecutions[0]"),
             ("market-close POST", close_url, close_note),
             ("stop mover PATCH", t._v2("positions/<positionId>"),
-             "documented, never measured"),
+             f"{segment_note}: ok on {{stopLossRate}} (tighter only), the "
+             f"new stop echoed on the next lookup; 200 vs 202 not recorded; "
+             f"a widening PATCH never sent"),
         ):
             w(f"  {'url':<8} {name:<44} {url}")
             w(f"           {note}")
@@ -450,5 +469,6 @@ class Command(BaseCommand):
               "a spelling eToro reads differently, or a path nobody attested "
               "— NOT eToro saying no. Read the detail before blaming the "
               "keys.")
-        w("No order was placed. The write path has never met eToro, and this "
-          "command cannot change that.")
+        w("No order was placed. The DEMO write path met eToro on 2026-09-23 "
+          "(deploy/ETORO_DEPARTURE.md §4); the LIVE write path never has, "
+          "and this command cannot change either.")

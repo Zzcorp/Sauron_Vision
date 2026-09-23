@@ -319,7 +319,8 @@ class SmokeTests(TestCase):
     def test_the_write_urls_are_named_with_what_the_tree_records(self):
         """Composed and printed so the operator can GET them by hand; never
         called. The real close path carries the one attestation the adapter
-        records (a 405 on GET); the v2 paths carry none."""
+        records (a 405 on GET); beside every write URL the DEMO measurement
+        of 2026-09-23, never the old 'documented, never measured'."""
         _keyed(self.user)
         body, _ = self._run()
         self.assertIn(f"{BASE}/api/v2/trading/execution/orders", body)
@@ -329,7 +330,11 @@ class SmokeTests(TestCase):
         self.assertIn(f"{BASE}/api/v2/trading/positions/<positionId>", body)
         self.assertIn("GET → 405", body)
         self.assertIn("the POST itself has never been sent", body)
-        self.assertIn("documented, never measured", body)
+        self.assertNotIn("documented, never measured", body)
+        self.assertIn("real segment never sent; measured 2026-09-23 on the "
+                      "demo segment", body)
+        self.assertIn("200 by ?orderId=<int>, 404 by ?referenceId=", body)
+        self.assertIn("status is an object {id, name, errorCode}", body)
         self.assertNotIn("no GET of it is recorded", body)
         self.assertNotIn("/real/", body)
 
@@ -346,8 +351,14 @@ class SmokeTests(TestCase):
         self.assertIn("0 open — an empty list is an answer", body)
         self.assertIn(f"{BASE}/api/v1/trading/execution/demo/market-close-orders/"
                       f"positions/<positionId>", body)
-        # the demo close path was never GET-probed; the note must not say 405
-        self.assertIn("no GET of it is recorded in the tree", body)
+        # the demo close path was POSTed on 2026-09-23 (never GET-probed):
+        # the note carries the measurement and must not say 405
+        self.assertIn("measured 2026-09-23 on the demo segment: POST 2xx",
+                      body)
+        self.assertIn("orderType 19", body)
+        self.assertIn("positionExecutions[0].state turning 'closed'", body)
+        self.assertNotIn("no GET of it is recorded in the tree", body)
+        self.assertNotIn("documented, never measured", body)
         self.assertNotIn("GET → 405", body)
 
     def test_a_swallowed_failure_is_not_ok(self):

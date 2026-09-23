@@ -472,6 +472,34 @@ class TheEntryPassesItThroughTests(TestCase):
         self.assertFalse(trade.metadata.get("protected"))
         self.assertEqual(trade.metadata["leverage"], 2)
 
+    def test_the_open_order_id_is_stored_on_the_row_as_broker_order_id(self):
+        """The regression pin for the first demo night's row: a filled order
+        whose poll went by referenceId booked WORKING/pollFailed. Polled by
+        the acceptance's orderId, the row records the fill and the handles
+        the close will need."""
+        from bot_program.models import AssetBotTrade
+        from tests.test_etoro_client import (ACCEPTED, _lookup_router,
+                                             _measured_lookup)
+        _switch(True)
+        _account(self.user, cash=100000)
+        cand = self._cand()
+        t, fake = _etoro([SEARCH_AAPL, RATES,
+                          ("POST", "/execution/demo/orders", 200, ACCEPTED)])
+        _lookup_router(fake, by_order=(200, _measured_lookup(
+            stop=float(cand.stop), units=float(cand.qty_default),
+            avg=100.0)))
+        res = self._execute(cand, t)
+        self.assertIsNotNone(res, self._skip_note() if res is None else "")
+        trade = AssetBotTrade.objects.get(id=res["trade_id"])
+        self.assertEqual(trade.broker_order_id, "383454450")
+        self.assertEqual(trade.metadata["broker_position_id"], "3603281458")
+        self.assertEqual(trade.metadata["leverage"], 2)
+        for absent in ("entry_working", "entry_poll_failed",
+                       "stop_rewritten_by_venue"):
+            self.assertNotIn(absent, trade.metadata, absent)
+        for _m, _u, k in fake.calls:
+            self.assertNotIn("referenceId", k.get("params") or {})
+
 
 class TheSyncStoresTheMarginCellsTests(TestCase):
 

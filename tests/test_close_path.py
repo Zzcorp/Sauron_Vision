@@ -555,6 +555,240 @@ class EtoroClosesByPositionIdOrNotAtAllTests(TestCase):
         client.market_order.assert_not_called()
 
 
+# ── the close is proven by the open order, never by a fresh list ──────────
+
+class TheCloseIsProvenByTheOpenOrderTests(TestCase):
+    """MEASURED 2026-09-23 on eToro's demo segment: the close order is
+    findable nowhere, the OPEN order's positionExecutions[0].state turns
+    "closed" ~8 s later behind transient 500s, and /portfolio lags ~60 s
+    both ways. Every path that books a close reads the venue's own word
+    first and never a fresh position list inside the lag."""
+
+    ROUTER = "bot_program.engine.broker_router.client_for_symbol"
+
+    def setUp(self):
+        self.user = _user("proof_u")
+        self.cfg = _cfg(self.user)
+
+    def _venue(self, state="closed", book=None, lag=60):
+        from tests.test_venue_drift import EtoroTrader as _DriftEtoro
+        venue = _DriftEtoro(book or [])
+        venue.PORTFOLIO_LAG_S = lag
+        venue.close_needs_position_id = lambda: True
+        venue.proofs = []
+        venue.closes = []
+
+        def position_state(order_id, **kw):
+            venue.proofs.append((order_id, kw))
+            return state
+
+        def close_position(position_id, symbol, units=None, *,
+                           open_order_id=""):
+            venue.closes.append((position_id, symbol, units, open_order_id))
+            return {"orderId": "383413813", "positionId": position_id,
+                    "status": "PENDING", "executedQty": "0.0",
+                    "openOrderId": open_order_id, "positionState": None}
+
+        def market_order(*_a, **_k):
+            # the real adapter HAS market_order (it opens; a SELL is
+            # sellShort) — the kill switch reads its presence and then
+            # closes through close_or_refuse; a client without one is
+            # "nothing submitted" and books at the mark. It must never
+            # be called on a close.
+            raise AssertionError("market_order must not be called on "
+                                 "an eToro close")
+
+        venue.market_order = market_order
+        venue.position_state = position_state
+        venue.close_position = close_position
+        return venue
+
+    def _row(self, age_s=600, broker="etoro", **kw):
+        from bot_program.models import AssetBotTrade
+        meta = {"initial_stop_loss": 98.0, "broker": broker,
+                "broker_position_id": "3603281458"}
+        meta.update(kw.pop("metadata", {}))
+        trade = _trade(self.cfg, broker_order_id="383454450", metadata=meta,
+                       **kw)
+        AssetBotTrade.objects.filter(pk=trade.pk).update(
+            opened_at=timezone.now() - timezone.timedelta(seconds=age_s))
+        trade.refresh_from_db()
+        return trade
+
+    def _working(self, broker="etoro"):
+        return self._row(status="CLOSE_PENDING", broker=broker, metadata={
+            "close_order_working": True,
+            "close_working_order_id": "383413813",
+            "close_sent_at": timezone.now().isoformat()})
+
+    def _held(self):
+        return [{"symbol": "AAPL", "qty": "10", "side": "BUY"}]
+
+    def test_close_or_refuse_hands_the_open_order_id_to_the_adapter(self):
+        from bot_program.engine.venue_close import close_or_refuse
+        trade = self._row()
+        venue = self._venue()
+        close_or_refuse(trade, venue, 10.0, close_side="SELL",
+                        client_order_id="EXIT-1")
+        self.assertEqual(venue.closes,
+                         [("3603281458", "AAPL", 10.0, "383454450")])
+        client = mock.MagicMock(spec=["market_order", "close_position",
+                                      "close_needs_position_id", "ticker"])
+        client.close_needs_position_id.return_value = True
+        client.close_position.return_value = {"orderId": "c1",
+                                              "status": "PENDING"}
+        close_or_refuse(trade, client, 10.0, close_side="SELL",
+                        client_order_id="EXIT-1")
+        self.assertEqual(client.close_position.call_args.kwargs, {})
+
+    def test_a_close_the_venue_has_not_proven_lands_close_pending_not_closed(self):
+        from bot_program.asset_engine.stock_bot import StockBot
+        trade = self._row()
+        venue = self._venue(state=None)
+        with self.assertLogs("bot_program.asset_engine.base", level="ERROR"):
+            closed = StockBot(self.cfg)._close_trade(trade, Decimal("98"),
+                                                     venue, reason="TIME")
+        self.assertFalse(closed)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertTrue(trade.metadata.get("close_order_working"))
+        self.assertEqual(trade.metadata.get("close_working_order_id"),
+                         "383413813")
+        self.assertTrue(trade.metadata.get("close_sent_at"))
+        self.assertEqual(len(venue.closes), 1)
+
+    def test_the_drain_finalises_on_the_proof_not_on_a_fresh_portfolio_read(self):
+        from bot_program.pending_closes import retry_trade_close
+        trade = self._working()
+        venue = self._venue(state="closed", book=self._held())  # stale list
+        with mock.patch(self.ROUTER, return_value=venue):
+            self.assertTrue(retry_trade_close(trade))
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        self.assertIn("RETRY_VENUE_PROVED_CLOSED", trade.reason or "")
+        self.assertEqual(trade.metadata.get("exit_fill_source"), "mark")
+        self.assertEqual(venue.proofs,
+                         [("383454450", {"attempts": 1, "delay": 0.0})])
+        self.assertEqual(venue.closes, [])
+
+    def test_a_queued_close_the_venue_still_shows_open_blocks_and_never_resends(self):
+        from bot_program.pending_closes import retry_trade_close
+        trade = self._working()
+        venue = self._venue(state="open", book=self._held())
+        with mock.patch(self.ROUTER, return_value=venue):
+            self.assertFalse(retry_trade_close(trade))
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertIn("queued", trade.metadata.get("close_blocked_why", ""))
+        self.assertFalse(trade.metadata.get("close_retry_attempts"))
+        self.assertEqual(venue.closes, [])
+
+    def test_a_stale_portfolio_hit_inside_the_lag_spends_no_attempt(self):
+        from bot_program.pending_closes import retry_trade_close
+        trade = self._working()
+        venue = self._venue(state=None, book=self._held())
+        with mock.patch(self.ROUTER, return_value=venue), \
+                self.assertLogs("bot_program.pending_closes", level="WARNING"):
+            self.assertFalse(retry_trade_close(trade))
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertFalse(trade.metadata.get("close_retry_attempts"))
+        self.assertEqual(venue.closes, [])
+
+    def test_a_fresh_portfolio_miss_inside_the_lag_is_not_flat(self):
+        from bot_program.models import AssetBotTrade
+        from bot_program.pending_closes import retry_trade_close
+        trade = self._row(status="CLOSE_PENDING", age_s=2)
+        venue = self._venue(state=None, book=[])
+        with mock.patch(self.ROUTER, return_value=venue):
+            self.assertFalse(retry_trade_close(trade))
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertEqual(venue.closes, [])
+        AssetBotTrade.objects.filter(pk=trade.pk).update(
+            opened_at=timezone.now() - timezone.timedelta(seconds=120))
+        trade.refresh_from_db()
+        with mock.patch(self.ROUTER, return_value=venue):
+            self.assertTrue(retry_trade_close(trade))
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        self.assertIn("RETRY_ALREADY_FLAT", trade.reason or "")
+
+    def test_the_kill_switch_leaves_an_unproven_etoro_close_pending(self):
+        from bot_program.engine.kill_switch import _close_asset_trade
+        trade = self._row()
+        venue = self._venue(state=None, book=self._held())
+        with mock.patch(self.ROUTER, return_value=venue), \
+                self.assertRaises(RuntimeError):
+            _close_asset_trade(trade, timezone.now())
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertTrue(trade.metadata.get("close_order_working"))
+        self.assertEqual(trade.metadata.get("close_working_order_id"),
+                         "383413813")
+        self.assertTrue(trade.metadata.get("close_sent_at"))
+        self.assertIsNone(trade.exit_price)
+        self.assertEqual(len(venue.closes), 1)
+        self.assertEqual(venue.closes[0][3], "383454450")
+
+    def test_the_kill_switch_inside_the_lag_sends_the_close_instead_of_booking_flat(self):
+        """Pressed within seconds of the entry fill, the switch reads an
+        eToro list that does not show the position yet. Before D3 the
+        cancel-window reviser read that as 'all filled', found nothing
+        left to send and booked CLOSED over a position the venue held.
+        Inside the lag the reviser stands down: the close is SENT, stays
+        unproven, and the row lands CLOSE_PENDING."""
+        from bot_program.engine.kill_switch import _close_asset_trade
+        trade = self._row(age_s=2)
+        venue = self._venue(state=None, book=[])
+        with mock.patch(self.ROUTER, return_value=venue), \
+                self.assertRaises(RuntimeError):
+            _close_asset_trade(trade, timezone.now())
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertIsNone(trade.exit_price)
+        self.assertEqual(len(venue.closes), 1)
+
+    def test_the_kill_switch_never_resends_over_a_queued_etoro_close(self):
+        """kill_switch: a queued eToro close has no cancel_order, so the
+        switch refuses — nothing sent, never a second close."""
+        from bot_program.engine.kill_switch import _close_asset_trade
+        trade = self._working()
+        venue = self._venue(state="open", book=self._held())
+        with mock.patch(self.ROUTER, return_value=venue), \
+                self.assertRaises(RuntimeError) as cm:
+            _close_asset_trade(trade, timezone.now())
+        self.assertIn("cancel", str(cm.exception).lower())
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertEqual(venue.closes, [])
+        self.assertTrue(trade.metadata.get("close_order_working"))
+
+    def test_a_venue_that_says_open_is_never_finalised_on_a_flat_list(self):
+        from bot_program.pending_closes import retry_trade_close
+        trade = self._row(status="CLOSE_PENDING", age_s=600)
+        venue = self._venue(state="open", book=[])
+        with mock.patch(self.ROUTER, return_value=venue), \
+                self.assertLogs("bot_program.pending_closes", level="WARNING"):
+            self.assertFalse(retry_trade_close(trade))
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertEqual(venue.closes, [])
+        self.assertNotIn("RETRY_ALREADY_FLAT", trade.reason or "")
+        self.assertFalse(trade.metadata.get("close_retry_attempts"))
+
+    def test_the_proof_is_not_asked_of_a_venue_that_did_not_carry_the_row(self):
+        from bot_program.pending_closes import retry_trade_close
+        trade = self._working(broker="ibkr")
+        venue = self._venue(state="closed", book=[])
+        with mock.patch(self.ROUTER, return_value=venue):
+            self.assertFalse(retry_trade_close(trade))
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertEqual(venue.proofs, [])
+        self.assertEqual(venue.closes, [])
+
+
 # ── a refused cancel, proved one way or the other ───────────────────────
 
 class ARefusedCancelIsProvedNotGuessedTests(TestCase):

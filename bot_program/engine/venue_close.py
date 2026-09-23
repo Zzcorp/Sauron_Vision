@@ -122,11 +122,24 @@ def close_or_refuse(trade, client, qty: float, *, close_side: str,
         # call sites in this platform say "the broker itself refuses the
         # second copy", and that is only true when the close carries the
         # same reference the first one did.
+        # AND THE OPEN ORDER'S ID where the adapter takes one. On eToro the
+        # close order it answers with is findable nowhere (measured
+        # 2026-09-23); the proof of the close is the OPEN order's execution
+        # state, read by the id both lanes store as
+        # AssetBotTrade.broker_order_id. Handed over here, once, so
+        # EtoroTrader.close_position can prove what it sent; an adapter whose
+        # signature has no seat for it is given nothing (a MagicMock's
+        # signature is (*args, **kwargs) — no seat), and a row with no id
+        # closes as before: PENDING, proven later by the drain.
         kw = {}
         try:
             import inspect
-            if "client_order_id" in inspect.signature(closer).parameters:
+            params = inspect.signature(closer).parameters
+            if "client_order_id" in params:
                 kw["client_order_id"] = client_order_id
+            if "open_order_id" in params:
+                kw["open_order_id"] = str(
+                    getattr(trade, "broker_order_id", "") or "")
         except (TypeError, ValueError):  # a builtin or a mock
             kw = {}
         return closer(pid, symbol, float(qty), **kw)

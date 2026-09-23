@@ -26,8 +26,15 @@ THREE FACTS ABOUT THE API THAT SHAPE EVERYTHING BELOW
 
 1. ORDERS ARE ASYNCHRONOUS. A 200 on POST /orders means "accepted for
    processing", not "filled". The fill is read by a second call,
-   orders:lookup, keyed by the x-request-id this client sent. Status is a
-   twelve-value table; 3 and 5 are fills, 4/7/8/9/10 are refusals. This
+   orders:lookup, keyed by the INTEGER orderId the acceptance carries
+   ({token, orderId, referenceId} — MEASURED 2026-09-23, demo segment).
+   NOT by the x-request-id this client sends: eToro echoes it as
+   referenceId and keeps no copy (the v1 order read shows referenceID all
+   zeros; `?referenceId=` answers 404 every time), which is how every order
+   of the first demo night read PENDING/pollFailed although each filled in
+   200 ms. `status` on the lookup is an OBJECT {id, name, errorCode}; only
+   id 3 / "Filled" / errorCode 0 has met a key — the twelve-value table
+   (3 and 5 fills, 4/7/8/9/10 refusals) is the public reference. This
    client polls — bounded, best-effort, the way `AlpacaTrader._await_fill`
    does — and NEVER reports an acceptance as a fill. OANDA's own history
    here is the warning: "a completely unfilled order was booked as a
@@ -66,11 +73,16 @@ WHAT IT REFUSES TO CLAIM
     `get_positions` exists because reconciliation needs it; `cancel_order`
     does not, so the tier is honestly absent. A method that existed and
     could not act would pass the conformance test and lie.
-  * `fills` — no closed-position history is documented anywhere, and the
-    close-confirmation shape has not met a real key. `closing_fill` is
-    therefore not implemented: the engine falls down its own ladder to a
-    ticker read flagged `exit_price_inferred`, which is the honest path it
-    already has. It gets implemented the day the confirmation is verified.
+  * `fills` — no closed-position history is documented anywhere. The
+    close-confirmation SHAPE met a real key on 2026-09-23 (`close_position`:
+    orderForClose{orderID, orderType 19, statusID 1}) and so did the close
+    PROOF (`position_state`: the OPEN order's positionExecutions[0].state
+    turning "closed") — but neither carries a closing price, and the close
+    order id is findable on no read path. So `closing_fill` stays absent:
+    the engine books the exit at its mark (exit_fill_source "mark") or,
+    from reconcile, at a ticker read flagged `exit_price_inferred`. Adding
+    it would also create the "fills" tier (capabilities.py) on a method
+    that cannot price an exit.
   * `options` — none.
   * `leverage` as a TIER — no. The capabilities tier of that name means
     set_leverage/set_margin_type: Binance futures' per-SYMBOL venue state,
@@ -83,10 +95,14 @@ WHAT IT REFUSES TO CLAIM
     is required when leverage is greater than 1". The fill result carries
     what the venue ECHOES (`venueStopLoss`/`venueTakeProfit` off
     positionExecutions[0], absent when the wire lacks them) and says when
-    the lookup could not be read at all (`pollFailed`). Nothing here reads
-    eToro's per-instrument `leverageValues` (its eligibility endpoint has
-    met no key), and no leveraged order has ever met eToro
-    (deploy/ETORO_DEPARTURE.md §4 D2b).
+    NO lookup could be read at all (`pollFailed`: every GET failed, never
+    one of them). Nothing here reads eToro's per-instrument
+    `leverageValues` (the eligibility endpoint was read by hand on
+    2026-09-23, deploy/ETORO_DEPARTURE.md §4 D2c-0; this adapter does not
+    call it). One leveraged order HAS met eToro — demo, 2x, GLDM, 1 unit,
+    order 383458277, FILLED 2026-09-23: asset.leverage 2, requestedAmount
+    42.4 = notional / 2, marginAccountCurrency 42.39, units 1.0 untouched,
+    fees 0.13 as at 1x, stop held exactly as sent.
   * an UNPROTECTED order nobody asked for — a stop_loss or take_profit that
     is present and not a price is refused before the POST (`_level`), never
     dropped; and a rates payload without a `rates` list, or a rate row
@@ -142,6 +158,26 @@ STATUS_NAMES = {1: "Received", 2: "Placed", 3: "Filled", 4: "Rejected",
 #: no quantity, never as a fill.
 FILL_ATTEMPTS = 5
 FILL_DELAY_S = 0.6
+
+#: THE CLOSE PROOF, and its budget. MEASURED 2026-09-23 (demo, the 2x close,
+#: order 383458277): the close order (orderType 19) is findable on no read
+#: path; the proof is the OPEN order's positionExecutions[0].state turning
+#: "closed", read by the OPEN orderId. During that close the lookup answered
+#: HTTP 500 three times over ~6 s, then 200 "closed" at ~8 s — a 500 there
+#: is transient. 5 × 2 s covers 8 s with a margin and, beside one order's
+#: FILL_ATTEMPTS, stays inside the public 20/60 s lookup quota (unmeasured;
+#: not hit at ≤ 18/min).
+CLOSE_PROOF_ATTEMPTS = 5
+CLOSE_PROOF_DELAY_S = 2.0
+
+#: /portfolio LAGS BOTH WAYS. MEASURED 2026-09-23 (demo): the row was
+#: ABSENT ~2 s after a fill (accountTotalUsedMargin already showed it) and
+#: STILL PRESENT 3 s after the close (used margin already 0); present ~60 s
+#: after the fill, absent ~60 s after the close. One get_positions() read
+#: inside this window proves neither presence nor absence. Carried on the
+#: class so the engine reads it duck-typed off the client it holds
+#: (reconcile_asset.venue_lag_window); an adapter without it lags for nobody.
+PORTFOLIO_LAG_S = 60
 
 #: THE MOST THIS ADAPTER WILL EVER PUT IN AN ORDER BODY, whatever the caller
 #: asks. EQUAL to asset_engine/base.MAX_ORDER_LEVERAGE and pinned equal by
@@ -258,9 +294,14 @@ def _leverage(value, symbol: str, side: str) -> int:
 def _status_of(polled) -> tuple:
     """(status id, refusal words) off an orders:lookup payload.
 
-    `status` is read as an INT today (the suite's fixtures); the public
-    reference (unmeasured) shows it as an OBJECT {id, name, errorCode,
-    errorMessage}. Both are read, and anything else is 0 — PENDING, which
+    `status` is an OBJECT {id, name, errorCode} on the wire — MEASURED
+    2026-09-23: {"id": 3, "name": "Filled", "errorCode": 0}; an
+    `errorMessage` beside a refusal is the public reference's claim, still
+    unmeasured (no refusal has been provoked). The INT form is the suite's
+    older fixture and is still read. The wire's `name` is not promoted
+    over STATUS_NAMES: the only name measured agrees with the table, and a
+    differing one would be a shape nobody has seen. Anything else is 0 —
+    PENDING, which
     the engine books WORKING (loud, never CLOSED) — because this runs
     AFTER an accepted POST: a raise here lands in execute_entry as
     ORDER_ERROR with NO ROW for an order eToro may have filled, the worse
@@ -330,6 +371,12 @@ class EtoroTrader:
 
     def _headers(self, rid: Optional[str] = None) -> dict:
         return {"x-request-id": rid or self._rid()}
+
+    #: Read off the client by reconcile_asset.venue_lag_window (and through
+    #: it by pending_closes.retry_trade_close); the module constant above
+    #: carries the measurement. A client that declares no NUMBER here has no
+    #: window — a MagicMock's attribute is not a number.
+    PORTFOLIO_LAG_S = PORTFOLIO_LAG_S
 
     #: WHAT THE REAL ACCOUNT DOES WITH THE ENVIRONMENT SEGMENT, PER TAIL.
     #:
@@ -759,7 +806,17 @@ class EtoroTrader:
     def get_positions(self) -> list[dict]:
         """Open positions — Phase-33 reconciliation shape. Raises on
         transport errors so reconcile counts the broker unavailable rather
-        than assuming flat (the same rule as OANDA and IBKR)."""
+        than assuming flat (the same rule as OANDA and IBKR).
+
+        /portfolio LAGS (MEASURED 2026-09-23, `PORTFOLIO_LAG_S`): a filled
+        position is ABSENT here ~2 s after the fill and a closed one STILL
+        LISTED 3 s after the close, both settled by ~60 s, while the margin
+        cells (`margin_cells`) move within the same second. One read inside
+        that window is not a measurement of presence or absence; the
+        readers (reconcile_asset, pending_closes) hold off on it. The row
+        keys are positionID / instrumentID / orderID (capital ID, measured);
+        the camel spellings are read as a courtesy and have not been seen.
+        """
         out = []
         for p in self._open_positions():
             qty = float(p.get("units") or 0)
@@ -810,11 +867,14 @@ class EtoroTrader:
                 "unrealized_pnl": 0.0,
                 "currency": "",
             }
-            # THE VENUE'S OWN MULTIPLIER, when the row carries one. From the
-            # public reference (unmeasured): a /portfolio position has a
-            # `leverage` field. Absent on the wire -> absent here, never 1:
-            # /treasury/ prints the em dash for a row that did not say.
-            # `units` stay units at any leverage (believed; §4 D2b measures).
+            # THE VENUE'S OWN MULTIPLIER, when the row carries one. MEASURED
+            # 2026-09-23: the /portfolio row of the 1x order carried
+            # `leverage: 1`, `units: 1.0`, `amount: 84.8` (units × openRate
+            # at 1x). Absent on the wire -> absent here, never 1: /treasury/
+            # prints the em dash for a row that did not say. `units` stay
+            # units at any leverage (measured on the 2x ORDER: requestedUnits
+            # 1.0, openingData.units 1.0; the 2x /portfolio row itself was
+            # not captured — it closed before the lagging list showed it).
             lev = p.get("leverage")
             if lev is not None and not isinstance(lev, bool):
                 try:
@@ -846,27 +906,118 @@ class EtoroTrader:
         """
         return True
 
-    def _await_fill(self, reference_id: str, attempts: int = FILL_ATTEMPTS,
+    def _lookup_once(self, params: dict) -> "tuple[Optional[dict], int]":
+        """ONE GET of orders:lookup -> (payload, http status). The payload is
+        None when the GET could not be read (4xx/5xx, transport, non-JSON);
+        the status is 0 when nothing answered. The bounded loops below
+        decide what a None means across their attempts; nothing here does.
+
+        MEASURED 2026-09-23: `orderId=<int from the acceptance>` -> 200;
+        `referenceId=<our x-request-id>` -> 404 "No external operation was
+        found for referenceId ..." (eToro keeps no client reference: the v1
+        order read shows referenceID all zeros); `token=` -> 400. During a
+        close in flight the same lookup answered 500 three times (~6 s),
+        then 200 — a 500 is transient. Never raises.
+        """
+        r = None
+        try:
+            r = self._sess().get(self._v2_lookup(), params=params,
+                                 headers=self._headers(),
+                                 timeout=self.timeout)
+            r.raise_for_status()
+            return (r.json() or {}), int(getattr(r, "status_code", 0) or 0)
+        except Exception as e:  # noqa: BLE001
+            code = getattr(r, "status_code", 0)
+            log.warning("eToro orders:lookup %s failed (%s): %s",
+                        params, code, e)
+            return None, (code if isinstance(code, int) else 0)
+
+    def _await_fill(self, order_id: str, *, reference_id: str = "",
+                    attempts: int = FILL_ATTEMPTS,
                     delay: float = FILL_DELAY_S) -> Optional[dict]:
-        """Poll orders:lookup by the x-request-id until a terminal status
-        or attempts run out. Returns the last payload seen, or None."""
+        """Poll orders:lookup by the acceptance's orderId until a terminal
+        status or attempts run out. Returns the last payload READ, or None
+        when no attempt could be read at all — three states: a terminal
+        payload, a non-terminal one, nothing.
+
+        BY orderId (DEFECT 1 of the first demo orders, MEASURED
+        2026-09-23): the acceptance's INTEGER orderId is the only key eToro
+        answers 200 to; polling by the echoed referenceId answered 404 for
+        ever and read every filled order as PENDING/pollFailed.
+        `reference_id` is the documented fallback for an acceptance that
+        names no orderId — a shape nobody has seen — and today it means
+        404 -> None -> pollFailed: loud, never a fill.
+
+        A FAILED GET IS ONE FAILED GET. Until 2026-09-23 this loop returned
+        on the first exception, so one 404 (or one transient 500) ended the
+        poll and `pollFailed` meant "one lookup failed". It now spends the
+        attempt and goes on; None means EVERY attempt failed.
+        """
         import time
+        if order_id:
+            params = {"orderId": str(order_id)}
+        elif reference_id:
+            params = {"referenceId": str(reference_id)}
+        else:
+            return None
         last = None
         for _ in range(attempts):
             time.sleep(delay)
-            try:
-                r = self._sess().get(self._v2_lookup(),
-                                     params={"referenceId": reference_id},
-                                     headers=self._headers(),
-                                     timeout=self.timeout)
-                r.raise_for_status()
-                last = r.json() or {}
-            except Exception as e:  # noqa: BLE001
-                log.warning("eToro fill poll failed for %s: %s",
-                            reference_id, e)
-                return last
+            read, _code = self._lookup_once(params)
+            if read is None:
+                continue
+            last = read
             status, _ = _status_of(last)
             if status in STATUS_FILLED or status in STATUS_REFUSED:
+                return last
+        return last
+
+    def position_state(self, order_id: str, *, until: Optional[str] = None,
+                       attempts: int = CLOSE_PROOF_ATTEMPTS,
+                       delay: float = CLOSE_PROOF_DELAY_S) -> Optional[str]:
+        """"open" / "closed" — the venue's own word on the position an OPEN
+        order created, read by that order's id — or None: could not ask.
+
+        THE CLOSE PROOF (MEASURED 2026-09-23). The close order this venue
+        answers with (orderType 19) is findable on no read path:
+        orders:lookup 404 "Order category for <id> not found", the v1 order
+        read 404. What changes is the OPEN order's
+        positionExecutions[0].state: "open" after the fill, "closed" after
+        the close — reached ~8 s after the close POST, behind three 500s
+        (measured on the 2x close; the 1x close's lookup timing was not
+        printed). The lookup's own `status` stays {id 3, Filled} across the
+        close and is NOT the proof; `remainingUnits` stays at the opened
+        units and is not a residual; no closing price rides anywhere here.
+
+        `until="closed"` keeps polling, `delay` apart (sleeping BEFORE each
+        read, so a caller straight after the close POST does not spend its
+        first read on a body that cannot have moved), until that word or
+        the budget; the last word READ is returned then — "open" is a
+        reading, not a proof. `until=None` returns the first word read; the
+        drain calls it with attempts=1, delay=0.0 — one GET, no sleep.
+        THREE STATES: a word is a reading; None is could-not-ask — every
+        read failed, or no body carried an execution (a 404 by orderId for
+        an order that exists is UNMEASURED and reads as could-not-ask,
+        never as closed).
+        """
+        import time
+        oid = str(order_id or "")
+        if not oid:
+            return None
+        last = None
+        for _ in range(attempts):
+            if delay:
+                time.sleep(delay)
+            read, _code = self._lookup_once({"orderId": oid})
+            if read is None:
+                continue
+            execs = read.get("positionExecutions") or []
+            first = execs[0] if execs and isinstance(execs[0], dict) else {}
+            state = str(first.get("state") or "").strip().lower()
+            if not state:
+                continue
+            last = state
+            if until is None or state == until:
                 return last
         return last
 
@@ -889,10 +1040,24 @@ class EtoroTrader:
         a None stop_loss raises too (public reference, unmeasured: eToro
         requires a stopLossRate there). Units are untouched by it: leverage
         changes the margin eToro locks for the same units and nothing else
-        this adapter sends. No settlementType is sent: what eToro assigns
-        when the body omits it is unmeasured (§4 D2b reads it back).
+        this adapter sends. No settlementType is sent; eToro assigned
+        `asset.settlementType "CFD"` at 1x and at 2x (measured 2026-09-23,
+        GLDM — an ETF, which eToro lists with no real settlement).
         `venueStopLoss`/`venueTakeProfit` echo what the lookup says the
-        venue holds; `pollFailed` says the lookup itself could not be read.
+        venue holds; `pollFailed` says NO lookup could be read (every GET
+        failed), never that one of them did.
+
+        THE RESULT, on the wire measured 2026-09-23: the acceptance is
+        {token, orderId (int), referenceId}; `orderId` rides out as a
+        string (the row column). FILLED carries executedQty
+        (openingData.units), avgPrice (openingData.avgPrice), positionId
+        (positionExecutions[0].positionId, camel), venueStopLoss /
+        venueTakeProfit, and protectedOnFill + protectiveTradeId when both
+        legs were sent; raw.lookup is the whole lookup body (state, margin,
+        fees, markup, marketSpread ride there for the record — no consumer
+        reads them, so they are not promoted to keys). PENDING with
+        `working` is a real non-filled status, or every lookup failing —
+        then `pollFailed` too.
         """
         rid = self._rid(kwargs.get("client_order_id"))
         # THE MULTIPLIER, validated before anything else is built: 1 when
@@ -953,12 +1118,18 @@ class EtoroTrader:
         order_id = str(accepted.get("orderId") or "")
         reference = str(accepted.get("referenceId") or rid)
 
-        polled = self._await_fill(reference)
-        # THREE STATES for the lookup: a payload (read), None (no poll could
-        # be read — a transport error or the shared 20/60 s quota, public
-        # reference, unmeasured). `poll_failed` travels out as `pollFailed`
-        # so a WORKING row can say "the lookup failed" instead of "eToro is
-        # holding it"; {} is never invented as a reading.
+        # BY THE ORDER ID, never by the reference (MEASURED 2026-09-23, see
+        # _await_fill): `order_id` is the handle, and it is what both lanes
+        # persist as AssetBotTrade.broker_order_id — the same id proves the
+        # close later (position_state). The reference rides only as the
+        # documented fallback for an acceptance with no orderId.
+        polled = self._await_fill(order_id, reference_id=reference)
+        # THREE STATES for the lookup: a payload (read), None (NO poll could
+        # be read — every GET failed: transport, 5xx, or the shared 20/60 s
+        # quota, public reference, unmeasured). `poll_failed` travels out as
+        # `pollFailed` so a WORKING row can say "the lookup failed" instead
+        # of "eToro is holding it"; {} is never invented as a reading, and
+        # one failed GET beside a later 200 is not a failed poll.
         poll_failed = polled is None
         polled = polled or {}
         status_id, refusal = _status_of(polled)
@@ -999,9 +1170,11 @@ class EtoroTrader:
             # Read by base.py into the ORDER_REJECTED detail (consumer key).
             out["refusal"] = refusal
         position_id = first.get("positionId") or first.get("positionID")
-        # WHAT THE VENUE HOLDS, when the lookup says: the fixture and the
-        # public reference (unmeasured) put stopLossRate/takeProfitRate on
-        # positionExecutions[]. Absent on the wire -> absent here. base.py
+        # WHAT THE VENUE HOLDS, when the lookup says. MEASURED 2026-09-23:
+        # positionExecutions[0].stopLossRate 82.22 / takeProfitRate 87.3,
+        # exactly the levels SENT (no rewrite at 1x or 2x), and a PATCH of
+        # the stop to 83.06 echoed there on the next lookup. Absent on the
+        # wire -> absent here. base.py
         # compares them with what was SENT; eToro's 0.0001 "no stop"
         # sentinel (public reference, unmeasured) then reads as a rewrite,
         # which is the truth: the venue holds no stop.
@@ -1046,13 +1219,22 @@ class EtoroTrader:
             # a bracket the platform never saw.
             #
             # WHAT THIS ADAPTER CANNOT DO NEXT, said here so nobody reads
-            # "working" as "watched": it has no order_status — orders:lookup
-            # is keyed by the x-request-id, which neither lane persists —
-            # and no cancel_order ("WHAT IT REFUSES TO CLAIM" above). A
-            # WORKING eToro row is therefore polled by nobody and withdrawn
-            # by nobody: it stays WORKING, alerts daily while its tick runs,
-            # and is resolved at eToro by hand. Loud and never CLOSED is the
-            # better of the two wrongs.
+            # "working" as "watched": it has no order_status and no
+            # cancel_order ("WHAT IT REFUSES TO CLAIM" above). NOT because
+            # the handle is lost — orders:lookup is keyed by orderId
+            # (measured 2026-09-23) and both lanes persist it as
+            # AssetBotTrade.broker_order_id — but because the one WORKING
+            # shape a poller would have to read (WaitingForMarket, status
+            # 11, off hours) has met no key, and the DELETE the public
+            # reference documents (deploy/ETORO_DEPARTURE.md §4 D2b-i) has
+            # met none either. Since the fix in _await_fill this branch is
+            # reached only by a real non-filled status or by EVERY lookup
+            # failing. A WORKING eToro row is therefore polled by nobody
+            # and withdrawn by nobody: it stays WORKING, alerts daily while
+            # its tick runs, and is resolved at eToro by hand. Loud and
+            # never CLOSED is the better of the two wrongs. (D3b:
+            # order_status off the same lookup, once status 11 is written
+            # down.)
             out["working"] = True
         return out
 
@@ -1076,7 +1258,11 @@ class EtoroTrader:
     def modify_protective(self, trade_id: str, new_price: float) -> dict:
         """Move the stop on position `trade_id`. One field, so the target is
         untouched — a mover that sent both would be the bug it exists to
-        prevent. 202 means accepted for asynchronous execution."""
+        prevent. 200 or 202 both mean accepted; which one answered the
+        first PATCH ever (2026-09-23, demo, position 3603285267, 82.22 ->
+        83.06) was not recorded — the adapter answered ok and the next
+        lookup showed stopLossRate 83.06 on positionExecutions[0]. TIGHTER
+        only; a widening PATCH has not been sent."""
         res = self._patch_position(str(trade_id),
                                    {"stopLossRate": float(new_price)},
                                    "modify_protective")
@@ -1111,11 +1297,43 @@ class EtoroTrader:
         return True
 
     def close_position(self, position_id: str, symbol: str,
-                       units: Optional[float] = None) -> dict:
-        """Submit a market close. Asynchronous: 200 means submitted. The
-        closing order id is returned so a caller can confirm later; this
-        client does not yet read that confirmation (see the module
-        docstring on `fills`)."""
+                       units: Optional[float] = None, *,
+                       open_order_id: str = "") -> dict:
+        """Submit a market close and, given the OPEN order's id, PROVE it.
+
+        MEASURED 2026-09-23 (demo): the POST answers {orderForClose:
+        {positionID, instrumentID, orderID (orderType 19), statusID 1, CID,
+        openDateTime, lastUpdate}, token} — never an executedQty, never a
+        price — and that orderID is findable nowhere afterwards, so it rides
+        out as a RECORD (`orderId`), never a handle. The proof is
+        `position_state(open_order_id, until="closed")`: the OPEN order's
+        execution state, ~8 s behind three transient 500s (measured on the
+        2x close). venue_close hands the id in from the row's own
+        AssetBotTrade.broker_order_id.
+
+        THREE ANSWERS, in the vocabulary pending_closes.resolve_exit_fill
+        reads:
+          proven      status FILLED, executedQty = the units asked, NO
+                      avgPrice — the exit books at the engine's mark
+                      (exit_fill_source "mark"); positionState "closed".
+                      With no `units` asked (the D2 shell) executedQty is
+                      left absent and the caller's size stands, flagged
+                      close_qty_assumed by resolve_exit_fill.
+          unproven    status PENDING, executedQty "0.0", positionState
+                      "open" / None -> the row books CLOSE_PENDING (the
+                      bot lane through _book_partial_close, the kill switch
+                      through its own incomplete branch) and the drain
+                      re-proves by the same open id. NEVER an absent
+                      executedQty here: resolve_exit_fill assumes the whole
+                      size for that, which is how an acceptance booked
+                      CLOSED on the first demo night.
+          no open id  (a row with no broker_order_id): status PENDING,
+                      executedQty "0.0", no lookup asked; the drain proves
+                      it off the book past PORTFOLIO_LAG_S.
+        UNMEASURED and said so: `UnitsToDeduct` (every engine caller passes
+        units; the measured close sent InstrumentID alone), a close below
+        the position, a second close on an already-closed positionId.
+        """
         body = {"InstrumentID": self.instrument_id(symbol)}
         if units:
             body["UnitsToDeduct"] = float(units)
@@ -1125,7 +1343,20 @@ class EtoroTrader:
         r.raise_for_status()
         data = r.json() or {}
         ofc = data.get("orderForClose") or {}
-        return {"orderId": str(ofc.get("orderID") or ofc.get("orderId")
-                               or ""),
-                "positionId": str(position_id), "status": "PENDING",
-                "raw": data}
+        out = {"orderId": str(ofc.get("orderID") or ofc.get("orderId")
+                              or ""),
+               "positionId": str(position_id), "status": "PENDING",
+               "executedQty": "0.0", "raw": data}
+        oid = str(open_order_id or "")
+        if not oid:
+            return out
+        out["openOrderId"] = oid
+        out["positionState"] = self.position_state(oid, until="closed")
+        if out["positionState"] != "closed":
+            return out
+        out["status"] = "FILLED"
+        if units:
+            out["executedQty"] = str(float(units))
+        else:
+            out.pop("executedQty")
+        return out

@@ -1,11 +1,15 @@
-"""EtoroTrader against a fake wire (2026-09-17).
+"""EtoroTrader against a fake wire (2026-09-17; measured shapes 2026-09-23).
 
-No real key has met this adapter yet. These tests therefore pin the three
-facts about eToro's API that shape it — read from the public reference and
-encoded here so a live key finds behaviour, not guesses:
+A real key met this adapter on the DEMO segment on 2026-09-23 (deploy/
+ETORO_DEPARTURE.md §4 D2, D2b-ii): TheMeasuredWireTests below pins every
+shape that came back, byte for byte, and the three DEFECTS the first orders
+exposed. The older classes pin the three facts about eToro's API that shape
+the adapter, read from the public reference:
 
   1. ORDERS ARE ASYNCHRONOUS. A 200 on POST is an acceptance. The fill is
-     read from orders:lookup, keyed by the x-request-id this client sent.
+     read from orders:lookup, keyed by the INTEGER orderId the acceptance
+     carries — NOT by the x-request-id this client sends: eToro echoes it
+     as referenceId and forgets it (DEFECTS 1/2, measured: 404 for ever).
      An order still pending when polling stops is PENDING with no quantity —
      never a fill. OANDA's own history is the warning: "a completely
      unfilled order was booked as a complete fill on both sides".
@@ -92,6 +96,142 @@ def _lookup(status, *, units=10.0, avg=190.5, position_id=555):
                 "remainingUnits": units, "stopLossRate": 180.0,
                 "takeProfitRate": 210.0,
                 "openingData": {"avgPrice": avg, "units": units}}]}
+
+
+# ── MEASURED 2026-09-23, demo segment, the operator's pair (D2: 1 GLDM at
+# 1x, order 383454450 → position 3603281458, closed by order 383413813;
+# D2b-ii: the same at 2x, order 383458277; position 3603285267 is the PATCH
+# target, paired by timing, never asserted). Every literal below was printed
+# by the real adapter (deploy/ETORO_DEPARTURE.md §4) unless a comment beside
+# it says "not captured". ──────────────────────────────────────────────────
+ACCEPTED = {"token": "04037292-2236-4ba7-b164-3dce815b15e5",
+            "orderId": 383454450,
+            "referenceId": "c03112d0-7e9c-4186-abb9-39027a79aa91"}
+SEARCH_GLDM = ("GET", "/market-data/search", 200,
+               [{"instrumentId": 3190, "internalSymbolFull": "GLDM"}])
+POST_GLDM = ("POST", "/execution/demo/orders", 200, ACCEPTED)
+LOOKUP_404_BY_REFERENCE = (404, {"message": "No external operation was found "
+                                 "for referenceId c03112d0-7e9c-4186-abb9-"
+                                 "39027a79aa91"})
+
+
+def _measured_lookup(state="open", *, order_id=383454450, leverage=1,
+                     units=1.0, avg=84.8, margin=84.8, exposure=84.8,
+                     margin_asset=84.8, exposure_asset=84.8,
+                     requested=84.8, frozen=84.93, markup=0.2, stop=82.22,
+                     target=87.3, position_id=3603281458):
+    """The 200 body of orders:lookup?orderId= (D2, 1x). state "open" right
+    after the fill; after the close it is byte-identical but for state
+    "closed" — remainingUnits STAYS 1.0. The 2x order differed in exactly
+    the printed delta list: leverage 2, requested 42.4, frozen 42.53,
+    margin 42.39, exposure 84.79, avg 84.79, markup 0.01.
+    marginAssetCurrency / initialExposureAssetCurrency at 2x were not in
+    the printed delta list and are not varied here (the 2x fixture leaves
+    them at the 1x literal; no test asserts on either). `units` is 1.0 on
+    the wire; the engine test sets it to the candidate's size."""
+    return {
+        "accountId": 15153738, "gcid": 13883661, "portfolioId": 0,
+        "orderId": order_id, "action": "open", "transaction": "buy",
+        "type": "mkt", "etoroOrderTypeId": 18,
+        "status": {"id": 3, "name": "Filled", "errorCode": 0},
+        "asset": {"symbol": "GLDM", "instrumentId": 3190, "currency": "USD",
+                  "settlementType": "CFD", "leverage": leverage,
+                  "side": "long"},
+        "orderCurrency": "usd", "requestedAmount": requested,
+        "requestedUnits": units, "requestedContracts": units,
+        "frozenAmount": frozen, "openStopLossRate": stop,
+        "openTakeProfitRate": target, "stopLossType": "fixed",
+        "totalCosts": 0.13, "positionsToClose": [],
+        "positionExecutions": [{
+            "positionId": position_id, "state": state,
+            "investedAmountCurrency": 1,
+            "initialExposureAccountCurrency": exposure,
+            "initialExposureAssetCurrency": exposure_asset, "addedFunds": 0.0,
+            "marginAccountCurrency": margin, "marginAssetCurrency": margin_asset,
+            "remainingUnits": units, "remainingContracts": units,
+            "stopLossRate": stop, "takeProfitRate": target,
+            "openingData": {
+                "openTime": "2026-09-23T14:06:31.263Z", "orderId": order_id,
+                "executionTime": "2026-09-23T14:06:31.463Z",
+                "units": units, "contracts": units, "avgPrice": avg,
+                "avgConversionRate": 1.0, "marketSpread": 0.01,
+                "markup": markup, "priceId": 0, "fees": 0.13,
+                "taxes": 0.0}}],
+        "requestTime": "2026-09-23T14:06:31.263Z",
+        "lastUpdate": "2026-09-23T14:06:31.51Z",
+        "openActionType": "customer", "requestType": "byUnits",
+    }
+
+
+PORTFOLIO_ROW = {  # /portfolio -> clientPortfolio.positions[0], capital ID
+    "positionID": 3603281458, "CID": 15153738,
+    "openDateTime": "2026-09-23T14:06:31.463Z", "openRate": 84.8,
+    "instrumentID": 3190, "isBuy": True, "takeProfitRate": 87.3,
+    "stopLossRate": 82.22, "mirrorID": 0, "parentPositionID": 0,
+    "amount": 84.8, "leverage": 1, "orderID": 383454450, "orderType": 18,
+    "units": 1.0, "totalFees": 0.0, "initialAmountInDollars": 84.8,
+    "isTslEnabled": False, "stopLossVersion": 1, "isSettled": False,
+    "redeemStatusID": 0, "initialUnits": 1.0, "isPartiallyAltered": False,
+    "unitsBaseValueDollars": 84.8, "isDiscounted": False,
+    "openPositionActionType": 0, "settlementTypeID": 0, "isDetached": False,
+    "openConversionRate": 1.0, "pnlVersion": 0, "totalExternalFees": 0.13,
+    "totalExternalTaxes": 0.0, "isNoTakeProfit": False,
+    "isNoStopLoss": False, "lotCount": 1.0}
+
+CLOSE_RESPONSE = {  # POST market-close-orders/positions/<positionID>
+    "orderForClose": {"positionID": 3603281458, "instrumentID": 3190,
+                      "orderID": 383413813, "orderType": 19, "statusID": 1,
+                      "CID": 15153738,
+                      "openDateTime": "2026-09-23T14:08:12.8681106Z",
+                      "lastUpdate": "<not captured>"},
+    "token": "80c526cc-<not captured>"}
+# lastUpdate and token were printed truncated (measured doc §7): placeholders,
+# never asserted.
+
+
+def _totals(value, cash, used, frozen=0.0):
+    """aggregate-portfolio at one of the five measured moments."""
+    return {"accountCurrency": "USD",
+            "accountTotals": {"accountTotalValue": value,
+                              "accountAvailableCash": cash,
+                              "accountTotalUsedMargin": used,
+                              "accountFrozenCash": frozen}}
+
+
+MOMENTS = {  # (accountTotalValue, accountAvailableCash, accountTotalUsedMargin)
+    "before D2": (332449.10, 332449.10, 0.0),
+    "after D2 fill (1x)": (332448.94, 332364.17, 84.8),
+    "after D2 close": (332448.87, 332448.87, 0.0),
+    "after D2b-ii fill (2x)": (332448.71, 332406.35, 42.39),
+    "after D2b-ii close": (332448.59, 332448.59, 0.0),
+}
+
+
+def _lookup_router(fake, *, by_order, by_reference=LOOKUP_404_BY_REFERENCE,
+                   by_token=(400, {})):
+    """Route orders:lookup by its PARAMS, which _FakeSession cannot (it
+    matches the URL substring only, and both polls share it). `by_order`
+    is one (status, payload) or a list consumed in order — the last one
+    repeats — so the measured 500, 500, 500, 200 sequence of a close can
+    be played back."""
+    seq = list(by_order) if isinstance(by_order, list) else [by_order]
+
+    def hit(method, url, **k):
+        fake.calls.append((method, url, k))
+        if "orders:lookup" in url:
+            p = k.get("params") or {}
+            if "orderId" in p:
+                return _Resp(*(seq.pop(0) if len(seq) > 1 else seq[0]))
+            if "token" in p:
+                return _Resp(*by_token)
+            return _Resp(*by_reference)
+        for m, sub, status, payload in fake.routes:
+            if m == method and sub in url:
+                return _Resp(status, payload)
+        return _Resp(*fake.default)
+
+    fake._hit = hit
+    return fake
 
 
 class EveryCallCarriesTheHeadersTests(SimpleTestCase):
@@ -399,9 +539,11 @@ class AnAcceptanceIsNotAFillTests(SimpleTestCase):
         # AnUnprotectedOrderIsNeverSentSilentlyTests below), nothing else.
         self.assertEqual(body["leverage"], 1)
         lookup = [c for c in fake.calls if "orders:lookup" in c[1]][0]
-        self.assertEqual(lookup[2]["params"], {"referenceId": "ref-1"},
-                         "the fill was not looked up by the reference the "
-                         "acceptance echoed back")
+        self.assertEqual(lookup[2]["params"], {"orderId": "777"},
+                         "the fill must be looked up by the orderId the "
+                         "acceptance carries — a lookup by the echoed "
+                         "referenceId answers 404 for ever (measured "
+                         "2026-09-23)")
 
     def test_sell_is_sell_short(self):
         out, fake = self._order([_lookup(3)], side="SELL")
@@ -451,8 +593,12 @@ class AnAcceptanceIsNotAFillTests(SimpleTestCase):
 
     def test_the_tier_it_cannot_fill_stays_absent(self):
         """`working` is a report; order_status/cancel_order would be
-        claims. They stay absent until orders:lookup has met a real key
-        under an id this platform persists."""
+        claims. orders:lookup HAS met a real key under the id both lanes
+        persist (broker_order_id, 2026-09-23); they stay absent because the
+        one WORKING shape a poller must read (WaitingForMarket, status 11)
+        has not, and the DELETE the public reference documents
+        (deploy/ETORO_DEPARTURE.md §4 D2b-i,
+        /api/v3/trading/execution/orders/<id>) has met no key (D3b)."""
         self.assertFalse(hasattr(EtoroTrader, "order_status"))
         self.assertFalse(hasattr(EtoroTrader, "cancel_order"))
 
@@ -922,3 +1068,418 @@ class AnUnprotectedOrderIsNeverSentSilentlyTests(SimpleTestCase):
         self.assertIn("except Exception as e:", after)
         self.assertIn('getattr(e, "in_doubt", False)', after)
         self.assertIn("skips.ORDER_ERROR", after)
+
+
+# ── the wire as it measured on 2026-09-23 ──────────────────────────────────
+
+def _polls(fake):
+    return [c for c in fake.calls if c[0] == "GET" and "orders:lookup" in c[1]]
+
+
+class TheMeasuredWireTests(SimpleTestCase):
+    """Every shape the first demo orders printed, pinned byte for byte with
+    the real EtoroTrader over a patched session. The three DEFECTS they
+    exposed are the regression pins here: the fill poll by referenceId (404
+    for ever), the unfindable close order, the lagging /portfolio."""
+
+    def _t(self, by_order, routes=None, **router_kw):
+        t, fake = _client(list(routes if routes is not None
+                               else [SEARCH_GLDM, POST_GLDM]))
+        _lookup_router(fake, by_order=by_order, **router_kw)
+        return t, fake
+
+    def _order(self, t, **kw):
+        with mock.patch("time.sleep"):
+            return t.market_order("GLDM", "BUY", 1, stop_loss=82.22,
+                                  take_profit=87.3, **kw)
+
+    def _closer(self, by_order):
+        return self._t(by_order, routes=[
+            SEARCH_GLDM,
+            ("POST", "/market-close-orders/positions/3603281458", 200,
+             CLOSE_RESPONSE)])
+
+    def test_the_accepted_payload_is_token_int_orderid_and_the_echoed_reference(self):
+        t, fake = self._t((200, _measured_lookup()))
+        out = self._order(t)
+        self.assertEqual(out["orderId"], "383454450")
+        acc = out["raw"]["accepted"]
+        self.assertIs(type(acc["orderId"]), int)
+        self.assertEqual(acc["referenceId"],
+                         "c03112d0-7e9c-4186-abb9-39027a79aa91")
+        self.assertIn("token", acc)
+        polls = _polls(fake)
+        self.assertEqual(len(polls), 1, "a 200 ms fill is read on the first poll")
+        self.assertEqual(polls[0][2]["params"], {"orderId": "383454450"})
+
+    def test_the_fill_is_looked_up_by_orderid_never_by_the_reference_etoro_forgets(self):
+        """Under aa5cfb2 this exact wire read PENDING/working/pollFailed for a
+        filled order: the poll went by referenceId and eToro answered 404."""
+        t, fake = self._t((200, _measured_lookup()))
+        out = self._order(t)
+        self.assertEqual(out["status"], "FILLED")
+        self.assertNotIn("working", out)
+        self.assertNotIn("pollFailed", out)
+        for _m, _u, k in _polls(fake):
+            self.assertNotIn("referenceId", k.get("params") or {})
+
+    def test_reference_id_is_only_a_fallback_when_the_acceptance_names_no_orderid(self):
+        """An acceptance with no orderId is a shape nobody has seen; the
+        documented fallback then means 404 -> pollFailed, never a fill."""
+        from bot_program.engine.etoro_client import FILL_ATTEMPTS
+        t, fake = self._t((200, _measured_lookup()), routes=[
+            SEARCH_GLDM, ("POST", "/execution/demo/orders", 200,
+                          {"token": "t", "referenceId": "ref-x"})])
+        out = self._order(t)
+        self.assertEqual(out["status"], "PENDING")
+        self.assertTrue(out.get("working"))
+        self.assertTrue(out.get("pollFailed"))
+        polls = _polls(fake)
+        self.assertEqual(len(polls), FILL_ATTEMPTS)
+        for _m, _u, k in polls:
+            self.assertEqual(k["params"], {"referenceId": "ref-x"})
+
+    def test_the_token_is_never_used_as_a_lookup_key(self):
+        t, fake = self._t((200, _measured_lookup()))
+        self._order(t)
+        for _m, _u, k in _polls(fake):
+            self.assertNotIn("token", k.get("params") or {})
+
+    def test_a_measured_fill_is_read_off_position_executions(self):
+        body = _measured_lookup()
+        t, _ = self._t((200, body))
+        out = self._order(t)
+        self.assertEqual(out["executedQty"], "1.0")
+        self.assertEqual(out["avgPrice"], "84.8")
+        self.assertEqual(out["positionId"], "3603281458")
+        self.assertEqual(out["venueStopLoss"], 82.22)
+        self.assertEqual(out["venueTakeProfit"], 87.3)
+        self.assertTrue(out.get("protectedOnFill"))
+        self.assertEqual(out.get("protectiveTradeId"), "3603281458")
+        self.assertIs(out["raw"]["lookup"], body)
+        first = out["raw"]["lookup"]["positionExecutions"][0]
+        self.assertEqual(first["openingData"]["fees"], 0.13)
+        self.assertEqual(first["marginAccountCurrency"], 84.8)
+        self.assertEqual(out["raw"]["lookup"]["asset"]["settlementType"], "CFD")
+
+    def test_the_status_object_id_three_is_filled_with_no_words(self):
+        """The wire's `name` is not promoted over STATUS_NAMES: the one name
+        measured agrees with the table."""
+        from bot_program.engine.etoro_client import _status_of
+        self.assertEqual(_status_of(_measured_lookup()), (3, ""))
+        self.assertEqual(_status_of(_measured_lookup("closed")), (3, ""),
+                         "status is NOT the close proof")
+        t, _ = self._t((200, _measured_lookup()))
+        self.assertEqual(self._order(t)["raw"]["statusName"], "Filled")
+
+    def test_a_levered_fill_keeps_its_units_and_halves_the_margin(self):
+        body = _measured_lookup(order_id=383458277, leverage=2, avg=84.79,
+                                margin=42.39, exposure=84.79, requested=42.4,
+                                frozen=42.53, markup=0.01,
+                                position_id=3603285267)
+        t, fake = self._t((200, body), routes=[
+            SEARCH_GLDM, ("POST", "/execution/demo/orders", 200,
+                          {"token": "t", "orderId": 383458277,
+                           "referenceId": "r"})])
+        out = self._order(t, leverage=2)
+        posted = [c for c in fake.calls if c[0] == "POST"][0][2]["json"]
+        self.assertEqual(posted["leverage"], 2)
+        self.assertEqual(posted["units"], 1.0)
+        self.assertEqual(out["executedQty"], "1.0")
+        self.assertEqual(out["avgPrice"], "84.79")
+        self.assertEqual(out["venueStopLoss"], 82.22)
+        ex = body["positionExecutions"][0]
+        self.assertAlmostEqual(body["requestedAmount"],
+                               ex["initialExposureAccountCurrency"] / 2,
+                               places=1)
+        self.assertAlmostEqual(body["frozenAmount"],
+                               body["requestedAmount"] + ex["openingData"]["fees"],
+                               places=2)
+
+    def test_one_failed_poll_before_a_fill_is_not_pollfailed(self):
+        t, fake = self._t([(500, {}), (200, _measured_lookup())])
+        out = self._order(t)
+        self.assertEqual(out["status"], "FILLED")
+        self.assertNotIn("pollFailed", out)
+        self.assertEqual(len(_polls(fake)), 2)
+
+    def test_pollfailed_only_when_every_lookup_failed(self):
+        from bot_program.engine.etoro_client import FILL_ATTEMPTS
+        t, fake = self._t((500, {}))
+        out = self._order(t)
+        self.assertEqual(out["status"], "PENDING")
+        self.assertTrue(out.get("working"))
+        self.assertTrue(out.get("pollFailed"))
+        self.assertEqual(out["executedQty"], "0.0")
+        self.assertEqual(len(_polls(fake)), FILL_ATTEMPTS)
+        t, fake = self._t([(500, {}), (503, {}), (200, {"status": 1})])
+        out = self._order(t)
+        self.assertEqual(out["status"], "PENDING")
+        self.assertTrue(out.get("working"))
+        self.assertNotIn("pollFailed", out)
+
+    def test_pending_only_on_a_real_non_filled_status(self):
+        """The INT form of status 1 is the older fixture; id 1's object
+        spelling is UNMEASURED."""
+        t, _ = self._t((200, {"status": 1}))
+        out = self._order(t)
+        self.assertEqual(out["status"], "PENDING")
+        self.assertTrue(out.get("working"))
+        self.assertNotIn("pollFailed", out)
+
+    def test_every_lookup_refused_by_quota_is_pollfailed_never_a_fill(self):
+        from bot_program.engine.etoro_client import (CLOSE_PROOF_ATTEMPTS,
+                                                     FILL_ATTEMPTS)
+        t, fake = self._t((429, {}))
+        out = self._order(t)
+        self.assertEqual(out["status"], "PENDING")
+        self.assertTrue(out.get("pollFailed"))
+        self.assertLessEqual(len(_polls(fake)), FILL_ATTEMPTS)
+        self.assertLessEqual(FILL_ATTEMPTS + CLOSE_PROOF_ATTEMPTS, 20)
+
+    def test_the_close_proof_is_the_open_orders_execution_state_turning_closed(self):
+        t, fake = self._t((200, _measured_lookup("closed")))
+        with mock.patch("time.sleep"):
+            self.assertEqual(t.position_state("383454450", until="closed"),
+                             "closed")
+        polls = _polls(fake)
+        self.assertEqual(len(polls), 1)
+        self.assertEqual(polls[0][2]["params"], {"orderId": "383454450"})
+
+    def test_a_500_during_the_close_is_transient_and_the_proof_still_arrives(self):
+        """The 500 x3 then 200 sequence and the ~8 s were measured on the 2x
+        close (order 383458277)."""
+        from bot_program.engine.etoro_client import (CLOSE_PROOF_ATTEMPTS,
+                                                     CLOSE_PROOF_DELAY_S)
+        t, fake = self._t([(500, {}), (500, {}), (500, {}),
+                           (200, _measured_lookup("closed"))])
+        with mock.patch("time.sleep") as sleep:
+            self.assertEqual(t.position_state("383454450", until="closed"),
+                             "closed")
+        self.assertEqual(len(_polls(fake)), 4)
+        self.assertEqual(sleep.call_count, 4)
+        self.assertGreaterEqual(CLOSE_PROOF_ATTEMPTS * CLOSE_PROOF_DELAY_S, 8)
+
+    def test_an_all_500_proof_is_none_never_closed(self):
+        from bot_program.engine.etoro_client import CLOSE_PROOF_ATTEMPTS
+        t, fake = self._t((500, {}))
+        with mock.patch("time.sleep"):
+            self.assertIsNone(t.position_state("383454450", until="closed"))
+        self.assertEqual(len(_polls(fake)), CLOSE_PROOF_ATTEMPTS)
+        t, _ = self._t((404, {"message": "Order category for 383454450 not found"}))
+        with mock.patch("time.sleep"):
+            self.assertIsNone(t.position_state("383454450", until="closed"))
+        t, _ = self._t((200, {"status": {"id": 3}, "positionExecutions": []}))
+        with mock.patch("time.sleep"):
+            self.assertIsNone(t.position_state("383454450", until="closed"))
+        self.assertIsNone(t.position_state(""))
+
+    def test_a_proof_that_reads_open_keeps_polling_then_answers_open(self):
+        from bot_program.engine.etoro_client import CLOSE_PROOF_ATTEMPTS
+        t, fake = self._t((200, _measured_lookup("open")))
+        with mock.patch("time.sleep"):
+            self.assertEqual(t.position_state("383454450", until="closed"),
+                             "open")
+        self.assertEqual(len(_polls(fake)), CLOSE_PROOF_ATTEMPTS)
+        t, fake = self._t((200, _measured_lookup("open")))
+        with mock.patch("time.sleep"):
+            self.assertEqual(t.position_state("383454450"), "open")
+        self.assertEqual(len(_polls(fake)), 1)
+        t, fake = self._t((200, _measured_lookup("open")))
+        with mock.patch("time.sleep") as sleep:
+            self.assertEqual(t.position_state("383454450", attempts=1,
+                                              delay=0.0), "open")
+        self.assertEqual(len(_polls(fake)), 1)
+        sleep.assert_not_called()
+
+    def test_a_proven_close_reports_the_units_and_no_price(self):
+        """`UnitsToDeduct` is UNMEASURED — the shell sent InstrumentID alone.
+        The 500 x3 sequence was measured on the 2x close and is played
+        against the 1x close response here: the proof reader is one code."""
+        t, fake = self._closer([(500, {}), (500, {}), (500, {}),
+                                (200, _measured_lookup("closed"))])
+        with mock.patch("time.sleep"):
+            out = t.close_position("3603281458", "GLDM", 1.0,
+                                   open_order_id="383454450")
+        self.assertEqual(out["status"], "FILLED")
+        self.assertEqual(out["executedQty"], "1.0")
+        self.assertNotIn("avgPrice", out)
+        self.assertEqual(out["orderId"], "383413813")
+        self.assertEqual(out["positionId"], "3603281458")
+        self.assertEqual(out["openOrderId"], "383454450")
+        self.assertEqual(out["positionState"], "closed")
+        self.assertIs(out["raw"], CLOSE_RESPONSE)
+        post = [c for c in fake.calls if c[0] == "POST"][0]
+        self.assertIn("/api/v1/trading/execution/demo/market-close-orders/"
+                      "positions/3603281458", post[1])
+        self.assertEqual(post[2]["json"], {"InstrumentID": 3190,
+                                           "UnitsToDeduct": 1.0})
+
+    def test_a_close_the_venue_has_not_proven_is_pending_with_nothing_filled(self):
+        t, _ = self._closer((500, {}))
+        with mock.patch("time.sleep"):
+            out = t.close_position("3603281458", "GLDM", 1.0,
+                                   open_order_id="383454450")
+        self.assertEqual(out["status"], "PENDING")
+        self.assertEqual(out["executedQty"], "0.0")
+        self.assertIsNone(out["positionState"])
+        self.assertNotIn("avgPrice", out)
+        t, _ = self._closer((200, _measured_lookup("open")))
+        with mock.patch("time.sleep"):
+            out = t.close_position("3603281458", "GLDM", 1.0,
+                                   open_order_id="383454450")
+        self.assertEqual(out["status"], "PENDING")
+        self.assertEqual(out["executedQty"], "0.0")
+        self.assertEqual(out["positionState"], "open")
+
+    def test_a_close_without_the_open_order_id_is_pending_and_asks_nothing(self):
+        t, fake = self._closer((200, _measured_lookup("closed")))
+        out = t.close_position("3603281458", "GLDM")
+        self.assertEqual(out["status"], "PENDING")
+        self.assertEqual(out["executedQty"], "0.0")
+        self.assertNotIn("positionState", out)
+        self.assertEqual(_polls(fake), [])
+        post = [c for c in fake.calls if c[0] == "POST"][0]
+        self.assertEqual(post[2]["json"], {"InstrumentID": 3190})
+
+    def test_the_close_order_id_is_never_used_as_a_handle(self):
+        import inspect
+        from bot_program import pending_closes
+        t, fake = self._closer((200, _measured_lookup("closed")))
+        with mock.patch("time.sleep"):
+            t.close_position("3603281458", "GLDM", 1.0,
+                             open_order_id="383454450")
+        for _m, _u, k in _polls(fake):
+            self.assertEqual(k["params"], {"orderId": "383454450"})
+        src = inspect.getsource(pending_closes.venue_position_state)
+        self.assertIn("broker_order_id", src)
+        self.assertNotIn("CLOSE_WORKING_ORDER_ID_KEY", src)
+
+    def test_the_portfolio_row_is_nested_and_spelt_with_capital_id(self):
+        t, _ = _client([SEARCH_GLDM,
+                        ("GET", "/info/demo/portfolio", 200,
+                         {"clientPortfolio": {"positions": [PORTFOLIO_ROW]}})])
+        t.instrument_id("GLDM")
+        self.assertEqual(t.get_positions(),
+                         [{"symbol": "GLDM", "qty": 1.0, "side": "BUY",
+                           "position_id": "3603281458"}])
+        rows = t.broker_portfolio()
+        self.assertEqual(rows[0]["leverage"], 1)
+        self.assertEqual(rows[0]["symbol"], "GLDM")
+        self.assertNotIn("positionId", PORTFOLIO_ROW)
+
+    def test_the_portfolio_lag_is_a_named_constant_the_readers_read(self):
+        from pathlib import Path
+        from django.conf import settings
+        from bot_program.engine.etoro_client import PORTFOLIO_LAG_S
+        self.assertEqual(PORTFOLIO_LAG_S, 60)
+        self.assertEqual(EtoroTrader.PORTFOLIO_LAG_S, 60)
+        t, _ = _client([])
+        self.assertEqual(t.PORTFOLIO_LAG_S, 60)
+        base = Path(settings.BASE_DIR) / "bot_program"
+        ra = (base / "reconcile_asset.py").read_text(encoding="utf-8")
+        self.assertIn('getattr(client, "PORTFOLIO_LAG_S", 0)', ra)
+        self.assertIn("isinstance(lag, (int, float))", ra)
+        pc = (base / "pending_closes.py").read_text(encoding="utf-8")
+        self.assertIn("venue_lag_window(trade, client)", pc)
+
+    def test_the_margin_cells_move_with_the_fill_and_the_close_in_the_same_second(self):
+        def cells(moment):
+            v, c, u = MOMENTS[moment]
+            t, _ = _client([("GET", "/aggregate-portfolio", 200,
+                             _totals(v, c, u))])
+            return t.margin_cells(), t.net_liquidation()
+        m, nl = cells("after D2 fill (1x)")
+        self.assertEqual(m, {"available_cash": 332364.17, "used_margin": 84.8,
+                             "currency": "USD"})
+        self.assertEqual(nl, (332448.94, "USD"))
+        self.assertEqual(cells("after D2 close")[0]["used_margin"], 0.0)
+        self.assertEqual(cells("after D2b-ii fill (2x)")[0]["used_margin"],
+                         42.39)
+        self.assertEqual(cells("after D2 fill (1x)")[0]["used_margin"],
+                         _measured_lookup()["positionExecutions"][0]
+                         ["marginAccountCurrency"])
+        cash = {k: v[1] for k, v in MOMENTS.items()}
+        self.assertAlmostEqual(cash["before D2"] - cash["after D2 fill (1x)"],
+                               84.8 + 0.13, places=2)
+        self.assertAlmostEqual(cash["after D2 close"]
+                               - cash["after D2b-ii fill (2x)"],
+                               42.39 + 0.13, places=2)
+
+    def test_a_tighter_stop_patch_echoes_in_the_open_orders_lookup(self):
+        t, fake = _client([SEARCH_GLDM,
+                           ("PATCH", "/positions/3603285267", 200, {})])
+        self.assertEqual(t.modify_protective("3603285267", 83.06),
+                         {"ok": True, "reason": "", "price": 83.06})
+        patched = [c for c in fake.calls if c[0] == "PATCH"][0]
+        self.assertIn("/api/v2/trading/demo/positions/3603285267", patched[1])
+        self.assertEqual(patched[2]["json"], {"stopLossRate": 83.06})
+        _lookup_router(fake, by_order=(200, _measured_lookup(
+            order_id=383458277, stop=83.06, position_id=3603285267)))
+        body, code = t._lookup_once({"orderId": "383458277"})
+        self.assertEqual(code, 200)
+        self.assertEqual(body["positionExecutions"][0]["stopLossRate"], 83.06)
+        self.assertEqual(body["positionExecutions"][0]["takeProfitRate"], 87.3)
+
+
+class ConsumerKeyTests(SimpleTestCase):
+    """The keys the adapter answers are the keys the engine reads — read out
+    of the consumers themselves (the tests/test_saxo_client.py rule)."""
+
+    def test_the_result_keys_are_the_ones_base_reads(self):
+        import inspect
+        from pathlib import Path
+        from django.conf import settings
+        from bot_program.asset_engine.base import AssetBot
+        entry = inspect.getsource(AssetBot.execute_entry)
+        for key in ('"orderId"', '"status"', '"executedQty"', '"avgPrice"',
+                    '"refusal"', '"venueStopLoss"', '"working"',
+                    '"pollFailed"', '"protectedOnFill"',
+                    '"protectiveTradeId"'):
+            self.assertIn(key, entry, key)
+        stamps = inspect.getsource(AssetBot.venue_stamps)
+        self.assertIn('"positionId"', stamps)
+        self.assertIn('"broker_position_id"', stamps)
+        manual = (Path(settings.BASE_DIR) / "bot_program"
+                  / "manual_trade.py").read_text(encoding="utf-8")
+        self.assertIn("broker_order_id=", manual)
+        self.assertIn('"protectiveTradeId"', manual)
+        # D3b, pinned as a gap: the hand lane does not stamp the carrier yet
+        self.assertNotIn("venue_stamps(", manual)
+
+    def test_the_close_path_hands_the_open_order_id_and_reads_the_proof(self):
+        import inspect
+        from decimal import Decimal
+        from pathlib import Path
+        from django.conf import settings
+        from bot_program import pending_closes
+        base = Path(settings.BASE_DIR) / "bot_program"
+        vc = (base / "engine" / "venue_close.py").read_text(encoding="utf-8")
+        self.assertIn('"open_order_id" in params', vc)
+        self.assertIn('getattr(trade, "broker_order_id", "")', vc)
+        pc = (base / "pending_closes.py").read_text(encoding="utf-8")
+        for needle in ('getattr(client, "position_state", None)',
+                       "fn(oid, attempts=1, delay=0.0)",
+                       'proof == "closed"', "RETRY_VENUE_PROVED_CLOSED",
+                       "_note_close_blocked(", "venue_lag_window",
+                       'CLOSE_SENT_AT_KEY = "close_sent_at"',
+                       'proof == "open" and exposure["state"] == POS_FLAT'):
+            self.assertIn(needle, pc, needle)
+        self.assertIn("unattributable(trade, client,",
+                      inspect.getsource(pending_closes.venue_position_state))
+        ra = (base / "reconcile_asset.py").read_text(encoding="utf-8")
+        for needle in ("def venue_lag_window",
+                       'getattr(client, "PORTFOLIO_LAG_S", 0)',
+                       "SWEEP_CLOSED_GRACE_S", "closed_at__gte"):
+            self.assertIn(needle, ra, needle)
+        ec = (base / "engine" / "etoro_client.py").read_text(encoding="utf-8")
+        for needle in ("def position_state", "def _lookup_once",
+                       "PORTFOLIO_LAG_S = 60", 'open_order_id: str = ""',
+                       '{"orderId": oid}', 'out["executedQty"]',
+                       'out["openOrderId"]'):
+            self.assertIn(needle, ec, needle)
+        self.assertNotIn('params={"referenceId": reference_id}', ec)
+        self.assertEqual(pending_closes.broker_filled_qty(
+            {"status": "PENDING", "executedQty": "0.0"}), Decimal(0))
+        self.assertIsNone(pending_closes.broker_filled_qty(
+            {"status": "PENDING"}))
