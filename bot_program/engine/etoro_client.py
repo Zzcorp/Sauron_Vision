@@ -71,6 +71,11 @@ WHAT IT REFUSES TO CLAIM
     already has. It gets implemented the day the confirmation is verified.
   * `options`, `leverage` — leverage on eToro is per-order (`leverage` in
     the body, defaulting to 1); this client always sends 1.
+  * an UNPROTECTED order nobody asked for — a stop_loss or take_profit that
+    is present and not a price is refused before the POST (`_level`), never
+    dropped; and a rates payload without a `rates` list, or a rate row
+    spelled with none of bid/ask/lastExecution, raises rather than reading
+    as a quiet market (`ticker`), because neither shape has met a real key.
 
 Symbol convention: the platform's spelling is passed to /search as
 `internalSymbolFull`. No renaming table exists yet because none has been
@@ -80,6 +85,7 @@ rather than silently elsewhere, and that is where the table starts.
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -133,6 +139,59 @@ def _iso_to_ms(ts: str) -> int:
             tzinfo=timezone.utc).timestamp() * 1000)
     except ValueError:
         return 0
+
+
+def _level(value, name: str, symbol: str, side: str):
+    """A protective level for the order body, or None when the caller sent
+    none — and a RAISE, before any POST, for a level that is not a price.
+
+    `market_order` used to attach the legs under `if stop_loss:`, so a stop
+    the engine computed at 0.0 was dropped SILENTLY and the order went out
+    unprotected at leverage 1 — while a NEGATIVE stop, being truthy, was
+    sent as stopLossRate. The routes to such a stop, most open first: the
+    Take Trade lane, where an engine-derived BUY stop of 0 passes the
+    wrong-side check `stop < price < target` and the cost filter is
+    information, never a refusal (manual_trade); the bot lane's
+    sizing.apply_stop_floor, which widens a BUY stop to entry * (1 - f/cap)
+    AFTER the cost filter and before the order when an extras
+    max_notional_fraction sits below the risk fraction; and stop_and_target's
+    pct fallback with stop_loss_pct >= 100 (asset_models.AssetBotConfig, no
+    validator, no form clean), which the bot lane's cost filter refuses
+    unless extras use_cost_filter is False. None stays None: a caller that
+    sent no level asked for no leg, and that is its choice.
+
+    ValueError is what both callers already catch: asset_engine/base.py
+    execute_entry's `except Exception` books it as skips.ORDER_ERROR
+    ("live order failed: ..."); manual_trade returns it in the error dict.
+    The message LEADS with the fact because skips.record keeps 200
+    characters and why_no_trade prints 88.
+
+    KNOWN, 2026-09-23: the Take Trade lane wraps that dict in "The order
+    MAY have reached the broker" (manual_trade, the except after
+    client.market_order), which is false for this refusal — nothing was
+    sent. Until that except reads the refusal apart from a transport
+    error, the operator is told to check the broker for an order that
+    never left the box.
+    """
+    if value is None:
+        return None
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        level = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"eToro NOT SENT: {name} {value!r} is not a number "
+            f"({symbol} {side}). The caller asked for a broker-held leg; "
+            f"an order without it would be unprotected at leverage 1."
+        ) from None
+    if not math.isfinite(level) or level <= 0:
+        raise ValueError(
+            f"eToro NOT SENT: {name} {level!r} is not a price "
+            f"({symbol} {side}). The caller asked for a broker-held leg; "
+            f"an order without it would be unprotected at leverage 1."
+        )
+    return level
 
 
 class EtoroTrader:
@@ -318,20 +377,99 @@ class EtoroTrader:
             return False
 
     def ticker(self, symbol: str) -> dict:
+        """{lastPrice, symbol[, bid, ask]} — THREE STATES, never two.
+
+          raise           could not ask: a transport/HTTP error, an unknown
+                          spelling (instrument_id), a 200 whose body has no
+                          `rates` list, or a rate row spelled with none of
+                          bid/ask/lastExecution — shapes this adapter has
+                          never seen answer, which is unmeasured, not empty.
+          lastPrice "0"   the venue ANSWERED and had no rate: an empty list,
+                          or a row whose believed keys are all 0/None. The
+                          platform's own no-price sentinel — ibkr_client,
+                          oanda_client, paper_trader and public_feed return
+                          this literal and every reader tests `> 0` and
+                          skips. One spelling, "0", from both branches.
+          lastPrice > 0   a price, with bid/ask beside it.
+
+        The keys `rates` and bid/ask/lastExecution are a BELIEF from the
+        public reference; this GET was not among the reads measured on
+        2026-09-22. Record the measured keys here the day it meets a real
+        key, as _V1_INFO_REAL_SEG records its status codes.
+        """
         iid = self.instrument_id(symbol)
         r = self._sess().get(f"{BASE}/api/v1/market-data/instruments/rates",
                              params={"instrumentIds": str(iid)},
                              headers=self._headers(), timeout=self.timeout)
         r.raise_for_status()
-        rates = (r.json() or {}).get("rates") or []
-        if not rates:
-            return {"lastPrice": "0", "symbol": symbol}
-        p = rates[0]
+        data = r.json()
+        if not isinstance(data, dict) or "rates" not in data:
+            # THREE STATES. A 200 whose body does not carry `rates` is not
+            # "no rates" — it is a shape this adapter has never seen answer.
+            # The rates endpoint was NOT among the reads measured on
+            # 2026-09-22 (search, aggregate-portfolio, portfolio, real/pnl,
+            # the close's 405), so the key is still a belief; read as an
+            # empty list it would make every symbol a quiet market forever,
+            # which is how the nested totals block hid for four commands.
+            # Raise, naming what came back, as `_seg` does for an unattested
+            # tail and instrument_id for an unknown spelling. Every reader
+            # catches it: base.py's manage tick logs it and still runs the
+            # clock exit; propose_entry skips NO_PRICE "ticker failed".
+            keys = (sorted(data) if isinstance(data, dict)
+                    else type(data).__name__)
+            raise LookupError(
+                f"eToro rates payload for {symbol!r} (id {iid}) carries no "
+                f"'rates' key — got {keys}. The shape has not met a real "
+                f"key; measure the GET beside a known-200 control and fix "
+                f"the key before trusting a 0 here."
+            )
+        rates = data.get("rates")
+        if rates is not None and not isinstance(rates, list):
+            raise LookupError(
+                f"eToro rates payload for {symbol!r} (id {iid}) carries "
+                f"'rates' as {type(rates).__name__}, not a list — an "
+                f"unmeasured shape; measure the GET before trusting a 0 here."
+            )
+        rates = rates or []
+        p = rates[0] if rates else {}
+        if rates and (not isinstance(p, dict)
+                      or not ({"bid", "ask", "lastExecution"} & set(p))):
+            # THE SAME RULE ONE LEVEL DOWN. The per-rate keys are as
+            # unmeasured as the top-level one: a row spelled any other way
+            # used to read `.get(...) or 0` as a quiet market with no line
+            # at all — the failure the raise above exists to end.
+            row = sorted(p) if isinstance(p, dict) else type(p).__name__
+            raise LookupError(
+                f"eToro rate row for {symbol!r} (id {iid}) carries none of "
+                f"bid/ask/lastExecution — got {row}. Measure the row's keys "
+                f"before trusting a 0 here."
+            )
         bid = float(p.get("bid") or 0)
         ask = float(p.get("ask") or 0)
         last = float(p.get("lastExecution") or 0)
         if not last:
             last = (bid + ask) / 2 if bid and ask else (bid or ask)
+        if not last:
+            # THE VENUE ANSWERED: nothing — an empty list, or a row whose
+            # believed keys are all 0/None. lastPrice "0" is the platform's
+            # no-price sentinel: ibkr_client, oanda_client, paper_trader and
+            # public_feed return this same literal, and every reader
+            # (base._mark_price, propose_entry, manual_trade._mark_for,
+            # pending_closes, reconcile_asset, kill_switch) tests `> 0` and
+            # skips. ONE spelling from both empty branches — "0", never the
+            # "0.0" str(0.0) used to give the row branch. Not None: the
+            # readers call .get on the dict. Not a raise: a shut market is an
+            # answer, not a failure to ask. Said with the id, because the
+            # engine's own line ("no usable mark from the broker") carries
+            # only the name; INFO rather than WARNING because base.py already
+            # WARNs per position per tick and US stocks are shut two thirds
+            # of the day.
+            log.info("eToro ticker(%s): instrument %s answered 200 with no "
+                     "price (%s) — reporting the platform's 0 sentinel, "
+                     "which every reader skips on", symbol, iid,
+                     "empty rates list" if not rates
+                     else "bid/ask/lastExecution all empty")
+            return {"lastPrice": "0", "symbol": symbol}
         return {"lastPrice": str(last), "symbol": symbol,
                 "bid": str(bid), "ask": str(ask)}
 
@@ -556,6 +694,11 @@ class EtoroTrader:
         absolute prices held AT THE BROKER on fill. The fill itself is read
         back by polling; an order still pending when polling stops is
         reported PENDING with executedQty 0, never as a fill.
+
+        A stop_loss / take_profit that is PRESENT and not a price (0, a
+        negative, NaN, a non-number) RAISES ValueError before any POST: the
+        caller asked for a broker-held leg, and an order sent without it is
+        unprotected at leverage 1. None means no leg was asked for.
         """
         rid = self._rid(kwargs.get("client_order_id"))
         body = {
@@ -565,15 +708,19 @@ class EtoroTrader:
             "units": float(quantity),
             "leverage": 1,
         }
-        stop_loss = kwargs.get("stop_loss")
-        take_profit = kwargs.get("take_profit")
+        # REFUSED BEFORE THE POST when a level is present and not a price.
+        # `if stop_loss:` dropped a 0.0 leg silently and SENT a negative
+        # one; `_level` raises for both, and None stays "no leg asked for".
+        stop_loss = _level(kwargs.get("stop_loss"), "stop_loss", symbol, side)
+        take_profit = _level(kwargs.get("take_profit"), "take_profit",
+                             symbol, side)
         protected = False
-        if stop_loss:
-            body["stopLossRate"] = float(stop_loss)
+        if stop_loss is not None:
+            body["stopLossRate"] = stop_loss
             body["stopLossType"] = "fixed"
-        if take_profit:
-            body["takeProfitRate"] = float(take_profit)
-        if stop_loss and take_profit:
+        if take_profit is not None:
+            body["takeProfitRate"] = take_profit
+        if stop_loss is not None and take_profit is not None:
             protected = True
 
         r = self._sess().post(self._v2_exec_orders(), json=body,

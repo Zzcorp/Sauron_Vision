@@ -558,3 +558,169 @@ class TheTotalsAreNestedTests(SimpleTestCase):
         payload["accountTotals"] = dict(self.REAL["accountTotals"],
                                         accountTotalValue=0.0)
         self.assertIsNone(self._t(payload).net_liquidation())
+
+
+class TheNoRateAnswerTests(SimpleTestCase):
+    """THREE STATES for a tick, and the middle one is the platform's own.
+
+    ibkr_client, oanda_client, paper_trader and public_feed all answer a
+    missing rate with the literal {"lastPrice": "0", "symbol": ...}, and
+    every reader tests `> 0` and skips — base._mark_price, propose_entry
+    ("ticker returned 0"), manual_trade._mark_for, pending_closes,
+    reconcile_asset, kill_switch. eToro's empty 200 is that sentinel. A 200
+    WITHOUT a `rates` list, or a rate row spelled with none of
+    bid/ask/lastExecution, is not: the rates endpoint has never met a real
+    key, and a wrong key read as an empty list — or as `.get(...) or 0` —
+    is a quiet market forever.
+    """
+
+    def test_an_empty_rates_list_is_the_platform_zero_and_is_said(self):
+        t, _ = _client([SEARCH_AAPL, ("GET", "/rates", 200, {"rates": []})])
+        with self.assertLogs("bot_program.engine.etoro_client",
+                             level="INFO") as logs:
+            out = t.ticker("AAPL")
+        self.assertEqual(out, {"lastPrice": "0", "symbol": "AAPL"})
+        self.assertTrue(any("AAPL" in line and "1001" in line
+                            for line in logs.output),
+                        "the empty answer was not said with its id")
+
+    def test_a_null_rates_value_is_still_the_venue_answering(self):
+        t, _ = _client([SEARCH_AAPL, ("GET", "/rates", 200, {"rates": None})])
+        self.assertEqual(t.ticker("AAPL")["lastPrice"], "0")
+
+    def test_a_row_whose_believed_keys_are_all_empty_is_the_venue_zero(self):
+        """The row CARRIES bid/ask/lastExecution and they are 0/None: the
+        venue answered, and the answer is the same one-spelling sentinel
+        the empty list gives — "0", never the "0.0" str(0.0) used to
+        return here — with the same INFO line."""
+        t, _ = _client([SEARCH_AAPL, ("GET", "/rates", 200, {"rates": [
+            {"bid": 0, "ask": 0, "lastExecution": None}]})])
+        with self.assertLogs("bot_program.engine.etoro_client",
+                             level="INFO") as logs:
+            out = t.ticker("AAPL")
+        self.assertEqual(out, {"lastPrice": "0", "symbol": "AAPL"})
+        self.assertTrue(any("AAPL" in line and "1001" in line
+                            for line in logs.output))
+
+    def test_a_payload_without_a_rates_list_raises_naming_what_came_back(self):
+        """Not a quiet market: an unmeasured shape. The same rule as `_seg`
+        for an unattested tail and instrument_id for a spelling. `{}` is
+        what _Resp hands back for a None payload, so it is covered too; a
+        `rates` that is present but not a list is the fourth shape."""
+        for payload in ({}, {"instrumentRates": []}, [], {"rates": {"bid": 1}}):
+            t, _ = _client([SEARCH_AAPL, ("GET", "/rates", 200, payload)])
+            with self.subTest(payload=payload):
+                with self.assertRaises(LookupError) as caught:
+                    t.ticker("AAPL")
+                self.assertIn("'rates'", str(caught.exception))
+                self.assertIn("1001", str(caught.exception))
+
+    def test_a_rate_row_spelled_any_other_way_raises_naming_the_row(self):
+        """The same rule one level down. The per-rate keys are a belief
+        too; a row without any of them used to read `.get(...) or 0` as
+        0.0 with no line at all — indistinguishable from a shut market."""
+        for row in ({"instrumentId": 1001, "bidRate": 1.0},
+                    {"bidPrice": 1, "askPrice": 2}, {}, "x"):
+            t, _ = _client([SEARCH_AAPL,
+                            ("GET", "/rates", 200, {"rates": [row]})])
+            with self.subTest(row=row):
+                with self.assertRaises(LookupError) as caught:
+                    t.ticker("AAPL")
+                self.assertIn("bid/ask/lastExecution", str(caught.exception))
+                self.assertIn("1001", str(caught.exception))
+
+    def test_the_sentinel_reaches_the_real_readers_as_no_mark(self):
+        """The CONSUMERS, not this file: pending_closes and the bot's own
+        _mark_price fed the eToro dict through the real adapter class."""
+        from types import SimpleNamespace
+
+        from bot_program.asset_engine.base import AssetBot
+        from bot_program.pending_closes import _mark_price, mark_with_quality
+
+        t, _ = _client([SEARCH_AAPL, ("GET", "/rates", 200, {"rates": []})])
+        trade = SimpleNamespace(asset_class="stock", symbol="AAPL")
+        self.assertIsNone(_mark_price(trade, t))
+        self.assertEqual(mark_with_quality(trade, t), (None, {}))
+        self.assertIsNone(AssetBot._mark_price(None, trade, t))
+
+    def test_a_transport_error_still_raises(self):
+        t, _ = _client([SEARCH_AAPL, ("GET", "/rates", 503, {})])
+        with self.assertRaises(RuntimeError):
+            t.ticker("AAPL")
+
+
+class AnUnprotectedOrderIsNeverSentSilentlyTests(SimpleTestCase):
+    """`if stop_loss:` dropped a 0.0 leg and SENT a negative one. A caller
+    that asked for protection gets the leg or a refusal that says why —
+    before any POST, as ValueError, which execute_entry books as
+    ORDER_ERROR and manual_trade returns in its error dict."""
+
+    def _routes(self):
+        return [SEARCH_AAPL,
+                ("POST", "/execution/demo/orders", 200,
+                 {"orderId": 777, "referenceId": "ref-1"}),
+                ("GET", "orders:lookup", 200, _lookup(3))]
+
+    def _refused(self, **levels):
+        t, fake = _client(self._routes())
+        with mock.patch("time.sleep"):
+            with self.assertRaises(ValueError) as caught:
+                t.market_order("AAPL", "BUY", 10, **levels)
+        self.assertEqual([c for c in fake.calls if c[0] == "POST"], [],
+                         "the order was POSTed despite the refusal")
+        return str(caught.exception)
+
+    def test_a_zero_stop_is_refused_before_the_post(self):
+        msg = self._refused(stop_loss=0.0, take_profit=210)
+        self.assertIn("NOT SENT", msg[:88],
+                      "the fact is past the 88 characters why_no_trade prints")
+        self.assertIn("stop_loss", msg[:88])
+        self.assertIn("AAPL BUY", msg)
+
+    def test_a_zero_target_is_refused_too(self):
+        msg = self._refused(stop_loss=180, take_profit=0)
+        self.assertIn("take_profit", msg[:88])
+
+    def test_a_negative_nan_inf_or_non_number_level_is_refused(self):
+        for bad in (-5, float("nan"), float("inf"), "abc", True):
+            with self.subTest(bad=bad):
+                self._refused(stop_loss=bad, take_profit=210)
+
+    def test_none_is_no_leg_asked_for_and_the_order_goes(self):
+        """A caller that sent no level asked for no leg — its choice, and
+        the fill then claims no protection."""
+        t, fake = _client(self._routes())
+        with mock.patch("time.sleep"):
+            out = t.market_order("AAPL", "BUY", 10)
+        body = [c for c in fake.calls if c[0] == "POST"][0][2]["json"]
+        self.assertNotIn("stopLossRate", body)
+        self.assertNotIn("takeProfitRate", body)
+        self.assertEqual(out["status"], "FILLED")
+        self.assertNotIn("protectedOnFill", out,
+                         "protection was claimed on an order with no legs")
+        self.assertEqual(out["positionId"], "555")
+
+    def test_a_valid_pair_still_rides_the_body_as_floats(self):
+        t, fake = _client(self._routes())
+        with mock.patch("time.sleep"):
+            out = t.market_order("AAPL", "BUY", 10, stop_loss=180,
+                                 take_profit=210)
+        body = [c for c in fake.calls if c[0] == "POST"][0][2]["json"]
+        self.assertEqual(body["stopLossRate"], 180.0)
+        self.assertEqual(body["takeProfitRate"], 210.0)
+        self.assertEqual(body["stopLossType"], "fixed")
+        self.assertTrue(out["protectedOnFill"])
+
+    def test_the_engine_books_the_refusal_as_order_error(self):
+        """Read out of the consumer, not this file: the raise lands in the
+        `except Exception` that follows client.market_order in
+        execute_entry, whose non-in-doubt branch is skips.ORDER_ERROR."""
+        import inspect
+        import textwrap
+
+        from bot_program.asset_engine.base import AssetBot
+        src = textwrap.dedent(inspect.getsource(AssetBot.execute_entry))
+        after = src.split("client.market_order(", 1)[1]
+        self.assertIn("except Exception as e:", after)
+        self.assertIn('getattr(e, "in_doubt", False)', after)
+        self.assertIn("skips.ORDER_ERROR", after)
