@@ -495,7 +495,36 @@ class EtoroTrader:
             headers=self._headers(), timeout=self.timeout)
         r.raise_for_status()
         data = r.json() or {}
-        candles = (data.get("candles") if isinstance(data, dict) else data) or []
+        # MEASURED 2026-09-23 on the real key (GLDM, FourHours, 5):
+        #   {"candles": [{"instrumentId": 3190,
+        #                 "candles": [{close, fromDate, high, instrumentID,
+        #                              low, open, volume}, ... x5],
+        #                 "rangeOpen", "rangeHigh", "rangeLow", "rangeClose",
+        #                 "volume"}],
+        #    "interval": ...}
+        # One GROUP per instrument, the bars one level down. This method
+        # used to read the group as a bar: one row, close "0", for every
+        # symbol — which bot_bars refused (close <= 0) WITHOUT falling back
+        # to the public feed, because the venue had "answered" a row. A
+        # config on eToro would have had no 4h bars at all. THREE STATES: a
+        # group's inner list is the bars; a flat list of bars (the shape
+        # this adapter believed before it met a key) is still read; a
+        # group that carries neither is an unmeasured shape and RAISES —
+        # bot_bars logs "klines failed" and then does fall back.
+        groups = (data.get("candles") if isinstance(data, dict) else data) or []
+        candles = []
+        for g in groups:
+            if isinstance(g, dict) and isinstance(g.get("candles"), list):
+                candles.extend(c for c in g["candles"] if isinstance(c, dict))
+            elif isinstance(g, dict) and "close" in g:
+                candles.append(g)
+            else:
+                shape = sorted(g) if isinstance(g, dict) else type(g).__name__
+                raise LookupError(
+                    f"eToro candles payload for {symbol!r} (id {iid}) carries "
+                    f"a row with neither a 'candles' list nor a 'close' — "
+                    f"got {shape}. An unmeasured shape; measure the GET "
+                    f"before trusting a bar here.")
         rows = []
         for c in candles:
             ts = _iso_to_ms(str(c.get("fromDate") or c.get("date") or ""))

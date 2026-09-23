@@ -274,12 +274,19 @@ class TheInstrumentIdIsResolvedOnceTests(SimpleTestCase):
 class MarketDataTests(SimpleTestCase):
 
     def test_klines_map_the_interval_and_return_eleven_columns(self):
-        candles = {"candles": [
-            {"fromDate": "2026-09-17T08:00:00Z", "open": 1, "high": 2,
-             "low": 0.5, "close": 1.5, "volume": 99},
-            {"fromDate": "2026-09-17T12:00:00Z", "open": 1.5, "high": 3,
-             "low": 1, "close": 2, "volume": 7},
-        ]}
+        # THE MEASURED SHAPE (2026-09-23, real key, GLDM FourHours 5): one
+        # group per instrument, the bars one level down. Before this was
+        # measured the adapter read the group as a bar and answered one row
+        # with close "0" for every symbol.
+        candles = {"candles": [{
+            "instrumentId": 1001, "rangeOpen": 1, "rangeHigh": 3,
+            "rangeLow": 0.5, "rangeClose": 2, "volume": 106,
+            "candles": [
+                {"instrumentID": 1001, "fromDate": "2026-09-17T08:00:00Z",
+                 "open": 1, "high": 2, "low": 0.5, "close": 1.5, "volume": 99},
+                {"instrumentID": 1001, "fromDate": "2026-09-17T12:00:00Z",
+                 "open": 1.5, "high": 3, "low": 1, "close": 2, "volume": 7},
+            ]}], "interval": "FourHours"}
         t, fake = _client([SEARCH_AAPL,
                            ("GET", "/history/candles", 200, candles)])
         rows = t.klines("AAPL", interval="4h", limit=5000)
@@ -297,6 +304,33 @@ class MarketDataTests(SimpleTestCase):
         self.assertEqual(rows[0][6] - rows[0][0], 4 * 3600 * 1000,
                          "closeTime is not openTime plus the interval")
         self.assertLess(rows[0][0], rows[1][0], "not oldest-first")
+
+    def test_klines_three_states_of_shape(self):
+        """A flat list of bars (the shape believed before the key) is still
+        read; a group with an empty inner list is an answer (no bars, so
+        bot_bars falls back); a row with neither is unmeasured and RAISES —
+        never one row of close "0", which bot_bars refused without falling
+        back and left a config on eToro with no bars at all."""
+        flat = {"candles": [
+            {"fromDate": "2026-09-17T08:00:00Z", "open": 1, "high": 2,
+             "low": 0.5, "close": 1.5, "volume": 99}]}
+        t, _ = _client([SEARCH_AAPL, ("GET", "/history/candles", 200, flat)])
+        self.assertEqual(t.klines("AAPL", interval="4h", limit=5)[0][4], "1.5")
+
+        empty_group = {"candles": [{"instrumentId": 1001, "candles": []}],
+                       "interval": "FourHours"}
+        t, _ = _client([SEARCH_AAPL,
+                        ("GET", "/history/candles", 200, empty_group)])
+        self.assertEqual(t.klines("AAPL", interval="4h", limit=5), [])
+
+        group_read_as_a_bar = {"candles": [
+            {"instrumentId": 1001, "rangeClose": 2, "volume": 106}]}
+        t, _ = _client([SEARCH_AAPL,
+                        ("GET", "/history/candles", 200, group_read_as_a_bar)])
+        with self.assertRaises(LookupError) as caught:
+            t.klines("AAPL", interval="4h", limit=5)
+        self.assertIn("1001", str(caught.exception))
+        self.assertIn("'candles'", str(caught.exception))
 
     def test_every_platform_timeframe_has_an_enum(self):
         for tf in ("1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"):

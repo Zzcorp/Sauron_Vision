@@ -108,14 +108,16 @@ REAL = {
     "cid": 1, "instrumentAggregates": [], "mirrors": [], "timestamp": "t",
 }
 
-CANDLES = {"candles": [
-    {"fromDate": "2026-09-22T08:00:00Z", "open": 84, "high": 85, "low": 83,
-     "close": 84.5, "volume": 10},
-    {"fromDate": "2026-09-22T09:00:00Z", "open": 84.5, "high": 85, "low": 84,
-     "close": 84.7, "volume": 11},
-    {"fromDate": "2026-09-22T10:00:00Z", "open": 84.7, "high": 85, "low": 84,
-     "close": 84.9, "volume": 12},
-]}
+# the MEASURED candles shape (2026-09-23, real key): one group per
+# instrument, the bars one level down
+CANDLES = {"candles": [{"instrumentId": 1001, "candles": [
+    {"instrumentID": 1001, "fromDate": "2026-09-22T08:00:00Z", "open": 84,
+     "high": 85, "low": 83, "close": 84.5, "volume": 10},
+    {"instrumentID": 1001, "fromDate": "2026-09-22T09:00:00Z", "open": 84.5,
+     "high": 85, "low": 84, "close": 84.7, "volume": 11},
+    {"instrumentID": 1001, "fromDate": "2026-09-22T10:00:00Z", "open": 84.7,
+     "high": 85, "low": 84, "close": 84.9, "volume": 12},
+]}], "interval": "OneHour"}
 
 ROUTES = [
     ("GET", "/info/demo/aggregate-portfolio", 401, {}),
