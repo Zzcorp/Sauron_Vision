@@ -225,6 +225,55 @@ class PlatformPositionsTests(TestCase):
         self.assertEqual(p["broker"], "saxo")
 
 
+class TheLeverageColumnTests(TestCase):
+    """A per-row multiplier the ENTRY recorded (metadata["leverage"]) and
+    the one the VENUE reported (a held row's "leverage"), each printed as
+    'Nx' when present — '1x' for a row that SAID 1 — and as the em dash
+    when the row did not say; never 1 for silence, which is a claim about
+    margin nobody measured."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("tr_lev", password="x")
+
+    def _run(self):
+        out = StringIO()
+        call_command("treasury", user="tr_lev", stdout=out)
+        return out.getvalue()
+
+    def test_platform_positions_carries_the_recorded_multiplier_or_none(self):
+        an_etoro(self.user, flags=("stock",))
+        t = a_trade(self.user, "AAPL", broker="etoro")
+        t.metadata = dict(t.metadata, leverage=2)
+        t.save(update_fields=["metadata"])
+        a_trade(self.user, "TSLA", broker="etoro")
+        by = {p["symbol"]: p
+              for p in platform_positions(_fresh(self.user))["live"]}
+        self.assertEqual(by["AAPL"]["leverage"], 2)
+        self.assertIsNone(by["TSLA"]["leverage"])
+
+    def test_the_command_prints_nx_for_a_row_that_said_and_a_dash_otherwise(self):
+        an_etoro(self.user, flags=("stock",),
+                 held=[dict(HELD_AAPL, sec_type="CFD", leverage=5),
+                       dict(HELD_MSFT, sec_type="CFD")])
+        t = a_trade(self.user, "AAPL", broker="etoro")
+        t.metadata = dict(t.metadata, leverage=2)
+        t.save(update_fields=["metadata"])
+        one = a_trade(self.user, "NVDA", broker="etoro")
+        one.metadata = dict(one.metadata, leverage=1)
+        one.save(update_fields=["metadata"])
+        a_trade(self.user, "TSLA", broker="etoro")
+        body = self._run()
+        self.assertIn(" 2x ", body)
+        self.assertIn(" 1x ", body)
+        self.assertIn("lev 5x", body)
+        self.assertIn(f"lev {DASH}", body)
+        tsla = [ln for ln in body.splitlines() if ln.strip().startswith("TSLA")]
+        self.assertTrue(tsla, body)
+        self.assertIn(DASH, tsla[0])
+        self.assertNotIn("x ", tsla[0].split("routing")[-1]
+                         if "routing" in tsla[0] else tsla[0])
+
+
 class DivergenceTests(TestCase):
 
     def setUp(self):

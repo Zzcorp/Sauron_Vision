@@ -397,6 +397,64 @@ demo row the book and the venue in one click).
   positionExecutions shape; whether protectedOnFill landed; what the close
   returned. If the position filled, one PATCH before the close:
   `t.modify_protective(pid, <new stop>)`.
+- D2b. THE LEVERAGED ROUND TRIP — on the DEMO row, after D2 printed
+  `POSITIONS after []`, BEFORE D4, and before the component
+  `etoro_leverage_live` is ever ON. It ships OFF: while it is OFF every
+  levered entry is refused (`leverage_refused`) and preflight §4 blocks
+  arming; nothing is sent at 1 instead. Two sittings, because a levered
+  order sent off hours lands WaitingForMarket — the shape a WORKING levered
+  row needs, measured for free on funding night — and the filled round trip
+  needs a market day. Through the adapter, printed values only, one unit at
+  leverage 2 with both legs; every snippet asserts `t.demo` first.
+  - D2b-i — OFF HOURS. Print `MARGIN before` (`t.margin_cells()`); the RAW
+    ELIGIBILITY read (`t._sess().post(f'{BASE}/api/v2/trading/info/eligibility',
+    json={'instrumentIds': [t.instrument_id('GLDM')]}, headers=t._headers(),
+    timeout=t.timeout)` and, on 404, the `.../trading/info/demo/eligibility`
+    and `.../trading/demo/info/eligibility` spellings — the demo segment's
+    placement on that tail is unmeasured); ONE order `t.market_order('GLDM',
+    'BUY', 1, stop_loss=round(last*0.97, 2), take_profit=round(last*1.03, 2),
+    leverage=2)` → expect PENDING with `working: True` (statusName
+    WaitingForMarket); print ORDER, LOOKUP, `pollFailed` if present, `MARGIN
+    after order` (do accountFrozenCash / accountTotalUsedMargin move for a
+    HELD order?); the COSTS read (`POST /api/v2/trading/info/costs` with the
+    same body at leverage 1 and at leverage 2 — record costType/amount per
+    row: markup, marketSpread, overnightFee, overWeekendFee); then the
+    DELETE (`t._sess().delete(f'{BASE}/api/v3/trading/execution/orders/{r["orderId"]}',
+    headers=t._headers(), timeout=t.timeout)` and its demo spelling) → record
+    the status code and text; LOOKUP again by referenceId to prove status
+    7/8; `MARGIN after delete`. A 404/405 on the DELETE is a measurement:
+    the WORKING-row hole then stands and the flip's precondition is unmet.
+    If the order cannot be withdrawn it fills at the open at 2x — close it
+    by position id in D2b-ii, first thing.
+  - D2b-ii — IN HOURS. `MARGIN before`; the same order → FILLED; print
+    LOOKUP and compare `positionExecutions[0].stopLossRate` with the SENT
+    stop (the THIRD state: accepted, filled, stop REWRITTEN — record both
+    numbers and whether 0.0001 appears); the raw `t._open_positions()` row:
+    `leverage`, `amount`, `settlementTypeID`, `isNoStopLoss`, and whether
+    `amount` is units × openRate / 2 or the full notional; `MARGIN after
+    open`; `t.modify_protective(pid, round(last*0.98, 2))` (TIGHTER only — a
+    widening PATCH moves cash into margin per the public reference,
+    unmeasured); `t.close_position(pid, 'GLDM')`; `POSITIONS after []`;
+    `MARGIN after close`; then ONE deliberate refusal: a second levered order
+    whose stop lies outside the printed band — refused at the POST (4xx,
+    text logged) or accepted and landed status 4 with an errorCode (record
+    whether `status` is an int or an object). A refusal of the FIRST order
+    (status 4/10 or a raise at the POST) IS the measurement — record it, do
+    not retry with another number, do not flip.
+  - PIN every shape in tests/test_etoro_client.py with the real class and a
+    patched session (D3's rule): the lookup's leverage placement and status
+    shape, the /portfolio row's leverage/amount/settlementTypeID, the totals
+    arithmetic before/after, the DELETE answer, the costs rows, the stop
+    echo.
+  - THE FLIP, by hand, never by a deploy, and only when ALL of: D2b-i and
+    D2b-ii are pinned; the costs rows for GLDM at 1x and 2x are written into
+    this plan; the DELETE answer is written down; every levered config's
+    `max_hold_hours` has been set by the operator with the printed overnight
+    fee in mind (or the fee accepted here in writing); the operator's own
+    book is saved on /setup/. Command:
+    `./deploy/dc exec worker-fast python manage.py shell -c "from core.platform_control import PlatformComponent; print(PlatformComponent.objects.filter(key='etoro_leverage_live').update(is_enabled=True))"`
+    → prints 1; then `preflight_live` must show the config's leverage line
+    without a BLOCKER.
 - D3. Any divergence from the adapter's assumptions is recorded in
   tests/test_etoro_client.py by name, with the real class and a patched
   session — never a subclass.
@@ -496,7 +554,16 @@ retirement then continues at deploy/IBKR_RETIREMENT.md Stage 3.
 - Never tick a class on /brokers/ before the demo write proof: the tick makes
   eToro the book and the venue in one click.
 - Never run the demo write proof through TAKE TRADE, and never enable config 10
-  for it.
+  for it. The TAKE TRADE lane refuses a config carrying extras['leverage']
+  above 1 (nothing sent, not at 1). Forex stays 1x on eToro until
+  capital_at_work reads the row's multiplier.
+- Never flip `etoro_leverage_live` ON before D2b (both sittings) is recorded
+  in tests/test_etoro_client.py, and never put extras['leverage'] above 1 on
+  a config while it is OFF: the preflight blocks arming and every tick
+  refuses the entry (`leverage_refused`) — nothing is sent at 1 instead.
+  Leverage changes the cash eToro locks and the financing it charges, never
+  the units or the loss at the stop; a bigger position is
+  risk_per_trade_pct, max_notional_fraction and funding (§5).
 - Never press CLOSE, close-all or EMERGENCY FLATTEN on a row whose symbol the
   broker no longer holds: the ordinary close is an opposite MARKET order.
 - Never disarm a live config by setting mode='paper' (`client_for_symbol`

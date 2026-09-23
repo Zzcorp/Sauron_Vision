@@ -1732,6 +1732,21 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 return {"error": (f"LIVE route unavailable — {cls} orders "
                                   f"have no live broker to go to. Nothing "
                                   f"was sent")}
+            # THE MULTIPLIER, if the config carries one: this lane sends
+            # NONE, and it must not send the adapter's 1 under a key that
+            # says 2. Judged with the bots' own rule on the routed client;
+            # a typed 1 passes (it IS the default); anything else refuses.
+            from bot_program.asset_engine.base import judge_order_leverage
+            from bot_program.engine.capabilities import adapter_key
+            _lev, _lev_why = judge_order_leverage(cfg, cls, adapter_key(client))
+            if _lev_why or (_lev is not None and _lev > 1):
+                return {"error": (
+                    f"config {cfg.id} carries extras['leverage']="
+                    f"{(cfg.extras or {}).get('leverage')!r} and the TAKE "
+                    f"TRADE lane sends no leverage — nothing was sent, not "
+                    f"at that multiplier and not at 1. "
+                    + (_lev_why or "Remove the key, or take the trade "
+                                   "through the bot lane"))}
             client_order_id = make_client_order_id(
                 cfg.id, inst.symbol,
                 signal_id=(str(signal.id) if signal is not None

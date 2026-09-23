@@ -849,9 +849,15 @@ def sync_etoro_accounts():
         out["attempted"] += 1
         reading, rows = None, None
         try:
+            margin = None
             client = EtoroTrader(k, u, env="demo" if acct.demo else "live")
             reading = client.net_liquidation()
             rows = client.broker_portfolio()
+            # The margin cells, duck-typed and three-state: an adapter (or
+            # a test double) that answers no dict leaves the cells alone.
+            _mc = getattr(client, "margin_cells", None)
+            _m = _mc() if callable(_mc) else None
+            margin = _m if isinstance(_m, dict) else None
         except Exception as e:  # noqa: BLE001 — one account must not stop the rest
             logger.warning("broker sync: %s (etoro) unreadable: %s",
                            acct.label, e)
@@ -879,6 +885,21 @@ def sync_etoro_accounts():
         acct.connected = True
         acct.last_sync = now
         fields += ["connected", "last_sync"]
+        if margin is not None:
+            # THE MARGIN CELLS (2026-09-23), each on its own: a payload that
+            # carries one figure and not the other writes one cell and
+            # leaves the other None. Same save and same `now` as the equity,
+            # so the headroom gate's age test reads one clock.
+            if margin.get("available_cash") is not None:
+                acct.last_available_cash = margin["available_cash"]
+                fields.append("last_available_cash")
+            if margin.get("used_margin") is not None:
+                acct.last_used_margin = margin["used_margin"]
+                fields.append("last_used_margin")
+            if (margin.get("available_cash") is not None
+                    or margin.get("used_margin") is not None):
+                acct.last_margin_at = now
+                fields.append("last_margin_at")
         acct.save(update_fields=fields)
 
         if reading is not None:

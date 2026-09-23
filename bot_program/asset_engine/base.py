@@ -317,6 +317,127 @@ class SmcVote:
     rule_name: str = SMC_RULE_NAME
 
 
+#: THE MOST A CONFIG MAY ASK OF eToro PER ORDER (2026-09-23). A hard cap,
+#: never a target and never a default. Units and the notional ceiling never
+#: see this number (sizing.qty_for_risk, MAX_NOTIONAL_FRACTION): at leverage
+#: L the same position pledges notional / L of cash and its stop, as a
+#: fraction of THAT margin, is stop_fraction x L — the default floor of
+#: 1.25% of price (0.25% risk / 20% cap) is 6.25% of the margin at 5x.
+#: eToro bounds a stop as a percentage of the margin (public reference,
+#: unmeasured). Restated as etoro_client.LEVERAGE_MAX, pinned equal.
+MAX_ORDER_LEVERAGE = 5
+
+#: BELIEVED, NOT MEASURED, per platform class, never above
+#: MAX_ORDER_LEVERAGE. forex is 1 ON PURPOSE: every exposure gate charges a
+#: forex row 1/30 of its notional (manual_trade.CAPITAL_USE_FRACTION through
+#: risk_gate.capital_at_work) whatever the row carries, so a 5x forex row
+#: would be under-counted 6x by MAX SINGLE POSITION, concentration and MAX
+#: TOTAL EXPOSURE — the dangerous direction. It stays 1 until
+#: capital_at_work reads the row's own multiplier (max(class fraction,
+#: 1/L), a tightening) — a named follow-up, not this patch. options and
+#: cfd never route to eToro (broker_router). An unknown class reads 1.
+#: eToro's real answer is per instrument (`leverageValues` on its
+#: eligibility endpoint — public reference, unmeasured, no method here).
+ORDER_LEVERAGE_CEILING = {"stock": 5, "etf": 5, "index": 5, "commodity": 5,
+                          "crypto": 2, "forex": 1, "options": 1, "cfd": 1}
+
+#: THE MOST OF THE ACCOUNT THE FLEET MAY HAVE PLEDGED after an order:
+#: (used margin + margin pledged since the reading + this order's margin)
+#: / equity. A BELIEF — eToro's close-out rule has met no key; §4 D2b
+#: prints what a levered open does to accountTotalUsedMargin — held at
+#: half so a 20% adverse move at 5x across the pledged half is 50% of
+#: equity, not 100%. Refused past it, never resized.
+MAX_PLEDGED_FRACTION = 0.5
+
+#: The PlatformComponent that stays OFF until deploy/ETORO_DEPARTURE.md §4
+#: D2b (both sittings) is recorded in tests/test_etoro_client.py. A
+#: missing row reads OFF (core.platform_control.is_component_enabled).
+LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
+
+
+def judge_order_leverage(cfg, asset_class: str, carrier: str) -> tuple:
+    """(leverage, refusal): what an eToro order body may carry for `cfg`.
+
+    ONE rule, read by execute_entry on the client an order goes through
+    (capabilities.adapter_key of its CLASS), by preflight_live §4 on the
+    venue the router names, and by the TAKE TRADE lane — imported, never
+    copied, so an armed config is never first refused at 02:00.
+
+    FOUR ANSWERS. (None, "") — no extras["leverage"]: no kwarg, the
+    adapter's own default, the row records nothing. (1, "") — the operator
+    typed 1: no kwarg (the body IS the default's), the row RECORDS 1
+    because it was said. (n, "") — a whole number >= 2 every check allows.
+    (None, why) — a refusal: the caller sends NOTHING, not at n and not at
+    1, because a multiplier the operator typed and this engine quietly
+    replaced would be a default nobody chose.
+
+    WHAT THIS NUMBER NEVER TOUCHES (house rule 5): units come from
+    risk_per_trade_pct and the stop (sizing.qty_for_risk); the notional cap
+    and apply_stop_floor are judged on qty x price; _judge_final_size
+    refuses on qty x |price - stop|. Leverage changes the margin eToro
+    locks and the financing it charges, nothing else this engine measures.
+    """
+    extras = getattr(cfg, "extras", None) or {}
+    if "leverage" not in extras:
+        return None, ""
+    raw = extras.get("leverage")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None, (f"extras['leverage']={raw!r} is not a number — a "
+                      f"multiplier this bot cannot read is not sent at 1 "
+                      f"behind your back; fix the key or remove it")
+    lev = float(raw)
+    if lev != lev or lev in (float("inf"), float("-inf")) or lev < 1 \
+            or lev != int(lev):
+        return None, (f"extras['leverage']={raw!r} is not a whole number "
+                      f">= 1; eToro's multiplier is an integer and nothing "
+                      f"here rounds one")
+    lev = int(lev)
+    if lev == 1:
+        return 1, ""
+    if carrier != "etoro":
+        return None, (f"at {lev}x: this order would be carried by "
+                      f"{carrier or 'an unmapped client'} — leverage is an "
+                      f"eToro per-order field, every other adapter absorbs "
+                      f"the kwarg silently, and a row recording a multiplier "
+                      f"nothing applied is worse than no order")
+    if lev > MAX_ORDER_LEVERAGE:
+        return None, (f"at {lev}x: past the platform cap of "
+                      f"{MAX_ORDER_LEVERAGE}x — refused, not clamped")
+    ceiling = int(ORDER_LEVERAGE_CEILING.get(asset_class, 1))
+    if lev > ceiling:
+        return None, (f"at {lev}x: past the {ceiling}x ceiling this platform "
+                      f"believes for {asset_class} on eToro — refused, not "
+                      f"clamped; a belief until §4 D2b measures "
+                      f"leverageValues")
+    from core.platform_control import is_component_enabled
+    if not is_component_enabled(LEVERAGE_SWITCH_KEY):
+        return None, (f"at {lev}x: {LEVERAGE_SWITCH_KEY} is OFF — no "
+                      f"leveraged eToro fill and close has been recorded "
+                      f"(deploy/ETORO_DEPARTURE.md §4 D2b). Nothing sent — "
+                      f"not at {lev}, not at 1")
+    # THE FLEET-LEVEL CEILING MUST BE A PERCENTAGE OF SOMETHING THE OPERATOR
+    # SAID. MAX TOTAL EXPOSURE reads gate_book_value, which prefers the
+    # operator's own /setup/ book and otherwise falls back to the shared row
+    # seeded at 10,000 that nobody entered. Margin is pledged against that
+    # ceiling only once the own book exists; the number is theirs and
+    # preflight §4 prints it beside this line.
+    from portfolio.models import Portfolio
+    from portfolio.risk_gate import book_value
+    from portfolio.services import PER_USER_SUFFIX
+    user = getattr(cfg, "user", None)
+    own = None
+    if user is not None:
+        own = Portfolio.objects.filter(
+            name=f"{getattr(user, 'username', '')}{PER_USER_SUFFIX}").first()
+    if own is None or book_value(own) is None:
+        return None, (f"at {lev}x: MAX TOTAL EXPOSURE has no book to be a "
+                      f"percentage of — your own book on /setup/ has never "
+                      f"been saved, and the gate would read a seeded 10,000 "
+                      f"instead. Save the capital form on /setup/ first; "
+                      f"nothing sent")
+    return lev, ""
+
+
 class AssetBot(ABC):
     """Base class. Subclass per asset_class to specialise decide()/sizing."""
 
@@ -646,6 +767,15 @@ class AssetBot(ABC):
     #: silently retired by one network blip. The alert says the number.
     IN_DOUBT_QUIET_HOURS = 12
 
+    #: How long a symbol is left alone after eToro REFUSED (or the wire
+    #: swallowed) a LEVERED order. Without it a config armed at 2x on an
+    #: instrument eToro will not lever POSTs once per tick for weeks, and
+    #: the fill polls those retries spend (up to 6 calls each against a
+    #: shared 20/60 s quota — public reference, unmeasured) can starve a
+    #: lookup into a WORKING row for an order eToro refused. Recorded as
+    #: leverage_refusals with both numbers; never re-sent at 1.
+    LEVERAGE_QUIET_HOURS = 12
+
     def _remember_in_doubt(self, symbol: str, reference: str) -> None:
         """Note on the config that `symbol` has an order nobody can account
         for. Read by propose_entry, which refuses the symbol while it is
@@ -664,6 +794,43 @@ class AssetBot(ABC):
         except Exception as e:  # noqa: BLE001 — a lost note must not raise
             logger.warning("[%s_bot] could not record the in-doubt order for "
                            "%s: %s", self.asset_class, symbol, e)
+
+    def _remember_leverage_refusal(self, symbol: str, leverage: int,
+                                   why: str) -> None:
+        """Note on the config that eToro (or the wire) refused `symbol` at
+        `leverage`. Read by _order_leverage, which refuses the symbol while
+        the note is fresh — one POST per LEVERAGE_QUIET_HOURS, not one per
+        tick. The in-doubt note's shape and posture."""
+        try:
+            extras = dict(self.cfg.extras or {})
+            book = dict(extras.get("leverage_refusals") or {})
+            book[str(symbol).upper()] = {
+                "leverage": int(leverage), "why": str(why)[:200],
+                "at": timezone.now().isoformat(),
+            }
+            extras["leverage_refusals"] = book
+            self.cfg.extras = extras
+            self.cfg.save(update_fields=["extras"])
+        except Exception as e:  # noqa: BLE001 — a lost note must not raise
+            logger.warning("[%s_bot] could not record the leverage refusal "
+                           "for %s: %s", self.asset_class, symbol, e)
+
+    def _leverage_refusal_note(self, symbol: str):
+        """The fresh refusal note for `symbol` (with its age), or None.
+        Expires by itself, as _in_doubt_note does."""
+        try:
+            book = (self.cfg.extras or {}).get("leverage_refusals") or {}
+            note = book.get(str(symbol).upper())
+            if not note:
+                return None
+            from datetime import datetime as _dt
+            age_h = ((timezone.now() - _dt.fromisoformat(note["at"]))
+                     .total_seconds() / 3600.0)
+            if age_h >= self.LEVERAGE_QUIET_HOURS:
+                return None
+            return dict(note, age_h=age_h)
+        except Exception:  # noqa: BLE001
+            return None
 
     def _in_doubt_note(self, symbol: str):
         """The fresh in-doubt note for `symbol`, or None. Expires by itself:
@@ -3267,6 +3434,29 @@ class AssetBot(ABC):
                 signal_id=decision.rule_name or "", intent="ENTRY",
                 bar_ts=bar_ts,
             )
+            # THE MULTIPLIER, if the config asked for one — judged on the
+            # client an order actually goes through, and a refusal sends
+            # NOTHING: not at n and not at 1 (judge_order_leverage). None
+            # means "no kwarg": the adapter's own default rides the body and
+            # the row records nothing; 1 means the operator SAID 1: no
+            # kwarg, and the row records it. Sizing above never saw this.
+            leverage, lev_why = self._order_leverage(client, symbol)
+            if lev_why:
+                logger.error("[%s_bot] %s REFUSED: %s", self.asset_class,
+                             symbol, lev_why)
+                return self._skip(symbol, skips.LEVERAGE_REFUSED, lev_why)
+            if leverage is not None and leverage > 1:
+                # THE ACCOUNT'S HEADROOM, from the sync's cells and never a
+                # round trip. Reached only past the switch — i.e. only after
+                # §4 D2b printed what a levered open does to those cells.
+                lev_why = self._leverage_headroom(
+                    client, symbol, qty=float(qty), price=float(price),
+                    leverage=leverage)
+                if lev_why:
+                    logger.error("[%s_bot] %s REFUSED at %dx: %s",
+                                 self.asset_class, symbol, leverage, lev_why)
+                    return self._skip(symbol, skips.LEVERAGE_REFUSED,
+                                      f"at {leverage}x: {lev_why}")
             if not self._still_armed():
                 return self._skip(symbol, skips.GATE_BLOCKED,
                                   "config was disarmed mid-tick — refusing "
@@ -3282,11 +3472,17 @@ class AssetBot(ABC):
                 # protected even when this worker is down. Clients without
                 # the capability ignore the kwargs; bot-side management then
                 # remains the safety net.
+                order_kwargs = {"client_order_id": client_order_id,
+                                "stop_loss": float(sl),
+                                "take_profit": float(tp)}
+                if leverage is not None and leverage > 1:
+                    # eToro only: judge_order_leverage refused every other
+                    # carrier above, so this kwarg never reaches an adapter
+                    # that would absorb it silently. A typed 1 passes no
+                    # kwarg: the body is the default's, byte for byte.
+                    order_kwargs["leverage"] = leverage
                 res = client.market_order(
-                    symbol, decision.direction, float(qty),
-                    client_order_id=client_order_id,
-                    stop_loss=float(sl), take_profit=float(tp),
-                )
+                    symbol, decision.direction, float(qty), **order_kwargs)
                 order_id = str(res.get("orderId", ""))
                 # Detect broker-side refusals: log + skip trade row.
                 # CANCELLED/INACTIVE/EXPIRED belong here too — brokers
@@ -3317,8 +3513,16 @@ class AssetBot(ABC):
                                     "(status=%s, client_order_id=%s)",
                                     self.asset_class, symbol, status,
                                     client_order_id)
-                    return self._skip(symbol, skips.ORDER_REJECTED,
-                                      f"broker status {status}")
+                    if leverage is not None and leverage > 1:
+                        # A LEVERED refusal quiets the symbol: one POST per
+                        # LEVERAGE_QUIET_HOURS, never a re-send at 1.
+                        self._remember_leverage_refusal(
+                            symbol, leverage, f"broker status {status}")
+                    return self._skip(
+                        symbol, skips.ORDER_REJECTED,
+                        (f"at {leverage}x: " if leverage is not None
+                         and leverage > 1 else "")
+                        + f"broker status {status}")
 
                 # WHICH BROKER carried this. Recorded from the client
                 # that actually placed the order, because the alternative
@@ -3329,6 +3533,17 @@ class AssetBot(ABC):
                 # Plus the world it traded in and the handle a close needs —
                 # ONE rule, shared with the TAKE TRADE lane: venue_stamps.
                 entry_meta.update(self.venue_stamps(client, res))
+                if leverage is not None:
+                    # WHAT WAS ASKED (or SAID, for a typed 1), not what eToro
+                    # applied: the lookup's own `leverage` (public reference,
+                    # placement unmeasured) sits in res["raw"]["lookup"] for
+                    # §4 D2b. ABSENT on every row whose config carried no
+                    # key — sent at the adapter's default — so absent is a
+                    # state, never a 1 and never a claim about margin. Read
+                    # by broker_vision, /treasury/ and _pledged_since; never
+                    # by sizing or any exposure gate. Not value_per_unit:
+                    # that scales loss-per-point and notional, this neither.
+                    entry_meta["leverage"] = int(leverage)
 
                 # Real fills: prefer the broker's average fill price and
                 # filled quantity over the pre-order ticker, so slippage
@@ -3372,6 +3587,40 @@ class AssetBot(ABC):
                 if (res.get("protectiveStopId") or res.get("protectiveTradeId")
                         or res.get("protectedOnFill")):
                     entry_meta["protected"] = True
+                # THE STOP THE VENUE HOLDS versus the stop that was SENT.
+                # eToro bounds a stop as a percentage of the margin (public
+                # reference, unmeasured) and may rewrite one on fill; its
+                # 0.0001 "no stop" sentinel is a rewrite too. The row keeps
+                # initial_stop_loss = the SENT stop (the risk denominator
+                # must not move) and records the divergence; the staff
+                # alert names both. Only a venue that echoes its legs
+                # (etoro_client: venueStopLoss) reaches this.
+                held = res.get("venueStopLoss")
+                if held is not None:
+                    try:
+                        held = float(held)
+                    except (TypeError, ValueError):
+                        held = None
+                if held is not None and abs(held - float(sl)) > 1e-9:
+                    entry_meta["stop_rewritten_by_venue"] = {
+                        "sent": float(sl), "held": held}
+                    logger.error("[%s_bot] %s: the venue holds a stop at %s, "
+                                 "the platform sent %s — recorded; risk is "
+                                 "measured at the SENT stop",
+                                 self.asset_class, symbol, held, float(sl))
+                    try:
+                        from bot_program.notifications import notify_staff
+                        notify_staff(
+                            title=f"⚠ {symbol}: the venue rewrote the stop",
+                            body=(f"{self.asset_class.upper()} {symbol}: sent "
+                                  f"stop {float(sl)}, the venue reports "
+                                  f"{held}. The loss at the stop is no longer "
+                                  f"the risk the entry was sized to. Read the "
+                                  f"position at the broker."),
+                            url="/positions/")
+                    except Exception as e2:  # noqa: BLE001
+                        logger.warning("[%s_bot] stop-rewrite alert failed: "
+                                       "%s", self.asset_class, e2)
                 if protective_ids or res.get("protectedOnFill"):
                     # Venues where protection rides the TRADE rather than
                     # standalone orders (OANDA) report the trade instead.
@@ -3408,6 +3657,38 @@ class AssetBot(ABC):
                 # bracket and let it fill naked.
                 if res.get("working"):
                     entry_meta["entry_working"] = True
+                    if res.get("pollFailed"):
+                        # NOBODY READ THE LOOKUP: filled, refused or held
+                        # are all possible. Said on the row so the WORKING
+                        # alert prints "lookup failed", never "expected on
+                        # fill".
+                        entry_meta["entry_poll_failed"] = True
+                    if leverage is not None and leverage > 1:
+                        # A LEVERED order eToro holds is a financed position
+                        # nobody here can poll or withdraw (etoro_client has
+                        # no order_status / cancel_order). Said NOW, not in
+                        # tomorrow's daily line.
+                        try:
+                            from bot_program.notifications import notify_staff
+                            notify_staff(
+                                title=(f"⚠ {symbol}: a {leverage}x order is "
+                                       f"WORKING at eToro"),
+                                body=(f"{self.asset_class.upper()} {symbol} at "
+                                      f"{leverage}x was accepted and not "
+                                      f"filled"
+                                      + (" — the fill lookup could not be "
+                                         "read, so it may already be filled "
+                                         "or refused"
+                                         if res.get("pollFailed") else
+                                         " — eToro is holding it")
+                                      + ". This platform cannot poll or "
+                                        "withdraw it; resolve it on the eToro "
+                                        "portal. The stop rides the order "
+                                        "body."),
+                                url="/positions/")
+                        except Exception as e2:  # noqa: BLE001
+                            logger.warning("[%s_bot] levered-working alert "
+                                           "failed: %s", self.asset_class, e2)
                     entry_meta["entry_working_since"] = timezone.now().isoformat()
                     entry_meta["qty_requested"] = requested_qty
                     entry_meta["protected"] = False
@@ -3457,8 +3738,14 @@ class AssetBot(ABC):
                              self.asset_class, symbol, e)
                 # The other bare `return None`: an order the broker threw
                 # on used to leave the same trace as no order at all.
-                return self._skip(symbol, skips.ORDER_ERROR,
-                                  f"live order failed: {e}")
+                if leverage is not None and leverage > 1:
+                    self._remember_leverage_refusal(
+                        symbol, leverage, f"live order failed: {e}")
+                return self._skip(
+                    symbol, skips.ORDER_ERROR,
+                    (f"at {leverage}x: " if leverage is not None
+                     and leverage > 1 else "")
+                    + f"live order failed: {e}")
 
         from bot_program.models import AssetBotTrade
         trade = AssetBotTrade.objects.create(
@@ -3584,6 +3871,118 @@ class AssetBot(ABC):
         if pos_id:
             stamps["broker_position_id"] = str(pos_id)
         return stamps
+
+    # ── the multiplier an eToro order may carry ───────────────────────────
+
+    def _order_leverage(self, client, symbol: str) -> tuple:
+        """judge_order_leverage on the client an order actually goes
+        through — the adapter key of its CLASS (capabilities.adapter_key),
+        never today's routing rule. A MagicMock or a subclass answers ""
+        and is refused above 1, correctly. A fresh refusal note for the
+        symbol (a levered order eToro or the wire refused within
+        LEVERAGE_QUIET_HOURS) refuses before anything is sent again."""
+        from bot_program.engine.capabilities import adapter_key
+        lev, why = judge_order_leverage(self.cfg, self.asset_class,
+                                        adapter_key(client))
+        if why or lev is None or lev <= 1:
+            return lev, why
+        note = self._leverage_refusal_note(symbol)
+        if note:
+            return None, (f"at {lev}x: eToro refused {symbol} "
+                          f"{note['age_h']:.1f}h ago ({note.get('why')}); "
+                          f"quiet for {self.LEVERAGE_QUIET_HOURS}h — nothing "
+                          f"sent, not at {lev}, not at 1")
+        return lev, ""
+
+    def _pledged_since(self, at, carrier: str) -> float:
+        """Cash this user's LIVE rows on `carrier` opened after `at` pledge
+        — the sync's reading can be 900 s old and one tick opens several.
+        A row that recorded the leverage it was sent at is charged
+        notional / L; a row on this carrier that recorded none is charged
+        its FULL notional (the venue's margin at leverage 1 is unmeasured;
+        the class table's forex 1/30 is the dangerous direction here); a
+        row stamped for another broker is not this account's cash and is
+        skipped; an unstamped row counts, in full."""
+        from bot_program.asset_models import AssetBotTrade
+        from portfolio.services import value_per_unit
+        total = 0.0
+        for t in AssetBotTrade.objects.filter(
+                config__user=self.user, paper=False, opened_at__gt=at,
+                status__in=("OPEN", "CLOSE_PENDING")):
+            meta = t.metadata or {}
+            stamped = str(meta.get("broker") or "")
+            if stamped and stamped != carrier:
+                continue
+            notional = (float(t.entry_price or 0) * float(t.qty or 0)
+                        * float(value_per_unit(t) or 1.0))
+            lev = meta.get("leverage")
+            try:
+                lev = float(lev) if lev is not None else None
+            except (TypeError, ValueError):
+                lev = None
+            total += (notional / lev if lev is not None and lev >= 1
+                      else notional)
+        return total
+
+    def _leverage_headroom(self, client, symbol: str, *, qty: float,
+                           price: float, leverage: int):
+        """Why an order at `leverage` > 1 may not leave for want of cash,
+        or None. Reads the SYNC'S CELLS on the carrier's row — looked up
+        by query, never through the User's cached reverse accessor — and
+        never the broker: capital_truth's rule, no broker I/O on an entry
+        path.
+
+        Refused, each a sentence with both numbers: either cell never
+        stored; older than TRACKING_FRESH_SECONDS; a currency other than
+        the pool's (nothing here converts); notional / leverage plus what
+        this tick already pledged exceeds the available cash; or the
+        account would be pledged past MAX_PLEDGED_FRACTION of its equity.
+        `notional / leverage` is the margin the public reference implies
+        and §4 D2b measures. Too strict sends nothing; too loose is
+        answered by the venue's own refusal.
+        """
+        from bot_program.capital_truth import TRACKING_FRESH_SECONDS
+        from bot_program.engine.capabilities import adapter_key
+        from bot_program.models import EtoroAccount
+        carrier = adapter_key(client)
+        acct = (EtoroAccount.objects.filter(user_id=self.user.id).first()
+                if carrier == "etoro" else None)
+        cash = getattr(acct, "last_available_cash", None)
+        used = getattr(acct, "last_used_margin", None)
+        at = getattr(acct, "last_margin_at", None)
+        equity = getattr(acct, "last_equity", None)
+        if acct is None or cash is None or used is None or at is None:
+            return ("the account's available cash / used margin have never "
+                    "been stored by the sync — refused; margin is not a "
+                    "number to guess")
+        if equity is None:
+            return "the account's equity has never been stored — refused"
+        age = (timezone.now() - at).total_seconds()
+        if age > TRACKING_FRESH_SECONDS:
+            return (f"cash reading {age / 3600:.1f}h old (limit "
+                    f"{TRACKING_FRESH_SECONDS / 3600:.0f}h) — refused")
+        ccy = str(getattr(acct, "last_equity_currency", "") or "").upper()
+        pool_ccy = str(self.cfg.base_currency or "").upper()
+        if ccy != pool_ccy:
+            return (f"pool in {pool_ccy or '?'} against cash read in "
+                    f"{ccy or '?'} — nothing here converts; refused")
+        need = (float(qty) * float(price) * self._value_per_unit(symbol)
+                / float(leverage))
+        pledged = self._pledged_since(at, carrier)
+        free = float(cash) - pledged
+        if need > free + 1e-9:
+            return (f"{symbol} needs {need:,.2f} {ccy} of margin and "
+                    f"{free:,.2f} is free ({float(cash):,.2f} read "
+                    f"{age / 60:.0f} min ago, less {pledged:,.2f} pledged "
+                    f"since) — refused before the venue refuses it")
+        after = (float(used) + pledged + need) / max(float(equity), 1e-9)
+        if after > MAX_PLEDGED_FRACTION + 1e-9:
+            return (f"the account would be {after:.0%} pledged after "
+                    f"{symbol} ({float(used):,.2f} used + {pledged:,.2f} "
+                    f"since + {need:,.2f}) against {float(equity):,.2f} "
+                    f"equity; the ceiling is {MAX_PLEDGED_FRACTION:.0%} "
+                    f"(a belief until D2b) — refused")
+        return None
 
     # ── live-mode paper-fallback guard ───────────────────────────────────
 

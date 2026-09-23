@@ -454,6 +454,146 @@ class CanThisPoolEvenPlaceAnOrderTests(TestCase):
         self.assertNotIn("ONE UNIT", out)
 
 
+class TheLeverageIsJudgedBeforeArmingTests(TestCase):
+    """Section 4 reads extras['leverage'] with the engine's own rule
+    (asset_engine.base.judge_order_leverage) for EVERY live config, enabled
+    or not — a blocker when armed, worth reading when not — so the operator
+    meets the refusal here and not at 02:00. Absent prints the adapter's
+    default and blocks nothing. Section 3 prints the margin cells."""
+
+    def _etoro_row(self, u, *, cash=None, used=0, asset_class="stock"):
+        from bot_program.models import EtoroAccount
+        acct = EtoroAccount.objects.create(
+            user=u, demo=False, label="Main",
+            is_primary_for_stocks=(asset_class == "stock"),
+            is_primary_for_forex=(asset_class == "forex"))
+        acct.set_credentials("k", "u")
+        acct.last_equity = Decimal("100000")
+        acct.last_equity_currency = "USD"
+        acct.last_equity_at = timezone.now()
+        if cash is not None:
+            acct.last_available_cash = Decimal(str(cash))
+            acct.last_used_margin = Decimal(str(used))
+            acct.last_margin_at = timezone.now()
+        acct.save()
+        return acct
+
+    def _own_book(self, u):
+        from portfolio.models import Portfolio
+        return Portfolio.objects.create(
+            name=f"{u.username}_main", initial_capital=Decimal("100000"),
+            current_value=Decimal("100000"),
+            cash_available=Decimal("100000"), currency="USD")
+
+    def _armed_lev(self, *, extras, cash=None, enabled=True, book=True,
+                   asset_class="stock", symbol="AAPL"):
+        u = _user()
+        self._etoro_row(u, cash=cash, asset_class=asset_class)
+        if book:
+            self._own_book(u)
+        _pin(u)
+        cfg = _cfg(u, capital="5000", base_currency="USD",
+                   asset_class=asset_class, symbols=(symbol,),
+                   enabled=enabled)
+        cfg.extras = extras
+        cfg.save(update_fields=["extras"])
+        _bars(symbol, age_hours=1.0)
+        return u, cfg
+
+    def _lev_switch(self, on):
+        from core.platform_control import PlatformComponent
+        PlatformComponent.objects.update_or_create(
+            key="etoro_leverage_live",
+            defaults={"name": "t", "category": "system", "is_enabled": on})
+
+    def test_absent_prints_the_default_and_blocks_nothing(self):
+        self._armed_lev(extras={})
+        out = _run()
+        self.assertIn("leverage —  (no extras['leverage']; the adapter "
+                      "sends 1)", out)
+        self.assertNotIn("leverage_refused", out)
+        self.assertIn("margin          NEVER MEASURED", out)
+
+    def test_above_one_with_the_switch_off_is_a_blocker_naming_the_proof(self):
+        self._armed_lev(extras={"leverage": 2})
+        self._lev_switch(False)
+        out = _run()
+        self.assertIn("etoro_leverage_live is OFF", _blockers(out))
+        self.assertIn("D2b", out)
+
+    def test_a_disabled_config_is_judged_under_worth_reading(self):
+        self._armed_lev(extras={"leverage": 2}, enabled=False)
+        self._lev_switch(False)
+        out = _run()
+        self.assertIn("etoro_leverage_live is OFF", _worth(out))
+        self.assertNotIn("etoro_leverage_live is OFF", _blockers(out))
+
+    def test_a_null_value_is_a_blocker_not_the_default(self):
+        self._armed_lev(extras={"leverage": None})
+        out = _run()
+        self.assertIn("not a number", _blockers(out))
+
+    def test_past_the_class_ceiling_is_a_blocker_even_with_the_switch_on(self):
+        from bot_program.asset_engine.base import ORDER_LEVERAGE_CEILING
+        cap = ORDER_LEVERAGE_CEILING["stock"]
+        self._armed_lev(extras={"leverage": cap + 1})
+        self._lev_switch(True)
+        out = _run()
+        self.assertIn(f"{cap}x", _blockers(out))
+
+    def test_forex_above_one_is_a_blocker(self):
+        self._armed_lev(extras={"leverage": 2}, asset_class="forex",
+                        symbol="EURUSD")
+        self._lev_switch(True)
+        out = _run()
+        self.assertIn("1x ceiling", _blockers(out))
+
+    def test_no_own_book_is_a_blocker_naming_setup(self):
+        self._armed_lev(extras={"leverage": 2}, cash=1000, book=False)
+        self._lev_switch(True)
+        out = _run()
+        self.assertIn("/setup/", _blockers(out))
+
+    def test_inside_the_ceiling_with_the_switch_on_prints_the_venue_cells_and_the_book(self):
+        self._armed_lev(extras={"leverage": 2}, cash=1.4)
+        self._lev_switch(True)
+        out = _run()
+        self.assertIn("leverage 2x (extras)", out)
+        self.assertIn("venue cash 1.40", out)
+        self.assertIn("100,000", out)
+        self.assertIn("financing", _worth(out))
+        self.assertNotIn("leverage", _blockers(out))
+        self.assertIn("notional ceiling", out)
+        self.assertIn("available cash  1.40", out)
+
+    def test_armed_with_no_cells_stored_is_a_blocker(self):
+        self._armed_lev(extras={"leverage": 2})
+        self._lev_switch(True)
+        out = _run()
+        self.assertIn("never been stored", _blockers(out))
+
+    def test_a_typed_one_prints_recorded_and_blocks_nothing(self):
+        self._armed_lev(extras={"leverage": 1})
+        out = _run()
+        self.assertIn("leverage 1 (extras) — the adapter's default, "
+                      "recorded on the row", out)
+        self.assertNotIn("leverage", _blockers(out))
+
+    def test_a_config_routed_elsewhere_is_blocked_for_the_carrier(self):
+        u = _user()
+        _acct(u, port=4003, equity=100000, currency="USD",
+              is_primary_for_stocks=True)
+        self._own_book(u)
+        _pin(u)
+        cfg = _cfg(u, capital="5000", base_currency="USD", symbols=("AAPL",))
+        cfg.extras = {"leverage": 2}
+        cfg.save(update_fields=["extras"])
+        _bars("AAPL", age_hours=1.0)
+        self._lev_switch(True)
+        out = _run()
+        self.assertIn("eToro per-order", _blockers(out))
+
+
 class TheRoutingIsCheckedTests(TestCase):
 
     def test_a_live_config_whose_class_ibkr_does_not_serve_is_flagged(self):

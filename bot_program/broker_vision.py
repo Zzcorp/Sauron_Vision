@@ -261,6 +261,10 @@ def platform_positions(user) -> dict:
             "opened_at": t.opened_at,
             "protected": bool((t.metadata or {}).get("protected")),
             "working": bool((t.metadata or {}).get("entry_working")),
+            # The multiplier the ENTRY asked eToro for, off the row's own
+            # metadata; None when the row did not say — the renderers print
+            # the em dash, never 1, which would be a claim about margin.
+            "leverage": (t.metadata or {}).get("leverage"),
         })
     return {"live": live, "paper_n": paper_n}
 

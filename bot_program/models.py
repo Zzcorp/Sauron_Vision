@@ -403,6 +403,19 @@ class EtoroAccount(models.Model):
     last_equity_at = models.DateTimeField(null=True, blank=True)
     broker_positions = models.JSONField(default=list, blank=True)
     broker_positions_at = models.DateTimeField(null=True, blank=True)
+    # THE MARGIN CELLS (2026-09-23), from the same aggregate read as the
+    # equity, written only by sync_etoro_accounts (EtoroTrader.margin_cells).
+    # `last_available_cash` is what the venue will lend against next;
+    # `last_used_margin` is what it already holds. None = never read (three
+    # states; 0 is a measurement). Read by asset_engine/base.py
+    # ::_leverage_headroom before a levered order, by preflight §3 and §4;
+    # read by nothing at leverage 1, where the venue's refusal stays the
+    # only margin gate. In the account's currency (last_equity_currency).
+    last_available_cash = models.DecimalField(max_digits=18, decimal_places=2,
+                                              null=True, blank=True)
+    last_used_margin = models.DecimalField(max_digits=18, decimal_places=2,
+                                           null=True, blank=True)
+    last_margin_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     @property

@@ -226,6 +226,9 @@ class SmokeTests(TestCase):
         self.assertIn("accountCurrency USD", body)
         self.assertIn("ok       live ping()", body)
         self.assertIn("1,234.56 USD", body)
+        # the margin cells the headroom gate reads, off the same payload
+        self.assertIn("ok       live margin_cells (accountTotals)", body)
+        self.assertIn("available cash 1.40 · used margin 0.00 USD", body)
         # every live config, enabled or not, and the currency it does not share
         self.assertIn("commodity_etf stock enabled=False · 5 symbols", body)
         self.assertIn("base EUR ≠ account USD — the platform converts nothing", body)
@@ -261,7 +264,8 @@ class SmokeTests(TestCase):
         self.assertIn("HTTP 401 — eToro saw the keys and said no", body)
         # the floor and the tally
         self.assertIn("size floor: cannot be asked before an order (capabilities.py)", body)
-        self.assertIn("11 ok · 1 refused by eToro · 1 spelling(s) eToro does "
+        # 12 = the margin_cells line joined the ping/net_liquidation trio
+        self.assertIn("12 ok · 1 refused by eToro · 1 spelling(s) eToro does "
                       "not know · 2 unknown", body)
         self.assertIn("NOT eToro saying no", body)
         self.assertIn("No order was placed", body)
@@ -353,8 +357,9 @@ class SmokeTests(TestCase):
         self.assertIn("the adapter swallowed the failure", body)
         self.assertIn("refused  live book (get_positions)", body)
         self.assertIn("unknown  live broker_portfolio", body)
+        # 4 = ping(), net_liquidation, margin_cells, broker_portfolio
         self.assertIn("0 ok · 2 refused by eToro · 0 spelling(s) eToro does "
-                      "not know · 3 unknown", body)
+                      "not know · 4 unknown", body)
 
     def test_the_currency_note_is_three_state(self):
         """No accountCurrency in the payload is 'unmeasured', printed —

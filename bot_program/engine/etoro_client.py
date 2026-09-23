@@ -69,8 +69,22 @@ WHAT IT REFUSES TO CLAIM
     therefore not implemented: the engine falls down its own ladder to a
     ticker read flagged `exit_price_inferred`, which is the honest path it
     already has. It gets implemented the day the confirmation is verified.
-  * `options`, `leverage` — leverage on eToro is per-order (`leverage` in
-    the body, defaulting to 1); this client always sends 1.
+  * `options` — none.
+  * `leverage` as a TIER — no. The capabilities tier of that name means
+    set_leverage/set_margin_type: Binance futures' per-SYMBOL venue state,
+    set once before a plain order (binance_futures_client.ensure_config).
+    eToro's leverage is a FIELD OF EACH ORDER BODY. This client sends 1
+    unless the caller passes `leverage=`: a whole number in
+    [1, LEVERAGE_MAX] rides the body as-is, anything else is refused
+    before the POST (`_leverage`), and above 1 a missing stop_loss is
+    refused too — from the public reference (unmeasured): "a stopLossRate
+    is required when leverage is greater than 1". The fill result carries
+    what the venue ECHOES (`venueStopLoss`/`venueTakeProfit` off
+    positionExecutions[0], absent when the wire lacks them) and says when
+    the lookup could not be read at all (`pollFailed`). Nothing here reads
+    eToro's per-instrument `leverageValues` (its eligibility endpoint has
+    met no key), and no leveraged order has ever met eToro
+    (deploy/ETORO_DEPARTURE.md §4 D2b).
   * an UNPROTECTED order nobody asked for — a stop_loss or take_profit that
     is present and not a price is refused before the POST (`_level`), never
     dropped; and a rates payload without a `rates` list, or a rate row
@@ -126,6 +140,16 @@ STATUS_NAMES = {1: "Received", 2: "Placed", 3: "Filled", 4: "Rejected",
 #: no quantity, never as a fill.
 FILL_ATTEMPTS = 5
 FILL_DELAY_S = 0.6
+
+#: THE MOST THIS ADAPTER WILL EVER PUT IN AN ORDER BODY, whatever the caller
+#: asks. EQUAL to asset_engine/base.MAX_ORDER_LEVERAGE and pinned equal by
+#: tests/test_etoro_leverage.py — restated rather than imported because
+#: engine/ does not import asset_engine/ (base.py imports this package).
+#: A ceiling on what LEAVES the box, not a claim about what eToro accepts:
+#: the allowed multipliers are per instrument, settlementType and direction
+#: (`leverageValues`, public reference, unmeasured). A shell caller on the
+#: live key cannot send more than the engine could ever ask for.
+LEVERAGE_MAX = 5
 
 
 def _iso_to_ms(ts: str) -> int:
@@ -192,6 +216,41 @@ def _level(value, name: str, symbol: str, side: str):
             f"an order without it would be unprotected at leverage 1."
         )
     return level
+
+
+def _leverage(value, symbol: str, side: str) -> int:
+    """The `leverage` field of the order body: 1 when the caller sent none,
+    else a whole number in [1, LEVERAGE_MAX] — and a RAISE, before any
+    POST, for anything else. A string, a bool, a fraction, a NaN, a zero
+    or a negative is refused rather than rounded or defaulted: a multiplier
+    this adapter silently replaced with 1 is a default nobody asked for.
+    ValueError, as `_level` raises it, so both callers book it the same
+    way (execute_entry: skips.ORDER_ERROR; manual_trade: the error dict);
+    the message LEADS with the fact (skips.record keeps 200 chars,
+    why_no_trade prints 88).
+    """
+    if value is None:
+        return 1
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(
+            f"eToro NOT SENT: leverage {value!r} is not a number "
+            f"({symbol} {side}). Nothing here sends 1 in its place."
+        )
+    lev = float(value)
+    if not math.isfinite(lev) or lev < 1 or lev != int(lev):
+        raise ValueError(
+            f"eToro NOT SENT: leverage {value!r} is not a whole number >= 1 "
+            f"({symbol} {side}). eToro's multiplier is an integer and "
+            f"nothing here rounds one."
+        )
+    if lev > LEVERAGE_MAX:
+        raise ValueError(
+            f"eToro NOT SENT: leverage {int(lev)} is past this adapter's "
+            f"{LEVERAGE_MAX} ceiling ({symbol} {side}). The cap is on what "
+            f"leaves the box; the venue refuses at the order what it will "
+            f"not take."
+        )
+    return int(lev)
 
 
 class EtoroTrader:
@@ -582,6 +641,33 @@ class EtoroTrader:
         block = info.get("accountTotals")
         return block if isinstance(block, dict) else {}
 
+    def margin_cells(self) -> "dict | None":
+        """{"available_cash", "used_margin", "currency"} from ONE aggregate
+        read, or None when the read failed. Each figure is None when the
+        payload lacks its key — three states; a 0 is a measurement. The
+        KEY NAMES were measured 2026-09-22 (accountAvailableCash,
+        accountTotalUsedMargin under accountTotals, see the comment above
+        `_totals`); their arithmetic (available + used + pnl = total) is
+        the public reference's claim, unmeasured. One more GET per sync;
+        nothing on an entry path calls this — the gate reads the cells."""
+        try:
+            info = self.account()
+        except Exception as e:  # noqa: BLE001
+            log.warning("eToro margin_cells failed: %s", e)
+            return None
+        totals = self._totals(info)
+
+        def _num(key):
+            raw = totals.get(key)
+            try:
+                return None if raw is None else float(raw)
+            except (TypeError, ValueError):
+                return None
+
+        return {"available_cash": _num("accountAvailableCash"),
+                "used_margin": _num("accountTotalUsedMargin"),
+                "currency": str(info.get("accountCurrency") or "")}
+
     def balance_usdt(self) -> float:
         """Available cash in the ACCOUNT currency, not USDT — the name is the
         contract's, the unit is eToro's. Caller converts if it must.
@@ -681,7 +767,7 @@ class EtoroTrader:
             qty = float(p.get("units") or 0)
             if qty == 0:
                 continue
-            out.append({
+            row = {
                 "symbol": self._symbol_for(p.get("instrumentID")
                                            or p.get("instrumentId")),
                 "sec_type": "CFD",
@@ -692,7 +778,20 @@ class EtoroTrader:
                 "market_value": 0.0,
                 "unrealized_pnl": 0.0,
                 "currency": "",
-            })
+            }
+            # THE VENUE'S OWN MULTIPLIER, when the row carries one. From the
+            # public reference (unmeasured): a /portfolio position has a
+            # `leverage` field. Absent on the wire -> absent here, never 1:
+            # /treasury/ prints the em dash for a row that did not say.
+            # `units` stay units at any leverage (believed; §4 D2b measures).
+            lev = p.get("leverage")
+            if lev is not None and not isinstance(lev, bool):
+                try:
+                    if float(lev) >= 1 and float(lev) == int(float(lev)):
+                        row["leverage"] = int(float(lev))
+                except (TypeError, ValueError):
+                    pass
+            out.append(row)
         return out
 
     # ── execution (fact 1) ─────────────────────────────────────────────────
@@ -734,14 +833,31 @@ class EtoroTrader:
         negative, NaN, a non-number) RAISES ValueError before any POST: the
         caller asked for a broker-held leg, and an order sent without it is
         unprotected at leverage 1. None means no leg was asked for.
+
+        `leverage` (kwarg, default absent) rides the body as an integer in
+        [1, LEVERAGE_MAX] or RAISES before the POST (`_leverage`); above 1
+        a None stop_loss raises too (public reference, unmeasured: eToro
+        requires a stopLossRate there). Units are untouched by it: leverage
+        changes the margin eToro locks for the same units and nothing else
+        this adapter sends. No settlementType is sent: what eToro assigns
+        when the body omits it is unmeasured (§4 D2b reads it back).
+        `venueStopLoss`/`venueTakeProfit` echo what the lookup says the
+        venue holds; `pollFailed` says the lookup itself could not be read.
         """
         rid = self._rid(kwargs.get("client_order_id"))
+        # THE MULTIPLIER, validated before anything else is built: 1 when
+        # the caller sent none (the literal this body carried until
+        # 2026-09-23), the caller's whole number otherwise, a raise for
+        # anything that is neither. It scales the margin eToro locks, not
+        # `units` — the same units at any leverage lose the same money at
+        # the stop, which is the invariant asset_engine/sizing.py keeps.
+        leverage = _leverage(kwargs.get("leverage"), symbol, side)
         body = {
             "action": "open",
             "transaction": "buy" if side == "BUY" else "sellShort",
             "symbol": str(symbol),
             "units": float(quantity),
-            "leverage": 1,
+            "leverage": leverage,
         }
         # REFUSED BEFORE THE POST when a level is present and not a price.
         # `if stop_loss:` dropped a 0.0 leg silently and SENT a negative
@@ -757,6 +873,18 @@ class EtoroTrader:
             body["takeProfitRate"] = take_profit
         if stop_loss is not None and take_profit is not None:
             protected = True
+        if leverage > 1 and stop_loss is None:
+            # From the public reference (unmeasured): "a stopLossRate is
+            # required when leverage is greater than 1". Refused here, in
+            # `_level`'s voice, rather than sent for eToro to refuse — and
+            # never sent at 1 instead. The bot lane always passes both legs
+            # (asset_engine/base.py execute_entry); this protects every
+            # other caller and the D2b shell snippet.
+            raise ValueError(
+                f"eToro NOT SENT: leverage {leverage} with no stop_loss "
+                f"({symbol} {side}). eToro requires a stop above leverage 1; "
+                f"an order without one is refused here, before the POST."
+            )
 
         r = self._sess().post(self._v2_exec_orders(), json=body,
                               headers=self._headers(rid),
@@ -770,7 +898,14 @@ class EtoroTrader:
         order_id = str(accepted.get("orderId") or "")
         reference = str(accepted.get("referenceId") or rid)
 
-        polled = self._await_fill(reference) or {}
+        polled = self._await_fill(reference)
+        # THREE STATES for the lookup: a payload (read), None (no poll could
+        # be read — a transport error or the shared 20/60 s quota, public
+        # reference, unmeasured). `poll_failed` travels out as `pollFailed`
+        # so a WORKING row can say "the lookup failed" instead of "eToro is
+        # holding it"; {} is never invented as a reading.
+        poll_failed = polled is None
+        polled = polled or {}
         status_id = int(polled.get("status") or polled.get("statusId") or 0)
         executions = polled.get("positionExecutions") or []
         first = executions[0] if executions else {}
@@ -806,6 +941,20 @@ class EtoroTrader:
                     "statusName": STATUS_NAMES.get(status_id, str(status_id))},
         }
         position_id = first.get("positionId") or first.get("positionID")
+        # WHAT THE VENUE HOLDS, when the lookup says: the fixture and the
+        # public reference (unmeasured) put stopLossRate/takeProfitRate on
+        # positionExecutions[]. Absent on the wire -> absent here. base.py
+        # compares them with what was SENT; eToro's 0.0001 "no stop"
+        # sentinel (public reference, unmeasured) then reads as a rewrite,
+        # which is the truth: the venue holds no stop.
+        for key, wire in (("venueStopLoss", "stopLossRate"),
+                          ("venueTakeProfit", "takeProfitRate")):
+            raw_level = first.get(wire)
+            if raw_level is not None and not isinstance(raw_level, bool):
+                try:
+                    out[key] = float(raw_level)
+                except (TypeError, ValueError):
+                    pass
         if position_id:
             # THE HANDLE THE CLOSE NEEDS, on every fill. It used to be
             # reported only beside an accepted bracket (below), so exactly
@@ -821,6 +970,11 @@ class EtoroTrader:
             out["protectiveOrders"] = []
             out["protectiveTradeId"] = str(position_id)
         if status == "PENDING":
+            if poll_failed:
+                # NOT "eToro is holding it": nobody could read the lookup.
+                # Filled, refused and waiting are all possible; the row
+                # books WORKING either way and the alert says which.
+                out["pollFailed"] = True
             # AN ACCEPTANCE IS NOT A POSITION. Every non-terminal lookup
             # status (Received, Placed, WaitingForMarket, PendingTriggered
             # Rate) — and a poll that could not be read at all, which also

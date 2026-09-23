@@ -192,6 +192,48 @@ class TheLiveTicketCeremonyTests(TestCase):
         fake.market_order.assert_not_called()
 
 
+class TheLeverageKeyIsRefusedOnThisLaneTests(TestCase):
+    """A config carrying extras['leverage'] above 1 never gets a hand-taken
+    order sent at the adapter's 1 under it: the lane refuses on the key's
+    presence with the bots' own rule (judge_order_leverage) and sends
+    nothing. A typed 1 is the default and passes."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user("lv_lev", password="x")
+
+    def setUp(self):
+        cache.clear()
+        self.inst = _quote("BTCUSD", 60000)
+        _components_on()
+        self.cfg = _arm_live(self.user)
+
+    def _with_key(self, value):
+        self.cfg.extras = dict(self.cfg.extras or {}, leverage=value)
+        self.cfg.save(update_fields=["extras"])
+
+    def test_a_key_above_one_refuses_and_sends_nothing(self):
+        from bot_program.manual_trade import execute_take_trade
+        from bot_program.models import AssetBotTrade
+        self._with_key(2)
+        fake = _fake_live_client()
+        with patch(ROUTER, return_value=fake):
+            out = execute_take_trade(self.user, _signal(self.inst), pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertIn("sends no leverage", out["error"])
+        fake.market_order.assert_not_called()
+        self.assertFalse(AssetBotTrade.objects.filter(config=self.cfg).exists())
+
+    def test_a_typed_one_is_the_default_and_the_order_goes(self):
+        from bot_program.manual_trade import execute_take_trade
+        self._with_key(1)
+        fake = _fake_live_client()
+        with patch(ROUTER, return_value=fake):
+            out = execute_take_trade(self.user, _signal(self.inst), pin_ok=True)
+        self.assertTrue(out.get("ok"), out)
+        self.assertNotIn("leverage", fake.market_order.call_args.kwargs)
+
+
 class TheLiveFillIsTheBrokersTests(TestCase):
     """What gets booked is what the broker said happened."""
 

@@ -69,6 +69,17 @@ VENUE_MIN_SIZE = "venue_min_size"
 # the plan and the reason so the operator can read the ladder on /desk/ and
 # see what took the capital instead (2026-09-12).
 DESK_DISPLACED = "desk_displaced"
+# 2026-09-23. A LEVERED order the platform refused to send: extras['leverage']
+# is not a whole number or is past a cap, the order would be carried by a
+# venue other than eToro, the component etoro_leverage_live is OFF, the
+# operator's own book on /setup/ was never saved, the account's available
+# cash (the sync's cells) is unmeasured, stale, in another currency or too
+# small, the account would be pledged past its ceiling, or eToro refused a
+# levered order on that symbol within the quiet hours. Its own code so a
+# repeated line reads as a DECISION with both numbers, never as a broken
+# connection (order_error) or a small pool (sized_to_zero). NOTHING IS
+# RESIZED OR DE-LEVERED: the operator is handed the numbers and chooses.
+LEVERAGE_REFUSED = "leverage_refused"
 
 MAX_SYMBOLS_TRACKED = 200
 
@@ -169,6 +180,13 @@ def diagnose(cfg) -> str:
         DESK_DISPLACED: "the capital desk is ranking these entries below "
                         "others — read the ladder on /desk/ to see what "
                         "took the risk budget instead",
+        LEVERAGE_REFUSED: "a levered eToro order was refused before it left "
+                          "— read the detail: the value, the carrier, the "
+                          "etoro_leverage_live switch (deploy/"
+                          "ETORO_DEPARTURE.md §4 D2b), the book on /setup/, "
+                          "the account's cash, or a refusal eToro gave "
+                          "within the quiet hours; nothing was sent at 1 "
+                          "and nothing was de-levered",
     }.get(top, "")
     return (f"{top} accounts for {share:.0%} of {total} skips"
             + (f" — {advice}" if advice else ""))

@@ -559,6 +559,24 @@ class Command(BaseCommand):
                         f"{user.username}: the equity reading carries no "
                         f"currency, and this platform converts nothing")
             w(f"   book currency   {book_ccy or '(unset)'}")
+            # THE MARGIN CELLS, three states, off the BOOK row when it has
+            # them (eToro since 2026-09-23); §4 reads the VENUE row's for a
+            # levered config. Never computed from the equity: available +
+            # used margin + pnl = total is the public reference's claim.
+            if book is not None and hasattr(book, "last_margin_at"):
+                _cash = getattr(book, "last_available_cash", None)
+                _used = getattr(book, "last_used_margin", None)
+                if _cash is None and _used is None:
+                    w("   margin          NEVER MEASURED (available cash / "
+                      "used margin: no sync has stored them)")
+                else:
+                    _m_at = getattr(book, "last_margin_at", None)
+                    _m_age = ((now - _m_at).total_seconds() / 3600.0
+                              if _m_at else float("nan"))
+                    cash_s = "—" if _cash is None else f"{float(_cash):,.2f}"
+                    used_s = "—" if _used is None else f"{float(_used):,.2f}"
+                    w(f"   available cash  {cash_s}  used margin {used_s}  "
+                      f"({_m_age:.1f}h old)")
 
             # REACHABILITY IS THE AGE OF THIS READING, NEVER THE `connected`
             # FLAG. The flag is written only when somebody presses TEST IBKR
@@ -761,6 +779,72 @@ class Command(BaseCommand):
                             f"{reading['value']:,.0f} — every risk limit is "
                             f"{over:.1f}x looser than it reads")
 
+                # THE MULTIPLIER, judged with the engine's own rule on the
+                # venue the router names (`kind`, "" when nothing carries
+                # the class) — for EVERY live config, enabled or not, so the
+                # operator meets the refusal here and not at 02:00. A key
+                # present is judged whatever its value (None included);
+                # absent prints the adapter's default. Enabled -> BLOCKER,
+                # disabled -> WORTH READING, the split this section keeps.
+                _extras = cfg.extras or {}
+                if "leverage" not in _extras:
+                    w("        leverage —  (no extras['leverage']; the "
+                      "adapter sends 1)")
+                else:
+                    from bot_program.asset_engine.base import (
+                        judge_order_leverage)
+                    _raw_lev = _extras.get("leverage")
+                    _lev, _lev_why = judge_order_leverage(
+                        cfg, cfg.asset_class, kind)
+                    if _lev_why:
+                        w(f"        leverage {_raw_lev!r} (extras)  ← {_lev_why}")
+                        (blockers if cfg.enabled else warnings).append(
+                            f"config {cfg.id} ({cfg.name}): {_lev_why}")
+                    elif _lev == 1:
+                        w("        leverage 1 (extras) — the adapter's "
+                          "default, recorded on the row")
+                    else:
+                        from portfolio.models import Portfolio
+                        from portfolio.services import PER_USER_SUFFIX
+                        _own = Portfolio.objects.filter(
+                            name=f"{user.username}{PER_USER_SUFFIX}").first()
+                        w(f"        leverage {_lev}x (extras) — rides the "
+                          f"eToro order body; units, the notional ceiling "
+                          f"and the loss at the stop are unchanged; cash "
+                          f"pledged per position is notional/{_lev} "
+                          f"(believed until D2b); MAX TOTAL EXPOSURE is a "
+                          f"percentage of your /setup/ book: "
+                          f"{float(_own.current_value):,.0f} "
+                          f"{_own.currency or ''}")
+                        _v_cash = getattr(venue, "last_available_cash", None)
+                        _v_used = getattr(venue, "last_used_margin", None)
+                        _v_at = getattr(venue, "last_margin_at", None)
+                        if _v_cash is None or _v_used is None or _v_at is None:
+                            w("          margin cells NEVER MEASURED on the "
+                              "venue row — every levered entry is refused "
+                              "until the sync stores them")
+                            (blockers if cfg.enabled else warnings).append(
+                                f"config {cfg.id} ({cfg.name}) at {_lev}x: "
+                                f"the venue row's available cash / used "
+                                f"margin have never been stored — every "
+                                f"levered entry is refused (leverage_refused) "
+                                f"until the sync stores them")
+                        else:
+                            w(f"          venue cash {float(_v_cash):,.2f}  "
+                              f"used margin {float(_v_used):,.2f}  "
+                              f"({_age(_v_at, now)})")
+                        from bot_program.asset_models import (
+                            DEFAULT_MAX_HOLD_HOURS)
+                        _hz = (cfg.max_hold_hours if cfg.max_hold_hours
+                               is not None else
+                               DEFAULT_MAX_HOLD_HOURS.get(cfg.asset_class))
+                        warnings.append(
+                            f"config {cfg.id} ({cfg.name}) at {_lev}x: "
+                            f"financing (overnight/weekend fees on a levered "
+                            f"CFD) is charged by NOTHING here — the cost "
+                            f"filter is spread only — and the position may "
+                            f"be held up to {_hz} h; the rate is unmeasured "
+                            f"until D2b's costs read")
                 if cfg.enabled and not list(cfg.symbols or []):
                     from bot_program.manual_trade import MANUAL_CONFIG_NAME
                     if cfg.name != MANUAL_CONFIG_NAME:

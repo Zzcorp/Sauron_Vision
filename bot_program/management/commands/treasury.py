@@ -17,6 +17,19 @@ User = get_user_model()
 DASH = "—"          # unmeasured. Never a 0.
 
 
+def _lev(value) -> str:
+    """'2x' for a multiplier the row carried — '1x' for a row that SAID 1;
+    the em dash when it did not say. Never '1x' for silence: that is a
+    claim about margin nobody measured (a row opened before 2026-09-23, or
+    one sent at the adapter's own default, carries no key at all)."""
+    if value is None or isinstance(value, bool):
+        return DASH
+    try:
+        return f"{int(value)}x"
+    except (TypeError, ValueError):
+        return DASH
+
+
 def _age(seconds) -> str:
     if seconds is None:
         return DASH
@@ -105,13 +118,14 @@ class Command(BaseCommand):
               f"counted apart {DASH} venue discipline)")
         else:
             w(f"   {'symbol':<12} {'side':<5} {'qty':>14} {'entry':>14} "
-              f"{'broker':<8} {'how':<9} state")
+              f"{'broker':<8} {'how':<9} {'lev':>4} state")
             for p in plat["live"]:
                 state = ("working" if p["working"] else
                          "protected" if p["protected"] else "unprotected")
                 w(f"   {p['symbol']:<12} {p['side']:<5} {p['qty']:>14.4f} "
                   f"{p['entry']:>14.4f} {p['broker']:<8} "
-                  f"{p['attribution']:<9} {state}")
+                  f"{p['attribution']:<9} {_lev(p.get('leverage')):>4} "
+                  f"{state}")
             w(f"   and {plat['paper_n']} paper row(s), counted apart")
 
         w("\n5. WHAT EACH BROKER SAYS IT HOLDS")
@@ -129,7 +143,7 @@ class Command(BaseCommand):
                   f"{float(h.get('qty') or 0):>14.4f} @ "
                   f"{float(h.get('avg_cost') or 0):>12.4f}  "
                   f"mark {float(mark):>12.4f}  "
-                  f"{h.get('currency') or ''}")
+                  f"{h.get('currency') or ''}  lev {_lev(h.get('leverage'))}")
 
         w("\n6. DIVERGENCE — THE BROKER AGAINST THE PLATFORM")
         for d in v["divergence"]:

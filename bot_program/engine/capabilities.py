@@ -101,6 +101,15 @@ ADAPTER_CAPABILITIES: dict = {
     # pending order. NOT "fills": no closed-position history is documented
     # and the close confirmation has not met a real key. A method that
     # existed and could not act would pass this table's test and lie.
+    # 2026-09-23. NOT "leverage" either: that tier means set_leverage /
+    # set_margin_type — per-SYMBOL venue state, Binance futures' shape.
+    # eToro's multiplier is a FIELD OF EACH ORDER BODY (market_order's
+    # `leverage=` kwarg, refused before the POST when it is not a whole
+    # number in [1, LEVERAGE_MAX] or arrives above 1 without a stop). Two
+    # fake methods to satisfy the tier would be exactly the lie the header
+    # warns about, so the per-order shape is a kwarg contract on
+    # "execution", written in asset_engine/base.py first and pinned by
+    # tests/test_etoro_leverage.py. `margin_cells` belongs to no tier.
     "etoro": ("market_data", "execution", "brackets", "account"),
     "ibkr": ("market_data", "execution", "orders", "brackets", "account",
              "options"),

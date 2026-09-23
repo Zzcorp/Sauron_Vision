@@ -394,6 +394,9 @@ class AnAcceptanceIsNotAFillTests(SimpleTestCase):
         self.assertEqual(body["stopLossRate"], 180.0)
         self.assertEqual(body["takeProfitRate"], 210.0)
         self.assertEqual(body["stopLossType"], "fixed")
+        # THE DEFAULT, pinned: no `leverage=` kwarg -> the literal 1 this
+        # body carried before 2026-09-23. A kwarg changes it (the
+        # AnUnprotectedOrderIsNeverSentSilentlyTests below), nothing else.
         self.assertEqual(body["leverage"], 1)
         lookup = [c for c in fake.calls if "orders:lookup" in c[1]][0]
         self.assertEqual(lookup[2]["params"], {"referenceId": "ref-1"},
@@ -538,6 +541,27 @@ class TheAccountReadsTests(SimpleTestCase):
         t2, _ = _client([("GET", "/portfolio", 503, {})])
         with self.assertRaises(RuntimeError):
             t2.get_positions()
+
+    def test_broker_portfolio_carries_the_venues_leverage_only_when_the_row_says(self):
+        """Public reference (unmeasured): a /portfolio position has a
+        `leverage` field. Three states on the way out — the number the row
+        carried, or NO key at all; never 1 for a row that did not say."""
+        t, _ = _client([SEARCH_AAPL, ("GET", "/portfolio", 200, {
+            "positions": [
+                {"positionID": 1, "instrumentID": 1001, "isBuy": True,
+                 "units": 10, "openRate": 190.5, "leverage": 5},
+                {"positionID": 2, "instrumentID": 1001, "isBuy": True,
+                 "units": 3, "openRate": 190.5},
+                {"positionID": 3, "instrumentID": 1001, "isBuy": True,
+                 "units": 3, "openRate": 190.5, "leverage": "x"},
+            ]})])
+        t.instrument_id("AAPL")
+        rows = t.broker_portfolio()
+        self.assertEqual(rows[0]["leverage"], 5)
+        self.assertNotIn("leverage", rows[1])
+        self.assertNotIn("leverage", rows[2])
+        self.assertEqual([r["qty"] for r in rows], [10.0, 3.0, 3.0],
+                         "units are units at any leverage")
 
     def test_broker_portfolio_is_none_when_unreadable(self):
         t, _ = _client([("GET", "/portfolio", 503, {})])
@@ -777,6 +801,98 @@ class AnUnprotectedOrderIsNeverSentSilentlyTests(SimpleTestCase):
         self.assertNotIn("protectedOnFill", out,
                          "protection was claimed on an order with no legs")
         self.assertEqual(out["positionId"], "555")
+
+    def test_leverage_above_one_without_a_stop_is_refused_before_the_post(self):
+        """Public reference (unmeasured): a stopLossRate is required when
+        leverage is greater than 1. Refused HERE, in `_level`'s voice,
+        rather than by eToro after the POST — and never sent at 1 instead."""
+        msg = self._refused(leverage=2, take_profit=210)
+        self.assertIn("NOT SENT", msg[:88])
+        self.assertIn("leverage 2", msg[:88])
+        self.assertIn("stop_loss", msg[:88])
+
+    def test_a_leverage_that_is_not_a_whole_number_at_least_one_is_refused(self):
+        for bad in (0, -1, 1.5, "2", True, float("nan"), float("inf")):
+            with self.subTest(bad=bad):
+                msg = self._refused(leverage=bad, stop_loss=180,
+                                    take_profit=210)
+                self.assertIn("leverage", msg[:88])
+
+    def test_leverage_past_the_adapter_ceiling_is_refused_not_clamped(self):
+        from bot_program.engine.etoro_client import LEVERAGE_MAX
+        msg = self._refused(leverage=LEVERAGE_MAX + 1, stop_loss=180,
+                            take_profit=210)
+        self.assertIn(str(LEVERAGE_MAX), msg)
+
+    def test_a_leverage_kwarg_rides_the_body_as_that_integer(self):
+        t, fake = _client(self._routes())
+        with mock.patch("time.sleep"):
+            out = t.market_order("AAPL", "BUY", 10, stop_loss=180,
+                                 take_profit=210, leverage=2)
+        body = [c for c in fake.calls if c[0] == "POST"][0][2]["json"]
+        self.assertEqual(body["leverage"], 2)
+        self.assertIs(type(body["leverage"]), int)
+        self.assertEqual(body["units"], 10.0,
+                         "leverage changed the units — it must change the "
+                         "margin eToro locks and nothing else")
+        self.assertNotIn("settlementType", body,
+                         "what eToro assigns when the body omits it is "
+                         "unmeasured; D2b reads settlementTypeID back")
+        self.assertEqual(body["stopLossRate"], 180.0)
+        self.assertEqual(out["status"], "FILLED")
+        self.assertTrue(out["protectedOnFill"])
+
+    def test_an_explicit_leverage_of_one_is_the_default_body(self):
+        t, fake = _client(self._routes())
+        with mock.patch("time.sleep"):
+            t.market_order("AAPL", "BUY", 10, leverage=1)
+        body = [c for c in fake.calls if c[0] == "POST"][0][2]["json"]
+        self.assertEqual(body["leverage"], 1)
+        self.assertNotIn("stopLossRate", body,
+                         "at leverage 1 None is still no leg asked for")
+
+    def test_the_venues_stop_echo_rides_out_as_venue_keys(self):
+        t, _ = _client(self._routes())
+        with mock.patch("time.sleep"):
+            out = t.market_order("AAPL", "BUY", 10, stop_loss=180,
+                                 take_profit=210)
+        self.assertEqual(out["venueStopLoss"], 180.0)
+        self.assertEqual(out["venueTakeProfit"], 210.0)
+        lk = _lookup(3)
+        lk["positionExecutions"][0].pop("stopLossRate")
+        lk["positionExecutions"][0].pop("takeProfitRate")
+        t2, _ = _client([SEARCH_AAPL,
+                         ("POST", "/execution/demo/orders", 200,
+                          {"orderId": 777, "referenceId": "ref-1"}),
+                         ("GET", "orders:lookup", 200, lk)])
+        with mock.patch("time.sleep"):
+            out2 = t2.market_order("AAPL", "BUY", 10, stop_loss=180,
+                                   take_profit=210)
+        self.assertNotIn("venueStopLoss", out2)
+        self.assertNotIn("venueTakeProfit", out2)
+
+    def test_a_failed_poll_is_pending_working_and_says_so(self):
+        t, _ = _client([SEARCH_AAPL,
+                        ("POST", "/execution/demo/orders", 200,
+                         {"orderId": 777, "referenceId": "ref-1"}),
+                        ("GET", "orders:lookup", 503, {})])
+        with mock.patch("time.sleep"):
+            out = t.market_order("AAPL", "BUY", 10, stop_loss=180,
+                                 take_profit=210, leverage=2)
+        self.assertEqual(out["status"], "PENDING")
+        self.assertTrue(out["working"])
+        self.assertTrue(out["pollFailed"])
+        t2, _ = _client([SEARCH_AAPL,
+                         ("POST", "/execution/demo/orders", 200,
+                          {"orderId": 777, "referenceId": "ref-1"}),
+                         ("GET", "orders:lookup", 200, _lookup(1))])
+        with mock.patch("time.sleep"):
+            out2 = t2.market_order("AAPL", "BUY", 10, stop_loss=180,
+                                   take_profit=210)
+        self.assertTrue(out2["working"])
+        self.assertNotIn("pollFailed", out2,
+                         "a lookup that ANSWERED Received is eToro holding "
+                         "it, not a failed poll")
 
     def test_a_valid_pair_still_rides_the_body_as_floats(self):
         t, fake = _client(self._routes())

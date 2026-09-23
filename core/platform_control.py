@@ -280,6 +280,18 @@ DEFAULT_COMPONENTS = [
     {"key": "pipeline_campaign_watch", "name": "Evidence Chain Watchdog",
      "description": "Daily read-only check that the paper-campaign evidence chain (bars -> indicators -> signals -> fills -> outcomes -> ladder) is still complete, and one notification when a link goes cold. Writes nothing and makes no broker call.",
      "category": "pipeline"},
+
+    # ── eToro leverage (2026-09-23) ───────────────────────────
+    # A per-config extras["leverage"] is handed to EtoroTrader.market_order
+    # as a body field. It changes the margin eToro locks, never the units
+    # or the loss at the stop. OFF until deploy/ETORO_DEPARTURE.md §4 D2b —
+    # a leveraged fill AND close on the demo world — is recorded in
+    # tests/test_etoro_client.py; a missing row reads OFF. Read by
+    # asset_engine/base.judge_order_leverage on the tick and by
+    # preflight_live §4. Description measured at 297 chars (< 300).
+    {"key": "etoro_leverage_live", "name": "eToro Leverage (per config)",
+     "description": "Off (default): a config carrying extras['leverage'] above 1 is REFUSED at the tick (leverage_refused) and blocked by preflight_live; nothing is sent at 1 instead. On: the multiplier rides the eToro order body; units, notional cap and the stop are unchanged. Flip only after ETORO_DEPARTURE §4 D2b.",
+     "category": "system"},
 ]
 
 

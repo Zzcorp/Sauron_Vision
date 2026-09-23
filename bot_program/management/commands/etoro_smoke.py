@@ -322,6 +322,21 @@ class Command(BaseCommand):
                     "and the sync would store nothing")
         line(f"{env} net_liquidation (accountTotals)", _nl)
 
+        def _mc():
+            mc = t.margin_cells()
+            if mc is None:
+                raise _Unknown("None — the adapter swallowed the failure "
+                               "(etoro_client.margin_cells); the sync would "
+                               "leave the margin cells as they are")
+            cash, used = mc.get("available_cash"), mc.get("used_margin")
+            cash_s = "ABSENT" if cash is None else f"{cash:,.2f}"
+            used_s = "ABSENT" if used is None else f"{used:,.2f}"
+            return (f"available cash {cash_s} · used margin {used_s} "
+                    f"{mc.get('currency') or ''} — the cells "
+                    f"_leverage_headroom reads; ABSENT is a key the payload "
+                    f"lacks, never a 0")
+        line(f"{env} margin_cells (accountTotals)", _mc)
+
         w("-" * 70)
         configs = list(AssetBotConfig.objects.filter(user=user, mode="live")
                        .order_by("id"))
