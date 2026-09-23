@@ -248,6 +248,14 @@ DEFAULT_COMPONENTS = [
      "description": "Off (default) = shadow: the plan is recorded and graded, the fleet is unchanged. On = the plan is OBEYED — displaced entries are skipped and chosen sizes multiplied, never above 1. The budget, the caps and every per-order refusal hold in both modes. Flip after weeks of positive edge, not before.",
      "category": "system"},
 
+    # ── eToro fractional units (2026-09-23) ──────────────────────
+    # Without this row _venue_fractional_units answers None and the stock
+    # bot rounds to whole shares on eToro — the correct default. Description
+    # under the 300-char Postgres column (the registry test measures it).
+    {"key": "fractional_units_live", "name": "Fractional Units Live Mode (eToro)",
+     "description": "Off (default) = the stock bot rounds to WHOLE shares on eToro, as on every venue. On = the size the risk budget produces is sent as a FRACTION. Flip only after demo proof D2c (deploy/ETORO_DEPARTURE.md section 4) measured a 0.1234-unit fill and its pins landed in tests/test_etoro_client.py.",
+     "category": "system"},
+
     # ── The three that were never registered (found live 2026-09-13) ────
     # These keys have guarded tasks and beat entries in this codebase, and
     # had NO row in DEFAULT_COMPONENTS. `is_component_enabled` returns

@@ -286,7 +286,8 @@ class ForexBot(AssetBot):
         so realized_r stays exactly price-based whatever the rate does."""
         return super()._trade_pnl(trade, price) * forex_usd_multiplier(trade)
 
-    def _round_qty(self, qty: float, price: float) -> float:
+    def _round_qty(self, qty: float, price: float, *,
+                   fractional=None) -> float:
         """Round to a tidy unit boundary; a fraction below half a boundary
         sizes to zero (recorded as SIZED_TO_ZERO upstream)."""
         units = round(float(qty) / UNIT_ROUNDING) * UNIT_ROUNDING

@@ -27,7 +27,8 @@ class CommodityBot(AssetBot):
             # Don't .save() — caller might prefer ephemeral override; runners
             # set this every tick anyway.
 
-    def _round_qty(self, qty: float, price: float) -> float:
+    def _round_qty(self, qty: float, price: float, *,
+                   fractional=None) -> float:
         """Fractional contracts allowed (paper-only for now).
 
         Real commodity sizing needs contract specs (CL = 1000 bbl, GC =

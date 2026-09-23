@@ -885,7 +885,7 @@ class Command(BaseCommand):
             # above catches a pool that is too BIG. Nothing caught the other
             # end, and the other end fails silently: sizing multiplies the
             # pool by a risk fraction, divides by the stop distance, and a
-            # result under one unit becomes zero. `stock_bot._whole_units`
+            # result under one unit becomes zero. `stock_bot._round_qty`
             # says so in its own docstring — "int() truncation is why a live
             # $10,000 config at 2% could not buy a $201 stock ... a zero qty
             # exits the entry path with no log line."
@@ -902,7 +902,8 @@ class Command(BaseCommand):
                 w(f"\n5. FUEL AND SIZE FOR ARMED LIVE CONFIGS — "
                   f"{user.username}")
                 from bot_program.asset_engine.sizing import (
-                    max_notional_fraction)
+                    _extras_float, max_notional_fraction,
+                    min_stop_fraction, risk_fraction)
                 for cfg in armed:
                     try:
                         pool = float(cfg.capital or 0)
@@ -912,6 +913,70 @@ class Command(BaseCommand):
                     ceiling = pool * cap_frac
                     w(f"   [{cfg.id}] {cfg.name} — pool {pool:,.0f}, notional "
                       f"ceiling {ceiling:,.0f} ({cap_frac:.0%})")
+                    # WHOLE SHARES OR FRACTIONS is a fact of the VENUE and of
+                    # the fractional_units_live switch — read off the
+                    # capability TABLE (what the platform believes;
+                    # test_broker_contract keeps it equal to the class) and
+                    # the component row. No client is built here and no key
+                    # is read. Only the stock bot floors to whole, so only
+                    # stock configs are judged this way; the money floor is
+                    # the OPERATOR's extras['venue_min_notional'], in the
+                    # venue's currency — nothing here converts it.
+                    from bot_program.engine.capabilities import declared
+                    from core.platform_control import is_component_enabled
+                    _, kind5 = _venue_for(user, cfg.asset_class)
+                    takes = (cfg.asset_class == "stock"
+                             and "fractional_units" in declared(kind5))
+                    switch = is_component_enabled("fractional_units_live")
+                    fractional = bool(takes and switch)
+                    if takes:
+                        w(f"        FRACTIONS at {kind5}: the adapter declares "
+                          f"the tier as a belief from the public reference "
+                          f"(unmeasured until D2c); switch "
+                          f"fractional_units_live is "
+                          + ("ON — fractions sent" if switch
+                             else "OFF — whole shares, as before"))
+                    if fractional:
+                        _f = risk_fraction(cfg)
+                        _risk = pool * _f
+                        _min_pos = _extras_float(cfg, "venue_min_notional", 0.0)
+                        if _min_pos > 0:
+                            _bound = _risk / _min_pos
+                            _floor = min_stop_fraction(cfg, cfg.asset_class, _f)
+                            w(f"        risk {_risk:,.2f} per trade; the "
+                              f"declared venue minimum {_min_pos:,.2f} "
+                              f"(extras['venue_min_notional'], the venue's "
+                              f"currency, unconverted) needs a stop within "
+                              f"{_bound:.2%} — wider stops are refused as "
+                              f"venue_min_size before the order")
+                            if _bound < _floor:
+                                # bound < floor <=> pool * cap < minimum:
+                                # the risk fraction cancels out of both
+                                # sides, so risk_per_trade_pct cannot move
+                                # this; pool * cap = risk / floor
+                                _cap_notional = _risk / _floor
+                                warnings.append(
+                                    f"config {cfg.id} ({cfg.name}): the "
+                                    f"declared venue minimum {_min_pos:,.2f} "
+                                    f"needs a stop within {_bound:.2%}, "
+                                    f"tighter than the {_floor:.2%} stop floor "
+                                    f"its own cap implies — the cap allows at "
+                                    f"most {_cap_notional:,.2f} of notional, "
+                                    f"under the minimum, so most entries will "
+                                    f"be refused as venue_min_size; raise the "
+                                    f"pool, raise max_notional_fraction, or "
+                                    f"lower the declared minimum once D2c "
+                                    f"measures it")
+                        else:
+                            w(f"        risk {_risk:,.2f} per trade; no venue "
+                              f"minimum declared (extras['venue_min_notional'] "
+                              f"absent) — the venue's own refusal is the only "
+                              f"floor, remembered per symbol for 24h")
+                        warnings.append(
+                            f"config {cfg.id} ({cfg.name}): SELL signals become "
+                            f"sellShort CFDs at {kind5}, with an overnight fee "
+                            f"this platform's cost filter does not charge "
+                            f"(unmeasured — D2c holds one overnight)")
                     for sym in list(cfg.symbols or [])[:per]:
                         row = (PriceData.objects
                                .filter(instrument__symbol=sym,
@@ -926,8 +991,14 @@ class Command(BaseCommand):
                         price = float(row["close"] or 0) if row else 0.0
                         note = ""
                         if price > 0 and ceiling > 0 and price > ceiling:
-                            note = (f"  ← ONE UNIT ({price:,.2f}) EXCEEDS THE "
-                                    f"CEILING")
+                            if fractional:
+                                note = (f"  ← a whole unit ({price:,.2f}) "
+                                        f"exceeds the ceiling; a fraction "
+                                        f"fits (FRACTIONS at {kind5}, switch "
+                                        f"ON, believed)")
+                            else:
+                                note = (f"  ← ONE UNIT ({price:,.2f}) EXCEEDS "
+                                        f"THE CEILING")
                         market = _market_note(row, newest, now)
                         w(f"   {sym:<12} newest 4h bar {_age(newest, now)}"
                           f"{market}{note}")
@@ -937,7 +1008,7 @@ class Command(BaseCommand):
                         else:
                             _bar_findings(sym, row, newest, now,
                                           blockers, warnings)
-                        if note:
+                        if note and not fractional:
                             blockers.append(
                                 f"config {cfg.id} ({cfg.name}): one unit of "
                                 f"{sym} costs {price:,.2f} and the notional "

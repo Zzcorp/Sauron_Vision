@@ -767,6 +767,18 @@ class AssetBot(ABC):
     #: silently retired by one network blip. The alert says the number.
     IN_DOUBT_QUIET_HOURS = 12
 
+    #: The switch that lets a size be SENT as a fraction on a venue whose
+    #: adapter declares `fractional_units`. A component row (arrives OFF on
+    #: every deploy through seed_components); OFF reads as "unmeasured" and
+    #: rounds to whole shares, as before. Flipped by the operator after
+    #: ETORO_DEPARTURE §4 D2c measured a fractional fill.
+    FRACTIONAL_UNITS_COMPONENT = "fractional_units_live"
+
+    #: How long a symbol whose FRACTIONAL size the venue refused is left
+    #: alone. One recorded refusal and one alert instead of the same POST
+    #: every tick for weeks; the operator's remedy is named in both.
+    FRACTION_REFUSED_QUIET_HOURS = 24
+
     #: How long a symbol is left alone after eToro REFUSED (or the wire
     #: swallowed) a LEVERED order. Without it a config armed at 2x on an
     #: instrument eToro will not lever POSTs once per tick for weeks, and
@@ -827,6 +839,43 @@ class AssetBot(ABC):
             age_h = ((timezone.now() - _dt.fromisoformat(note["at"]))
                      .total_seconds() / 3600.0)
             if age_h >= self.LEVERAGE_QUIET_HOURS:
+                return None
+            return dict(note, age_h=age_h)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _remember_fraction_refused(self, symbol: str, words: str) -> None:
+        """Note on the config that the venue refused a FRACTIONAL size of
+        `symbol`, with its words. Read by propose_entry, which refuses the
+        symbol while the note is fresh — one POST per
+        FRACTION_REFUSED_QUIET_HOURS, not one per tick. The in-doubt
+        note's shape and posture."""
+        try:
+            extras = dict(self.cfg.extras or {})
+            book = dict(extras.get("entry_fraction_refused") or {})
+            book[str(symbol).upper()] = {
+                "words": str(words)[:160],
+                "at": timezone.now().isoformat(),
+            }
+            extras["entry_fraction_refused"] = book
+            self.cfg.extras = extras
+            self.cfg.save(update_fields=["extras"])
+        except Exception as e:  # noqa: BLE001 — a lost note must not raise
+            logger.warning("[%s_bot] could not record the fraction refusal "
+                           "for %s: %s", self.asset_class, symbol, e)
+
+    def _fraction_refused_note(self, symbol: str):
+        """The fresh refusal note for `symbol`, or None. Expires by itself,
+        as _in_doubt_note does."""
+        try:
+            book = (self.cfg.extras or {}).get("entry_fraction_refused") or {}
+            note = book.get(str(symbol).upper())
+            if not note:
+                return None
+            from datetime import datetime as _dt
+            age_h = ((timezone.now() - _dt.fromisoformat(note["at"]))
+                     .total_seconds() / 3600.0)
+            if age_h >= self.FRACTION_REFUSED_QUIET_HOURS:
                 return None
             return dict(note, age_h=age_h)
         except Exception:  # noqa: BLE001
@@ -2774,6 +2823,16 @@ class AssetBot(ABC):
         # Without this the next tick sends a SECOND order: the idempotency key
         # buckets by the minute, so the broker's duplicate guard does not see
         # the first one either.
+        # AND SKIP WHILE THE VENUE'S REFUSAL OF A FRACTION IS FRESH. The
+        # words come first: skips.record keeps 200 chars, why_no_trade 88.
+        refused = self._fraction_refused_note(symbol)
+        if refused:
+            return self._skip(
+                symbol, skips.VENUE_MIN_SIZE,
+                f"{refused.get('words') or 'the venue refused'} — a "
+                f"fractional size refused at {refused.get('at')}; quiet for "
+                f"{self.FRACTION_REFUSED_QUIET_HOURS}h. Type "
+                f"extras['venue_min_notional'] to refuse before the order")
         doubt = self._in_doubt_note(symbol)
         if doubt:
             return self._skip(
@@ -3046,7 +3105,13 @@ class AssetBot(ABC):
             logger.info("[%s_bot] %s correlation taper: %s",
                         self.asset_class, symbol, corr["reason"])
 
-        qty = self._round_qty(qty, price)
+        # THE VENUE'S UNIT GRANULARITY, asked of the client this pass priced
+        # through — the same adapter class the order will go through, since
+        # `purpose` matters to IBKR alone (broker_router:243) — and carried
+        # on the candidate so execute_entry rounds by the same answer.
+        # Three states; None is whole shares for stocks, as before.
+        fractional = self._venue_fractional_units(client, symbol)
+        qty = self._round_qty(qty, price, fractional=fractional)
 
         # Steps M-O: the ceiling, the single-position cap, the duplicate and
         # theme gates - on the bot's own final size. execute_entry runs the
@@ -3089,6 +3154,7 @@ class AssetBot(ABC):
             risk_dollars_default=float(qty) * per_unit_risk,
             notional_default=float(qty) * float(price) * vpu,
             value_per_unit=vpu, corr_scale=float(corr.get("scale", 1.0)),
+            fractional_units=fractional,
             horizon_hours=horizon,
         )
 
@@ -3281,8 +3347,13 @@ class AssetBot(ABC):
         # the quantity judged is the quantity sent. At 1.0 this is the
         # bot's own size rounded a second time, which every _round_qty is
         # idempotent under (round-to-6, floor-to-whole, snap-to-100).
+        # The venue's unit granularity is the one the proposal read off its
+        # client (None for a candidate built by hand): the same answer, so
+        # the second rounding is idempotent on the first.
+        _fr = getattr(cand, "fractional_units", None)
+        _fr = _fr if (_fr is True or _fr is False) else None
         qty = self._round_qty(float(cand.qty_default) * float(size_mult),
-                              price)
+                              price, fractional=_fr)
         if not self._judge_final_size(symbol, qty=qty, price=price, sl=sl,
                                       decision=decision, sizing=sizing):
             return None
@@ -3377,14 +3448,50 @@ class AssetBot(ABC):
         # forex_usd_multiplier reads this on every close path and in
         # grading, so P&L and the R denominator convert by the same number.
         entry_meta["value_per_unit"] = sizing.get("value_per_unit", 1.0)
+        if getattr(cand, "fractional_units", None) is True and not paper:
+            # Rounded by the venue's answer, not by whole shares — so a later
+            # grader can select these rows and treasury can say so.
+            entry_meta["fractional_units"] = True
         if sizing["stop_widened"]:
             entry_meta["stop_widened"] = True
         if stage.get("stage"):
             entry_meta["promotion_stage"] = stage["stage"]
         if not paper:
+            # THE GRANULARITY THE SIZE WAS ROUNDED TO, on the client the
+            # order actually goes through. A non-whole size is one this
+            # bot's own rounding would not produce without a venue's
+            # promise; propose_entry read that promise off its pricing
+            # client, and a flag moved on /brokers/ — or the switch flipped
+            # — between the two passes would send it to a venue that floors
+            # to whole: a refusal at the order, on every tick. Refused HERE
+            # instead, recorded, nothing resized (2026-09-23). Compared
+            # against the candidate's recorded answer, never re-rounded, so
+            # the log does not contradict itself; the second read is silent.
+            _fr = getattr(cand, "fractional_units", None)
+            if (_fr is True and float(qty) != float(int(qty))
+                    and self._venue_fractional_units(client, symbol,
+                                                     say=False) is not True):
+                logger.error(
+                    "[%s_bot] %s REFUSED: sized %g units for a venue that "
+                    "takes fractions, and the client this order goes through "
+                    "(%s) does not vouch for it now — the switch or the route "
+                    "moved between proposal and order. Nothing sent, nothing "
+                    "resized.", self.asset_class, symbol, float(qty),
+                    type(client).__name__)
+                # verdict first: skips keeps 200 characters of detail
+                return self._skip(
+                    symbol, skips.GATE_BLOCKED,
+                    f"Nothing sent, nothing resized: sized {float(qty):g} "
+                    f"fractional units, but the client this order goes "
+                    f"through ({type(client).__name__}) does not vouch for "
+                    f"fractions now — the switch or the route moved since "
+                    f"proposal")
             # THE VENUE'S OWN FLOOR, BEFORE THE ORDER. `qty` above is the
             # risk the operator chose, rounded by a `_round_qty` that knows
-            # the asset class and nothing about the venue. Saxo already
+            # the asset class and the venue's unit granularity (three
+            # states, off the client and the switch) and nothing else — and
+            # a money floor the OPERATOR declared (extras['venue_min_notional'])
+            # is turned into units with the entry price here. Saxo already
             # refuses a size under its MinimumTradeSize rather than upsizing
             # it — correctly, and on every tick, as an ORDER_ERROR whose
             # advice is "check the gateway". Asking here turns that into ONE
@@ -3399,7 +3506,9 @@ class AssetBot(ABC):
             # floor would stop a venue trading for want of a lookup.
             # qty > 0 is guaranteed: _judge_final_size above refuses a
             # non-positive size with SIZED_TO_ZERO and returns first.
-            _floor, _why = self._venue_size_floor(client, symbol)
+            _floor, _why = self._venue_size_floor(
+                client, symbol, price=price,
+                min_notional=self._extras_float("venue_min_notional", 0.0))
             if _floor is None:
                 logger.info("[%s_bot] %s: no venue size floor measured (%s) "
                             "— an under-minimum order, if this venue has "
@@ -3416,13 +3525,18 @@ class AssetBot(ABC):
                     self.asset_class, symbol, float(qty), _floor,
                     _floor / float(qty))
                 self._notify_venue_min_size(symbol, qty=float(qty),
-                                            floor=_floor)
+                                            floor=_floor, note=_why)
                 return self._skip(
                     symbol, skips.VENUE_MIN_SIZE,
-                    f"sized {float(qty):g} units from the stop distance; "
-                    f"this venue's minimum is {_floor:g}. Refused rather "
-                    f"than traded at {_floor:g}, which is "
-                    f"{_floor / float(qty):.1f}x the chosen risk")
+                    (f"sized {float(qty):g} units from the stop distance; "
+                     f"this venue's minimum is {_floor:g}. Refused rather "
+                     f"than traded at {_floor:g}, which is "
+                     f"{_floor / float(qty):.1f}x the chosen risk")
+                    # the label AFTER the multiple, so both numbers and the
+                    # multiple sit inside skips.record's 200 characters; a
+                    # measured floor has an empty note and the detail is
+                    # byte-identical to before
+                    + (f" ({_why})" if _why else ""))
             # Phase-33 idempotency — deterministic clientOrderId derived from
             # (config, symbol, signal/rule, minute-bucket). Retrying the same
             # logical entry within the bucket reuses the id, so the broker
@@ -3513,16 +3627,27 @@ class AssetBot(ABC):
                                     "(status=%s, client_order_id=%s)",
                                     self.asset_class, symbol, status,
                                     client_order_id)
+                    words = str(res.get("refusal") or "")[:160]
                     if leverage is not None and leverage > 1:
                         # A LEVERED refusal quiets the symbol: one POST per
                         # LEVERAGE_QUIET_HOURS, never a re-send at 1.
                         self._remember_leverage_refusal(
                             symbol, leverage, f"broker status {status}")
+                    if (getattr(cand, "fractional_units", None) is True
+                            and float(qty) != float(int(qty))):
+                        # A refused FRACTION quiets the symbol too, and is
+                        # alerted once with the venue's own words.
+                        self._remember_fraction_refused(
+                            symbol, words or f"broker status {status}")
+                        self._notify_fraction_refused(
+                            symbol, qty=float(qty),
+                            words=words or f"broker status {status}")
                     return self._skip(
                         symbol, skips.ORDER_REJECTED,
                         (f"at {leverage}x: " if leverage is not None
                          and leverage > 1 else "")
-                        + f"broker status {status}")
+                        + f"broker status {status}"
+                        + (f": {words}" if words else ""))
 
                 # WHICH BROKER carried this. Recorded from the client
                 # that actually placed the order, because the alternative
@@ -3560,6 +3685,38 @@ class AssetBot(ABC):
                 requested_qty = float(qty)
                 if fill_qty > 0:
                     qty = fill_qty
+                if fill_qty > requested_qty * (1 + 1e-6):
+                    # THE VENUE FILLED MORE THAN WAS SIZED (a venue that
+                    # rounds a fraction UP, or a shape D2c has not met). The
+                    # row is still booked — real units need an owner — at
+                    # the venue's units, nothing resized, nothing closed
+                    # (closing moves money); stamped and alerted so the
+                    # multiple of the chosen risk is a fact on the row.
+                    entry_meta["overfilled"] = {"requested": requested_qty,
+                                                "filled": float(fill_qty)}
+                    logger.error(
+                        "[%s_bot] %s OVERFILLED: sized %g, the venue filled "
+                        "%g (%.1fx the chosen risk) — booked at the venue's "
+                        "units, not resized", self.asset_class, symbol,
+                        requested_qty, float(fill_qty),
+                        float(fill_qty) / requested_qty)
+                    try:
+                        from bot_program.notifications import notify_staff
+                        notify_staff(
+                            title=(f"⚠ {symbol}: the venue filled more than "
+                                   f"was sized"),
+                            body=(f"{self.asset_class.upper()} {self.cfg.name} "
+                                  f"sized {requested_qty:g} units of {symbol}; "
+                                  f"the venue filled {float(fill_qty):g}, "
+                                  f"{float(fill_qty) / requested_qty:.1f}x the "
+                                  f"risk this entry was sized for. The row is "
+                                  f"booked at {float(fill_qty):g} with the "
+                                  f"judged stop; nothing was resized or "
+                                  f"closed."),
+                            url="/positions/")
+                    except Exception as e2:  # noqa: BLE001
+                        logger.warning("[%s_bot] over-fill alert failed: %s",
+                                       self.asset_class, e2)
 
                 # Broker-side protection bookkeeping. "protected" trades are
                 # skipped by bot-side SL/TP management (no double-close).
@@ -3741,6 +3898,14 @@ class AssetBot(ABC):
                 if leverage is not None and leverage > 1:
                     self._remember_leverage_refusal(
                         symbol, leverage, f"live order failed: {e}")
+                if (getattr(cand, "fractional_units", None) is True
+                        and float(qty) != float(int(qty))
+                        and str(e).startswith("eToro refused")):
+                    # The POST itself refused a FRACTION: the venue's words
+                    # (etoro_client re-raises them) quiet the symbol.
+                    self._remember_fraction_refused(symbol, str(e)[:160])
+                    self._notify_fraction_refused(symbol, qty=float(qty),
+                                                  words=str(e)[:160])
                 return self._skip(
                     symbol, skips.ORDER_ERROR,
                     (f"at {leverage}x: " if leverage is not None
@@ -3993,12 +4158,18 @@ class AssetBot(ABC):
 
     # ── the venue's own size floor ──────────────────────────────────────
     #
-    # `_round_qty` knows the ASSET CLASS and nothing about the venue: the
-    # forex bot's 100-unit boundary is OANDA/IBKR granularity and its own
-    # comment calls it tidiness, not any venue's rule. The venue is known
-    # only through broker_router, and the one step holding the client an
-    # order actually goes through is `execute_entry`. So the question is
-    # asked there, on that client, and answered in three states.
+    # `_round_qty` knows the ASSET CLASS and, since 2026-09-23, ONE venue
+    # fact handed to it in three states: whether the client takes fractions
+    # (`_venue_fractional_units`, read at proposal off the pricing client and
+    # the fractional_units_live switch, carried on the candidate). The
+    # forex bot's 100-unit boundary is still OANDA/IBKR granularity and its
+    # own comment calls it tidiness, not any venue's rule. The venue's FLOOR
+    # is the other question: the venue is known only through broker_router,
+    # and the one step holding the client an order actually goes through is
+    # `execute_entry`. So that question is asked there, on that client, and
+    # answered in three states — and a money floor (the operator's
+    # extras['venue_min_notional']) is converted into units with the entry
+    # price, labelled operator-declared.
     #
     # NOT gated by any PlatformComponent key: this rides the entry path, so
     # there is no row whose absence turns it off. And it is never the
@@ -4012,7 +4183,8 @@ class AssetBot(ABC):
     # line — no skip code, no counter, no alert. Left alone, named here.
 
     @staticmethod
-    def _venue_size_floor(client, symbol: str) -> tuple:
+    def _venue_size_floor(client, symbol: str, price=None,
+                          min_notional=None) -> tuple:
         """(floor, unmeasured_reason) — the smallest size this venue takes.
 
         THREE STATES, and a 0 would be a fourth this must never give:
@@ -4023,8 +4195,12 @@ class AssetBot(ABC):
                          reads from the venue carries a minimum size. eToro
                          is the standing example — its search payload is
                          read for `instrumentId` and the spelling, and
-                         inventing an eToro minimum here would be a number
-                         with no anchor anywhere.
+                         no adapter invents an eToro minimum.
+          (0.05, "operator-declared: ...")  a MONEY floor the OPERATOR typed
+                         per config (extras['venue_min_notional'], the
+                         venue's order currency, unconverted), turned into
+                         units with the entry price. The refusal and the
+                         alert carry the label; a measured floor wins.
           (None, "...")  the venue could be asked and did not answer: no
                          session, an unknown spelling, or a payload without
                          the field.
@@ -4036,6 +4212,10 @@ class AssetBot(ABC):
         """
         from bot_program.engine.capabilities import has_capability
         if not has_capability(client, "size_floor"):
+            declared_floor = AssetBot._declared_money_floor(
+                client, symbol, price, min_notional)
+            if declared_floor is not None:
+                return declared_floor
             return None, (f"{type(client).__name__} declares no size_floor "
                           f"capability: this venue publishes no minimum "
                           f"trade size that the adapter already reads")
@@ -4057,8 +4237,109 @@ class AssetBot(ABC):
                           f"floor of zero or less is not a measurement")
         return floor, ""
 
+    @staticmethod
+    def _venue_fractional_units(client, symbol: str, *, say: bool = True):
+        """THREE STATES, off the client AND the switch: True (declares the
+        `fractional_units` tier, answered True for `symbol`, and the
+        fractional_units_live component is ON), False (declared it and
+        answered False — the eligibility read, once it exists), None
+        (declares no such tier, the switch is OFF, raised, or answered
+        neither). None rounds exactly as before this tier existed, which
+        for stocks is whole shares. Asked of the INSTANCE through
+        has_capability — before any DB read, so a MagicMock or a tier-less
+        class answers None without touching the switch. `say=False` keeps
+        the second read (execute_entry's guard) silent.
+        """
+        from bot_program.engine.capabilities import has_capability
+        if not has_capability(client, "fractional_units"):
+            return None
+        from core.platform_control import is_component_enabled
+        if not is_component_enabled(AssetBot.FRACTIONAL_UNITS_COMPONENT):
+            if say:
+                logger.info("%s declares fractional units of %s; the %s "
+                            "switch is OFF — whole shares, as before",
+                            type(client).__name__, symbol,
+                            AssetBot.FRACTIONAL_UNITS_COMPONENT)
+            return None
+        try:
+            ans = client.takes_fractional_units(symbol)
+        except Exception as e:  # noqa: BLE001 — could not ask IS an answer
+            logger.info("takes_fractional_units(%s) raised %s: %s — "
+                        "rounding as if unmeasured", symbol,
+                        type(e).__name__, e)
+            return None
+        if ans is True:
+            if say:
+                logger.info("%s takes fractional units of %s (a belief from "
+                            "the public reference; the switch is ON)",
+                            type(client).__name__, symbol)
+            return True
+        if ans is False:
+            return False
+        return None
+
+    @staticmethod
+    def _declared_money_floor(client, symbol: str, price, min_notional):
+        """(floor_units, "operator-declared: ...") from the per-config
+        extras['venue_min_notional'] — the OPERATOR's number, in the
+        venue's order currency, unconverted — turned into units with the
+        entry price; or (None, why) when a price is missing; or None when
+        no floor was declared, so the caller keeps its own reason."""
+        try:
+            amount = float(min_notional or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        if amount <= 0:
+            return None
+        try:
+            px = float(price or 0)
+        except (TypeError, ValueError):
+            px = 0.0
+        if px <= 0:
+            return None, (f"extras['venue_min_notional'] {amount:g} is "
+                          f"declared for {symbol} and no price was given to "
+                          f"turn it into units")
+        return amount / px, (f"operator-declared: extras['venue_min_notional'] "
+                             f"{amount:g} in the venue's currency, "
+                             f"{amount / px:g} units at {px:g}; unconverted")
+
+    def _notify_fraction_refused(self, symbol: str, *, qty: float,
+                                 words: str) -> None:
+        """Say it ONCE per config per symbol per day: the venue refused a
+        FRACTIONAL size, in its own words. The remedies are named; never
+        'widen the stop' (a wider stop buys FEWER units)."""
+        try:
+            from datetime import timedelta as _td
+
+            from alerts.models import Notification as _N
+            title = (f"✕ {self.cfg.name} · {symbol}: the venue refused a "
+                     f"fractional size")[:200]
+            recent = _N.objects.filter(
+                user=self.user, notification_type="bot", title=title,
+                created_at__gte=timezone.now() - _td(hours=24),
+            ).exists()
+            if recent:
+                return
+            _N.objects.create(
+                user=self.user, notification_type="bot", title=title,
+                body=(f"{self.asset_class} config '{self.cfg.name}' sent "
+                      f"{qty:g} units of {symbol} — a fraction, because the "
+                      f"venue's adapter declares fractional units — and the "
+                      f"venue refused: {words}. Nothing was booked and "
+                      f"nothing was resized; the symbol is quiet for "
+                      f"{self.FRACTION_REFUSED_QUIET_HOURS}h. What raises the "
+                      f"unit count is more capital, a higher "
+                      f"extras['risk_per_trade_pct'], or a TIGHTER stop; "
+                      f"extras['venue_min_notional'] refuses before the order "
+                      f"next time, with both numbers."),
+                url="/asset-bots/",
+            )
+        except Exception as e:  # noqa: BLE001 — an alert must not cost a tick
+            logger.warning("[%s_bot] fraction-refused notification failed: "
+                           "%s", self.asset_class, e)
+
     def _notify_venue_min_size(self, symbol: str, *, qty: float,
-                               floor: float) -> None:
+                               floor: float, note: str = "") -> None:
         """Say it ONCE, not once per tick.
 
         The floor is a property of the instrument at the venue, so it will
@@ -4088,7 +4369,8 @@ class AssetBot(ABC):
                 user=self.user, notification_type="bot", title=title,
                 body=(f"{self.asset_class} config '{self.cfg.name}' sized "
                       f"{qty:g} units of {symbol} from its stop distance. "
-                      f"The venue's minimum there is {floor:g}, so nothing "
+                      f"The venue's minimum there is {floor:g}"
+                      f"{(' — ' + note) if note else ''}, so nothing "
                       f"was sent — and nothing was resized: trading "
                       f"{floor:g} would be {times:.1f}x the risk this entry "
                       f"was sized for, which is a different trade. What "
@@ -4241,8 +4523,13 @@ class AssetBot(ABC):
             value_per_unit=self._value_per_unit(symbol),
         )
 
-    def _round_qty(self, qty: float, price: float) -> float:
+    def _round_qty(self, qty: float, price: float, *,
+                   fractional=None) -> float:
         """Snap a size to what the venue will actually accept.
+
+        `fractional` is the venue's unit-granularity answer in three states
+        (True / False / None) as `_venue_fractional_units` read it; the base
+        rounding ignores it (six decimals either way) and StockBot reads it.
 
         Applied LAST, after every multiplier, so rounding never silently
         rescales the risk budget by more than one tick of granularity.

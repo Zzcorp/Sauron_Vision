@@ -83,6 +83,13 @@ class EntryCandidate:
     #: which is a third state and not a cost of zero.
     cost: dict = field(default_factory=dict)
     corr_scale: float = 1.0
+    #: The venue's unit granularity as `_venue_fractional_units` read it off
+    #: the pricing client AND the fractional_units_live switch: True
+    #: fractions, False whole, None unmeasured / switch OFF / never asked (a
+    #: candidate built by hand). execute_entry rounds qty_default x size_mult
+    #: by the SAME answer, so the second rounding is idempotent on the first,
+    #: and then confirms it on the trade client.
+    fractional_units: Optional[bool] = None
     horizon_hours: float = DEFAULT_HORIZON_HOURS
     created_at: datetime = field(default_factory=timezone.now)
 
@@ -107,6 +114,7 @@ class EntryCandidate:
             "risk_dollars_default": self.risk_dollars_default,
             "notional_default": self.notional_default,
             "corr_scale": self.corr_scale,
+            "fractional_units": self.fractional_units,
             "horizon_hours": self.horizon_hours,
             "created_at": self.created_at.isoformat(),
         }

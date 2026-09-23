@@ -430,6 +430,12 @@ class Command(BaseCommand):
               "line and capabilities.py disagree; update both")
         else:
             w("  size floor: cannot be asked before an order (capabilities.py)")
+        if cap.has_capability(t, "fractional_units"):
+            w("  fractional units: the tier is declared — a BELIEF from the "
+              "public reference (create-an-order: units is a double > 0; "
+              "the portfolio example holds 0.049485), unmeasured until D2c; "
+              "fractions are sent only while fractional_units_live is "
+              "ON. The eligibility endpoint is not called.")
 
         w("=" * 70)
         w(f"{tally[OK]} ok · {tally[REFUSED]} refused by eToro · "

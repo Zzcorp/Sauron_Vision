@@ -77,11 +77,28 @@ CAPABILITIES: dict = {
     # enforces them by RAISING rather than upsizing. eToro cannot — the only
     # per-instrument payload its adapter reads is the market-data search
     # result, read for `instrumentId` and the symbol spelling, and it
-    # carries no size field. So an eToro floor CANNOT BE KNOWN before the
-    # order and must not be invented here. OANDA, Alpaca, IBKR, Binance and
+    # carries no size field. So an eToro floor IN UNITS cannot be known
+    # before the order and no adapter invents one; the operator may declare
+    # a MONEY floor per config (extras['venue_min_notional'], read by
+    # asset_engine/base.py::_venue_size_floor as a fourth, labelled state),
+    # and the `fractional_units` tier below is a separate, labelled belief.
+    # OANDA, Alpaca, IBKR, Binance and
     # PaperTrader go unasked for the same reason: no method, which the
     # engine reads as unmeasured and never as zero.
     "size_floor": ("min_tradable",),
+    # 2026-09-23. A venue that takes a NON-WHOLE unit count. ONE method, and
+    # it carries no number: eToro declares it as a BELIEF from the public
+    # reference (create-an-order documents `units` as a double "greater than
+    # 0" with no integer constraint; the portfolio example holds 0.049485
+    # units), never as a measurement — the measured answer is per instrument
+    # on POST /api/v2/trading/info/eligibility (`unitsQuantityType`), which
+    # no adapter calls yet. The ENGINE reads it off the CLIENT the router
+    # hands the entry and holds every stock size at WHOLE shares until the
+    # `fractional_units_live` component is ON (core/platform_control),
+    # which is flipped only after ETORO_DEPARTURE §4 D2c measured a
+    # fractional fill. A money floor is NOT part of this tier: that number is
+    # the operator's (extras['venue_min_notional']), never an adapter's.
+    "fractional_units": ("takes_fractional_units",),
     "leverage": ("set_leverage", "set_margin_type"),
 }
 
@@ -110,7 +127,10 @@ ADAPTER_CAPABILITIES: dict = {
     # warns about, so the per-order shape is a kwarg contract on
     # "execution", written in asset_engine/base.py first and pinned by
     # tests/test_etoro_leverage.py. `margin_cells` belongs to no tier.
-    "etoro": ("market_data", "execution", "brackets", "account"),
+    # "fractional_units" 2026-09-23: a belief, see the tier — sent only
+    # while fractional_units_live is ON; D2c measures it.
+    "etoro": ("market_data", "execution", "brackets", "account",
+              "fractional_units"),
     "ibkr": ("market_data", "execution", "orders", "brackets", "account",
              "options"),
     "oanda": ("market_data", "execution", "orders", "brackets", "fills"),

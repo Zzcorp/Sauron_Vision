@@ -455,6 +455,55 @@ demo row the book and the venue in one click).
     `./deploy/dc exec worker-fast python manage.py shell -c "from core.platform_control import PlatformComponent; print(PlatformComponent.objects.filter(key='etoro_leverage_live').update(is_enabled=True))"`
     → prints 1; then `preflight_live` must show the config's leverage line
     without a BLOCKER.
+- D2c. FRACTIONS — on the DEMO row, after D2 has closed flat and before any
+  class is ticked or the `fractional_units_live` switch is flipped. Every
+  answer written down by NAME; the shell idiom of D2 (values printed, never a
+  key; `assert t.demo` first).
+  - D2c-0 THE ELIGIBILITY READ FIRST, for the 18 stock symbols of configs 6
+    and 14, by hand through the adapter's own session
+    (`t._sess().post(<url>, json={'symbols': [...], 'currency': 'USD'},
+    headers=t._headers(), timeout=t.timeout)`); the URL is POST
+    /api/v2/trading/info/eligibility from the public reference (unmeasured),
+    and whether the demo world takes a `demo/` segment there is unmeasured
+    too — try the adapter's `_v2("info/eligibility")` rule and the bare path,
+    and write down which answers and the status of the other. Record per
+    symbol: unitsQuantityType, allowedOrderQuantityType, minPositionExposure,
+    maxUnitsPerOrder, and the stop-percentage band. If it answers, the belief
+    in capabilities.py and `takes_fractional_units` are corrected in the same
+    commit to read the payload and answer None for an unread instrument.
+  - D2c-1 THE FRACTION, four significant decimals above the believed
+    minimum: check `last` first and pick a size s with s × last > 10 USD
+    (0.2345 GLDM if it fits):
+    `r = t.market_order('GLDM', 'BUY', 0.2345, stop_loss=round(last*0.97, 2), take_profit=round(last*1.03, 2))`.
+    Write down: accepted or refused; the lookup `status` WIRE SHAPE (int or
+    object — this decides `_status_of` and the D3 fixture);
+    openingData.units and remainingUnits byte for byte (0.2345 exactly, or
+    rounded to how many decimals — this measures FRACTIONAL_DECIMALS = 4
+    against the venue's step); requestedUnits versus the fill (an over-fill
+    is a measurement, not a surprise); the /portfolio row's units and
+    amount; the margin cells before and after; the close with units=0.2345
+    and `POSITIONS after []`.
+  - D2c-2 THE FLOOR, deliberately BELOW it: `t.market_order('GLDM', 'BUY',
+    0.0123, …)` (0.0123 × last under 10 USD). A refusal measures the
+    minimum — record its shape: an HTTP 4xx at the POST (the raise now says
+    "eToro refused (<code>): <words>", ORDER_ERROR on the bot lane) or an
+    accepted order landing status 4 with errorCode/errorMessage
+    (ORDER_REJECTED with the words) — and its number becomes the value the
+    operator types into extras['venue_min_notional']; an acceptance refutes
+    the 10 USD belief and the position is closed by id.
+  - D2c-3 THE SHORT, overnight: `t.market_order('GLDM', 'SELL', 0.2345, …)`
+    held over one night; read /portfolio totalFees and the costs endpoint
+    for the same body; close by id. The number goes to the cost item; this
+    item only names it.
+  - D2c-4 THE QUOTA: on the demo key, more than 20 orders:lookup GETs
+    inside 60 s by hand; record the 429's status and body and whether the
+    demo world enforces it. Until written down, §7 runs the first eToro
+    stock config with max_concurrent_positions = 1.
+  - D2c-5 D3 lands each shape by name in tests/test_etoro_client.py with the
+    real class over _FakeSession: the fractional fill, the refusal in its
+    measured shape, the over-fill, the status wire shape; then and only
+    then the operator flips fractional_units_live on /health/, ticks
+    the class, and enables ONE config.
 - D3. Any divergence from the adapter's assumptions is recorded in
   tests/test_etoro_client.py by name, with the real class and a patched
   session — never a subclass.
@@ -463,10 +512,20 @@ demo row the book and the venue in one click).
 
 ## 5. Funding, and the pool arithmetic
 
-- eToro cannot be asked its size floor before an order
-  (bot_program/engine/capabilities.py:74-84); an under-minimum order is refused
-  AT the order. Fund enough that one unit of the largest-priced symbol fits
-  inside the smallest pool's per-trade size.
+- eToro cannot be asked its size floor in UNITS before an order
+  (bot_program/engine/capabilities.py:74-84). Since 2026-09-23 the adapter
+  declares `fractional_units` — a BELIEF that `units` may be non-whole — and
+  the stock bot SENDS a fraction only while the fractional_units_live
+  switch is ON (OFF until D2c's pins land). The venue's minimum position is
+  NOT known to the platform: after D2c, type it per config into
+  extras['venue_min_notional'] (USD, unconverted) and the engine refuses
+  under it as venue_min_size with both numbers; without it the venue's
+  refusal is the only floor and the symbol is quiet for 24 h after the first.
+  The fuel arithmetic is pool × risk_per_trade_pct / stop_fraction against
+  that minimum — preflight section 5 prints it — not the notional ceiling.
+  Whole units stay the rule on every other venue, and on eToro while the
+  switch is OFF: fund enough that one unit of the largest-priced symbol fits
+  inside the smallest pool's notional ceiling until then.
 - A DISABLED pool is not a follower (`followers_of` filters enabled=True), so
   nothing is re-sized today. The moment configs 14 and 10 are BOTH enabled while
   both follow, `allocate_shares` gives 10 the remainder after 14's 20 %. Before
@@ -504,7 +563,8 @@ exists. Crypto routes nothing until a crypto config exists.
   after §6 made eToro the book for that class.
 - d. Relabel base_currency (§8) BEFORE enabling.
 - e. `./deploy/dc exec worker-fast python manage.py preflight_live --user Sauron`
-  → NO BLOCKERS FOUND.
+  → NO BLOCKERS FOUND. The first eToro stock config runs with
+  max_concurrent_positions = 1 until D2c's quota note exists.
 - f. `./deploy/dc exec worker-fast python manage.py bot on 14 --yes` — one
   config per sitting; watch one full 5-minute tick and the Telegram before the
   next.
@@ -553,6 +613,9 @@ retirement then continues at deploy/IBKR_RETIREMENT.md Stage 3.
   is OPEN or CLOSE_PENDING.
 - Never tick a class on /brokers/ before the demo write proof: the tick makes
   eToro the book and the venue in one click.
+- Never flip fractional_units_live before D2c's pins are in
+  tests/test_etoro_client.py, and never with more than one config enabled
+  until the 20-per-60-s quota's 429 shape is written down (D2c-4).
 - Never run the demo write proof through TAKE TRADE, and never enable config 10
   for it. The TAKE TRADE lane refuses a config carrying extras['leverage']
   above 1 (nothing sent, not at 1). Forex stays 1x on eToro until

@@ -5,7 +5,10 @@ Earnings nights produce gaps that blow through stop levels — opening fresh
 positions into that risk is rarely intentional. Default is conservative
 (skip 3 days before earnings); admin can disable or tune via `extras`.
 
-Sizing rounds to whole shares in live mode; fractional ok in paper.
+Sizing rounds to whole shares in live mode — unless the client the router
+hands the entry declares the `fractional_units` tier (eToro, as a belief
+from the public reference) AND the fractional_units_live switch is
+on, in which case the four decimals paper keeps; fractional ok in paper.
 """
 import logging
 from datetime import timedelta
@@ -91,8 +94,30 @@ class StockBot(AssetBot):
             return float(int(dollars / price))
         return round(dollars / price, 4)
 
-    def _round_qty(self, qty: float, price: float) -> float:
-        """Whole shares live; fractional tolerated in paper.
+    #: THIS platform's granularity on a venue that takes fractions — the four
+    #: decimals paper keeps below, not the venue's step. eToro's step is
+    #: unmeasured (its portfolio example carries six decimals); four is
+    #: coarser than six, and a venue that takes 0.049485 takes 0.0495.
+    #: crypto_bot.QTY_DECIMALS is the same kind of number.
+    FRACTIONAL_DECIMALS = 4
+
+    def _round_qty(self, qty: float, price: float, *,
+                   fractional=None) -> float:
+        """Whole shares live — unless the venue takes fractions; fractional
+        tolerated in paper.
+
+        `fractional` is THREE STATES, answered by the base class off the
+        CLIENT the router handed the entry (`_venue_fractional_units`) and
+        carried on the candidate so the second rounding in execute_entry
+        uses the same answer: True (the client declares the
+        `fractional_units` tier, said so for this symbol, and the
+        fractional_units_live switch is ON — eToro, as a belief from
+        the public reference), False (declared and said whole), None
+        (declares nothing, raised, the switch is OFF, or nobody asked — the
+        manual lane's `_qty_step` probe, every positional caller). None
+        rounds exactly as before this seam existed: whole shares, the
+        conservative reading of unmeasured. Only True changes the
+        arithmetic, and only in live mode.
 
         int() truncation is why a live $10,000 config at 2% could not buy a
         $201 stock: int(200/201) == 0, and a zero qty exits the entry path
@@ -101,6 +126,16 @@ class StockBot(AssetBot):
         the floor still bites on very expensive shares, so it now says so.
         """
         if self.cfg.mode == "live":
+            if fractional is True:
+                snapped = round(float(qty), self.FRACTIONAL_DECIMALS)
+                if snapped <= 0 and qty > 0:
+                    logger.info(
+                        "[stock_bot] %s at %.2f rounds to 0 at this "
+                        "platform's %d-decimal granularity from %.8f — the "
+                        "risk budget buys less than one ten-thousandth of "
+                        "a share (the venue's own floor is asked next)",
+                        self.cfg.name, price, self.FRACTIONAL_DECIMALS, qty)
+                return snapped
             whole = float(int(qty))
             if whole <= 0 and qty > 0:
                 logger.info(
@@ -108,4 +143,4 @@ class StockBot(AssetBot):
                     "%.4f — the risk budget is smaller than one share",
                     self.cfg.name, price, qty)
             return whole
-        return round(float(qty), 4)
+        return round(float(qty), self.FRACTIONAL_DECIMALS)

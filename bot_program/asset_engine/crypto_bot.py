@@ -43,7 +43,8 @@ QTY_DECIMALS = 8
 class CryptoBot(AssetBot):
     asset_class = "crypto"
 
-    def _round_qty(self, qty: float, price: float) -> float:
+    def _round_qty(self, qty: float, price: float, *,
+                   fractional=None) -> float:
         """Fractional units, to eight decimals.
 
         A $25 risk budget on BTC at $65,000 with a 3% stop is 0.0128 BTC.

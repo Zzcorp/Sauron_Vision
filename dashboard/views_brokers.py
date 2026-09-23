@@ -194,6 +194,13 @@ def _class_conflicts(user) -> dict:
 
 def _rows(user) -> list:
     from bot_program.engine.capabilities import declared
+    # A tier that is a BELIEF is badged as one: eToro declares
+    # fractional_units from the public reference, unmeasured until
+    # ETORO_DEPARTURE §4 D2c, and sends fractions only while the
+    # fractional_units_live switch is on.
+    notes = {"fractional_units": "believed from the public reference until "
+                                 "the demo proof D2c; sent only while "
+                                 "fractional_units_live is ON"}
 
     def row(key, name, acct, env, has_adapter=True, extra="",
             needs_signin=False):
@@ -207,7 +214,8 @@ def _rows(user) -> list:
                               and getattr(acct, "connected", False)),
             "needs_signin": needs_signin,
             "last_sync": getattr(acct, "last_sync", None),
-            "capabilities": declared(key) if has_adapter else (),
+            "capabilities": ([(c, notes.get(c, "")) for c in declared(key)]
+                             if has_adapter else []),
             "has_adapter": has_adapter,
             "extra": extra,
             "primary_for": _primary_classes(acct),

@@ -1,12 +1,14 @@
 """eToro public API trading client (2026-09-17).
 
 Conforms to the duck-typed adapter contract in `engine/capabilities.py`,
-declaring: market_data, execution, brackets, account.
+declaring: market_data, execution, brackets, account, fractional_units.
 
     ping, ticker, klines, order_book            market_data
     market_order                                execution
     modify_protective, modify_target            brackets
     net_liquidation, broker_portfolio           account
+    takes_fractional_units                      fractional_units (BELIEVED;
+                                                 sent only while the switch is on)
     account, balance_usdt, get_positions        (used, not a tier on their own)
 
 NOT declared, on purpose — see "What it refuses to claim" below.
@@ -251,6 +253,35 @@ def _leverage(value, symbol: str, side: str) -> int:
             f"not take."
         )
     return int(lev)
+
+
+def _status_of(polled) -> tuple:
+    """(status id, refusal words) off an orders:lookup payload.
+
+    `status` is read as an INT today (the suite's fixtures); the public
+    reference (unmeasured) shows it as an OBJECT {id, name, errorCode,
+    errorMessage}. Both are read, and anything else is 0 — PENDING, which
+    the engine books WORKING (loud, never CLOSED) — because this runs
+    AFTER an accepted POST: a raise here lands in execute_entry as
+    ORDER_ERROR with NO ROW for an order eToro may have filled, the worse
+    of the two wrongs. The words ride `refusal` on the result, a key
+    base.py reads into the ORDER_REJECTED detail. D2 writes the wire
+    shape down (deploy/ETORO_DEPARTURE.md §4).
+    """
+    raw = (polled or {}).get("status")
+    if raw is None:
+        raw = (polled or {}).get("statusId")
+    words = ""
+    if isinstance(raw, dict):
+        code, msg = raw.get("errorCode"), raw.get("errorMessage")
+        if code or msg:
+            words = f"errorCode {code}: {str(msg or '')[:120]}"
+        raw = raw.get("id")
+    try:
+        sid = int(raw or 0)
+    except (TypeError, ValueError):
+        sid = 0
+    return sid, words
 
 
 class EtoroTrader:
@@ -796,6 +827,25 @@ class EtoroTrader:
 
     # ── execution (fact 1) ─────────────────────────────────────────────────
 
+    # ── fractional units (the `fractional_units` tier, BELIEVED) ──────────
+
+    def takes_fractional_units(self, symbol: str) -> "bool | None":
+        """Does eToro take a non-whole `units` for `symbol`?
+
+        True as a labelled BELIEF from the public reference, never a
+        measurement: create-an-order documents `units` as a number (double)
+        that "must be greater than 0" with no integer constraint, and the
+        portfolio-breakdown example holds 0.049485 units. The per-instrument
+        truth is `unitsQuantityType` (whole | fractional) on
+        POST /api/v2/trading/info/eligibility, which this adapter does not
+        call; the day it does, this reads that payload and answers None for
+        an instrument it has not been read for. The ENGINE holds the answer
+        at whole shares until the `fractional_units_live` switch is on
+        (base._venue_fractional_units), flipped only after ETORO_DEPARTURE
+        §4 D2c measured a fractional fill. No HTTP call: asking is free.
+        """
+        return True
+
     def _await_fill(self, reference_id: str, attempts: int = FILL_ATTEMPTS,
                     delay: float = FILL_DELAY_S) -> Optional[dict]:
         """Poll orders:lookup by the x-request-id until a terminal status
@@ -815,7 +865,7 @@ class EtoroTrader:
                 log.warning("eToro fill poll failed for %s: %s",
                             reference_id, e)
                 return last
-            status = int(last.get("status") or last.get("statusId") or 0)
+            status, _ = _status_of(last)
             if status in STATUS_FILLED or status in STATUS_REFUSED:
                 return last
         return last
@@ -891,9 +941,14 @@ class EtoroTrader:
                               timeout=self.timeout)
         try:
             r.raise_for_status()
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            # THE VENUE'S WORDS ride the raise: skips.record keeps 200 chars
+            # and why_no_trade prints 88, and a bare HTTPError read as
+            # "check the gateway" for a size eToro refused (the
+            # _patch_position idiom below).
             log.error("eToro order failed: %s", r.text)
-            raise
+            raise RuntimeError(f"eToro refused ({r.status_code}): "
+                               f"{str(r.text)[:160]}") from e
         accepted = r.json() or {}
         order_id = str(accepted.get("orderId") or "")
         reference = str(accepted.get("referenceId") or rid)
@@ -906,7 +961,7 @@ class EtoroTrader:
         # holding it"; {} is never invented as a reading.
         poll_failed = polled is None
         polled = polled or {}
-        status_id = int(polled.get("status") or polled.get("statusId") or 0)
+        status_id, refusal = _status_of(polled)
         executions = polled.get("positionExecutions") or []
         first = executions[0] if executions else {}
         opening = first.get("openingData") or {}
@@ -940,6 +995,9 @@ class EtoroTrader:
                     "clientOrderId": kwargs.get("client_order_id"),
                     "statusName": STATUS_NAMES.get(status_id, str(status_id))},
         }
+        if status_id in STATUS_REFUSED and refusal:
+            # Read by base.py into the ORDER_REJECTED detail (consumer key).
+            out["refusal"] = refusal
         position_id = first.get("positionId") or first.get("positionID")
         # WHAT THE VENUE HOLDS, when the lookup says: the fixture and the
         # public reference (unmeasured) put stopLossRate/takeProfitRate on

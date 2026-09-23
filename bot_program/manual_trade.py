@@ -450,7 +450,10 @@ def _qty_step(bot, price: float) -> float:
     rounds to zero.
 
     It is NOT a venue minimum and must not be described as one. `_round_qty`
-    has no client and knows nothing about where the order goes; the forex
+    is called here WITHOUT the venue's fractional answer (its keyword
+    `fractional`, three states, is read by the bot lane off the client at
+    proposal), so this probe reports whole shares for live stock on every
+    venue — the manual lane holds no client at preview time; the forex
     100-unit boundary is OANDA/IBKR granularity and the bot's own tidiness.
     The venue's real floor is a different question with a different answer,
     asked of one adapter only — see AssetBot._venue_size_floor and
@@ -554,7 +557,8 @@ def validate_qty_override(cfg, *, asset_class, raw, entry, stop,
     qty = float(round_qty(qty, entry))
     if qty <= 0:
         # "this platform's", not "this venue's": the step came from the
-        # bot's own _round_qty, which has never asked a venue anything.
+        # bot's own _round_qty called without the venue's fractional answer
+        # (the bot lane reads that off the client; this lane holds none).
         return None, ("That size rounds to zero at this platform's own size "
                       "granularity — nothing would have been sent. It is not "
                       "the venue refusing; the venue's own floor is a "

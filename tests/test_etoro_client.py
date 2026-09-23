@@ -570,9 +570,13 @@ class TheAccountReadsTests(SimpleTestCase):
 
 class WhatItClaimsIsWhatItHasTests(SimpleTestCase):
 
-    def test_the_derived_tiers_are_the_four_intended(self):
+    def test_the_derived_tiers_are_the_five_intended(self):
+        """fractional_units joined 2026-09-23 as a labelled belief; the
+        tier is derived from the one method on the class, and it is the
+        only tier here that a demo order can refute rather than confirm."""
         self.assertEqual(cap.capabilities_of(EtoroTrader),
-                         ("market_data", "execution", "brackets", "account"))
+                         ("market_data", "execution", "brackets", "account",
+                          "fractional_units"))
 
     def test_orders_and_fills_are_absent_by_design(self):
         """No documented cancel for a pending order; no documented closed-

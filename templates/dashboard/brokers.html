@@ -49,7 +49,7 @@
                 <td style="font-size:11px;color:var(--text-muted);">{% if r.last_sync %}{{ r.last_sync|date:"Y-m-d H:i" }}{% else %}—{% endif %}</td>
                 <td style="font-size:11px;">
                     {% if r.has_adapter %}
-                        {% for c in r.capabilities %}<span class="badge" style="margin-right:4px;">{{ c }}</span>{% empty %}<span style="color:var(--text-muted);">—</span>{% endfor %}
+                        {% for c, n in r.capabilities %}<span class="badge" style="margin-right:4px;"{% if n %} title="{{ n }}"{% endif %}>{{ c }}{% if n %} (believed){% endif %}</span>{% empty %}<span style="color:var(--text-muted);">—</span>{% endfor %}
                     {% else %}
                         <span style="color:var(--text-muted);">adapter pending — nothing can be asked of it yet</span>
                     {% endif %}
