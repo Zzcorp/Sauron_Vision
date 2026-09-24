@@ -680,6 +680,12 @@ exists. Crypto routes nothing until a crypto config exists.
 
 ## 7. Follow before enable — per config, in this order
 
+- 0. The class's demo fill-and-close proof is pinned as `test_proof_<token>`
+  and its token sits in `ETORO_PROVEN` (bot_program/asset_engine/base.py) —
+  until then every lane (the asset bots, TAKE TRADE and the legacy tick)
+  refuses every eToro entry of that class as `gate_blocked`, before the
+  floor and before any POST. The per-class sitting list lands with the
+  proofs; nothing below lifts this bullet.
 - a. `./deploy/dc exec worker-fast python manage.py follow --user Sauron` — who
   follows, at what share.
 - b. One sync after the tick:
@@ -742,9 +748,17 @@ retirement then continues at deploy/IBKR_RETIREMENT.md Stage 3.
 - Never tick a class on /brokers/ before the demo write proof: the tick makes
   eToro the book and the venue in one click.
 - Never tick crypto on the eToro row: the legacy tick (engine/runner.py)
-  books a live BotTrade on an unread eToro answer, with no stop.
-- Never tick crypto on the eToro row: the legacy tick (engine/runner.py)
-  books a live BotTrade on an unread eToro answer, with no stop.
+  books a live BotTrade on an unread eToro answer, with no stop. Since
+  2026-09-24 that loop meets the proof gate too, so an unproven class
+  sends nothing from it — a proven one still would, with no stop: the
+  bullet stands.
+- Never add a token to `ETORO_PROVEN` (bot_program/asset_engine/base.py)
+  without its `test_proof_<token>` in tests/test_etoro_client.py in the
+  same commit, and never tick a class whose token is absent: every lane
+  (the asset-bot tick, TAKE TRADE and the legacy tick) refuses every
+  eToro entry of that class — and every short until "short" is pinned —
+  as `gate_blocked`, before the floor and before any POST, until the
+  proof lands (2026-09-24).
 - Never flip fractional_units_live before D2c's pins are in
   tests/test_etoro_client.py, and never with more than one config enabled
   until the 20-per-60-s quota's 429 shape is written down (D2c-4).

@@ -228,6 +228,23 @@ class TheEntryPassesItThroughTests(TestCase):
         self.cfg.save(update_fields=["base_currency", "extras"])
         _signal(_instrument(), rule="lev_rule")
         _book(self.user)
+        # C0 (2026-09-24): ETORO_PROVEN ships EMPTY, so every eToro-carried
+        # entry below is gate_blocked before the floor and the multiplier
+        # unless its class is named. These tests are about the multiplier:
+        # "stock" is stated proven HERE, for this class only, never in the
+        # tree — the empty-set case has its own test below.
+        self._proven("stock")
+
+    def _proven(self, *tokens):
+        """State `tokens` as proven for the rest of this test. The gate
+        reads base.ETORO_PROVEN at CALL time, so a patch on the module
+        global is what it sees; undone at cleanup (LIFO, so a second call
+        with the empty set wins until the test ends)."""
+        p = mock.patch("bot_program.asset_engine.base.ETORO_PROVEN",
+                       frozenset(tokens))
+        p.start()
+        self.addCleanup(p.stop)
+        return p
 
     def _cand(self):
         from bot_program.asset_engine.stock_bot import StockBot
@@ -246,6 +263,71 @@ class TheEntryPassesItThroughTests(TestCase):
     def _execute(self, cand, t):
         with mock.patch(ROUTER, return_value=t), mock.patch("time.sleep"):
             return self.bot.execute_entry(cand)
+
+    def test_an_unproven_class_is_gate_blocked_before_the_floor_and_the_post(self):
+        """ETORO_PROVEN as the tree ships it (empty, 2026-09-24): the same
+        LIVE stock config, the switch ON, the cells fresh, the same real
+        adapter — and the gate refuses naming "stock" before the venue
+        floor (no _notify_venue_min_size), before the multiplier (the
+        skip is gate_blocked, not leverage_refused) and before any POST.
+        EtoroTrader declares no size_floor, so the floor is made REACHABLE
+        here by declaring extras['venue_min_notional'] far above the order:
+        a gate placed after the floor would record venue_min_size and
+        notify — which is what makes the two floor pins bite."""
+        from bot_program.asset_engine import skips
+        from bot_program.models import AssetBotTrade
+        _switch(True)
+        _account(self.user, cash=100000)
+        self.cfg.extras = {"leverage": 2, "venue_min_notional": 1e9}
+        self.cfg.save(update_fields=["extras"])
+        cand = self._cand()
+        self._proven()                        # the shipped set: nothing
+        t, fake = _etoro()
+        with mock.patch("bot_program.asset_engine.base.AssetBot"
+                        "._notify_venue_min_size") as floor_note:
+            res = self._execute(cand, t)
+        self.assertIsNone(res)
+        self.assertEqual([c for c in fake.calls if c[0] == "POST"], [],
+                         "an order left the box on an unproven class")
+        floor_note.assert_not_called()
+        self.assertEqual(AssetBotTrade.objects.count(), 0)
+        note = self._skip_note()
+        self.assertEqual(note["code"], skips.GATE_BLOCKED)
+        self.assertTrue(note["detail"].startswith("eToro AAPL (stock, BUY): "),
+                        note)
+        self.assertIn("no demo fill-and-close proof pinned for ['stock']",
+                      note["detail"])
+
+    def test_the_whole_refusal_words_reach_the_log_where_the_record_cuts_them(self):
+        """The DIRECT refusal (a REJECTED answered by market_order, not a
+        held order): the skip detail keeps the verdict first and
+        skips.record keeps 200 characters, so the venue's minimum — the
+        LAST words of the measured 720 message — falls off the record.
+        Since 2026-09-24 the log line carries the whole message, so the
+        number debt 1 set out to keep is somewhere on every direct
+        refusal too (the held-order path lands it whole in
+        entry_withdrawn_reason)."""
+        from bot_program.asset_engine import skips
+        from tests.test_etoro_client import REJECTED_720
+        _switch(True)
+        _account(self.user, cash=100000)
+        cand = self._cand()
+        t, fake = _etoro([SEARCH_AAPL, RATES, POSTED,
+                          ("GET", "orders:lookup", 200, REJECTED_720)])
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="WARNING") as cm:
+            res = self._execute(cand, t)
+        self.assertIsNone(res)
+        self.assertEqual(len([c for c in fake.calls if c[0] == "POST"]), 1)
+        note = self._skip_note()
+        self.assertEqual(note["code"], skips.ORDER_REJECTED)
+        self.assertTrue(note["detail"].startswith(
+            "at 2x: broker status REJECTED: errorCode 720: Error opening "
+            "position"), note)
+        tail = "InitialPositionAmount: 8.44 MinimumPositionAmount: 10 (Dollars)"
+        self.assertLessEqual(len(note["detail"]), 200, "skips.record's bound")
+        self.assertNotIn(tail, note["detail"], "the record's cut, measured")
+        self.assertTrue(any(tail in line for line in cm.output), cm.output)
 
     def test_the_kwarg_reaches_the_body_and_the_row_records_it(self):
         from bot_program.models import AssetBotTrade

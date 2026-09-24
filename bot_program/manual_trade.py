@@ -1736,6 +1736,24 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 return {"error": (f"LIVE route unavailable — {cls} orders "
                                   f"have no live broker to go to. Nothing "
                                   f"was sent")}
+            # THE eToro GATE, the bots' own (AssetBot._etoro_entry_refusal,
+            # 2026-09-24): a class — or a short — with no demo fill-and-
+            # close proof pinned sends nothing from this lane either.
+            # Judged on the INSTRUMENT's class (an ETF is "etf", the key
+            # the bot lane uses), never the execution class `cls`; a
+            # non-eToro carrier passes at the first line. horizon_hours
+            # None: the operator holds a hand-taken position, no bot
+            # closes it before a rollover. The leverage hint is read by
+            # the bots' own rule (_leverage_hint_of), so "0" is None here
+            # as there.
+            _code, _why = AssetBot._etoro_entry_refusal(
+                client, inst.symbol, side, float(qty), float(fill),
+                str(inst.asset_class or cls),
+                leverage_hint=AssetBot._leverage_hint_of(cfg.extras),
+                horizon_hours=None)
+            if _code:
+                return {"error": (f"eToro refusal ({_code}): {_why} — "
+                                  f"nothing was sent")}
             # THE MULTIPLIER, if the config carries one: this lane sends
             # NONE, and it must not send the adapter's 1 under a key that
             # says 2. Judged with the bots' own rule on the routed client;
@@ -1779,7 +1797,10 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             # a partial fill is real units that must get a row.
             if status in ("REJECTED", "DUPLICATE", "CANCELLED", "CANCELED",
                           "INACTIVE", "EXPIRED") and fill_qty <= 0:
-                why = str((res.get("raw") or {}).get("reason") or status)
+                # the eToro adapter's words ride `refusal` (raw.reason is
+                # IBKR's key): whole since 2026-09-24, the numbers at the end
+                why = str(res.get("refusal")
+                          or (res.get("raw") or {}).get("reason") or status)
                 return {"error": (f"The broker refused the order ({why}) — "
                                   f"nothing opened")}
 
@@ -1789,6 +1810,10 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 "fill_source": "broker" if fill_px > 0 else "ticker",
                 "client_order_id": client_order_id,
             }
+            # The carrier, its world and the close handle — ONE rule with
+            # the bot lane (AssetBot.venue_stamps), off the client that
+            # placed the order and the fill it answered (2026-09-24).
+            extra.update(AssetBot.venue_stamps(client, res))
             # WORKING: the broker took the order and has not filled it —
             # a market order sent outside regular hours, most often. The
             # row is booked so the order has an owner, but it is not a

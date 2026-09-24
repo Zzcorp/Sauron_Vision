@@ -160,6 +160,24 @@ def run_bot_tick(user_id: int):
                               "(missing/invalid broker credentials?) — skipping",
                               user.username, symbol)
                     continue
+                # THE eToro PROOF GATE, the bots' own rule (AssetBot.
+                # _etoro_entry_refusal, 2026-09-24). This loop reaches the
+                # same clients through the same client_for_symbol as the
+                # asset bots and the TAKE TRADE lane, so an eToro-carried
+                # symbol whose class — or short — has no demo fill-and-close
+                # proof pinned sends nothing from here either. Keyed on the
+                # router's own class (the Instrument row; no row routes as
+                # crypto); a non-eToro carrier passes at the first line.
+                from bot_program.asset_engine.base import AssetBot
+                from bot_program.engine.broker_router import _instrument_for
+                _inst = _instrument_for(symbol)
+                _gate, _gate_why = AssetBot._etoro_entry_refusal(
+                    sym_client, symbol, d.direction, float(qty), float(price),
+                    str(_inst.asset_class) if _inst is not None else "crypto")
+                if _gate:
+                    log.error("legacy tick %s REFUSED (%s): %s — nothing was "
+                              "sent", symbol, _gate, _gate_why)
+                    continue
                 try:
                     if cfg.market_type == "futures" and hasattr(sym_client, "ensure_config"):
                         sym_client.ensure_config(symbol, cfg.leverage, cfg.margin_mode)

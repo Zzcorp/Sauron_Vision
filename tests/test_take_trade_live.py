@@ -350,6 +350,148 @@ class TheLiveFillIsTheBrokersTests(TestCase):
         self.assertEqual(float(trade.entry_price), 60010.0)
 
 
+class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
+    """The TAKE TRADE lane enters the bots' own eToro gate
+    (AssetBot._etoro_entry_refusal, C0 2026-09-24) on the REAL EtoroTrader
+    over a fake wire (tests.test_etoro_client._client). The MagicMock
+    carrier every other class here uses answers adapter_key "" and never
+    meets it — those tests are untouched by the gate."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user("lv_et", password="x")
+
+    def setUp(self):
+        cache.clear()
+        self.inst = _quote("BTCUSD", 60000)
+        _components_on()
+        self.cfg = _arm_live(self.user)
+
+    def _etoro(self):
+        """The real adapter, demo world, over a fake wire that answers
+        nothing; the mark the preview reads is patched on the instance."""
+        from tests.test_etoro_client import _client
+        t, fake = _client([])
+        p = patch.object(t, "ticker", return_value={"lastPrice": "60000"})
+        p.start()
+        self.addCleanup(p.stop)
+        return t, fake
+
+    def _proven(self, *tokens):
+        p = patch("bot_program.asset_engine.base.ETORO_PROVEN",
+                  frozenset(tokens))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_an_unproven_class_is_refused_and_nothing_is_sent(self):
+        """ETORO_PROVEN as shipped (empty): a hand-taken BUY on the crypto
+        manual config is refused naming "crypto" — no market_order, no
+        POST on the wire, no row."""
+        from bot_program.manual_trade import execute_take_trade
+        from bot_program.models import AssetBotTrade
+        t, fake = self._etoro()
+        with patch.object(t, "market_order", wraps=t.market_order) as spy, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertIn("eToro refusal (gate_blocked)", out["error"])
+        self.assertIn("BTCUSD (crypto, BUY)", out["error"])
+        self.assertIn("['crypto']", out["error"])
+        self.assertTrue(out["error"].endswith("nothing was sent"),
+                        out["error"])
+        spy.assert_not_called()
+        self.assertEqual([c for c in fake.calls if c[0] == "POST"], [])
+        self.assertFalse(AssetBotTrade.objects.filter(config=self.cfg).exists())
+
+    def test_a_short_needs_its_own_token(self):
+        """"crypto" stated proven, a bearish signal (SELL): the gate still
+        refuses, naming "short" alone."""
+        from bot_program.manual_trade import execute_take_trade
+        self._proven("crypto")
+        t, fake = self._etoro()
+        with patch.object(t, "market_order", wraps=t.market_order) as spy, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(
+                self.user, _signal(self.inst, direction="bearish",
+                                   entry=60000, stop=60900, target=58200),
+                pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertIn("eToro refusal (gate_blocked)", out["error"])
+        self.assertIn("BTCUSD (crypto, SELL)", out["error"])
+        self.assertIn("['short']", out["error"])
+        spy.assert_not_called()
+        self.assertEqual([c for c in fake.calls if c[0] == "POST"], [])
+
+    def test_a_proven_class_passes_and_the_row_carries_the_venue_stamps(self):
+        """"crypto" stated proven: the order goes, and the row records the
+        carrier, its world and the close handle off the client that placed
+        it and the fill it answered — the same three execute_entry writes
+        (AssetBot.venue_stamps, one rule for both lanes since 2026-09-24).
+        positionId 3603281458 is the demo fill D2 measured on 2026-09-23;
+        "paper" is VENUE_WORLDS' word for the adapter's demo world."""
+        from bot_program.manual_trade import execute_take_trade
+        from bot_program.models import AssetBotTrade
+        self._proven("crypto")
+        t, _fake = self._etoro()
+        with patch.object(t, "market_order", return_value=_filled_response(
+                positionId="3603281458")) as mo, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertTrue(out.get("ok"), out)
+        mo.assert_called_once()
+        self.assertEqual(mo.call_args.args[:2], ("BTCUSD", "BUY"))
+        trade = AssetBotTrade.objects.get(pk=out["trade_id"])
+        self.assertEqual(trade.metadata["broker"], "etoro")
+        self.assertEqual(trade.metadata["broker_env"], "paper")
+        self.assertEqual(trade.metadata["broker_position_id"], "3603281458")
+        self.assertEqual(trade.metadata["fill_source"], "broker")
+
+    def test_a_magicmock_carrier_records_no_venue_stamps(self):
+        """The existing behaviour, pinned: a carrier the adapter map does
+        not know answers "" and the row records no broker, no world and no
+        handle — absent, never invented — and the gate never fired."""
+        from bot_program.manual_trade import execute_take_trade
+        from bot_program.models import AssetBotTrade
+        fake = _fake_live_client()
+        with patch(ROUTER, return_value=fake):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertTrue(out.get("ok"), out)
+        trade = AssetBotTrade.objects.get(pk=out["trade_id"])
+        for absent in ("broker", "broker_env", "broker_position_id"):
+            self.assertNotIn(absent, trade.metadata, absent)
+
+    def test_a_refusal_shows_the_adapters_whole_words(self):
+        """A REJECTED answered by the real adapter carries its words under
+        `refusal` (raw.reason is IBKR's key, which this lane used to read
+        alone): the operator sees the measured 720 message whole, with
+        the amount and the minimum at its end (2026-09-24); no row."""
+        from bot_program.manual_trade import execute_take_trade
+        from bot_program.models import AssetBotTrade
+        from tests.test_etoro_client import REJECTED_720
+        self._proven("crypto")
+        t, _fake = self._etoro()
+        words = "errorCode 720: " + REJECTED_720["status"]["errorMessage"]
+        refused = {"orderId": "383455967", "symbol": "BTCUSD", "side": "BUY",
+                   "executedQty": "0.0", "avgPrice": "0.0",
+                   "status": "REJECTED", "raw": {"statusName": "Rejected"},
+                   "refusal": words}
+        with patch.object(t, "market_order", return_value=refused), \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertTrue(out["error"].startswith(
+            "The broker refused the order (errorCode 720: Error opening "
+            "position"), out["error"])
+        self.assertIn("InitialPositionAmount: 8.44 MinimumPositionAmount: 10 "
+                      "(Dollars)) ", out["error"])
+        self.assertTrue(out["error"].endswith("nothing opened"))
+        self.assertFalse(AssetBotTrade.objects.filter(config=self.cfg).exists())
+
+
 class ThePaperPathIsUntouchedTests(TestCase):
     """Wave 2 must change nothing about the rehearsal stage."""
 

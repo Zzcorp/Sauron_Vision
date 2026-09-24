@@ -354,6 +354,20 @@ MAX_PLEDGED_FRACTION = 0.5
 #: missing row reads OFF (core.platform_control.is_component_enabled).
 LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
 
+#: THE eToro CLASSES (and "short") WHOSE DEMO FILL-AND-CLOSE PROOF IS PINNED
+#: in tests/test_etoro_client.py (deploy/ETORO_DEPARTURE.md §7 bullet 0,
+#: one sitting per class). EMPTY ON ARRIVAL (2026-09-24): an eToro order
+#: whose instrument class — or direction, for a SELL — is not named here
+#: is refused in _etoro_entry_refusal (every lane: execute_entry, the
+#: TAKE TRADE lane and the legacy tick in engine/runner.py) BEFORE the
+#: venue floor (so an unproven class never fires _notify_venue_min_size),
+#: the idempotency id, the multiplier and the POST. A token is added only
+#: in the commit that adds test_proof_<token>; tests/test_etoro_proofs.py
+#: greps for it. Not a PlatformComponent on purpose: nothing on /health/
+#: can flip a proof that was never measured. Read at CALL time by the
+#: gate, never copied, so a test states a token by patching this name.
+ETORO_PROVEN = frozenset()
+
 
 def judge_order_leverage(cfg, asset_class: str, carrier: str) -> tuple:
     """(leverage, refusal): what an eToro order body may carry for `cfg`.
@@ -725,6 +739,25 @@ class AssetBot(ABC):
         from bot_program.asset_engine import skips
         skips.record(self.cfg, symbol, code, detail)
         return None
+
+    @staticmethod
+    def _leverage_hint_of(extras):
+        """extras['leverage'] as the whole number the operator typed
+        (>= 1), else None — ONE reading for every lane (the TAKE TRADE
+        lane calls this off cfg.extras; "0" is None on both). A HINT for
+        the later steps of _etoro_entry_refusal, never a judgement:
+        judge_order_leverage still decides what an order may carry, and
+        an unreadable value is ITS refusal (leverage_refused), not a
+        silent 1 here."""
+        raw = (extras or {}).get("leverage")
+        if raw is None or isinstance(raw, bool):
+            return None
+        text = str(raw).strip()
+        return int(text) if text.isdigit() and int(text) >= 1 else None
+
+    def _extras_leverage_hint(self):
+        """The config's extras['leverage'] through _leverage_hint_of."""
+        return self._leverage_hint_of(getattr(self.cfg, "extras", None))
 
     def _extras_float(self, key: str, default: float = 0.0) -> float:
         """Read a numeric knob out of cfg.extras without ever raising.
@@ -3573,6 +3606,23 @@ class AssetBot(ABC):
                     f"through ({type(client).__name__}) does not vouch for "
                     f"fractions now — the switch or the route moved since "
                     f"proposal")
+            # THE PROOF GATE, before the floor, the id, the multiplier and
+            # the POST: an eToro order on a class — or a short — whose demo
+            # fill-and-close proof is not pinned (ETORO_PROVEN) sends
+            # nothing. ONE rule for every lane (_etoro_entry_refusal); a
+            # non-eToro carrier answers ("", "") at its first line. Keyed
+            # on the INSTRUMENT's class, the router's own key: one Instrument
+            # read per live entry, every carrier, on a path that already
+            # reads rows (duplicate_state, theme_state above).
+            _gate, _gate_why = self._etoro_entry_refusal(
+                client, symbol, decision.direction, float(qty), float(price),
+                self._instrument_class(symbol),
+                leverage_hint=self._extras_leverage_hint(),
+                horizon_hours=getattr(cand, "horizon_hours", None))
+            if _gate:
+                logger.warning("[%s_bot] %s REFUSED: %s", self.asset_class,
+                               symbol, _gate_why)
+                return self._skip(symbol, _gate, _gate_why)
             # THE VENUE'S OWN FLOOR, BEFORE THE ORDER. `qty` above is the
             # risk the operator chose, rounded by a `_round_qty` that knows
             # the asset class and the venue's unit granularity (three
@@ -3714,7 +3764,20 @@ class AssetBot(ABC):
                                     "(status=%s, client_order_id=%s)",
                                     self.asset_class, symbol, status,
                                     client_order_id)
-                    words = str(res.get("refusal") or "")[:160]
+                    # WHOLE since 2026-09-24: the numbers a refusal
+                    # names sit at its END (errorCode 720); the record
+                    # and the row bound it (skips.record 200,
+                    # _remember_fraction_refused 160, trade.reason 1000),
+                    # the fraction-refused alert body and the log
+                    # carry it whole
+                    words = str(res.get("refusal") or "")
+                    if words:
+                        # the skip record keeps 200 characters after
+                        # the verdict, and the measured 720 message is
+                        # longer: the log carries the whole of it
+                        logger.warning("[%s_bot] %s refused by the venue: "
+                                       "%s", self.asset_class, symbol,
+                                       words)
                     if leverage is not None and leverage > 1:
                         # A LEVERED refusal quiets the symbol: one POST per
                         # LEVERAGE_QUIET_HOURS, never a re-send at 1.
@@ -4110,8 +4173,10 @@ class AssetBot(ABC):
 
         ONE rule for both lanes. execute_entry has written these since
         1da56db / d3c735f; the TAKE TRADE lane (manual_trade._execute)
-        wrote none of them, so a hand-taken eToro row recorded no carrier,
-        no handle and no world. Absent is a state: nothing here invents a
+        wrote none of them until 2026-09-24 — a hand-taken eToro row
+        recorded no carrier, no handle and no world — and now stamps the
+        same three off the same client and fill. Absent is a state:
+        nothing here invents a
         value the client or the fill did not give. For a non-dict `res`
         nothing is stamped — the inline code used to stamp str(obj) for
         any object answering .get; no test depends on that reading.
@@ -4130,6 +4195,45 @@ class AssetBot(ABC):
         if pos_id:
             stamps["broker_position_id"] = str(pos_id)
         return stamps
+
+    # ── the eToro refusals, in order, for EVERY lane ──────────────────────
+
+    @classmethod
+    def _etoro_entry_refusal(cls, client, symbol: str, side: str, qty: float,
+                             price: float, icls: str, now_utc=None,
+                             leverage_hint=None, horizon_hours=None) -> tuple:
+        """THE eToro refusals, in order, for EVERY lane that reaches
+        market_order: execute_entry, manual_trade's TAKE TRADE and the
+        legacy tick (engine/runner.py). ("", "") when nothing refuses,
+        else (skip_code, text). Order is the money order: 1 ETORO_PROVEN — an
+        unproven class, or a short before "short" is pinned, never
+        reaches the venue; then, as later stages land INSIDE this method
+        (never a second anchor): 2 the eligibility row's own state /
+        allowOpenPosition / maxUnitsPerOrder; 3 the hours refusal; 4
+        the unmeasured carry. Step 1 is what ships (C0, 2026-09-24);
+        qty, price, now_utc, leverage_hint and horizon_hours are the
+        later steps' inputs and are unread today. The floor stays in
+        execute_entry after this block because it resizes nothing. A
+        non-eToro carrier answers ("", "") at the first line —
+        capabilities.adapter_key reads the CLASS name, so a MagicMock or
+        a subclass is not eToro. `icls` is the INSTRUMENT's class
+        (_instrument_class; the lane passes inst.asset_class): an ETF in
+        a stock config is gated on "etf"."""
+        from bot_program.asset_engine import skips
+        from bot_program.engine.capabilities import adapter_key as _ak
+        if _ak(client) != "etoro":
+            return "", ""
+        # step 1 — the proof. ETORO_PROVEN is read HERE, at call time,
+        # off the module: a test states a token by patching that name.
+        _need = {str(icls)} | ({"short"} if side == "SELL" else set())
+        _missing = sorted(_need - set(ETORO_PROVEN))
+        if _missing:
+            # verdict first: skips.record keeps 200 characters
+            return skips.GATE_BLOCKED, (
+                f"eToro {symbol} ({icls}, {side}): no demo fill-and-close "
+                f"proof pinned for {_missing} (test_proof_<token>, "
+                f"ETORO_DEPARTURE §7)")
+        return "", ""
 
     # ── the multiplier an eToro order may carry ───────────────────────────
 
@@ -4606,6 +4710,20 @@ class AssetBot(ABC):
         passes `contract.multiplier` into sizing directly.
         """
         return 1.0
+
+    def _instrument_class(self, symbol: str) -> str:
+        """The INSTRUMENT's class — the router's own key (broker_router
+        .client_for_symbol reads the Instrument row; no row routes as
+        crypto) — for every per-instrument fact: the proof token today,
+        the leverage ceiling, the notional cap, the hours clock and the
+        eligibility row as their stages land. Falls back to the CONFIG's
+        class when no row exists (decide() already HOLDs on such a
+        symbol). Risk (risk_fraction), the cost table and the time stop
+        stay the CONFIG's: they are the pool's rule."""
+        from instruments.models import Instrument
+        cls = (Instrument.objects.filter(symbol=symbol)
+               .values_list("asset_class", flat=True).first())
+        return str(cls or self.asset_class)
 
     def _size_for_entry(self, symbol: str, price: float, stop: float,
                         decision) -> dict:

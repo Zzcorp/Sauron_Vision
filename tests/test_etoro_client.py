@@ -1537,8 +1537,11 @@ class TheHeldOrderTests(SimpleTestCase):
         self.assertEqual(st["state"], "dead")
         self.assertTrue(st["refusal"].startswith(
             "errorCode 720: Error opening position"))
-        self.assertLessEqual(len(st["refusal"]), len("errorCode 720: ") + 120,
-                             "_status_of cuts the message at 120 chars")
+        self.assertTrue(st["refusal"].endswith(
+            "InitialPositionAmount: 8.44 MinimumPositionAmount: 10 (Dollars)"),
+            "the WHOLE measured message rides refusal since 2026-09-24: "
+            "the amount and the minimum are its last words")
+        self.assertGreater(len(st["refusal"]), len("errorCode 720: ") + 120)
 
     def test_order_status_three_states(self):
         t, fake = self._t((404, {"message": "Order category for x not found"}))
@@ -1709,8 +1712,10 @@ class ConsumerKeyTests(SimpleTestCase):
                   / "manual_trade.py").read_text(encoding="utf-8")
         self.assertIn("broker_order_id=", manual)
         self.assertIn('"protectiveTradeId"', manual)
-        # D3b, pinned as a gap: the hand lane does not stamp the carrier yet
-        self.assertNotIn("venue_stamps(", manual)
+        # C0 (2026-09-24): the hand lane stamps the carrier, its world and
+        # the close handle with the bots' own rule, off the same client
+        # and fill
+        self.assertIn("venue_stamps(client, res)", manual)
         # D3b: the live-segment caveat rides the TAKE TRADE note, which lives
         # in manual_trade._execute - execute_take_trade is a wrapper, so
         # inspect.getsource(execute_take_trade) would never carry it; the

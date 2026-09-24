@@ -1231,9 +1231,9 @@ class AnEtoroHeldOrderIsPolledAndWithdrawnTests(TestCase):
         self.assertEqual(self._notes("rewrote"), 0)
 
     def test_a_held_order_refused_at_the_open_is_booked_with_its_refusal_words(self):
-        """_status_of cuts the message at 120 chars, so the numbers are NOT
-        on the row yet - a measured fact of this tree; un-truncating is the
-        next batch."""
+        """The WHOLE measured 720 message lands on the row (2026-09-24):
+        the amount and the minimum are its LAST words, and the 120-char cut
+        _status_of used to make lost exactly them."""
         from tests.test_etoro_client import REJECTED_720
         trade = self._row(self.YOUNG)
         t, fake = self._venue((200, REJECTED_720))
@@ -1245,4 +1245,5 @@ class AnEtoroHeldOrderIsPolledAndWithdrawnTests(TestCase):
         for needle in ("Rejected", "errorCode 720", "Initial Leveraged Position"):
             self.assertIn(needle, reason, needle)
         self.assertTrue(reason.endswith("with nothing filled"))
-        self.assertNotIn("MinimumPositionAmount", reason)
+        self.assertIn("InitialPositionAmount: 8.44 MinimumPositionAmount: 10 "
+                      "(Dollars) with nothing filled", reason)

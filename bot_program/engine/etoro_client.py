@@ -308,9 +308,13 @@ def _status_of(polled) -> tuple:
     2026-09-23: {"id": 3, "name": "Filled", "errorCode": 0}, then 11
     WaitingForMarket and 7 Canceled (D2b-i), then 4 Rejected with
     errorCode 720 and an errorMessage naming the amount and the minimum
-    (the floor refusal, BTC) — cut here at 120 chars; since D3b the
-    working-entry poller writes the words into entry_withdrawn_reason,
-    and un-truncating them is the next batch. The INT form is the suite's
+    (the floor refusal, BTC) — carried WHOLE since 2026-09-24: the amount
+    and the minimum sit at the END of that message and a 120-char cut
+    lost exactly them; the skip record and the row bound it (skips.record
+    200, trade.reason 1000); entry_withdrawn_reason, the alert body and
+    the TAKE TRADE error carry it whole. Since D3b
+    the working-entry poller writes the words into
+    entry_withdrawn_reason. The INT form is the suite's
     older fixture and is still read. The wire's `name` is not promoted
     over STATUS_NAMES: the only name measured agrees with the table, and a
     differing one would be a shape nobody has seen. Anything else is 0 —
@@ -329,7 +333,7 @@ def _status_of(polled) -> tuple:
     if isinstance(raw, dict):
         code, msg = raw.get("errorCode"), raw.get("errorMessage")
         if code or msg:
-            words = f"errorCode {code}: {str(msg or '')[:120]}"
+            words = f"errorCode {code}: {msg or ''}"
         raw = raw.get("id")
     try:
         sid = int(raw or 0)
