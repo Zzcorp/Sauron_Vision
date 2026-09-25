@@ -337,7 +337,9 @@ MAX_ORDER_LEVERAGE = 5
 #: 1/L), a tightening) — a named follow-up, not this patch. options and
 #: cfd never route to eToro (broker_router). An unknown class reads 1.
 #: eToro's real answer is per instrument (`leverageValues` on its
-#: eligibility endpoint — public reference, unmeasured, no method here).
+#: eligibility endpoint — MEASURED 2026-09-23 and read by
+#: EtoroTrader.eligibility / leverage_values since Stage 1, 2026-09-25;
+#: this table is judged against the LIVE list in Stage 2).
 ORDER_LEVERAGE_CEILING = {"stock": 5, "etf": 5, "index": 5, "commodity": 5,
                           "crypto": 2, "forex": 1, "options": 1, "cfd": 1}
 
@@ -3627,8 +3629,10 @@ class AssetBot(ABC):
             # risk the operator chose, rounded by a `_round_qty` that knows
             # the asset class and the venue's unit granularity (three
             # states, off the client and the switch) and nothing else — and
-            # a money floor the OPERATOR declared (extras['venue_min_notional'])
-            # is turned into units with the entry price here. Saxo already
+            # eToro's MEASURED money floor (minPositionExposure, the
+            # money_floor tier, 2026-09-23) and a money floor the OPERATOR
+            # declared (extras['venue_min_notional']) are turned into units
+            # with the entry price and value_per_unit here. Saxo already
             # refuses a size under its MinimumTradeSize rather than upsizing
             # it — correctly, and on every tick, as an ORDER_ERROR whose
             # advice is "check the gateway". Asking here turns that into ONE
@@ -3645,7 +3649,8 @@ class AssetBot(ABC):
             # non-positive size with SIZED_TO_ZERO and returns first.
             _floor, _why = self._venue_size_floor(
                 client, symbol, price=price,
-                min_notional=self._extras_float("venue_min_notional", 0.0))
+                min_notional=self._extras_float("venue_min_notional", 0.0),
+                value_per_unit=self._value_per_unit(symbol))
             if _floor is None:
                 logger.info("[%s_bot] %s: no venue size floor measured (%s) "
                             "— an under-minimum order, if this venue has "
@@ -4210,9 +4215,13 @@ class AssetBot(ABC):
         reaches the venue; then, as later stages land INSIDE this method
         (never a second anchor): 2 the eligibility row's own state /
         allowOpenPosition / maxUnitsPerOrder; 3 the hours refusal; 4
-        the unmeasured carry. Step 1 is what ships (C0, 2026-09-24);
-        qty, price, now_utc, leverage_hint and horizon_hours are the
-        later steps' inputs and are unread today. The floor stays in
+        the unmeasured carry. Steps 1 and 2 ship (C0 2026-09-24, C1
+        2026-09-25): step 2 reads qty and leverage_hint against the
+        eligibility row's own three-state, allowOpenPosition and
+        maxUnitsPerOrder (etoro_client.eligibility: one POST per
+        instrument per UTC day once read; an unread row is asked again on
+        every ask); price, now_utc and horizon_hours are the later steps'
+        inputs and are unread today. The floor stays in
         execute_entry after this block because it resizes nothing. A
         non-eToro carrier answers ("", "") at the first line —
         capabilities.adapter_key reads the CLASS name, so a MagicMock or
@@ -4233,6 +4242,75 @@ class AssetBot(ABC):
                 f"eToro {symbol} ({icls}, {side}): no demo fill-and-close "
                 f"proof pinned for {_missing} (test_proof_<token>, "
                 f"ETORO_DEPARTURE §7)")
+        # step 2 — THE VENUE'S OWN ROW (E1.4, 2026-09-25), on the
+        # `order_caps` tier: the read's THREE-STATE first, because
+        # "absent" is eToro saying it holds no row for this id — a
+        # stronger statement than "could not ask" — and the two are
+        # gated apart. ONE cached read per instrument per UTC day once
+        # read (etoro_client.eligibility); an unread row is asked again
+        # on every ask — the floor's min_notional asks once more this
+        # tick when a 1x stock/etf/crypto passes here on "error".
+        from bot_program.engine.capabilities import has_capability
+        if has_capability(client, "order_caps"):
+            try:
+                _state = client.eligibility_state(symbol)
+            except Exception as e:  # noqa: BLE001 — a raise IS could-not-ask
+                _state = "error"
+                logger.info("[etoro] %s: eligibility_state raised %s: %s",
+                            symbol, type(e).__name__, e)
+            if _state == "absent":
+                return skips.ELIGIBILITY_REFUSED, (
+                    f"eToro lists no eligibility row for {symbol} today — "
+                    f"the venue's own answer, not a failed read; nothing "
+                    f"sent")
+            if _state == "error":
+                _hint = int(leverage_hint or 1)
+                _unread = ([f"the LIVE leverage list a {_hint}x order is "
+                            f"judged on"] if _hint > 1 else [])
+                if icls in ("forex", "index", "commodity"):
+                    # MEASURED 2026-09-23 on every forex, index and
+                    # commodity row read: minPositionExposure 1,000 USD
+                    _unread.append("its measured 1,000 USD floor")
+                if _unread:
+                    # verdict first: skips.record keeps 200 characters
+                    return skips.ELIGIBILITY_REFUSED, (
+                        f"eToro {symbol} ({icls}, {_hint}x): eligibility row "
+                        f"unread today; {' and '.join(_unread)} unread — "
+                        f"nothing sent")
+                # [GAP 6] a 1x stock/etf/crypto order proceeds on the class
+                # table ONLY for a hold under 24 h: with the row unread its
+                # settlement is unknown (never free), and the carry step
+                # (a later stage) refuses an unknown settlement held a day
+                # or more. The caps below cannot be read either and are
+                # NOT asked again this tick (each ask would re-POST on a
+                # failing wire); an unread cap refuses nothing.
+                logger.info("[etoro] %s: eligibility row unread today; the "
+                            "1x %s order proceeds on the class table for a "
+                            "hold under 24 h only — settlement unknown, "
+                            "the carry step refuses at >= 24 h", symbol,
+                            icls)
+            else:
+                try:
+                    _open = client.allow_open_position(symbol)
+                    _cap = client.max_units_per_order(symbol)
+                except Exception as e:  # noqa: BLE001
+                    _open, _cap = None, None
+                    logger.info("[etoro] %s: order caps unmeasured (%s: %s)",
+                                symbol, type(e).__name__, e)
+                if _open is False:
+                    return skips.ELIGIBILITY_REFUSED, (
+                        f"eToro does not allow opening {symbol} today "
+                        f"(allowOpenPosition false) — nothing sent")
+                try:
+                    _cap = float(_cap) if _cap is not None else None
+                except (TypeError, ValueError):
+                    _cap = None
+                if _cap is not None and float(qty) > _cap + 1e-9:
+                    return skips.ELIGIBILITY_REFUSED, (
+                        f"sized {float(qty):g} units; eToro's "
+                        f"maxUnitsPerOrder for {symbol} is {_cap:g} — "
+                        f"refused, not clamped (a clamp is a different "
+                        f"trade)")
         return "", ""
 
     # ── the multiplier an eToro order may carry ───────────────────────────
@@ -4382,18 +4460,28 @@ class AssetBot(ABC):
 
     @staticmethod
     def _venue_size_floor(client, symbol: str, price=None,
-                          min_notional=None) -> tuple:
+                          min_notional=None, value_per_unit=1.0) -> tuple:
         """(floor, unmeasured_reason) — the smallest size this venue takes.
 
         THREE STATES, and a 0 would be a fourth this must never give:
 
+          (925.9, "")    a MONEY floor the VENUE itself states — eToro's
+                         minPositionExposure on its eligibility row,
+                         MEASURED 2026-09-23 (10 USD on stocks, ETFs and
+                         crypto; 1,000 USD on forex, indices and
+                         commodities), read through the `money_floor`
+                         tier FIRST and turned into units with the entry
+                         price and `value_per_unit` (a USDJPY floor typed
+                         in USD is 150x wrong without it). The note is
+                         EMPTY: the refusal reads byte for byte as a
+                         measured unit floor's. None from the tier (no row
+                         read today) falls through to the declared floor.
           (1000.0, "")   the venue was asked and said 1000
-          (None, "...")  this adapter cannot be asked at all: it declares no
-                         `size_floor` capability, because nothing it already
-                         reads from the venue carries a minimum size. eToro
-                         is the standing example — its search payload is
-                         read for `instrumentId` and the spelling, and
-                         no adapter invents an eToro minimum.
+          (None, "...")  this adapter cannot be asked at all: it declares
+                         neither `money_floor` nor `size_floor`, because
+                         nothing it already reads from the venue carries a
+                         minimum size (IBKR, OANDA, Alpaca, Binance,
+                         paper); no adapter invents a minimum.
           (0.05, "operator-declared: ...")  a MONEY floor the OPERATOR typed
                          per config (extras['venue_min_notional'], the
                          venue's order currency, unconverted), turned into
@@ -4409,11 +4497,53 @@ class AssetBot(ABC):
         as "any size is fine", which is why this returns None and not 0.0.
         """
         from bot_program.engine.capabilities import has_capability
+        unread = ""
+        if has_capability(client, "money_floor"):
+            # THE VENUE'S OWN MONEY FLOOR FIRST (eToro, MEASURED 2026-09-23):
+            # one cached read of the eligibility row. None means the row
+            # is not read today (absent or unread), never "no floor"; a
+            # body typed in any currency but usd RAISES from min_notional
+            # and is read below as unmeasured, the currency in the reason.
+            try:
+                amount = client.min_notional(symbol)
+                unread = (f"{type(client).__name__} has no eligibility row "
+                          f"for {symbol} today")
+            except Exception as e:  # noqa: BLE001 — could not ask IS an answer
+                amount = None
+                unread = (f"min_notional({symbol}) raised "
+                          f"{type(e).__name__}: {e}")
+            if amount is not None:
+                try:
+                    amount = float(amount)
+                except (TypeError, ValueError):
+                    # only a fake reaches this (the client answers
+                    # float | None) — named for what it answered
+                    unread = (f"min_notional({symbol}) answered {amount!r}: "
+                              f"not a number, so not a measurement")
+                    amount = None
+            if amount is not None:
+                try:
+                    px = float(price or 0) * float(value_per_unit or 0)
+                except (TypeError, ValueError):
+                    px = 0.0
+                if amount > 0 and px > 0:
+                    # MEASURED: an EMPTY note — execute_entry's refusal
+                    # detail and its log rely on it to read as a venue floor
+                    return amount / px, ""
+                if amount > 0:
+                    return None, (f"measured floor {amount:g} for {symbol} "
+                                  f"and no price to turn it into units")
+                unread = (f"min_notional({symbol}) answered {amount:g}: a "
+                          f"floor of zero or less is not a measurement")
+            # None: the operator's declared floor, then unmeasured — with
+            # the row's own reason on the way out
         if not has_capability(client, "size_floor"):
             declared_floor = AssetBot._declared_money_floor(
-                client, symbol, price, min_notional)
+                client, symbol, price, min_notional, value_per_unit)
             if declared_floor is not None:
                 return declared_floor
+            if unread:
+                return None, unread
             return None, (f"{type(client).__name__} declares no size_floor "
                           f"capability: this venue publishes no minimum "
                           f"trade size that the adapter already reads")
@@ -4440,7 +4570,8 @@ class AssetBot(ABC):
         """THREE STATES, off the client AND the switch: True (declares the
         `fractional_units` tier, answered True for `symbol`, and the
         fractional_units_live component is ON), False (declared it and
-        answered False — the eligibility read, once it exists), None
+        answered False — the eligibility row's unitsQuantityType
+        "whole", read since 2026-09-25), None
         (declares no such tier, the switch is OFF, raised, or answered
         neither). None rounds exactly as before this tier existed, which
         for stocks is whole shares. Asked of the INSTANCE through
@@ -4468,8 +4599,9 @@ class AssetBot(ABC):
             return None
         if ans is True:
             if say:
-                logger.info("%s takes fractional units of %s (a belief from "
-                            "the public reference; the switch is ON)",
+                logger.info("%s takes fractional units of %s (measured on "
+                            "eToro's eligibility row: unitsQuantityType "
+                            "fractional; the switch is ON)",
                             type(client).__name__, symbol)
             return True
         if ans is False:
@@ -4477,12 +4609,16 @@ class AssetBot(ABC):
         return None
 
     @staticmethod
-    def _declared_money_floor(client, symbol: str, price, min_notional):
+    def _declared_money_floor(client, symbol: str, price, min_notional,
+                              value_per_unit=1.0):
         """(floor_units, "operator-declared: ...") from the per-config
         extras['venue_min_notional'] — the OPERATOR's number, in the
         venue's order currency, unconverted — turned into units with the
-        entry price; or (None, why) when a price is missing; or None when
-        no floor was declared, so the caller keeps its own reason."""
+        entry price and `value_per_unit` (2026-09-25: a USDJPY floor typed
+        in USD was 150x wrong without it); or (None, why) when a price is
+        missing; or None when no floor was declared, so the caller keeps
+        its own reason. Behind the venue's MEASURED money floor since
+        Stage 1 (_venue_size_floor asks the `money_floor` tier first)."""
         try:
             amount = float(min_notional or 0)
         except (TypeError, ValueError):
@@ -4490,7 +4626,7 @@ class AssetBot(ABC):
         if amount <= 0:
             return None
         try:
-            px = float(price or 0)
+            px = float(price or 0) * float(value_per_unit or 0)
         except (TypeError, ValueError):
             px = 0.0
         if px <= 0:

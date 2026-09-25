@@ -71,34 +71,52 @@ CAPABILITIES: dict = {
     # Reading the account itself — what `sync_broker_account` needs.
     "account": ("net_liquidation", "broker_portfolio"),
     "options": ("option_chain", "option_greeks", "market_order_option"),
-    # 2026-09-20. Asking a venue the smallest size it will accept, BEFORE an
-    # order exists. Saxo alone can answer: its instrument details carry
-    # LotSize/LotSizeType and MinimumTradeSize, and `_amount` already
-    # enforces them by RAISING rather than upsizing. eToro cannot — the only
-    # per-instrument payload its adapter reads is the market-data search
-    # result, read for `instrumentId` and the symbol spelling, and it
-    # carries no size field. So an eToro floor IN UNITS cannot be known
-    # before the order and no adapter invents one; the operator may declare
-    # a MONEY floor per config (extras['venue_min_notional'], read by
-    # asset_engine/base.py::_venue_size_floor as a fourth, labelled state),
-    # and the `fractional_units` tier below is a separate, labelled belief.
-    # OANDA, Alpaca, IBKR, Binance and
-    # PaperTrader go unasked for the same reason: no method, which the
-    # engine reads as unmeasured and never as zero.
+    # 2026-09-20. Asking a venue the smallest size IN UNITS it will accept,
+    # BEFORE an order exists. Saxo alone can answer: its instrument details
+    # carry LotSize/LotSizeType and MinimumTradeSize, and `_amount` already
+    # enforces them by RAISING rather than upsizing. eToro's floor is MONEY,
+    # not units (minPositionExposure on its eligibility row, MEASURED
+    # 2026-09-23: 10 USD on stocks, ETFs and crypto; 1,000 USD on forex,
+    # indices and commodities), so it declares `money_floor` below and
+    # never this tier (tests/test_venue_min_size.py pins Saxo alone here);
+    # the operator may still declare a MONEY floor per config
+    # (extras['venue_min_notional'], read by asset_engine/base.py::
+    # _venue_size_floor as a labelled state behind the measured one).
+    # OANDA, Alpaca, IBKR, Binance and PaperTrader go unasked: no method,
+    # which the engine reads as unmeasured and never as zero.
     "size_floor": ("min_tradable",),
-    # 2026-09-23. A venue that takes a NON-WHOLE unit count. ONE method, and
-    # it carries no number: eToro declares it as a BELIEF from the public
-    # reference (create-an-order documents `units` as a double "greater than
-    # 0" with no integer constraint; the portfolio example holds 0.049485
-    # units), never as a measurement — the measured answer is per instrument
-    # on POST /api/v2/trading/info/eligibility (`unitsQuantityType`), which
-    # no adapter calls yet. The ENGINE reads it off the CLIENT the router
-    # hands the entry and holds every stock size at WHOLE shares until the
-    # `fractional_units_live` component is ON (core/platform_control),
-    # which is flipped only after ETORO_DEPARTURE §4 D2c measured a
-    # fractional fill. A money floor is NOT part of this tier: that number is
-    # the operator's (extras['venue_min_notional']), never an adapter's.
+    # 2026-09-23. A venue that takes a NON-WHOLE unit count. ONE method and
+    # it carries no number. Declared as a BELIEF from the public reference
+    # on 2026-09-23; MEASURED since 2026-09-25 per instrument off
+    # `unitsQuantityType` on POST /api/v2/trading/info/{demo/}eligibility
+    # ("fractional" on all 20 instruments read on 2026-09-23, both worlds;
+    # D2c pinned a fractional fill the same night): True / False / None for
+    # an instrument whose row is not read today. The ENGINE reads it off
+    # the CLIENT the router hands the entry and holds every stock size at
+    # WHOLE shares until the `fractional_units_live` component is ON
+    # (core/platform_control); with the switch OFF the row is not asked.
+    # A money floor is NOT part of this tier: that is `money_floor`.
     "fractional_units": ("takes_fractional_units",),
+    # 2026-09-25, MEASURED 2026-09-23: POST /api/v2/trading/info/{demo/}
+    # eligibility, one row per instrument, ONE POST per UTC day once read;
+    # an unread row (a non-200) is asked again on every ask
+    # (etoro_client.eligibility). A MONEY floor (minPositionExposure) in
+    # USD — the body's currency; any other RAISES, unmeasured —
+    # deliberately NOT `size_floor` (units, Saxo's tier): base.
+    # _venue_size_floor turns money into units with the entry price and
+    # value_per_unit, and asks this tier FIRST. `order_caps`:
+    # maxUnitsPerOrder, allowOpenPosition, and the read's own three-state
+    # (read / absent / error — the entry gate judges "absent", the venue
+    # saying it holds no row, apart from "could not ask"). `leverage_values`:
+    # the per-(settlement, direction, leverage) lists and stop bands the
+    # engine judges a multiplier against in a later stage; the LIVE list is
+    # readable from a demo instance (world="live") and only it proves
+    # anything. None from any of them means unmeasured, never free.
+    "money_floor": ("min_notional",),
+    "order_caps": ("max_units_per_order", "allow_open_position",
+                   "eligibility_state"),
+    "leverage_values": ("leverage_values", "max_stop_loss_pct",
+                        "settlement_for"),
     "leverage": ("set_leverage", "set_margin_type"),
 }
 
@@ -127,14 +145,19 @@ ADAPTER_CAPABILITIES: dict = {
     # warns about, so the per-order shape is a kwarg contract on
     # "execution", written in asset_engine/base.py first and pinned by
     # tests/test_etoro_leverage.py. `margin_cells` belongs to no tier.
-    # "fractional_units" 2026-09-23: a belief, see the tier — sent only
-    # while fractional_units_live is ON; D2c measures it.
+    # "fractional_units" 2026-09-23 a belief, MEASURED since 2026-09-25 off
+    # the eligibility row (unitsQuantityType) — sent only while
+    # fractional_units_live is ON. "money_floor", "order_caps" and
+    # "leverage_values" 2026-09-25: the same row's minPositionExposure,
+    # maxUnitsPerOrder / allowOpenPosition / the read's three-state, and
+    # the leverageConfigs lists (MEASURED 2026-09-23, D2c-0).
     # "orders" 2026-09-24 (D3b): MEASURED 2026-09-23 20:29 UTC on the demo
     # segment - DELETE v3 -> 202, the lookup then 7 Canceled. cancel_order
     # is lookup-first and refuses (False) any id it cannot read; the real
     # spelling raises until measured; order_status is in no tier.
     "etoro": ("market_data", "execution", "orders", "brackets",
-              "account", "fractional_units"),
+              "account", "fractional_units", "money_floor", "order_caps",
+              "leverage_values"),
     "ibkr": ("market_data", "execution", "orders", "brackets", "account",
              "options"),
     "oanda": ("market_data", "execution", "orders", "brackets", "fills"),

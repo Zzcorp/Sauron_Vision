@@ -289,8 +289,19 @@ class ForexBot(AssetBot):
     def _round_qty(self, qty: float, price: float, *,
                    fractional=None) -> float:
         """Round to a tidy unit boundary; a fraction below half a boundary
-        sizes to zero (recorded as SIZED_TO_ZERO upstream)."""
-        units = round(float(qty) / UNIT_ROUNDING) * UNIT_ROUNDING
+        sizes to zero (recorded as SIZED_TO_ZERO upstream).
+
+        `fractional` is the venue's unit-granularity answer in three
+        states (base._venue_fractional_units: True only while the
+        fractional_units_live switch is ON and the client MEASURED the
+        instrument fractional — eToro's eligibility row, 2026-09-25).
+        True snaps to ONE unit instead of UNIT_ROUNDING: 1,000 USD / 1.08
+        = 926 units against eToro's measured 1,000 USD floor
+        (minPositionExposure) would snap to 900 and be refused under a
+        926-unit floor on every tick. None and False keep the 100-unit
+        step: with the switch OFF nothing changes."""
+        step = 1 if fractional is True else UNIT_ROUNDING
+        units = round(float(qty) / step) * step
         return float(max(units, 0.0))
 
     def position_size(self, price: float) -> float:

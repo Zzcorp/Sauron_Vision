@@ -170,6 +170,26 @@ class SizingTests(TestCase):
         qty = bot.position_size(1.08)
         self.assertEqual(qty, 2000.0)
 
+    def test_forex_bot_rounds_to_single_units_only_when_measured_fractional(self):
+        """E1.3 (2026-09-25): 1,000 USD / 1.08 = 926 units snaps to 900 on
+        the 100-unit boundary and is refused under eToro's measured
+        926-unit floor (minPositionExposure 1,000 USD) on every tick. With
+        the venue measured fractional (the switch ON and the eligibility
+        row's unitsQuantityType) the step is 1. None and False keep the
+        100-unit step: with the switch OFF nothing changes."""
+        from bot_program.asset_engine import ForexBot
+        u = _user()
+        cfg = _config(u, "forex", capital=Decimal("10000"),
+                      position_size_pct=2.0)
+        bot = ForexBot(cfg)
+        self.assertEqual(bot._round_qty(925.93, 1.08), 900.0)
+        self.assertEqual(bot._round_qty(925.93, 1.08, fractional=None), 900.0)
+        self.assertEqual(bot._round_qty(925.93, 1.08, fractional=False),
+                         900.0)
+        self.assertEqual(bot._round_qty(925.93, 1.08, fractional=True), 926.0)
+        self.assertEqual(bot._round_qty(0.4, 1.08, fractional=True), 0.0)
+        self.assertEqual(bot._round_qty(49.0, 1.08), 0.0)
+
     def test_commodity_bot_forces_paper_mode(self):
         from bot_program.asset_engine import CommodityBot
         u = _user()

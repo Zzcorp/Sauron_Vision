@@ -111,8 +111,8 @@ class StockBot(AssetBot):
         carried on the candidate so the second rounding in execute_entry
         uses the same answer: True (the client declares the
         `fractional_units` tier, said so for this symbol, and the
-        fractional_units_live switch is ON — eToro, as a belief from
-        the public reference), False (declared and said whole), None
+        fractional_units_live switch is ON — eToro, measured on its
+        eligibility row, 2026-09-25), False (declared and said whole), None
         (declares nothing, raised, the switch is OFF, or nobody asked — the
         manual lane's `_qty_step` probe, every positional caller). None
         rounds exactly as before this seam existed: whole shares, the

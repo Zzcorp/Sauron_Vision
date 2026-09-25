@@ -366,12 +366,20 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         self.inst = _quote("BTCUSD", 60000)
         _components_on()
         self.cfg = _arm_live(self.user)
+        from tests.test_etoro_client import _clear_eligibility
+        _clear_eligibility()
+        self.addCleanup(_clear_eligibility)
 
     def _etoro(self):
         """The real adapter, demo world, over a fake wire that answers
-        nothing; the mark the preview reads is patched on the instance."""
-        from tests.test_etoro_client import _client
-        t, fake = _client([])
+        /search and the eligibility row; the mark the preview reads is
+        patched on the instance. C1 (2026-09-25): step 2 of the gate
+        reads the row, so the MEASURED BTC row (id 100000, maxUnitsPerOrder
+        41, allowOpenPosition true) rides the wire and a proven class
+        passes on a READ row, not on an error; /search answers BTC to
+        BTCUSD as eToro did (BTCUSD itself is not found there, doc §10)."""
+        from tests.test_etoro_client import ELIG_BTC, SEARCH_BTC, _client
+        t, fake = _client([SEARCH_BTC, ELIG_BTC])
         p = patch.object(t, "ticker", return_value={"lastPrice": "60000"})
         p.start()
         self.addCleanup(p.stop)
@@ -422,6 +430,55 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         self.assertIn("['short']", out["error"])
         spy.assert_not_called()
         self.assertEqual([c for c in fake.calls if c[0] == "POST"], [])
+
+    def test_the_venues_own_row_refuses_the_lane_too(self):
+        """"crypto" stated proven and the eligibility row answering
+        allowOpenPosition false: the lane is refused by step 2 of the
+        same gate (eligibility_refused, C1 2026-09-25) — no market_order,
+        no order POST; the one POST on the wire is the eligibility read."""
+        from bot_program.manual_trade import execute_take_trade
+        from tests.test_etoro_client import (ROW_BTC_LIVE, SEARCH_BTC,
+                                             _client, _elig_route)
+        self._proven("crypto")
+        t, fake = _client([SEARCH_BTC, _elig_route([
+            dict(ROW_BTC_LIVE, allowOpenPosition=False)])])
+        p = patch.object(t, "ticker", return_value={"lastPrice": "60000"})
+        p.start()
+        self.addCleanup(p.stop)
+        with patch.object(t, "market_order", wraps=t.market_order) as spy, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertIn("eToro refusal (eligibility_refused)", out["error"])
+        self.assertIn("allowOpenPosition false", out["error"])
+        self.assertTrue(out["error"].endswith("nothing was sent"),
+                        out["error"])
+        spy.assert_not_called()
+        posts = [c for c in fake.calls if c[0] == "POST"]
+        self.assertEqual([c[1] for c in posts if "orders" in c[1]], [])
+        self.assertEqual(len(posts), 1, [p[1] for p in posts])
+
+    def test_a_proven_class_passes_step_two_on_a_read_row_not_an_error(self):
+        """The MEASURED BTC row (maxUnitsPerOrder 41, allowOpenPosition
+        true) is READ before the order: one eligibility POST keyed on the
+        id /search answered, and the state is "read" — the lane passed on
+        the venue's answer, not on a failed read."""
+        from bot_program.manual_trade import execute_take_trade
+        self._proven("crypto")
+        t, fake = self._etoro()
+        with patch.object(t, "market_order", return_value=_filled_response(
+                positionId="3603281458")) as mo, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertTrue(out.get("ok"), out)
+        mo.assert_called_once()
+        self.assertEqual(t.eligibility_state("BTCUSD"), "read")
+        posts = [c for c in fake.calls if c[0] == "POST"]
+        self.assertEqual(len(posts), 1, [p[1] for p in posts])
+        self.assertTrue(posts[0][1].endswith("/info/demo/eligibility"))
+        self.assertEqual(posts[0][2]["json"], {"instrumentIds": [100000]})
 
     def test_a_proven_class_passes_and_the_row_carries_the_venue_stamps(self):
         """"crypto" stated proven: the order goes, and the row records the

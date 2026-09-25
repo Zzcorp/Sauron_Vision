@@ -517,6 +517,28 @@ demo row the book and the venue in one click).
     maxUnitsPerOrder, and the stop-percentage band. If it answers, the belief
     in capabilities.py and `takes_fractional_units` are corrected in the same
     commit to read the payload and answer None for an unread instrument.
+    MEASURED 2026-09-23; the adapter reads it since Stage 1
+    (`EtoroTrader.eligibility`, one POST per instrument per UTC day once
+    read — an unread row is asked again on every ask — and the accessors
+    beside it: `eligibility_state`, `unit_type`, `min_notional` (USD; a
+    body typed in another currency raises), `max_units_per_order`,
+    `allow_open_position`, `requires_w8ben`, `leverage_values`,
+    `max_stop_loss_pct`, `settlement_for` — `world='live'` reads the LIVE
+    list from the demo row). The demo read, values only, WORLD CHECK
+    first:
+
+    ```
+    ./deploy/dc exec worker-fast python manage.py shell -c "
+    from bot_program.models import EtoroAccount
+    from bot_program.engine.etoro_client import EtoroTrader
+    a = EtoroAccount.objects.get(user__username='Sauron'); k, u = a.get_credentials()
+    t = EtoroTrader(k, u, env='demo' if a.demo else 'live')
+    assert t.demo, 'REFUSING: the row is not demo'
+    assert t.ping() is True, 'REFUSING: the demo world did not answer'
+    nl = t.net_liquidation(); assert nl and nl[0] > 100000, f'REFUSING: {nl} is not the virtual balance'
+    [print(S, 'state', t.eligibility_state(S), 'units', t.unit_type(S), 'floor', t.min_notional(S), 'maxUnits', t.max_units_per_order(S), 'open', t.allow_open_position(S), 'w8', t.requires_w8ben(S), 'LIVE long cfd', t.leverage_values(S, 'BUY', 'cfd', world='live'), 'LIVE short cfd', t.leverage_values(S, 'SELL', 'cfd', world='live'), 'settlement@1x', t.settlement_for(S, 'BUY', 1)) for S in ('AAPL', 'GLDM', 'EURUSD', 'SPX500', 'BTC')]
+    "
+    ```
   - D2c-1 THE FRACTION, four significant decimals above the believed
     minimum: check `last` first and pick a size s with s × last > 10 USD
     (0.2345 GLDM if it fits):
@@ -638,14 +660,20 @@ demo row the book and the venue in one click).
 ## 5. Funding, and the pool arithmetic
 
 - eToro cannot be asked its size floor in UNITS before an order
-  (bot_program/engine/capabilities.py:74-84). Since 2026-09-23 the adapter
-  declares `fractional_units` — a BELIEF that `units` may be non-whole — and
-  the stock bot SENDS a fraction only while the fractional_units_live
-  switch is ON (OFF until D2c's pins land). The venue's minimum position is
-  NOT known to the platform: after D2c, type it per config into
-  extras['venue_min_notional'] (USD, unconverted) and the engine refuses
-  under it as venue_min_size with both numbers; without it the venue's
-  refusal is the only floor and the symbol is quiet for 24 h after the first.
+  (bot_program/engine/capabilities.py:74-87, Saxo's `size_floor` tier) — its
+  MONEY floor it can, and since Stage 1 (2026-09-25) the engine asks it
+  FIRST: `EtoroTrader.min_notional` reads minPositionExposure off the
+  eligibility row (MEASURED 2026-09-23, §4 D2c-0: 10 USD on stocks, ETFs and
+  crypto; 1,000 USD on forex, indices and commodities; USD only — a body in
+  another currency raises and reads as unmeasured) and `_venue_size_floor`
+  turns it into units at the entry price, refusing under it as
+  venue_min_size with both numbers. The typed extras['venue_min_notional']
+  (USD, unconverted) is the FALLBACK for a row unread today; without either
+  the venue's refusal is the only floor and the symbol is quiet for 24 h
+  after the first. Since 2026-09-23 the adapter declares `fractional_units`
+  — since Stage 1 a MEASUREMENT off the row's unitsQuantityType (True /
+  False / None unread), no longer a belief — and the stock bot SENDS a
+  fraction only while the fractional_units_live switch is ON (OFF today).
   The fuel arithmetic is pool × risk_per_trade_pct / stop_fraction against
   that minimum — preflight section 5 prints it — not the notional ceiling.
   Whole units stay the rule on every other venue, and on eToro while the

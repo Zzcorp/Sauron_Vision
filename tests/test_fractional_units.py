@@ -23,7 +23,8 @@ from unittest import mock
 
 from django.test import SimpleTestCase, TestCase
 
-from tests.test_etoro_client import SEARCH_AAPL, _client
+from tests.test_etoro_client import (ELIG_AAPL, SEARCH_AAPL,
+                                     _clear_eligibility, _client)
 from tests.test_execution_trust import _cfg as _live_cfg
 from tests.test_execution_trust import _instrument, _signal, _user
 from tests.test_venue_min_size import _venue
@@ -103,20 +104,58 @@ class TheTierIsDeclaredAndDerived(SimpleTestCase):
         self.assertEqual(cap.CAPABILITIES["size_floor"], ("min_tradable",))
         self.assertEqual({k for k, v in cap.ADAPTER_CAPABILITIES.items()
                           if "size_floor" in v}, {"saxo"})
+        # C1 (2026-09-25): the three MEASURED eligibility tiers, eToro
+        # alone — a money floor is `money_floor`, never Saxo's `size_floor`
+        self.assertEqual(cap.CAPABILITIES["money_floor"], ("min_notional",))
+        self.assertEqual(cap.CAPABILITIES["order_caps"],
+                         ("max_units_per_order", "allow_open_position",
+                          "eligibility_state"))
+        self.assertEqual(cap.CAPABILITIES["leverage_values"],
+                         ("leverage_values", "max_stop_loss_pct",
+                          "settlement_for"))
+        for tier in ("money_floor", "order_caps", "leverage_values"):
+            self.assertEqual({k for k, v in cap.ADAPTER_CAPABILITIES.items()
+                              if tier in v}, {"etoro"}, tier)
+            self.assertIn(tier, cap.capabilities_of(EtoroTrader), tier)
+            for cls in (IBKRTrader, AlpacaTrader, SaxoTrader, PaperTrader):
+                self.assertNotIn(tier, cap.capabilities_of(cls),
+                                 (tier, cls.__name__))
 
 
-class TheAdapterAnswersABelief(SimpleTestCase):
+class TheAdapterAnswersAMeasurement(SimpleTestCase):
+    """Until 2026-09-25 this class was TheAdapterAnswersABelief: True from
+    the public reference, no HTTP call. The answer is MEASURED now, per
+    instrument, off unitsQuantityType on the eligibility row read once
+    per UTC day."""
 
-    def test_the_answer_is_a_belief_and_costs_no_call(self):
+    def setUp(self):
+        _clear_eligibility()
+        self.addCleanup(_clear_eligibility)
+
+    def test_the_answer_is_measured_and_costs_one_post(self):
         from bot_program.engine import capabilities as cap
         from bot_program.engine.etoro_client import EtoroTrader
-        t, fake = _client([SEARCH_AAPL])
+        t, fake = _client([SEARCH_AAPL, ELIG_AAPL])
         self.assertIs(t.takes_fractional_units("AAPL"), True)
-        self.assertEqual(fake.calls, [])
+        posts = [c for c in fake.calls if c[0] == "POST"]
+        self.assertEqual(len(posts), 1, posts)
+        self.assertTrue(posts[0][1].endswith("/info/demo/eligibility"),
+                        posts[0][1])
+        self.assertIs(t.takes_fractional_units("AAPL"), True)
+        self.assertEqual(len([c for c in fake.calls if c[0] == "POST"]), 1,
+                         "a second POST for a same-day row")
         self.assertEqual(cap.adapter_key(t), "etoro")
-        self.assertIn("belie",
-                      EtoroTrader.takes_fractional_units.__doc__.lower())
+        doc = EtoroTrader.takes_fractional_units.__doc__.lower()
+        self.assertIn("measured", doc)
+        self.assertIn("unitsquantitytype", doc)
         self.assertFalse(hasattr(EtoroTrader, "min_position_notional"))
+        _clear_eligibility()
+        u, _ = _client([SEARCH_AAPL,
+                        ("POST", "/info/demo/eligibility", 503, {})])
+        with self.assertLogs("bot_program.engine.etoro_client",
+                             level="WARNING"):
+            self.assertIsNone(u.takes_fractional_units("AAPL"),
+                              "unread today: None, never the old True")
 
 
 class TheStatusParserNeverRaises(SimpleTestCase):
@@ -177,6 +216,10 @@ class ThePostRefusalCarriesTheWords(SimpleTestCase):
 
 class TheEngineReadsThreeStates(TestCase):
 
+    def setUp(self):
+        _clear_eligibility()
+        self.addCleanup(_clear_eligibility)
+
     def test_true_false_none_off_the_client_and_the_switch(self):
         from bot_program.asset_engine.base import AssetBot
         from bot_program.engine.etoro_client import EtoroTrader
@@ -191,9 +234,15 @@ class TheEngineReadsThreeStates(TestCase):
         self.assertIs(f(_fractional(answer=False), "AAPL"), False)
         self.assertIsNone(f(_fractional(answer="yes"), "AAPL"))
         self.assertIsNone(f(_fractional(answer=TimeoutError("x")), "AAPL"))
-        real, _ = _client([])
+        real, fake = _client([SEARCH_AAPL, ELIG_AAPL])
         self.assertIs(f(real, "AAPL"), True)
         self.assertIsInstance(real, EtoroTrader)
+        self.assertEqual(len([c for c in fake.calls if c[0] == "POST"]), 1,
+                         "the measured answer costs one eligibility POST")
+        _clear_eligibility()
+        unread, _ = _client([])
+        self.assertIsNone(f(unread, "AAPL"),
+                          "no row read today: None, as any unmeasured answer")
         _switch(False)
         self.assertIsNone(f(real, "AAPL"))
 
@@ -262,9 +311,15 @@ class TheStockBotRoundsByTheAnswer(TestCase):
             self.assertEqual(paper._round_qty(0.37, 200.0, fractional=state),
                              0.37)
         fx = _forex_bot(user)
+        # C1 (2026-09-25): a MEASURED fractional venue snaps forex to ONE
+        # unit (eToro's 1,000 USD floor at 1.08 is 926 units, which the
+        # 100-unit step would refuse on every tick); None and False keep
+        # the 100-unit step, so with the switch OFF nothing changes
         self.assertEqual(fx._round_qty(1666.67, 150.0, fractional=True),
-                         fx._round_qty(1666.67, 150.0))
+                         1667.0)
         self.assertEqual(fx._round_qty(1666.67, 150.0), 1700.0)
+        self.assertEqual(fx._round_qty(1666.67, 150.0, fractional=False),
+                         1700.0)
         for cls in ("crypto", "commodity"):
             bot = make_bot(_live_cfg(user, asset_class=cls, mode="paper",
                                      name=f"FR_{cls}"))

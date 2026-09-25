@@ -24,7 +24,8 @@ from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from tests.test_desk_seam import _client as _mock_client
-from tests.test_etoro_client import SEARCH_AAPL, _FakeSession, _lookup
+from tests.test_etoro_client import (ELIG_AAPL, SEARCH_AAPL, _FakeSession,
+                                     _clear_eligibility, _lookup)
 from tests.test_execution_trust import _cfg as _live_cfg
 from tests.test_execution_trust import _instrument, _signal, _trade, _user
 
@@ -49,9 +50,25 @@ def _etoro(routes=None, *, echo_stop=None):
     else:
         ex["stopLossRate"] = echo_stop
     t = EtoroTrader("api-k", "user-k", env="demo")
-    t._session = _FakeSession(list(routes or [
-        SEARCH_AAPL, RATES, POSTED, ("GET", "orders:lookup", 200, lk)]))
+    routes = list(routes or [
+        SEARCH_AAPL, RATES, POSTED, ("GET", "orders:lookup", 200, lk)])
+    # C1 (2026-09-25): the entry gate reads the eligibility row BEFORE the
+    # multiplier; a wire without one is "error" today and refuses every
+    # levered entry here. The MEASURED AAPL row rides every wire that did
+    # not route eligibility itself (a test states a 503 or an absent row
+    # by routing it).
+    if not any("eligibility" in r[1] for r in routes):
+        routes.append(ELIG_AAPL)
+    t._session = _FakeSession(routes)
     return t, t._session
+
+
+def _order_posts(fake):
+    """The ORDER POSTs on the wire. Since C1 (2026-09-25) the eligibility
+    read is a POST too (/info/demo/eligibility, one per instrument per UTC
+    day, BEFORE the multiplier), so "a POST left the box" names the
+    orders path: /execution/demo/orders."""
+    return [c for c in fake.calls if c[0] == "POST" and "/orders" in c[1]]
 
 
 def _switch(on):
@@ -234,6 +251,10 @@ class TheEntryPassesItThroughTests(TestCase):
         # "stock" is stated proven HERE, for this class only, never in the
         # tree — the empty-set case has its own test below.
         self._proven("stock")
+        # C1: the eligibility cache is module-level and keyed on the id
+        # every test here shares (1001) — cleared around every test
+        _clear_eligibility()
+        self.addCleanup(_clear_eligibility)
 
     def _proven(self, *tokens):
         """State `tokens` as proven for the rest of this test. The gate
@@ -287,7 +308,7 @@ class TheEntryPassesItThroughTests(TestCase):
                         "._notify_venue_min_size") as floor_note:
             res = self._execute(cand, t)
         self.assertIsNone(res)
-        self.assertEqual([c for c in fake.calls if c[0] == "POST"], [],
+        self.assertEqual(_order_posts(fake), [],
                          "an order left the box on an unproven class")
         floor_note.assert_not_called()
         self.assertEqual(AssetBotTrade.objects.count(), 0)
@@ -318,7 +339,7 @@ class TheEntryPassesItThroughTests(TestCase):
                              level="WARNING") as cm:
             res = self._execute(cand, t)
         self.assertIsNone(res)
-        self.assertEqual(len([c for c in fake.calls if c[0] == "POST"]), 1)
+        self.assertEqual(len(_order_posts(fake)), 1)
         note = self._skip_note()
         self.assertEqual(note["code"], skips.ORDER_REJECTED)
         self.assertTrue(note["detail"].startswith(
@@ -329,6 +350,73 @@ class TheEntryPassesItThroughTests(TestCase):
         self.assertNotIn(tail, note["detail"], "the record's cut, measured")
         self.assertTrue(any(tail in line for line in cm.output), cm.output)
 
+    def test_the_eligibility_row_is_read_once_before_the_order(self):
+        """C1 (2026-09-25): step 2 of the gate reads the MEASURED AAPL row
+        the wire carries (ONE POST, before the order POST) and lets a
+        2x order through on allowOpenPosition true / maxUnitsPerOrder
+        6151; the floor reads the same cached row (no second POST)."""
+        _switch(True)
+        _account(self.user, cash=100000)
+        cand = self._cand()
+        t, fake = _etoro()
+        res = self._execute(cand, t)
+        self.assertIsNotNone(res, None if res is not None
+                             else self._skip_note())
+        posts = [c for c in fake.calls if c[0] == "POST"]
+        self.assertEqual(len(posts), 2, [p[1] for p in posts])
+        self.assertTrue(posts[0][1].endswith("/info/demo/eligibility"),
+                        posts[0][1])
+        self.assertEqual(posts[0][2]["json"], {"instrumentIds": [1001]})
+        self.assertTrue(posts[1][1].endswith("/execution/demo/orders"),
+                        posts[1][1])
+        self.assertEqual(t.eligibility_state("AAPL"), "read")
+
+    def test_an_unread_row_refuses_a_levered_entry_before_the_multiplier(self):
+        """The wire answers 503 on eligibility: the row is "error" today,
+        the hint is 2 -> eligibility_refused naming the multiplier and the
+        LIVE list, before the multiplier's own judgement and before any
+        order POST; ONE eligibility POST this tick (an error is asked
+        again next tick, not three times now)."""
+        from bot_program.asset_engine import skips
+        from bot_program.models import AssetBotTrade
+        _switch(True)
+        _account(self.user, cash=100000)
+        cand = self._cand()
+        t, fake = _etoro([SEARCH_AAPL, RATES, POSTED,
+                          ("POST", "/info/demo/eligibility", 503, {})])
+        res = self._execute(cand, t)
+        self.assertIsNone(res)
+        posts = [c for c in fake.calls if c[0] == "POST"]
+        self.assertEqual([c[1] for c in posts if "orders" in c[1]], [],
+                         "an order left the box on an unread row")
+        self.assertEqual(len(posts), 1, [p[1] for p in posts])
+        note = self._skip_note()
+        self.assertEqual(note["code"], skips.ELIGIBILITY_REFUSED)
+        self.assertIn("2x", note["detail"])
+        self.assertIn("LIVE leverage list", note["detail"])
+        self.assertLessEqual(len(note["detail"]), 200)
+        self.assertEqual(AssetBotTrade.objects.count(), 0)
+
+    def test_allow_open_position_false_refuses_before_the_post(self):
+        """The venue's own row says the instrument may not be opened
+        today: eligibility_refused, no order POST, no row."""
+        from bot_program.asset_engine import skips
+        from bot_program.models import AssetBotTrade
+        from tests.test_etoro_client import ROW_AAPL_DEMO, _elig_route
+        _switch(True)
+        _account(self.user, cash=100000)
+        cand = self._cand()
+        t, fake = _etoro([SEARCH_AAPL, RATES, POSTED, _elig_route([
+            dict(ROW_AAPL_DEMO, allowOpenPosition=False)])])
+        res = self._execute(cand, t)
+        self.assertIsNone(res)
+        self.assertEqual([c for c in fake.calls
+                          if c[0] == "POST" and "orders" in c[1]], [])
+        note = self._skip_note()
+        self.assertEqual(note["code"], skips.ELIGIBILITY_REFUSED)
+        self.assertIn("allowOpenPosition false", note["detail"])
+        self.assertEqual(AssetBotTrade.objects.count(), 0)
+
     def test_the_kwarg_reaches_the_body_and_the_row_records_it(self):
         from bot_program.models import AssetBotTrade
         _switch(True)
@@ -337,7 +425,7 @@ class TheEntryPassesItThroughTests(TestCase):
         t, fake = _etoro()
         res = self._execute(cand, t)
         self.assertIsNotNone(res)
-        body = [c for c in fake.calls if c[0] == "POST"][0][2]["json"]
+        body = _order_posts(fake)[0][2]["json"]
         self.assertEqual(body["leverage"], 2)
         self.assertAlmostEqual(body["units"], float(cand.qty_default),
                                places=6, msg="leverage must not touch units")
@@ -357,7 +445,7 @@ class TheEntryPassesItThroughTests(TestCase):
         t, fake = _etoro()
         res = self._execute(cand, t)
         self.assertIsNone(res)
-        self.assertEqual([c for c in fake.calls if c[0] == "POST"], [],
+        self.assertEqual(_order_posts(fake), [],
                          "an order left the box while the switch was OFF")
         self.assertEqual(AssetBotTrade.objects.count(), 0)
         note = self._skip_note()
@@ -372,7 +460,7 @@ class TheEntryPassesItThroughTests(TestCase):
         t, fake = _etoro()
         res = self._execute(cand, t)
         self.assertIsNotNone(res)
-        body = [c for c in fake.calls if c[0] == "POST"][0][2]["json"]
+        body = _order_posts(fake)[0][2]["json"]
         self.assertEqual(body["leverage"], 1, "the adapter's own default")
         trade = AssetBotTrade.objects.get(id=res["trade_id"])
         self.assertNotIn("leverage", trade.metadata)
@@ -391,7 +479,7 @@ class TheEntryPassesItThroughTests(TestCase):
         self.assertIsNotNone(res)
         self.assertNotIn("leverage", spy.call_args.kwargs,
                          "a typed 1 is the default: no kwarg")
-        body = [c for c in fake.calls if c[0] == "POST"][0][2]["json"]
+        body = _order_posts(fake)[0][2]["json"]
         self.assertEqual(body["leverage"], 1)
         trade = AssetBotTrade.objects.get(id=res["trade_id"])
         self.assertEqual(trade.metadata["leverage"], 1)
@@ -418,7 +506,7 @@ class TheEntryPassesItThroughTests(TestCase):
         t, fake = _etoro()
         res = self._execute(cand, t)
         self.assertIsNone(res)
-        self.assertEqual([c for c in fake.calls if c[0] == "POST"], [])
+        self.assertEqual(_order_posts(fake), [])
         note = self._skip_note()
         self.assertEqual(note["code"], skips.LEVERAGE_REFUSED)
         return note["detail"], cand
@@ -512,7 +600,7 @@ class TheEntryPassesItThroughTests(TestCase):
         self.assertEqual(first["code"], skips.ORDER_REJECTED)
         self.assertTrue(first["detail"].startswith("at 2x: broker status "
                                                    "REJECTED"), first)
-        self.assertEqual(len([c for c in fake.calls if c[0] == "POST"]), 1)
+        self.assertEqual(len(_order_posts(fake)), 1)
         cand = self._cand()
         t2, fake2 = _etoro()
         res = self._execute(cand, t2)
@@ -520,7 +608,7 @@ class TheEntryPassesItThroughTests(TestCase):
         second = self._skip_note()
         self.assertEqual(second["code"], skips.LEVERAGE_REFUSED)
         self.assertIn("quiet for 12h", second["detail"])
-        self.assertEqual([c for c in fake2.calls if c[0] == "POST"], [],
+        self.assertEqual(_order_posts(fake2), [],
                          "a second POST left the box inside the quiet hours")
 
     def test_a_rewritten_stop_is_recorded_on_the_row(self):

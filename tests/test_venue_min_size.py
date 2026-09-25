@@ -304,6 +304,308 @@ class TheEntryRefusesAndNeverResizes(TestCase):
         self.assertIn("tighter stop", body)
 
 
+ROUTER = "bot_program.engine.broker_router.client_for_symbol"
+PROVEN = "bot_program.asset_engine.base.ETORO_PROVEN"
+
+
+def _etoro_like(**answers):
+    """A client whose CLASS is NAMED EtoroTrader, carrying the three
+    eligibility tiers (money_floor, order_caps, leverage_values) and the
+    fractional tier with the answers a test states. capabilities.
+    adapter_key reads the class NAME and has_capability reads the CLASS's
+    callables, so a bare MagicMock (which declares nothing) never meets
+    either; a MagicMock base keeps every other attribute mocked, as
+    _Venue does. The WIRE's own three states are pinned on the real
+    adapter in tests/test_etoro_client.py; here the ENGINE's reading of
+    them is. An answer that is an exception is raised, as the real
+    adapter raises on an unknown spelling. eligibility_state defaults to
+    "read"; a cap left unstated answers None (unmeasured passes)."""
+    answers.setdefault("eligibility_state", "read")
+
+    def _answer(key):
+        def method(self, symbol, *a, **kw):
+            v = answers.get(key)
+            if isinstance(v, BaseException):
+                raise v
+            return v
+        return method
+
+    ns = {name: _answer(name) for name in (
+        "min_notional", "max_units_per_order", "allow_open_position",
+        "eligibility_state", "leverage_values", "max_stop_loss_pct",
+        "settlement_for", "takes_fractional_units")}
+    ns["ticker"] = lambda self, symbol: {
+        "lastPrice": str(answers.get("price", "100"))}
+    client = type("EtoroTrader", (mock.MagicMock,), ns)()
+    client.get_positions = mock.MagicMock(return_value=[])
+    return client
+
+
+class TheMeasuredMoneyFloorTests(TestCase):
+    """E1.3 (2026-09-25): eToro's minPositionExposure — a MONEY floor the
+    VENUE states (MEASURED 2026-09-23: 10 USD on stocks, ETFs and crypto;
+    1,000 USD on forex, indices and commodities) — read through the
+    `money_floor` tier FIRST, turned into units with the entry price and
+    value_per_unit, with an EMPTY note so the refusal reads as any
+    measured floor. None (no row today) falls to the operator's declared
+    floor, then unmeasured, carrying the row's own reason."""
+
+    def setUp(self):
+        from tests.test_execution_trust import _user
+        self.user = _user("mfloor_u")
+        self.cfg = _live_cfg(self.user, name="MFLOOR")
+        self.inst = _instrument()
+        _signal(self.inst)
+
+    def _ask(self, client, symbol="AAPL", **kw):
+        from bot_program.asset_engine.base import AssetBot
+        return AssetBot._venue_size_floor(client, symbol, **kw)
+
+    def test_a_measured_money_floor_is_units_at_the_price_with_an_empty_note(self):
+        floor, why = self._ask(_etoro_like(min_notional=1000), "EURUSD",
+                               price=1.08)
+        self.assertAlmostEqual(floor, 925.9259, places=3)
+        self.assertEqual(why, "")
+
+    def test_value_per_unit_turns_a_usd_floor_into_quote_units(self):
+        """USDJPY at 150: one unit moves 1/150 USD per point, so a 1,000
+        USD floor is 1,000 units — not 6.7. Without value_per_unit the
+        floor typed in USD is 150x wrong."""
+        floor, why = self._ask(_etoro_like(min_notional=1000), "USDJPY",
+                               price=150.0, value_per_unit=1 / 150)
+        self.assertAlmostEqual(floor, 1000.0, places=6)
+        self.assertEqual(why, "")
+        floor, _ = self._ask(_etoro_like(min_notional=1000), "USDJPY",
+                             price=150.0)
+        self.assertAlmostEqual(floor, 1000.0 / 150.0, places=6)
+
+    def test_a_measured_floor_and_no_price_is_unmeasured_and_says_so(self):
+        floor, why = self._ask(_etoro_like(min_notional=1000), "EURUSD")
+        self.assertIsNone(floor)
+        self.assertIn("no price", why)
+        self.assertIn("1000", why)
+
+    def test_no_row_falls_to_the_declared_floor_then_unmeasured(self):
+        floor, why = self._ask(_etoro_like(min_notional=None), "AAPL",
+                               price=200.0, min_notional=10.0)
+        self.assertAlmostEqual(floor, 0.05)
+        self.assertIn("operator-declared", why)
+        floor, why = self._ask(_etoro_like(min_notional=None), "AAPL",
+                               price=200.0)
+        self.assertIsNone(floor)
+        self.assertIn("no eligibility row", why)
+        floor, why = self._ask(_etoro_like(min_notional=LookupError(
+            "eToro knows no instrument spelled 'NOPE'")), "NOPE", price=1.0)
+        self.assertIsNone(floor)
+        self.assertIn("LookupError", why)
+
+    def test_the_measured_floor_is_asked_before_the_declared_one(self):
+        floor, why = self._ask(_etoro_like(min_notional=1000), "EURUSD",
+                               price=1.08, min_notional=5.0)
+        self.assertAlmostEqual(floor, 925.9259, places=3)
+        self.assertEqual(why, "")
+
+    def test_a_zero_floor_is_not_a_measurement(self):
+        floor, why = self._ask(_etoro_like(min_notional=0), "AAPL",
+                               price=100.0)
+        self.assertIsNone(floor)
+        self.assertIn("not a measurement", why)
+
+    def test_a_non_numeric_floor_is_named_for_what_it_answered(self):
+        """Only a fake reaches this (the real client answers float | None):
+        the reason names the answer itself, never "answered 0"."""
+        floor, why = self._ask(_etoro_like(min_notional="ten"), "AAPL",
+                               price=100.0)
+        self.assertIsNone(floor)
+        self.assertIn("'ten'", why)
+        self.assertIn("not a number", why)
+        self.assertNotIn("answered 0", why)
+
+    def test_the_declared_floor_reads_value_per_unit_too(self):
+        from bot_program.asset_engine.base import AssetBot
+        units, why = AssetBot._declared_money_floor(object(), "USDJPY",
+                                                    150.0, 1000.0, 1 / 150)
+        self.assertAlmostEqual(units, 1000.0, places=6)
+        self.assertIn("operator-declared", why)
+        units, _ = AssetBot._declared_money_floor(object(), "USDJPY",
+                                                  150.0, 1000.0)
+        self.assertAlmostEqual(units, 1000.0 / 150.0, places=6)
+
+    def test_saxo_alone_still_declares_size_floor(self):
+        from bot_program.engine.capabilities import (ADAPTER_CAPABILITIES,
+                                                     CAPABILITIES)
+        self.assertEqual(CAPABILITIES["money_floor"], ("min_notional",))
+        self.assertEqual({k for k, v in ADAPTER_CAPABILITIES.items()
+                          if "money_floor" in v}, {"etoro"})
+        self.assertEqual({k for k, v in ADAPTER_CAPABILITIES.items()
+                          if "size_floor" in v}, {"saxo"})
+
+    def test_the_entry_refuses_under_a_measured_floor_with_the_venue_wording(self):
+        """Through the stock lane: the class states a 1,000,000 USD floor
+        on AAPL at 100 (10,000 units) against a size well under it. The
+        skip is VENUE_MIN_SIZE with the MEASURED wording — no
+        operator-declared label — the alert fires, nothing is sent."""
+        from alerts.models import Notification
+        from bot_program.asset_engine import skips
+        from bot_program.asset_engine.stock_bot import StockBot
+        from bot_program.models import AssetBotTrade
+        client = _etoro_like(min_notional=1_000_000, allow_open_position=True)
+        with mock.patch(PROVEN, frozenset({"stock"})), \
+                mock.patch(ROUTER, return_value=client):
+            StockBot(self.cfg).scan_symbol("AAPL")
+        client.market_order.assert_not_called()
+        self.assertFalse(AssetBotTrade.objects.filter(config=self.cfg)
+                         .exists())
+        self.cfg.refresh_from_db()
+        note = self.cfg.extras["skips"]["AAPL"]
+        self.assertEqual(note["code"], skips.VENUE_MIN_SIZE)
+        self.assertNotIn("operator-declared", note["detail"])
+        self.assertIn("this venue's minimum is 10000", note["detail"])
+        self.assertTrue(Notification.objects.filter(
+            user=self.user, title__contains="AAPL").exists())
+
+
+class TheEligibilityGateTests(TestCase):
+    """Step 2 of AssetBot._etoro_entry_refusal (E1.4, 2026-09-25) on the
+    `order_caps` tier: the read's own THREE-STATE first — "absent" (the
+    venue holds no row: refused), "error" (could not ask: refused for a
+    levered hint or a 1,000-USD-floor class, a 1x stock/etf/crypto
+    proceeds for a hold under 24 h with the log line), "read" (then
+    allowOpenPosition and maxUnitsPerOrder). Nothing is clamped."""
+
+    def _gate(self, client, symbol="AAPL", icls="stock", qty=1.0,
+              hint=None, side="BUY"):
+        from bot_program.asset_engine.base import AssetBot
+        with mock.patch(PROVEN, frozenset({"stock", "etf", "crypto", "forex",
+                                           "index", "commodity", "short"})):
+            return AssetBot._etoro_entry_refusal(
+                client, symbol, side, qty, 100.0, icls, leverage_hint=hint)
+
+    def test_allow_open_position_false_is_refused(self):
+        from bot_program.asset_engine import skips
+        code, why = self._gate(_etoro_like(allow_open_position=False,
+                                           max_units_per_order=6151))
+        self.assertEqual(code, skips.ELIGIBILITY_REFUSED)
+        self.assertIn("allowOpenPosition false", why)
+        self.assertIn("AAPL", why)
+
+    def test_a_size_past_max_units_per_order_is_refused_naming_both(self):
+        from bot_program.asset_engine import skips
+        client = _etoro_like(allow_open_position=True, max_units_per_order=41)
+        code, why = self._gate(client, symbol="BTCUSD", icls="crypto",
+                               qty=42)
+        self.assertEqual(code, skips.ELIGIBILITY_REFUSED)
+        self.assertIn("42", why)
+        self.assertIn("41", why)
+        self.assertIn("not clamped", why)
+        self.assertEqual(self._gate(client, symbol="BTCUSD", icls="crypto",
+                                    qty=41), ("", ""))
+        self.assertEqual(self._gate(client, symbol="BTCUSD", icls="crypto",
+                                    qty=0.0004), ("", ""))
+
+    def test_an_absent_row_is_refused(self):
+        from bot_program.asset_engine import skips
+        code, why = self._gate(_etoro_like(eligibility_state="absent"))
+        self.assertEqual(code, skips.ELIGIBILITY_REFUSED)
+        self.assertIn("no eligibility row", why)
+        self.assertIn("AAPL", why)
+
+    def test_an_unread_row_refuses_the_thousand_floor_classes_at_1x(self):
+        from bot_program.asset_engine import skips
+        for icls, sym in (("forex", "EURUSD"), ("index", "SPX500"),
+                          ("commodity", "WHEAT")):
+            with self.subTest(icls=icls):
+                code, why = self._gate(_etoro_like(eligibility_state="error"),
+                                       symbol=sym, icls=icls)
+                self.assertEqual(code, skips.ELIGIBILITY_REFUSED)
+                self.assertIn("1,000 USD floor", why)
+                self.assertIn("unread", why)
+                self.assertIn(sym, why)
+
+    def test_an_unread_row_lets_a_1x_stock_etf_or_crypto_through_with_the_log_line(self):
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="INFO") as cm:
+            for icls, sym in (("stock", "AAPL"), ("etf", "GLDM"),
+                              ("crypto", "BTCUSD")):
+                self.assertEqual(
+                    self._gate(_etoro_like(eligibility_state="error"),
+                               symbol=sym, icls=icls), ("", ""), icls)
+        said = [ln for ln in cm.output if "settlement unknown" in ln]
+        self.assertEqual(len(said), 3, cm.output)
+        self.assertTrue(all("24 h" in ln for ln in said), said)
+
+    def test_an_unread_row_refuses_any_hint_above_one(self):
+        from bot_program.asset_engine import skips
+        code, why = self._gate(_etoro_like(eligibility_state="error"), hint=5)
+        self.assertEqual(code, skips.ELIGIBILITY_REFUSED)
+        self.assertIn("5x", why)
+        self.assertIn("LIVE leverage list", why)
+        code, why = self._gate(_etoro_like(eligibility_state="error"),
+                               symbol="BTCUSD", icls="crypto", hint=2)
+        self.assertEqual(code, skips.ELIGIBILITY_REFUSED)
+        self.assertIn("2x", why)
+        code, why = self._gate(_etoro_like(eligibility_state="error"),
+                               symbol="EURUSD", icls="forex", hint=10)
+        self.assertEqual(code, skips.ELIGIBILITY_REFUSED)
+        self.assertIn("10x", why)
+        self.assertIn("1,000 USD floor", why)
+
+    def test_a_raise_from_the_state_reads_as_error(self):
+        from bot_program.asset_engine import skips
+        client = _etoro_like(eligibility_state=LookupError(
+            "eToro knows no instrument spelled 'NOPE'"))
+        code, why = self._gate(client, symbol="NOPE", icls="forex")
+        self.assertEqual(code, skips.ELIGIBILITY_REFUSED)
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="INFO") as cm:
+            self.assertEqual(self._gate(client, symbol="NOPE", icls="stock"),
+                             ("", ""))
+        self.assertTrue(any("eligibility_state raised LookupError" in ln
+                            for ln in cm.output), cm.output)
+
+    def test_a_read_row_that_allows_and_fits_passes(self):
+        self.assertEqual(self._gate(_etoro_like(
+            allow_open_position=True, max_units_per_order=6151,
+            min_notional=10)), ("", ""))
+        self.assertEqual(self._gate(_etoro_like()), ("", ""),
+                         "caps unstated: unmeasured refuses nothing here")
+
+    def test_a_raise_from_the_caps_reads_as_unmeasured(self):
+        client = _etoro_like(allow_open_position=TimeoutError("gone"))
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="INFO") as cm:
+            self.assertEqual(self._gate(client), ("", ""))
+        self.assertTrue(any("order caps unmeasured" in ln
+                            for ln in cm.output), cm.output)
+
+    def test_the_words_fit_the_skip_record_and_start_with_the_verdict(self):
+        for client, kw in (
+                (_etoro_like(eligibility_state="absent"), {}),
+                (_etoro_like(eligibility_state="error"),
+                 dict(symbol="RUSSELL2000", icls="commodity", hint=5)),
+                (_etoro_like(allow_open_position=False), {}),
+                (_etoro_like(max_units_per_order=41), dict(qty=42))):
+            _code, why = self._gate(client, **kw)
+            self.assertLessEqual(len(why), 200, why)
+            self.assertTrue(why.startswith(("eToro", "sized")), why)
+
+    def test_the_code_and_its_advice(self):
+        from bot_program.asset_engine import skips
+        from tests.test_execution_trust import _user
+        self.assertEqual(skips.ELIGIBILITY_REFUSED, "eligibility_refused")
+        self.assertNotIn(skips.ELIGIBILITY_REFUSED,
+                         (skips.LEVERAGE_REFUSED, skips.GATE_BLOCKED,
+                          skips.VENUE_MIN_SIZE, skips.ORDER_ERROR))
+        cfg = _live_cfg(_user("elig_adv"), name="EADV")
+        skips.record(cfg, "EURUSD", skips.ELIGIBILITY_REFUSED,
+                     "eToro EURUSD (forex, 1x): eligibility row unread")
+        cfg.refresh_from_db()
+        advice = skips.diagnose(cfg)
+        self.assertIn("eligibility row", advice, advice)
+        self.assertIn("nothing was clamped", advice, advice)
+        self.assertIn("1,000 USD", advice, advice)
+
+
 class TheFollowButtonRefusesAnOffBookPool(TestCase):
 
     def setUp(self):

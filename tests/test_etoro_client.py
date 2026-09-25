@@ -762,13 +762,36 @@ class TheAccountReadsTests(SimpleTestCase):
 
 class WhatItClaimsIsWhatItHasTests(SimpleTestCase):
 
-    def test_the_derived_tiers_are_the_six_intended(self):
+    def test_the_derived_tiers_are_the_nine_intended(self):
         """fractional_units joined 2026-09-23 as a labelled belief (measured
-        the same night on BTC); orders joined with D3b off the measured
-        DELETE. Every tier is derived from the methods on the class."""
+        the same night on BTC, and MEASURED per instrument since C1
+        2026-09-25); orders joined with D3b off the measured DELETE;
+        money_floor, order_caps and leverage_values joined with C1 off the
+        eligibility row read on 2026-09-23. Every tier is derived from the
+        methods on the class."""
         self.assertEqual(cap.capabilities_of(EtoroTrader),
                          ("market_data", "execution", "orders", "brackets",
-                          "account", "fractional_units"))
+                          "account", "fractional_units", "money_floor",
+                          "order_caps", "leverage_values"))
+
+    def test_the_module_header_names_every_tier_and_calls_none_a_belief(self):
+        """The table at the top of etoro_client.py is read by people, not
+        by the engine, so it is pinned here: every tier the class derives
+        is named in it (nine since C1, 2026-09-25), every accessor of the
+        three eligibility tiers too, and the word BELIEVED is gone (the
+        fractional tier is a measurement off unitsQuantityType since C1;
+        the header said BELIEVED until the round-2 critic read it)."""
+        import bot_program.engine.etoro_client as _ec
+        head = (_ec.__doc__ or "").split("WHY THIS BROKER")[0]
+        self.assertTrue(head, "the module docstring lost its header")
+        for tier in cap.capabilities_of(EtoroTrader):
+            self.assertIn(tier, head, tier)
+        for name in ("takes_fractional_units", "min_notional",
+                     "max_units_per_order", "allow_open_position",
+                     "eligibility_state", "leverage_values",
+                     "max_stop_loss_pct", "settlement_for"):
+            self.assertIn(name, head, name)
+        self.assertNotIn("BELIEVED", head)
 
     def test_fills_is_absent_by_design_and_orders_is_measured(self):
         """No closed-position history is documented, so `fills` stays
@@ -1688,6 +1711,503 @@ class TheHeldOrderTests(SimpleTestCase):
                 self.assertLogs("bot_program.engine.etoro_client", level="ERROR"):
             self.assertIs(t.cancel_order("383459788"), False)
         self.assertEqual(len(self._deletes(fake)), 1)
+
+
+# ── ELIGIBILITY, MEASURED 2026-09-23 14:5x-15:1x UTC, both worlds, the
+# operator's one pair (deploy/ETORO_DEPARTURE.md §4 D2c-0; the sitting's
+# notes: scratchpad etoro_measured_2026-09-23.md §9-§10). NO byte-literal
+# body was printed that day, so the rows below are COMPOSED from the
+# printed KEY LIST — {"currency": "usd", "eligibilities": [{instrumentId,
+# symbol, minPositionExposure, maxUnitsPerOrder, allowOpenPosition,
+# requiresW8Ben, unitsQuantityType, orderFillBehaviorType,
+# allowedOrderQuantityType, tradeUnitType, leverageConfigs:
+# [{settlementType, direction, leverageValues, minPositionAmount,
+# maxStopLossPercentage, ...}]}]} — and the printed VALUES. A key whose
+# value was NOT printed (the stop band of every levered entry, an ETF's
+# maxUnitsPerOrder) is LEFT OUT, so the accessor answers None and never a
+# number nobody read. Ids: BTC 100000 was printed; 1001 (AAPL) and 3190
+# (GLDM) are this file's /search fixtures; 1002 (EURUSD) is a fixture id
+# — the forex ids were not printed. The LIVE lists are the narrower ones
+# (stocks 5 vs 20, forex 30 vs 400): a demo route carries the LIVE list
+# unless the demo list was printed exactly (stocks). ─────────────────────
+
+
+def _clear_eligibility():
+    """etoro_client._ELIGIBILITY is MODULE-level, keyed (world, id) per UTC
+    day, and SEARCH_AAPL hands every test id 1001: without this in setUp
+    AND tearDown the cache tests pass or fail by alphabetical order."""
+    from bot_program.engine import etoro_client
+    etoro_client._ELIGIBILITY.clear()
+
+
+def _lev(settlement, direction, values, *, max_sl=None, min_amount=10):
+    """One leverageConfigs entry, the printed keys only; the stop band
+    rides only where it was printed (the 1x entries: 100; stock CFD: 50)."""
+    c = {"settlementType": settlement, "direction": direction,
+         "leverageValues": list(values), "minPositionAmount": min_amount}
+    if max_sl is not None:
+        c["maxStopLossPercentage"] = max_sl
+    return c
+
+
+def _elig_row(iid, symbol, configs, *, min_exposure=10, max_units=None,
+              allow_open=True, w8=True, units="fractional"):
+    """One eligibilities[] row. maxUnitsPerOrder rides only when printed."""
+    row = {"instrumentId": iid, "symbol": symbol,
+           "minPositionExposure": min_exposure,
+           "allowOpenPosition": allow_open, "requiresW8Ben": w8,
+           "unitsQuantityType": units, "orderFillBehaviorType": "bestEffort",
+           "allowedOrderQuantityType": "all", "tradeUnitType": "units",
+           "leverageConfigs": list(configs)}
+    if max_units is not None:
+        row["maxUnitsPerOrder"] = max_units
+    return row
+
+
+def _elig_route(rows, world="demo", status=200):
+    """The POST route of ONE world. "/info/demo/eligibility" is not a
+    substring of "/info/eligibility" and vice versa, so a fake session
+    routes the two worlds apart (the same pair answers both)."""
+    sub = "/info/demo/eligibility" if world == "demo" else "/info/eligibility"
+    return ("POST", sub, status,
+            {"currency": "usd", "eligibilities": list(rows)})
+
+
+# STOCKS (AAPL META MSFT AMZN TSLA NVDA GOOGL): real/long [1] maxSL 100
+# minAmt 10; cfd/long LIVE [2,5] maxSL 50; cfd/short LIVE [1,2,5] maxSL 50;
+# DEMO cfd/long [2,5,10,20], cfd/short [1,2,5,10,20]; minPositionExposure
+# 10 USD; W8Ben required; maxUnitsPerOrder per symbol (AAPL 6151).
+ROW_AAPL_LIVE = _elig_row(1001, "AAPL", [
+    _lev("real", "long", [1], max_sl=100),
+    _lev("cfd", "long", [2, 5], max_sl=50),
+    _lev("cfd", "short", [1, 2, 5], max_sl=50)], max_units=6151)
+ROW_AAPL_DEMO = _elig_row(1001, "AAPL", [
+    _lev("real", "long", [1], max_sl=100),
+    _lev("cfd", "long", [2, 5, 10, 20], max_sl=50),
+    _lev("cfd", "short", [1, 2, 5, 10, 20], max_sl=50)], max_units=6151)
+# ETFs (GLDM SLV USO UNG WEAT): NO real settlement — cfd/long [1] maxSL 100
+# AND cfd/long [2,5] (band unprinted), cfd/short [1,2,5]; minExposure 10;
+# W8 True; maxUnitsPerOrder unprinted. So a 1x long is a CFD (D2 measured
+# its overnight fee).
+ROW_GLDM_LIVE = _elig_row(3190, "GLDM", [
+    _lev("cfd", "long", [1], max_sl=100),
+    _lev("cfd", "long", [2, 5]),
+    _lev("cfd", "short", [1, 2, 5])])
+# FOREX (EURUSD GBPUSD ...): cfd only; minPositionExposure 1000 USD, minAmt
+# 25; cfd/long [1] maxSL 100 AND [2,5,10,20,30]; cfd/short
+# [1,2,5,10,20,30]; W8 False; maxUnitsPerOrder EURUSD 3,805,935; DEMO up
+# to 400 (unprinted exactly, so the demo route carries the LIVE list).
+ROW_EURUSD_LIVE = _elig_row(1002, "EURUSD", [
+    _lev("cfd", "long", [1], max_sl=100, min_amount=25),
+    _lev("cfd", "long", [2, 5, 10, 20, 30], min_amount=25),
+    _lev("cfd", "short", [1, 2, 5, 10, 20, 30], min_amount=25)],
+    min_exposure=1000, max_units=3805935, w8=False)
+# CRYPTO (BTC 100000): real/long [1] maxSL 100 minAmt 10; LIVE cfd/short
+# [1,2], cfd/long [2]; minPositionExposure 10; maxUnitsPerOrder 41; W8
+# False; DEMO up to 20 (unprinted exactly).
+ROW_BTC_LIVE = _elig_row(100000, "BTC", [
+    _lev("real", "long", [1], max_sl=100),
+    _lev("cfd", "long", [2]),
+    _lev("cfd", "short", [1, 2])], max_units=41, w8=False)
+
+SEARCH_EURUSD = ("GET", "/market-data/search", 200,
+                 [{"instrumentId": 1002, "internalSymbolFull": "EURUSD"}])
+# /search for BTCUSD found nothing on 2026-09-23; BTC answered 100000. A
+# fake that answers BTC to the platform's BTCUSD is the LONE-result rule
+# instrument_id already accepts (and _venue_spelling records).
+SEARCH_BTC = ("GET", "/market-data/search", 200,
+              [{"instrumentId": 100000, "internalSymbolFull": "BTC"}])
+ELIG_AAPL = _elig_route([ROW_AAPL_DEMO])                 # demo, the default
+ELIG_AAPL_LIVE = _elig_route([ROW_AAPL_LIVE], world="live")
+ELIG_BTC = _elig_route([ROW_BTC_LIVE])
+
+
+class TheEligibilityReadTests(SimpleTestCase):
+    """EtoroTrader.eligibility and the accessors beside it, over a fake
+    wire, in the shapes MEASURED 2026-09-23 (the fixture block above says
+    what was printed and what is composed). ONE POST per (world,
+    instrument) per UTC day once read — an unread row costs one POST per
+    ask; THREE STATES behind a None (read / absent /
+    error); the LIVE list readable from a demo instance; the
+    leverage-keyed accessors take the UNION across the two entries one
+    (settlement, direction) pair carries [FIX 1]; settlement_for is None
+    on an unread row — unknown, never free [GAP 6]."""
+
+    def setUp(self):
+        _clear_eligibility()
+        self.addCleanup(_clear_eligibility)
+
+    @staticmethod
+    def _posts(fake):
+        return [c for c in fake.calls if c[0] == "POST"]
+
+    def test_the_url_puts_the_segment_after_info(self):
+        """MEASURED 2026-09-23: info/eligibility 200 live,
+        info/demo/eligibility 200 demo, trading/demo/info/eligibility 404
+        — the last is what _v2() composes, so _v2_info is its own rule."""
+        t, _ = _client([])
+        self.assertEqual(t._v2_info("eligibility"),
+                         BASE + "/api/v2/trading/info/demo/eligibility")
+        self.assertEqual(t._v2_info("eligibility", "live"),
+                         BASE + "/api/v2/trading/info/eligibility")
+        live, _ = _client([], env="live")
+        self.assertEqual(live._v2_info("eligibility"),
+                         BASE + "/api/v2/trading/info/eligibility")
+        self.assertEqual(live._v2_info("eligibility", "demo"),
+                         BASE + "/api/v2/trading/info/demo/eligibility")
+        self.assertEqual(t._v2("info/eligibility"),
+                         BASE + "/api/v2/trading/demo/info/eligibility",
+                         "the measured 404, kept as what _v2 composes")
+        self.assertNotEqual(t._v2("info/eligibility"),
+                            t._v2_info("eligibility"))
+
+    def test_the_body_the_headers_and_one_post_per_day(self):
+        t, fake = _client([SEARCH_AAPL, ELIG_AAPL])
+        row = t.eligibility("AAPL")
+        self.assertEqual(row["symbol"], "AAPL")
+        posts = self._posts(fake)
+        self.assertEqual(len(posts), 1)
+        _m, url, kw = posts[0]
+        self.assertTrue(url.endswith("/api/v2/trading/info/demo/eligibility"),
+                        url)
+        self.assertEqual(kw["json"], {"instrumentIds": [1001]})
+        uuid.UUID(kw["headers"]["x-request-id"])
+        self.assertEqual(kw["timeout"], t.timeout)
+        self.assertIs(t.eligibility("AAPL"), row, "the same-day row")
+        self.assertEqual(len(self._posts(fake)), 1,
+                         "a second POST for a same-day row")
+        self.assertEqual(row["_world"], "demo")
+        self.assertEqual(row["_currency"], "usd")
+        self.assertEqual(t.eligibility_state("AAPL"), "read")
+        self.assertEqual(len(self._posts(fake)), 1)
+
+    def test_a_fresh_client_reads_the_module_cache(self):
+        """The router builds a fresh EtoroTrader per call: the second
+        instance costs a /search GET (its own id map) and NO POST."""
+        t, _fake = _client([SEARCH_AAPL, ELIG_AAPL])
+        t.eligibility("AAPL")
+        t2, fake2 = _client([SEARCH_AAPL])
+        self.assertEqual(t2.min_notional("AAPL"), 10.0)
+        self.assertEqual(self._posts(fake2), [])
+        self.assertEqual(t2.eligibility_state("AAPL"), "read")
+
+    def test_a_stale_day_is_asked_again(self):
+        from datetime import datetime, timedelta, timezone as _tz
+
+        from bot_program.engine import etoro_client
+        t, fake = _client([SEARCH_AAPL, ELIG_AAPL])
+        yesterday = datetime.now(_tz.utc).date() - timedelta(days=1)
+        etoro_client._ELIGIBILITY[("demo", 1001)] = (yesterday,
+                                                    {"symbol": "STALE"})
+        self.assertEqual(t.eligibility("AAPL")["symbol"], "AAPL")
+        self.assertEqual(len(self._posts(fake)), 1)
+
+    def test_the_cache_key_carries_the_world(self):
+        t, fake = _client([SEARCH_AAPL, ELIG_AAPL, ELIG_AAPL_LIVE])
+        demo = t.eligibility("AAPL")
+        live = t.eligibility("AAPL", world="live")
+        urls = [c[1] for c in self._posts(fake)]
+        self.assertEqual(len(urls), 2, urls)
+        self.assertTrue(urls[0].endswith("/info/demo/eligibility"), urls)
+        self.assertTrue(urls[1].endswith("/api/v2/trading/info/eligibility"),
+                        urls)
+        self.assertEqual((demo["_world"], live["_world"]), ("demo", "live"))
+        t.eligibility("AAPL", world="live")
+        t.eligibility("AAPL")
+        self.assertEqual(len(self._posts(fake)), 2)
+        self.assertEqual(t.eligibility_state("AAPL", world="live"), "read")
+
+    def test_a_wider_demo_list_never_leaks_into_live(self):
+        """DEMO IS MORE PERMISSIVE THAN LIVE (stocks 20 vs 5): the
+        leverage-keyed accessors default to the LIVE world, and a demo
+        instance reads it through the same pair."""
+        t, _ = _client([SEARCH_AAPL, ELIG_AAPL, ELIG_AAPL_LIVE])
+        self.assertEqual(t.leverage_values("AAPL", "BUY", "cfd",
+                                           world="demo"), [2, 5, 10, 20])
+        self.assertEqual(t.leverage_values("AAPL", "BUY", "cfd"), [2, 5],
+                         "the default world is LIVE")
+        self.assertEqual(t.leverage_values("AAPL", "BUY", "cfd",
+                                           world="live"), [2, 5])
+        self.assertEqual(t.leverage_values("AAPL", "SELL", "cfd",
+                                           world="live"), [1, 2, 5])
+        self.assertEqual(t.leverage_values("AAPL", "BUY", "real",
+                                           world="live"), [1])
+        self.assertIsNone(t.leverage_values("AAPL", "SELL", "real",
+                                            world="live"))
+        self.assertEqual(t.max_stop_loss_pct("AAPL", "BUY", "cfd", 2,
+                                             world="live"), 50.0)
+        self.assertEqual(t.max_stop_loss_pct("AAPL", "BUY", "real", 1,
+                                             world="live"), 100.0)
+        self.assertIsNone(t.max_stop_loss_pct("AAPL", "BUY", "cfd", 10,
+                                              world="live"),
+                          "10x is on the DEMO list only")
+
+    def test_a_demo_only_wire_asked_for_live_raises_and_never_answers_the_demo_list(self):
+        """Only the DEMO route answers. The LIVE ask — the default of every
+        leverage-keyed accessor — meets an unrouted POST (the fake's bare
+        200 {}) and RAISES on the no-list rule: the demo list [2, 5, 10,
+        20] is never answered for live, and nothing is cached under live
+        (the demo row stays, read once)."""
+        from bot_program.engine import etoro_client
+        t, fake = _client([SEARCH_AAPL, ELIG_AAPL])
+        self.assertEqual(t.eligibility_state("AAPL"), "read")
+        with self.assertRaises(LookupError) as caught:
+            t.leverage_values("AAPL", "BUY", "cfd")
+        self.assertIn("live", str(caught.exception))
+        with self.assertRaises(LookupError):
+            t.settlement_for("AAPL", "BUY", 2, world="live")
+        self.assertEqual(set(etoro_client._ELIGIBILITY), {("demo", 1001)})
+        urls = [c[1] for c in self._posts(fake)]
+        self.assertEqual(len(urls), 3, urls)
+        self.assertTrue(urls[1].endswith("/api/v2/trading/info/eligibility"),
+                        urls)
+        self.assertEqual(t.leverage_values("AAPL", "BUY", "cfd",
+                                           world="demo"), [2, 5, 10, 20])
+        self.assertEqual(len(self._posts(fake)), 3, "the demo row is cached")
+
+    def test_a_200_without_the_id_is_absent_for_the_day(self):
+        """The venue answered and listed no row for this id: ABSENT, cached
+        for the UTC day, every accessor None, no second POST."""
+        t, fake = _client([SEARCH_AAPL, _elig_route([ROW_GLDM_LIVE])])
+        with self.assertLogs("bot_program.engine.etoro_client",
+                             level="WARNING"):
+            self.assertIsNone(t.eligibility("AAPL"))
+        self.assertEqual(t.eligibility_state("AAPL"), "absent")
+        self.assertIsNone(t.min_notional("AAPL"))
+        self.assertIsNone(t.unit_type("AAPL"))
+        self.assertIsNone(t.takes_fractional_units("AAPL"))
+        self.assertIsNone(t.allow_open_position("AAPL"))
+        self.assertIsNone(t.settlement_for("AAPL", "BUY", 1))
+        self.assertIsNone(t.leverage_values("AAPL", "BUY", "cfd",
+                                            world="demo"))
+        self.assertEqual(len(self._posts(fake)), 1,
+                         "an absent row was asked again the same day")
+
+    def test_a_non_200_is_an_error_not_cached_and_asked_again(self):
+        """429 included: nothing is cached, the next call asks again, and
+        every accessor is None — unmeasured, never whole and never free."""
+        from bot_program.engine import etoro_client
+        for status in (429, 500, 403):
+            with self.subTest(status=status):
+                _clear_eligibility()
+                t, fake = _client([SEARCH_AAPL,
+                                   _elig_route([], status=status)])
+                with self.assertLogs("bot_program.engine.etoro_client",
+                                     level="WARNING"):
+                    self.assertIsNone(t.eligibility("AAPL"))
+                self.assertEqual(etoro_client._ELIGIBILITY, {})
+                self.assertEqual(t.eligibility_state("AAPL"), "error")
+                self.assertEqual(len(self._posts(fake)), 2,
+                                 "the second call must ask again")
+                self.assertIsNone(t.takes_fractional_units("AAPL"))
+                self.assertIsNone(t.settlement_for("AAPL", "BUY", 1))
+                self.assertIsNone(t.min_notional("AAPL"))
+
+    def test_a_200_without_the_list_raises_and_caches_nothing(self):
+        """The ticker() rule: a 200 whose body has no `eligibilities`
+        list is a shape never seen answer — unmeasured, not empty."""
+        from bot_program.engine import etoro_client
+        t, _ = _client([SEARCH_AAPL,
+                        ("POST", "/info/demo/eligibility", 200,
+                         {"currency": "usd", "items": []})])
+        with self.assertRaises(LookupError) as caught:
+            t.eligibility("AAPL")
+        self.assertIn("['currency', 'items']", str(caught.exception))
+        self.assertIn("eligibilities", str(caught.exception))
+        self.assertEqual(etoro_client._ELIGIBILITY, {})
+        with self.assertRaises(LookupError):
+            t.eligibility_state("AAPL")
+        t2, _ = _client([SEARCH_AAPL,
+                         ("POST", "/info/demo/eligibility", 200,
+                          [ROW_AAPL_LIVE])])
+        with self.assertRaises(LookupError):
+            t2.eligibility("AAPL")
+        self.assertEqual(etoro_client._ELIGIBILITY, {})
+
+    def test_an_unknown_spelling_raises_before_any_post(self):
+        t, fake = _client([("GET", "/market-data/search", 200, [])])
+        with self.assertRaises(LookupError):
+            t.eligibility("NOPE")
+        with self.assertRaises(LookupError):
+            t.eligibility_state("NOPE")
+        self.assertEqual(self._posts(fake), [])
+
+    def test_the_rows_symbol_confirms_the_spelling(self):
+        """The row's `symbol` is written to _venue_spelling: the NAME
+        confirmation a lone /search result lacks (WHEAT -> WHEAT.FUT 97,
+        doc §10)."""
+        t, _ = _client([SEARCH_AAPL, ELIG_AAPL])
+        t.instrument_id("AAPL")
+        self.assertEqual(t._venue_spelling[1001], "AAPL")
+        t.eligibility("AAPL")
+        self.assertEqual(t._venue_spelling[1001], "AAPL")
+        _clear_eligibility()
+        t2, _ = _client([
+            ("GET", "/market-data/search", 200,
+             [{"instrumentId": 97, "internalSymbolFull": "WHEAT.FUT"}]),
+            _elig_route([_elig_row(
+                97, "WHEAT.FUT",
+                [_lev("cfd", "long", [1], max_sl=100, min_amount=25)],
+                min_exposure=1000, w8=False)])])
+        self.assertEqual(t2.instrument_id("WHEAT"), 97)
+        self.assertEqual(t2.eligibility("WHEAT")["symbol"], "WHEAT.FUT")
+        self.assertEqual(t2._venue_spelling[97], "WHEAT.FUT")
+        self.assertEqual(t2.min_notional("WHEAT"), 1000.0)
+
+    def test_the_row_accessors_answer_the_measured_values(self):
+        t, _ = _client([SEARCH_AAPL, ELIG_AAPL])
+        self.assertEqual(t.unit_type("AAPL"), "fractional")
+        self.assertEqual(t.min_notional("AAPL"), 10.0)
+        self.assertIsInstance(t.min_notional("AAPL"), float)
+        self.assertEqual(t.max_units_per_order("AAPL"), 6151.0)
+        self.assertIs(t.allow_open_position("AAPL"), True)
+        self.assertIs(t.requires_w8ben("AAPL"), True)
+        _clear_eligibility()
+        e, _ = _client([SEARCH_EURUSD, _elig_route([ROW_EURUSD_LIVE])])
+        self.assertEqual(e.min_notional("EURUSD"), 1000.0)
+        self.assertEqual(e.max_units_per_order("EURUSD"), 3805935.0)
+        self.assertIs(e.requires_w8ben("EURUSD"), False)
+        _clear_eligibility()
+        g, _ = _client([SEARCH_GLDM, _elig_route([ROW_GLDM_LIVE])])
+        self.assertIsNone(g.max_units_per_order("GLDM"),
+                          "unprinted for ETFs: None, never a number")
+        self.assertEqual(g.min_notional("GLDM"), 10.0)
+        self.assertIs(g.requires_w8ben("GLDM"), True)
+
+    def test_a_floor_typed_in_another_currency_raises_never_scales(self):
+        """MEASURED 2026-09-23: the body's `currency` read "usd" in both
+        worlds and the money floor is divided by a USD price. A body typed
+        in anything else would scale the floor silently, so min_notional
+        RAISES naming the currency (unmeasured, the ticker() rule); the
+        currency-free accessors on the same row still answer, one POST;
+        base._venue_size_floor reads the raise as unmeasured, the
+        currency in its reason, never a number. A body naming no currency
+        raises too."""
+        from bot_program.asset_engine.base import AssetBot
+        t, fake = _client([SEARCH_EURUSD,
+                           ("POST", "/info/demo/eligibility", 200,
+                            {"currency": "eur",
+                             "eligibilities": [ROW_EURUSD_LIVE]})])
+        with self.assertRaises(LookupError) as caught:
+            t.min_notional("EURUSD")
+        self.assertIn("eur", str(caught.exception))
+        self.assertIn("not usd", str(caught.exception))
+        self.assertEqual(t.eligibility_state("EURUSD"), "read")
+        self.assertEqual(t.max_units_per_order("EURUSD"), 3805935.0)
+        self.assertIs(t.takes_fractional_units("EURUSD"), True)
+        self.assertEqual(len(self._posts(fake)), 1)
+        floor, why = AssetBot._venue_size_floor(t, "EURUSD", price=1.08)
+        self.assertIsNone(floor)
+        self.assertIn("eur", why)
+        self.assertIn("LookupError", why)
+        _clear_eligibility()
+        bare, _ = _client([SEARCH_EURUSD,
+                           ("POST", "/info/demo/eligibility", 200,
+                            {"eligibilities": [ROW_EURUSD_LIVE]})])
+        with self.assertRaises(LookupError) as caught2:
+            bare.min_notional("EURUSD")
+        self.assertIn("no currency", str(caught2.exception))
+
+    def test_fractional_is_three_states_off_unitsquantitytype(self):
+        t, fake = _client([SEARCH_AAPL, ELIG_AAPL])
+        self.assertIs(t.takes_fractional_units("AAPL"), True)
+        self.assertEqual(len(self._posts(fake)), 1)
+        self.assertIs(t.takes_fractional_units("AAPL"), True)
+        self.assertEqual(len(self._posts(fake)), 1, "one POST per day")
+        _clear_eligibility()
+        w, _ = _client([SEARCH_AAPL, _elig_route([
+            _elig_row(1001, "AAPL", [], units="whole")])])
+        self.assertIs(w.takes_fractional_units("AAPL"), False)
+        _clear_eligibility()
+        bare = _elig_row(1001, "AAPL", [])
+        del bare["unitsQuantityType"]
+        n, _ = _client([SEARCH_AAPL, _elig_route([bare])])
+        self.assertIsNone(n.takes_fractional_units("AAPL"),
+                          "the key absent: None, never a guess")
+        _clear_eligibility()
+        u, _ = _client([SEARCH_AAPL, _elig_route([], status=503)])
+        with self.assertLogs("bot_program.engine.etoro_client",
+                             level="WARNING"):
+            self.assertIsNone(u.takes_fractional_units("AAPL"))
+
+    def test_settlement_for_is_read_never_free(self):
+        """"real" only for a 1x long where a real/long entry exists; "cfd"
+        wherever a cfd entry exists for the direction; None on a row with
+        neither AND on an unread row (unknown is not free). B: eToro's
+        own assignment when the order body omits settlementType is
+        measured once (GLDM 1x -> CFD, D2), consistent with this."""
+        t, _ = _client([SEARCH_AAPL, ELIG_AAPL])
+        self.assertEqual(t.settlement_for("AAPL", "BUY", 1), "real")
+        self.assertEqual(t.settlement_for("AAPL", "BUY", None), "real")
+        self.assertEqual(t.settlement_for("AAPL", "BUY", 1.0), "real")
+        self.assertEqual(t.settlement_for("AAPL", "BUY", 2), "cfd")
+        self.assertEqual(t.settlement_for("AAPL", "SELL", 1), "cfd")
+        _clear_eligibility()
+        g, _ = _client([SEARCH_GLDM, _elig_route([ROW_GLDM_LIVE])])
+        self.assertEqual(g.settlement_for("GLDM", "BUY", 1), "cfd",
+                         "an ETF has no real settlement: a 1x long is a "
+                         "CFD (D2 measured its fee)")
+        _clear_eligibility()
+        e, _ = _client([SEARCH_EURUSD, _elig_route([ROW_EURUSD_LIVE])])
+        self.assertEqual(e.settlement_for("EURUSD", "BUY", 10), "cfd")
+        self.assertEqual(e.settlement_for("EURUSD", "SELL", 1), "cfd")
+        _clear_eligibility()
+        u, _ = _client([SEARCH_AAPL, _elig_route([], status=503)])
+        with self.assertLogs("bot_program.engine.etoro_client",
+                             level="WARNING"):
+            self.assertIsNone(u.settlement_for("AAPL", "BUY", 1),
+                              "unread is unknown, never free")
+        _clear_eligibility()
+        none, _ = _client([SEARCH_AAPL,
+                           _elig_route([_elig_row(1001, "AAPL", [])])])
+        self.assertIsNone(none.settlement_for("AAPL", "BUY", 1))
+
+    def test_the_leverage_keyed_accessors_take_the_union_of_a_pairs_entries(self):
+        """[FIX 1] ONE (settlementType, direction) pair carries TWO
+        entries on ETFs, forex, indices and commodities — cfd/long [1]
+        maxSL 100 AND cfd/long [2,5] — so a single-entry pick would
+        answer [1] or [2,5] by response order. The list is the UNION; the
+        band is the entry that CARRIES the multiplier; an unprinted band
+        is None."""
+        t, _ = _client([SEARCH_GLDM,
+                        _elig_route([ROW_GLDM_LIVE], world="live")])
+        self.assertEqual(len(t._lev_configs("GLDM", "BUY", "cfd",
+                                            world="live")), 2)
+        self.assertEqual(t.leverage_values("GLDM", "BUY", "cfd",
+                                           world="live"), [1, 2, 5])
+        self.assertEqual(t.max_stop_loss_pct("GLDM", "BUY", "cfd", 1,
+                                             world="live"), 100.0)
+        self.assertIsNone(t.max_stop_loss_pct("GLDM", "BUY", "cfd", 5,
+                                              world="live"),
+                          "the levered band was not printed: None, "
+                          "never 100")
+        self.assertIsNone(t._lev_config_for("GLDM", "BUY", "cfd", 3,
+                                            world="live"))
+        self.assertIsNone(t.max_stop_loss_pct("GLDM", "BUY", "cfd", 3,
+                                              world="live"))
+        self.assertIsNone(t.min_stop_loss_pct("GLDM", "BUY", "cfd", 1,
+                                              world="live"))
+        self.assertEqual(t.min_amount("GLDM", "BUY", "cfd", 1,
+                                      world="live"), 10.0)
+        self.assertEqual(t.leverage_values("GLDM", "SELL", "cfd",
+                                           world="live"), [1, 2, 5])
+        self.assertIsNone(t.leverage_values("GLDM", "BUY", "real",
+                                            world="live"))
+        _clear_eligibility()
+        e, _ = _client([SEARCH_EURUSD,
+                        _elig_route([ROW_EURUSD_LIVE], world="live")])
+        self.assertEqual(e.leverage_values("EURUSD", "BUY", "cfd",
+                                           world="live"),
+                         [1, 2, 5, 10, 20, 30])
+        self.assertEqual(e.max_stop_loss_pct("EURUSD", "BUY", "cfd", 1,
+                                             world="live"), 100.0)
+        self.assertIsNone(e.max_stop_loss_pct("EURUSD", "BUY", "cfd", 30,
+                                              world="live"))
+        self.assertEqual(e.min_amount("EURUSD", "BUY", "cfd", 30,
+                                      world="live"), 25.0)
+        self.assertIsNone(e._lev_config_for("EURUSD", "BUY", "cfd", 400,
+                                            world="live"),
+                          "400 is the DEMO ceiling, never on the LIVE list")
 
 
 class ConsumerKeyTests(SimpleTestCase):

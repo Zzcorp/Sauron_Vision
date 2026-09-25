@@ -1,14 +1,29 @@
 """eToro public API trading client (2026-09-17).
 
 Conforms to the duck-typed adapter contract in `engine/capabilities.py`,
-declaring: market_data, execution, orders, brackets, account, fractional_units.
+declaring: market_data, execution, orders, brackets, account, fractional_units,
+money_floor, order_caps, leverage_values — nine tiers (capabilities.py TIERS,
+pinned by tests/test_etoro_client.py). The last four read the eligibility
+row, MEASURED 2026-09-23 (deploy/ETORO_DEPARTURE.md §4 D2c-0): one POST per
+instrument per UTC day once read; an unread row is asked again on every ask.
 
     ping, ticker, klines, order_book            market_data
     market_order                                execution
     modify_protective, modify_target            brackets
     net_liquidation, broker_portfolio           account
-    takes_fractional_units                      fractional_units (BELIEVED;
-                                                 sent only while the switch is on)
+    takes_fractional_units                      fractional_units (MEASURED off the
+                                                 row's unitsQuantityType: True /
+                                                 False / None unread; the engine
+                                                 asks only while the switch is on)
+    min_notional                                money_floor (minPositionExposure,
+                                                 USD; another currency raises)
+    max_units_per_order, allow_open_position,   order_caps (step 2 of the entry
+    eligibility_state                           gate, base._etoro_entry_refusal)
+    leverage_values, max_stop_loss_pct,         leverage_values (read; the engine
+    settlement_for                              judges against the LIVE list in
+                                                 a later stage)
+    eligibility, unit_type, requires_w8ben,     (read, not a tier on their own)
+    min_stop_loss_pct, min_amount
     cancel_order, get_positions                 orders (MEASURED 2026-09-23 20:29 UTC,
                                                  demo; order_status is in no tier)
     order_status, account, balance_usdt         (used, not a tier on their own)
@@ -104,10 +119,14 @@ WHAT IT REFUSES TO CLAIM
     what the venue ECHOES (`venueStopLoss`/`venueTakeProfit` off
     positionExecutions[0], absent when the wire lacks them) and says when
     NO lookup could be read at all (`pollFailed`: every GET failed, never
-    one of them). Nothing here reads eToro's per-instrument
-    `leverageValues` (the eligibility endpoint was read by hand on
-    2026-09-23, deploy/ETORO_DEPARTURE.md §4 D2c-0; this adapter does not
-    call it). One leveraged order HAS met eToro — demo, 2x, GLDM, 1 unit,
+    one of them). This client READS eToro's per-instrument
+    `leverageValues` (`eligibility` and the accessors beside it, MEASURED
+    2026-09-23, deploy/ETORO_DEPARTURE.md §4 D2c-0: once read, one POST per
+    instrument per UTC day through a module cache — an unread row costs one
+    POST per ask — and the LIVE list readable from a demo instance); the
+    engine judges a multiplier against the LIVE list of the entry that
+    carries it in a later stage, and no leveraged order has met the live
+    world. One leveraged order HAS met eToro — demo, 2x, GLDM, 1 unit,
     order 383458277, FILLED 2026-09-23: asset.leverage 2, requestedAmount
     42.4 = notional / 2, marginAccountCurrency 42.39, units 1.0 untouched,
     fees 0.13 as at 1x, stop held exactly as sent.
@@ -148,6 +167,26 @@ INTERVAL_SECONDS = {
     "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800,
 }
 CANDLES_MAX = 1000
+
+#: ELIGIBILITY rows (deploy/ETORO_DEPARTURE.md §4 D2c-0, MEASURED
+#: 2026-09-23), one per (world, instrumentId), kept for the UTC day they
+#: were read. MODULE-level on purpose: the router builds a fresh
+#: EtoroTrader per call (broker_router.client_for_symbol), so an instance
+#: cache would POST on every tick; config/settings.py defines no CACHES,
+#: so Django's cache is the same per-process memo with more machinery.
+#: Per day is a design choice — intraday drift is unmeasured. THREE
+#: STATES in the value: a row dict (read), the literal ELIGIBILITY_ABSENT
+#: (a 200 that listed no row for this id — not re-asked today), nothing
+#: (an error — a non-200, 429 included, is asked again on EVERY ask: the
+#: proposal's fractional read with the switch ON, the gate's state read
+#: and the floor's min_notional read are up to three POSTs on one tick;
+#: a memo or a back-off for an unread row is a later stage's).
+#: (world, iid) -> (utc_date, value). Forgotten on restart. Tests clear
+#: it in setUp AND tearDown (tests/test_etoro_client.py
+#: _clear_eligibility, and every module where a real EtoroTrader reaches
+#: it: SEARCH_AAPL hands every test the same id 1001).
+_ELIGIBILITY: dict = {}
+ELIGIBILITY_ABSENT = "absent"
 
 #: Met on the wire: 3, 11, 7 (2026-09-23 D2b-i) and 4 with errorCode 720
 #: (the floor refusal); the rest is the public table (5 and 9 never seen).
@@ -195,7 +234,9 @@ PORTFOLIO_LAG_S = 60
 #: engine/ does not import asset_engine/ (base.py imports this package).
 #: A ceiling on what LEAVES the box, not a claim about what eToro accepts:
 #: the allowed multipliers are per instrument, settlementType and direction
-#: (`leverageValues`, public reference, unmeasured). A shell caller on the
+#: (`leverageValues`, MEASURED 2026-09-23 and read off the eligibility row
+#: by `leverage_values` since 2026-09-25; the engine judges against the
+#: LIVE list in a later stage). A shell caller on the
 #: live key cannot send more than the engine could ever ask for.
 LEVERAGE_MAX = 5
 
@@ -476,6 +517,20 @@ class EtoroTrader:
     def _v2_lookup(self) -> str:
         seg = "demo/" if self.demo else ""
         return f"{BASE}/api/v2/trading/info/{seg}orders:lookup"
+
+    def _v2_info(self, tail: str, world: str = "") -> str:
+        """/api/v2/trading/info/{demo/}{tail} — the segment sits AFTER
+        `info/`, as orders:lookup writes it (_v2_lookup). MEASURED
+        2026-09-23 (deploy/ETORO_DEPARTURE.md §4 D2c-0): info/eligibility
+        200 live, info/demo/eligibility 200 demo, and
+        trading/demo/info/eligibility 404 — which is what _v2() composes,
+        so _v2 is the WRONG shape for an info tail. `world` "live" /
+        "demo" overrides this instance's world: the same key pair
+        answers both (both worlds were measured with the operator's one
+        pair) and only the LIVE lists prove anything; "" is this
+        instance's own."""
+        demo = self.demo if not world else (str(world).lower() == "demo")
+        return f"{BASE}/api/v2/trading/info/{'demo/' if demo else ''}{tail}"
 
     # ── instruments (fact 3) ───────────────────────────────────────────────
 
@@ -916,24 +971,321 @@ class EtoroTrader:
 
     # ── execution (fact 1) ─────────────────────────────────────────────────
 
-    # ── fractional units (the `fractional_units` tier, BELIEVED) ──────────
+    # ── eligibility (MEASURED 2026-09-23, deploy/ETORO_DEPARTURE.md §4 D2c-0) ──
+
+    def _elig_key(self, symbol: str, world: str = "") -> tuple:
+        """((world, instrumentId), today's UTC date) — the cache key of one
+        eligibility row. `world` "" is this instance's own; an unknown
+        spelling raises from instrument_id (never a 0 id)."""
+        iid = self.instrument_id(symbol)
+        world_name = str(world or ("demo" if self.demo else "live")).lower()
+        return (world_name, iid), datetime.now(timezone.utc).date()
+
+    def eligibility(self, symbol: str, world: str = "") -> "dict | None":
+        """eToro's ELIGIBILITY row for `symbol` — the per-instrument facts
+        an order is judged against (minPositionExposure, maxUnitsPerOrder,
+        allowOpenPosition, unitsQuantityType, requiresW8Ben and the
+        leverageConfigs list) — or None.
+
+        MEASURED 2026-09-23 (deploy/ETORO_DEPARTURE.md §4 D2c-0), both
+        worlds, the operator's one pair: POST /api/v2/trading/info/
+        {demo/}eligibility, body {"instrumentIds": [id]}, 200 in both
+        worlds, answer {"currency": "usd", "eligibilities": [row, ...]}
+        with the row keyed on `instrumentId`. ONCE READ (or absent), ONE
+        POST per (world, instrument) per UTC day through the module cache
+        _ELIGIBILITY (the router builds a fresh client per call, so the
+        memo cannot live on the instance); while UNREAD every ask is a
+        POST — up to three on one tick (the proposal's fractional read
+        with the switch ON, the gate's state read, the floor's
+        min_notional read), no back-off: a memo for an unread row is a
+        later stage's.
+
+        THREE STATES behind the None: a same-day row (returned, the same
+        dict each time); a 200 that listed no row for this id
+        (ELIGIBILITY_ABSENT, cached for the day, None — the venue's own
+        answer); an error — a non-200 (429 included) is logged, NOT
+        cached and asked again on the next ask, None. A transport
+        failure (requests raising from the POST) RAISES, nothing caught
+        here — as every read on this client — and the engine reads the
+        raise as an error (base._etoro_entry_refusal step 2,
+        _venue_size_floor, _venue_fractional_units). A 200 whose body
+        carries no `eligibilities` list RAISES LookupError naming its
+        keys (the ticker() rule: a shape never seen answer is
+        unmeasured, not empty) and caches nothing; an unknown spelling
+        raises from instrument_id before any POST. `world` "live"/"demo"
+        reads that world's row on any instance — the same pair answers
+        both and only the LIVE lists prove anything; "" is this
+        instance's own. On a hit the row's `symbol` is written to
+        _venue_spelling (the NAME confirmation a lone /search result
+        lacks — WHEAT -> WHEAT.FUT 97) and the body's currency rides the
+        row as `_currency` (min_notional refuses any but usd), the world
+        as `_world`."""
+        key, today = self._elig_key(symbol, world)
+        hit = _ELIGIBILITY.get(key)
+        if hit is not None and hit[0] == today:
+            return None if hit[1] == ELIGIBILITY_ABSENT else hit[1]
+        world_name, iid = key
+        r = self._sess().post(self._v2_info("eligibility", world_name),
+                              json={"instrumentIds": [iid]},
+                              headers=self._headers(), timeout=self.timeout)
+        status = int(getattr(r, "status_code", 0) or 0)
+        if status != 200:
+            log.warning("eToro eligibility for %s (id %s, %s) answered %s — "
+                        "not cached, asked again next tick", symbol, iid,
+                        world_name, status)
+            return None
+        body = r.json()
+        rows = body.get("eligibilities") if isinstance(body, dict) else None
+        if not isinstance(rows, list):
+            keys = (sorted(body) if isinstance(body, dict)
+                    else type(body).__name__)
+            raise LookupError(
+                f"eToro eligibility payload for {symbol!r} (id {iid}, "
+                f"{world_name}) carries no 'eligibilities' list — got {keys}. "
+                f"MEASURED 2026-09-23 as {{currency, eligibilities: [...]}}; "
+                f"a body spelled otherwise is unmeasured, not empty, and "
+                f"nothing is cached.")
+        row = None
+        for it in rows:
+            try:
+                if isinstance(it, dict) and int(it.get("instrumentId")) == iid:
+                    row = dict(it)
+                    break
+            except (TypeError, ValueError):
+                continue
+        if row is None:
+            log.warning("eToro eligibility (%s) lists no row for %s (id %s) "
+                        "— ABSENT for the rest of the UTC day", world_name,
+                        symbol, iid)
+            _ELIGIBILITY[key] = (today, ELIGIBILITY_ABSENT)
+            return None
+        row["_currency"] = body.get("currency")
+        row["_world"] = world_name
+        spelling = str(row.get("symbol") or "")
+        if spelling:
+            self._venue_spelling[iid] = spelling
+        _ELIGIBILITY[key] = (today, row)
+        return row
+
+    def eligibility_state(self, symbol: str, world: str = "") -> str:
+        """"read" | "absent" | "error" — the row's own THREE-STATE after one
+        attempt (a same-day hit costs nothing). "absent" is the venue
+        saying it holds no row for this id — a stronger statement than
+        "error", could not ask (a non-200) — and the engine gates the two
+        apart (base._etoro_entry_refusal, step 2). An unknown spelling,
+        an unmeasured body shape or a transport failure (requests raising
+        from the POST) RAISES through eligibility(), nothing caught here;
+        the engine reads a raise as "error"."""
+        self.eligibility(symbol, world)
+        key, today = self._elig_key(symbol, world)
+        hit = _ELIGIBILITY.get(key)
+        if hit is None or hit[0] != today:
+            return "error"
+        return "absent" if hit[1] == ELIGIBILITY_ABSENT else "read"
+
+    def _elig(self, symbol: str, key: str, world: str = ""):
+        """One key off the row; None when the row or the key is absent."""
+        row = self.eligibility(symbol, world)
+        return None if row is None else row.get(key)
+
+    @staticmethod
+    def _num(value) -> "float | None":
+        """A number off the wire as float; None for anything else (a
+        bool, a word, nothing) — unmeasured, never 0."""
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def unit_type(self, symbol: str, world: str = "") -> "str | None":
+        """`unitsQuantityType` ("fractional" | "whole"), None unread."""
+        v = self._elig(symbol, "unitsQuantityType", world)
+        return None if v is None else str(v)
+
+    def min_notional(self, symbol: str, world: str = "") -> "float | None":
+        """`minPositionExposure` — the MONEY floor of one order in USD
+        (MEASURED 2026-09-23: 10 on stocks, ETFs and crypto; 1000 on
+        forex, indices and commodities; the body's `currency` read "usd"
+        in both worlds), the `money_floor` tier base._venue_size_floor
+        turns into units at a USD entry price. None unread. A body typed
+        in anything but usd — or naming no currency — RAISES LookupError
+        naming it (2026-09-25): the floor would otherwise be divided by
+        a USD price and refuse or pass on a number nobody measured; the
+        engine reads the raise as unmeasured with the currency in its
+        reason, and the currency-free accessors on the same row still
+        answer. NOT `minPositionAmount`, the per-entry margin floor
+        (min_amount)."""
+        row = self.eligibility(symbol, world)
+        if row is None:
+            return None
+        currency = str(row.get("_currency") or "").lower()
+        if currency != "usd":
+            raise LookupError(
+                f"eToro eligibility for {symbol!r} ({row.get('_world')}) is "
+                f"typed in {currency or 'no currency'}, not usd — MEASURED "
+                f"usd in both worlds 2026-09-23; a floor in another "
+                f"currency is unmeasured, never scaled")
+        return self._num(row.get("minPositionExposure"))
+
+    def max_units_per_order(self, symbol: str,
+                            world: str = "") -> "float | None":
+        """`maxUnitsPerOrder` (AAPL 6151, BTC 41, SPX500 2300 ...); None
+        unread or unprinted (ETFs, commodities). Refused past it by the
+        entry gate, never clamped."""
+        return self._num(self._elig(symbol, "maxUnitsPerOrder", world))
+
+    def allow_open_position(self, symbol: str,
+                            world: str = "") -> "bool | None":
+        """`allowOpenPosition` as the wire's own bool; None unread or
+        spelled as anything but a bool."""
+        v = self._elig(symbol, "allowOpenPosition", world)
+        return v if isinstance(v, bool) else None
+
+    def requires_w8ben(self, symbol: str, world: str = "") -> "bool | None":
+        """`requiresW8Ben` (True on US stocks and ETFs, False on forex,
+        crypto, CPER). The platform cannot read the account's W8 state;
+        the first live stock order is that measurement."""
+        v = self._elig(symbol, "requiresW8Ben", world)
+        return v if isinstance(v, bool) else None
+
+    # leverageConfigs, keyed on (settlementType, direction, LEVERAGE).
+    # MEASURED 2026-09-23 [FIX 1]: ONE (settlementType, direction) pair
+    # maps to TWO entries on ETFs, forex, indices and commodities —
+    # cfd/long [1] maxSL 100 AND cfd/long [2,5] — so a single-entry pick
+    # would answer [1] or [2,5] by response order. The list is the UNION
+    # across the pair's entries; a band is read off the entry that CARRIES
+    # the multiplier. The levered bands were not printed: None, three-state.
+
+    def _lev_configs(self, symbol: str, side: str, settlement: str,
+                     world: str = "") -> list:
+        """ALL leverageConfigs entries of `settlement` ("real" | "cfd")
+        and the direction `side` maps to (BUY -> long, SELL -> short —
+        the body's own words; the order body says buy/sellShort)."""
+        row = self.eligibility(symbol, world)
+        if row is None:
+            return []
+        direction = "long" if str(side).upper() == "BUY" else "short"
+        want = str(settlement or "").lower()
+        out = []
+        for c in row.get("leverageConfigs") or []:
+            if not isinstance(c, dict):
+                continue
+            if str(c.get("direction") or "").lower() != direction:
+                continue
+            if str(c.get("settlementType") or "").lower() != want:
+                continue
+            out.append(c)
+        return out
+
+    @staticmethod
+    def _lev_values(config: dict) -> list:
+        """The whole numbers >= 1 of one entry's `leverageValues`."""
+        vals = []
+        for v in config.get("leverageValues") or []:
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                continue
+            if f >= 1 and f == int(f):
+                vals.append(int(f))
+        return vals
+
+    def leverage_values(self, symbol: str, side: str, settlement: str,
+                        world: str = "live") -> "list | None":
+        """The sorted UNION of `leverageValues` across the pair's entries
+        — a membership check — or None when the row or the pair is
+        absent. Defaults to the LIVE world: demo is more permissive
+        (stocks 20 vs 5, forex 400 vs 30) and a demo list proves nothing
+        for the real account."""
+        configs = self._lev_configs(symbol, side, settlement, world)
+        if not configs:
+            return None
+        return sorted({v for c in configs for v in self._lev_values(c)})
+
+    def _lev_config_for(self, symbol: str, side: str, settlement: str,
+                        leverage, world: str = "live") -> "dict | None":
+        """The entry whose `leverageValues` carries `leverage`, else
+        None (an off-list multiplier has no band to read)."""
+        want = self._num(leverage)
+        if want is None or want != int(want):
+            return None
+        for c in self._lev_configs(symbol, side, settlement, world):
+            if int(want) in self._lev_values(c):
+                return c
+        return None
+
+    def max_stop_loss_pct(self, symbol: str, side: str, settlement: str,
+                          leverage, world: str = "live") -> "float | None":
+        """`maxStopLossPercentage` of the entry that carries `leverage`
+        (100 on every 1x entry read; 50 on stock CFDs); None when the
+        entry or the key is absent — the levered ETF/forex/index bands
+        were not printed on 2026-09-23. Its semantics (of the margin? of
+        the price?) are unmeasured; a later stage judges a stop by it."""
+        c = self._lev_config_for(symbol, side, settlement, leverage, world)
+        return None if c is None else self._num(c.get("maxStopLossPercentage"))
+
+    def min_stop_loss_pct(self, symbol: str, side: str, settlement: str,
+                          leverage, world: str = "live") -> "float | None":
+        """`minStopLossPercentage` of the entry that carries `leverage`;
+        None absent (unprinted on every entry read)."""
+        c = self._lev_config_for(symbol, side, settlement, leverage, world)
+        return None if c is None else self._num(c.get("minStopLossPercentage"))
+
+    def min_amount(self, symbol: str, side: str, settlement: str,
+                   leverage, world: str = "live") -> "float | None":
+        """`minPositionAmount` of the entry that carries `leverage` — the
+        smallest MARGIN of one position (10 stocks/crypto, 25 forex and
+        commodities, 50 indices); printed by a later stage, not enforced
+        (under the platform cap it never binds before minPositionExposure)."""
+        c = self._lev_config_for(symbol, side, settlement, leverage, world)
+        return None if c is None else self._num(c.get("minPositionAmount"))
+
+    def settlement_for(self, symbol: str, side: str, leverage,
+                       world: str = "") -> "str | None":
+        """The settlement an order of `side` at `leverage` lands on, read
+        off the row's entries: "real" iff side is BUY, leverage is None
+        or 1 and a real/long entry exists; "cfd" iff any cfd entry exists
+        for the direction; else None — and None when the row itself is
+        None (unread or absent): unknown, never free, which the carry
+        step of a later stage reads as a refusal at >= 24 h [GAP 6].
+        Every ETF, every short and every multiplier above 1 is a CFD with
+        an overnight fee (doc §9). B: eToro's OWN assignment when the
+        order body omits settlementType was measured once only (GLDM 1x
+        -> CFD, D2 2026-09-23), consistent with this reading."""
+        row = self.eligibility(symbol, world)
+        if row is None:
+            return None
+        buy = str(side).upper() == "BUY"
+        at_one = leverage is None or self._num(leverage) == 1.0
+        if buy and at_one and self._lev_configs(symbol, side, "real", world):
+            return "real"
+        if self._lev_configs(symbol, side, "cfd", world):
+            return "cfd"
+        return None
+
+    # ── fractional units (the `fractional_units` tier, MEASURED 2026-09-23) ──
 
     def takes_fractional_units(self, symbol: str) -> "bool | None":
-        """Does eToro take a non-whole `units` for `symbol`?
-
-        True as a labelled BELIEF from the public reference, never a
-        measurement: create-an-order documents `units` as a number (double)
-        that "must be greater than 0" with no integer constraint, and the
-        portfolio-breakdown example holds 0.049485 units. The per-instrument
-        truth is `unitsQuantityType` (whole | fractional) on
-        POST /api/v2/trading/info/eligibility, which this adapter does not
-        call; the day it does, this reads that payload and answers None for
-        an instrument it has not been read for. The ENGINE holds the answer
-        at whole shares until the `fractional_units_live` switch is on
-        (base._venue_fractional_units), flipped only after ETORO_DEPARTURE
-        §4 D2c measured a fractional fill. No HTTP call: asking is free.
-        """
-        return True
+        """Does eToro take a non-whole `units` for `symbol`? MEASURED per
+        instrument off `unitsQuantityType` on the eligibility row (deploy/
+        ETORO_DEPARTURE.md §4 D2c-0, 2026-09-23: "fractional" on all 20
+        instruments read, both worlds; D2c pinned a fractional fill the
+        same night). THREE STATES: True ("fractional"), False ("whole"),
+        None for an instrument whose row is not read today (a non-200,
+        an absent row, the key missing — unmeasured, never "whole" and
+        never "fractional"); an unknown spelling raises from
+        instrument_id, as every read here does. Once read, ONE POST per
+        instrument per UTC day (the module cache); an unread row costs
+        one POST per ask. The ENGINE asks
+        only while the `fractional_units_live` switch is ON
+        (base._venue_fractional_units) and holds stocks at whole shares
+        otherwise — with the switch OFF this is never called. Until
+        2026-09-25 this answered True as a labelled belief from the
+        public reference, with no HTTP call."""
+        ut = self.unit_type(symbol)
+        return True if ut == "fractional" else (False if ut == "whole" else None)
 
     def _lookup_once(self, params: dict) -> "tuple[Optional[dict], int]":
         """ONE GET of orders:lookup -> (payload, http status). The payload is

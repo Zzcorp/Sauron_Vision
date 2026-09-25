@@ -253,7 +253,7 @@ DEFAULT_COMPONENTS = [
     # bot rounds to whole shares on eToro — the correct default. Description
     # under the 300-char Postgres column (the registry test measures it).
     {"key": "fractional_units_live", "name": "Fractional Units Live Mode (eToro)",
-     "description": "Off (default) = the stock bot rounds to WHOLE shares on eToro, as on every venue. On = the size the risk budget produces is sent as a FRACTION. Flip only after demo proof D2c (deploy/ETORO_DEPARTURE.md section 4) measured a 0.1234-unit fill and its pins landed in tests/test_etoro_client.py.",
+     "description": "Off (default) = the STOCK bot rounds to WHOLE shares on eToro. On = the sized fraction is sent. Crypto (8 dp) and commodity (4 dp) send fractions whatever this says; forex snaps to 100 units, to 1 only when ON and measured fractional. Flip only after D2c pins (deploy/ETORO_DEPARTURE.md section 4).",
      "category": "system"},
 
     # ── The three that were never registered (found live 2026-09-13) ────

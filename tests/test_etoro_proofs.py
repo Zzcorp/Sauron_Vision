@@ -74,7 +74,15 @@ class TheSetShipsEmptyTests(SimpleTestCase):
 
 
 class TheGateTests(SimpleTestCase):
-    """AssetBot._etoro_entry_refusal, step 1, on its own."""
+    """AssetBot._etoro_entry_refusal, step 1, on its own. With a token
+    patched in, step 2 (C1) runs on the same real adapter: its wire
+    answers no /search here, so the row reads "error" and a 1x stock
+    passes with the log line — the cache is cleared around every test."""
+
+    def setUp(self):
+        from tests.test_etoro_client import _clear_eligibility
+        _clear_eligibility()
+        self.addCleanup(_clear_eligibility)
 
     def test_a_carrier_that_is_not_etoro_answers_nothing_at_the_first_line(self):
         """MagicMock (the desk seam), and a class carrying every OTHER

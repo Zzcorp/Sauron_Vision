@@ -81,6 +81,18 @@ DESK_DISPLACED = "desk_displaced"
 # RESIZED OR DE-LEVERED: the operator is handed the numbers and chooses.
 LEVERAGE_REFUSED = "leverage_refused"
 
+# 2026-09-25 (Stage 1). eToro's OWN eligibility row said no — read once per
+# instrument per UTC day once read, an unread row asked again on every ask
+# (EtoroTrader.eligibility, MEASURED 2026-09-23), by step 2 of
+# AssetBot._etoro_entry_refusal, on every lane: the venue lists no row for
+# the id today ("absent"), allowOpenPosition is false, the size is past
+# maxUnitsPerOrder (refused, never clamped), or the row could not be read
+# today for a levered order or for a class whose measured floor is 1,000
+# USD (forex, index, commodity). Its own code so the operator reads the
+# venue's answer, never a broken connection (order_error) or a small pool
+# (sized_to_zero). NOTHING IS RESIZED OR CLAMPED.
+ELIGIBILITY_REFUSED = "eligibility_refused"
+
 MAX_SYMBOLS_TRACKED = 200
 
 
@@ -187,6 +199,15 @@ def diagnose(cfg) -> str:
                           "the account's cash, or a refusal eToro gave "
                           "within the quiet hours; nothing was sent at 1 "
                           "and nothing was de-levered",
+        ELIGIBILITY_REFUSED: "eToro's own eligibility row refused the entry "
+                             "before it left — read the detail: no row for "
+                             "the symbol today, allowOpenPosition false, a "
+                             "size past maxUnitsPerOrder, or a row unread "
+                             "today for a levered order or a forex/index/"
+                             "commodity symbol (their measured floor is "
+                             "1,000 USD). Nothing was sent and nothing was "
+                             "clamped; the row is re-read once per UTC day, "
+                             "an unread one on every ask",
     }.get(top, "")
     return (f"{top} accounts for {share:.0%} of {total} skips"
             + (f" — {advice}" if advice else ""))
