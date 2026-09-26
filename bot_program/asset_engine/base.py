@@ -317,38 +317,49 @@ class SmcVote:
     rule_name: str = SMC_RULE_NAME
 
 
-#: THE MOST A CONFIG MAY ASK OF eToro PER ORDER (2026-09-23). A hard cap,
-#: never a target and never a default. Units and the notional ceiling never
-#: see this number (sizing.qty_for_risk, MAX_NOTIONAL_FRACTION): at leverage
-#: L the same position pledges notional / L of cash and its stop, as a
-#: fraction of THAT margin, is stop_fraction x L — the default floor of
-#: 1.25% of price (0.25% risk / 20% cap) is 6.25% of the margin at 5x.
-#: eToro bounds a stop as a percentage of the margin — MEASURED ONCE, on
-#: demo (doc §14 N2: a BTC 2x CFD stop sent 60% below was held 25% below,
-#: 50% of the margin = maxStopLossPercentage 50; clamped, not refused);
-#: unmeasured on live and on every other class. Restated as
+#: THE MOST A CONFIG MAY ASK OF eToro PER ORDER (2026-09-23; 20 since
+#: 2026-09-26 — the operator's written ceilings: "forex max x20", "indices
+#: en x20"). A hard cap, never a target and never a default. Units and the
+#: notional ceiling never see this number (sizing.qty_for_risk,
+#: MAX_NOTIONAL_FRACTION): at leverage L the same position pledges
+#: notional / L of cash, and its stop, as a fraction of THAT margin, is
+#: stop_fraction x L. At the 7% risk cap the stop floor is 7% / the
+#: notional cap: 1.75% of price on forex (cap 4.0) — 35% of the margin
+#: at 20x — and 3.5% on an index or a commodity (cap 2.0) — 70% at 20x,
+#: 35% at 10x. eToro bounds a stop as a percentage of the margin —
+#: MEASURED ONCE, on demo (doc §14 N2: a BTC 2x CFD stop sent 60% below was
+#: held 25% below, 50% of the margin = maxStopLossPercentage 50; clamped,
+#: not refused); unmeasured on live and on every other class. So a 3.5%
+#: stop fits that band at 10x and not at 20x: the attack mode picks 10
+#: there (_choose_auto_leverage), and a typed 20 is refused by
+#: _instrument_leverage_check wherever eToro prints the band. Restated as
 #: etoro_client.LEVERAGE_MAX, pinned equal.
-MAX_ORDER_LEVERAGE = 5
+MAX_ORDER_LEVERAGE = 20
 
-#: THE CLASS CEILINGS (2a, 2026-09-26), per platform class, never above
-#: MAX_ORDER_LEVERAGE, and each INSIDE the LIVE list eToro printed for
-#: every instrument of the class read on 2026-09-23/25 (doc §9-§10, §15 —
-#: the LIVE lists; the DEMO lists are wider and prove nothing): stock/etf
-#: 5 <= [2,5]; forex 5 <= 30 (AUD/NZD 20); index 5 <= 20; commodity 5 <=
-#: 10; crypto 2 <= [2]. Held at the platform cap; 2b (10 on forex and
-#: index) is its own commit after the 5x proofs per class. Keyed on the
+#: THE CLASS CEILINGS (2a, 2026-09-26; forex, index and commodity raised
+#: the same day to the operator's written numbers — "forex max x20", "cfd
+#: matière première ... disons x10", "indices en x20"), per platform
+#: class, never above MAX_ORDER_LEVERAGE, and each INSIDE the LIVE list
+#: eToro printed for every instrument of the class read on 2026-09-23/25
+#: (doc §9-§10, §15 — the LIVE lists; the DEMO lists are wider and prove
+#: nothing): stock/etf 5 <= [2,5]; forex 20 <= 30 (AUD/NZD 20); index 20
+#: <= 20; commodity 10 <= 10; crypto 2 <= [2]. A ceiling is not a proof: a
+#: typed multiplier still needs etoro_leverage_live ON, and the attack
+#: mode never picks above ETORO_PROVEN_LEVERAGE, empty until a demo
+#: fill-and-close at that multiplier is pinned. Keyed on the
 #: INSTRUMENT's class (_instrument_class: SPX500 in a stock config is
 #: judged as an index); the instrument's OWN entry is judged next, on the
 #: client (_instrument_leverage_check: settlement, direction, the LIVE
-#: leverageValues and the stop band). forex 5 since capital_at_work reads
-#: the row's multiplier (this batch: notional / L floored at the table's
-#: 1/30, the full notional at 1, measured). options and cfd have no eToro path
+#: leverageValues and the stop band). forex above 1 since capital_at_work
+#: reads the row's multiplier (notional / L floored at the table's 1/30,
+#: the full notional at 1, measured). options and cfd have no eToro path
 #: (broker_router); the keys stay so a typed multiplier on such a config
 #: is refused by the table, not by silence. An unknown class reads 1.
 #: tests/test_etoro_leverage.py MeasuredLiveListsTests pins each value
 #: under the class's smallest LIVE long maximum.
-ORDER_LEVERAGE_CEILING = {"stock": 5, "etf": 5, "index": 5, "commodity": 5,
-                          "crypto": 2, "forex": 5, "options": 1, "cfd": 1}
+ORDER_LEVERAGE_CEILING = {"stock": 5, "etf": 5, "index": 20,
+                          "commodity": 10, "crypto": 2, "forex": 20,
+                          "options": 1, "cfd": 1}
 
 #: THE MOST OF THE ACCOUNT THE FLEET MAY HAVE PLEDGED after an order:
 #: (used margin + margin pledged since the reading + this order's margin)
@@ -356,10 +367,18 @@ ORDER_LEVERAGE_CEILING = {"stock": 5, "etf": 5, "index": 5, "commodity": 5,
 #: margin itself is MEASURED (D2b-ii, 2026-09-23, doc §2 and §5:
 #: accountTotalUsedMargin 84.8 at 1x and 42.39 at 2x on 84.8 of
 #: exposure — notional / L); what the venue does to a levered position
-#: as equity falls is not. Held at half so a 20% adverse move at 5x
-#: across the pledged half is 50% of equity, not 100%; since 2026-09-26
-#: it binds at 1x too (a 1x order pledges its FULL notional). Refused
-#: past it, never resized.
+#: as equity falls is not. Held at half. What half means at 20x, stated
+#: so nobody has to derive it: the pledged half carries a notional of half
+#: the equity x L — ten times the equity at 20x — so a 5% adverse move
+#: across all of it is 50% of equity (at 5x it took a 20% move), and a 10%
+#: gap across all of it is ALL of the equity (at 5x it took 40%). The
+#: stops, not this fraction, bound the ordinary loss: each position loses
+#: its risk fraction of its pool at its stop (<= sizing.MAX_RISK_FRACTION,
+#: 7%) whatever L is. A gap THROUGH the stops is bounded by nothing here:
+#: it costs the gap x L x the cash pledged, so this fraction bounds the
+#: cash locked, not what a gap past 1/L of price can take. Since
+#: 2026-09-26 it binds at 1x too (a 1x order pledges its FULL notional).
+#: Refused past it, never resized.
 MAX_PLEDGED_FRACTION = 0.5
 
 #: The PlatformComponent that stays OFF until deploy/ETORO_DEPARTURE.md §4
@@ -381,8 +400,137 @@ LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
 #: gate, never copied, so a test states a token by patching this name.
 ETORO_PROVEN = frozenset()
 
+#: THE MULTIPLIER EACH eToro CLASS HAS BEEN PROVEN AT (2026-09-26): class
+#: -> the highest multiplier whose demo fill-and-close is pinned as
+#: `test_proof_<class>_at_<L>x` in tests/test_etoro_client.py
+#: (tests/test_attack_mode.py greps for it, as tests/test_etoro_proofs.py
+#: does for ETORO_PROVEN). A class absent reads 1 (proven_leverage).
+#: EMPTY ON ARRIVAL: the Monday demo proofs (EURUSD at 20x, SPX500 at 20x,
+#: WHEAT at 10x, AAPL at 5x, BTC at 2x) each add ONE entry, in the commit
+#: that pins its test — {"forex": 20, "index": 20, "commodity": 10,
+#: "stock": 5, "crypto": 2} is the shape, never a value before its proof.
+#: It binds the attack mode's chooser ONLY (_choose_auto_leverage): a
+#: TYPED multiplier above it is judged as before — the switch, the class
+#: token (ETORO_PROVEN), the class ceiling, the instrument's LIVE list and
+#: its stop band — and preflight_live §4 says so under WORTH READING. Read
+#: at CALL time; a test states a value by patching this name. Not a
+#: PlatformComponent: nothing on /health/ can prove a multiplier.
+ETORO_PROVEN_LEVERAGE = {}
 
-def judge_order_leverage(cfg, asset_class: str, carrier: str) -> tuple:
+#: THE ATTACK MODE (2026-09-26; the operator: "je veux surtout que ce mode
+#: d'attaque de leverage soit vraiment smart, qu'il soit ballsy si proba
+#: très high"). Opt-in per config: extras["leverage"] = "auto". Two
+#: halves, because under house rule 5 the multiplier changes ONLY the cash
+#: eToro locks (notional / L) — never the loss at the stop, never the gain
+#: per R:
+#:   RISK  (AssetBot._attack_tier, in _size_for_entry): the decision's
+#:         score picks a tier, and the tier scales the config's own risk
+#:         fraction — 0.50x STANDARD, 0.75x STRONG, 1.00x HIGH, HIGH only
+#:         with a measured edge. Being ballsy on a high-probability trade
+#:         is putting MORE RISK on it; no tier lifts risk above the
+#:         config's own fraction (itself clamped by MAX_RISK_FRACTION).
+#:   CASH  (AssetBot._choose_auto_leverage, in _order_leverage): the
+#:         highest multiplier on the instrument's LIVE list inside the class
+#:         ceiling, the proven multiplier and the stop band — the least
+#:         cash the stop allows — then judged by every gate a typed number
+#:         meets. The chooser picks; it never bypasses a gate.
+AUTO_LEVERAGE = "auto"
+
+#: The tier multipliers of the config's risk fraction. Overridable per
+#: config by extras["attack_tiers"] = {"standard": x, "strong": y,
+#: "high": z}, each read without raising and clamped to (0, 1]
+#: (attack_tier_scales).
+ATTACK_TIER_SCALES = {"standard": 0.50, "strong": 0.75, "high": 1.00}
+
+#: HIGH needs a MEASURED edge on the decision's rule, on the INSTRUMENT's
+#: class (bot_grading.bot_track_record_detail): at least this many graded
+#: trades, this win rate and this average realized R. A HIGH score without
+#: it is STRONG: the score alone is the rules' own opinion of themselves.
+#: The config's own venue is read first; the pooled record (paper and live)
+#: only when the own venue holds fewer than ATTACK_HIGH_MIN_N graded trades
+#: AND they do not average below 0 R — a losing record on the venue the
+#: order goes to is never outvoted by the other venue's fills. The record
+#: is keyed on the class a row is FILED under (AssetBotTrade.asset_class,
+#: the config's): an instrument of another class reads the record of the
+#: configs of its own class, and the words say so.
+ATTACK_HIGH_MIN_N = 20
+ATTACK_HIGH_MIN_WIN_RATE = 0.55
+ATTACK_HIGH_MIN_AVG_R = 0.20
+
+#: The stop band the chooser assumes where eToro's row prints none, as a
+#: percentage of the margin: the ONE band measured (doc §14 N2, BTC 2x on
+#: demo, maxStopLossPercentage 50). An assumption, said so in every line
+#: that uses it; a printed band always wins.
+ASSUMED_STOP_BAND_PCT = 50.0
+
+
+def proven_leverage(asset_class: str) -> int:
+    """ETORO_PROVEN_LEVERAGE[asset_class] as a whole number >= 1, read at
+    call time; 1 for a class absent or a value nothing can read."""
+    raw = ETORO_PROVEN_LEVERAGE.get(str(asset_class or ""), 1)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return 1
+    try:
+        val = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        return 1
+    return val if val >= 1 and val == raw else 1
+
+
+def leverage_is_auto(extras) -> bool:
+    """extras["leverage"] asks for the attack mode ("auto", any case)."""
+    raw = (extras or {}).get("leverage")
+    return isinstance(raw, str) and raw.strip().lower() == AUTO_LEVERAGE
+
+
+def attack_thresholds(entry_score_min) -> tuple:
+    """(strong_from, high_from) for an entry bar e: the band a score can
+    occupy above the bar, in thirds — e + (1 - e) / 3 and
+    e + 2 (1 - e) / 3. At e = 0.60: 0.7333 and 0.8667. An unreadable bar
+    reads 0; the bar is clamped to [0, 1]."""
+    try:
+        e = float(entry_score_min)
+    except (TypeError, ValueError):
+        e = 0.0
+    if e != e:
+        e = 0.0
+    e = min(max(e, 0.0), 1.0)
+    span = 1.0 - e
+    return e + span / 3.0, e + 2.0 * span / 3.0
+
+
+def attack_tier_scales(cfg) -> dict:
+    """The three tier multipliers for `cfg`: ATTACK_TIER_SCALES, with
+    extras["attack_tiers"] read WITHOUT RAISING — each value a number in
+    (0, 1]. Above 1 is clamped to 1: a tier never lifts risk above the
+    config's own fraction. Anything else (a string, a bool, zero, a
+    negative, NaN, a non-dict) keeps the default and logs a line."""
+    extras = getattr(cfg, "extras", None) or {}
+    out = dict(ATTACK_TIER_SCALES)
+    raw = extras.get("attack_tiers")
+    if raw is None:
+        return out
+    if not isinstance(raw, dict):
+        logger.warning("[attack] cfg %s: extras['attack_tiers']=%r is not "
+                       "a mapping — the default tiers", getattr(cfg, "id",
+                                                               "?"), raw)
+        return out
+    for name in ATTACK_TIER_SCALES:
+        if name not in raw:
+            continue
+        val = raw.get(name)
+        if (isinstance(val, bool) or not isinstance(val, (int, float))
+                or val != val or val <= 0):
+            logger.warning("[attack] cfg %s: extras['attack_tiers'][%r]=%r "
+                           "is not a number in (0, 1] — keeping %.2f",
+                           getattr(cfg, "id", "?"), name, val, out[name])
+            continue
+        out[name] = min(float(val), 1.0)
+    return out
+
+
+def judge_order_leverage(cfg, asset_class: str, carrier: str, *,
+                         pick=None) -> tuple:
     """(leverage, refusal): what an eToro order body may carry for `cfg`.
 
     ONE rule, read by execute_entry on the client an order goes through
@@ -403,11 +551,25 @@ def judge_order_leverage(cfg, asset_class: str, carrier: str) -> tuple:
     and apply_stop_floor are judged on qty x price; _judge_final_size
     refuses on qty x |price - stop|. Leverage changes the margin eToro
     locks and the financing it charges, nothing else this engine measures.
+
+    THE ATTACK MODE (extras["leverage"] = "auto", 2026-09-26). The
+    multiplier is not typed: AssetBot._choose_auto_leverage picks it on
+    the client an order goes through and hands it here as `pick`, and it
+    is judged by EVERY check below exactly as a typed number would be —
+    the chooser picks, it never bypasses a gate. A pick of 1 answers
+    (1, "") like a typed 1. Without a pick (preflight's own line, the
+    TAKE TRADE lane, which never levers a hand-taken ticket) "auto"
+    answers (None, ""): no kwarg, the unlevered order. `pick` is read
+    only under "auto".
     """
     extras = getattr(cfg, "extras", None) or {}
     if "leverage" not in extras:
         return None, ""
     raw = extras.get("leverage")
+    if leverage_is_auto(extras):
+        if pick is None:
+            return None, ""
+        raw = pick
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         return None, (f"extras['leverage']={raw!r} is not a number — a "
                       f"multiplier this bot cannot read is not sent at 1 "
@@ -761,7 +923,14 @@ class AssetBot(ABC):
         the later steps of _etoro_entry_refusal, never a judgement:
         judge_order_leverage still decides what an order may carry, and
         an unreadable value is ITS refusal (leverage_refused), not a
-        silent 1 here."""
+        silent 1 here. "auto" (the attack mode, 2026-09-26) reads None
+        too, deliberately: the multiplier is chosen per order, on the
+        client, by _order_leverage, and before that choice every reader
+        of this hint counts the unlevered order — step 2 of
+        _etoro_entry_refusal asks at 1 (where the row is unread the
+        chooser can pick nothing above 1), and the TAKE TRADE lane never
+        levers a hand-taken ticket. The bot's MAX SINGLE POSITION reads
+        _margin_leverage_hint instead."""
         raw = (extras or {}).get("leverage")
         if raw is None or isinstance(raw, bool):
             return None
@@ -771,6 +940,34 @@ class AssetBot(ABC):
     def _extras_leverage_hint(self):
         """The config's extras['leverage'] through _leverage_hint_of."""
         return self._leverage_hint_of(getattr(self.cfg, "extras", None))
+
+    def _leverage_is_auto(self) -> bool:
+        """The config asks for the attack mode (extras["leverage"] =
+        "auto")."""
+        return leverage_is_auto(getattr(self.cfg, "extras", None))
+
+    def _auto_leverage_bound(self, icls: str) -> int:
+        """The most the attack mode could pick for an instrument of class
+        `icls`: 1 while etoro_leverage_live is OFF, else the lowest of the
+        platform cap, the class ceiling and the proven multiplier. The
+        chooser may pick less (the LIVE list, the stop band)."""
+        from core.platform_control import is_component_enabled
+        if not is_component_enabled(LEVERAGE_SWITCH_KEY):
+            return 1
+        return max(1, min(int(MAX_ORDER_LEVERAGE),
+                          int(ORDER_LEVERAGE_CEILING.get(icls, 1)),
+                          proven_leverage(icls)))
+
+    def _margin_leverage_hint(self, symbol: str):
+        """The multiplier MAX SINGLE POSITION counts a ticket at before the
+        order: the typed hint (_extras_leverage_hint), or, in the attack
+        mode, the most the chooser could pick for this instrument
+        (_auto_leverage_bound). execute_entry judges the gate again at
+        the multiplier actually chosen, so every margin gate sees the
+        multiplier sent."""
+        if self._leverage_is_auto():
+            return self._auto_leverage_bound(self._instrument_class(symbol))
+        return self._extras_leverage_hint()
 
     def _extras_float(self, key: str, default: float = 0.0) -> float:
         """Read a numeric knob out of cfg.extras without ever raising.
@@ -1384,7 +1581,8 @@ class AssetBot(ABC):
                     self.user, asset_class=self.asset_class,
                     symbol=trade.symbol, side=trade.side, qty=trade.qty,
                     entry_price=trade.entry_price,
-                    rule_name=trade.rule_name, trade_id=trade.id)
+                    rule_name=self._fill_rule_words(trade),
+                    trade_id=trade.id)
         except Exception as e:  # noqa: BLE001
             logger.warning("[%s_bot] fill notification failed: %s",
                            self.asset_class, e)
@@ -3292,8 +3490,16 @@ class AssetBot(ABC):
         )
 
     def _judge_final_size(self, symbol: str, *, qty: float, price: float,
-                          sl: float, decision, sizing: dict) -> bool:
+                          sl: float, decision, sizing: dict,
+                          leverage=None, note: str = "") -> bool:
         """Steps M-O on a FINAL quantity: True when it may go to the book.
+
+        `leverage` (2026-09-26) is the multiplier MAX SINGLE POSITION
+        counts the ticket at; None reads _margin_leverage_hint — the typed
+        hint, or the most the attack mode could pick. execute_entry passes
+        the attack mode's actual pick, and `note` ("attack HIGH: at 10x: ")
+        then leads the MAX SINGLE POSITION refusal — the one check here the
+        multiplier moves — so the skip names the tier and the multiplier.
 
         Records the skip and returns False otherwise. Shared by
         propose_entry (on the bot's own size) and execute_entry (on that
@@ -3384,19 +3590,22 @@ class AssetBot(ABC):
         # the gate counts is notional / L of the multiplier this config
         # would send (the hint; judge_order_leverage still decides), the
         # full notional at 1 — measured 2026-09-23 — floored at the class
-        # table's forex 1/30.
+        # table's forex 1/30. In the attack mode, the most the chooser
+        # could pick here, and the pick itself from execute_entry.
         from bot_program.engine.broker_router import broker_name_for_symbol
         cap = single_position_state(
             limits_book(), asset_class=self.asset_class,
             notional=notional,
             capital_base=float(self.cfg.capital or 0),
             base_label="bot pool",
-            leverage=self._extras_leverage_hint(),
+            leverage=(leverage if leverage is not None
+                      else self._margin_leverage_hint(symbol)),
             carrier=broker_name_for_symbol(self.user, symbol, self.cfg))
         if not cap["ok"]:
             logger.info("[%s_bot] %s refused by the book's single-position "
-                        "limit: %s", self.asset_class, symbol, cap["reason"])
-            self._skip(symbol, skips.GATE_BLOCKED, cap["reason"])
+                        "limit: %s%s", self.asset_class, symbol, note,
+                        cap["reason"])
+            self._skip(symbol, skips.GATE_BLOCKED, note + cap["reason"])
             return False
 
         # NOT a per-ticket total-exposure pre-check here, deliberately.
@@ -3589,6 +3798,14 @@ class AssetBot(ABC):
         # forex_usd_multiplier reads this on every close path and in
         # grading, so P&L and the R denominator convert by the same number.
         entry_meta["value_per_unit"] = sizing.get("value_per_unit", 1.0)
+        # THE ATTACK MODE's tier (2026-09-26): risk_fraction above is
+        # already the tiered one (_size_for_entry); the multiplier sent
+        # and its words join it below, on the live path.
+        _attack = sizing.get("attack") if isinstance(sizing, dict) else None
+        if isinstance(_attack, dict):
+            entry_meta["attack"] = dict(_attack)
+        else:
+            _attack = None
         if getattr(cand, "fractional_units", None) is True and not paper:
             # Rounded by the venue's answer, not by whole shares — so a later
             # grader can select these rows and treasury can say so.
@@ -3720,11 +3937,28 @@ class AssetBot(ABC):
             # at 1 too (E2.6, 2026-09-26).
             leverage, lev_why = self._order_leverage(
                 client, symbol, side=decision.direction, price=float(price),
-                stop=float(sl))
+                stop=float(sl), qty=float(qty))
             if lev_why:
                 logger.error("[%s_bot] %s REFUSED: %s", self.asset_class,
                              symbol, lev_why)
-                return self._skip(symbol, skips.LEVERAGE_REFUSED, lev_why)
+                # verdict first; an attack-mode refusal names its tier
+                return self._skip(symbol, skips.LEVERAGE_REFUSED,
+                                  (f"attack {_attack['tier']}: "
+                                   if _attack else "") + lev_why)
+            if _attack is not None:
+                # THE ATTACK MODE's pick, judged again by MAX SINGLE
+                # POSITION at the multiplier actually chosen: the proposal
+                # counted the most the chooser could pick
+                # (_margin_leverage_hint), and every margin gate must see
+                # the multiplier sent. The refusal names the tier and the
+                # multiplier.
+                if not self._judge_final_size(
+                        symbol, qty=qty, price=price, sl=sl,
+                        decision=decision, sizing=sizing,
+                        leverage=int(leverage or 1),
+                        note=(f"attack {_attack['tier']}: at "
+                              f"{int(leverage or 1)}x: ")):
+                    return None
             from bot_program.engine.capabilities import adapter_key
             if adapter_key(client) == "etoro":
                 # THE ACCOUNT'S HEADROOM, from the sync's cells and never a
@@ -3744,7 +3978,9 @@ class AssetBot(ABC):
                                  self.asset_class, symbol,
                                  leverage or "1 (no key)", lev_why)
                     return self._skip(symbol, skips.LEVERAGE_REFUSED,
-                                      f"at {leverage or 1}x: {lev_why}")
+                                      (f"attack {_attack['tier']}: "
+                                       if _attack else "")
+                                      + f"at {leverage or 1}x: {lev_why}")
             if not self._still_armed():
                 return self._skip(symbol, skips.GATE_BLOCKED,
                                   "config was disarmed mid-tick — refusing "
@@ -3862,6 +4098,14 @@ class AssetBot(ABC):
                     # Not value_per_unit: that scales loss-per-point and
                     # notional, this neither.
                     entry_meta["leverage"] = int(leverage)
+                if _attack is not None:
+                    # the multiplier SENT (1 when the chooser settled on
+                    # the unlevered order) and the chooser's own words
+                    _pick = ((getattr(self, "_auto_pick", None) or {})
+                             .get(symbol) or {})
+                    entry_meta["attack"]["leverage"] = int(leverage or 1)
+                    entry_meta["attack"]["leverage_why"] = str(
+                        _pick.get("why") or "")[:300]
 
                 # Real fills: prefer the broker's average fill price and
                 # filled quantity over the pre-order ticker, so slippage
@@ -4143,7 +4387,8 @@ class AssetBot(ABC):
                 notify_bot_fill_open(
                     self.user, asset_class=self.asset_class, symbol=symbol,
                     side=decision.direction, qty=trade.qty,
-                    entry_price=trade.entry_price, rule_name=trade.rule_name,
+                    entry_price=trade.entry_price,
+                    rule_name=self._fill_rule_words(trade),
                     trade_id=trade.id,
                 )
             except Exception as e:
@@ -4335,6 +4580,8 @@ class AssetBot(ABC):
                     f"the venue's own answer, not a failed read; nothing "
                     f"sent")
             if _state == "error":
+                # the attack mode's hint is None, read as 1: on an unread
+                # row its chooser can pick nothing above 1
                 _hint = int(leverage_hint or 1)
                 _unread = ([f"the LIVE leverage list a {_hint}x order is "
                             f"judged on"] if _hint > 1 else [])
@@ -4387,7 +4634,7 @@ class AssetBot(ABC):
     # ── the multiplier an eToro order may carry ───────────────────────────
 
     def _order_leverage(self, client, symbol: str, *, side: str = "BUY",
-                        price=None, stop=None) -> tuple:
+                        price=None, stop=None, qty=None) -> tuple:
         """judge_order_leverage on the client an order actually goes
         through — the adapter key of its CLASS (capabilities.adapter_key),
         never today's routing rule — keyed on the INSTRUMENT's class
@@ -4396,10 +4643,31 @@ class AssetBot(ABC):
         correctly. Then the instrument's OWN entry
         (_instrument_leverage_check, at 1 too); then a fresh refusal note
         for the symbol (a levered order eToro or the wire refused within
-        LEVERAGE_QUIET_HOURS) refuses before anything is sent again."""
+        LEVERAGE_QUIET_HOURS) refuses before anything is sent again.
+
+        THE ATTACK MODE (extras["leverage"] = "auto", 2026-09-26):
+        _choose_auto_leverage picks L on this client first, and the pick is
+        then judged exactly as a typed L — judge_order_leverage(pick=L),
+        the instrument's own entry, the refusal note — the chooser picks,
+        it never bypasses a gate. `qty` (the final size, never changed
+        here) lets the chooser pass over an L whose margin would sit under
+        eToro's minimum. The pick and its words are kept on
+        self._auto_pick[symbol] for the row. A config without "auto"
+        never reaches the chooser."""
         from bot_program.engine.capabilities import adapter_key
+        pick = None
+        if self._leverage_is_auto():
+            pick, pick_why = self._choose_auto_leverage(
+                client, symbol, side, price, stop, qty=qty)
+            if not isinstance(getattr(self, "_auto_pick", None), dict):
+                self._auto_pick = {}
+            self._auto_pick[symbol] = {"leverage": pick, "why": pick_why}
+            logger.info("[%s_bot] %s attack mode: %s", self.asset_class,
+                        symbol, pick_why)
+            if pick is None:
+                return None, pick_why
         lev, why = judge_order_leverage(self.cfg, self._instrument_class(symbol),
-                                        adapter_key(client))
+                                        adapter_key(client), pick=pick)
         if why:
             return lev, why
         eff = int(lev or 1)   # no key / typed 1 -> 1: the check runs at 1 too
@@ -4416,6 +4684,195 @@ class AssetBot(ABC):
                           f"quiet for {self.LEVERAGE_QUIET_HOURS}h — nothing "
                           f"sent, not at {lev}, not at 1")
         return lev, ""
+
+    def _choose_auto_leverage(self, client, symbol: str, side: str,
+                              price=None, stop=None, qty=None) -> tuple:
+        """THE ATTACK MODE's multiplier — the CASH half (2026-09-26).
+        (L, words) or (None, refusal).
+
+        The HIGHEST L on the instrument's LIVE list for this direction (the
+        union _instrument_leverage_check reads, at the settlement a levered
+        order lands on) such that ALL hold: L <= ORDER_LEVERAGE_CEILING[the
+        instrument's class] (and the platform cap); L <= proven_leverage
+        (ETORO_PROVEN_LEVERAGE, empty on arrival: 1 until a demo
+        fill-and-close at L is pinned); the stop, as a fraction of price
+        times L, inside the band — maxStopLossPercentage / 100 of the entry
+        carrying L where eToro prints it, else ASSUMED_STOP_BAND_PCT, the
+        one measured band, and the words say "assumed"; the margin at L
+        (qty x price x value_per_unit / L) not under the entry's printed
+        minPositionAmount — the smallest MARGIN eToro takes, whose
+        refusal would quiet the symbol for LEVERAGE_QUIET_HOURS, at 1x
+        too (unchecked when no qty is handed in or nothing is printed);
+        the switch etoro_leverage_live ON (OFF -> 1, the unlevered order,
+        the words name the switch). A carrier that is not eToro -> 1; an
+        unread row -> 1 (a typed 1 on an unread row proceeds on the class
+        ceiling alone, and so does this). No L above 1 fits -> 1 when 1 is
+        on the LIVE list at the settlement a 1x order lands on, or when
+        that LIVE list is unread or absent (a typed 1 proceeds there too,
+        on the class ceiling alone, and the words say "unread", never a
+        measured absence); else a refusal that sends nothing — the size is
+        never clamped and the stop never widened for the band. Units never
+        see L (house rule 5): the size was decided before this runs. The
+        pick then meets every gate a typed number meets
+        (_order_leverage)."""
+        from bot_program.engine.capabilities import (adapter_key,
+                                                     has_capability)
+        from core.platform_control import is_component_enabled
+        carrier = adapter_key(client)
+        if carrier != "etoro":
+            return 1, (f"auto: 1x — {carrier or 'this client'} carries no "
+                       f"per-order multiplier")
+        if not is_component_enabled(LEVERAGE_SWITCH_KEY):
+            return 1, (f"auto: 1x — {LEVERAGE_SWITCH_KEY} is OFF, so the "
+                       f"unlevered order")
+        if not has_capability(client, "leverage_values"):
+            return 1, "auto: 1x — this client reads no LIVE leverage list"
+        icls = self._instrument_class(symbol)
+        ceiling = min(int(MAX_ORDER_LEVERAGE),
+                      int(ORDER_LEVERAGE_CEILING.get(icls, 1)))
+        proven = proven_leverage(icls)
+        direction = "long" if str(side or "BUY").upper() == "BUY" else "short"
+        try:
+            _elig = getattr(client, "eligibility", None)
+            row = _elig(symbol) if callable(_elig) else None
+        except Exception as e:  # noqa: BLE001 — a raise IS could-not-read
+            logger.info("[%s_bot] %s: eligibility raised %s: %s",
+                        self.asset_class, symbol, type(e).__name__, e)
+            row = None
+        if not isinstance(row, dict):
+            return 1, (f"auto: 1x — eToro's eligibility row for {symbol} is "
+                       f"unread today, so there is no LIVE list to lever on")
+
+        def _live(settlement):
+            if not settlement:
+                return None
+            try:
+                return client.leverage_values(symbol, side, settlement,
+                                              world="live")
+            except Exception as e:  # noqa: BLE001 — could-not-read
+                logger.info("[%s_bot] %s: LIVE leverageValues (%s) raised "
+                            "%s: %s", self.asset_class, symbol, settlement,
+                            type(e).__name__, e)
+                return None
+
+        def _band(name, settlement, lev):
+            fn = getattr(client, name, None)
+            if not callable(fn):
+                return None
+            try:
+                v = fn(symbol, side, settlement, lev, world="live")
+                return None if v is None else float(v)
+            except Exception:  # noqa: BLE001 — unmeasured, never a number
+                return None
+
+        frac = None
+        try:
+            if price is not None and stop is not None and float(price) > 0:
+                frac = abs(float(price) - float(stop)) / float(price)
+        except (TypeError, ValueError):
+            frac = None
+        # the notional the margin at each L is a share of (qty is final:
+        # this reads it, never changes it)
+        notional = None
+        try:
+            if qty is not None and price is not None:
+                notional = (abs(float(qty)) * float(price)
+                            * float(self._value_per_unit(symbol) or 1.0))
+        except Exception:  # noqa: BLE001 — unmeasured, never a number
+            notional = None
+        try:
+            settle_up = client.settlement_for(symbol, side, 2)
+        except Exception:  # noqa: BLE001 — unknown, never free
+            settle_up = None
+        up_vals = _live(settle_up)
+        listed = sorted(v for v in (up_vals or []) if v > 1)
+        passed_over = []
+        for lev in sorted(listed, reverse=True):
+            if lev > ceiling or lev > proven:
+                continue
+            if frac is None:
+                passed_over.append("no stop was handed in, so the band "
+                                   "cannot be judged")
+                break
+            max_sl = _band("max_stop_loss_pct", settle_up, lev)
+            assumed = max_sl is None
+            band = ASSUMED_STOP_BAND_PCT if assumed else max_sl
+            if frac * lev > band / 100.0 + 1e-12:
+                passed_over.append(
+                    f"{lev}x puts the stop at {frac * lev:.1%} of the margin, "
+                    f"past the {band:g}% band"
+                    + (" (assumed)" if assumed else ""))
+                continue
+            min_sl = _band("min_stop_loss_pct", settle_up, lev)
+            if min_sl is not None and frac * lev < min_sl / 100.0 - 1e-12:
+                passed_over.append(
+                    f"{lev}x puts the stop at {frac * lev:.1%} of the margin, "
+                    f"under eToro's {min_sl:g}% minimum")
+                continue
+            min_amt = _band("min_amount", settle_up, lev)
+            if (notional is not None and min_amt is not None
+                    and notional / lev < min_amt - 1e-9):
+                passed_over.append(
+                    f"{lev}x pledges {notional / lev:,.2f}, under eToro's "
+                    f"minimum margin of {min_amt:g}")
+                continue
+            return lev, (
+                f"auto: {lev}x — the highest on {symbol}'s LIVE "
+                f"{direction}/{settle_up} list {listed} inside the {icls} "
+                f"ceiling ({ceiling}x) and the proven {proven}x; the stop is "
+                f"{frac * lev:.1%} of the margin, inside the {band:g}% band"
+                + (" (assumed from the one measured band)" if assumed
+                   else " (printed)")
+                + (f"; passed over: {'; '.join(passed_over)}"
+                   if passed_over else ""))
+        # an UNREAD LIVE list is not a measured absence: the words tell
+        # the two apart (the LIVE row itself unread, or read without the
+        # entry)
+        try:
+            _elig_live = getattr(client, "eligibility", None)
+            live_read = isinstance(
+                _elig_live(symbol, "live") if callable(_elig_live) else None,
+                dict)
+        except Exception:  # noqa: BLE001 — a raise IS could-not-read
+            live_read = False
+        unread = ("absent from its LIVE row" if live_read
+                  else "unread today")
+        if not settle_up:
+            reason = (f"eToro's row for {symbol} lists no {direction} entry "
+                      f"that carries a multiplier")
+        elif up_vals is None:
+            reason = (f"eToro's LIVE {direction}/{settle_up} list for "
+                      f"{symbol} is {unread}")
+        elif not listed:
+            reason = (f"eToro's LIVE {direction} list for {symbol} carries "
+                      f"nothing above 1")
+        elif proven <= 1:
+            reason = (f"no multiplier is proven for {icls} yet "
+                      f"(ETORO_PROVEN_LEVERAGE)")
+        elif not [v for v in listed if v <= min(ceiling, proven)]:
+            reason = (f"nothing on the LIVE list {listed} sits inside the "
+                      f"{icls} ceiling ({ceiling}x) and the proven "
+                      f"{proven}x")
+        else:
+            reason = "; ".join(passed_over) or "no multiplier passed"
+        try:
+            settle_one = client.settlement_for(symbol, side, 1)
+        except Exception:  # noqa: BLE001
+            settle_one = None
+        ones = _live(settle_one)
+        if ones and 1 in ones:
+            return 1, f"auto: 1x — {reason}"
+        if settle_one and ones is None:
+            # the typed 1's own rule (_instrument_leverage_check): an
+            # unread LIVE list at 1x leaves the class ceiling the only
+            # ceiling — said as unread, never as measured
+            return 1, (f"auto: 1x — {reason}; the LIVE {direction}/"
+                       f"{settle_one} list is {unread}, and at 1x the class "
+                       f"ceiling is the only ceiling, as for a typed 1")
+        return None, (f"auto: no multiplier fits {symbol} {direction} — "
+                      f"{reason}; and 1 is not on its LIVE list "
+                      f"({settle_one or 'no entry'}: {ones}) — nothing sent, "
+                      f"the size not clamped, the stop not widened")
 
     def _instrument_leverage_check(self, client, symbol: str, side: str,
                                    eff: int, price=None, stop=None) -> str:
@@ -5126,9 +5583,20 @@ class AssetBot(ABC):
 
     def _size_for_entry(self, symbol: str, price: float, stop: float,
                         decision) -> dict:
-        """Units to buy so that a stop-out costs a fixed fraction of equity."""
+        """Units to buy so that a stop-out costs a fixed fraction of equity.
+
+        THE ATTACK MODE's risk half lands HERE, the one place the bot
+        lane's risk fraction enters sizing (2026-09-26): with
+        extras["leverage"] = "auto" the tier (_attack_tier) scales the
+        config's fraction before size_position computes anything, so the
+        widened stop, the notional cap and _judge_final_size all read the
+        tiered fraction; the tier rides the sizing dict (sizing["attack"])
+        to the row. Without "auto" this is the call it always was."""
         from bot_program.asset_engine.sizing import size_position
-        return size_position(
+        attack = (self._attack_tier(symbol, decision)
+                  if self._leverage_is_auto() else None)
+        extra = {} if attack is None else {"risk_scale": attack["scale"]}
+        sizing = size_position(
             self.cfg, asset_class=self.asset_class, entry=price, stop=stop,
             direction=decision.direction,
             value_per_unit=self._value_per_unit(symbol),
@@ -5136,7 +5604,210 @@ class AssetBot(ABC):
             # (SPX500 in a stock config sizes under the index cap); the
             # risk fraction stays the config's (E2.5, 2026-09-26)
             cap_class=self._instrument_class(symbol),
+            **extra,
         )
+        if attack is not None:
+            attack["risk_fraction"] = sizing["risk_fraction"]
+            sizing["attack"] = attack
+        return sizing
+
+    def _attack_tier(self, symbol: str, decision) -> dict:
+        """THE CONVICTION TIER of the attack mode — the RISK half.
+
+        c is the decision's score as the trade records it (composite_score:
+        the SMC seat taken back out by _conviction_score, after
+        _apply_track_record on the headcount path); e is the config's
+        entry_score_min. The band above the bar, in thirds
+        (attack_thresholds):
+          STANDARD  c <  e + (1 - e) / 3                    0.50x risk
+          STRONG    c >= e + (1 - e) / 3                    0.75x
+          HIGH      c >= e + 2 (1 - e) / 3 AND a measured   1.00x
+                    edge (_attack_edge)
+        A HIGH score without the edge is STRONG; a record lookup that
+        raises or answers nothing is STANDARD — never HIGH on an unread
+        record — with a log line. The multipliers are
+        attack_tier_scales(cfg), each in (0, 1]: a tier never lifts risk
+        above the config's own fraction, which risk_fraction already
+        clamps at MAX_RISK_FRACTION."""
+        from bot_program.asset_engine.sizing import risk_fraction
+        scales = attack_tier_scales(self.cfg)
+        e = getattr(self.cfg, "entry_score_min", 0.0)
+        strong_from, high_from = attack_thresholds(e)
+        try:
+            c = float(getattr(decision, "score", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            c = 0.0
+        if c != c:
+            c = 0.0
+        if c >= high_from - 1e-9:
+            tier, why = self._attack_edge(symbol, decision, c)
+        elif c >= strong_from - 1e-9:
+            tier, why = "strong", (f"score {c:.4f} is at or above "
+                                   f"{strong_from:.4f}")
+        else:
+            tier, why = "standard", (f"score {c:.4f} is below "
+                                     f"{strong_from:.4f}")
+        base = risk_fraction(self.cfg)
+        return {"tier": tier.upper(), "scale": scales[tier],
+                "score": round(c, 4),
+                "strong_from": round(strong_from, 4),
+                "high_from": round(high_from, 4),
+                "config_risk_fraction": base,
+                "risk_fraction": base * scales[tier], "why": why}
+
+    def _attack_edge(self, symbol: str, decision, c: float) -> tuple:
+        """(tier, words) for a score in the HIGH band: "high" only on a
+        MEASURED edge — bot_grading.bot_track_record_detail for the
+        decision's rule on the INSTRUMENT's class: the config's own venue
+        (paper or live, its mode) when it holds ATTACK_HIGH_MIN_N graded
+        trades, else the pooled record — unless the own venue's thinner
+        record averages below 0 R, which the other venue's fills never
+        outvote (bot_grading: simulated fills must not size a real order);
+        n >= 20, win rate >= 0.55 and average realized R >= +0.20.
+        Otherwise "strong", naming what is missing; "standard" when the
+        lookup raises or answers nothing. The record is keyed on the class
+        a row is FILED under (the config's, AssetBotTrade.asset_class): an
+        instrument of another class reads its own class's record, which
+        this config's own trades of it are not in, and the words say so."""
+
+        def _num(v):
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return None
+            return f if f == f else None
+
+        rule = str(getattr(decision, "rule_name", "") or "")
+        icls = self._instrument_class(symbol)
+        filed = ("" if icls == self.asset_class else
+                 f"; this {self.asset_class} config files its own {icls} "
+                 f"trades as {self.asset_class}, outside this record")
+        if not rule:
+            return "strong", (f"score {c:.4f} in the HIGH band; edge not yet "
+                              f"measured: the decision names no rule")
+        try:
+            from bot_program.bot_grading import (
+                VENUE_ALL, VENUE_LIVE, VENUE_PAPER, bot_track_record_detail,
+            )
+            own = VENUE_PAPER if self.cfg.mode == "paper" else VENUE_LIVE
+            rec = bot_track_record_detail(rule, icls,
+                                          min_n=ATTACK_HIGH_MIN_N, venue=own)
+            where = own
+            if isinstance(rec, dict) and rec and int(
+                    rec.get("n") or 0) < ATTACK_HIGH_MIN_N:
+                own_n = int(rec.get("n") or 0)
+                own_avg = _num(rec.get("expectancy"))
+                if own_n > 0 and own_avg is not None and own_avg < 0:
+                    return "strong", (
+                        f"score {c:.4f} in the HIGH band; edge not proven — "
+                        f"{rule} on {icls}, {own}: n {own_n}, avg R "
+                        f"{own_avg:+.2f}, a losing record on the venue this "
+                        f"order goes to, which the pooled record may not "
+                        f"lift to HIGH{filed}")
+                rec = bot_track_record_detail(rule, icls,
+                                              min_n=ATTACK_HIGH_MIN_N,
+                                              venue=VENUE_ALL)
+                where = "pooled (paper and live)"
+        except Exception as e:  # noqa: BLE001 — never HIGH on an unread record
+            logger.warning("[%s_bot] %s attack tier: the track record of %s "
+                           "on %s could not be read (%s: %s) — STANDARD, "
+                           "never HIGH on an unread record", self.asset_class,
+                           symbol, rule, icls, type(e).__name__, e)
+            return "standard", (f"score {c:.4f} in the HIGH band; the track "
+                                f"record could not be read "
+                                f"({type(e).__name__}) — STANDARD")
+        if not isinstance(rec, dict) or not rec:
+            logger.warning("[%s_bot] %s attack tier: the track record of %s "
+                           "on %s answered nothing — STANDARD, never HIGH on "
+                           "an unread record", self.asset_class, symbol,
+                           rule, icls)
+            return "standard", (f"score {c:.4f} in the HIGH band; the track "
+                                f"record answered nothing — STANDARD")
+
+        n = int(rec.get("n") or 0)
+        wr = _num(rec.get("win_rate"))
+        avg = _num(rec.get("expectancy"))
+        words = (f"{rule} on {icls}, {where}: n {n}, win "
+                 f"{'—' if wr is None else format(wr, '.0%')}, avg R "
+                 f"{'—' if avg is None else format(avg, '+.2f')}{filed}")
+        if (n >= ATTACK_HIGH_MIN_N and wr is not None and avg is not None
+                and wr >= ATTACK_HIGH_MIN_WIN_RATE - 1e-12
+                and avg >= ATTACK_HIGH_MIN_AVG_R - 1e-12):
+            return "high", f"score {c:.4f}; edge measured — {words}"
+        if n < ATTACK_HIGH_MIN_N:
+            return "strong", (f"score {c:.4f} in the HIGH band; edge not yet "
+                              f"measured — {words}; HIGH needs n >= "
+                              f"{ATTACK_HIGH_MIN_N}")
+        return "strong", (f"score {c:.4f} in the HIGH band; edge not proven "
+                          f"— {words}; HIGH needs win >= "
+                          f"{ATTACK_HIGH_MIN_WIN_RATE:.0%} and avg R >= "
+                          f"{ATTACK_HIGH_MIN_AVG_R:+.2f}")
+
+    def _fill_rule_words(self, trade):
+        """What the open notification's `rule_name` carries: the rule, and
+        on an attack-mode row a second line. notify_bot_fill_open renders
+        rule_name as one of its lines (bot_program/notifications.py, not
+        this file's to change), so the tier, the risk the row carries at
+        its stop, the multiplier sent and the margin ride the argument it
+        already has: "Attack: HIGH · risk 7.0% of pool · 20x · margin
+        100.00 USD". Every other row passes its rule_name unchanged."""
+        meta = getattr(trade, "metadata", None) or {}
+        att = meta.get("attack")
+        if not isinstance(att, dict):
+            return trade.rule_name
+        line = self._attack_line(att, trade)
+        if not line:
+            return trade.rule_name
+        return f"{trade.rule_name or '—'}\n{line}"
+
+    def _attack_line(self, att: dict, trade) -> str:
+        """"Attack: TIER · risk F% of pool · Lx · margin M CCY". The risk is
+        the one the ROW carries at its stop — qty x |entry - the stop sent|
+        x value_per_unit / the pool — so the desk's size_mult, the
+        allocator's multiplier, the correlation taper, the rounding and a
+        partial fill all show in it; the sizer's own fraction only when
+        the row cannot say (no stop, no pool). The margin is the row's
+        notional / L (measured: eToro pledges notional / L). A paper row
+        says so instead of a multiplier."""
+        meta = getattr(trade, "metadata", None) or {}
+        f = None
+        try:
+            _stop = float(meta.get("initial_stop_loss")
+                          or trade.stop_loss or 0)
+            _pool = float(self.cfg.capital or 0)
+            if _stop > 0 and _pool > 0:
+                f = (float(trade.qty)
+                     * abs(float(trade.entry_price) - _stop)
+                     * float(meta.get("value_per_unit") or 1.0)
+                     / _pool * 100.0)
+        except (TypeError, ValueError, InvalidOperation):
+            f = None
+        if f is None:
+            try:
+                f = float(att.get("risk_fraction") or 0.0) * 100.0
+            except (TypeError, ValueError):
+                f = 0.0
+        parts = [f"Attack: {att.get('tier') or '?'}",
+                 (f"risk {f:.1f}% of pool" if f >= 1.0
+                  else f"risk {f:.2f}% of pool")]
+        if getattr(trade, "paper", False):
+            parts.append("paper, no multiplier")
+            return " · ".join(parts)
+        try:
+            lev = int(att.get("leverage") or 0)
+        except (TypeError, ValueError):
+            lev = 0
+        if lev < 1:
+            return " · ".join(parts)
+        parts.append(f"{lev}x")
+        try:
+            vpu = float((trade.metadata or {}).get("value_per_unit") or 1.0)
+            notional = float(trade.qty) * float(trade.entry_price) * vpu
+            ccy = str(self.cfg.base_currency or "").strip()
+            parts.append(f"margin {notional / lev:,.2f} {ccy}".rstrip())
+        except (TypeError, ValueError, InvalidOperation):
+            pass
+        return " · ".join(parts)
 
     def _round_qty(self, qty: float, price: float, *,
                    fractional=None) -> float:

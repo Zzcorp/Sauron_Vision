@@ -288,6 +288,96 @@ def _venue_for(user, asset_class: str):
     return None, ""
 
 
+def _instrument_classes(cfg) -> list:
+    """The INSTRUMENT classes a config carries — Instrument.asset_class of
+    each symbol, the router's own key and the one the engine judges a
+    multiplier on (AssetBot._instrument_class: SPX500 in a stock config is
+    an index) — the config's own class for a symbol with no row; sorted,
+    distinct. A config with no symbols is judged on its own class."""
+    from instruments.models import Instrument
+    syms = [str(s) for s in (cfg.symbols or [])]
+    known = dict(Instrument.objects.filter(symbol__in=syms)
+                 .values_list("symbol", "asset_class"))
+    out = {str(known.get(s) or cfg.asset_class) for s in syms}
+    return sorted(out or {str(cfg.asset_class)})
+
+
+def _attack_lines(w, cfg, kind, venue, now, blockers, warnings) -> None:
+    """Section 4 for a config in the attack mode (extras['leverage'] =
+    "auto", 2026-09-26): the tier table for ITS entry_score_min — the three
+    thresholds and the three risk fractions — then, per instrument class it
+    carries, the class ceiling, the proven multiplier and the most the
+    chooser may pick. That most is judged by the engine's own rule
+    (judge_order_leverage with the pick); a refusal is a BLOCKER when
+    armed, worth reading when not. Nothing here asks a broker."""
+    from bot_program.asset_engine.base import (
+        ATTACK_HIGH_MIN_AVG_R, ATTACK_HIGH_MIN_N, ATTACK_HIGH_MIN_WIN_RATE,
+        LEVERAGE_SWITCH_KEY, MAX_ORDER_LEVERAGE, ORDER_LEVERAGE_CEILING,
+        attack_thresholds, attack_tier_scales, judge_order_leverage,
+        proven_leverage)
+    from bot_program.asset_engine.sizing import risk_fraction
+    from core.platform_control import is_component_enabled
+    try:
+        e = float(cfg.entry_score_min or 0.0)
+    except (TypeError, ValueError):
+        e = 0.0
+    strong_from, high_from = attack_thresholds(e)
+    scales = attack_tier_scales(cfg)
+    f = risk_fraction(cfg)
+    w("        leverage auto (extras) — the attack mode: the decision's "
+      "score picks the risk tier, and the multiplier is chosen per order "
+      "on eToro's LIVE list; units never see it")
+    w(f"          tiers at entry_score_min {e:.2f}: STANDARD below "
+      f"{strong_from:.4f} — {scales['standard']:.2f}x, risk "
+      f"{f * scales['standard']:.2%} of the pool")
+    w(f"          STRONG from {strong_from:.4f} — {scales['strong']:.2f}x, "
+      f"risk {f * scales['strong']:.2%}")
+    w(f"          HIGH from {high_from:.4f} with a measured edge (n >= "
+      f"{ATTACK_HIGH_MIN_N}, win >= {ATTACK_HIGH_MIN_WIN_RATE:.0%}, avg R "
+      f">= {ATTACK_HIGH_MIN_AVG_R:+.2f}) — {scales['high']:.2f}x, risk "
+      f"{f * scales['high']:.2%}")
+    if kind != "etoro":
+        w(f"          multiplier 1x — {kind or 'nothing'} carries this "
+          f"class, and only eToro takes a per-order multiplier; the tiers "
+          f"still apply")
+        return
+    on = is_component_enabled(LEVERAGE_SWITCH_KEY)
+    for icls in _instrument_classes(cfg):
+        ceiling = min(int(MAX_ORDER_LEVERAGE),
+                      int(ORDER_LEVERAGE_CEILING.get(icls, 1)))
+        proven = proven_leverage(icls)
+        most = min(ceiling, proven) if on else 1
+        w(f"          {icls}: ceiling {ceiling}x, proven {proven}x — the "
+          f"chooser picks at most {most}x"
+          + ("" if on else f" ({LEVERAGE_SWITCH_KEY} is OFF: every order "
+                           f"goes at 1x)"))
+        if most <= 1:
+            continue
+        _lev, why = judge_order_leverage(cfg, icls, kind, pick=most)
+        if why:
+            w(f"            ← {why}")
+            (blockers if cfg.enabled else warnings).append(
+                f"config {cfg.id} ({cfg.name}) in attack mode, {icls} at "
+                f"{most}x: {why}")
+            continue
+        _v_cash = getattr(venue, "last_available_cash", None)
+        _v_used = getattr(venue, "last_used_margin", None)
+        _v_at = getattr(venue, "last_margin_at", None)
+        if _v_cash is None or _v_used is None or _v_at is None:
+            (blockers if cfg.enabled else warnings).append(
+                f"config {cfg.id} ({cfg.name}) in attack mode: the venue "
+                f"row's available cash / used margin have never been stored "
+                f"— every eToro entry is refused (leverage_refused) until "
+                f"the sync stores them")
+        else:
+            w(f"            venue cash {float(_v_cash):,.2f}  used margin "
+              f"{float(_v_used):,.2f}  ({_age(_v_at, now)})")
+        warnings.append(
+            f"config {cfg.id} ({cfg.name}) in attack mode, {icls} up to "
+            f"{most}x: financing (overnight/weekend fees on a levered CFD) "
+            f"is charged by NOTHING here — the cost filter is spread only")
+
+
 def _primary_classes(row) -> str:
     out = []
     for c in _VENUE_CLASSES:
@@ -802,15 +892,28 @@ class Command(BaseCommand):
                 # absent prints the adapter's default. Enabled -> BLOCKER,
                 # disabled -> WORTH READING, the split this section keeps.
                 _extras = cfg.extras or {}
+                from bot_program.asset_engine.base import leverage_is_auto
                 if "leverage" not in _extras:
                     w("        leverage —  (no extras['leverage']; the "
                       "adapter sends 1)")
+                elif leverage_is_auto(_extras):
+                    _attack_lines(w, cfg, kind, venue, now, blockers,
+                                  warnings)
                 else:
                     from bot_program.asset_engine.base import (
                         judge_order_leverage)
                     _raw_lev = _extras.get("leverage")
-                    _lev, _lev_why = judge_order_leverage(
-                        cfg, cfg.asset_class, kind)
+                    # judged on every INSTRUMENT class the config carries
+                    # (2026-09-26: the engine keys the ceiling on
+                    # _instrument_class — SPX500 in a stock config is an
+                    # index at 20x, AAPL beside it a stock at 5x); the
+                    # first refusal is the line
+                    _lev, _lev_why = None, ""
+                    for _icls in _instrument_classes(cfg):
+                        _lev, _lev_why = judge_order_leverage(
+                            cfg, _icls, kind)
+                        if _lev_why:
+                            break
                     if _lev_why:
                         w(f"        leverage {_raw_lev!r} (extras)  ← {_lev_why}")
                         (blockers if cfg.enabled else warnings).append(
@@ -861,6 +964,22 @@ class Command(BaseCommand):
                             f"filter is spread only — and the position may "
                             f"be held up to {_hz} h; the rate is unmeasured "
                             f"until D2b's costs read")
+                        # THE PROVEN MULTIPLIERS (2026-09-26) bind the
+                        # attack mode only: a TYPED multiplier above one is
+                        # judged as before (the switch, the class ceiling,
+                        # the LIVE list) — said here, never a blocker
+                        from bot_program.asset_engine.base import (
+                            proven_leverage)
+                        for _icls in _instrument_classes(cfg):
+                            _pv = proven_leverage(_icls)
+                            if _lev > _pv:
+                                warnings.append(
+                                    f"config {cfg.id} ({cfg.name}) at "
+                                    f"{_lev}x: {_icls} is proven at {_pv}x "
+                                    f"only — no demo fill-and-close at "
+                                    f"{_lev}x is pinned; a typed multiplier "
+                                    f"is not held to the proven multipliers "
+                                    f"(the attack mode is)")
                 if cfg.enabled and not list(cfg.symbols or []):
                     from bot_program.manual_trade import MANUAL_CONFIG_NAME
                     if cfg.name != MANUAL_CONFIG_NAME:

@@ -396,7 +396,14 @@ def capital_at_work(asset_class: str, notional: float, *, leverage=None,
             frac = max(1.0 / lev, frac)
         else:
             # a stamp past the platform cap (no order here can carry one)
-            # counts AT the cap: a stock stamped 100 is a fifth, not 1 %
+            # counts AT the cap: a stock stamped 100 is a twentieth
+            # (MAX_ORDER_LEVERAGE 20 since 2026-09-26), not 1 %. The
+            # PLATFORM cap, deliberately not the class ceiling:
+            # `asset_class` is the row's — the CONFIG's — and SPX500 in a
+            # stock config goes at up to the index's 20x, which a
+            # stock-keyed 5 would count at four times its measured margin.
+            # The engine stamps only what it sent, inside the instrument's
+            # own ceiling; a stamp above that is a hand-edited row.
             from bot_program.asset_engine.base import MAX_ORDER_LEVERAGE
             frac = 1.0 / min(lev, float(MAX_ORDER_LEVERAGE))
     return abs(float(notional)) * frac

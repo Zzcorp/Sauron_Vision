@@ -292,10 +292,12 @@ PORTFOLIO_LAG_S = 60
 #: A ceiling on what LEAVES the box, not a claim about what eToro accepts:
 #: the allowed multipliers are per instrument, settlementType and direction
 #: (`leverageValues`, MEASURED 2026-09-23 and read off the eligibility row
-#: by `leverage_values` since 2026-09-25; the engine judges against the
-#: LIVE list in a later stage). A shell caller on the
-#: live key cannot send more than the engine could ever ask for.
-LEVERAGE_MAX = 5
+#: by `leverage_values` since 2026-09-25; the engine judges every
+#: multiplier against the LIVE list since 2026-09-26 —
+#: _instrument_leverage_check). 20 since 2026-09-26: the operator's forex
+#: and index ceiling. A shell caller on the live key cannot send more than
+#: the engine could ever ask for.
+LEVERAGE_MAX = 20
 
 
 def _iso_to_ms(ts: str) -> int:

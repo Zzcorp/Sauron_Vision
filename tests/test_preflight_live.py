@@ -466,7 +466,8 @@ class TheLeverageIsJudgedBeforeArmingTests(TestCase):
         acct = EtoroAccount.objects.create(
             user=u, demo=False, label="Main",
             is_primary_for_stocks=(asset_class == "stock"),
-            is_primary_for_forex=(asset_class == "forex"))
+            is_primary_for_forex=(asset_class == "forex"),
+            is_primary_for_commodity=(asset_class == "commodity"))
         acct.set_credentials("k", "u")
         acct.last_equity = Decimal("100000")
         acct.last_equity_currency = "USD"
@@ -486,18 +487,29 @@ class TheLeverageIsJudgedBeforeArmingTests(TestCase):
             cash_available=Decimal("100000"), currency="USD")
 
     def _armed_lev(self, *, extras, cash=None, enabled=True, book=True,
-                   asset_class="stock", symbol="AAPL"):
+                   asset_class="stock", symbol="AAPL", symbols=None,
+                   inst_class=None):
+        from instruments.models import Instrument
         u = _user()
         self._etoro_row(u, cash=cash, asset_class=asset_class)
         if book:
             self._own_book(u)
         _pin(u)
+        symbols = tuple(symbols or (symbol,))
         cfg = _cfg(u, capital="5000", base_currency="USD",
-                   asset_class=asset_class, symbols=(symbol,),
+                   asset_class=asset_class, symbols=symbols,
                    enabled=enabled)
         cfg.extras = extras
         cfg.save(update_fields=["extras"])
-        _bars(symbol, age_hours=1.0)
+        for sym in symbols:
+            # the INSTRUMENT's class — the key §4 judges a multiplier on
+            # since 2026-09-26 (the engine's _instrument_class); the
+            # config's own class unless the test names another. _bars'
+            # get_or_create keeps the row made here.
+            Instrument.objects.get_or_create(symbol=sym, defaults={
+                "name": sym,
+                "asset_class": (inst_class or {}).get(sym, asset_class)})
+            _bars(sym, age_hours=1.0)
         return u, cfg
 
     def _lev_switch(self, on):
@@ -541,31 +553,66 @@ class TheLeverageIsJudgedBeforeArmingTests(TestCase):
         out = _run()
         self.assertIn(f"{cap}x", _blockers(out))
 
-    def test_forex_above_five_is_a_blocker(self):
-        """2a (2026-09-26): forex's ceiling is 5 == the platform cap, so 6
-        is caught by the platform-cap sentence BEFORE the class table —
-        this asserts that sentence. The class-ceiling sentence is pinned
-        on crypto 3 in tests/test_etoro_leverage.py TheRuleTests."""
-        self._armed_lev(extras={"leverage": 6}, asset_class="forex",
+    def test_forex_above_twenty_is_a_blocker(self):
+        """2026-09-26 (the operator: "forex max x20"): forex's ceiling is
+        20 == the platform cap, so 21 is caught by the platform-cap
+        sentence BEFORE the class table — this asserts that sentence."""
+        self._armed_lev(extras={"leverage": 21}, asset_class="forex",
                         symbol="EURUSD")
         self._lev_switch(True)
         out = _run()
-        self.assertIn("platform cap of 5x", _blockers(out))
+        self.assertIn("platform cap of 20x", _blockers(out))
         self.assertIn("not clamped", _blockers(out))
 
-    def test_forex_at_five_is_inside_the_ceiling(self):
-        """2a: forex's ceiling is 5 — inside every LIVE forex list
-        (2-30; AUD/NZD 20). The class-ceiling sentence itself is pinned
-        on crypto 3 in tests/test_etoro_leverage.py TheRuleTests: crypto
-        (2 < the cap) is the only class whose ceiling sits under the
-        platform cap, and EtoroAccount.is_primary_for carries no crypto
-        key, so the preflight cannot route a crypto config to eToro."""
-        self._armed_lev(extras={"leverage": 5}, asset_class="forex",
+    def test_forex_at_twenty_is_inside_the_ceiling(self):
+        """forex 20 — inside every LIVE forex list (2-30; AUD/NZD 20)."""
+        self._armed_lev(extras={"leverage": 20}, asset_class="forex",
                         symbol="EURUSD", cash=100000)
         self._lev_switch(True)
         out = _run()
         self.assertNotIn("x ceiling", _blockers(out))
         self.assertNotIn("platform cap", _blockers(out))
+        self.assertIn("leverage 20x (extras)", out)
+
+    def test_an_index_at_twenty_is_inside_its_ceiling(self):
+        """SPX500 in a STOCK config is judged as an index — the engine's
+        own key (_instrument_class) — and 20 is inside its ceiling (the
+        operator: "indices en x20"; LIVE long [2,5,10,20])."""
+        self._armed_lev(extras={"leverage": 20}, symbol="SPX500",
+                        inst_class={"SPX500": "index"}, cash=100000)
+        self._lev_switch(True)
+        out = _run()
+        self.assertNotIn("x ceiling", _blockers(out))
+        self.assertNotIn("platform cap", _blockers(out))
+        self.assertIn("leverage 20x (extras)", out)
+
+    def test_a_stock_beside_the_index_at_twenty_is_a_blocker(self):
+        """§4 judges every instrument class the config carries: AAPL
+        beside SPX500 at 20 is past the 5x stock ceiling."""
+        self._armed_lev(extras={"leverage": 20}, symbols=("SPX500", "AAPL"),
+                        inst_class={"SPX500": "index"}, cash=100000)
+        self._lev_switch(True)
+        out = _run()
+        self.assertIn("past the 5x ceiling this platform holds for stock",
+                      _blockers(out))
+
+    def test_commodity_above_ten_is_a_blocker(self):
+        """The operator: "cfd matière première ... disons x10": 11 is past
+        the commodity ceiling, 10 is inside it."""
+        self._armed_lev(extras={"leverage": 11}, asset_class="commodity",
+                        symbol="WHEAT", cash=100000)
+        self._lev_switch(True)
+        out = _run()
+        self.assertIn("past the 10x ceiling this platform holds for "
+                      "commodity", _blockers(out))
+
+    def test_commodity_at_ten_is_inside_the_ceiling(self):
+        self._armed_lev(extras={"leverage": 10}, asset_class="commodity",
+                        symbol="WHEAT", cash=100000)
+        self._lev_switch(True)
+        out = _run()
+        self.assertNotIn("x ceiling", _blockers(out))
+        self.assertIn("leverage 10x (extras)", out)
 
     def test_section_three_prints_the_world_the_cells_were_read_in(self):
         """[FIX 9] (2026-09-26, round 2): §3 prints the world the sync

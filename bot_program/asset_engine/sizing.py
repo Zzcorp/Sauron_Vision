@@ -239,9 +239,24 @@ def qty_for_risk(equity: float, f: float, entry: float, stop: float,
     return risk_budget / per_unit
 
 
+def _unit_scale(scale) -> float:
+    """A risk scale as a number in (0, 1]: above 1 is 1 (a scale never
+    raises risk past risk_fraction), and anything that is not a positive
+    finite number is 1 — never a larger risk, never a crash."""
+    try:
+        val = float(scale)
+    except (TypeError, ValueError):
+        return 1.0
+    if val != val or val <= 0 or val == float("inf"):
+        logger.warning("[sizing] risk scale %r is not a number in (0, 1] "
+                       "— unscaled", scale)
+        return 1.0
+    return min(val, 1.0)
+
+
 def size_position(cfg, *, asset_class: str, entry: float, stop: float,
                   direction: str, value_per_unit: float = 1.0,
-                  cap_class: str = None) -> dict:
+                  cap_class: str = None, risk_scale=None) -> dict:
     """The whole calculation, in one place.
 
     Returns {qty, stop, stop_widened, risk_fraction, risk_dollars,
@@ -256,8 +271,17 @@ def size_position(cfg, *, asset_class: str, entry: float, stop: float,
     through apply_stop_floor): an index symbol in a stock config sizes under
     the index cap. None means `asset_class`. The risk fraction stays
     config-keyed — it is the pool's rule.
+
+    `risk_scale` (2026-09-26) is the attack mode's conviction tier
+    (asset_engine/base.AssetBot._attack_tier): a number in (0, 1] that
+    scales the config's fraction BEFORE the stop floor and the size are
+    computed, so both read the tiered fraction. Clamped to (0, 1] here too
+    (_unit_scale): it can shrink risk, never raise it past
+    risk_fraction(cfg). None is the call as it always was.
     """
     f = risk_fraction(cfg)
+    if risk_scale is not None:
+        f = f * _unit_scale(risk_scale)
     equity = float(getattr(cfg, "capital", 0) or 0)
     stop_used, widened, skip = apply_stop_floor(cfg, cap_class or asset_class,
                                                 entry, stop, direction, f)

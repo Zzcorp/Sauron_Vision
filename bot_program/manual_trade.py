@@ -1128,6 +1128,17 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
             f"cash cost IS its notional. Size is the only lever; this pool "
             f"carries up to ${max_notional:,.0f} of notional."),
     }
+    # THE ATTACK MODE (extras['leverage'] = "auto", 2026-09-26) is a BOT
+    # decision: the tier and the multiplier are chosen per entry by the
+    # asset bots. This lane's ticket keeps a typed number or 1 —
+    # judge_order_leverage answers "auto" with no kwarg here — and its
+    # risk is the pool's own fraction. Said where the operator reads it.
+    from bot_program.asset_engine.base import leverage_is_auto
+    if leverage_is_auto(getattr(cfg, "extras", None)):
+        leverage["note"] += (
+            " Attack mode (extras['leverage'] = \"auto\") is a bot "
+            "decision: this hand-taken ticket goes at 1x, at the pool's own "
+            "risk fraction — no tier and no multiplier.")
 
     return {
         "symbol": inst.symbol, "side": side, "qty": qty,
@@ -1832,6 +1843,9 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             # NONE, and it must not send the adapter's 1 under a key that
             # says 2. Judged with the bots' own rule on the routed client;
             # a typed 1 passes (it IS the default); anything else refuses.
+            # "auto" (the attack mode, 2026-09-26) is a bot decision: the
+            # rule answers it with no kwarg here (no pick), so the ticket
+            # goes at 1x — the preview says so in words.
             from bot_program.asset_engine.base import judge_order_leverage
             from bot_program.engine.capabilities import adapter_key
             _lev, _lev_why = judge_order_leverage(cfg, cls, adapter_key(client))

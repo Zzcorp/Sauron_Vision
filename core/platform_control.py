@@ -311,10 +311,14 @@ DEFAULT_COMPONENTS = [
     # engine also judges the multiplier against the instrument's LIVE
     # leverageValues (eligibility, measured 2026-09-23); a missing row
     # reads OFF. Read by asset_engine/base.judge_order_leverage on the
-    # tick and by preflight_live §4. Description measured at 297 chars
-    # (< 300).
+    # tick and by preflight_live §4. 2026-09-26: the platform cap is 20x
+    # (forex and index 20, commodity 10, stock 5, crypto 2), and the
+    # attack mode ("auto") sends 1x while this is OFF. The proven
+    # multipliers bind "auto" only; a typed multiplier needs its class
+    # proven, the class ceiling and the instrument's LIVE list.
+    # Description measured at 299 chars (< 300).
     {"key": "etoro_leverage_live", "name": "eToro Leverage (per config)",
-     "description": "Off (default): extras['leverage'] above 1 is REFUSED at the tick (leverage_refused) and blocked by preflight_live; nothing is sent at 1. On: the multiplier rides the eToro order body only if it is in the instrument's LIVE leverageValues and the class is in the proven set (ETORO_DEPARTURE.md 7-0).",
+     "description": "Off (default): a typed extras['leverage'] above 1 is REFUSED at the tick and by preflight_live; 'auto' goes at 1x. On: up to 20x (forex, index; commodity 10x, stock 5x, crypto 2x) if in the instrument's LIVE leverageValues and its class is in the proven set; 'auto' is held to its proven multiplier.",
      "category": "system"},
 ]
 

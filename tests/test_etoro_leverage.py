@@ -187,19 +187,38 @@ class TheRuleTests(TestCase):
                                                 cls, "etoro")
                 self.assertIsNone(lev)
                 self.assertIn("x", why)
-        # 2a (2026-09-26): forex's ceiling is 5 — the platform cap — so 6
-        # meets the cap sentence first, and 5 is inside the ceiling (it is
-        # refused later, for the missing own book, not by the table)
-        lev, why = judge_order_leverage(self._cfg(leverage=6), "forex",
+        # 2026-09-26, the operator's numbers: forex and index 20 — the
+        # platform cap — so 21 meets the cap sentence first, and 20 is
+        # inside the ceiling (refused later, for the missing own book, not
+        # by the table); commodity 10, so 11 meets the class sentence
+        for cls in ("forex", "index"):
+            with self.subTest(cls=cls):
+                lev, why = judge_order_leverage(self._cfg(leverage=21), cls,
+                                                "etoro")
+                self.assertIsNone(lev)
+                self.assertIn("platform cap of 20x", why)
+                lev, why = judge_order_leverage(self._cfg(leverage=20), cls,
+                                                "etoro")
+                self.assertIsNone(lev)
+                self.assertNotIn("x ceiling", why)
+                self.assertNotIn("platform cap", why)
+                self.assertIn("/setup/", why)
+        lev, why = judge_order_leverage(self._cfg(leverage=11), "commodity",
                                         "etoro")
         self.assertIsNone(lev)
-        self.assertIn("platform cap of 5x", why)
-        lev, why = judge_order_leverage(self._cfg(leverage=5), "forex",
+        self.assertIn("past the 10x ceiling this platform holds for "
+                      "commodity", why)
+        lev, why = judge_order_leverage(self._cfg(leverage=10), "commodity",
                                         "etoro")
         self.assertIsNone(lev)
         self.assertNotIn("x ceiling", why)
         self.assertIn("/setup/", why)
-        # the class-ceiling sentence, on the one class under the cap
+        lev, why = judge_order_leverage(self._cfg(leverage=6), "stock",
+                                        "etoro")
+        self.assertIsNone(lev)
+        self.assertIn("past the 5x ceiling this platform holds for stock",
+                      why)
+        # the class-ceiling sentence on crypto (its LIVE list is [2])
         lev, why = judge_order_leverage(self._cfg(leverage=3), "crypto",
                                         "etoro")
         self.assertIsNone(lev)
@@ -251,9 +270,13 @@ class TheCapsAgreeTests(SimpleTestCase):
         self.assertEqual(LEVERAGE_MAX, MAX_ORDER_LEVERAGE)
         for cls, cap in ORDER_LEVERAGE_CEILING.items():
             self.assertLessEqual(cap, MAX_ORDER_LEVERAGE, cls)
-        # 2a (2026-09-26): forex 5, since capital_at_work reads the row's
-        # multiplier; inside every LIVE forex list (MeasuredLiveListsTests)
-        self.assertEqual(ORDER_LEVERAGE_CEILING["forex"], 5)
+        # 2026-09-26, the operator's numbers: the platform cap 20; forex
+        # and index 20, commodity 10 — each inside every LIVE list of its
+        # class (MeasuredLiveListsTests); stock/etf 5 and crypto 2 as before
+        self.assertEqual(MAX_ORDER_LEVERAGE, 20)
+        self.assertEqual(ORDER_LEVERAGE_CEILING, {
+            "stock": 5, "etf": 5, "index": 20, "commodity": 10,
+            "crypto": 2, "forex": 20, "options": 1, "cfd": 1})
 
 
 class TheEntryPassesItThroughTests(TestCase):
@@ -1231,12 +1254,14 @@ class MeasuredLiveListsTests(SimpleTestCase):
                 self.assertLessEqual(ORDER_LEVERAGE_CEILING[cls], live_max)
 
     def test_each_ceiling_is_the_platform_cap_or_the_live_maximum(self):
-        """2a in writing: every eToro class is held at the LOWER of the
-        platform cap (MAX_ORDER_LEVERAGE, 5) and its smallest measured LIVE
-        long maximum — stock/etf/forex/index/commodity 5 (forex from 1,
-        since capital_at_work reads the row's multiplier), crypto 2 (its
-        LIVE list is [2]). options/cfd have no eToro path: 1, so a typed
-        multiplier is refused by the table and nothing is sent."""
+        """In writing: every eToro class is held at the LOWER of the
+        platform cap (MAX_ORDER_LEVERAGE, 20 since 2026-09-26) and its
+        smallest measured LIVE long maximum — stock/etf 5, forex 20 (AUD
+        and NZD pairs stop at 20), index 20, commodity 10, crypto 2 (its
+        LIVE list is [2]); the operator's written numbers (forex 20, index
+        20, commodity 10) are exactly those maxima. options/cfd have no
+        eToro path: 1, so a typed multiplier is refused by the table and
+        nothing is sent."""
         from types import SimpleNamespace
 
         from bot_program.asset_engine.base import (MAX_ORDER_LEVERAGE,
@@ -1246,7 +1271,7 @@ class MeasuredLiveListsTests(SimpleTestCase):
             with self.subTest(cls=cls):
                 self.assertEqual(ORDER_LEVERAGE_CEILING[cls],
                                  min(MAX_ORDER_LEVERAGE, live_max))
-        self.assertEqual(ORDER_LEVERAGE_CEILING["forex"], 5)
+        self.assertEqual(ORDER_LEVERAGE_CEILING["forex"], 20)
         for cls in ("options", "cfd"):
             with self.subTest(cls=cls):
                 self.assertEqual(ORDER_LEVERAGE_CEILING[cls], 1)
