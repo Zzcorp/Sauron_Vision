@@ -329,6 +329,11 @@ def sync_broker_account() -> dict:
 
     out = {"attempted": 0, "stored": 0, "unreachable": 0}
     if not is_ibkr_available():
+        # No keyed account, nothing to read: the missing library costs
+        # nothing, so the pass is idle, not "not configured" (2026-09-26).
+        # A keyed account without the library is still the warning.
+        if not IBKRAccount.objects.exclude(account_id_enc="").exists():
+            return {**out, "idle": "no keyed IBKR account"}
         return {**out, "skipped": "ib_insync not installed"}
 
     # ib_insync needs an event loop; celery prefork workers, like web
@@ -447,6 +452,17 @@ def sync_broker_account() -> dict:
                 _follow_the_account(user, value, currency)
                 _shock_trigger(user, now)
         out["stored"] += 1
+    if not out["attempted"]:
+        # IDLE, NOT "RAN AND PRODUCED NOTHING" (2026-09-26). No keyed IBKR
+        # account belongs to a user with a book, so this pass read nothing — IBKR is
+        # being retired, and on the live box that is every pass. The gate
+        # writes nothing for an idle result: broker_account_sync is the row
+        # of all three walks, and this verdict used to land on it minutes
+        # after eToro's, turning a healthy sync into a warning in the daily
+        # digest and an eToro error into a quiet "ran and produced
+        # nothing". A keyed account
+        # that answered nothing was attempted, and is still a warning.
+        out["idle"] = "no IBKR account to read"
     return out
 
 
@@ -711,6 +727,14 @@ def sync_saxo_accounts():
                     and book.pk == acct.pk:
                 _follow_the_account(user, value, currency)
                 _shock_trigger(user, now)
+    if not out["attempted"]:
+        # IDLE (2026-09-26): no keyed Saxo account, or none with a live
+        # session — the keeper (refresh_saxo_sessions) owns the session and
+        # /brokers/ already says "sign in again". Nothing was read, so the
+        # gate writes nothing to the row the three walks share; see the
+        # IBKR walk above and core.task_gate.guarded_task.
+        out["idle"] = ("no live Saxo session" if out["no_session"]
+                       else "no keyed Saxo account")
     return out
 
 

@@ -242,6 +242,87 @@ class SilentIsWhatTheGateRecordsTests(TestCase):
         self.assertIn("not configured", msg)
 
 
+# ── an idle pass writes nothing (2026-09-26) ────────────────────────────
+
+class AnIdlePassWritesNothingTests(TestCase):
+    """core.task_gate's idle convention. One component row can be written
+    by several tasks — broker_account_sync is the row of the IBKR, Saxo and
+    eToro walks — and a walk with nothing to read used to write "ran and
+    produced nothing" over the verdict of the walk that read: a healthy
+    eToro sync became a warning in the daily digest, and an eToro error
+    became nothing at all. A result with a truthy `idle` is not a run of
+    the component; every other result is judged exactly as before."""
+
+    def setUp(self):
+        _component("platform_master", category="system")
+
+    @staticmethod
+    def _through_the_gate(key, result=None, raises=None):
+        from core.task_gate import guarded_task
+
+        def walk():
+            if raises is not None:
+                raise raises
+            return result
+        return guarded_task(key)(walk)()
+
+    @staticmethod
+    def _row(key):
+        from core.platform_control import PlatformComponent
+        return PlatformComponent.objects.get(key=key)
+
+    def test_an_idle_result_leaves_the_row_exactly_as_it_was(self):
+        """Real fault, kept up: the error the last real pass wrote stands."""
+        then = timezone.now() - timedelta(minutes=7)
+        _component("walks_x", last_status="error",
+                   last_message="eToro answered 500", last_run_at=then,
+                   run_count=4, error_count=2)
+        out = self._through_the_gate(
+            "walks_x", {"attempted": 0, "stored": 0,
+                        "idle": "nothing to read"})
+        row = self._row("walks_x")
+        self.assertEqual((row.last_status, row.last_message, row.run_count,
+                          row.error_count, row.last_run_at),
+                         ("error", "eToro answered 500", 4, 2, then))
+        self.assertEqual(out["idle"], "nothing to read")
+
+    def test_the_same_counts_without_idle_still_ran_and_produced_nothing(self):
+        """Real fault, kept up: a sole writer that does no work is exactly
+        what the gate exists to report."""
+        _component("poller_x", last_run_at=timezone.now() - timedelta(hours=1))
+        self._through_the_gate("poller_x", {"attempted": 0, "stored": 0})
+        row = self._row("poller_x")
+        self.assertEqual((row.last_status, row.last_message),
+                         ("warning", "ran and produced nothing"))
+
+    def test_an_empty_idle_reason_is_not_idle(self):
+        """Real fault, kept up: only a stated reason makes a pass idle."""
+        _component("poller_y")
+        self._through_the_gate("poller_y",
+                               {"idle": "", "parsed": 5, "stored": 0})
+        row = self._row("poller_y")
+        self.assertEqual((row.last_status, row.last_message),
+                         ("warning", "handled 5 rows and stored none"))
+
+    def test_a_raise_is_still_an_error(self):
+        """Real fault, kept up."""
+        _component("walks_z")
+        with self.assertRaises(RuntimeError):
+            self._through_the_gate("walks_z", raises=RuntimeError("boom"))
+        row = self._row("walks_z")
+        self.assertEqual((row.last_status, row.last_message),
+                         ("error", "boom"))
+
+    def test_the_wrapper_names_the_component_it_writes(self):
+        """What lets the digest read each beat's rhythm off the schedule
+        — and so keep a stopped component reachable."""
+        from core.task_gate import guarded_task
+        # A name, not a literal: tests.test_component_registry reads every
+        # literal key handed to the gate and wants each one registered.
+        key = "walks_q"
+        self.assertEqual(guarded_task(key)(lambda: None).component_key, key)
+
+
 # ── the COT node says what it measured ──────────────────────────────────
 
 class CotNodeTests(TestCase):
