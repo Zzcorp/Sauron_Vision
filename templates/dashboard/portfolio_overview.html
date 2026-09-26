@@ -185,13 +185,20 @@ trade and this page would go on showing nothing until they reloaded it.
             <a href="{% url 'positions_list' %}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">all positions →</a>
         </span>
     </div>
+    {% if not live_only %}{% include "_partials/position_filter.html" with view=open_view label="open positions" %}{% endif %}
     <div data-sv-live="pf-open">
+    {% include "_partials/position_view_note.html" with view=open_view noun="open positions" %}
     {% if open_positions %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
         <thead><tr><th>symbol</th><th>side</th><th class="num">qty</th><th class="num">entry</th><th class="num">last</th><th class="num">unreal P&amp;L</th><th class="num">%</th><th class="num">R</th><th class="nowrap">action</th></tr></thead>
         <tbody>
-            {% for p in open_positions %}
+            {# One tbody per group, as on /positions/: the header's scope="rowgroup" covers its own rows only. #}
+            {% for g in open_view.groups %}{% if not forloop.first %}
+        </tbody>
+        <tbody>{% endif %}
+            {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=9 scope="pf" %}{% endif %}
+            {% for p in g.rows %}
             <tr data-sv-position-row>
                 <td class="nowrap"><strong>{{ p.symbol }}</strong></td>
                 <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
@@ -216,9 +223,13 @@ trade and this page would go on showing nothing until they reloaded it.
                 </td>
             </tr>
             {% endfor %}
+            {% endfor %}
         </tbody>
     </table>
     </div>
+    {% elif open_view.n_total %}
+    {# The book is not empty: the filter matched nothing. #}
+    <div class="empty-state" style="padding:24px;"><p>NO OPEN POSITION MATCHES THIS FILTER — <a href="{{ open_view.clear_href }}" class="pos-filter-clear">clear it</a> to see all {{ open_view.n_total }}</p></div>
     {% else %}
     <div class="empty-state" style="padding:24px;"><p>NO OPEN POSITIONS</p></div>
     {% endif %}

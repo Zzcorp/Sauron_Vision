@@ -185,8 +185,9 @@ honest freshness claim.{% endcomment %}
         {# the reason to be flat is the market rather than the trade. Only #}
         {# rendered when there is something to close, so the page never #}
         {# offers an action that would report "nothing to do". #}
+        {# A filter narrows the TABLE, never this button: it closes the whole book, so under a filter its label and tooltip say so (2026-09-26). No count on it: it sits outside every live region, and a number here would go stale after a fill; the note inside pos-open carries M and is re-rendered each sweep. #}
         {% if positions %}
-        <button type="button" class="btn btn-sm btn-danger" id="svCloseAll">Close all</button>
+        <button type="button" class="btn btn-sm btn-danger" id="svCloseAll"{% if open_view.filtered %} title="Acts on the whole book, not only the rows this filter shows; its preview names any position it cannot close." aria-label="Close all open positions in the whole book, not only the filtered rows shown"{% endif %}>Close all{% if open_view.filtered %} (whole book){% endif %}</button>
         {% endif %}
         {# Says which way the numbers below are arriving: pushed on fills, or #}
         {# swept on a timer because the feed is down. It reads the class #}
@@ -194,8 +195,10 @@ honest freshness claim.{% endcomment %}
         <span class="sv-live-chip" data-sv-live-status>◉ LIVE</span>
         </span>
     </div>
+    {% if not live_only %}{% include "_partials/position_filter.html" with view=open_view label="open positions" %}{% endif %}
     <div data-sv-live="pos-open">
-    {% if positions %}
+    {% include "_partials/position_view_note.html" with view=open_view noun="open positions" closes=1 %}
+    {% if positions_detailed %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
         {# Capital sits beside the prices because it is the question the price #}
@@ -219,7 +222,12 @@ honest freshness claim.{% endcomment %}
         {# to an Instrument, or one carrying a character the route cannot #}
         {# hold, yields "" and renders as plain text instead of 500ing the #}
         {# whole book over one row. #}
-        {% for p, d in positions_detailed %}
+        {# One tbody per group (2026-09-26): the group header's scope="rowgroup" then covers its own rows and no other group's. Ungrouped, this is the one tbody it always was. #}
+        {% for g in open_view.groups %}{% if not forloop.first %}
+        </tbody>
+        <tbody>{% endif %}
+        {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=14 scope="pos" %}{% endif %}
+        {% for p, d in g.pairs %}
         {% if p.instrument.has_page %}{% url 'instrument_detail' p.instrument.symbol as instrument_url%}{% endif %}
         <tr data-sv-position-row
             data-pos-instrument-href="{{ instrument_url }}"
@@ -358,8 +366,14 @@ honest freshness claim.{% endcomment %}
             </td>
         </tr>
         {% endfor %}
+        {% endfor %}
         </tbody>
     </table>
+    </div>
+    {% elif positions %}
+    {# The book is not empty: the filter matched nothing. NO OPEN POSITIONS here would be the table lying about the book. #}
+    <div class="empty-state">
+        <p>NO OPEN POSITION MATCHES THIS FILTER — <a href="{{ open_view.clear_href }}" class="pos-filter-clear">clear it</a> to see all {{ open_view.n_total }}</p>
     </div>
     {% else %}
     <div class="empty-state">
@@ -451,9 +465,13 @@ honest freshness claim.{% endcomment %}
         <span class="card-title">Trade History</span>
         <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);letter-spacing:1px;">{{ total_closed }} TRADES</span>
     </div>
-    {% if closed_positions %}
+    {% include "_partials/position_filter.html" with view=closed_view label="closed trades" %}
+    {% include "_partials/position_view_note.html" with view=closed_view noun="closed trades" %}
+    {% if closed_detailed %}
     <div class="ph-list">
-        {% for p, d in closed_detailed %}
+        {% for g in closed_view.groups %}
+        {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=0 scope="ph" %}{% endif %}
+        {% for p, d in g.pairs %}
         {# The card toggles on click, so the symbol link has to say the #}
         {# click was for it: without the guard, following the link ALSO #}
         {# expanded the card the operator was leaving. #}
@@ -589,6 +607,12 @@ honest freshness claim.{% endcomment %}
             </div>
         </div>
         {% endfor %}
+        {% endfor %}
+    </div>
+    {% elif closed_positions %}
+    {# The history is not empty: the filter matched nothing. #}
+    <div class="empty-state">
+        <p>NO CLOSED TRADE MATCHES THIS FILTER — <a href="{{ closed_view.clear_href }}" class="pos-filter-clear">clear it</a> to see all {{ closed_view.n_total }}</p>
     </div>
     {% else %}
     <div class="empty-state">
@@ -987,6 +1011,10 @@ a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
 (function () {
     var btn = document.getElementById("svCloseAll");
     if (!btn) return;
+    /* The label the page rendered is the one every reset puts back: under
+       a filter it says "Close all (whole book)", because this button
+       closes the whole book whatever the table shows. */
+    var label = btn.textContent;
 
     function csrf() {
         var m = document.cookie.match(/csrftoken=([^;]+)/);
@@ -1076,7 +1104,7 @@ a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
                 post("/positions/close-all/", { pin: (ok === true ? "" : ok) })
                     .then(function (res) {
                         release();
-                        btn.textContent = "Close all";
+                        btn.textContent = label;
                         if (res.error) {
                             /* NOT "nothing was closed": the server commits
                                each close as it goes, so a response we could
@@ -1122,7 +1150,7 @@ a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
                     });
             }).catch(function (e) {
                 release();
-                btn.textContent = "Close all";
+                btn.textContent = label;
                 SV.overlay.alert({
                     title: "Could not read the result",
                     message: "The confirmation did not come back (" + e +

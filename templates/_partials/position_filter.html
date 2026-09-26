@@ -1,0 +1,166 @@
+{% comment %}
+The order-and-filter bar over a position table (2026-09-26, the operator's
+ask: the book in purchase order, filtered to one asset or one type, and
+grouped).
+
+A plain GET form on purpose: /positions/live/ and /portfolio/live/ fetch
+LIVE_URL + window.location.search, so what this form puts in the query
+string rides every refresh through the same view code — a filter kept in
+the browser alone would be wiped by the next swap. Outside the live region,
+so a sweep never swaps a select out from under the operator; the counts in
+the options are the book as of this page load.
+
+Parameters
+  view   the dict dashboard.position_views.build_view returned
+  label  what the table holds, for the form's accessible name
+{% endcomment %}
+<style>
+/* The bar, the "showing N of M" note and the group header rows share one
+   block: every page that renders a position table includes this partial. */
+.pos-filter {
+    display: flex; flex-wrap: wrap; align-items: flex-end;
+    gap: 8px 12px; padding: 10px 12px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+/* Two fields a row on a phone: at 8.5rem each, two plus the 12px gap
+   overran a 360px card's 278px and every select took its own row, a
+   327px bar over the table. Half the bar less half the gap fits two. */
+.pos-filter-field {
+    display: flex; flex-direction: column; gap: 3px;
+    flex: 1 1 min(8.5rem, calc(50% - 7px)); min-width: 0; max-width: 14rem;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.2px;
+    text-transform: uppercase; color: var(--text-muted);
+}
+/* The global select is a 12px/16px form control; in a toolbar it is a
+   compact one, still wide enough to read its longest option. */
+.pos-filter .pos-filter-field select {
+    width: 100%; min-width: 0; padding: 6px 26px 6px 8px;
+    font-size: 11px; letter-spacing: normal; text-transform: none;
+    background-position: right 8px center;
+}
+.pos-filter-actions {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.pos-filter-clear {
+    font-family: var(--font-mono); font-size: 11px; color: var(--accent);
+}
+.pos-filter select:focus-visible,
+.pos-filter-clear:focus-visible {
+    outline: 1px solid var(--accent); outline-offset: 2px;
+}
+.pos-view-note {
+    margin: 0; padding: 7px 12px;
+    font-family: var(--font-mono); font-size: 10.5px;
+    color: var(--text-secondary); white-space: normal;
+    border-bottom: 1px dashed color-mix(in srgb, var(--border) 60%, transparent);
+}
+.pos-view-note b { color: var(--text-primary); font-weight: 600; }
+/* A group header inside the SAME table: one cell spanning every column, so
+   the columns, the dwell card and the row click keep working below it. */
+.sv-perf-table tr.pos-group-row > th {
+    text-align: left; font-weight: 400; white-space: normal;
+    padding: 8px 12px 6px;
+    background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.ph-group-row {
+    padding: 8px 14px 6px;
+    background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
+    border-bottom: 1px solid var(--border);
+}
+.pos-group, .ph-group-row {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+}
+.pos-group-name {
+    font-family: var(--font-display); font-size: 12px; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--text-primary); overflow-wrap: anywhere;
+}
+.pos-group-fig b { color: var(--text-primary); font-weight: 600; }
+.pos-group-fig b.up { color: var(--accent); }
+.pos-group-fig b.down { color: var(--accent-red); }
+.pos-group-cut { cursor: help; }
+/* Below 768px a six-column table gets a 34rem runway in a sideways-
+   scrolling wrapper, and a header cell spanning it ran its P&L past the
+   card's edge. The figures stick to the wrapper's left edge and wrap at
+   the phone's width, so the one number the header exists for is read
+   without dragging the table. */
+@media (max-width: 768px) {
+    .sv-perf-table tr.pos-group-row .pos-group {
+        position: sticky; left: 12px;
+        max-width: calc(100vw - 84px);
+    }
+}
+</style>
+{% if view.n_total %}
+<form method="get" class="pos-filter" data-pos-filter aria-label="Order, filter and group the {{ label }}">
+    {% for name, value in view.keep %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+    <label class="pos-filter-field">Order
+        <select name="sort">{% for o in view.sort_options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+    </label>
+    <label class="pos-filter-field">Type
+        <select name="class"><option value="">All types ({{ view.n_total }})</option>{% for o in view.class_options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+    </label>
+    <label class="pos-filter-field">Asset
+        <select name="symbol"><option value="">All assets ({{ view.n_total }})</option>{% for o in view.symbol_options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+    </label>
+    <label class="pos-filter-field">Side
+        <select name="side"><option value="">Both sides</option>{% for o in view.side_options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+    </label>
+    {% if view.venue_options %}
+    <label class="pos-filter-field">Venue
+        <select name="venue"><option value="">Live and paper</option>{% for o in view.venue_options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+    </label>
+    {% endif %}
+    <label class="pos-filter-field">Group
+        <select name="group">{% for o in view.group_options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+    </label>
+    <span class="pos-filter-actions">
+        <button type="submit" class="btn btn-sm btn-ghost">Apply</button>
+        {% if view.changed %}<a class="pos-filter-clear" href="{{ view.clear_href }}">clear</a>{% endif %}
+    </span>
+</form>
+<script>
+/* Apply on a pointer pick; a keyboard walk through the options waits for
+   Enter or the Apply button. Chrome on Windows fires change on every arrow
+   press of a closed select, and a page that navigated away on the first
+   arrow would be a page a keyboard cannot use. Without script the Apply
+   button is the whole mechanism.
+   The key and the pointer are noted in the CAPTURE phase on window, the
+   first stop of every event: the tour stops keys capture-phase on
+   document, and a key that never reached a bubbling listener left the
+   first arrow free to submit the page. Enter stays a bubbling listener on
+   the form, so a surface that owns the keyboard still gets it first. */
+(function () {
+    "use strict";
+    Array.prototype.forEach.call(
+        document.querySelectorAll("form[data-pos-filter]"), function (form) {
+            /* Bound once: a page that includes this bar twice must not
+               submit a form twice on one pick. */
+            if (form.hasAttribute("data-pos-filter-bound")) return;
+            form.setAttribute("data-pos-filter-bound", "");
+            var keyed = false;
+            window.addEventListener("keydown", function (e) {
+                var t = e.target;
+                if (t && t.tagName === "SELECT" && t.form === form) keyed = true;
+            }, true);
+            window.addEventListener("pointerdown", function (e) {
+                if (e.target && form.contains(e.target)) keyed = false;
+            }, true);
+            form.addEventListener("keydown", function (e) {
+                if (!e.target || e.target.tagName !== "SELECT") return;
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    form.submit();
+                }
+            });
+            form.addEventListener("change", function (e) {
+                if (!e.target || e.target.tagName !== "SELECT" || keyed) return;
+                form.submit();
+            });
+        });
+})();
+</script>
+{% endif %}

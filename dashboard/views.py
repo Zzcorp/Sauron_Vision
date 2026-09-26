@@ -2012,6 +2012,17 @@ def _render_portfolio(request, live_only):
         key=lambda r: r["value"], reverse=True,
     )
 
+    # ORDER, FILTER, GROUP (2026-09-26, the operator's ask: the book in
+    # purchase order, narrowed to one asset or one type, grouped). The GET
+    # params ride /portfolio/live/ like every refresh, so the second
+    # render is this same call. Eight rows at most, cut AFTER the filters
+    # and the sort, and the table says "showing N of M" whenever it holds
+    # less than the book; the strip and the donut above stay on the
+    # unfiltered rows (dashboard/position_views.py).
+    from .position_views import build_view
+    pf_view = build_view(request.GET, [(row, None) for row in open_rows],
+                         limit=8, base_url=reverse("portfolio_overview"))
+
     context = {
         "page_id": "portfolio", "portfolio": portfolio,
         # Pools / used / free / cash — the money question, answered by ONE
@@ -2021,7 +2032,10 @@ def _render_portfolio(request, live_only):
         "capital": _capital_or_none(request.user),
         "strip": strip,
         "open_positions_count": n_open,
-        "open_positions": open_rows[:8],
+        # The rows the table shows, in the view's order; the cap moved
+        # into build_view (2026-09-26) so it applies after the sort.
+        "open_positions": [row for row, _detail in pf_view["pairs"]],
+        "open_view": pf_view,
         "n_priced": n_priced,
         # What the strip's TOTAL VALUE actually covered. The number itself is
         # in strip.value; these two say whether it is the whole book, so the
@@ -2728,6 +2742,27 @@ def _render_positions(request, live_only):
          for k, v in by_class.items()],
         key=lambda r: -r["exposure"])
 
+    # ORDER, FILTER, GROUP (2026-09-26, the operator's ask: the book in
+    # purchase order, narrowed to one asset or one type, grouped). The GET
+    # params ride /positions/live/ for free — live_region.html fetches
+    # LIVE_URL + window.location.search — so a refresh renders the same
+    # table as the first paint through this same call. The PAIRS move,
+    # never two lists apart, so a row cannot carry another row's card.
+    # The strip, the donut and the class breakdown above stay on the
+    # unfiltered book, and so does Close all (its own endpoint).
+    from .position_views import build_view
+    positions_url = reverse("positions_list")
+    open_view = build_view(
+        request.GET if tab == "open" else {},
+        list(zip(open_rows,
+                 _position_card_details(request.user, open_objects))),
+        keep={"tab": "open"}, base_url=positions_url)
+    closed_view = build_view(
+        request.GET if tab == "history" else {},
+        list(zip(closed_positions,
+                 _position_card_details(request.user, closed_positions))),
+        history=True, keep={"tab": "history"}, base_url=positions_url)
+
     context = {
         "page_id": "positions",
         # Pools / used / free / cash — the money question, answered by ONE
@@ -2743,17 +2778,19 @@ def _render_positions(request, live_only):
         # them — while the row's own cells read the live dict, so the two
         # halves of a row cannot quote different marks. Zipped rather than
         # keyed because a portfolio.Position row has no id to join on.
-        "positions_detailed": list(zip(
-            open_rows, _position_card_details(request.user, open_objects))),
+        # Since 2026-09-26 the zip happens once, above, and build_view
+        # filters, sorts and groups the pairs; this is the rendered order
+        # (open_view["groups"] flattened).
+        "positions_detailed": open_view["pairs"],
+        "open_view": open_view,
         # CLOSED rows get the same treatment. They used to carry eight
         # cells and nothing else — no capital, no leverage, no venue, no
         # rule, not even the R the trade was graded on — so a trade the
         # operator wanted to LEARN from was the thinnest row on the page,
         # which is exactly backwards: an open position can be watched, a
         # closed one is only ever what was written down about it.
-        "closed_detailed": list(zip(
-            closed_positions,
-            _position_card_details(request.user, closed_positions))),
+        "closed_detailed": closed_view["pairs"],
+        "closed_view": closed_view,
         "n_priced": n_priced,
         "direction_donut": direction_donut,
         "asset_breakdown": asset_breakdown,

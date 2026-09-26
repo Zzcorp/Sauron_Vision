@@ -1,0 +1,23 @@
+{% comment %}
+One group's header inside a position table (2026-09-26). In a table
+(cols > 0) it is a row whose one cell spans every column, so the column
+layout, the dwell card (data-sv-position-row) and the row click keep
+working under it; in the history list (cols 0) it is a heading div. The
+tables open a <tbody> per group, so scope="rowgroup" names this group's
+rows and not the groups after it.
+
+Name, count, exposure, P&L with its tone. P&L is None when nothing in the
+group could be priced, and prints the em dash — never 0, which would read
+as a group that is exactly flat. The count and the sums cover every row of
+the group, even the ones /portfolio/'s cap keeps off the table; "k of n
+shown" says when it did.
+
+Parameters
+  g      one group from dashboard.position_views.build_view
+  cols   the table's column count; 0 in the history list
+  scope  the live-key prefix (pos / pf / ph)
+{% endcomment %}
+{% if cols %}<tr class="pos-group-row"><th scope="rowgroup" colspan="{{ cols }}"><span class="pos-group">{% else %}<div class="ph-group-row" role="heading" aria-level="3">{% endif %}<span class="pos-group-name">{{ g.label }}</span><span class="pos-group-n">{{ g.n }} {{ g.noun }}{{ g.n|pluralize }}</span>{% if g.cut %}<span class="pos-group-cut" title="{{ g.cut_title }}">{{ g.n_shown }} of {{ g.n }} shown</span>{% endif %}
+<span class="pos-group-fig" title="{{ g.exposure_title }}">{{ g.exposure_label }} <b>{% if g.exposure is not None %}{{ g.exposure_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</b></span>
+<span class="pos-group-fig" title="{{ g.pnl_title }}">{{ g.pnl_label }} <b class="{{ g.pnl_tone }}" data-sv-live-key="{{ scope }}.group.{{ g.kind }}.{{ g.key }}.pnl">{% if g.pnl is not None %}{{ g.pnl_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</b></span>
+{% if cols %}</span></th></tr>{% else %}</div>{% endif %}
