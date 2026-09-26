@@ -541,12 +541,53 @@ class TheLeverageIsJudgedBeforeArmingTests(TestCase):
         out = _run()
         self.assertIn(f"{cap}x", _blockers(out))
 
-    def test_forex_above_one_is_a_blocker(self):
-        self._armed_lev(extras={"leverage": 2}, asset_class="forex",
+    def test_forex_above_five_is_a_blocker(self):
+        """2a (2026-09-27): forex's ceiling is 5 == the platform cap, so 6
+        is caught by the platform-cap sentence BEFORE the class table —
+        this asserts that sentence. The class-ceiling sentence is pinned
+        on crypto 3 in tests/test_etoro_leverage.py TheRuleTests."""
+        self._armed_lev(extras={"leverage": 6}, asset_class="forex",
                         symbol="EURUSD")
         self._lev_switch(True)
         out = _run()
-        self.assertIn("1x ceiling", _blockers(out))
+        self.assertIn("platform cap of 5x", _blockers(out))
+        self.assertIn("not clamped", _blockers(out))
+
+    def test_forex_at_five_is_inside_the_ceiling(self):
+        """2a: forex's ceiling is 5 — inside every LIVE forex list
+        (2-30; AUD/NZD 20). The class-ceiling sentence itself is pinned
+        on crypto 3 in tests/test_etoro_leverage.py TheRuleTests: crypto
+        (2 < the cap) is the only class whose ceiling sits under the
+        platform cap, and EtoroAccount.is_primary_for carries no crypto
+        key, so the preflight cannot route a crypto config to eToro."""
+        self._armed_lev(extras={"leverage": 5}, asset_class="forex",
+                        symbol="EURUSD", cash=100000)
+        self._lev_switch(True)
+        out = _run()
+        self.assertNotIn("x ceiling", _blockers(out))
+        self.assertNotIn("platform cap", _blockers(out))
+
+    def test_section_three_prints_the_world_the_cells_were_read_in(self):
+        """[FIX 9] (2026-09-27, round 2): §3 prints the world the sync
+        stamped beside the cells' age, and — when that stamp is not this
+        LIVE row's world, or was never written — the consequence on the
+        same line: the headroom refuses every eToro entry on those cells
+        until the sync re-reads. The cells are read, never computed."""
+        from bot_program.models import EtoroAccount
+        u, _cfg = self._armed_lev(extras={}, cash=1.4)
+        out = _run()
+        self.assertIn("available cash  1.40", out)
+        self.assertIn("world unstamped; this row trades live — every eToro "
+                      "entry is refused on these cells until the sync "
+                      "re-reads", out)
+        EtoroAccount.objects.filter(user=u).update(last_margin_world="demo")
+        out = _run()
+        self.assertIn("read in demo; this row trades live — every eToro "
+                      "entry is refused", out)
+        EtoroAccount.objects.filter(user=u).update(last_margin_world="live")
+        out = _run()
+        self.assertIn("h old, read in live)", out)
+        self.assertNotIn("refused on these cells", out)
 
     def test_no_own_book_is_a_blocker_naming_setup(self):
         self._armed_lev(extras={"leverage": 2}, cash=1000, book=False)

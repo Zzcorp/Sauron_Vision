@@ -178,6 +178,26 @@ def run_bot_tick(user_id: int):
                     log.error("legacy tick %s REFUSED (%s): %s — nothing was "
                               "sent", symbol, _gate, _gate_why)
                     continue
+                # THE ACCOUNT'S HEADROOM (2026-09-27). Every eToro entry
+                # needs the sync's cells — stored, fresh, read in the
+                # row's world, in the pool's currency — because at 1x the
+                # venue locks the FULL notional (MEASURED 2026-09-23: used
+                # margin 84.8 on 84.8 of exposure). The bots' own
+                # _leverage_headroom answers that for the asset bots and
+                # the TAKE TRADE lane; this loop cannot ask it honestly (a
+                # BotConfig names no pool currency, and the BotTrade rows
+                # it books are not what _pledged_since counts), so an
+                # eToro-carried order that clears the proof gate is
+                # REFUSED here, never sent unchecked. Unreachable while
+                # ETORO_PROVEN is empty; the asset bots carry eToro.
+                from .capabilities import adapter_key as _ak
+                if _ak(sym_client) == "etoro":
+                    log.error("legacy tick %s REFUSED (leverage_refused): "
+                              "this loop cannot check the eToro account's "
+                              "headroom (no pool currency; its BotTrade rows "
+                              "are not counted) — nothing was sent; an "
+                              "asset bot carries eToro", symbol)
+                    continue
                 try:
                     if cfg.market_type == "futures" and hasattr(sym_client, "ensure_config"):
                         sym_client.ensure_config(symbol, cfg.leverage, cfg.margin_mode)

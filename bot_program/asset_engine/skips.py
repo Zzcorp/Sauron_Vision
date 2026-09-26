@@ -194,11 +194,15 @@ def diagnose(cfg) -> str:
                         "took the risk budget instead",
         LEVERAGE_REFUSED: "a levered eToro order was refused before it left "
                           "— read the detail: the value, the carrier, the "
-                          "etoro_leverage_live switch (deploy/"
-                          "ETORO_DEPARTURE.md §4 D2b), the book on /setup/, "
-                          "the account's cash, or a refusal eToro gave "
-                          "within the quiet hours; nothing was sent at 1 "
-                          "and nothing was de-levered",
+                          "etoro_leverage_live switch, the instrument's "
+                          "LIVE leverageValues and maxStopLossPercentage "
+                          "(eligibility, doc 2026-09-23 §9), the class's "
+                          "ETORO_PROVEN token (ETORO_DEPARTURE §7-0), the "
+                          "book on /setup/, the account's cash and its "
+                          "world stamp, or a refusal eToro gave within the "
+                          "quiet hours; nothing was sent at 1 (since "
+                          "2026-09-27 a 1x eToro order needs the cells "
+                          "too) and nothing was de-levered",
         ELIGIBILITY_REFUSED: "eToro's own eligibility row refused the entry "
                              "before it left — read the detail: no row for "
                              "the symbol today, allowOpenPosition false, a "

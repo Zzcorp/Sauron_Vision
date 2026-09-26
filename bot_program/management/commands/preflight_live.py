@@ -575,8 +575,23 @@ class Command(BaseCommand):
                               if _m_at else float("nan"))
                     cash_s = "—" if _cash is None else f"{float(_cash):,.2f}"
                     used_s = "—" if _used is None else f"{float(_used):,.2f}"
+                    # the world the cells were read in (2026-09-27): the
+                    # headroom gate refuses cells read in the other world
+                    # and cells never stamped — said here, beside them
+                    _m_stamp = str(getattr(book, "last_margin_world", "")
+                                   or "")
+                    _m_world = (f"read in {_m_stamp}" if _m_stamp
+                                else "world unstamped")
+                    _b_demo = getattr(book, "demo", None)
+                    if isinstance(_b_demo, bool):
+                        _b_world = "demo" if _b_demo else "live"
+                        if _m_stamp != _b_world:
+                            _m_world += (f"; this row trades {_b_world} — "
+                                         f"every eToro entry is refused "
+                                         f"on these cells until the sync "
+                                         f"re-reads")
                     w(f"   available cash  {cash_s}  used margin {used_s}  "
-                      f"({_m_age:.1f}h old)")
+                      f"({_m_age:.1f}h old, {_m_world})")
 
             # REACHABILITY IS THE AGE OF THIS READING, NEVER THE `connected`
             # FLAG. The flag is written only when somebody presses TEST IBKR
@@ -812,7 +827,8 @@ class Command(BaseCommand):
                           f"eToro order body; units, the notional ceiling "
                           f"and the loss at the stop are unchanged; cash "
                           f"pledged per position is notional/{_lev} "
-                          f"(believed until D2b); MAX TOTAL EXPOSURE is a "
+                          f"(measured on demo 2026-09-23: 42.39 on 84.79 "
+                          f"at 2x); MAX TOTAL EXPOSURE is a "
                           f"percentage of your /setup/ book: "
                           f"{float(_own.current_value):,.0f} "
                           f"{_own.currency or ''}")

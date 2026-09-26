@@ -8,10 +8,12 @@ the stop floor are judged on qty x price, and the loss at the stop is the
 same at any multiplier. Every refusal is a `leverage_refused` skip that
 sends nothing: an unreadable value, a carrier that is not eToro, a value
 past the platform cap or the believed class ceiling, the switch OFF, no own
-book on /setup/, and — past the switch — an account whose available cash
-(the sync's cells) is unmeasured, stale, in another currency, too small, or
-that would be pledged past its ceiling; and, after eToro refused a levered
-order on a symbol, that symbol for the quiet hours.
+book on /setup/, the instrument's own LIVE leverageValues and stop band
+(E2.6, 2026-09-27), and — before every eToro order the bot sends, 1x too
+(E2.2) — an account whose available cash (the sync's cells) is
+unmeasured, stale, read in the other world, in another currency, too
+small, or that would be pledged past its ceiling; and, after eToro
+refused a levered order on a symbol, that symbol for the quiet hours.
 
 The eToro client is the REAL class with its transport replaced — never a
 subclass, because capabilities.adapter_key reads the class name.
@@ -24,8 +26,9 @@ from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from tests.test_desk_seam import _client as _mock_client
-from tests.test_etoro_client import (ELIG_AAPL, SEARCH_AAPL, _FakeSession,
-                                     _clear_eligibility, _lookup)
+from tests.test_etoro_client import (ELIG_AAPL, ELIG_AAPL_LIVE, SEARCH_AAPL,
+                                     _FakeSession, _clear_eligibility,
+                                     _lookup)
 from tests.test_execution_trust import _cfg as _live_cfg
 from tests.test_execution_trust import _instrument, _signal, _trade, _user
 
@@ -57,8 +60,15 @@ def _etoro(routes=None, *, echo_stop=None):
     # levered entry here. The MEASURED AAPL row rides every wire that did
     # not route eligibility itself (a test states a 503 or an absent row
     # by routing it).
-    if not any("eligibility" in r[1] for r in routes):
+    if not any("/info/demo/eligibility" in r[1] for r in routes):
         routes.append(ELIG_AAPL)
+    # E2.6 (2026-09-27): the multiplier is judged against the LIVE lists
+    # and bands, read from the demo instance (world="live": a second
+    # POST, to the path WITHOUT the segment — /info/eligibility); the
+    # measured LIVE AAPL row rides every wire that did not route that
+    # path itself (a test states a 503 there by routing it).
+    if not any(r[1].endswith("/info/eligibility") for r in routes):
+        routes.append(ELIG_AAPL_LIVE)
     t._session = _FakeSession(routes)
     return t, t._session
 
@@ -102,6 +112,8 @@ def _account(user, *, cash=None, used=0, age_s=60, currency="USD",
         acct.last_available_cash = Decimal(str(cash))
         acct.last_used_margin = Decimal(str(used))
         acct.last_margin_at = timezone.now() - timedelta(seconds=age_s)
+        # the world the cells were read in [FIX 9]: this row is demo
+        acct.last_margin_world = "demo"
     acct.save()
     return acct
 
@@ -175,14 +187,25 @@ class TheRuleTests(TestCase):
                                                 cls, "etoro")
                 self.assertIsNone(lev)
                 self.assertIn("x", why)
-        lev, why = judge_order_leverage(self._cfg(leverage=2), "forex",
+        # 2a (2026-09-27): forex's ceiling is 5 — the platform cap — so 6
+        # meets the cap sentence first, and 5 is inside the ceiling (it is
+        # refused later, for the missing own book, not by the table)
+        lev, why = judge_order_leverage(self._cfg(leverage=6), "forex",
                                         "etoro")
         self.assertIsNone(lev)
-        self.assertIn("1x ceiling", why)
+        self.assertIn("platform cap of 5x", why)
+        lev, why = judge_order_leverage(self._cfg(leverage=5), "forex",
+                                        "etoro")
+        self.assertIsNone(lev)
+        self.assertNotIn("x ceiling", why)
+        self.assertIn("/setup/", why)
+        # the class-ceiling sentence, on the one class under the cap
         lev, why = judge_order_leverage(self._cfg(leverage=3), "crypto",
                                         "etoro")
-        self.assertIn("2x", why)
-        self.assertIn("belief", why)
+        self.assertIsNone(lev)
+        self.assertIn("2x ceiling", why)
+        self.assertIn("LIVE leverageValues", why)
+        self.assertNotIn("belief", why)
 
     def test_the_switch_off_or_missing_refuses_and_names_the_proof(self):
         from bot_program.asset_engine.base import judge_order_leverage
@@ -228,7 +251,9 @@ class TheCapsAgreeTests(SimpleTestCase):
         self.assertEqual(LEVERAGE_MAX, MAX_ORDER_LEVERAGE)
         for cls, cap in ORDER_LEVERAGE_CEILING.items():
             self.assertLessEqual(cap, MAX_ORDER_LEVERAGE, cls)
-        self.assertEqual(ORDER_LEVERAGE_CEILING["forex"], 1)
+        # 2a (2026-09-27): forex 5, since capital_at_work reads the row's
+        # multiplier; inside every LIVE forex list (MeasuredLiveListsTests)
+        self.assertEqual(ORDER_LEVERAGE_CEILING["forex"], 5)
 
 
 class TheEntryPassesItThroughTests(TestCase):
@@ -350,11 +375,16 @@ class TheEntryPassesItThroughTests(TestCase):
         self.assertNotIn(tail, note["detail"], "the record's cut, measured")
         self.assertTrue(any(tail in line for line in cm.output), cm.output)
 
-    def test_the_eligibility_row_is_read_once_before_the_order(self):
+    def test_the_eligibility_row_is_read_once_per_world_before_the_order(self):
         """C1 (2026-09-25): step 2 of the gate reads the MEASURED AAPL row
         the wire carries (ONE POST, before the order POST) and lets a
         2x order through on allowOpenPosition true / maxUnitsPerOrder
-        6151; the floor reads the same cached row (no second POST)."""
+        6151; the floor reads the same cached row (no second POST).
+        E2.6 (2026-09-27): the multiplier is then judged against the
+        LIVE list and band — ONE more POST, to the live path (the demo
+        list proves nothing; doc §15 read the LIVE lists from the demo
+        instance this way) — before the order POST. Three POSTs, in
+        that order, each world's row once."""
         _switch(True)
         _account(self.user, cash=100000)
         cand = self._cand()
@@ -363,13 +393,18 @@ class TheEntryPassesItThroughTests(TestCase):
         self.assertIsNotNone(res, None if res is not None
                              else self._skip_note())
         posts = [c for c in fake.calls if c[0] == "POST"]
-        self.assertEqual(len(posts), 2, [p[1] for p in posts])
+        self.assertEqual(len(posts), 3, [p[1] for p in posts])
         self.assertTrue(posts[0][1].endswith("/info/demo/eligibility"),
                         posts[0][1])
         self.assertEqual(posts[0][2]["json"], {"instrumentIds": [1001]})
-        self.assertTrue(posts[1][1].endswith("/execution/demo/orders"),
+        self.assertTrue(posts[1][1].endswith("/info/eligibility"),
                         posts[1][1])
+        self.assertNotIn("/demo/", posts[1][1])
+        self.assertEqual(posts[1][2]["json"], {"instrumentIds": [1001]})
+        self.assertTrue(posts[2][1].endswith("/execution/demo/orders"),
+                        posts[2][1])
         self.assertEqual(t.eligibility_state("AAPL"), "read")
+        self.assertEqual(t.eligibility_state("AAPL", "live"), "read")
 
     def test_an_unread_row_refuses_a_levered_entry_before_the_multiplier(self):
         """The wire answers 503 on eligibility: the row is "error" today,
@@ -456,6 +491,9 @@ class TheEntryPassesItThroughTests(TestCase):
         from bot_program.models import AssetBotTrade
         self.cfg.extras = {}
         self.cfg.save(update_fields=["extras"])
+        # E2.2 (2026-09-27): a 1x eToro order needs the cells too — at 1x
+        # the venue locks the full notional (measured)
+        _account(self.user, cash=100000)
         cand = self._cand()
         t, fake = _etoro()
         res = self._execute(cand, t)
@@ -469,6 +507,7 @@ class TheEntryPassesItThroughTests(TestCase):
         from bot_program.models import AssetBotTrade
         self.cfg.extras = {"leverage": 1}
         self.cfg.save(update_fields=["extras"])
+        _account(self.user, cash=100000)      # E2.2: 1x needs the cells
         cand = self._cand()
         t, fake = _etoro()
         with mock.patch.object(t, "market_order",
@@ -533,6 +572,186 @@ class TheEntryPassesItThroughTests(TestCase):
                                       equity=100000)
         self.assertIn("pledged after", detail)
         self.assertIn("50%", detail)
+
+    def test_a_typed_one_needs_the_cells_too(self):
+        """E2.2 (2026-09-27): the headroom runs before every eToro order
+        the bot sends — at 1x the venue locks the FULL notional (MEASURED
+        2026-09-23: used margin 84.8 on 84.8 of exposure) — so a 1x entry
+        with no cells
+        stored is leverage_refused "never been stored" and sends nothing;
+        the detail says "at 1x" and the log line "REFUSED at 1x"."""
+        from bot_program.asset_engine import skips
+        from bot_program.models import AssetBotTrade
+        self.cfg.extras = {"leverage": 1}
+        self.cfg.save(update_fields=["extras"])
+        cand = self._cand()
+        t, fake = _etoro()
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="ERROR") as cm:
+            res = self._execute(cand, t)
+        self.assertIsNone(res)
+        self.assertEqual(_order_posts(fake), [],
+                         "a 1x order left the box with no cells stored")
+        self.assertEqual(AssetBotTrade.objects.count(), 0)
+        note = self._skip_note()
+        self.assertEqual(note["code"], skips.LEVERAGE_REFUSED)
+        self.assertTrue(note["detail"].startswith("at 1x: "), note)
+        self.assertIn("never been stored", note["detail"])
+        self.assertTrue(any("REFUSED at 1x:" in ln for ln in cm.output),
+                        cm.output)
+
+    def test_a_config_without_the_key_needs_the_cells_too(self):
+        """No key is 1 at the venue (the adapter's default): the same
+        headroom, the same refusal, and the log names the missing key."""
+        from bot_program.asset_engine import skips
+        self.cfg.extras = {}
+        self.cfg.save(update_fields=["extras"])
+        cand = self._cand()
+        t, fake = _etoro()
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="ERROR") as cm:
+            res = self._execute(cand, t)
+        self.assertIsNone(res)
+        self.assertEqual(_order_posts(fake), [])
+        note = self._skip_note()
+        self.assertEqual(note["code"], skips.LEVERAGE_REFUSED)
+        self.assertTrue(note["detail"].startswith("at 1x: "), note)
+        self.assertIn("never been stored", note["detail"])
+        # the decided log wording: %s with (leverage or "1 (no key)")
+        self.assertTrue(any("REFUSED at 1 (no key)x:" in ln
+                            for ln in cm.output), cm.output)
+
+    def test_cells_read_in_the_demo_world_refuse_a_live_row_naming_both(self):
+        """[FIX 9] The same key pair answers both worlds and
+        EtoroAccount.demo alone picks the segment: a row unticked demo ->
+        live keeps the DEMO reading (332,449.10, doc §5) for up to the
+        freshness window. The sync stamps the world it read in; the gate
+        refuses cells stamped for the other world, naming both."""
+        from bot_program.asset_engine import skips
+        _switch(True)
+        acct = _account(self.user, cash=100000)      # stamped "demo"
+        acct.demo = False
+        acct.save(update_fields=["demo"])
+        cand = self._cand()
+        t, fake = _etoro()
+        res = self._execute(cand, t)
+        self.assertIsNone(res)
+        self.assertEqual(_order_posts(fake), [])
+        note = self._skip_note()
+        self.assertEqual(note["code"], skips.LEVERAGE_REFUSED)
+        self.assertIn("read in the demo world", note["detail"])
+        self.assertIn("trades live", note["detail"])
+
+    def test_cells_stamped_for_the_rows_own_world_pass(self):
+        """The matching stamp is the ordinary path: a live row whose cells
+        were read live sends the order (the wire here is the demo
+        adapter; the gate reads the ROW's world, not the client's)."""
+        _switch(True)
+        acct = _account(self.user, cash=100000)
+        acct.demo = False
+        acct.last_margin_world = "live"
+        acct.save(update_fields=["demo", "last_margin_world"])
+        cand = self._cand()
+        t, fake = _etoro()
+        res = self._execute(cand, t)
+        self.assertIsNotNone(res, None if res is not None
+                             else self._skip_note())
+        self.assertEqual(len(_order_posts(fake)), 1)
+
+    def test_cells_never_stamped_with_a_world_are_refused(self):
+        """"" is unmeasured, never free: cells stored before the stamp
+        existed (or by a writer that never stamps) gate nothing."""
+        from bot_program.asset_engine import skips
+        _switch(True)
+        acct = _account(self.user, cash=100000)
+        acct.last_margin_world = ""
+        acct.save(update_fields=["last_margin_world"])
+        cand = self._cand()
+        t, fake = _etoro()
+        res = self._execute(cand, t)
+        self.assertIsNone(res)
+        self.assertEqual(_order_posts(fake), [])
+        note = self._skip_note()
+        self.assertEqual(note["code"], skips.LEVERAGE_REFUSED)
+        self.assertIn("read in the ? world", note["detail"])
+
+    def test_a_multiplier_off_the_live_list_reaches_the_skip_and_sends_nothing(self):
+        """E2.6 end to end (2026-09-27): 3 is inside the stock ceiling (5)
+        and the platform cap, so judge_order_leverage passes it; AAPL's
+        own LIVE list (long/cfd [2, 5], measured 2026-09-23) does not
+        carry it -> leverage_refused naming that list, not clamped to 2
+        or 5. The two eligibility reads (the demo row, the LIVE row) are
+        the only POSTs; no order POST, no row."""
+        from bot_program.asset_engine import skips
+        from bot_program.models import AssetBotTrade
+        self.cfg.extras = {"leverage": 3}
+        self.cfg.save(update_fields=["extras"])
+        _switch(True)
+        _account(self.user, cash=100000)
+        cand = self._cand()
+        t, fake = _etoro()
+        res = self._execute(cand, t)
+        self.assertIsNone(res)
+        self.assertEqual(_order_posts(fake), [])
+        posts = [c for c in fake.calls if c[0] == "POST"]
+        self.assertEqual(len(posts), 2, [p[1] for p in posts])
+        note = self._skip_note()
+        self.assertEqual(note["code"], skips.LEVERAGE_REFUSED)
+        self.assertIn("not in eToro's LIVE leverageValues", note["detail"])
+        self.assertIn("[2, 5]", note["detail"])
+        self.assertIn("not clamped", note["detail"])
+        self.assertEqual(AssetBotTrade.objects.count(), 0)
+
+    def test_the_ceiling_is_the_instruments_class_not_the_configs(self):
+        """E2.4 wiring (2026-09-27, round 2): _order_leverage keys
+        judge_order_leverage on _instrument_class(symbol). A crypto
+        instrument in this STOCK config at 3x: the config's class (stock,
+        ceiling 5) passes 3; the instrument's (crypto, ceiling 2 — its
+        LIVE list is [2], measured 2026-09-23) refuses it before the
+        eligibility row is read: nothing on the wire at all."""
+        from bot_program.asset_engine.base import judge_order_leverage
+        from bot_program.asset_engine.stock_bot import StockBot
+        _instrument("ETH", "crypto")
+        self.cfg.extras = {"leverage": 3}
+        self.cfg.save(update_fields=["extras"])
+        _switch(True)
+        self.assertEqual(judge_order_leverage(self.cfg, "stock", "etoro"),
+                         (3, ""))
+        t, fake = _etoro()
+        lev, why = StockBot(self.cfg)._order_leverage(
+            t, "ETH", side="BUY", price=100.0, stop=97.0)
+        self.assertIsNone(lev)
+        self.assertIn("past the 2x ceiling this platform holds for crypto",
+                      why)
+        self.assertEqual(fake.calls, [], "the wire was asked something")
+
+    def test_the_single_position_gate_counts_the_tickets_stamp(self):
+        """E2.1 wiring (2026-09-27, round 2): the bot's MAX SINGLE POSITION
+        check (_judge_final_size -> single_position_state) is handed the
+        config's multiplier hint (2 here) and the carrier the router names
+        for AAPL (eToro, primary for stocks), so it counts notional / 2 —
+        the margin eToro locks at 2x (MEASURED 2026-09-23: 42.39 on 84.79
+        of exposure) — not the full notional a share settles in."""
+        from portfolio import risk_gate
+        real = risk_gate.single_position_state
+        seen = []
+
+        def _spy(*a, **kw):
+            out = real(*a, **kw)
+            seen.append((kw, out))
+            return out
+
+        _account(self.user, cash=100000)
+        with mock.patch.object(risk_gate, "single_position_state",
+                               side_effect=_spy):
+            self._cand()
+        self.assertEqual(len(seen), 1, seen)
+        kw, out = seen[0]
+        self.assertEqual(kw["leverage"], 2)
+        self.assertEqual(kw["carrier"], "etoro")
+        self.assertGreater(kw["notional"], 0)
+        self.assertAlmostEqual(out["capital_at_work"],
+                               round(kw["notional"] / 2.0, 2), places=2)
 
     def test_rows_opened_since_the_reading_are_charged_first(self):
         """cash = need + 100, and a levered eToro row opened after the
@@ -712,6 +931,26 @@ class TheSyncStoresTheMarginCellsTests(TestCase):
         self.assertEqual(acct.last_used_margin, Decimal("5.00"))
         self.assertIsNotNone(acct.last_margin_at)
 
+    def test_the_cells_carry_the_world_they_were_read_in(self):
+        """[FIX 9] (2026-09-27): the stamp is the client's own world
+        (EtoroTrader.demo) and, for a double that states none, the row's —
+        the client was built from acct.demo, so the two never differ on a
+        real read. A payload with no cells leaves the stamp alone."""
+        from bot_program.models import EtoroAccount
+        _, acct = self._run({"available_cash": 1.4, "used_margin": 0.0,
+                             "currency": "USD"})
+        self.assertEqual(acct.last_margin_world, "demo")
+        EtoroAccount.objects.filter(pk=self.acct.pk).update(demo=False)
+        _, acct = self._run({"available_cash": 1.4, "used_margin": 0.0,
+                             "currency": "USD"})
+        self.assertEqual(acct.last_margin_world, "live")
+        EtoroAccount.objects.filter(pk=self.acct.pk).update(
+            last_margin_world="", last_available_cash=None,
+            last_used_margin=None, last_margin_at=None)
+        _, acct = self._run(...)
+        self.assertEqual(acct.last_margin_world, "")
+        self.assertIsNone(acct.last_margin_at)
+
 
 class MarginCellsReadTests(SimpleTestCase):
     """The REAL payload shape (tests/test_etoro_client.TheTotalsAreNestedTests,
@@ -783,7 +1022,9 @@ class ConsumerKeyTests(SimpleTestCase):
 
     def test_sizing_never_reads_it(self):
         """House rule 5, greppable: the module that decides units has no
-        seat for a multiplier (its one 'leverage' is the comment at :101)."""
+        seat for a multiplier (its one 'leverage' is the forex-cap comment,
+        "the leverage is at the broker"; the 7 % cap's comment and the
+        index/commodity 2.0 comment, 2026-09-27, say "multiplier")."""
         from pathlib import Path
 
         from django.conf import settings
@@ -812,7 +1053,14 @@ class TheAdviceLineTests(TestCase):
         skips.record(cfg, "AAPL", skips.LEVERAGE_REFUSED,
                      "at 2x: etoro_leverage_live is OFF")
         cfg.refresh_from_db()
-        self.assertIn("nothing was sent at 1", skips.diagnose(cfg))
+        advice = skips.diagnose(cfg)
+        self.assertIn("nothing was sent at 1", advice)
+        # GAP 11 (2026-09-27): the advice names the LIVE list, the proof
+        # token and the cells' world, not "§4 D2b"
+        self.assertIn("LIVE leverageValues", advice)
+        self.assertIn("ETORO_PROVEN", advice)
+        self.assertIn("world stamp", advice)
+        self.assertNotIn("D2b", advice)
 
 
 class TheComponentShipsOffTests(TestCase):
@@ -826,4 +1074,184 @@ class TheComponentShipsOffTests(TestCase):
         row = PlatformComponent.objects.get(key="etoro_leverage_live")
         self.assertFalse(row.is_enabled)
         self.assertLessEqual(len(row.description), 300)
-        self.assertIn("D2b", row.description)
+        # GAP 11 (2026-09-27): the words name the LIVE list and the proof
+        # — "the proven set", never the constant's name: a switch must not
+        # be able to name the proof set (tests/test_etoro_proofs.py)
+        self.assertIn("LIVE leverageValues", row.description)
+        self.assertIn("proven set", row.description)
+        self.assertNotIn("D2b", row.description)
+
+
+class TheInstrumentCheckTests(TestCase):
+    """E2.6 (2026-09-27): AssetBot._instrument_leverage_check — the
+    INSTRUMENT's own eligibility row, by direction, settlement and
+    multiplier, judged on the client; the lists and the band are the LIVE
+    world's (world="live", readable from the demo instance — MEASURED
+    2026-09-25, doc §15). Every refusal sends nothing and clamps nothing;
+    an unmeasured band passes with a log line, never a number nobody
+    read. The AAPL fixtures are the measured rows (tests/test_etoro_client
+    .py): real/long [1] maxSL 100; LIVE cfd/long [2,5] maxSL 50; DEMO
+    cfd/long [2,5,10,20]."""
+
+    def setUp(self):
+        from bot_program.asset_engine.stock_bot import StockBot
+        self.user = _user("lev_inst")
+        self.cfg = _live_cfg(self.user, name="LEVI")
+        self.bot = StockBot(self.cfg)
+        _clear_eligibility()
+        self.addCleanup(_clear_eligibility)
+
+    def _check(self, t, eff, *, symbol="AAPL", side="BUY", price=100.0,
+               stop=97.0):
+        return self.bot._instrument_leverage_check(t, symbol, side, eff,
+                                                   price, stop)
+
+    def test_a_multiplier_off_the_live_list_is_refused_naming_it(self):
+        """3 is in neither list; 10 is in the DEMO list only — the demo
+        list never lifts the ceiling."""
+        t, _ = _etoro()
+        why = self._check(t, 3)
+        self.assertIn("not in eToro's LIVE leverageValues", why)
+        self.assertIn("AAPL long/cfd [2, 5]", why)
+        self.assertIn("not clamped", why)
+        why = self._check(t, 10)
+        self.assertIn("[2, 5]", why)
+        self.assertIn("not clamped", why)
+
+    def test_a_multiplier_on_the_live_list_passes_and_stashes_the_settlement(self):
+        t, _ = _etoro()
+        self.assertEqual(self._check(t, 2), "")
+        self.assertEqual(self.bot._last_settlement["AAPL"], "cfd")
+        self.assertEqual(self._check(t, 1), "")
+        self.assertEqual(self.bot._last_settlement["AAPL"], "real")
+
+    def test_the_stop_band_refuses_a_stop_past_max_sl_at_the_multiplier(self):
+        """AAPL CFD maxSL 50 (measured): a 12%-of-price stop at 5x is 60%
+        of the margin — refused, not widened. The reading (% of the
+        amount) is the stricter one and is named a BELIEF."""
+        t, _ = _etoro()
+        why = self._check(t, 5, price=100.0, stop=88.0)
+        self.assertIn("60.0% of the margin at 5x", why)
+        self.assertIn("eToro allows 50%", why)
+        self.assertIn("BELIEF", why)
+        self.assertIn("refused, not widened", why)
+        self.assertEqual(self._check(t, 5, price=100.0, stop=91.0), "")
+
+    def test_the_band_never_binds_at_one(self):
+        """1x is the real/long entry, maxSL 100: a 30% stop is 30% of the
+        margin."""
+        t, _ = _etoro()
+        self.assertEqual(self._check(t, 1, price=100.0, stop=70.0), "")
+
+    def test_an_unread_row_passes_at_one_with_the_line_and_refuses_above(self):
+        """[FIX 5] BNO CORN SOYB CANE DBC are exactly the unread rows a 5x
+        stock config would otherwise send at 5x. At 1 the class ceiling
+        is the only ceiling (logged); above 1 refused naming "unread"."""
+        t, _ = _etoro([SEARCH_AAPL,
+                       ("POST", "/info/demo/eligibility", 503, {}),
+                       ("POST", "/info/eligibility", 503, {})])
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="INFO") as cm:
+            self.assertEqual(self._check(t, 1), "")
+        self.assertTrue(any("eligibility unread — the class ceiling is the "
+                            "only ceiling" in ln for ln in cm.output),
+                        cm.output)
+        why = self._check(t, 5)
+        self.assertIn("unread today", why)
+        self.assertIn("not at 5, not at 1", why)
+
+    def test_a_demo_only_wire_refuses_a_levered_order_until_live_answers(self):
+        """[FIX 1] The demo row is read (its cfd/long list carries 5 and
+        10), the LIVE read fails (503 on the path without the segment):
+        above 1 refused naming the LIVE list unread — the demo list proves
+        nothing; at 1 passes with the line."""
+        t, _ = _etoro([SEARCH_AAPL, ELIG_AAPL,
+                       ("POST", "/info/eligibility", 503, {})])
+        why = self._check(t, 5)
+        self.assertIn("LIVE leverageValues of AAPL long/cfd are unread", why)
+        self.assertIn("not at 5, not at 1", why)
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="INFO") as cm:
+            self.assertEqual(self._check(t, 1), "")
+        self.assertTrue(any("LIVE leverageValues unread" in ln
+                            for ln in cm.output), cm.output)
+
+    def test_an_etf_at_five_passes_with_the_unmeasured_band_line(self):
+        """[FIX 2] GLDM: cfd/long [2,5] carries 5 and its
+        maxStopLossPercentage was NOT printed on 2026-09-23 — the band is
+        not checked and the log says so; nothing is invented."""
+        from tests.test_etoro_client import (ROW_GLDM_LIVE, SEARCH_GLDM,
+                                             _elig_route)
+        t, _ = _etoro([SEARCH_GLDM, _elig_route([ROW_GLDM_LIVE]),
+                       _elig_route([ROW_GLDM_LIVE], world="live")])
+        with self.assertLogs("bot_program.asset_engine.base",
+                             level="INFO") as cm:
+            self.assertEqual(self._check(t, 5, symbol="GLDM", price=84.5,
+                                         stop=80.0), "")
+        self.assertTrue(any("maxStopLossPercentage unmeasured on the "
+                            "cfd/long entry carrying 5 — band not checked"
+                            in ln for ln in cm.output), cm.output)
+        self.assertEqual(self.bot._last_settlement["GLDM"], "cfd")
+
+    def test_a_read_row_with_no_entry_for_the_direction_is_refused(self):
+        """A row that lists no entry carrying `eff` for the direction
+        (settlement_for None): refused naming both LIVE lists."""
+        from tests.test_etoro_client import _elig_row, _elig_route, _lev
+        row = _elig_row(1001, "AAPL", [_lev("real", "long", [1], max_sl=100)],
+                        max_units=6151)
+        t, _ = _etoro([SEARCH_AAPL, _elig_route([row]),
+                       _elig_route([row], world="live")])
+        why = self._check(t, 2)
+        self.assertIn("lists no long entry that carries 2", why)
+        self.assertIn("LIVE real: [1], cfd: None", why)
+        self.assertIn("not clamped", why)
+
+    def test_a_client_without_the_tier_is_untouched(self):
+        """A MagicMock, a Saxo-named class: no leverage_values tier, no
+        judgement here — the class ceiling was the whole judgement."""
+        self.assertEqual(self._check(_mock_client("100.00"), 5), "")
+        saxo = type("SaxoTrader", (mock.MagicMock,), {})()
+        self.assertEqual(self._check(saxo, 5), "")
+
+
+class MeasuredLiveListsTests(SimpleTestCase):
+    """E2.7 (2026-09-27): every class ceiling sits inside the LIVE list
+    eToro printed for every instrument of the class read on 2026-09-23/25
+    (doc §9-§10, §15) — the smallest LIVE long maximum per class (AUD/NZD
+    20 on forex). The DEMO lists are wider (stocks 20, forex 400, indices
+    and commodities 100) and prove nothing."""
+
+    LIVE_LEVERAGE_MAX = {"stock": 5, "etf": 5, "crypto": 2, "forex": 20,
+                         "index": 20, "commodity": 10}
+
+    def test_every_ceiling_is_inside_the_measured_live_list(self):
+        from bot_program.asset_engine.base import ORDER_LEVERAGE_CEILING
+        for cls, live_max in self.LIVE_LEVERAGE_MAX.items():
+            with self.subTest(cls=cls):
+                self.assertLessEqual(ORDER_LEVERAGE_CEILING[cls], live_max)
+
+    def test_each_ceiling_is_the_platform_cap_or_the_live_maximum(self):
+        """2a in writing: every eToro class is held at the LOWER of the
+        platform cap (MAX_ORDER_LEVERAGE, 5) and its smallest measured LIVE
+        long maximum — stock/etf/forex/index/commodity 5 (forex from 1,
+        since capital_at_work reads the row's multiplier), crypto 2 (its
+        LIVE list is [2]). options/cfd have no eToro path: 1, so a typed
+        multiplier is refused by the table and nothing is sent."""
+        from types import SimpleNamespace
+
+        from bot_program.asset_engine.base import (MAX_ORDER_LEVERAGE,
+                                                   ORDER_LEVERAGE_CEILING,
+                                                   judge_order_leverage)
+        for cls, live_max in self.LIVE_LEVERAGE_MAX.items():
+            with self.subTest(cls=cls):
+                self.assertEqual(ORDER_LEVERAGE_CEILING[cls],
+                                 min(MAX_ORDER_LEVERAGE, live_max))
+        self.assertEqual(ORDER_LEVERAGE_CEILING["forex"], 5)
+        for cls in ("options", "cfd"):
+            with self.subTest(cls=cls):
+                self.assertEqual(ORDER_LEVERAGE_CEILING[cls], 1)
+                lev, why = judge_order_leverage(
+                    SimpleNamespace(extras={"leverage": 2}), cls, "etoro")
+                self.assertIsNone(lev)
+                self.assertIn("past the 1x ceiling", why)
+                self.assertIn("refused, not clamped", why)

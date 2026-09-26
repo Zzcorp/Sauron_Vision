@@ -125,31 +125,53 @@ EXECUTABLE_CLASS = {
     "forex": "forex", "commodity": "commodity", "crypto": "crypto",
 }
 
-# Cash a position ties up, per dollar of notional. Forex is margined at the
-# broker — sizing.py's 4.0 notional cap exists BECAUSE the leverage lives
-# there — so charging an FX trade its full notional against the pool made
-# any stop tighter than 0.25% "insufficient capital" on an empty book.
-# 30:1 is the standard retail FX margin. Everything else settles in full.
+# Cash a position ties up, per dollar of notional, BY CLASS — the table's
+# shape is OANDA's: forex margined 30:1 at the broker (sizing.py's 4.0
+# notional cap exists BECAUSE the multiplier lives there), so charging an
+# FX trade its full notional against the pool made any stop tighter than
+# 0.25% "insufficient capital" on an empty book. Everything else settles
+# in full. On eToro a row counts notional / L of its OWN recorded
+# multiplier (risk_gate.capital_at_work, 2026-09-27): eToro pledges
+# notional / L and the FULL notional at 1 — MEASURED 2026-09-23 (used
+# margin 84.8 on 84.8 of exposure; 42.39 at 2x) — so a forex row sent at
+# 1 counts its full notional there, floored at this table's 1/30 (a row
+# stamped 50 still counts 1/30); a 5x stock CFD counts a fifth.
 CAPITAL_USE_FRACTION = {"forex": 1.0 / 30.0}
 
 
-def _capital_use(asset_class: str, notional: float) -> float:
-    return notional * CAPITAL_USE_FRACTION.get(asset_class, 1.0)
+def _capital_use(asset_class: str, notional: float, *, leverage=None,
+                 carrier: str = "") -> float:
+    """Cash a ticket or a held row ties up — the GATES' number
+    (risk_gate.capital_at_work, 2026-09-27), so the pool this lane
+    refuses on cannot drift from the one the bots refuse on: on an eToro
+    carrier notional / L of the stamp, the FULL notional at 1 (MEASURED
+    2026-09-23, used margin 84.8 on 84.8 of exposure); the class table
+    elsewhere and with no carrier."""
+    from portfolio.risk_gate import capital_at_work
+    return capital_at_work(asset_class, notional, leverage=leverage,
+                           carrier=carrier)
 
 
-def _leverage(asset_class: str) -> float:
+def _leverage(asset_class: str, *, leverage=None,
+              carrier: str = "") -> float:
     """Dollars of exposure one dollar of pool capital carries in this class.
 
     A derived fact, not a setting: it is CAPITAL_USE_FRACTION read the
     other way up. 30x on FX because the broker margins it, 1x everywhere
     else because the position settles in full — and no code path anywhere
-    in the platform multiplies a manual order by anything. That is why the
+    in the platform multiplies a manual order by anything. (That is the
+    class TABLE's shape, what it answers with no stamp. Since 2026-09-27
+    `leverage` and `carrier` are the ticket's stamp and the answer is its
+    own margin, through _capital_use (risk_gate.capital_at_work): on eToro
+    the full notional at 1, which is what this lane sends — MEASURED
+    2026-09-23, used margin 84.8 on 84.8 — so an eToro forex ticket reads
+    1:1, not 30:1.) That is why the
     confirm popup states the leverage instead of offering it: a control
     the execution path ignores would have the operator sizing against a
     number the order never sees, which is a worse failure than the missing
     control it was meant to fix.
     """
-    frac = CAPITAL_USE_FRACTION.get(asset_class, 1.0)
+    frac = _capital_use(asset_class, 1.0, leverage=leverage, carrier=carrier)
     return (1.0 / frac) if frac > 0 else 1.0
 
 
@@ -237,7 +259,12 @@ def _trade_notional_usd(trade) -> float:
 
 
 def _trade_capital_use(trade) -> float:
-    return _capital_use(trade.asset_class, _trade_notional_usd(trade))
+    # the ROW's own stamp (2026-09-27): what execute_entry and this lane
+    # recorded — the carrier and, when the body carried one, the multiplier
+    meta = trade.metadata or {}
+    return _capital_use(trade.asset_class, _trade_notional_usd(trade),
+                        leverage=meta.get("leverage"),
+                        carrier=str(meta.get("broker") or ""))
 
 
 def _open_manual_trades(cfg):
@@ -279,10 +306,18 @@ def _concentration_guard(user, inst, side, cls, cfg, close_ids):
     if not close_ids and not probe.get("sufficient", True):
         return None
 
+    # THE TICKET'S STAMP (2026-09-27): on an eToro carrier the ticket counts
+    # notional / L of the multiplier this config would send (the lane reads
+    # extras['leverage'] through _leverage_hint_of), the full notional at
+    # 1 — the same pair AssetBot passes single_position_state.
+    from bot_program.asset_engine.base import AssetBot
+    from bot_program.engine.broker_router import broker_name_for_symbol
     state = concentration_state(
         user, symbol=inst.symbol, side=side, asset_class=cls,
         notional=float(notional), capital_base=float(cfg.capital or 0),
-        base_label="manual pool")
+        base_label="manual pool",
+        leverage=AssetBot._leverage_hint_of(cfg.extras),
+        carrier=broker_name_for_symbol(user, inst.symbol, cfg))
     if state["ok"]:
         return None
 
@@ -296,7 +331,9 @@ def _concentration_guard(user, inst, side, cls, cfg, close_ids):
         freed += capital_at_work(
             trade.asset_class,
             float(trade.entry_price or 0) * float(trade.qty or 0)
-            * value_per_unit(trade))
+            * value_per_unit(trade),
+            leverage=(trade.metadata or {}).get("leverage"),
+            carrier=str((trade.metadata or {}).get("broker") or ""))
     if freed and state["cap_money"] is not None             and (state["after"] - freed) <= state["cap_money"] + 1e-9:
         return None
     return state["reason"]
@@ -476,7 +513,7 @@ def _floor_to_step(qty: float, step: float) -> float:
 
 
 def judge_qty(cfg, *, asset_class, qty, entry, stop, value_per_unit,
-              available):
+              available, leverage=None, carrier: str = ""):
     """Why this size may not be sent, or None.
 
     The three gates that keep the book solvent and 1R comparable —
@@ -507,7 +544,10 @@ def judge_qty(cfg, *, asset_class, qty, entry, stop, value_per_unit,
     capital = float(getattr(cfg, "capital", 0) or 0)
     per_unit_risk = abs(float(entry) - float(stop)) * float(value_per_unit)
     notional = qty * float(entry) * float(value_per_unit)
-    capital_use = _capital_use(asset_class, notional)
+    # the ticket's stamp (2026-09-27): on eToro the pool is charged the
+    # full notional at 1 (measured), not the class table's 1/30
+    capital_use = _capital_use(asset_class, notional, leverage=leverage,
+                               carrier=carrier)
 
     risk = qty * per_unit_risk
     risk_cap = capital * MAX_RISK_FRACTION
@@ -535,7 +575,8 @@ def judge_qty(cfg, *, asset_class, qty, entry, stop, value_per_unit,
 
 
 def validate_qty_override(cfg, *, asset_class, raw, entry, stop,
-                          value_per_unit, available, round_qty):
+                          value_per_unit, available, round_qty,
+                          leverage=None, carrier: str = ""):
     """The operator's size, re-derived and re-judged server-side.
 
     Returns (qty, None) or (None, reason). Never trust the number in the
@@ -566,7 +607,8 @@ def validate_qty_override(cfg, *, asset_class, raw, entry, stop,
 
     why = judge_qty(cfg, asset_class=asset_class, qty=qty, entry=entry,
                     stop=stop, value_per_unit=value_per_unit,
-                    available=available)
+                    available=available, leverage=leverage,
+                    carrier=carrier)
     return (None, why) if why else (qty, None)
 
 
@@ -882,7 +924,19 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
 
     capital = float(cfg.capital)
     notional = round(sizing["notional_fraction"] * capital, 2)
-    capital_use = round(_capital_use(cls, notional), 2)
+    # THE TICKET'S STAMP (2026-09-27), one pair for every number below —
+    # the pool, MAX SINGLE POSITION, concentration, the size bounds and
+    # the leverage fact: the multiplier this config would send (the bots'
+    # own _leverage_hint_of; above 1 this lane refuses at the order, so
+    # every ticket that leaves is counted at 1) on the carrier that would
+    # carry it. On eToro the full notional at 1 (MEASURED 2026-09-23);
+    # the class table elsewhere.
+    from bot_program.asset_engine.base import AssetBot
+    from bot_program.engine.broker_router import broker_name_for_symbol
+    ticket_stamp = {
+        "leverage": AssetBot._leverage_hint_of(cfg.extras),
+        "carrier": broker_name_for_symbol(user, inst.symbol, cfg)}
+    capital_use = round(_capital_use(cls, notional, **ticket_stamp), 2)
 
     # MAX SINGLE POSITION from /setup/ — a percentage of the BOOK, where the
     # pool caps are percentages of this CLASS's pool. Two different ceilings
@@ -900,7 +954,8 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     single = single_position_state(risk_book, asset_class=cls,
                                    notional=notional,
                                    capital_base=float(capital or 0),
-                                   base_label="manual pool")
+                                   base_label="manual pool",
+                                   **ticket_stamp)
     # The concentration ceiling, reported here and enforced in `_execute`.
     # The preview must never raise the operator's own screen out from under
     # them — it bounds the size control and explains itself instead.
@@ -908,7 +963,10 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     concentration = concentration_state(
         user, symbol=inst.symbol, side=side, asset_class=cls,
         notional=notional, capital_base=float(capital or 0),
-        base_label="manual pool")
+        base_label="manual pool",
+        # the ticket's stamp (2026-09-27): the multiplier this config
+        # would send, on the carrier that would carry it
+        **ticket_stamp)
 
     # A DUPLICATE EXPRESSION is refused even on this path, where the money
     # limits only warn — because it is not appetite. Appetite is how much
@@ -970,7 +1028,8 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     stop_used = float(sizing["stop"])
     risk_per_unit = abs(price - stop_used) * vpu
     notional_per_unit = price * vpu
-    capital_use_per_unit = _capital_use(cls, notional_per_unit)
+    capital_use_per_unit = _capital_use(cls, notional_per_unit,
+                                        **ticket_stamp)
     step = _qty_step(bot, price)
     # The pool line moves with the funding closes: what an override may use
     # is what is free AFTER whatever the operator agrees to close.
@@ -1049,12 +1108,15 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     # Stated, never offered. See _leverage: no execution path multiplies a
     # manual order, so the honest control here is the truth about where the
     # leverage lives plus the notional this pool can carry.
-    lev = _leverage(cls)
+    # The TICKET's multiplier (2026-09-27), not the class table's: an eToro
+    # forex ticket at 1 ties up its full notional (measured), so it reads
+    # 1:1 — the table's 30:1 is OANDA's shape.
+    lev = _leverage(cls, **ticket_stamp)
     max_notional = round(capital * max_notional_fraction(cfg, cls), 2)
     leverage = {
         "effective": round(lev, 4),
         "adjustable": False,
-        "margin_fraction": CAPITAL_USE_FRACTION.get(cls, 1.0),
+        "margin_fraction": _capital_use(cls, 1.0, **ticket_stamp),
         "max_notional": max_notional,
         "note": (
             f"{lev:.0f}:1 — the leverage is the broker's, not this "
@@ -1138,9 +1200,11 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         # path exists not to do. What they must not be is uninformed.
         "rule_advisory": _manual_rule_advisory(),
         # How hard this pool is set to swing, and whether that is unusual.
-        # The ceiling is 5% because a small book needs room for a win to
-        # clear its own costs; a number typed into extras months ago must
-        # not go on sizing at 5% without saying so.
+        # The ceiling is sizing.MAX_RISK_FRACTION — 7% since 2026-09-26,
+        # room the operator chose in writing; 5% before, itself raised
+        # from 1% so a small book can risk enough for a win to clear its
+        # own costs. A number typed into extras months ago must not go on
+        # sizing at 5% without saying so.
         "risk_appetite": _risk_appetite(cfg),
         # The book's own limits, as information rather than as a veto. The
         # dialog renders this as a warning the operator reads past; the
@@ -1436,6 +1500,13 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                     "closed": closed}
 
         bot = make_bot(cfg)
+        # The ticket's stamp, the preview's own pair (2026-09-27): every
+        # pool and MAX SINGLE POSITION judgement below charges it.
+        from bot_program.asset_engine.base import AssetBot
+        from bot_program.engine.broker_router import broker_name_for_symbol
+        ticket_stamp = {
+            "leverage": AssetBot._leverage_hint_of(cfg.extras),
+            "carrier": broker_name_for_symbol(user, inst.symbol, cfg)}
         # Fill FIRST, size from the fill — the bot entry path's ordering.
         # Sizing off the free raw mark and then filling adversely overshoots
         # the risk budget by half the round-trip cost every time.
@@ -1496,7 +1567,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 # caps have to bite on what is actually sent.
                 why = judge_qty(cfg, asset_class=cls, qty=qty, entry=fill,
                                 stop=stop, value_per_unit=vpu,
-                                available=preview["available"])
+                                available=preview["available"],
+                                **ticket_stamp)
                 if why:
                     return {"error": why, "closed": closed}
         elif dist <= 0:
@@ -1510,7 +1582,7 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             qty, why = validate_qty_override(
                 cfg, asset_class=cls, raw=qty_override, entry=fill, stop=stop,
                 value_per_unit=vpu, available=preview["available"],
-                round_qty=bot._round_qty)
+                round_qty=bot._round_qty, **ticket_stamp)
             if why:
                 return {"error": why, "closed": closed}
             logger.info("[take-trade] %s sized %s %s by hand: %s units "
@@ -1534,7 +1606,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             capital = float(preview["capital"])
             risk_dollars = round(qty * dist, 6)
             notional_fraction = round(notional / capital, 6) if capital else 0.0
-            capital_use = round(_capital_use(cls, notional), 2)
+            capital_use = round(_capital_use(cls, notional,
+                                             **ticket_stamp), 2)
         else:
             notional = float(preview["notional"])
             risk_dollars = preview["risk_dollars"]
@@ -1552,7 +1625,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         single = single_position_state(limits_book(), asset_class=cls,
                                        notional=notional,
                                        capital_base=float(cfg.capital or 0),
-                                       base_label="manual pool")
+                                       base_label="manual pool",
+                                       **ticket_stamp)
         if not single["ok"]:
             return {"error": single["reason"], "closed": closed}
 
@@ -1769,6 +1843,23 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                     f"at that multiplier and not at 1. "
                     + (_lev_why or "Remove the key, or take the trade "
                                    "through the bot lane"))}
+            # THE ACCOUNT'S HEADROOM (2026-09-27), the bots' own check
+            # (AssetBot._leverage_headroom) before this lane's eToro order
+            # too: the lane sends at 1, and at 1x eToro locks the FULL
+            # notional (MEASURED 2026-09-23: used margin 84.8 on 84.8 of
+            # exposure) — so the sync's cells must show the cash: stored,
+            # fresh, read in this row's world, in the pool's currency, and
+            # the account under MAX_PLEDGED_FRACTION after it. A refusal
+            # sends nothing; any other carrier is not asked.
+            if adapter_key(client) == "etoro":
+                from bot_program.asset_engine import skips as _skips
+                _room = bot._leverage_headroom(
+                    client, inst.symbol, qty=float(qty), price=float(fill),
+                    leverage=1)
+                if _room:
+                    return {"error": (
+                        f"eToro refusal ({_skips.LEVERAGE_REFUSED}): at 1x: "
+                        f"{_room} — nothing was sent")}
             client_order_id = make_client_order_id(
                 cfg.id, inst.symbol,
                 signal_id=(str(signal.id) if signal is not None

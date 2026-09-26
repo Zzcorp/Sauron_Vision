@@ -391,6 +391,16 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         p.start()
         self.addCleanup(p.stop)
 
+    def _cells(self, **kw):
+        """The sync's cells (2026-09-27): the lane's eToro order meets the
+        bots' own headroom (AssetBot._leverage_headroom) — at 1x eToro
+        locks the FULL notional (MEASURED 2026-09-23) — so a test that
+        sends needs them: stored, fresh, demo-stamped for this demo row,
+        in USD, the account far under its pledged ceiling."""
+        from tests.test_etoro_leverage import _account
+        kw.setdefault("cash", 100000)
+        return _account(self.user, **kw)
+
     def test_an_unproven_class_is_refused_and_nothing_is_sent(self):
         """ETORO_PROVEN as shipped (empty): a hand-taken BUY on the crypto
         manual config is refused naming "crypto" — no market_order, no
@@ -466,6 +476,7 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         the venue's answer, not on a failed read."""
         from bot_program.manual_trade import execute_take_trade
         self._proven("crypto")
+        self._cells()       # the lane's eToro order needs them (2026-09-27)
         t, fake = self._etoro()
         with patch.object(t, "market_order", return_value=_filled_response(
                 positionId="3603281458")) as mo, \
@@ -490,6 +501,7 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         from bot_program.manual_trade import execute_take_trade
         from bot_program.models import AssetBotTrade
         self._proven("crypto")
+        self._cells()       # the lane's eToro order needs them (2026-09-27)
         t, _fake = self._etoro()
         with patch.object(t, "market_order", return_value=_filled_response(
                 positionId="3603281458")) as mo, \
@@ -529,6 +541,7 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         from bot_program.models import AssetBotTrade
         from tests.test_etoro_client import REJECTED_720
         self._proven("crypto")
+        self._cells()       # the lane's eToro order needs them (2026-09-27)
         t, _fake = self._etoro()
         words = "errorCode 720: " + REJECTED_720["status"]["errorMessage"]
         refused = {"orderId": "383455967", "symbol": "BTCUSD", "side": "BUY",
@@ -547,6 +560,55 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
                       "(Dollars)) ", out["error"])
         self.assertTrue(out["error"].endswith("nothing opened"))
         self.assertFalse(AssetBotTrade.objects.filter(config=self.cfg).exists())
+
+    def test_a_proven_class_with_no_cells_is_refused_and_nothing_is_sent(self):
+        """[the lens-1 finding, 2026-09-27] The lane sends at 1, and at 1x
+        eToro locks the FULL notional (MEASURED 2026-09-23: used margin
+        84.8 on 84.8 of exposure): the bots' own headroom runs before this
+        lane's eToro order too. "crypto" stated proven, the eligibility row
+        read, NO cells stored: refused as leverage_refused naming the
+        missing cells — no market_order, no order POST, no row."""
+        from bot_program.manual_trade import execute_take_trade
+        from bot_program.models import AssetBotTrade
+        self._proven("crypto")
+        t, fake = self._etoro()
+        with patch.object(t, "market_order", wraps=t.market_order) as spy, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertTrue(out["error"].startswith(
+            "eToro refusal (leverage_refused): at 1x: "), out["error"])
+        self.assertIn("never been stored", out["error"])
+        self.assertTrue(out["error"].endswith("nothing was sent"),
+                        out["error"])
+        spy.assert_not_called()
+        posts = [c for c in fake.calls if c[0] == "POST"]
+        self.assertEqual([c[1] for c in posts if "orders" in c[1]], [])
+        self.assertFalse(AssetBotTrade.objects.filter(config=self.cfg).exists())
+
+    def test_cells_read_in_the_other_world_refuse_the_lane_too(self):
+        """The same world gate as the bots': cells the sync stamped "demo"
+        on a row now flagged live are refused naming both worlds, and
+        nothing is sent."""
+        from bot_program.manual_trade import execute_take_trade
+        self._proven("crypto")
+        acct = self._cells()
+        acct.demo = False
+        acct.save(update_fields=["demo"])
+        t, fake = self._etoro()
+        with patch.object(t, "market_order", wraps=t.market_order) as spy, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertIn("cash read in the demo world; this row now trades live",
+                      out["error"])
+        self.assertTrue(out["error"].endswith("nothing was sent"),
+                        out["error"])
+        spy.assert_not_called()
+        self.assertEqual([c[1] for c in fake.calls
+                          if c[0] == "POST" and "orders" in c[1]], [])
 
 
 class ThePaperPathIsUntouchedTests(TestCase):

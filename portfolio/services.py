@@ -161,7 +161,12 @@ class UnifiedPosition:
                  # slotted class refuses an attribute it never declared, so
                  # a template reading trade.metadata directly would silently
                  # get nothing. Position rows have no brokered stop at all.
-                 "protected")
+                 "protected",
+                 # The row's VENUE STAMP (2026-09-27): the carrier and the
+                 # multiplier execute_entry recorded, so the book's
+                 # ALLOCATED (services._capital_at_work) charges an eToro
+                 # row what the gates charge it. Position rows have neither.
+                 "carrier", "stamped_leverage")
 
 
 def is_option_row(trade) -> bool:
@@ -211,8 +216,16 @@ def value_per_unit(trade) -> float:
     return vpu
 
 
-def pnl_on_capital_pct(pnl, asset_class, notional):
+def pnl_on_capital_pct(pnl, asset_class, notional, *, leverage=None,
+                       carrier: str = ""):
     """P&L as a percentage of the CAPITAL the position actually ties up.
+
+    `leverage` and `carrier` are the row's stamp, forwarded to
+    risk_gate.capital_at_work (2026-09-27): an eToro row's capital is
+    notional / L of its OWN multiplier, the full notional at 1 (measured
+    2026-09-23) — so a forex row sent at 1 on eToro has NO second
+    percentage (capital == notional), and the class table stays for every
+    other carrier and for a legacy row that passes nothing.
 
     The headline percentage on every row is pnl/notional — true, and for a
     margined class also the smaller number by exactly the leverage. A forex
@@ -236,7 +249,8 @@ def pnl_on_capital_pct(pnl, asset_class, notional):
     if pnl is None:
         return None
     notional = abs(float(notional or 0))
-    cap = capital_at_work(asset_class or "", notional)
+    cap = capital_at_work(asset_class or "", notional, leverage=leverage,
+                          carrier=carrier)
     if not cap or cap == notional:
         return None
     return round(float(pnl) / cap * 100, 2)
@@ -279,8 +293,13 @@ def capital_summary(user):
             ).select_related("config"):
         notional = abs(float(trade.entry_price or 0)
                        * float(trade.qty or 0) * value_per_unit(trade))
+        # the ROW's stamp (2026-09-27): an eToro forex row sent at 1 is
+        # USED in full — the gate counts it so; a "free" printed at 1/30
+        # would be a free the next entry cannot draw
         used[(trade.asset_class, trade.config.mode)] += capital_at_work(
-            trade.asset_class, notional)
+            trade.asset_class, notional,
+            leverage=(trade.metadata or {}).get("leverage"),
+            carrier=str((trade.metadata or {}).get("broker") or ""))
 
     classes = []
     for ac, mode in sorted(set(pools) | set(used)):
@@ -359,6 +378,8 @@ def _trade_to_position(trade, instruments, quotes):
     up.trade_id = trade.id
     up.status = trade.status
     up.protected = bool((trade.metadata or {}).get("protected"))
+    up.carrier = str((trade.metadata or {}).get("broker") or "")
+    up.stamped_leverage = (trade.metadata or {}).get("leverage")
 
     entry = float(trade.entry_price or 0)
     qty = float(trade.qty or 0)
@@ -379,8 +400,10 @@ def _trade_to_position(trade, instruments, quotes):
         up.unrealized_pnl = pnl
         notional = abs(entry * qty * vpu)
         up.unrealized_pnl_pct = round(pnl / notional * 100, 2) if notional else None
-        up.pnl_on_capital_pct = pnl_on_capital_pct(pnl, trade.asset_class,
-                                                   notional)
+        up.pnl_on_capital_pct = pnl_on_capital_pct(
+            pnl, trade.asset_class, notional,
+            leverage=(trade.metadata or {}).get("leverage"),
+            carrier=str((trade.metadata or {}).get("broker") or ""))
         return up
 
     if is_option:
@@ -401,7 +424,9 @@ def _trade_to_position(trade, instruments, quotes):
         up.unrealized_pnl = round((last - entry) * qty * vpu * sign, 2)
         up.unrealized_pnl_pct = round((last - entry) / entry * 100 * sign, 2)
         up.pnl_on_capital_pct = pnl_on_capital_pct(
-            up.unrealized_pnl, trade.asset_class, abs(entry * qty * vpu))
+            up.unrealized_pnl, trade.asset_class, abs(entry * qty * vpu),
+            leverage=(trade.metadata or {}).get("leverage"),
+            carrier=str((trade.metadata or {}).get("broker") or ""))
     else:
         up.unrealized_pnl = None
         up.unrealized_pnl_pct = None
@@ -597,14 +622,29 @@ def _capital_at_work(row, notional: float) -> float:
     record of how much of its notional a class actually locks — the same
     table the risk gates size against, so the allocation an operator reads
     cannot drift from the number that refuses their next trade.
+
+    Through the GATE's own number since 2026-09-27
+    (risk_gate.capital_at_work). `_open_book`'s rows are BOTH halves: a
+    bot row (a UnifiedPosition over an AssetBotTrade) carries its stamp
+    — `carrier` and `stamped_leverage`, set by _trade_to_position — so an
+    eToro forex row sent at 1 is ALLOCATED in full (the venue pledges the
+    full notional at 1, MEASURED 2026-09-23), not at 1/30: a "free" at
+    1/30 is a free the next entry cannot draw. Legacy rows
+    (portfolio.Position: the setup form's and the eToro sync's) carry no
+    venue stamp: the class table, in full. Forex legacy rows stay at the
+    OANDA fraction until the row model records one.
     """
     try:
-        from bot_program.manual_trade import CAPITAL_USE_FRACTION
+        from portfolio.risk_gate import capital_at_work
     except Exception:  # noqa: BLE001
         return float(notional or 0.0)
     cls = (getattr(row, "asset_class", "")
            or getattr(getattr(row, "instrument", None), "asset_class", "") or "")
-    return float(notional or 0.0) * CAPITAL_USE_FRACTION.get(cls, 1.0)
+    # the ROW's stamp when it carries one (a bot row); a legacy Position
+    # has neither attribute and keeps the class table
+    return capital_at_work(cls, float(notional or 0.0),
+                           leverage=getattr(row, "stamped_leverage", None),
+                           carrier=str(getattr(row, "carrier", "") or ""))
 
 
 def _simulated_realized_pnl(user) -> float:

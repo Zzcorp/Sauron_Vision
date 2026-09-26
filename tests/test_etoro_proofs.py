@@ -424,6 +424,39 @@ class TheLegacyTickMeetsTheGateTests(TestCase):
         self.assertTrue(any("(stock, SELL)" in ln and "['short']" in ln
                             for ln in cm.output), cm.output)
 
+    def test_a_proven_class_is_still_refused_for_want_of_the_headroom(self):
+        """E2.2 (2026-09-27, round 2): every eToro entry needs the sync's
+        cells, because at 1x the venue locks the FULL notional (MEASURED
+        2026-09-23: used margin 84.8 on 84.8 of exposure), and this loop
+        cannot ask the bots' _leverage_headroom honestly (a BotConfig names
+        no pool currency; its BotTrade rows are not what the check
+        counts). "stock" stated proven, the measured AAPL eligibility row
+        on the wire, a BUY that clears the proof gate: refused here — no
+        market_order, no order POST, no row."""
+        from bot_program.models import BotTrade
+        from tests.test_etoro_client import ELIG_AAPL, SEARCH_AAPL
+        t, fake = _etoro_client([SEARCH_AAPL, ELIG_AAPL])
+        for name, value in (("klines", self._BARS),
+                            ("order_book", {"bids": [], "asks": []})):
+            p = mock.patch.object(t, name, return_value=value)
+            p.start()
+            self.addCleanup(p.stop)
+        with mock.patch(PROVEN, frozenset({"stock"})), \
+                mock.patch.object(t, "market_order",
+                                  wraps=t.market_order) as spy, \
+                self.assertLogs("bot_program.engine.runner",
+                                level="ERROR") as cm:
+            self._tick(t)
+        spy.assert_not_called()
+        self.assertEqual([c[1] for c in fake.calls if "/orders" in c[1]], [])
+        self.assertEqual(BotTrade.objects.count(), 0)
+        self.assertFalse(any("gate_blocked" in ln for ln in cm.output),
+                         cm.output)
+        line = [ln for ln in cm.output if "headroom" in ln]
+        self.assertEqual(len(line), 1, cm.output)
+        self.assertIn("legacy tick AAPL REFUSED (leverage_refused)", line[0])
+        self.assertIn("nothing was sent", line[0])
+
     def test_a_carrier_that_is_not_etoro_is_untouched(self):
         """The existing behaviour, pinned: the loop sends through a carrier
         the adapter map does not know and books the row off its answer."""

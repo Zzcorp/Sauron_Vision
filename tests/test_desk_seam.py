@@ -318,17 +318,19 @@ class PricingSessionTests(TestCase):
 # ── execute re-judges the ceiling ────────────────────────────────────────────
 
 class SizeMultCeilingTests(TestCase):
-    """3% risk per trade on a 5% ceiling: 1.0 fits, 0.5 halves, 2.0 (6%) is
-    refused by the MAX_RISK_FRACTION arithmetic exactly as the allocator
-    lane would be. A 30% stop keeps the notional (~$1,000 of a $10,000 pool)
-    well inside the single-position cap, so the ceiling is the only gate
-    that can bind here."""
+    """3.6% risk per trade on the 7% ceiling (2026-09-26): 1.0 fits, 0.5
+    halves, 2.0 (7.2%) is refused by the MAX_RISK_FRACTION arithmetic
+    exactly as the allocator lane would be. A 30% stop keeps the notional
+    (~$1,200 of a $10,000 pool) well inside the single-position cap, so the
+    ceiling is the only gate that can bind here. (3.6 rather than 4: the
+    default size is rounded to four decimals, and 3.6% sizes 7.9980 units
+    here — a half that the rounding can represent.)"""
 
     def setUp(self):
         self.user = _user("seam_mult")
         self.cfg = _config(self.user, symbols=["SEAM5"],
                            stop_loss_pct=30.0, take_profit_pct=60.0,
-                           extras={"risk_per_trade_pct": 3.0})
+                           extras={"risk_per_trade_pct": 3.6})
         _signal("SEAM5", "bullish", 0.85, rule="seam_rule")
 
     def _cand(self):

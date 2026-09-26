@@ -282,3 +282,88 @@ class EndToEndEntryTests(TestCase):
         t = AssetBotTrade.objects.filter(config=cfg).first()
         self.assertIsNotNone(t, "still cannot buy a $201 share")
         self.assertGreaterEqual(float(t.qty), 1.0)
+
+
+class TheInstrumentCapTests(TestCase):
+    """E2.5 (2026-09-27): the notional cap and the stop floor are the
+    INSTRUMENT's (size_position cap_class) — an index or commodity symbol
+    in a stock config sizes under 2.0 while its AAPL keeps 0.20. eToro
+    floors index/commodity exposure at 1,000 USD (measured 2026-09-23);
+    under 0.20 that floor was unreachable below a 5,000 pool. The risk
+    fraction stays the config's."""
+
+    def setUp(self):
+        self.user = _user("icap_u")
+        self.cfg = _cfg(self.user)                 # a stock config, 10,000
+
+    def test_index_and_commodity_stop_floors_are_f_over_two(self):
+        from bot_program.asset_engine.sizing import (MAX_NOTIONAL_FRACTION,
+                                                     min_stop_fraction)
+        self.assertEqual(MAX_NOTIONAL_FRACTION["index"], 2.0)
+        self.assertEqual(MAX_NOTIONAL_FRACTION["commodity"], 2.0)
+        self.assertEqual(MAX_NOTIONAL_FRACTION["stock"], 0.20)
+        f = 0.0025
+        self.assertAlmostEqual(min_stop_fraction(self.cfg, "index", f), f / 2.0)
+        self.assertAlmostEqual(min_stop_fraction(self.cfg, "commodity", f),
+                               f / 2.0)
+        self.assertAlmostEqual(min_stop_fraction(self.cfg, "stock", f), f / 0.20)
+
+    def test_an_index_symbol_in_a_stock_config_sizes_under_the_index_cap(self):
+        """The same 0.2% stop: AAPL (cap_class None -> the config's class)
+        widens to the 1.25% floor and stays under 20%; SPX500 (cap_class
+        "index") keeps its stop and runs to 125% of the pool, under 2.0.
+        Risk is the same 0.25% of 10,000 both times."""
+        from bot_program.asset_engine.sizing import size_position
+        aapl = size_position(self.cfg, asset_class="stock", entry=100.0,
+                             stop=99.8, direction="BUY")
+        self.assertTrue(aapl["stop_widened"])
+        self.assertLessEqual(aapl["notional_fraction"], 0.20 + 1e-9)
+        spx = size_position(self.cfg, asset_class="stock", entry=100.0,
+                            stop=99.8, direction="BUY", cap_class="index")
+        self.assertFalse(spx["stop_widened"])
+        self.assertAlmostEqual(spx["notional_fraction"], 1.25, places=6)
+        self.assertLessEqual(spx["notional_fraction"], 2.0 + 1e-9)
+        self.assertAlmostEqual(spx["risk_dollars"], 25.0)
+        self.assertAlmostEqual(aapl["risk_dollars"], 25.0)
+        self.assertAlmostEqual(abs(100.0 - spx["stop"]) * spx["qty"], 25.0,
+                               places=6)
+
+    def test_the_sizer_still_never_reads_a_multiplier(self):
+        """cap_class is a class name, not a number: the units come from the
+        risk budget and the stop alone — as they must, because eToro's
+        exposure is the full notional at ANY multiplier (MEASURED
+        2026-09-23: initialExposure 84.8 at 1x and 84.79 at 2x, doc §2),
+        so the loss at the stop never moves with it. 0.25% of 10,000 on a
+        2% stop is 12.5 units whatever the class cap."""
+        from bot_program.asset_engine.sizing import size_position
+        a = size_position(self.cfg, asset_class="stock", entry=100.0,
+                          stop=98.0, direction="BUY", cap_class="commodity")
+        b = size_position(self.cfg, asset_class="stock", entry=100.0,
+                          stop=98.0, direction="BUY")
+        self.assertAlmostEqual(a["qty"], b["qty"], places=9)
+        self.assertAlmostEqual(a["qty"], 12.5, places=9)
+        self.assertAlmostEqual(a["risk_dollars"], 25.0, places=9)
+
+    def test_the_bot_hands_the_instruments_class_to_the_sizer(self):
+        """E2.5 wiring (2026-09-27, round 2): AssetBot._size_for_entry
+        passes cap_class=_instrument_class(symbol) — the Instrument row's
+        class — so the same stock config sizes SPX500 under the index cap
+        (the 0.2% stop kept, 125% of the pool) and AAPL under 0.20 (the
+        stop widened to the floor). eToro floors index exposure at 1,000
+        USD (measured 2026-09-23), which 0.20 could not reach below a
+        5,000 pool."""
+        from types import SimpleNamespace
+
+        from bot_program.asset_engine.stock_bot import StockBot
+        from tests.test_execution_trust import _instrument
+        _instrument("SPX500", "index")
+        _instrument("AAPL", "stock")
+        bot = StockBot(self.cfg)
+        buy = SimpleNamespace(direction="BUY")
+        spx = bot._size_for_entry("SPX500", 100.0, 99.8, buy)
+        aapl = bot._size_for_entry("AAPL", 100.0, 99.8, buy)
+        self.assertFalse(spx["stop_widened"])
+        self.assertAlmostEqual(spx["notional_fraction"], 1.25, places=6)
+        self.assertTrue(aapl["stop_widened"])
+        self.assertLessEqual(aapl["notional_fraction"], 0.20 + 1e-9)
+        self.assertAlmostEqual(spx["risk_dollars"], aapl["risk_dollars"])

@@ -342,8 +342,25 @@ def _limit_pct(portfolio, field: str) -> float | None:
     return value if value > 0 else None
 
 
-def capital_at_work(asset_class: str, notional: float) -> float:
+def capital_at_work(asset_class: str, notional: float, *, leverage=None,
+                    carrier: str = "") -> float:
     """Account-currency cash a position of this notional actually ties up.
+
+    On an eToro-carried row (`carrier` "etoro") the ROW'S OWN multiplier
+    says how much, not the class table: eToro pledges notional / L, and
+    the FULL notional at 1 — MEASURED 2026-09-23 (used margin 84.8 on
+    84.8 of exposure at 1x; 42.39 at 2x; doc §2, §5). A row that recorded
+    no multiplier was sent at 1. Floored at the class table where the
+    table MODELS margin (forex 1/30): a forex row stamped 50 still counts
+    1/30 — never looser than that model. A class the table settles in
+    full (stock, etf, crypto, index, commodity) has no margin model in
+    the table: a 5x stock CFD counts the venue's measured notional / 5
+    (margin 42.39 on 84.79 of exposure at 2x, doc §2), and a stamp past
+    MAX_ORDER_LEVERAGE — an order nothing here can send — counts AT that
+    cap, never looser (Stage 2 E2.1, 2026-09-27; the plan's literal
+    max(class fraction, 1/L) would count that 5x stock in full, which
+    its own GAP 3 numbers refute — the operator has not ruled on the
+    two in writing). Every other carrier keeps the table as before.
 
     Margin-aware, through `bot_program.manual_trade.CAPITAL_USE_FRACTION` —
     the one place this platform records that an FX position ties up broker
@@ -359,7 +376,30 @@ def capital_at_work(asset_class: str, notional: float) -> float:
     limit.
     """
     from bot_program.manual_trade import CAPITAL_USE_FRACTION
-    return abs(float(notional)) * CAPITAL_USE_FRACTION.get(asset_class or "", 1.0)
+    frac = CAPITAL_USE_FRACTION.get(asset_class or "", 1.0)
+    if str(carrier or "") == "etoro":
+        # MEASURED 2026-09-23 (doc §2, §5): eToro pledges notional / L, and
+        # the FULL notional at 1 (used margin 84.8 on 84.8; 42.39 at 2x).
+        # A row that recorded no multiplier, or one nothing can read, was
+        # sent at 1. Floored at the table where the table models margin
+        # (forex 1/30), never below it; a class the table settles in full
+        # (1.0) has no margin model here — the venue's number stands, at
+        # a multiplier no higher than this platform can send.
+        try:
+            lev = float(leverage) if leverage is not None else 1.0
+        except (TypeError, ValueError):
+            lev = 1.0
+        # (a NaN or an infinite stamp is unreadable: 1, never 0 margin)
+        if not 1 <= lev < float("inf"):
+            lev = 1.0
+        if frac < 1.0:
+            frac = max(1.0 / lev, frac)
+        else:
+            # a stamp past the platform cap (no order here can carry one)
+            # counts AT the cap: a stock stamped 100 is a fifth, not 1 %
+            from bot_program.asset_engine.base import MAX_ORDER_LEVERAGE
+            frac = 1.0 / min(lev, float(MAX_ORDER_LEVERAGE))
+    return abs(float(notional)) * frac
 
 
 def open_capital_at_work(user, portfolio) -> dict:
@@ -417,7 +457,10 @@ def open_capital_at_work(user, portfolio) -> dict:
                 "asset_class", "entry_price", "qty", "metadata", "paper"):
         notional = (float(trade.entry_price or 0) * float(trade.qty or 0)
                     * value_per_unit(trade))
-        at_work = capital_at_work(trade.asset_class, notional)
+        at_work = capital_at_work(
+            trade.asset_class, notional,
+            leverage=(trade.metadata or {}).get("leverage"),
+            carrier=str((trade.metadata or {}).get("broker") or ""))
         if trade.paper:
             paper_total += at_work
             paper_n += 1
@@ -450,6 +493,9 @@ def open_capital_at_work(user, portfolio) -> dict:
             portfolio=portfolio,
             closed_at__isnull=True).select_related("instrument"):
         notional = float(pos.entry_price or 0) * float(pos.quantity or 0)
+        # A legacy Position carries no venue stamp (no metadata): the
+        # class table, in full. Forex legacy rows stay at the OANDA
+        # fraction until the row model records one (2026-09-27).
         legacy_total += capital_at_work(
             getattr(pos.instrument, "asset_class", ""), notional)
         legacy_n += 1
@@ -802,12 +848,16 @@ def exposure_state(user, *, portfolio=None, adding: float = 0.0,
 
 def single_position_state(portfolio, *, asset_class: str, user=None,
                           notional: float, capital_base: float = None,
-                          base_label: str = "book") -> dict:
+                          base_label: str = "book", leverage=None,
+                          carrier: str = "") -> dict:
     """Whether one proposed position clears MAX SINGLE POSITION.
 
     Judged on capital AT WORK, the same margin-aware basis `exposure_state`
     uses, so a 20% cap means the same 20% whether the position is a share
     that settles in full or an FX ticket the broker margins at 30:1.
+    `leverage` and `carrier` are the ticket's stamp for capital_at_work
+    (2026-09-27): on an eToro carrier the margin is notional / L, the
+    full notional at 1 (measured), floored at the table's forex 1/30.
 
     `capital_base` is THE CAPITAL BACKING THIS POSITION, and passing the
     right one is the whole correctness of this gate.
@@ -830,7 +880,8 @@ def single_position_state(portfolio, *, asset_class: str, user=None,
     limit_pct = _limit_pct(portfolio, "max_single_position_pct")
     base = (capital_base if capital_base is not None
             else gate_book_value(user, portfolio))
-    at_work = capital_at_work(asset_class, notional)
+    at_work = capital_at_work(asset_class, notional, leverage=leverage,
+                              carrier=carrier)
     state = {"ok": True, "limit_pct": limit_pct, "book_value": base,
              "capital_base": base, "base_label": base_label,
              "cap_money": None, "capital_at_work": round(at_work, 2),
@@ -903,7 +954,10 @@ def symbol_side_exposure(user, symbol: str, side: str, *, portfolio=None) -> dic
             continue
         notional = (float(trade.entry_price or 0) * float(trade.qty or 0)
                     * value_per_unit(trade))
-        total += capital_at_work(trade.asset_class, notional)
+        total += capital_at_work(
+            trade.asset_class, notional,
+            leverage=(trade.metadata or {}).get("leverage"),
+            carrier=str((trade.metadata or {}).get("broker") or ""))
         n += 1
         rules.append(trade.rule_name or "—")
 
@@ -914,6 +968,9 @@ def symbol_side_exposure(user, symbol: str, side: str, *, portfolio=None) -> dic
         if (str(pos.direction or "").lower() in ("long", "buy")) != want_long:
             continue
         notional = float(pos.entry_price or 0) * float(pos.quantity or 0)
+        # A legacy Position carries no venue stamp (no metadata): the
+        # class table, in full. Forex legacy rows stay at the OANDA
+        # fraction until the row model records one (2026-09-27).
         total += capital_at_work(
             getattr(pos.instrument, "asset_class", ""), notional)
         n += 1
@@ -924,7 +981,8 @@ def symbol_side_exposure(user, symbol: str, side: str, *, portfolio=None) -> dic
 
 def concentration_state(user, *, symbol: str, side: str, asset_class: str,
                         notional: float, capital_base: float = None,
-                        base_label: str = "book", portfolio=None) -> dict:
+                        base_label: str = "book", portfolio=None,
+                        leverage=None, carrier: str = "") -> dict:
     """Would this ticket put too much of one bet on one instrument?
 
     The SAME `max_single_position_pct` the card already carries, applied to
@@ -937,13 +995,18 @@ def concentration_state(user, *, symbol: str, side: str, asset_class: str,
     A separate knob was the obvious alternative and the wrong one — a second
     percentage would let the two disagree, and an operator who set "no more
     than 20% in one position" did not mean "per ticket".
+
+    `leverage` and `carrier` are the ticket's stamp for capital_at_work
+    (2026-09-27): what is HELD is counted off each row's own stamp; what
+    is ADDED off the multiplier this ticket would carry.
     """
     pf = portfolio if portfolio is not None else limits_book()
     limit_pct = _limit_pct(pf, "max_single_position_pct")
     base = (capital_base if capital_base is not None
             else gate_book_value(user, pf))
     held = symbol_side_exposure(user, symbol, side, portfolio=pf)
-    adding = capital_at_work(asset_class, notional)
+    adding = capital_at_work(asset_class, notional, leverage=leverage,
+                             carrier=carrier)
     after = held["committed"] + adding
 
     state = {"ok": True, "limit_pct": limit_pct, "capital_base": base,

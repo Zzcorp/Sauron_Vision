@@ -2209,8 +2209,22 @@ def _pos_exit_cost(trade, mark, qty_abs, vpu):
 
 
 
-def _pos_modelled_margin(asset_class: str, notional):
-    """Capital a levered position ties up, per the platform's own table.
+def _pos_stamp_multiplier(meta) -> int:
+    """The multiplier an eToro-stamped row recorded (>= 1); 1 when none
+    or unreadable — the reading AssetBot._leverage_hint_of makes."""
+    try:
+        return max(int((meta or {}).get("leverage") or 1), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _pos_modelled_margin(asset_class: str, notional, meta=None):
+    """Capital a levered position ties up, per the platform's own table —
+    or, on an eToro-stamped row, the ROW'S OWN multiplier through the
+    gate's own capital_at_work (GAP 3, 2026-09-27): notional / L, the
+    full notional at 1 (measured 2026-09-23), floored at the class table's
+    forex 1/30. Importing the gate is what keeps the card from drifting
+    from the number that refuses the next entry.
 
     None when there is no notional to scale — an unpriced row has no
     margin to state, and inventing one would put a number under a
@@ -2218,6 +2232,15 @@ def _pos_modelled_margin(asset_class: str, notional):
     """
     if notional is None:
         return None
+    meta = meta or {}
+    if str(meta.get("broker") or "") == "etoro":
+        try:
+            from portfolio.risk_gate import capital_at_work
+            return capital_at_work(asset_class, notional,
+                                   leverage=meta.get("leverage"),
+                                   carrier="etoro")
+        except Exception:  # noqa: BLE001
+            return None
     try:
         from bot_program.manual_trade import CAPITAL_USE_FRACTION
     except Exception:  # noqa: BLE001
@@ -2226,8 +2249,13 @@ def _pos_modelled_margin(asset_class: str, notional):
     return None if not frac else float(notional) * frac
 
 
-def _pos_leverage(asset_class: str) -> str:
-    """How many times its own capital a position of this class carries.
+def _pos_leverage(asset_class: str, meta=None, notional=None) -> str:
+    """How many times its own capital a position of this class carries —
+    or, on an eToro-stamped row, THIS ROW (GAP 3, 2026-09-27): notional
+    over the gate's own margin, so the printed figure IS what the gate
+    counted: forex at 1 prints "1", a stock at 5 prints "5", forex at 50
+    prints "30" (floored at the class table's 1/30). Without a notional
+    to divide, the recorded multiplier itself.
 
     Read off `manual_trade.CAPITAL_USE_FRACTION`, the platform's single
     record of margin — the same table the risk gates size against — so the
@@ -2240,6 +2268,12 @@ def _pos_leverage(asset_class: str) -> str:
     """
     if not asset_class:
         return ""
+    meta = meta or {}
+    if str(meta.get("broker") or "") == "etoro":
+        margin = _pos_modelled_margin(asset_class, notional, meta=meta)
+        if notional and margin:
+            return _pos_fmt(float(notional) / float(margin), 0)
+        return str(_pos_stamp_multiplier(meta))
     try:
         from bot_program.manual_trade import CAPITAL_USE_FRACTION
     except Exception:  # noqa: BLE001
@@ -2444,7 +2478,14 @@ def _position_card_details(user, positions):
         # — see _POS_LEVERED_CLASSES. The margin is the broker's number and
         # nothing here records it, so the card dashes it and names the
         # notional separately rather than passing one off as the other.
-        levered = asset_class in _POS_LEVERED_CLASSES
+        # `trade` is None on a legacy portfolio.Position row: no stamp.
+        _meta = (getattr(trade, "metadata", None) if trade is not None
+                 else None) or {}
+        # An eToro row above 1x carries margin, not cash, whatever its
+        # class: the multiplier is the ROW's (GAP 3, 2026-09-27).
+        levered = asset_class in _POS_LEVERED_CLASSES or (
+            str(_meta.get("broker") or "") == "etoro"
+            and _pos_stamp_multiplier(_meta) > 1)
         # The MODELLED margin on a levered row, not a dash.
         #
         # This used to be None on the grounds that the margin is the
@@ -2455,8 +2496,8 @@ def _position_card_details(user, positions):
         # as the one class whose capital the card would not name. It is
         # labelled `committed_kind = "margin"` so it is never read as cash
         # spent, and it is the same number the gate used.
-        committed = (_pos_modelled_margin(asset_class, notional) if levered
-                     else notional)
+        committed = (_pos_modelled_margin(asset_class, notional, meta=_meta)
+                     if levered else notional)
         exit_cost = _pos_exit_cost(trade, mark, qty_abs, vpu)
         if pnl is None:
             net_now = None
@@ -2501,7 +2542,8 @@ def _position_card_details(user, positions):
             # risk gates size against exactly that. An operator reading a
             # 4,800 exposure on a 160 margin is owed the number that
             # explains the gap.
-            "leverage": _pos_leverage(asset_class),
+            "leverage": _pos_leverage(asset_class, meta=_meta,
+                                      notional=notional),
             # What this one position ties up, as a share of the book it is
             # tying it up FROM. 4,800 means nothing without the pool it came
             # out of; "48% of the pool" is the sentence an operator sizes by.

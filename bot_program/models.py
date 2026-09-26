@@ -411,14 +411,22 @@ class EtoroAccount(models.Model):
     # `last_available_cash` is what the venue will lend against next;
     # `last_used_margin` is what it already holds. None = never read (three
     # states; 0 is a measurement). Read by asset_engine/base.py
-    # ::_leverage_headroom before a levered order, by preflight §3 and §4;
-    # read by nothing at leverage 1, where the venue's refusal stays the
-    # only margin gate. In the account's currency (last_equity_currency).
+    # ::_leverage_headroom before every eToro order the asset bots and the
+    # TAKE TRADE lane send (2026-09-27; at 1x the venue locks the FULL
+    # notional — MEASURED 2026-09-23, used margin 84.8 on 84.8 of
+    # exposure; the legacy BotConfig tick cannot read them and refuses
+    # every eToro order instead), by preflight §3 and §4. In the account's
+    # currency (last_equity_currency). `last_margin_world` is the world the
+    # cells were read in ("demo"/"live", stamped by sync_etoro_accounts from
+    # the client it built; "" = never stamped): the same key pair answers
+    # both worlds and `demo` alone picks the segment, so cells read in one
+    # world must not gate an order in the other.
     last_available_cash = models.DecimalField(max_digits=18, decimal_places=2,
                                               null=True, blank=True)
     last_used_margin = models.DecimalField(max_digits=18, decimal_places=2,
                                            null=True, blank=True)
     last_margin_at = models.DateTimeField(null=True, blank=True)
+    last_margin_world = models.CharField(max_length=8, default="", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     @property

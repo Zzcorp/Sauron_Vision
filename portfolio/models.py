@@ -83,6 +83,9 @@ class Position(models.Model):
         # here turned that unmeasured value into a confident +0.00% — the
         # exact zero the service's own fence exists to refuse.
         pnl = self.unrealized_pnl
+        # A legacy row carries no venue stamp: the class table, in full —
+        # forex legacy rows stay at the OANDA fraction until the row model
+        # records one (2026-09-27; an AssetBotTrade passes its own).
         return pnl_on_capital_pct(
             None if pnl is None else float(pnl),
             getattr(self.instrument, "asset_class", ""), notional)

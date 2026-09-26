@@ -900,6 +900,16 @@ def sync_etoro_accounts():
                     or margin.get("used_margin") is not None):
                 acct.last_margin_at = now
                 fields.append("last_margin_at")
+                # THE WORLD THE CELLS WERE READ IN (2026-09-27): the
+                # client's own (`EtoroTrader.demo`, the segment it POSTs
+                # to); the row's when a double states none — the client
+                # above was built from acct.demo, so on a real read the
+                # two never differ. Read by _leverage_headroom.
+                _demo = getattr(client, "demo", None)
+                if not isinstance(_demo, bool):
+                    _demo = bool(acct.demo)
+                acct.last_margin_world = "demo" if _demo else "live"
+                fields.append("last_margin_world")
         acct.save(update_fields=fields)
 
         if reading is not None:
