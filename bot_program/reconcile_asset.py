@@ -527,6 +527,24 @@ def _close_as_orphan(trade) -> None:
         if not trade.outcome:
             trade.outcome = "manual_close"
             trade.save(update_fields=["outcome"])
+
+    # THE VENUE CLOSED IT — a stop or a target struck, or a hand on the
+    # broker's own app — and until 2026-09-26 this path, the one every
+    # bracket-protected exit takes, told nobody: the bell and Telegram
+    # heard first-attempt closes and retried closes only. Same notifier,
+    # same preference, same quiet hours; after grading, so the words are
+    # the graded outcome's.
+    try:
+        from bot_program.notifications import notify_bot_fill_close
+        notify_bot_fill_close(
+            trade.config.user, asset_class=trade.asset_class,
+            symbol=trade.symbol, side=trade.side, qty=trade.qty,
+            exit_price=trade.exit_price, pnl=trade.pnl,
+            outcome=trade.outcome or "", trade_id=trade.id,
+        )
+    except Exception as e:  # noqa: BLE001 — a bell never blocks a close
+        logger.warning("reconcile: close notification failed for #%s: %s",
+                       trade.id, e)
     # A row reconciled as an orphan may still have its OTHER leg resting:
     # a stop that filled leaves the target behind (and vice versa) unless
     # the broker's OCA pair cancelled it. A resting exit against a flat

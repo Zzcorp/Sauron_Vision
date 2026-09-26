@@ -285,6 +285,23 @@ COMMANDS = [
         "runnable_reason": "presents the operator's Saxo session to an external service and prints the balance",
     },
     {
+        "name": "notify_probe",
+        "title": "Notification probe",
+        "purpose": "Show where one user's alerts go: the channel, the bot-alert preference, the quiet hours, whether a Telegram chat id and the platform token are present in THIS process; with --send, push ONE test message through the Telegram sender and print its answer (a refusal is logged with Telegram's own words). Nothing traded, ticked or armed.",
+        "usage": [
+            "python manage.py notify_probe --user Sauron",
+            "python manage.py notify_probe --user Sauron --send",
+        ],
+        "mirrors": "/notifications/settings/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+        # --user needs a value the Run lane cannot ask for, and --send
+        # writes to an external service (one Telegram message): the shell.
+        "runnable": False,
+        "runnable_reason": "takes --user; with --send it sends one Telegram message to the operator's chat",
+    },
+    {
         "name": "etoro_smoke",
         "title": "eToro smoke",
         "purpose": "Exercise the READS of the eToro adapter with one user's stored key pair — the row, its world's ping, equity and book, every live config's symbols (id, eToro's spelling, rate, bars), optionally the other world with the same pair, and which write URLs have ever been attested — as ok, refused, no-such or unknown. Places no order.",

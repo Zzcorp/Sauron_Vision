@@ -47,6 +47,18 @@ BOT_KINDS = {
 }
 
 
+#: The close outcome as the operator reads it on Telegram: an emoji the
+#: client renders, and words without an underscore. The keys are
+#: bot_grading's own vocabulary; anything else reads as a plain close.
+OUTCOME_WORDS = {
+    "hit_target": ("\U0001F3AF", "target hit"),
+    "stopped_out": ("\U0001F6D1", "stopped out"),
+    "time_stop": ("\u23F1", "time stop"),
+    "expired": ("\u231B", "expired"),
+    "manual_close": ("\u270B", "closed by hand"),
+}
+
+
 # Kinds the OPERATOR caused with their own hands. They ride this same
 # dispatcher — one bell, one set of channels, one quiet-hours rule — but they
 # are not bot events, and the two differences that follow from that are the
@@ -162,7 +174,16 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
     # ── External channels ───────────────────────────────────────────
     channel = _user_channel(user)
     if channel == "telegram":
-        delivered = _send_telegram(user, title, body) or delivered
+        # The structured facts (row_data["items"], the bell card's own
+        # lines) and the notifier's emoji ride to Telegram when a
+        # notifier hands them over; a plain call keeps its shape.
+        rd = row_data if isinstance(row_data, dict) else {}
+        if rd.get("items") or rd.get("mark"):
+            delivered = _send_telegram(
+                user, title, body, lines=rd.get("items"),
+                mark=str(rd.get("mark") or "")) or delivered
+        else:
+            delivered = _send_telegram(user, title, body) or delivered
     elif channel == "email":
         # Phase-45 — when delivering a briefing via email, render the
         # Sauron-themed HTML template instead of a plain-text dump.
@@ -261,11 +282,48 @@ def _plain_title(title: str) -> str:
     return title.lstrip(_PLATFORM_MARKS).lstrip() or title
 
 
-def _send_telegram(user, title: str, body: str) -> bool:
+def _telegram_text(title: str, body: str = "", *, lines=None,
+                   mark: str = "") -> str:
+    """The HTML Telegram renders: a bold title, then one fact per line.
+
+    HTML parse mode with every field escaped, because the legacy
+    Markdown mode this sent until 2026-09-26 read every underscore as
+    italics: a body carrying `golden_cross`, `stopped_out` or
+    `hit_target` — every bot open and every bot close — came back 400
+    "can't parse entities" and was dropped without a log line, while a
+    hand-taken fill (no rule name, no outcome word) went through. That
+    is how "the trades the machine takes and closes never reach
+    Telegram" looked from the operator's phone. `lines` are the
+    structured facts a notifier hands over (row_data["items"], the
+    same lines the bell's dwell card shows) and replace `body`; `mark`
+    is a plain emoji for the Telegram client — the bell keeps the
+    platform's geometric mark, which _plain_title strips on the way
+    out.
+    """
+    from html import escape
+    head = escape(_plain_title(title))
+    if mark:
+        head = f"{mark} {head}"
+    out = [f"<b>{head}</b>"]
+    if lines:
+        out.extend(escape(str(ln)) for ln in lines
+                   if str(ln or "").strip())
+    elif body:
+        out.append("")
+        out.append(escape(str(body)))
+    return "\n".join(out)
+
+
+def _send_telegram(user, title: str, body: str, *, lines=None,
+                   mark: str = "") -> bool:
     """Send via the platform Telegram bot to the user's chat_id.
 
     Requires `TELEGRAM_BOT_TOKEN` env var (platform-wide) and the user's
-    `UserNotificationPrefs.telegram_chat_id` (per-user).
+    `UserNotificationPrefs.telegram_chat_id` (per-user). HTML, escaped
+    (_telegram_text). An answer that is not OK is LOGGED with
+    Telegram's own words at WARNING — until 2026-09-26 it vanished into
+    a bare False, which is why a month of refused bot fills left no
+    trace anywhere.
     """
     try:
         import os, requests
@@ -275,14 +333,19 @@ def _send_telegram(user, title: str, body: str) -> bool:
         chat_id = getattr(user.notification_prefs, "telegram_chat_id", "")
         if not chat_id:
             return False
-        plain = _plain_title(title)
-        text = f"*{plain}*\n\n{body}" if body else f"*{plain}*"
+        text = _telegram_text(title, body, lines=lines, mark=mark)
         r = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                  "disable_web_page_preview": True},
             timeout=5,
         )
-        return r.ok
+        if not r.ok:
+            logger.warning("telegram refused (%s) %r: %s",
+                           getattr(r, "status_code", "?"),
+                           _plain_title(title),
+                           str(getattr(r, "text", ""))[:200])
+        return bool(r.ok)
     except Exception as e:
         logger.warning("telegram dispatch failed: %s", e)
         return False
@@ -351,11 +414,19 @@ def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
                           qty, entry_price, rule_name: str = "",
                           trade_id=None) -> bool:
     from alerts.links import page_url
+    items = [f"{asset_class.upper()} · qty {qty} @ {entry_price}"]
+    if rule_name:
+        items.append(f"Rule {rule_name}")
+    if trade_id:
+        items.append(f"Trade #{trade_id}")
     return dispatch_notification(
         user, "bot_fill_open",
         title=f"◉ {symbol} {side} opened",
         body=f"{asset_class.upper()} · qty {qty} @ {entry_price}"
              + (f" · {rule_name}" if rule_name else ""),
+        # the Telegram lines and mark (dispatch_notification hands them
+        # to _send_telegram; the bell card renders the same items)
+        row_data={"items": items, "mark": "\U0001F7E2"},
         # The fill has a page: forensics carries the rule that fired, the
         # signals that voted and the gate decision behind THIS trade —
         # "why did it just buy that?", which is the question the banner
@@ -444,11 +515,22 @@ def notify_bot_fill_close(user, *, asset_class: str, symbol: str, side: str,
     icon = "⊕" if outcome == "hit_target" else (
         "⊟" if outcome == "stopped_out" else "◯")
     sign = "+" if (pnl is not None and pnl > 0) else ""
+    # A P&L of None is UNMEASURED (no exit price could be read, the
+    # reconciled close with no quote) — never printed as a number.
+    pnl_words = f"{sign}{pnl}" if pnl is not None else "P&L unmeasured"
+    mark, words = OUTCOME_WORDS.get(str(outcome or ""), ("\u26AA", "closed"))
+    items = [(f"P&L {pnl_words}" if pnl is not None
+              else "P&L unmeasured (no exit price was read)"),
+             f"{asset_class.upper()} · qty {qty} @ {exit_price}",
+             words.capitalize()]
+    if trade_id:
+        items.append(f"Trade #{trade_id}")
     return dispatch_notification(
         user, "bot_fill_close",
-        title=f"{icon} {symbol} {side} closed · {sign}{pnl}",
+        title=f"{icon} {symbol} {side} closed · {pnl_words}",
         body=f"{asset_class.upper()} · qty {qty} @ {exit_price}"
              + (f" · {outcome}" if outcome else ""),
+        row_data={"items": items, "mark": mark},
         # Same trade, same page — the close's own timeline, grade and R
         # multiple. /bot-performance/ aggregates every rule instead.
         url=page_url("forensics_detail", trade_id) or "/bot-performance/",

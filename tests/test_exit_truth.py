@@ -793,3 +793,45 @@ class CloseContractTests(SimpleTestCase):
             self.assertIn(
                 "resolve_exit_fill", src,
                 f"{name} books an exit without the shared resolver")
+
+
+# ── a reconciled close rings the bell (2026-09-26) ───────────────────────
+
+class OrphanCloseIsAnnouncedTests(TestCase):
+    """The venue closed it — a stop or a target struck — and the platform
+    learned it by reconciliation: until 2026-09-26 that path, the one every
+    bracket-protected exit takes, rang no bell and sent no Telegram, while
+    first-attempt and retried closes did."""
+
+    def setUp(self):
+        self.user = _user("orphan_bell")
+        self.cfg = _cfg(self.user, name="ORPHANBELL")
+
+    def test_a_reconciled_close_rings_the_same_close_notifier(self):
+        from bot_program.reconcile_asset import _close_as_orphan
+        trade = _trade(self.cfg, metadata={"initial_stop_loss": 98.0})
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                   return_value=_client(last="97")), \
+                patch("bot_program.notifications.notify_bot_fill_close") as bell:
+            _close_as_orphan(trade)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        bell.assert_called_once()
+        self.assertEqual(bell.call_args.args[0], self.user)
+        kw = bell.call_args.kwargs
+        self.assertEqual((kw["symbol"], kw["side"], kw["trade_id"]),
+                         ("AAPL", "BUY", trade.id))
+        self.assertEqual(kw["exit_price"], trade.exit_price)
+        self.assertEqual(kw["pnl"], trade.pnl)
+        self.assertEqual(kw["outcome"], trade.outcome or "")
+
+    def test_a_failing_bell_never_blocks_the_close(self):
+        from bot_program.reconcile_asset import _close_as_orphan
+        trade = _trade(self.cfg, metadata={"initial_stop_loss": 98.0})
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                   return_value=_client(last="97")), \
+                patch("bot_program.notifications.notify_bot_fill_close",
+                      side_effect=RuntimeError("no mailer")):
+            _close_as_orphan(trade)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
