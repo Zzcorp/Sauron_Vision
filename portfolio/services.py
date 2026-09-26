@@ -162,7 +162,7 @@ class UnifiedPosition:
                  # a template reading trade.metadata directly would silently
                  # get nothing. Position rows have no brokered stop at all.
                  "protected",
-                 # The row's VENUE STAMP (2026-09-27): the carrier and the
+                 # The row's VENUE STAMP (2026-09-26): the carrier and the
                  # multiplier execute_entry recorded, so the book's
                  # ALLOCATED (services._capital_at_work) charges an eToro
                  # row what the gates charge it. Position rows have neither.
@@ -221,7 +221,7 @@ def pnl_on_capital_pct(pnl, asset_class, notional, *, leverage=None,
     """P&L as a percentage of the CAPITAL the position actually ties up.
 
     `leverage` and `carrier` are the row's stamp, forwarded to
-    risk_gate.capital_at_work (2026-09-27): an eToro row's capital is
+    risk_gate.capital_at_work (2026-09-26): an eToro row's capital is
     notional / L of its OWN multiplier, the full notional at 1 (measured
     2026-09-23) — so a forex row sent at 1 on eToro has NO second
     percentage (capital == notional), and the class table stays for every
@@ -293,7 +293,7 @@ def capital_summary(user):
             ).select_related("config"):
         notional = abs(float(trade.entry_price or 0)
                        * float(trade.qty or 0) * value_per_unit(trade))
-        # the ROW's stamp (2026-09-27): an eToro forex row sent at 1 is
+        # the ROW's stamp (2026-09-26): an eToro forex row sent at 1 is
         # USED in full — the gate counts it so; a "free" printed at 1/30
         # would be a free the next entry cannot draw
         used[(trade.asset_class, trade.config.mode)] += capital_at_work(
@@ -623,7 +623,7 @@ def _capital_at_work(row, notional: float) -> float:
     table the risk gates size against, so the allocation an operator reads
     cannot drift from the number that refuses their next trade.
 
-    Through the GATE's own number since 2026-09-27
+    Through the GATE's own number since 2026-09-26
     (risk_gate.capital_at_work). `_open_book`'s rows are BOTH halves: a
     bot row (a UnifiedPosition over an AssetBotTrade) carries its stamp
     — `carrier` and `stamped_leverage`, set by _trade_to_position — so an

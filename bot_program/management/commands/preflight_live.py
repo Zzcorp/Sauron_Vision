@@ -575,7 +575,7 @@ class Command(BaseCommand):
                               if _m_at else float("nan"))
                     cash_s = "—" if _cash is None else f"{float(_cash):,.2f}"
                     used_s = "—" if _used is None else f"{float(_used):,.2f}"
-                    # the world the cells were read in (2026-09-27): the
+                    # the world the cells were read in (2026-09-26): the
                     # headroom gate refuses cells read in the other world
                     # and cells never stamped — said here, beside them
                     _m_stamp = str(getattr(book, "last_margin_world", "")

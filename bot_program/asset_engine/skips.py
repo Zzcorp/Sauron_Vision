@@ -201,7 +201,7 @@ def diagnose(cfg) -> str:
                           "book on /setup/, the account's cash and its "
                           "world stamp, or a refusal eToro gave within the "
                           "quiet hours; nothing was sent at 1 (since "
-                          "2026-09-27 a 1x eToro order needs the cells "
+                          "2026-09-26 a 1x eToro order needs the cells "
                           "too) and nothing was de-levered",
         ELIGIBILITY_REFUSED: "eToro's own eligibility row refused the entry "
                              "before it left — read the detail: no row for "

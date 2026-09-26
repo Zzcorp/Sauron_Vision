@@ -425,7 +425,7 @@ class TheLegacyTickMeetsTheGateTests(TestCase):
                             for ln in cm.output), cm.output)
 
     def test_a_proven_class_is_still_refused_for_want_of_the_headroom(self):
-        """E2.2 (2026-09-27, round 2): every eToro entry needs the sync's
+        """E2.2 (2026-09-26, round 2): every eToro entry needs the sync's
         cells, because at 1x the venue locks the FULL notional (MEASURED
         2026-09-23: used margin 84.8 on 84.8 of exposure), and this loop
         cannot ask the bots' _leverage_headroom honestly (a BotConfig names

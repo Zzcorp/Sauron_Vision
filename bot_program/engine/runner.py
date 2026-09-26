@@ -178,7 +178,7 @@ def run_bot_tick(user_id: int):
                     log.error("legacy tick %s REFUSED (%s): %s — nothing was "
                               "sent", symbol, _gate, _gate_why)
                     continue
-                # THE ACCOUNT'S HEADROOM (2026-09-27). Every eToro entry
+                # THE ACCOUNT'S HEADROOM (2026-09-26). Every eToro entry
                 # needs the sync's cells — stored, fresh, read in the
                 # row's world, in the pool's currency — because at 1x the
                 # venue locks the FULL notional (MEASURED 2026-09-23: used

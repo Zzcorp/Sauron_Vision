@@ -2221,7 +2221,7 @@ def _pos_stamp_multiplier(meta) -> int:
 def _pos_modelled_margin(asset_class: str, notional, meta=None):
     """Capital a levered position ties up, per the platform's own table —
     or, on an eToro-stamped row, the ROW'S OWN multiplier through the
-    gate's own capital_at_work (GAP 3, 2026-09-27): notional / L, the
+    gate's own capital_at_work (GAP 3, 2026-09-26): notional / L, the
     full notional at 1 (measured 2026-09-23), floored at the class table's
     forex 1/30. Importing the gate is what keeps the card from drifting
     from the number that refuses the next entry.
@@ -2251,7 +2251,7 @@ def _pos_modelled_margin(asset_class: str, notional, meta=None):
 
 def _pos_leverage(asset_class: str, meta=None, notional=None) -> str:
     """How many times its own capital a position of this class carries —
-    or, on an eToro-stamped row, THIS ROW (GAP 3, 2026-09-27): notional
+    or, on an eToro-stamped row, THIS ROW (GAP 3, 2026-09-26): notional
     over the gate's own margin, so the printed figure IS what the gate
     counted: forex at 1 prints "1", a stock at 5 prints "5", forex at 50
     prints "30" (floored at the class table's 1/30). Without a notional
@@ -2482,7 +2482,7 @@ def _position_card_details(user, positions):
         _meta = (getattr(trade, "metadata", None) if trade is not None
                  else None) or {}
         # An eToro row above 1x carries margin, not cash, whatever its
-        # class: the multiplier is the ROW's (GAP 3, 2026-09-27).
+        # class: the multiplier is the ROW's (GAP 3, 2026-09-26).
         levered = asset_class in _POS_LEVERED_CLASSES or (
             str(_meta.get("broker") or "") == "etoro"
             and _pos_stamp_multiplier(_meta) > 1)

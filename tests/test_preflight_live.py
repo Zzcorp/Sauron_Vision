@@ -542,7 +542,7 @@ class TheLeverageIsJudgedBeforeArmingTests(TestCase):
         self.assertIn(f"{cap}x", _blockers(out))
 
     def test_forex_above_five_is_a_blocker(self):
-        """2a (2026-09-27): forex's ceiling is 5 == the platform cap, so 6
+        """2a (2026-09-26): forex's ceiling is 5 == the platform cap, so 6
         is caught by the platform-cap sentence BEFORE the class table —
         this asserts that sentence. The class-ceiling sentence is pinned
         on crypto 3 in tests/test_etoro_leverage.py TheRuleTests."""
@@ -568,7 +568,7 @@ class TheLeverageIsJudgedBeforeArmingTests(TestCase):
         self.assertNotIn("platform cap", _blockers(out))
 
     def test_section_three_prints_the_world_the_cells_were_read_in(self):
-        """[FIX 9] (2026-09-27, round 2): §3 prints the world the sync
+        """[FIX 9] (2026-09-26, round 2): §3 prints the world the sync
         stamped beside the cells' age, and — when that stamp is not this
         LIVE row's world, or was never written — the consequence on the
         same line: the headroom refuses every eToro entry on those cells

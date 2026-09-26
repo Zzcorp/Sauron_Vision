@@ -109,7 +109,7 @@ MAX_NOTIONAL_FRACTION = {
     # stop window from 1,000; extras['max_notional_fraction'] narrows or
     # widens it per config. Applied to the INSTRUMENT's class
     # (size_position cap_class): SPX500 in a stock config sizes under 2.0
-    # while AAPL keeps 0.20 (E2.5, 2026-09-27).
+    # while AAPL keeps 0.20 (E2.5, 2026-09-26).
     "index": 2.0,
     "commodity": 2.0,
     "crypto": 0.20,
@@ -251,7 +251,7 @@ def size_position(cfg, *, asset_class: str, entry: float, stop: float,
             `initial_stop_loss`, or realized_r is denominated against a stop
             that was never live. qty is 0 when the setup was skipped.
 
-    `cap_class` (2026-09-27) is the INSTRUMENT's class, read ONLY by the
+    `cap_class` (2026-09-26) is the INSTRUMENT's class, read ONLY by the
     notional cap and the stop floor (max_notional_fraction, min_stop_fraction
     through apply_stop_floor): an index symbol in a stock config sizes under
     the index cap. None means `asset_class`. The risk fraction stays

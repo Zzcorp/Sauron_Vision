@@ -900,7 +900,7 @@ def sync_etoro_accounts():
                     or margin.get("used_margin") is not None):
                 acct.last_margin_at = now
                 fields.append("last_margin_at")
-                # THE WORLD THE CELLS WERE READ IN (2026-09-27): the
+                # THE WORLD THE CELLS WERE READ IN (2026-09-26): the
                 # client's own (`EtoroTrader.demo`, the segment it POSTs
                 # to); the row's when a double states none — the client
                 # above was built from acct.demo, so on a real read the

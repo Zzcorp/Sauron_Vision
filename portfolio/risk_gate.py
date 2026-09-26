@@ -357,7 +357,7 @@ def capital_at_work(asset_class: str, notional: float, *, leverage=None,
     the table: a 5x stock CFD counts the venue's measured notional / 5
     (margin 42.39 on 84.79 of exposure at 2x, doc §2), and a stamp past
     MAX_ORDER_LEVERAGE — an order nothing here can send — counts AT that
-    cap, never looser (Stage 2 E2.1, 2026-09-27; the plan's literal
+    cap, never looser (Stage 2 E2.1, 2026-09-26; the plan's literal
     max(class fraction, 1/L) would count that 5x stock in full, which
     its own GAP 3 numbers refute — the operator has not ruled on the
     two in writing). Every other carrier keeps the table as before.
@@ -495,7 +495,7 @@ def open_capital_at_work(user, portfolio) -> dict:
         notional = float(pos.entry_price or 0) * float(pos.quantity or 0)
         # A legacy Position carries no venue stamp (no metadata): the
         # class table, in full. Forex legacy rows stay at the OANDA
-        # fraction until the row model records one (2026-09-27).
+        # fraction until the row model records one (2026-09-26).
         legacy_total += capital_at_work(
             getattr(pos.instrument, "asset_class", ""), notional)
         legacy_n += 1
@@ -856,7 +856,7 @@ def single_position_state(portfolio, *, asset_class: str, user=None,
     uses, so a 20% cap means the same 20% whether the position is a share
     that settles in full or an FX ticket the broker margins at 30:1.
     `leverage` and `carrier` are the ticket's stamp for capital_at_work
-    (2026-09-27): on an eToro carrier the margin is notional / L, the
+    (2026-09-26): on an eToro carrier the margin is notional / L, the
     full notional at 1 (measured), floored at the table's forex 1/30.
 
     `capital_base` is THE CAPITAL BACKING THIS POSITION, and passing the
@@ -970,7 +970,7 @@ def symbol_side_exposure(user, symbol: str, side: str, *, portfolio=None) -> dic
         notional = float(pos.entry_price or 0) * float(pos.quantity or 0)
         # A legacy Position carries no venue stamp (no metadata): the
         # class table, in full. Forex legacy rows stay at the OANDA
-        # fraction until the row model records one (2026-09-27).
+        # fraction until the row model records one (2026-09-26).
         total += capital_at_work(
             getattr(pos.instrument, "asset_class", ""), notional)
         n += 1
@@ -997,7 +997,7 @@ def concentration_state(user, *, symbol: str, side: str, asset_class: str,
     than 20% in one position" did not mean "per ticket".
 
     `leverage` and `carrier` are the ticket's stamp for capital_at_work
-    (2026-09-27): what is HELD is counted off each row's own stamp; what
+    (2026-09-26): what is HELD is counted off each row's own stamp; what
     is ADDED off the multiplier this ticket would carry.
     """
     pf = portfolio if portfolio is not None else limits_book()

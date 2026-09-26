@@ -85,7 +85,7 @@ class Position(models.Model):
         pnl = self.unrealized_pnl
         # A legacy row carries no venue stamp: the class table, in full —
         # forex legacy rows stay at the OANDA fraction until the row model
-        # records one (2026-09-27; an AssetBotTrade passes its own).
+        # records one (2026-09-26; an AssetBotTrade passes its own).
         return pnl_on_capital_pct(
             None if pnl is None else float(pnl),
             getattr(self.instrument, "asset_class", ""), notional)

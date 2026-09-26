@@ -289,7 +289,7 @@ DEFAULT_COMPONENTS = [
      "description": "Daily read-only check that the paper-campaign evidence chain (bars -> indicators -> signals -> fills -> outcomes -> ladder) is still complete, and one notification when a link goes cold. Writes nothing and makes no broker call.",
      "category": "pipeline"},
 
-    # ── eToro leverage (2026-09-23; the words 2026-09-27) ──────
+    # ── eToro leverage (2026-09-23; the words 2026-09-26) ──────
     # A per-config extras["leverage"] is handed to EtoroTrader.market_order
     # as a body field. It changes the margin eToro locks, never the units
     # or the loss at the stop. OFF until the class's proof is in the

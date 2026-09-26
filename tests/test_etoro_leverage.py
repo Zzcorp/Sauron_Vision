@@ -9,7 +9,7 @@ same at any multiplier. Every refusal is a `leverage_refused` skip that
 sends nothing: an unreadable value, a carrier that is not eToro, a value
 past the platform cap or the believed class ceiling, the switch OFF, no own
 book on /setup/, the instrument's own LIVE leverageValues and stop band
-(E2.6, 2026-09-27), and — before every eToro order the bot sends, 1x too
+(E2.6, 2026-09-26), and — before every eToro order the bot sends, 1x too
 (E2.2) — an account whose available cash (the sync's cells) is
 unmeasured, stale, read in the other world, in another currency, too
 small, or that would be pledged past its ceiling; and, after eToro
@@ -62,7 +62,7 @@ def _etoro(routes=None, *, echo_stop=None):
     # by routing it).
     if not any("/info/demo/eligibility" in r[1] for r in routes):
         routes.append(ELIG_AAPL)
-    # E2.6 (2026-09-27): the multiplier is judged against the LIVE lists
+    # E2.6 (2026-09-26): the multiplier is judged against the LIVE lists
     # and bands, read from the demo instance (world="live": a second
     # POST, to the path WITHOUT the segment — /info/eligibility); the
     # measured LIVE AAPL row rides every wire that did not route that
@@ -187,7 +187,7 @@ class TheRuleTests(TestCase):
                                                 cls, "etoro")
                 self.assertIsNone(lev)
                 self.assertIn("x", why)
-        # 2a (2026-09-27): forex's ceiling is 5 — the platform cap — so 6
+        # 2a (2026-09-26): forex's ceiling is 5 — the platform cap — so 6
         # meets the cap sentence first, and 5 is inside the ceiling (it is
         # refused later, for the missing own book, not by the table)
         lev, why = judge_order_leverage(self._cfg(leverage=6), "forex",
@@ -251,7 +251,7 @@ class TheCapsAgreeTests(SimpleTestCase):
         self.assertEqual(LEVERAGE_MAX, MAX_ORDER_LEVERAGE)
         for cls, cap in ORDER_LEVERAGE_CEILING.items():
             self.assertLessEqual(cap, MAX_ORDER_LEVERAGE, cls)
-        # 2a (2026-09-27): forex 5, since capital_at_work reads the row's
+        # 2a (2026-09-26): forex 5, since capital_at_work reads the row's
         # multiplier; inside every LIVE forex list (MeasuredLiveListsTests)
         self.assertEqual(ORDER_LEVERAGE_CEILING["forex"], 5)
 
@@ -380,7 +380,7 @@ class TheEntryPassesItThroughTests(TestCase):
         the wire carries (ONE POST, before the order POST) and lets a
         2x order through on allowOpenPosition true / maxUnitsPerOrder
         6151; the floor reads the same cached row (no second POST).
-        E2.6 (2026-09-27): the multiplier is then judged against the
+        E2.6 (2026-09-26): the multiplier is then judged against the
         LIVE list and band — ONE more POST, to the live path (the demo
         list proves nothing; doc §15 read the LIVE lists from the demo
         instance this way) — before the order POST. Three POSTs, in
@@ -491,7 +491,7 @@ class TheEntryPassesItThroughTests(TestCase):
         from bot_program.models import AssetBotTrade
         self.cfg.extras = {}
         self.cfg.save(update_fields=["extras"])
-        # E2.2 (2026-09-27): a 1x eToro order needs the cells too — at 1x
+        # E2.2 (2026-09-26): a 1x eToro order needs the cells too — at 1x
         # the venue locks the full notional (measured)
         _account(self.user, cash=100000)
         cand = self._cand()
@@ -574,7 +574,7 @@ class TheEntryPassesItThroughTests(TestCase):
         self.assertIn("50%", detail)
 
     def test_a_typed_one_needs_the_cells_too(self):
-        """E2.2 (2026-09-27): the headroom runs before every eToro order
+        """E2.2 (2026-09-26): the headroom runs before every eToro order
         the bot sends — at 1x the venue locks the FULL notional (MEASURED
         2026-09-23: used margin 84.8 on 84.8 of exposure) — so a 1x entry
         with no cells
@@ -676,7 +676,7 @@ class TheEntryPassesItThroughTests(TestCase):
         self.assertIn("read in the ? world", note["detail"])
 
     def test_a_multiplier_off_the_live_list_reaches_the_skip_and_sends_nothing(self):
-        """E2.6 end to end (2026-09-27): 3 is inside the stock ceiling (5)
+        """E2.6 end to end (2026-09-26): 3 is inside the stock ceiling (5)
         and the platform cap, so judge_order_leverage passes it; AAPL's
         own LIVE list (long/cfd [2, 5], measured 2026-09-23) does not
         carry it -> leverage_refused naming that list, not clamped to 2
@@ -703,7 +703,7 @@ class TheEntryPassesItThroughTests(TestCase):
         self.assertEqual(AssetBotTrade.objects.count(), 0)
 
     def test_the_ceiling_is_the_instruments_class_not_the_configs(self):
-        """E2.4 wiring (2026-09-27, round 2): _order_leverage keys
+        """E2.4 wiring (2026-09-26, round 2): _order_leverage keys
         judge_order_leverage on _instrument_class(symbol). A crypto
         instrument in this STOCK config at 3x: the config's class (stock,
         ceiling 5) passes 3; the instrument's (crypto, ceiling 2 — its
@@ -726,7 +726,7 @@ class TheEntryPassesItThroughTests(TestCase):
         self.assertEqual(fake.calls, [], "the wire was asked something")
 
     def test_the_single_position_gate_counts_the_tickets_stamp(self):
-        """E2.1 wiring (2026-09-27, round 2): the bot's MAX SINGLE POSITION
+        """E2.1 wiring (2026-09-26, round 2): the bot's MAX SINGLE POSITION
         check (_judge_final_size -> single_position_state) is handed the
         config's multiplier hint (2 here) and the carrier the router names
         for AAPL (eToro, primary for stocks), so it counts notional / 2 —
@@ -932,7 +932,7 @@ class TheSyncStoresTheMarginCellsTests(TestCase):
         self.assertIsNotNone(acct.last_margin_at)
 
     def test_the_cells_carry_the_world_they_were_read_in(self):
-        """[FIX 9] (2026-09-27): the stamp is the client's own world
+        """[FIX 9] (2026-09-26): the stamp is the client's own world
         (EtoroTrader.demo) and, for a double that states none, the row's —
         the client was built from acct.demo, so the two never differ on a
         real read. A payload with no cells leaves the stamp alone."""
@@ -1024,7 +1024,7 @@ class ConsumerKeyTests(SimpleTestCase):
         """House rule 5, greppable: the module that decides units has no
         seat for a multiplier (its one 'leverage' is the forex-cap comment,
         "the leverage is at the broker"; the 7 % cap's comment and the
-        index/commodity 2.0 comment, 2026-09-27, say "multiplier")."""
+        index/commodity 2.0 comment, 2026-09-26, say "multiplier")."""
         from pathlib import Path
 
         from django.conf import settings
@@ -1055,7 +1055,7 @@ class TheAdviceLineTests(TestCase):
         cfg.refresh_from_db()
         advice = skips.diagnose(cfg)
         self.assertIn("nothing was sent at 1", advice)
-        # GAP 11 (2026-09-27): the advice names the LIVE list, the proof
+        # GAP 11 (2026-09-26): the advice names the LIVE list, the proof
         # token and the cells' world, not "§4 D2b"
         self.assertIn("LIVE leverageValues", advice)
         self.assertIn("ETORO_PROVEN", advice)
@@ -1074,7 +1074,7 @@ class TheComponentShipsOffTests(TestCase):
         row = PlatformComponent.objects.get(key="etoro_leverage_live")
         self.assertFalse(row.is_enabled)
         self.assertLessEqual(len(row.description), 300)
-        # GAP 11 (2026-09-27): the words name the LIVE list and the proof
+        # GAP 11 (2026-09-26): the words name the LIVE list and the proof
         # — "the proven set", never the constant's name: a switch must not
         # be able to name the proof set (tests/test_etoro_proofs.py)
         self.assertIn("LIVE leverageValues", row.description)
@@ -1083,7 +1083,7 @@ class TheComponentShipsOffTests(TestCase):
 
 
 class TheInstrumentCheckTests(TestCase):
-    """E2.6 (2026-09-27): AssetBot._instrument_leverage_check — the
+    """E2.6 (2026-09-26): AssetBot._instrument_leverage_check — the
     INSTRUMENT's own eligibility row, by direction, settlement and
     multiplier, judged on the client; the lists and the band are the LIVE
     world's (world="live", readable from the demo instance — MEASURED
@@ -1215,7 +1215,7 @@ class TheInstrumentCheckTests(TestCase):
 
 
 class MeasuredLiveListsTests(SimpleTestCase):
-    """E2.7 (2026-09-27): every class ceiling sits inside the LIVE list
+    """E2.7 (2026-09-26): every class ceiling sits inside the LIVE list
     eToro printed for every instrument of the class read on 2026-09-23/25
     (doc §9-§10, §15) — the smallest LIVE long maximum per class (AUD/NZD
     20 on forex). The DEMO lists are wider (stocks 20, forex 400, indices

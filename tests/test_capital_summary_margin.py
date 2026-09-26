@@ -1,4 +1,4 @@
-"""Margin honesty (Stage 2: E2.1, GAP 2, GAP 3 — 2026-09-27): the gates,
+"""Margin honesty (Stage 2: E2.1, GAP 2, GAP 3 — 2026-09-26): the gates,
 the capital card and the positions page count an eToro row at ITS OWN
 multiplier — notional / L, and the FULL notional at 1 — MEASURED 2026-09-23
 (used margin 84.8 on 84.8 of exposure at 1x; 42.39 at 2x; doc §2, §5) —
@@ -181,7 +181,7 @@ class CapitalSummaryMarginTests(TestCase):
 
 
 class TheBookAllocatesEachRowsStampTests(TestCase):
-    """[GAP 2 — the lens-1 finding, 2026-09-27] The portfolio overview's
+    """[GAP 2 — the lens-1 finding, 2026-09-26] The portfolio overview's
     ALLOCATED / free / "% of the book" strip sums _open_book's rows — the
     BOT rows too — through services._capital_at_work: an eToro forex bot
     row sent at 1 is allocated in full (the venue pledges the full
@@ -216,7 +216,7 @@ class TheBookAllocatesEachRowsStampTests(TestCase):
 
 
 class TheTakeTradeLaneChargesTheTicketTests(TestCase):
-    """[the lens-1 finding, 2026-09-27] The TAKE TRADE lane's OWN pool
+    """[the lens-1 finding, 2026-09-26] The TAKE TRADE lane's OWN pool
     arithmetic — the pool check, the funding proposal, MAX SINGLE POSITION
     and the popup's leverage fact — charges the gates' number
     (capital_at_work): a held eToro forex row at 1 in full, and a ticket

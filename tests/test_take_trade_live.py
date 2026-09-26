@@ -392,7 +392,7 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         self.addCleanup(p.stop)
 
     def _cells(self, **kw):
-        """The sync's cells (2026-09-27): the lane's eToro order meets the
+        """The sync's cells (2026-09-26): the lane's eToro order meets the
         bots' own headroom (AssetBot._leverage_headroom) — at 1x eToro
         locks the FULL notional (MEASURED 2026-09-23) — so a test that
         sends needs them: stored, fresh, demo-stamped for this demo row,
@@ -476,7 +476,7 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         the venue's answer, not on a failed read."""
         from bot_program.manual_trade import execute_take_trade
         self._proven("crypto")
-        self._cells()       # the lane's eToro order needs them (2026-09-27)
+        self._cells()       # the lane's eToro order needs them (2026-09-26)
         t, fake = self._etoro()
         with patch.object(t, "market_order", return_value=_filled_response(
                 positionId="3603281458")) as mo, \
@@ -501,7 +501,7 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         from bot_program.manual_trade import execute_take_trade
         from bot_program.models import AssetBotTrade
         self._proven("crypto")
-        self._cells()       # the lane's eToro order needs them (2026-09-27)
+        self._cells()       # the lane's eToro order needs them (2026-09-26)
         t, _fake = self._etoro()
         with patch.object(t, "market_order", return_value=_filled_response(
                 positionId="3603281458")) as mo, \
@@ -541,7 +541,7 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         from bot_program.models import AssetBotTrade
         from tests.test_etoro_client import REJECTED_720
         self._proven("crypto")
-        self._cells()       # the lane's eToro order needs them (2026-09-27)
+        self._cells()       # the lane's eToro order needs them (2026-09-26)
         t, _fake = self._etoro()
         words = "errorCode 720: " + REJECTED_720["status"]["errorMessage"]
         refused = {"orderId": "383455967", "symbol": "BTCUSD", "side": "BUY",
@@ -562,7 +562,7 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         self.assertFalse(AssetBotTrade.objects.filter(config=self.cfg).exists())
 
     def test_a_proven_class_with_no_cells_is_refused_and_nothing_is_sent(self):
-        """[the lens-1 finding, 2026-09-27] The lane sends at 1, and at 1x
+        """[the lens-1 finding, 2026-09-26] The lane sends at 1, and at 1x
         eToro locks the FULL notional (MEASURED 2026-09-23: used margin
         84.8 on 84.8 of exposure): the bots' own headroom runs before this
         lane's eToro order too. "crypto" stated proven, the eligibility row

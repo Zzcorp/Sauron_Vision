@@ -330,7 +330,7 @@ class SmcVote:
 #: etoro_client.LEVERAGE_MAX, pinned equal.
 MAX_ORDER_LEVERAGE = 5
 
-#: THE CLASS CEILINGS (2a, 2026-09-27), per platform class, never above
+#: THE CLASS CEILINGS (2a, 2026-09-26), per platform class, never above
 #: MAX_ORDER_LEVERAGE, and each INSIDE the LIVE list eToro printed for
 #: every instrument of the class read on 2026-09-23/25 (doc §9-§10, §15 —
 #: the LIVE lists; the DEMO lists are wider and prove nothing): stock/etf
@@ -357,7 +357,7 @@ ORDER_LEVERAGE_CEILING = {"stock": 5, "etf": 5, "index": 5, "commodity": 5,
 #: accountTotalUsedMargin 84.8 at 1x and 42.39 at 2x on 84.8 of
 #: exposure — notional / L); what the venue does to a levered position
 #: as equity falls is not. Held at half so a 20% adverse move at 5x
-#: across the pledged half is 50% of equity, not 100%; since 2026-09-27
+#: across the pledged half is 50% of equity, not 100%; since 2026-09-26
 #: it binds at 1x too (a 1x order pledges its FULL notional). Refused
 #: past it, never resized.
 MAX_PLEDGED_FRACTION = 0.5
@@ -3380,7 +3380,7 @@ class AssetBot(ABC):
             # number no bot consults, so measuring against it refused every
             # entry on any account whose pool exceeds its recorded book.
         notional = qty * price * self._value_per_unit(symbol)
-        # THE TICKET'S STAMP (2026-09-27): on an eToro carrier the margin
+        # THE TICKET'S STAMP (2026-09-26): on an eToro carrier the margin
         # the gate counts is notional / L of the multiplier this config
         # would send (the hint; judge_order_leverage still decides), the
         # full notional at 1 — measured 2026-09-23 — floored at the class
@@ -3717,7 +3717,7 @@ class AssetBot(ABC):
             # kwarg, and the row records it. Sizing above never saw this.
             # The INSTRUMENT's own LIVE entry (direction, settlement, the
             # leverageValues, the stop band) is judged in the same call,
-            # at 1 too (E2.6, 2026-09-27).
+            # at 1 too (E2.6, 2026-09-26).
             leverage, lev_why = self._order_leverage(
                 client, symbol, side=decision.direction, price=float(price),
                 stop=float(sl))
@@ -3729,7 +3729,7 @@ class AssetBot(ABC):
             if adapter_key(client) == "etoro":
                 # THE ACCOUNT'S HEADROOM, from the sync's cells and never a
                 # round trip — before every eToro order this bot sends
-                # since 2026-09-27, not only a levered one (the TAKE TRADE
+                # since 2026-09-26, not only a levered one (the TAKE TRADE
                 # lane runs the same method; the legacy BotConfig tick,
                 # which cannot, refuses every eToro order instead): at 1x
                 # the venue locks the FULL notional (MEASURED 2026-09-23:
@@ -3853,7 +3853,7 @@ class AssetBot(ABC):
                     # carried no key — sent at the adapter's default — so
                     # absent is a state, never a typed 1. Read by
                     # broker_vision, /treasury/ and _pledged_since, and
-                    # since 2026-09-27 by portfolio.risk_gate.capital_at_work
+                    # since 2026-09-26 by portfolio.risk_gate.capital_at_work
                     # — every exposure gate, the capital pages, the
                     # positions card and the book's ALLOCATED: on an eToro
                     # carrier the row pledges notional / L, and an ABSENT
@@ -4361,7 +4361,7 @@ class AssetBot(ABC):
         """judge_order_leverage on the client an order actually goes
         through — the adapter key of its CLASS (capabilities.adapter_key),
         never today's routing rule — keyed on the INSTRUMENT's class
-        (2026-09-27: SPX500 in a stock config is judged as an index). A
+        (2026-09-26: SPX500 in a stock config is judged as an index). A
         MagicMock or a subclass answers "" and is refused above 1,
         correctly. Then the instrument's OWN entry
         (_instrument_leverage_check, at 1 too); then a fresh refusal note
@@ -4391,7 +4391,7 @@ class AssetBot(ABC):
                                    eff: int, price=None, stop=None) -> str:
         """Why the INSTRUMENT's own eligibility row refuses an order at
         `eff` (the multiplier the body would carry; 1 when none), or "".
-        E2.6 (2026-09-27), on the `leverage_values` tier only — any other
+        E2.6 (2026-09-26), on the `leverage_values` tier only — any other
         client answers "" here (Saxo, IBKR, a MagicMock: for them the
         class ceiling was the whole judgement).
 
@@ -4557,7 +4557,7 @@ class AssetBot(ABC):
         """Why an order at `leverage` (1 when the config carries none) may
         not leave for want of cash, or None — before every eToro order
         the asset bots (execute_entry) and the TAKE TRADE lane send,
-        since 2026-09-27; the legacy BotConfig tick cannot ask it and
+        since 2026-09-26; the legacy BotConfig tick cannot ask it and
         refuses every eToro order instead (engine/runner.py). At 1x the
         venue locks the FULL notional (MEASURED 2026-09-23, used margin
         84.8 on 84.8; 42.39 at 2x), so a 1x order needs cash exactly as
@@ -4599,7 +4599,7 @@ class AssetBot(ABC):
         if age > TRACKING_FRESH_SECONDS:
             return (f"cash reading {age / 3600:.1f}h old (limit "
                     f"{TRACKING_FRESH_SECONDS / 3600:.0f}h) — refused")
-        # THE CELLS' WORLD (2026-09-27): the same key pair answers both
+        # THE CELLS' WORLD (2026-09-26): the same key pair answers both
         # worlds and EtoroAccount.demo alone picks the segment, so a row
         # unticked demo -> live keeps the DEMO reading (332,449.10, doc §5)
         # for up to TRACKING_FRESH_SECONDS and would pass a 13,000 USD 1x
@@ -5081,7 +5081,7 @@ class AssetBot(ABC):
             value_per_unit=self._value_per_unit(symbol),
             # the notional cap and the stop floor are the INSTRUMENT's
             # (SPX500 in a stock config sizes under the index cap); the
-            # risk fraction stays the config's (E2.5, 2026-09-27)
+            # risk fraction stays the config's (E2.5, 2026-09-26)
             cap_class=self._instrument_class(symbol),
         )
 

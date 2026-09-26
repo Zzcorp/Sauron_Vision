@@ -412,7 +412,7 @@ class EtoroAccount(models.Model):
     # `last_used_margin` is what it already holds. None = never read (three
     # states; 0 is a measurement). Read by asset_engine/base.py
     # ::_leverage_headroom before every eToro order the asset bots and the
-    # TAKE TRADE lane send (2026-09-27; at 1x the venue locks the FULL
+    # TAKE TRADE lane send (2026-09-26; at 1x the venue locks the FULL
     # notional — MEASURED 2026-09-23, used margin 84.8 on 84.8 of
     # exposure; the legacy BotConfig tick cannot read them and refuses
     # every eToro order instead), by preflight §3 and §4. In the account's

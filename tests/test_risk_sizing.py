@@ -285,7 +285,7 @@ class EndToEndEntryTests(TestCase):
 
 
 class TheInstrumentCapTests(TestCase):
-    """E2.5 (2026-09-27): the notional cap and the stop floor are the
+    """E2.5 (2026-09-26): the notional cap and the stop floor are the
     INSTRUMENT's (size_position cap_class) — an index or commodity symbol
     in a stock config sizes under 2.0 while its AAPL keeps 0.20. eToro
     floors index/commodity exposure at 1,000 USD (measured 2026-09-23);
@@ -345,7 +345,7 @@ class TheInstrumentCapTests(TestCase):
         self.assertAlmostEqual(a["risk_dollars"], 25.0, places=9)
 
     def test_the_bot_hands_the_instruments_class_to_the_sizer(self):
-        """E2.5 wiring (2026-09-27, round 2): AssetBot._size_for_entry
+        """E2.5 wiring (2026-09-26, round 2): AssetBot._size_for_entry
         passes cap_class=_instrument_class(symbol) — the Instrument row's
         class — so the same stock config sizes SPX500 under the index cap
         (the 0.2% stop kept, 125% of the pool) and AAPL under 0.20 (the

@@ -131,7 +131,7 @@ EXECUTABLE_CLASS = {
 # FX trade its full notional against the pool made any stop tighter than
 # 0.25% "insufficient capital" on an empty book. Everything else settles
 # in full. On eToro a row counts notional / L of its OWN recorded
-# multiplier (risk_gate.capital_at_work, 2026-09-27): eToro pledges
+# multiplier (risk_gate.capital_at_work, 2026-09-26): eToro pledges
 # notional / L and the FULL notional at 1 — MEASURED 2026-09-23 (used
 # margin 84.8 on 84.8 of exposure; 42.39 at 2x) — so a forex row sent at
 # 1 counts its full notional there, floored at this table's 1/30 (a row
@@ -142,7 +142,7 @@ CAPITAL_USE_FRACTION = {"forex": 1.0 / 30.0}
 def _capital_use(asset_class: str, notional: float, *, leverage=None,
                  carrier: str = "") -> float:
     """Cash a ticket or a held row ties up — the GATES' number
-    (risk_gate.capital_at_work, 2026-09-27), so the pool this lane
+    (risk_gate.capital_at_work, 2026-09-26), so the pool this lane
     refuses on cannot drift from the one the bots refuse on: on an eToro
     carrier notional / L of the stamp, the FULL notional at 1 (MEASURED
     2026-09-23, used margin 84.8 on 84.8 of exposure); the class table
@@ -160,7 +160,7 @@ def _leverage(asset_class: str, *, leverage=None,
     other way up. 30x on FX because the broker margins it, 1x everywhere
     else because the position settles in full — and no code path anywhere
     in the platform multiplies a manual order by anything. (That is the
-    class TABLE's shape, what it answers with no stamp. Since 2026-09-27
+    class TABLE's shape, what it answers with no stamp. Since 2026-09-26
     `leverage` and `carrier` are the ticket's stamp and the answer is its
     own margin, through _capital_use (risk_gate.capital_at_work): on eToro
     the full notional at 1, which is what this lane sends — MEASURED
@@ -259,7 +259,7 @@ def _trade_notional_usd(trade) -> float:
 
 
 def _trade_capital_use(trade) -> float:
-    # the ROW's own stamp (2026-09-27): what execute_entry and this lane
+    # the ROW's own stamp (2026-09-26): what execute_entry and this lane
     # recorded — the carrier and, when the body carried one, the multiplier
     meta = trade.metadata or {}
     return _capital_use(trade.asset_class, _trade_notional_usd(trade),
@@ -306,7 +306,7 @@ def _concentration_guard(user, inst, side, cls, cfg, close_ids):
     if not close_ids and not probe.get("sufficient", True):
         return None
 
-    # THE TICKET'S STAMP (2026-09-27): on an eToro carrier the ticket counts
+    # THE TICKET'S STAMP (2026-09-26): on an eToro carrier the ticket counts
     # notional / L of the multiplier this config would send (the lane reads
     # extras['leverage'] through _leverage_hint_of), the full notional at
     # 1 — the same pair AssetBot passes single_position_state.
@@ -544,7 +544,7 @@ def judge_qty(cfg, *, asset_class, qty, entry, stop, value_per_unit,
     capital = float(getattr(cfg, "capital", 0) or 0)
     per_unit_risk = abs(float(entry) - float(stop)) * float(value_per_unit)
     notional = qty * float(entry) * float(value_per_unit)
-    # the ticket's stamp (2026-09-27): on eToro the pool is charged the
+    # the ticket's stamp (2026-09-26): on eToro the pool is charged the
     # full notional at 1 (measured), not the class table's 1/30
     capital_use = _capital_use(asset_class, notional, leverage=leverage,
                                carrier=carrier)
@@ -924,7 +924,7 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
 
     capital = float(cfg.capital)
     notional = round(sizing["notional_fraction"] * capital, 2)
-    # THE TICKET'S STAMP (2026-09-27), one pair for every number below —
+    # THE TICKET'S STAMP (2026-09-26), one pair for every number below —
     # the pool, MAX SINGLE POSITION, concentration, the size bounds and
     # the leverage fact: the multiplier this config would send (the bots'
     # own _leverage_hint_of; above 1 this lane refuses at the order, so
@@ -964,7 +964,7 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         user, symbol=inst.symbol, side=side, asset_class=cls,
         notional=notional, capital_base=float(capital or 0),
         base_label="manual pool",
-        # the ticket's stamp (2026-09-27): the multiplier this config
+        # the ticket's stamp (2026-09-26): the multiplier this config
         # would send, on the carrier that would carry it
         **ticket_stamp)
 
@@ -1108,7 +1108,7 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     # Stated, never offered. See _leverage: no execution path multiplies a
     # manual order, so the honest control here is the truth about where the
     # leverage lives plus the notional this pool can carry.
-    # The TICKET's multiplier (2026-09-27), not the class table's: an eToro
+    # The TICKET's multiplier (2026-09-26), not the class table's: an eToro
     # forex ticket at 1 ties up its full notional (measured), so it reads
     # 1:1 — the table's 30:1 is OANDA's shape.
     lev = _leverage(cls, **ticket_stamp)
@@ -1500,7 +1500,7 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                     "closed": closed}
 
         bot = make_bot(cfg)
-        # The ticket's stamp, the preview's own pair (2026-09-27): every
+        # The ticket's stamp, the preview's own pair (2026-09-26): every
         # pool and MAX SINGLE POSITION judgement below charges it.
         from bot_program.asset_engine.base import AssetBot
         from bot_program.engine.broker_router import broker_name_for_symbol
@@ -1843,7 +1843,7 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                     f"at that multiplier and not at 1. "
                     + (_lev_why or "Remove the key, or take the trade "
                                    "through the bot lane"))}
-            # THE ACCOUNT'S HEADROOM (2026-09-27), the bots' own check
+            # THE ACCOUNT'S HEADROOM (2026-09-26), the bots' own check
             # (AssetBot._leverage_headroom) before this lane's eToro order
             # too: the lane sends at 1, and at 1x eToro locks the FULL
             # notional (MEASURED 2026-09-23: used margin 84.8 on 84.8 of
