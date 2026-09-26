@@ -52,8 +52,9 @@ def _broker_for_asset_class(asset_class: str) -> str:
     if asset_class in ("stock", "etf", "index"):
         return "alpaca"
     if asset_class == "commodity":
-        # Commodities reach price feeds via Twelve Data / FMP; no live execution
-        # broker is wired today. Fall back to paper.
+        # No DEFAULT execution broker: a commodity reaches a venue only
+        # through a flag (Saxo, eToro or IBKR, checked before this map).
+        # Unflagged, paper — which a live config refuses to trade against.
         return "paper"
     return "paper"
 
@@ -343,9 +344,12 @@ def broker_name_for_symbol(user, symbol: str, cfg=None) -> str:
     if cfg is not None and getattr(cfg, "mode", "paper") == "paper":
         return "paper"
     inst = _instrument_for(symbol)
-    if inst is None:
-        return "paper"
-    asset_class = inst.asset_class
+    # THE SAME DEFAULT client_for_symbol routes on (2026-09-26): a symbol
+    # with no Instrument row is crypto there, so it is crypto here. This
+    # said "paper" while the client went to eToro's crypto box or to
+    # Binance, and the readers that compare venues (the follow sync, the
+    # HQ follow refusal, the capital gate's carrier) read the wrong one.
+    asset_class = (inst.asset_class if inst else "crypto")
     if _saxo_overrides(user, asset_class):
         return "saxo"
     if _etoro_overrides(user, asset_class):

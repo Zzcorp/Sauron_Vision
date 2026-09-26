@@ -450,3 +450,149 @@ class TheRailReachesItTests(TestCase):
                 / "base.html").read_text(encoding="utf-8")
         self.assertIn("{% url 'brokers_page' %}", rail)
         self.assertIn("page_id == 'brokers'", rail)
+
+
+class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
+    """E3.5 + GAP 4 (2026-09-26). Each eToro class box carries, in English
+    on one line, what eToro answered on 2026-09-23 (stocks real at 1x from
+    10 USD; ETFs CFD only; forex, indices and commodities a 1,000 USD
+    minimum; crypto real at 1x from 10 USD) and the class's proof state.
+    ETORO_PROVEN ships empty, so tonight every box reads "no proof pinned —
+    entries refused"; a save that ticks a box names what the gate will
+    refuse — on the verified branch too, which said nothing before. The
+    gate keys on the INSTRUMENT's class, so the stocks box needs three
+    tokens: stock, etf, index."""
+
+    PROVEN = "bot_program.asset_engine.base.ETORO_PROVEN"
+    ALL_STOCKS = frozenset({"stock", "etf", "index", "short"})
+
+    def setUp(self):
+        self.user = User.objects.create_user("pf_u", password="x")
+        self.admin = User.objects.create_superuser("pf_admin", "a@x", "x")
+        self.client.force_login(self.admin)
+
+    def _form(self):
+        body = self.client.get(reverse("brokers_page")).content.decode()
+        return body[body.index("Add / Update eToro Keys"):
+                    body.index("Register Saxo Application")]
+
+    @staticmethod
+    def _label(form, name):
+        start = form.index(f'name="{name}"')
+        return form[start:form.index("</label>", start)]
+
+    def _save(self, verdict=("ok", "200"), **boxes):
+        data = {"target_username": "pf_u", "etoro_api_key": RAW_KEY,
+                "etoro_user_key": RAW_USER, "demo": "on"}
+        data.update(boxes)
+        with mock.patch("dashboard.views_brokers.etoro_probe",
+                        return_value=verdict):
+            r = self.client.post(reverse("hq_save_etoro"), data, follow=True)
+        return r.content.decode()
+
+    def test_the_four_labels_carry_the_measured_facts(self):
+        form = self._form()
+        self.assertIn("what eToro answered when measured on 2026-09-23", form)
+        stocks = self._label(form, "primary_stocks")
+        for fact in ("stocks · ETFs · indices",
+                     "real shares at 1x from 10 USD (W-8BEN)",
+                     "CFD at 2–5x or short",
+                     "ETFs CFD only, overnight fee even at 1x",
+                     "indices CFD, 1,000 USD minimum"):
+            self.assertIn(fact, stocks)
+        forex = self._label(form, "primary_forex")
+        for fact in ("CFD only", "1,000 USD minimum", "up to 30x live",
+                     "this platform caps lower"):
+            self.assertIn(fact, forex)
+        commodity = self._label(form, "primary_commodity")
+        for fact in ("CFD only", "WHEAT.FUT and PLATINUM found",
+                     "gold, silver and oil spellings unknown",
+                     "1,000 USD minimum"):
+            self.assertIn(fact, commodity)
+        crypto = self._label(form, "primary_crypto")
+        for fact in ("real coins at 1x from 10 USD (BTC, ETH, XRP, SOL)",
+                     "CFD at 2x or short",
+                     "unticked, crypto routes to Binance"):
+            self.assertIn(fact, crypto)
+
+    def test_tonight_every_box_says_no_proof_is_pinned(self):
+        form = self._form()
+        for name in ("primary_stocks", "primary_forex", "primary_commodity",
+                     "primary_crypto"):
+            self.assertIn("no proof pinned — entries refused",
+                          self._label(form, name), name)
+        self.assertEqual(form.count("no proof pinned — entries refused"), 4)
+        self.assertIn("no short proven", self._label(form, "primary_stocks"))
+        self.assertNotIn("proof pinned for", form)
+
+    def test_a_pinned_proof_reads_beside_its_box_only(self):
+        with mock.patch(self.PROVEN, self.ALL_STOCKS):
+            form = self._form()
+        stocks = self._label(form, "primary_stocks")
+        self.assertIn("proof pinned", stocks)
+        self.assertNotIn("no proof pinned", stocks)
+        self.assertIn("shorts proven", stocks)
+        self.assertEqual(form.count("no proof pinned — entries refused"), 3)
+
+    def test_a_partial_stocks_proof_names_what_is_still_refused(self):
+        """An ETF proof (GLDM, the first sitting) lifts ETF entries and
+        nothing else on the box."""
+        with mock.patch(self.PROVEN, frozenset({"etf"})):
+            stocks = self._label(self._form(), "primary_stocks")
+        self.assertIn("proof pinned for etf only — stock, index entries "
+                      "refused", stocks)
+
+    def test_a_verified_save_names_the_unproven_class_and_the_refusal(self):
+        body = self._save(primary_stocks="on")
+        self.assertIn("eToro keys saved and verified for pf_u (demo).", body)
+        self.assertIn("No demo fill-and-close proof is pinned for stock, "
+                      "etf, index", body)
+        self.assertIn("gate_blocked", body)
+        self.assertIn("Every short is refused as well", body)
+        self.assertNotIn("now the book", body)
+        self.assertTrue(EtoroAccount.objects.get(user=self.user)
+                        .is_primary_for_stocks)
+
+    def test_a_proven_class_saves_without_the_note(self):
+        with mock.patch(self.PROVEN, self.ALL_STOCKS):
+            body = self._save(primary_stocks="on")
+        self.assertIn("saved and verified", body)
+        self.assertNotIn("No demo fill-and-close proof", body)
+        self.assertNotIn("Every short is refused", body)
+
+    def test_a_stock_proof_alone_still_names_etf_and_index(self):
+        with mock.patch(self.PROVEN, frozenset({"stock"})):
+            body = self._save(primary_stocks="on", primary_crypto="on")
+        self.assertIn("No demo fill-and-close proof is pinned for etf, "
+                      "index, crypto", body)
+        self.assertIn("every eToro entry of those classes is refused "
+                      "(gate_blocked), by the bots and by TAKE TRADE, each "
+                      "until its own proof lands; nothing is sent in the "
+                      "meantime.", body)
+
+    def test_a_proven_class_with_shorts_unproven_names_only_the_short(self):
+        """Every ticked class proven, "short" not: the note names the short
+        alone, with no "as well" leaning on a sentence that is not there."""
+        with mock.patch(self.PROVEN, frozenset({"crypto"})):
+            body = self._save(primary_crypto="on")
+        self.assertNotIn("No demo fill-and-close proof", body)
+        self.assertIn("Every short is refused until the short proof is "
+                      "pinned.", body)
+        self.assertNotIn("refused as well", body)
+
+    def test_a_save_that_ticks_nothing_says_nothing_about_proofs(self):
+        body = self._save()
+        self.assertIn("saved and verified", body)
+        self.assertNotIn("No demo fill-and-close proof", body)
+        self.assertNotIn("Every short is refused", body)
+
+    def test_a_refused_save_carries_both_notes(self):
+        body = self._save(("refused", "401"), primary_forex="on")
+        self.assertIn("now the book", body)
+        self.assertIn("No demo fill-and-close proof is pinned for forex "
+                      "(ETORO_PROVEN", body)
+        self.assertIn("every eToro entry of that class is refused "
+                      "(gate_blocked), by the bots and by TAKE TRADE, until "
+                      "its proof lands; nothing is sent in the meantime. "
+                      "Every short is refused as well until the short proof "
+                      "is pinned.", body)

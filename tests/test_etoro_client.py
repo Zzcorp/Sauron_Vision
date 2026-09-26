@@ -439,18 +439,30 @@ class TheInstrumentIdIsResolvedOnceTests(SimpleTestCase):
         with self.assertRaises(LookupError):
             t.instrument_id("NOPE")
 
-    def test_a_lone_result_of_any_spelling_is_accepted_and_kept(self):
-        """instrument_id accepts a single /search item whatever it is
-        spelled — a conscious act, pinned here rather than hidden. The
-        venue's own spelling is kept beside the id so a reader
-        (etoro_smoke) can show the mismatch instead of painting the id
-        green. Whether eToro's search is exact or prefix is unmeasured."""
-        t, _ = _client([("GET", "/search", 200,
-                         [{"instrumentId": 1004,
-                           "internalSymbolFull": "SLVX"}])])
-        self.assertEqual(t.instrument_id("SLV"), 1004)
-        self.assertEqual(t._venue_spelling[1004], "SLVX")
-        self.assertEqual(t._symbols[1004], "SLV")
+    def test_a_lone_result_spelled_differently_is_refused_not_adopted(self):
+        """FIX 6 (2026-09-26). instrument_id used to accept a single
+        /search item whatever it was spelled — /search WHEAT answered
+        'WHEAT.FUT' 97 alone on 2026-09-23, and ticker() and market_order()
+        never compare spellings. It is refused now: a LookupError of that
+        exact type (the smoke's no-such/unknown split reads the type)
+        naming both spellings and the id, carrying them as lone_id /
+        lone_spelling, and nothing cached — so the next ask asks again."""
+        t, fake = _client([("GET", "/search", 200,
+                            [{"instrumentId": 1004,
+                              "internalSymbolFull": "SLVX"}])])
+        with self.assertRaises(LookupError) as cm:
+            t.instrument_id("SLV")
+        self.assertIs(type(cm.exception), LookupError)
+        for part in ("'SLV'", "'SLVX'", "1004", "refused, never adopted"):
+            self.assertIn(part, str(cm.exception))
+        self.assertEqual(cm.exception.lone_id, 1004)
+        self.assertEqual(cm.exception.lone_spelling, "SLVX")
+        self.assertEqual((t._ids, t._symbols, t._venue_spelling),
+                         ({}, {}, {}))
+        with self.assertRaises(LookupError):
+            t.instrument_id("SLV")
+        self.assertEqual(len([c for c in fake.calls if "/search" in c[1]]),
+                         2, "a refused lone result was cached")
 
     def test_the_reverse_cache_names_positions_it_opened(self):
         t, _ = _client([SEARCH_AAPL])
@@ -1812,9 +1824,10 @@ ROW_BTC_LIVE = _elig_row(100000, "BTC", [
 
 SEARCH_EURUSD = ("GET", "/market-data/search", 200,
                  [{"instrumentId": 1002, "internalSymbolFull": "EURUSD"}])
-# /search for BTCUSD found nothing on 2026-09-23; BTC answered 100000. A
-# fake that answers BTC to the platform's BTCUSD is the LONE-result rule
-# instrument_id already accepts (and _venue_spelling records).
+# /search for BTCUSD found nothing on 2026-09-23; BTC answered 100000. The
+# adapter asks for BTC when the platform says BTCUSD (VENUE_SPELLING,
+# 2026-09-26), so this fake — matched on the url, params ignored — answers
+# exactly the spelling it is asked for; the lone-result rule is gone.
 SEARCH_BTC = ("GET", "/market-data/search", 200,
               [{"instrumentId": 100000, "internalSymbolFull": "BTC"}])
 ELIG_AAPL = _elig_route([ROW_AAPL_DEMO])                 # demo, the default
@@ -2035,7 +2048,8 @@ class TheEligibilityReadTests(SimpleTestCase):
     def test_the_rows_symbol_confirms_the_spelling(self):
         """The row's `symbol` is written to _venue_spelling: the NAME
         confirmation a lone /search result lacks (WHEAT -> WHEAT.FUT 97,
-        doc §10)."""
+        doc §10). Since 2026-09-26 the platform's WHEATUSD reaches id 97
+        through VENUE_SPELLING — the lone answer to WHEAT is refused."""
         t, _ = _client([SEARCH_AAPL, ELIG_AAPL])
         t.instrument_id("AAPL")
         self.assertEqual(t._venue_spelling[1001], "AAPL")
@@ -2049,10 +2063,10 @@ class TheEligibilityReadTests(SimpleTestCase):
                 97, "WHEAT.FUT",
                 [_lev("cfd", "long", [1], max_sl=100, min_amount=25)],
                 min_exposure=1000, w8=False)])])
-        self.assertEqual(t2.instrument_id("WHEAT"), 97)
-        self.assertEqual(t2.eligibility("WHEAT")["symbol"], "WHEAT.FUT")
+        self.assertEqual(t2.instrument_id("WHEATUSD"), 97)
+        self.assertEqual(t2.eligibility("WHEATUSD")["symbol"], "WHEAT.FUT")
         self.assertEqual(t2._venue_spelling[97], "WHEAT.FUT")
-        self.assertEqual(t2.min_notional("WHEAT"), 1000.0)
+        self.assertEqual(t2.min_notional("WHEATUSD"), 1000.0)
 
     def test_the_row_accessors_answer_the_measured_values(self):
         t, _ = _client([SEARCH_AAPL, ELIG_AAPL])
@@ -2310,3 +2324,226 @@ class ConsumerKeyTests(SimpleTestCase):
             self.assertIn(needle, ec, needle)
         capf = (base / "engine" / "capabilities.py").read_text(encoding="utf-8")
         self.assertIn('"execution", "orders", "brackets"', capf)
+
+
+class TheVenueSpellingTests(SimpleTestCase):
+    """VENUE_SPELLING and FIX 6 (2026-09-26). The platform spelling is the
+    key everywhere; the adapter rewrites it for the /search param and the
+    order body only. Every entry is an id /search answered on 2026-09-23
+    (doc §10): BTC 100000, ETH 100001, XRP 100003, SOL 100063, 'WHEAT.FUT'
+    97 (a LONE result to WHEAT), PLATINUM 40, UK100 30, FRA40 31, GER40 32,
+    JPN225 36, EUSTX50 43 — and SPX500 27 as spelled, so no entry; /search
+    answered nothing for BTCUSD, ETHUSD, XAUUSD, XAGUSD. A lone result
+    spelled differently is refused, never adopted, and caches nothing."""
+
+    def setUp(self):
+        _clear_eligibility()
+        self.addCleanup(_clear_eligibility)
+
+    @staticmethod
+    def _searches(fake):
+        return [c[2]["params"] for c in fake.calls if "/search" in c[1]]
+
+    def test_the_table_is_the_measured_one(self):
+        from bot_program.engine.etoro_client import (VENUE_SPELLING,
+                                                     VENUE_SPELLING_UNKNOWN)
+        self.assertEqual(VENUE_SPELLING, {
+            "BTCUSD": "BTC", "ETHUSD": "ETH", "XRPUSD": "XRP",
+            "SOLUSD": "SOL", "WHEATUSD": "WHEAT.FUT", "XPTUSD": "PLATINUM",
+            "FTSE100": "UK100", "CAC40": "FRA40", "DAX40": "GER40",
+            "NIKKEI225": "JPN225", "STOXX50": "EUSTX50"})
+        self.assertEqual(VENUE_SPELLING_UNKNOWN, ("XAUUSD", "XAGUSD"))
+
+    def test_every_key_is_a_catalogue_spelling_and_no_value_is_one(self):
+        """The LEFT column is what configs, Instrument rows and bars carry
+        (instruments.services.INSTRUMENTS_DATA); the RIGHT column must
+        never be one, or a reader would meet eToro's spelling as a
+        platform symbol."""
+        from bot_program.engine.etoro_client import (VENUE_SPELLING,
+                                                     VENUE_SPELLING_UNKNOWN)
+        from instruments.services import INSTRUMENTS_DATA
+        cls_of = {s: c for c, rows in INSTRUMENTS_DATA.items() for s in rows}
+        self.assertEqual({k: cls_of.get(k) for k in VENUE_SPELLING}, {
+            "BTCUSD": "crypto", "ETHUSD": "crypto", "XRPUSD": "crypto",
+            "SOLUSD": "crypto", "WHEATUSD": "commodity",
+            "XPTUSD": "commodity", "FTSE100": "index", "CAC40": "index",
+            "DAX40": "index", "NIKKEI225": "index", "STOXX50": "index"})
+        for value in VENUE_SPELLING.values():
+            self.assertNotIn(value, cls_of, value)
+            self.assertNotIn(value, VENUE_SPELLING, value)
+        for key in VENUE_SPELLING_UNKNOWN:
+            self.assertEqual(cls_of.get(key), "commodity", key)
+            self.assertNotIn(key, VENUE_SPELLING, key)
+
+    def test_btcusd_is_asked_as_btc_and_named_btcusd_on_the_way_back(self):
+        t, fake = _client([SEARCH_BTC,
+                           ("GET", "/info/demo/portfolio", 200,
+                            {"clientPortfolio": {"positions": [
+                                dict(PORTFOLIO_ROW, instrumentID=100000)]}})])
+        self.assertEqual(t.instrument_id("BTCUSD"), 100000)
+        self.assertEqual(t.instrument_id("btcusd"), 100000)
+        self.assertEqual(self._searches(fake),
+                         [{"internalSymbolFull": "BTC"}],
+                         "asked twice, or asked in the platform's spelling")
+        self.assertEqual(t._ids, {"BTCUSD": 100000})
+        self.assertEqual(t._symbols[100000], "BTCUSD")
+        self.assertEqual(t._venue_spelling[100000], "BTC")
+        rows = t.get_positions()
+        self.assertEqual(rows[0]["symbol"], "BTCUSD")
+        self.assertNotIn("symbol_unresolved", rows[0])
+
+    def test_the_order_body_carries_btc_for_btcusd(self):
+        """The body's `symbol` is eToro's spelling; nothing else in it
+        moves. A mapped spelling on the body has met no key yet — the
+        crypto proof is the first (deploy/ETORO_DEPARTURE.md §7). The
+        client resolves BTC on /search BEFORE the POST (FIX 6 on the order
+        path), on a client that never priced it."""
+        t, fake = _client([SEARCH_BTC, POST_GLDM,
+                           ("GET", "orders:lookup", 200, _lookup(3))])
+        with mock.patch("time.sleep"):
+            t.market_order("BTCUSD", "BUY", 1, stop_loss=80000.0,
+                           take_profit=90000.0)
+        body = [c for c in fake.calls if c[0] == "POST"][0][2]["json"]
+        self.assertEqual(body["symbol"], "BTC")
+        self.assertEqual(body["units"], 1.0)
+        self.assertEqual(body["leverage"], 1)
+        kinds = [(c[0], "/search" in c[1]) for c in fake.calls]
+        self.assertLess(kinds.index(("GET", True)),
+                        kinds.index(("POST", False)))
+        self.assertEqual(self._searches(fake),
+                         [{"internalSymbolFull": "BTC"}])
+        t2, fake2 = _client([SEARCH_GLDM, POST_GLDM,
+                             ("GET", "orders:lookup", 200, _lookup(3))])
+        with mock.patch("time.sleep"):
+            t2.market_order("GLDM", "BUY", 1, stop_loss=82.22,
+                            take_profit=87.3)
+        body2 = [c for c in fake2.calls if c[0] == "POST"][0][2]["json"]
+        self.assertEqual(body2["symbol"], "GLDM", "an unmapped spelling moved")
+
+    def test_an_unmapped_spelling_is_asked_as_spelled(self):
+        """SPX500 answered id 27 as spelled (doc §10): no entry, and one
+        item spelled exactly as asked resolves."""
+        t, fake = _client([("GET", "/market-data/search", 200,
+                            [{"instrumentId": 27,
+                              "internalSymbolFull": "SPX500"}])])
+        self.assertEqual(t.instrument_id("SPX500"), 27)
+        self.assertEqual(self._searches(fake),
+                         [{"internalSymbolFull": "SPX500"}])
+        self.assertEqual(t._symbols[27], "SPX500")
+
+    def test_the_lone_wheat_answer_is_refused_naming_both_and_the_id(self):
+        """/search WHEAT answered 'WHEAT.FUT' 97 alone (doc §10). Unmapped,
+        that answer is refused before any price or order: the ticker
+        raises too, and no rate is ever asked."""
+        t, fake = _client([("GET", "/market-data/search", 200,
+                            [{"instrumentId": 97,
+                              "internalSymbolFull": "WHEAT.FUT"}])])
+        with self.assertRaises(LookupError) as cm:
+            t.instrument_id("WHEAT")
+        self.assertIs(type(cm.exception), LookupError)
+        for part in ("'WHEAT'", "'WHEAT.FUT'", "id 97", "2026-09-23"):
+            self.assertIn(part, str(cm.exception))
+        self.assertEqual((cm.exception.lone_id, cm.exception.lone_spelling),
+                         (97, "WHEAT.FUT"))
+        with self.assertRaises(LookupError):
+            t.ticker("WHEAT")
+        self.assertFalse([c for c in fake.calls if "/rates" in c[1]])
+        self.assertEqual((t._ids, t._symbols), ({}, {}))
+
+    def test_the_mapped_lone_answer_resolves(self):
+        """WHEATUSD is asked as WHEAT.FUT and eToro's item is spelled
+        exactly that: adopted under the platform spelling."""
+        t, fake = _client([("GET", "/market-data/search", 200,
+                            [{"instrumentId": 97,
+                              "internalSymbolFull": "WHEAT.FUT"}])])
+        self.assertEqual(t.instrument_id("WHEATUSD"), 97)
+        self.assertEqual(self._searches(fake),
+                         [{"internalSymbolFull": "WHEAT.FUT"}])
+        self.assertEqual(t._symbols[97], "WHEATUSD")
+        self.assertEqual(t._venue_spelling[97], "WHEAT.FUT")
+
+    def test_a_spelling_etoro_refused_raises_with_the_date(self):
+        t, _ = _client([("GET", "/market-data/search", 200, [])])
+        with self.assertRaises(LookupError) as cm:
+            t.instrument_id("XAUUSD")
+        self.assertIn("'XAUUSD'", str(cm.exception))
+        self.assertIn("measured 2026-09-23", str(cm.exception))
+        self.assertIn("ETORO_DEPARTURE.md", str(cm.exception))
+        with self.assertRaises(LookupError) as plain:
+            t.instrument_id("NOPE")
+        self.assertEqual(str(plain.exception),
+                         "eToro knows no instrument spelled 'NOPE'")
+
+    def test_the_eligibility_read_reaches_the_mapped_id(self):
+        """The eligibility read keys on the id, so the map reaches it
+        through instrument_id: BTCUSD reads the BTC row (§15: floor 10,
+        maxUnitsPerOrder 41, real at 1x)."""
+        t, fake = _client([SEARCH_BTC, ELIG_BTC])
+        self.assertEqual(t.eligibility("BTCUSD")["symbol"], "BTC")
+        self.assertEqual(t.min_notional("BTCUSD"), 10.0)
+        self.assertEqual(t.max_units_per_order("BTCUSD"), 41)
+        self.assertEqual(t.settlement_for("BTCUSD", "BUY", 1), "real")
+        posts = [c for c in fake.calls if c[0] == "POST"]
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(posts[0][2]["json"], {"instrumentIds": [100000]})
+        self.assertEqual(self._searches(fake),
+                         [{"internalSymbolFull": "BTC"}])
+
+    def test_the_five_non_usd_indices_are_mapped_with_their_currency_unread(self):
+        """VENUE_QUOTE_UNMEASURED (2026-09-26): the five index CFDs the map
+        resolves (doc §10: UK100 30, FRA40 31, GER40 32, JPN225 36, EUSTX50
+        43) whose quote currency nobody has read. The entry gate refuses
+        them (tests/test_etoro_routing.py); here, the table."""
+        from bot_program.engine.etoro_client import (VENUE_QUOTE_UNMEASURED,
+                                                     VENUE_SPELLING)
+        self.assertEqual(VENUE_QUOTE_UNMEASURED,
+                         ("FTSE100", "CAC40", "DAX40", "NIKKEI225", "STOXX50"))
+        self.assertEqual([VENUE_SPELLING[k] for k in VENUE_QUOTE_UNMEASURED],
+                         ["UK100", "FRA40", "GER40", "JPN225", "EUSTX50"])
+        self.assertNotIn("SPX500", VENUE_QUOTE_UNMEASURED)
+
+    def test_a_mapped_spelling_etoro_does_not_answer_names_both(self):
+        """/search is asked the map's rewrite; an empty answer names the
+        platform spelling AND the one asked, so nobody hunts for BTCUSD on
+        eToro. Nothing is cached."""
+        t, fake = _client([("GET", "/market-data/search", 200, [])])
+        with self.assertRaises(LookupError) as cm:
+            t.instrument_id("BTCUSD")
+        self.assertIs(type(cm.exception), LookupError)
+        self.assertEqual(str(cm.exception),
+                         "eToro knows no instrument spelled 'BTCUSD' "
+                         "(asked as 'BTC', VENUE_SPELLING)")
+        self.assertEqual(self._searches(fake),
+                         [{"internalSymbolFull": "BTC"}])
+        self.assertEqual(t._ids, {})
+
+    def test_the_order_path_refuses_a_lone_spelling_before_any_post(self):
+        """FIX 6 on the order path (2026-09-26): market_order resolves the
+        spelling on its own client before the POST, so the lone /search
+        answer to WHEAT ('WHEAT.FUT' 97, doc §10) raises there and nothing
+        is sent, even on a client that never priced it."""
+        t, fake = _client([("GET", "/market-data/search", 200,
+                            [{"instrumentId": 97,
+                              "internalSymbolFull": "WHEAT.FUT"}]),
+                           POST_GLDM])
+        with mock.patch("time.sleep"):
+            with self.assertRaises(LookupError) as cm:
+                t.market_order("WHEAT", "BUY", 1, stop_loss=5.0,
+                               take_profit=6.0)
+        self.assertEqual(cm.exception.lone_id, 97)
+        self.assertFalse([c for c in fake.calls if c[0] == "POST"],
+                         "an order was POSTed on an unverified spelling")
+
+    def test_a_close_on_btcusd_sends_instrument_100000(self):
+        """close_position keys its body on the id instrument_id answers:
+        the platform's BTCUSD closes InstrumentID 100000 (BTC, doc §10),
+        asked as BTC. UnitsToDeduct is never sent (measured 2026-09-23)."""
+        t, fake = _client([SEARCH_BTC,
+                           ("POST", "market-close-orders", 200,
+                            CLOSE_RESPONSE)])
+        out = t.close_position("3603281458", "BTCUSD")
+        post = [c for c in fake.calls if c[0] == "POST"][0]
+        self.assertEqual(post[2]["json"], {"InstrumentID": 100000})
+        self.assertEqual(self._searches(fake),
+                         [{"internalSymbolFull": "BTC"}])
+        self.assertEqual(out["status"], "PENDING")

@@ -4266,11 +4266,29 @@ class AssetBot(ABC):
         execute_entry after this block because it resizes nothing. A
         non-eToro carrier answers ("", "") at the first line —
         capabilities.adapter_key reads the CLASS name, so a MagicMock or
-        a subclass is not eToro. `icls` is the INSTRUMENT's class
+        a subclass is not eToro — save ONE refusal ahead of it (step 0,
+        2026-09-26): a live commodity order carried by IBKR or Saxo, since
+        CommodityBot no longer rewrites a live config to paper and neither
+        venue has a commodity proof. Step 1b refuses the index CFDs whose
+        quote currency is unread (etoro_client.VENUE_QUOTE_UNMEASURED),
+        whatever ETORO_PROVEN holds. `icls` is the INSTRUMENT's class
         (_instrument_class; the lane passes inst.asset_class): an ETF in
         a stock config is gated on "etf"."""
         from bot_program.asset_engine import skips
         from bot_program.engine.capabilities import adapter_key as _ak
+        # step 0 — THE COMMODITY CARRIER (2026-09-26). CommodityBot stopped
+        # rewriting a live config to paper, which woke the IBKR and Saxo
+        # commodity flags for the bots and TAKE TRADE alike: IBKR's reads
+        # True until deploy/ETORO_DEPARTURE.md §2a, IBKR is being retired,
+        # and neither venue has a commodity proof. A live commodity order
+        # goes to eToro, through the steps below, or nowhere. Keyed on the
+        # adapter name, so the desk seam's MagicMock ("") is untouched.
+        if str(icls) == "commodity" and _ak(client) in ("ibkr", "saxo"):
+            # verdict first: skips.record keeps 200 characters
+            return skips.GATE_BLOCKED, (
+                f"{symbol} (commodity, {side}): a live commodity order goes "
+                f"to eToro only — this one routes to {_ak(client)}, which "
+                f"has no commodity proof")
         if _ak(client) != "etoro":
             return "", ""
         # step 1 — the proof. ETORO_PROVEN is read HERE, at call time,
@@ -4283,6 +4301,18 @@ class AssetBot(ABC):
                 f"eToro {symbol} ({icls}, {side}): no demo fill-and-close "
                 f"proof pinned for {_missing} (test_proof_<token>, "
                 f"ETORO_DEPARTURE §7)")
+        # step 1b — THE QUOTE CURRENCY (2026-09-26): the index CFDs
+        # VENUE_SPELLING resolves with their quote currency unread (UK100
+        # FRA40 GER40 JPN225 EUSTX50, measured 2026-09-23) are refused
+        # whatever ETORO_PROVEN holds: sized as USD, their risk and their
+        # floor would be wrong by the exchange rate. Nothing is asked of
+        # the wire.
+        from bot_program.engine.etoro_client import VENUE_QUOTE_UNMEASURED
+        if str(symbol).upper() in VENUE_QUOTE_UNMEASURED:
+            return skips.GATE_BLOCKED, (
+                f"eToro {symbol} ({icls}, {side}): quote currency unread "
+                f"(VENUE_QUOTE_UNMEASURED) — sized as USD, its risk and its "
+                f"floor would be wrong")
         # step 2 — THE VENUE'S OWN ROW (E1.4, 2026-09-25), on the
         # `order_caps` tier: the read's THREE-STATE first, because
         # "absent" is eToro saying it holds no row for this id — a
@@ -4960,17 +4990,40 @@ class AssetBot(ABC):
                         f"held by another process. NOTHING was sent and the "
                         f"broker is fine; the entry on {symbol} was refused "
                         f"and the next tick will try again."
-                        if busy else
-                        f"{self.asset_class} config '{self.cfg.name}' is in LIVE "
-                        f"mode but its broker is unavailable (missing or invalid "
-                        f"credentials?). Entry on {symbol} was refused rather "
-                        f"than silently traded on paper."
+                        if busy else self._paper_fallback_words(symbol)
                     ),
                     url="/asset-bots/",
                 )
         except Exception as e:
             logger.warning("[%s_bot] paper-fallback notification failed: %s",
                            self.asset_class, e)
+
+    def _paper_fallback_words(self, symbol: str) -> str:
+        """The not-busy words of _notify_paper_fallback (2026-09-26). The
+        router hands back a PaperTrader for two different reasons: no
+        broker is set to carry the symbol's class at all (a live commodity
+        config with no commodity box ticked, the case CommodityBot's old
+        paper rewrite hid), or the broker that carries it has no usable
+        credentials. broker_router.broker_name_for_symbol reads the
+        database only and answers "paper" for the first; the words name
+        the fix that applies, never a credential that is fine."""
+        lead = (f"{self.asset_class} config '{self.cfg.name}' is in LIVE "
+                f"mode but ")
+        tail = (f" Entry on {symbol} was refused rather than silently "
+                f"traded on paper.")
+        try:
+            from bot_program.engine.broker_router import (
+                broker_name_for_symbol)
+            unrouted = broker_name_for_symbol(self.user, symbol,
+                                              self.cfg) == "paper"
+            icls = self._instrument_class(symbol)
+        except Exception:  # noqa: BLE001 — the words must not cost the alert
+            unrouted, icls = False, ""
+        if unrouted:
+            return (lead + f"no broker is set to carry {symbol}: no {icls} "
+                    f"box is ticked on /brokers/." + tail)
+        return (lead + "its broker is unavailable (missing or invalid "
+                "credentials?)." + tail)
 
     def _notify_unmanaged_live_position(self, trade, *, busy: bool = False):
         """A REAL position is open and its manager is switched off.

@@ -206,3 +206,134 @@ class ThePageShowsWhoCarriesWhatTests(TestCase):
                 "etoro_user_key": "u", "demo": "on"})
         self.assertFalse(EtoroAccount.objects.get(user=self.user)
                          .is_primary_for_stocks)
+
+
+class CommoditiesAndSymbolsWithoutARowTests(TestCase):
+    """E3.3 + E3.4 (2026-09-26). The commodities box routes a commodity to
+    eToro (eToro lists WHEAT.FUT 97 and PLATINUM 40 as CFDs, measured
+    2026-09-23; the platform spells them WHEATUSD and XPTUSD); without a
+    box a live commodity config meets a PaperTrader, which execute_entry
+    refuses. And the NAME agrees with the CLIENT for a symbol with no
+    Instrument row: both route it as crypto (client_for_symbol's default)
+    — the name used to say "paper" while the client went to eToro."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("rt_cmd", password="x")
+
+    def test_the_commodity_box_routes_wheat_to_etoro(self):
+        _instrument("WHEATUSD", "commodity")
+        cfg = _cfg(self.user, asset_class="commodity",
+                   symbols=("WHEATUSD",))
+        _etoro(self.user, is_primary_for_commodity=True)
+        self.assertEqual(_kind(client_for_symbol(self.user, "WHEATUSD", cfg)),
+                         "EtoroTrader")
+        self.assertEqual(broker_name_for_symbol(self.user, "WHEATUSD", cfg),
+                         "etoro")
+
+    def test_without_the_box_a_live_commodity_meets_paper(self):
+        _instrument("WHEATUSD", "commodity")
+        cfg = _cfg(self.user, asset_class="commodity",
+                   symbols=("WHEATUSD",))
+        _etoro(self.user, is_primary_for_stocks=True)
+        self.assertEqual(_kind(client_for_symbol(self.user, "WHEATUSD", cfg)),
+                         "PaperTrader")
+        self.assertEqual(broker_name_for_symbol(self.user, "WHEATUSD", cfg),
+                         "paper")
+
+    def test_a_symbol_with_no_row_is_named_where_the_client_goes(self):
+        cfg = _cfg(self.user, asset_class="crypto", symbols=("NOROW1",))
+        _etoro(self.user, is_primary_for_crypto=True)
+        self.assertEqual(_kind(client_for_symbol(self.user, "NOROW1", cfg)),
+                         "EtoroTrader")
+        self.assertEqual(broker_name_for_symbol(self.user, "NOROW1", cfg),
+                         "etoro")
+
+    def test_with_no_row_and_no_box_it_is_named_like_any_crypto(self):
+        """No box, no Binance keys: the router would pick Binance and hands
+        back paper, for a row-less symbol exactly as for BTCUSD — and a
+        live config refuses to trade against paper."""
+        _instrument("BTCUSD", "crypto")
+        cfg = _cfg(self.user, asset_class="crypto",
+                   symbols=("NOROW1", "BTCUSD"))
+        self.assertEqual(broker_name_for_symbol(self.user, "NOROW1", cfg),
+                         broker_name_for_symbol(self.user, "BTCUSD", cfg))
+        self.assertEqual(broker_name_for_symbol(self.user, "NOROW1", cfg),
+                         "binance")
+        self.assertEqual(_kind(client_for_symbol(self.user, "NOROW1", cfg)),
+                         "PaperTrader")
+
+
+class TheEntryGateKeepsCommoditiesOnEtoroAndUnreadQuotesOutTests(TestCase):
+    """The entry gate's two refusals of the fixer round (2026-09-26),
+    AssetBot._etoro_entry_refusal: one rule for the bots and TAKE TRADE.
+    Step 0: E3.3 woke the IBKR and Saxo commodity flags (IBKR's reads True
+    until deploy/ETORO_DEPARTURE.md §2a), so a live commodity order carried
+    by either is refused; every other class on those carriers, and the desk
+    seam's MagicMock, pass untouched. Step 1b: the five index CFDs the map
+    resolves with their quote currency unread are refused whatever
+    ETORO_PROVEN holds; SPX500, quoted as spelled, is not. Neither refusal
+    asks any wire anything."""
+
+    PROVEN = "bot_program.asset_engine.base.ETORO_PROVEN"
+
+    def setUp(self):
+        from tests.test_etoro_client import _clear_eligibility
+        _clear_eligibility()
+        self.addCleanup(_clear_eligibility)
+
+    @staticmethod
+    def _gate(client, symbol, icls, side="BUY"):
+        from bot_program.asset_engine.base import AssetBot
+        return AssetBot._etoro_entry_refusal(client, symbol, side, 1.0, 100.0,
+                                             icls)
+
+    def test_a_live_commodity_order_on_ibkr_or_saxo_is_refused(self):
+        from unittest.mock import MagicMock
+        from bot_program.asset_engine import skips
+        for name, key in (("IBKRTrader", "ibkr"), ("SaxoTrader", "saxo")):
+            client = type(name, (), {})()
+            code, why = self._gate(client, "WHEATUSD", "commodity")
+            self.assertEqual(code, skips.GATE_BLOCKED, name)
+            self.assertEqual(why, f"WHEATUSD (commodity, BUY): a live "
+                                  f"commodity order goes to eToro only — "
+                                  f"this one routes to {key}, which has no "
+                                  f"commodity proof")
+            code, _why = self._gate(client, "XPTUSD", "commodity", "SELL")
+            self.assertEqual(code, skips.GATE_BLOCKED, name)
+            self.assertEqual(self._gate(client, "AAPL", "stock"), ("", ""))
+            self.assertEqual(self._gate(client, "EURUSD", "forex", "SELL"),
+                             ("", ""))
+        self.assertEqual(self._gate(MagicMock(), "WHEATUSD", "commodity"),
+                         ("", ""))
+
+    def test_an_etoro_commodity_order_meets_the_proof_gate_not_step_0(self):
+        from bot_program.asset_engine import skips
+        from tests.test_etoro_client import _client
+        t, fake = _client([])
+        code, why = self._gate(t, "WHEATUSD", "commodity")
+        self.assertEqual(code, skips.GATE_BLOCKED)
+        self.assertIn("no demo fill-and-close proof pinned for ['commodity']",
+                      why)
+        self.assertNotIn("eToro only", why)
+        self.assertEqual(fake.calls, [])
+
+    def test_an_index_with_its_quote_currency_unread_is_refused_when_proven(self):
+        from unittest import mock
+        from bot_program.asset_engine import skips
+        from tests.test_etoro_client import _client
+        t, fake = _client([])
+        with mock.patch(self.PROVEN, frozenset({"index", "short"})):
+            for sym in ("FTSE100", "CAC40", "DAX40", "NIKKEI225", "STOXX50"):
+                for side in ("BUY", "SELL"):
+                    code, why = self._gate(t, sym, "index", side)
+                    self.assertEqual(code, skips.GATE_BLOCKED, sym)
+                    self.assertTrue(why.startswith(
+                        f"eToro {sym} (index, {side}): quote currency "
+                        f"unread"), why)
+                    self.assertLessEqual(len(why), 200)
+            self.assertEqual(fake.calls, [], "the wire was asked something")
+            # SPX500 passes step 1b; what refuses it here is step 2's
+            # unread row (this fake answers no /search)
+            code, why = self._gate(t, "SPX500", "index")
+        self.assertNotEqual(code, skips.GATE_BLOCKED, why)
+        self.assertNotIn("quote currency", why)

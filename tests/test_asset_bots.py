@@ -10,7 +10,8 @@ Covers:
   - run_asset_bot_tick handles disabled / missing configs
   - run_all_asset_bots aggregates per-bot results
   - Phase-5/7/8 multiplier gets applied to qty (paused rule -> qty=0)
-  - CommodityBot forces paper mode
+  - CommodityBot keeps the config's mode (2026-09-26); a live config with
+    no commodity box meets a PaperTrader and is refused (PAPER_FALLBACK)
   - Cooldown after CLOSED prevents re-entry within window
 
 Run with:  python manage.py test tests.test_asset_bots
@@ -190,12 +191,58 @@ class SizingTests(TestCase):
         self.assertEqual(bot._round_qty(0.4, 1.08, fractional=True), 0.0)
         self.assertEqual(bot._round_qty(49.0, 1.08), 0.0)
 
-    def test_commodity_bot_forces_paper_mode(self):
-        from bot_program.asset_engine import CommodityBot
+    def test_commodity_bot_no_longer_forces_paper_mode(self):
+        """E3.3 (2026-09-26): the mode is the config's — a commodity
+        reaches eToro through its box now (WHEAT.FUT 97 and PLATINUM 40,
+        CFD only, measured 2026-09-23). With no box ticked anywhere the
+        real router hands the live config a PaperTrader and propose_entry
+        refuses it (PAPER_FALLBACK, the operator told) — the one refusal
+        every class shares, not a mode rewritten here."""
+        from bot_program.asset_engine import CommodityBot, skips
+        from bot_program.engine.broker_router import client_for_symbol
+        from bot_program.engine.paper_trader import PaperTrader
         u = _user()
-        cfg = _config(u, "commodity", mode="live")
+        _signal("WHEATUSD", "bullish", 0.85, rule="cmd_rule",
+                asset_class="commodity")
+        cfg = _config(u, "commodity", mode="live", symbols=["WHEATUSD"])
         bot = CommodityBot(cfg)
-        self.assertEqual(cfg.mode, "paper")  # forced down
+        self.assertEqual(cfg.mode, "live")
+        self.assertEqual(bot.cfg.mode, "live")
+        self.assertIsInstance(client_for_symbol(u, "WHEATUSD", cfg),
+                              PaperTrader)
+        with patch.object(CommodityBot, "_notify_paper_fallback") as notify:
+            cand = bot.propose_entry("WHEATUSD")
+        self.assertIsNone(cand)
+        notify.assert_called_once()
+        self.assertEqual(skips.last_by_symbol(cfg)["WHEATUSD"]["code"],
+                         skips.PAPER_FALLBACK)
+
+    def test_the_paper_fallback_names_the_missing_box_not_credentials(self):
+        """2026-09-26: a live commodity config with no commodity box ticked
+        meets a PaperTrader because NO broker is set to carry the class;
+        the alert says so instead of 'missing or invalid credentials',
+        which sent the operator to keys that were fine. A class whose
+        broker exists and has no keys keeps the credentials words."""
+        from alerts.models import Notification
+        from bot_program.asset_engine import CommodityBot, StockBot
+        u = _user()
+        _signal("WHEATUSD", "bullish", 0.85, rule="cmd_rule",
+                asset_class="commodity")
+        cfg = _config(u, "commodity", mode="live", symbols=["WHEATUSD"])
+        CommodityBot(cfg)._notify_paper_fallback("WHEATUSD")
+        body = Notification.objects.get(user=u, notification_type="bot").body
+        self.assertEqual(body, (
+            "commodity config 'Test Bot' is in LIVE mode but no broker is "
+            "set to carry WHEATUSD: no commodity box is ticked on "
+            "/brokers/. Entry on WHEATUSD was refused rather than silently "
+            "traded on paper."))
+        _instrument("AAPL", "stock")
+        stock = _config(u, "stock", mode="live", symbols=["AAPL"],
+                        name="Stock Bot")
+        words = StockBot(stock)._paper_fallback_words("AAPL")
+        self.assertIn("its broker is unavailable (missing or invalid "
+                      "credentials?)", words)
+        self.assertNotIn("/brokers/", words)
 
 
 # ── scan_symbol creates AssetBotTrade ──────────────────────────────────────

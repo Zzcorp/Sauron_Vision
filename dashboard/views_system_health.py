@@ -496,13 +496,20 @@ def check_live_mode_readiness(user) -> dict:
     """Live configs whose broker route would fall back to paper. Entries and
     management both refuse in that state, so the bot is effectively off."""
     from bot_program.engine.broker_router import client_for_symbol
+    from bot_program.engine.capabilities import adapter_key
     from bot_program.engine.paper_trader import PaperTrader
     from bot_program.models import AssetBotConfig
 
-    # Asset classes with no wired execution broker route to paper by design
-    # (broker_router._broker_for_asset_class) — flagging them would make the
-    # page permanently red for a condition no credential can fix.
-    PAPER_BY_DESIGN = {"commodity"}
+    # Asset classes with no execution venue at all route to paper by
+    # design — flagging them would make the page permanently red for a
+    # condition no credential can fix. EMPTY since 2026-09-26: commodity
+    # left it when CommodityBot stopped rewriting a live config to paper.
+    # A live commodity config reaches eToro through its commodities box;
+    # routed to IBKR or Saxo it is refused at the entry gate (step 0 of
+    # AssetBot._etoro_entry_refusal), and with no box it meets a
+    # PaperTrader and every entry is refused (PAPER_FALLBACK). Both are
+    # exactly what this row exists to say, so neither is hidden.
+    PAPER_BY_DESIGN = frozenset()
 
     live_cfgs = list(
         AssetBotConfig.objects.filter(user=user, enabled=True, mode="live"))
@@ -518,7 +525,7 @@ def check_live_mode_readiness(user) -> dict:
                       "no bot is in live mode — nothing to verify yet",
                       configured=False)
 
-    broken, expected, symbolless = [], [], []
+    broken, expected, symbolless, gated = [], [], [], []
     for cfg in live_cfgs:
         if cfg.asset_class in PAPER_BY_DESIGN:
             expected.append(cfg.name)
@@ -537,17 +544,30 @@ def check_live_mode_readiness(user) -> dict:
                 # the exclusive trading session to render a page would
                 # starve the tick of the one clientId that can place,
                 # read or cancel an order.
-                if isinstance(client_for_symbol(user, symbol, cfg,
-                                                purpose="data"),
-                              PaperTrader):
+                client = client_for_symbol(user, symbol, cfg, purpose="data")
+                if isinstance(client, PaperTrader):
                     broken.append(f"{cfg.name}/{symbol}")
+                elif (cfg.asset_class == "commodity"
+                      and adapter_key(client) in ("ibkr", "saxo")):
+                    # a real route the entry gate refuses (2026-09-26): a
+                    # live commodity order goes to eToro only
+                    gated.append(f"{cfg.name}/{symbol} "
+                                 f"({adapter_key(client)})")
             except Exception:
                 broken.append(f"{cfg.name}/{symbol}")
     if broken:
         return _check("live_ready", "Live broker credentials", "fail",
                       "live bots falling back to paper: " + ", ".join(broken[:6]),
-                      "Add or fix broker credentials — these bots refuse to "
-                      "trade rather than record fake live fills")
+                      "Add or fix broker credentials, or tick a box for the "
+                      "class on /brokers/ — these bots refuse to trade "
+                      "rather than record fake live fills")
+    if gated:
+        return _check("live_ready", "Live broker credentials", "fail",
+                      "live commodity routed where every entry is refused: "
+                      + ", ".join(gated[:6]),
+                      "A live commodity order goes to eToro only: tick "
+                      "eToro's commodities box on /brokers/ (Saxo's "
+                      "commodity flag outranks it)")
     if symbolless:
         return _check("live_ready", "Live broker credentials", "warn",
                       "live but scans nothing: " + ", ".join(symbolless[:6]),

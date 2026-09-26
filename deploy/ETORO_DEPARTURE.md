@@ -704,7 +704,51 @@ the save that unticks Demo: the form refuses a demo -> live flip with a class
 ticked, so D4 and the first tick are two saves, in that order. Stocks
 first (configs 6 and 14; 10 stays disabled), forex second (config 1). Options
 and CFD have no eToro box and fall to paper by design; no live options config
-exists. Crypto routes nothing until a crypto config exists.
+exists — and it stays so: eToro's CFD is a settlementType per instrument, not
+a class to configure, and a `cfd` config raises at make_bot every tick
+(bot_program/asset_engine/base.py, make_bot).
+
+Crypto (2026-09-26). The config keeps the platform spelling — BTCUSD, ETHUSD,
+XRPUSD, SOLUSD — and the adapter asks eToro for BTC, ETH, XRP, SOL
+(VENUE_SPELLING in bot_program/engine/etoro_client.py; ids 100000, 100001,
+100003, 100063, measured 2026-09-23; /search answers nothing to BTCUSD or
+ETHUSD). With the crypto box ticked the router sends crypto to eToro (a Saxo
+crypto flag would win); unticked, crypto goes to Binance, and to paper
+without Binance keys — which a live config refuses to trade against. Whether
+Sauron holds a BinanceAccount row is unread. A symbol with no Instrument row
+routes as crypto, and `etoro_smoke` prints `route=<broker>` beside every
+config symbol. The legacy tick (engine/runner.py) never sends to eToro:
+since 2026-09-26 it refuses every eToro-carried order, because it cannot
+check the account's headroom. Crypto routes nothing until a crypto config
+exists, and reaches eToro only once `crypto` is in ETORO_PROVEN with its
+pinned proof (§7, bullet 0).
+
+Commodities (2026-09-26). CommodityBot no longer rewrites a live config to
+paper, so a live commodity config goes where the router sends it: eToro's
+commodities box (WHEATUSD → WHEAT.FUT 97, XPTUSD → PLATINUM 40; gold,
+silver and oil have no known spelling, §7 bullet 0s), or IBKR's or Saxo's
+commodity flag. The old rewrite kept those two flags asleep for the bots
+and TAKE TRADE, and IBKR's reads True until §2a. The entry gate refuses a
+live commodity order on any carrier but eToro (AssetBot._etoro_entry_refusal,
+step 0): nothing is sent to IBKR or Saxo, and /health/ reports such a
+config red. With no flag at all it meets a PaperTrader and every entry is
+refused (PAPER_FALLBACK). Read-only, before any commodity config is set
+live:
+
+```
+./deploy/dc exec worker-fast python manage.py shell -c "
+from bot_program.models import IBKRAccount, SaxoAccount, EtoroAccount, AssetBotConfig
+for M in (IBKRAccount, SaxoAccount, EtoroAccount):
+    print(M.__name__, list(M.objects.filter(user__username='Sauron').values_list('is_primary_for_commodity', flat=True)))
+print('live commodity configs', list(AssetBotConfig.objects.filter(user__username='Sauron', asset_class='commodity', mode='live').values_list('id', 'name', 'enabled', 'symbols')))
+"
+```
+
+Expect `IBKRAccount [True]` until §2a (its `before` line) and `live
+commodity configs []`. Every True printed is a venue a live commodity
+config would be sent to, and only eToro's may carry one. `etoro_smoke
+--user Sauron` prints `route=<broker>` beside every config symbol: a live
+commodity symbol reads `route=etoro` before its config is enabled.
 
 ## 7. Follow before enable — per config, in this order
 
@@ -714,6 +758,69 @@ exists. Crypto routes nothing until a crypto config exists.
   refuses every eToro entry of that class as `gate_blocked`, before the
   floor and before any POST. The per-class sitting list lands with the
   proofs; nothing below lifts this bullet.
+- 0s. THE SPELLINGS eToro has not answered — gold, silver, oil, gas, copper
+  (VENUE_SPELLING_UNKNOWN in bot_program/engine/etoro_client.py: XAUUSD and
+  XAGUSD raise naming 2026-09-23) — before any commodity or metal config.
+  Read-only, demo, values only, D1's WORLD CHECK first; three parts, in this
+  order.
+  (1) One eligibility POST by `symbols`. Every spelling that prints is a
+  measurement, and the answer for the ones that do not — absent from the
+  list, or the whole POST a 4xx — is the unknown-symbol shape. GLDM is the
+  control: 3190 must print, or the read is wrong.
+
+    ```
+    ./deploy/dc exec worker-fast python manage.py shell -c "
+    from bot_program.models import EtoroAccount
+    from bot_program.engine.etoro_client import EtoroTrader, BASE
+    a=EtoroAccount.objects.get(user__username='Sauron'); k,u=a.get_credentials()
+    t=EtoroTrader(k,u,env='demo' if a.demo else 'live')
+    assert t.demo, 'WORLD CHECK: not demo'
+    assert t.ping() is True, 'WORLD CHECK: no ping'
+    nl=t.net_liquidation(); assert nl and float(nl[0]) > 100000, 'WORLD CHECK: real book'
+    r=t._sess().post(f'{BASE}/api/v2/trading/info/demo/eligibility', json={'symbols': ['GOLD','XAUUSD','SILVER','XAGUSD','OIL','WTIUSD','BRNUSD','NATGAS','NGUSD','COPPER','HGUSD','XPDUSD','GLDM'], 'currency': 'USD'}, headers=t._headers(), timeout=t.timeout)
+    print(r.status_code, [(e.get('instrumentId'), e.get('symbol')) for e in (r.json() or {}).get('eligibilities', [])] if r.status_code==200 else r.text[:200])
+    "
+    ```
+
+  Record the status and the list. Each printed (id, symbol) enters
+  VENUE_SPELLING with its id and the date; if the whole POST is a 4xx, the
+  range read below is the only way, and the unknown-symbol shape reads "4xx on
+  any unknown symbol in the body — send known spellings only".
+  (2) Then the id-range read, in windows typed per sitting (START, STOP):
+  first 1–400 (WHEAT.FUT 97 and PLATINUM 40 sit there), second 400–1,200,
+  third 3,000–3,400 (around GLDM 3190); at most 20 POSTs of 20 ids per
+  sitting, 3 s apart (the eligibility quota is unmeasured). It stops at the
+  first batch printing a symbol containing GOLD, XAU, SILVER, XAG, OIL,
+  BRENT, WTI, NATGAS or COPPER.
+
+    ```
+    ./deploy/dc exec worker-fast python manage.py shell -c "
+    import time
+    START, STOP = 1, 401          # typed per sitting: (1,401) then (401,1201) then (3001,3401)
+    from bot_program.models import EtoroAccount
+    from bot_program.engine.etoro_client import EtoroTrader, BASE
+    a=EtoroAccount.objects.get(user__username='Sauron'); k,u=a.get_credentials()
+    t=EtoroTrader(k,u,env='demo' if a.demo else 'live')
+    assert t.demo, 'WORLD CHECK: not demo'
+    assert t.ping() is True, 'WORLD CHECK: no ping'
+    nl=t.net_liquidation(); assert nl and float(nl[0]) > 100000, 'WORLD CHECK: real book'
+    WANT=('GOLD','XAU','SILVER','XAG','OIL','BRENT','WTI','NATGAS','COPPER')
+    for lo in range(START, STOP, 20):
+        r=t._sess().post(f'{BASE}/api/v2/trading/info/demo/eligibility', json={'instrumentIds': list(range(lo, lo+20))}, headers=t._headers(), timeout=t.timeout)
+        body=(r.json() or {}) if r.status_code==200 else {}
+        rows=[(e.get('instrumentId'), e.get('symbol'), e.get('minPositionExposure'), [c.get('settlementType') for c in e.get('leverageConfigs') or []][:1]) for e in body.get('eligibilities', [])]
+        print(lo, r.status_code, rows or r.text[:120])
+        if any(any(w in str(s).upper() for w in WANT) for _, s, *_ in rows): print('FOUND at batch', lo); break
+        time.sleep(3)
+    "
+    ```
+
+  (3) Write back every window that printed no wanted row into the comment
+  above VENUE_SPELLING_UNKNOWN ("ids scanned: 1-400 on <date>: none"), in the
+  same commit as any spelling found, so the next sitting starts where this
+  one stopped. Unmeasured until run: whether an unknown id answers an empty
+  list or a 4xx (the first batch with a gap measures it), and the order of
+  the rows.
 - a. `./deploy/dc exec worker-fast python manage.py follow --user Sauron` — who
   follows, at what share.
 - b. One sync after the tick:
@@ -775,11 +882,13 @@ retirement then continues at deploy/IBKR_RETIREMENT.md Stage 3.
   is OPEN or CLOSE_PENDING.
 - Never tick a class on /brokers/ before the demo write proof: the tick makes
   eToro the book and the venue in one click.
-- Never tick crypto on the eToro row: the legacy tick (engine/runner.py)
-  books a live BotTrade on an unread eToro answer, with no stop. Since
-  2026-09-24 that loop meets the proof gate too, so an unproven class
-  sends nothing from it — a proven one still would, with no stop: the
-  bullet stands.
+- Never tick crypto on the eToro row until its own sitting (§7). The reason
+  first written here — the legacy tick (engine/runner.py) booking a live
+  BotTrade on an unread eToro answer, with no stop — is gone: since
+  2026-09-26 that loop never sends to eToro (it refuses every eToro-carried
+  order, because it cannot check the account's headroom). The proof gate
+  refuses every crypto entry until `crypto` is in ETORO_PROVEN with its
+  pinned proof, and the bullet stands until that proof lands.
 - Never add a token to `ETORO_PROVEN` (bot_program/asset_engine/base.py)
   without its `test_proof_<token>` in tests/test_etoro_client.py in the
   same commit, and never tick a class whose token is absent: every lane
@@ -809,6 +918,24 @@ retirement then continues at deploy/IBKR_RETIREMENT.md Stage 3.
 - Never put a key in argv, chat or history; the /brokers/ form is the only
   path, and every shell snippet above prints values, never a key.
 - Never enable two configs in one sitting.
+- Never rename a config symbol or an Instrument row to eToro's spelling, and
+  never add a VENUE_SPELLING entry (bot_program/engine/etoro_client.py) that
+  eToro has not answered with its id printed: every entry carries its id and
+  the date it was measured. The platform spelling is the key everywhere
+  (configs, Instrument rows, bars, exchange hours, the readers); the table
+  rewrites it for /search and the order body only. A lone /search result
+  spelled differently is refused, never adopted — map it only once the
+  eligibility row's `symbol` confirms the name.
+- Never take an index out of VENUE_QUOTE_UNMEASURED
+  (bot_program/engine/etoro_client.py) before its quote currency is read
+  and converted: FTSE100, CAC40, DAX40, NIKKEI225 and STOXX50 resolve (UK100
+  30, FRA40 31, GER40 32, JPN225 36, EUSTX50 43), and the entry gate refuses
+  them whatever ETORO_PROVEN holds, because the engine sizes a point of
+  price as one USD. The `index` proof on SPX500 lifts none of them.
+- Never set a commodity config live while IBKR's or Saxo's
+  is_primary_for_commodity is True and eToro's is not: the entry gate
+  refuses every order there, so the config would be enabled and dead (§6,
+  the read-only check).
 - Never read ticker "0" or a net_liquidation None as a measurement.
 - Never toggle `pipeline_asset_bots` or `broker_account_sync` to steer one
   beat; each gates more than one walk.

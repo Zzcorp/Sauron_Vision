@@ -200,7 +200,7 @@ DEFAULT_COMPONENTS = [
 
     # ── Phase 13 — multi-asset bot framework ──────────────────
     {"key": "pipeline_asset_bots", "name": "Multi-Asset Bots (stocks/forex/commodities)",
-     "description": "Phase-13 framework: per-(user, asset_class) bot configs that consume Phase-1 Signals and route trades through Phase-4 broker_router (Alpaca for stocks, OANDA for forex, paper-only for commodities). Crypto bot is unchanged.",
+     "description": "Phase-13 framework: per-(user, asset_class) bot configs that consume Phase-1 Signals and route trades through Phase-4 broker_router (Alpaca for stocks, OANDA for forex, commodities live through eToro's box only). Crypto bot is unchanged.",
      "category": "pipeline"},
 
     # ── Broker account sync ───────────────────────────────────

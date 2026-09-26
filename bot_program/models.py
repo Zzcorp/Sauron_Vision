@@ -156,7 +156,7 @@ class IBKRAccount(models.Model):
     is_primary_for_options = models.BooleanField(default=True,
         help_text="IBKR is the default for options since Alpaca/OANDA don't trade them at scale.")
     is_primary_for_commodity = models.BooleanField(default=False,
-        help_text="IBKR routes futures via FUT contracts; commodity bot still defers to PaperTrader unless this is on.")
+        help_text="Route commodity orders to IBKR (futures via FUT contracts); Saxo's and eToro's commodity flags win over this one. Since 2026-09-26 a live commodity entry routed here is refused before any order is sent: only eToro carries live commodities.")
     is_primary_for_cfd = models.BooleanField(default=False,
         help_text="IBKR CFD trading — indices, commodities, shares. NOT available to US residents (IBKR LLC blocks CFDs); UK/EU/SG/HK accounts only.")
 
@@ -388,7 +388,7 @@ class EtoroAccount(models.Model):
     # two classes are forced to IBKR in the router today, and lifting that
     # is a separate, named change.
     is_primary_for_stocks = models.BooleanField(
-        default=False, help_text="Route stocks, ETFs and indices here.")
+        default=False, help_text="Route stocks, ETFs and indices here. Measured 2026-09-23: stocks settle real at 1x; every ETF and index position is a CFD (overnight fee, even at 1x); indices carry a 1,000 USD minimum exposure.")
     is_primary_for_forex = models.BooleanField(default=False)
     is_primary_for_commodity = models.BooleanField(default=False)
     is_primary_for_crypto = models.BooleanField(default=False)

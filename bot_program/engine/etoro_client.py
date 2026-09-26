@@ -136,10 +136,15 @@ WHAT IT REFUSES TO CLAIM
     spelled with none of bid/ask/lastExecution, raises rather than reading
     as a quiet market (`ticker`), because neither shape has met a real key.
 
-Symbol convention: the platform's spelling is passed to /search as
-`internalSymbolFull`. No renaming table exists yet because none has been
-measured; the first symbol eToro spells differently will fail loudly here
-rather than silently elsewhere, and that is where the table starts.
+Symbol convention (2026-09-26): the platform's spelling is the key
+everywhere — configs, Instrument rows, bars, exchange hours, the caches
+here. `VENUE_SPELLING` (MEASURED 2026-09-23, each entry with the id
+eToro answered) rewrites it for the /search param and the order body
+only; the reverse map (`_symbols`, `_symbol_for`) answers the platform
+spelling, and the eligibility read keys on the id instrument_id returns.
+A lone /search result spelled differently is refused, never adopted. A
+spelling eToro refused and nobody has replaced sits in
+`VENUE_SPELLING_UNKNOWN` and raises with the date.
 """
 from __future__ import annotations
 
@@ -187,6 +192,58 @@ CANDLES_MAX = 1000
 #: it: SEARCH_AAPL hands every test the same id 1001).
 _ELIGIBILITY: dict = {}
 ELIGIBILITY_ABSENT = "absent"
+
+#: VENUE SPELLINGS (2026-09-26). PLATFORM spelling -> the spelling eToro's
+#: /search answers, each MEASURED on 2026-09-23 (the adapter's
+#: instrument_id on the operator's pair, deploy/ETORO_DEPARTURE.md §4
+#: D2c-0 extended) and written with the id it answered and the date.
+#: Configs, Instrument rows, PriceData, exchange_status and every reader
+#: keep the LEFT column; only the /search param (instrument_id) and the
+#: order body (market_order) carry the RIGHT. The eligibility read keys
+#: on the id, so it reaches the right row through instrument_id; the
+#: reverse direction is the _symbols cache (_symbol_for), written by
+#: instrument_id with the platform spelling. A mapped spelling on the
+#: ORDER BODY has met no key yet — the crypto proof is the first. No
+#: identity entries: SPX500, NSDQ100 and DJ30 resolve as spelled (27, 28,
+#: 29), and a spelling nobody saw /search answer gets no entry (an entry
+#: would be a guess).
+VENUE_SPELLING = {
+    "BTCUSD": "BTC",          # 100000, 2026-09-23 (BTCUSD: not found)
+    "ETHUSD": "ETH",          # 100001, 2026-09-23 (ETHUSD: not found)
+    "XRPUSD": "XRP",          # 100003, 2026-09-23
+    "SOLUSD": "SOL",          # 100063, 2026-09-23
+    # 97, 2026-09-23: the LONE result /search WHEAT answered; the name is
+    # confirmed only by the eligibility row's symbol, and a /search by
+    # WHEAT.FUT itself has not been sent — the smoke's line measures it.
+    "WHEATUSD": "WHEAT.FUT",
+    "XPTUSD": "PLATINUM",     # 40, 2026-09-23
+    "FTSE100": "UK100",       # 30, 2026-09-23 — quote currency unmeasured
+    "CAC40": "FRA40",         # 31, 2026-09-23 — quote currency unmeasured
+    "DAX40": "GER40",         # 32, 2026-09-23 — quote currency unmeasured
+    "NIKKEI225": "JPN225",    # 36, 2026-09-23 — quote currency unmeasured
+    "STOXX50": "EUSTX50",     # 43, 2026-09-23 — quote currency unmeasured
+}
+#: Platform spellings /search answered NOTHING to on 2026-09-23 with no
+#: eToro spelling known yet (GOLD, SILVER, OIL, NATGAS and COPPER were
+#: refused too). instrument_id raises for them naming the date and the
+#: reads that find the spelling (deploy/ETORO_DEPARTURE.md §7, bullet 0s:
+#: the eligibility POST by `symbols`, then the id-range read). [GAP 10]
+#: Id windows that read answered with NO metal or energy row are written
+#: here after each sitting, so nobody rescans them — "ids scanned:
+#: <lo>-<hi> on <date>: none". None scanned yet.
+VENUE_SPELLING_UNKNOWN = ("XAUUSD", "XAGUSD")
+#: QUOTE CURRENCY UNREAD (2026-09-26). These five resolve through
+#: VENUE_SPELLING (UK100 30, FRA40 31, GER40 32, JPN225 36, EUSTX50 43),
+#: and nobody has read the currency eToro quotes them in. The engine
+#: counts a point of price as one USD (AssetBot._value_per_unit is 1.0
+#: for every index), so risk, notional and the 1,000 USD floor would be
+#: off by the exchange rate — JPN225 by two orders of magnitude if it is
+#: quoted in yen. AssetBot._etoro_entry_refusal (step 1b) refuses every
+#: entry on them whatever ETORO_PROVEN holds: the "index" token is one
+#: proof, on SPX500, and lifts none of these. An entry leaves this tuple
+#: only with its currency read and a conversion in the engine.
+VENUE_QUOTE_UNMEASURED = ("FTSE100", "CAC40", "DAX40", "NIKKEI225",
+                          "STOXX50")
 
 #: Met on the wire: 3, 11, 7 (2026-09-23 D2b-i) and 4 with errorCode 720
 #: (the floor refusal); the rest is the public table (5 and 9 never seen).
@@ -397,10 +454,11 @@ class EtoroTrader:
         # symbol -> instrumentId, and the reverse for reading positions back.
         self._ids: dict = {}
         self._symbols: dict = {}
-        # instrumentId -> the spelling eToro itself answered on /search.
-        # Kept because instrument_id accepts a LONE result of any
-        # spelling; a reader (etoro_smoke) shows the mismatch instead
-        # of painting the id green. No consumer reads it.
+        # instrumentId -> eToro's OWN spelling: the /search item's (equal
+        # to VENUE_SPELLING's rewrite since 2026-09-26 — a lone result
+        # spelled differently is refused, never adopted) or, once read,
+        # the eligibility row's `symbol`. etoro_smoke prints it beside
+        # the id; nothing on the order path reads it.
         self._venue_spelling: dict = {}
 
     # ── plumbing ───────────────────────────────────────────────────────────
@@ -537,31 +595,68 @@ class EtoroTrader:
     def instrument_id(self, symbol: str) -> int:
         """The immutable integer id for `symbol`, resolved once and cached.
 
-        Raises LookupError when eToro does not know the spelling. Silently
-        returning 0 would make every later call answer "nothing here",
-        which reads as a quiet market and is a blind bot.
+        `symbol` is the PLATFORM spelling and stays the key of the three
+        caches below; /search is asked for VENUE_SPELLING's rewrite of it
+        (MEASURED 2026-09-23), and an item is adopted only when eToro
+        spells it exactly that way.
+
+        Raises LookupError when eToro does not know the spelling — naming
+        the date and the reads that find it for a VENUE_SPELLING_UNKNOWN
+        symbol. Silently returning 0 would make every later call answer
+        "nothing here", which reads as a quiet market and is a blind bot.
+
+        Raises LookupError too — the SAME type, so etoro_smoke's
+        no-such/unknown split holds — when /search answers ONE item
+        spelled differently (FIX 6, 2026-09-26). The lone result used to
+        be adopted: /search WHEAT answered 'WHEAT.FUT' 97 alone on
+        2026-09-23, and ticker() and market_order() never compare
+        spellings, so an unmapped catalogue symbol answered that way
+        would have been priced and traded under an id nobody named. The
+        error names both spellings and the id, carries them as `lone_id`
+        and `lone_spelling`, and nothing is cached.
         """
         key = str(symbol).upper()
         if key in self._ids:
             return self._ids[key]
+        wire = VENUE_SPELLING.get(key, key)
         r = self._sess().get(f"{BASE}/api/v1/market-data/search",
-                             params={"internalSymbolFull": key},
+                             params={"internalSymbolFull": wire},
                              headers=self._headers(), timeout=self.timeout)
         r.raise_for_status()
         data = r.json()
         items = data if isinstance(data, list) else (
             data.get("items") or data.get("instruments") or data.get("data")
             or ([data] if data.get("instrumentId") else []))
+        sym, iid = "", None
         for it in items:
             sym = str(it.get("internalSymbolFull") or it.get("symbol")
                       or "").upper()
             iid = it.get("instrumentId") or it.get("instrumentID")
-            if iid and (sym == key or len(items) == 1):
+            if iid and sym == wire:
                 iid = int(iid)
                 self._ids[key] = iid
                 self._symbols[iid] = key
                 self._venue_spelling[iid] = sym
                 return iid
+        if len(items) == 1 and iid:
+            err = LookupError(
+                f"eToro's lone /search result for {key!r} is spelled "
+                f"{sym!r} (id {iid}), not {wire!r} — refused, never "
+                f"adopted: not priced or traded until VENUE_SPELLING maps "
+                f"{key!r} to {sym!r} and the eligibility row's symbol "
+                f"confirms the name (measured 2026-09-23: /search WHEAT "
+                f"answered 'WHEAT.FUT' 97 alone)")
+            err.lone_id, err.lone_spelling = iid, sym
+            raise err
+        if key in VENUE_SPELLING_UNKNOWN:
+            raise LookupError(
+                f"eToro knows no instrument spelled {key!r} (measured "
+                f"2026-09-23; eToro's own spelling is not yet known — run "
+                f"the spelling reads, deploy/ETORO_DEPARTURE.md §7, "
+                f"bullet 0s)")
+        if wire != key:
+            raise LookupError(f"eToro knows no instrument spelled {key!r} "
+                              f"(asked as {wire!r}, VENUE_SPELLING)")
         raise LookupError(f"eToro knows no instrument spelled {key!r}")
 
     def _symbol_for(self, instrument_id) -> str:
@@ -1523,7 +1618,9 @@ class EtoroTrader:
         body = {
             "action": "open",
             "transaction": "buy" if side == "BUY" else "sellShort",
-            "symbol": str(symbol),
+            # eToro's spelling (VENUE_SPELLING, 2026-09-26): BTCUSD rides
+            # as BTC. A mapped spelling on this body has met no key yet.
+            "symbol": VENUE_SPELLING.get(str(symbol).upper(), str(symbol)),
             "units": float(quantity),
             "leverage": leverage,
         }
@@ -1554,6 +1651,14 @@ class EtoroTrader:
                 f"an order without one is refused here, before the POST."
             )
 
+        # FIX 6 ON THE ORDER PATH (2026-09-26): the spelling is resolved
+        # on THIS client before anything is sent. A lone /search result
+        # spelled differently, or a spelling eToro does not know, raises
+        # LookupError here and nothing is POSTed. Every lane prices
+        # through ticker() first, which resolves the same way; the order
+        # path no longer leans on that. Cached per instance: a warm client
+        # asks nothing again, a cold one sends one GET before the POST.
+        self.instrument_id(symbol)
         r = self._sess().post(self._v2_exec_orders(), json=body,
                               headers=self._headers(rid),
                               timeout=self.timeout)

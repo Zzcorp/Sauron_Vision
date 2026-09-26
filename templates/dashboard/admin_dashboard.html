@@ -653,7 +653,7 @@ button.
                 <label><input type="checkbox" name="primary_for_options" checked> Options</label>
                 <label><input type="checkbox" name="primary_for_stocks"> Stocks / ETFs / Indices</label>
                 <label><input type="checkbox" name="primary_for_forex"> Forex</label>
-                <label><input type="checkbox" name="primary_for_commodity"> Commodities <span class="ib-hint">(gold and futures stay on the paper venue unless this is on)</span></label>
+                <label><input type="checkbox" name="primary_for_commodity"> Commodities <span class="ib-hint">(since 2026-09-26 a live commodity entry routed here is refused: only eToro carries live commodities)</span></label>
                 <label><input type="checkbox" name="primary_for_cfd"> CFDs <span class="ib-hint">(not available to US residents)</span></label>
             </div>
 
@@ -827,7 +827,7 @@ button.
             <select name="asset_class" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
                 <option value="stock">Stocks (Alpaca)</option>
                 <option value="forex">Forex (OANDA)</option>
-                <option value="commodity">Commodities (paper-only)</option>
+                <option value="commodity">Commodities (live only through eToro's commodities box)</option>
             </select>
             <input type="text" name="name" placeholder="Bot name" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <select name="mode" id="assetBotMode" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
@@ -908,11 +908,13 @@ button.
                 ["Universe", val("symbols")],
                 ["Per position", val("position_size_pct") + "% · max " +
                                  val("max_concurrent_positions") + " open"],
-                /* Named, because "live" does not say WHERE — and for
-                   commodities the answer is that it stays simulated unless
-                   an IBKR account is routed for that class. */
+                /* Named, because "live" does not say WHERE. For
+                   commodities (2026-09-26) the answer is eToro's
+                   commodities box: routed to IBKR or Saxo, or to no
+                   venue, every entry is refused. */
                 ["Routes to", cls === "stock" ? "Alpaca, or IBKR if routed"
                             : cls === "forex" ? "OANDA, or IBKR if routed"
+                            : cls === "commodity" ? "eToro, through its commodities box; any other route refuses every entry"
                             : "paper venue unless IBKR is primary for " + cls],
                 ["Still required", "correct trading PIN"]
             ],

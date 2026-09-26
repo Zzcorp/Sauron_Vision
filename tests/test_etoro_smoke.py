@@ -134,7 +134,8 @@ ROUTES = [
     ("GET", "search?internalSymbolFull=NOPE&", 200, []),
     ("GET", "search?internalSymbolFull=ZERO&", 200,
      [{"instrumentId": 1003, "internalSymbolFull": "ZERO"}]),
-    # a lone result spelled differently: the adapter accepts it
+    # a lone result spelled differently: the adapter REFUSES it since
+    # 2026-09-26 (FIX 6) and the smoke prints it 'unknown'
     ("GET", "search?internalSymbolFull=SLV&", 200,
      [{"instrumentId": 1004, "internalSymbolFull": "SLVX"}]),
     ("GET", "search?internalSymbolFull=BOOM&", 503, {}),
@@ -262,8 +263,20 @@ class SmokeTests(TestCase):
         # the other world, with the same pair — asked for
         self.assertIn("refused  demo ping with the SAME pair", body)
         self.assertIn("HTTP 401 — eToro saw the keys and said no", body)
-        # the floor and the tally
-        self.assertIn("size floor: cannot be asked before an order (capabilities.py)", body)
+        # the floors, as MEASURED 2026-09-23 and read by the engine — named,
+        # never read here: no call added, the run stays GET-only
+        self.assertIn("size floor: none in units — the floor is MONEY, "
+                      "MEASURED 2026-09-23: minPositionExposure on the "
+                      "eligibility row", body)
+        self.assertIn("This command does not POST that read", body)
+        self.assertIn("deploy/ETORO_DEPARTURE.md §4 D2c-0", body)
+        self.assertNotIn("cannot be asked before an order", body)
+        self.assertIn("fractional units: MEASURED 2026-09-23 — "
+                      "unitsQuantityType 'fractional'", body)
+        self.assertIn("This command does not call the eligibility "
+                      "endpoint", body)
+        self.assertNotIn("a BELIEF", body)
+        # the tally
         # 12 = the margin_cells line joined the ping/net_liquidation trio
         self.assertIn("12 ok · 1 refused by eToro · 1 spelling(s) eToro does "
                       "not know · 2 unknown", body)
@@ -450,4 +463,72 @@ class SmokeTests(TestCase):
                      ".post(", ".patch(", ".delete(", "cancel_order",
                      "order_status"):
             self.assertNotIn(word, src, word)
+
+    def test_a_mapped_spelling_prints_both_and_every_symbol_its_route(self):
+        """E3.6 (2026-09-26). The platform's BTCUSD is asked as BTC
+        (VENUE_SPELLING: /search answered BTC 100000 and nothing for BTCUSD
+        on 2026-09-23) and prints "(BTC ← BTCUSD)"; the book names the
+        position BTCUSD. Every config symbol carries its route —
+        broker_name_for_symbol, the same default client_for_symbol routes
+        on: a symbol with no Instrument row routes as crypto, and an index
+        in a stock config says so. The run stays GET-only."""
+        from instruments.models import Instrument
+        acct = _keyed(self.user)
+        acct.is_primary_for_crypto = True
+        acct.save()
+        for sym, cls in (("BTCUSD", "crypto"), ("SPX500", "index")):
+            Instrument.objects.get_or_create(
+                symbol=sym, defaults={"name": sym, "asset_class": cls})
+        _live_cfg(self.user, "crypto", ["BTCUSD", "NOROW"],
+                  asset_class="crypto")
+        _live_cfg(self.user, "megacaps", ["SPX500"])
+        body, fake = self._run(routes=[
+            ("GET", "/info/aggregate-portfolio", 200, REAL),
+            ("GET", "/info/portfolio", 200, {"positions": [
+                {"positionID": 9, "instrumentID": 100000, "isBuy": True,
+                 "units": 1}]}),
+            ("GET", "search?internalSymbolFull=BTC&", 200,
+             [{"instrumentId": 100000, "internalSymbolFull": "BTC"}]),
+            ("GET", "search?internalSymbolFull=SPX500&", 200,
+             [{"instrumentId": 27, "internalSymbolFull": "SPX500"}]),
+            ("GET", "search?internalSymbolFull=NOROW&", 200, []),
+            # the measured quote (doc §10: BTC 85,710.6 / 85,720.46, 24/7)
+            ("GET", "rates?instrumentIds=100000&", 200,
+             {"rates": [{"bid": 85710.6, "ask": 85720.46}]}),
+            ("GET", "rates?instrumentIds=27&", 200, {"rates": []}),
+            ("GET", "instruments/100000/history/candles", 200,
+             {"candles": []}),
+        ])
+        self.assertIn("instrument 100000 (BTC ← BTCUSD) · last", body)
+        self.assertIn("bid 85710.6 ask 85720.46", body)
+        self.assertIn("instrument 27 (SPX500) · no rate", body)
+        self.assertNotIn("(SPX500 ←", body)
+        self.assertIn("route=etoro · eToro spells it BTC", body)
+        self.assertIn("route=etoro · [no Instrument row → routes as crypto, "
+                      "no bars]", body)
+        self.assertIn("route=alpaca · [index in a stock config]", body)
+        self.assertIn("no-such  [", body)
+        self.assertIn("1 open · BUY 1 BTCUSD", body)
+        self.assertNotIn("ETORO:100000", body)
+        self.assertEqual({m for m, _u, _k in fake.calls}, {"GET"})
+        searched = [k.get("params") for _m, u, k in fake.calls
+                    if "/search" in u]
+        self.assertIn({"internalSymbolFull": "BTC"}, searched)
+        self.assertNotIn({"internalSymbolFull": "BTCUSD"}, searched)
+
+    def test_a_route_that_cannot_be_named_is_named_by_type(self):
+        """_route_note reads the route from the database only; when that
+        read raises, the line names the failure by type, "route=?
+        (RuntimeError: ...)", and the smoke goes on, still GET-only."""
+        _keyed(self.user)
+        _live_cfg(self.user, "commodity_etf", ["GLDM", "HYG"])
+        with mock.patch(
+                "bot_program.engine.broker_router.broker_name_for_symbol",
+                side_effect=RuntimeError("router unreadable")):
+            body, fake = self._run()
+        self.assertEqual(
+            body.count("route=? (RuntimeError: router unreadable)"), 2)
+        self.assertIn("instrument 1002 (HYG) · last 78.6 bid 78.5 ask 78.7",
+                      body)
+        self.assertEqual({m for m, _u, _k in fake.calls}, {"GET"})
 

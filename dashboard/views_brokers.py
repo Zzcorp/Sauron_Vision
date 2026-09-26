@@ -294,6 +294,8 @@ def brokers_page(request):
         "rows": _rows(request.user),
         "capabilities": list(CAPABILITIES.keys()),
         "can_edit": request.user.is_superuser,
+        # GAP 4 (2026-09-26): the proof state printed beside each eToro box.
+        "etoro_proof": etoro_proof_states(),
     }
     if request.user.is_superuser:
         from django.contrib.auth.models import User
@@ -314,6 +316,75 @@ DEMO_UNTICK_MEASURED = (
 _CLASS_BOXES = (("primary_stocks", "stocks"), ("primary_forex", "forex"),
                 ("primary_commodity", "commodities"),
                 ("primary_crypto", "crypto"))
+
+#: THE PROOF TOKENS EACH eToro BOX NEEDS (2026-09-26, GAP 4). The gate
+#: (asset_engine/base.py AssetBot._etoro_entry_refusal, step 1) keys on
+#: the INSTRUMENT's class, so the stocks box needs three tokens — an ETF
+#: or an index in a stock config needs "etf" or "index", not "stock" —
+#: and a SELL needs "short" as well, on every box.
+ETORO_BOX_TOKENS = (("stock", ("stock", "etf", "index")),
+                    ("forex", ("forex",)),
+                    ("commodity", ("commodity",)),
+                    ("crypto", ("crypto",)))
+
+
+def _etoro_proven() -> frozenset:
+    """ETORO_PROVEN read at CALL time, off the module — the gate's own
+    rule, so a test states a token by patching that one name."""
+    from bot_program.asset_engine import base
+    return frozenset(base.ETORO_PROVEN)
+
+
+def etoro_proof_states() -> dict:
+    """What the page prints beside each eToro box: box -> words, and
+    "short". Three states per box: every token pinned ("proof pinned"),
+    none ("no proof pinned — entries refused"), or some — the stocks box
+    only — naming what is still refused."""
+    proven = _etoro_proven()
+    out = {}
+    for box, tokens in ETORO_BOX_TOKENS:
+        pinned = [t for t in tokens if t in proven]
+        missing = [t for t in tokens if t not in proven]
+        if not missing:
+            out[box] = "proof pinned"
+        elif not pinned:
+            out[box] = "no proof pinned — entries refused"
+        else:
+            out[box] = (f"proof pinned for {', '.join(pinned)} only — "
+                        f"{', '.join(missing)} entries refused")
+    out["short"] = ("shorts proven" if "short" in proven
+                    else "no short proven")
+    return out
+
+
+def unproven_note(carried) -> str:
+    """The save flash's words for the classes this save ticked whose
+    proof is not pinned — "" when every one is, or nothing is ticked.
+    Printed on every branch, the verified one included: a verified save
+    used to say nothing while every entry of an unproven class was
+    refused at the tick."""
+    if not carried:
+        return ""
+    proven = _etoro_proven()
+    missing = [t for box, tokens in ETORO_BOX_TOKENS if box in carried
+               for t in tokens if t not in proven]
+    note = ""
+    if missing:
+        which, until = (("that class", "until its proof lands")
+                        if len(missing) == 1 else
+                        ("those classes", "each until its own proof lands"))
+        note = (f" No demo fill-and-close proof is pinned for "
+                f"{', '.join(missing)} (ETORO_PROVEN; "
+                f"deploy/ETORO_DEPARTURE.md §7, bullet 0): every eToro "
+                f"entry of {which} is refused (gate_blocked), by the bots "
+                f"and by TAKE TRADE, {until}; nothing is sent in the "
+                f"meantime.")
+    if "short" not in proven:
+        note += (" Every short is refused as well until the short proof "
+                 "is pinned." if missing else
+                 " Every short is refused until the short proof is "
+                 "pinned.")
+    return note
 
 
 def demo_untick_refusals(request, user) -> list:
@@ -449,10 +520,15 @@ def save_etoro_credentials(request):
                      f"is now the book: every pool and every limit is "
                      f"measured against an account that just refused us. "
                      f"Untick those boxes or fix the keys.")
+    # GAP 4 (2026-09-26): a ticked class whose demo proof is not pinned
+    # saves, and every entry of it is refused at the tick — said here, on
+    # every branch below, the verified one included.
+    book_note += unproven_note(carried)
 
     if verdict == "ok":
         messages.success(request, f"eToro keys saved and verified for "
-                                  f"{target_username} ({env}).{env_note}")
+                                  f"{target_username} ({env}).{book_note}"
+                                  f"{env_note}")
     elif verdict == "refused":
         messages.error(request, f"eToro keys saved for {target_username} "
                                 f"({env}) but REFUSED by eToro ({detail}). "

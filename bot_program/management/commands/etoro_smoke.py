@@ -25,10 +25,16 @@ What it prints, in order:
     plus the account currency read from that same payload), the adapter's
     own two-state ping(), and net_liquidation from the nested accountTotals
     block.
-  * every symbol of every LIVE config of the user, enabled or not: the
-    instrument id beside eToro's OWN spelling of it — the adapter accepts a
-    lone /search result of any spelling, so a mismatch is 'unknown', never
-    'ok' — or NO SUCH SPELLING with eToro's own answer, or could-not-ask;
+  * every symbol of every LIVE config of the user, enabled or not, with
+    its route (broker_router.broker_name_for_symbol, read from the
+    database: route=etoro, binance, alpaca …; "[no Instrument row →
+    routes as crypto, no bars]"; "[index in a stock config]" where the
+    row's class is not the config's): the instrument id beside eToro's OWN
+    spelling of it — "(BTC ← BTCUSD)" where the adapter's VENUE_SPELLING
+    rewrites the platform spelling (measured 2026-09-23); a lone /search
+    result spelled differently is refused by the adapter and printed
+    'unknown', never 'ok' — or NO SUCH SPELLING with eToro's own answer,
+    or could-not-ask;
     then the ticker, printed as "no rate" whenever lastPrice is not > 0,
     which is the rule asset_engine/base.py applies (NO_PRICE), never as a
     price of 0; then klines on the config's timeframe, 5 bars, because
@@ -51,7 +57,11 @@ What it prints, in order:
     2026-09-23 (the measured facts are printed beside each); on the real
     segment the close path was attested by a GET answering 405 and the v2
     paths carry no measurement at all.
-  * the size floor: cannot be asked before an order (capabilities.py).
+  * the floors, named and never read here: the MONEY floor
+    (minPositionExposure) and the fractional reading (unitsQuantityType)
+    are MEASURED 2026-09-23 on the eligibility row, which the engine reads
+    before an entry; this command makes GET calls only — the adapter's
+    eligibility read is run by hand (deploy/ETORO_DEPARTURE.md §4 D2c-0).
 
 Run with:
 
@@ -128,43 +138,84 @@ def _verdict(fn):
 def _price_line(t, symbol: str) -> str:
     """instrument id, eToro's own spelling, and the ticker, for one spelling.
 
-    A LookupError of exactly that type from instrument_id is eToro's own
-    answer — /search returned 200 and nothing matched — and becomes
-    _NoSuch. A KeyError or IndexError is also a LookupError and is NOT
-    eToro's answer: it propagates and is named by type. The adapter accepts
-    a lone /search result of ANY spelling (etoro_client.instrument_id); the
-    venue's spelling is read back and a mismatch is 'unknown', because a
-    different instrument is possible and nothing here can tell. The ticker
-    is 'no rate' whenever lastPrice is not > 0 — the rule base.py applies
-    for the mark (None) and for the entry (NO_PRICE) — never a price of 0,
-    whichever shape the sentinel took.
+    The adapter asks /search for VENUE_SPELLING's rewrite of the platform
+    spelling (measured 2026-09-23); a mapped one prints as "(BTC ← BTCUSD)"
+    — eToro's spelling, then the platform's. A LookupError of exactly that
+    type from instrument_id is eToro's own answer — /search returned 200
+    and nothing matched — and becomes _NoSuch; the same type raised for a
+    LONE result spelled differently (it carries `lone_id`: the adapter
+    refuses it since 2026-09-26) is 'unknown', because a different
+    instrument is possible and nothing here can tell. A KeyError or
+    IndexError is also a LookupError and is NOT eToro's answer: it
+    propagates and is named by type. The ticker is 'no rate' whenever
+    lastPrice is not > 0 — the rule base.py applies for the mark (None) and
+    for the entry (NO_PRICE) — never a price of 0, whichever shape the
+    sentinel took.
     """
+    from bot_program.engine.etoro_client import VENUE_SPELLING
+    key = str(symbol).upper()
+    wire = VENUE_SPELLING.get(key, key)
     try:
         iid = t.instrument_id(symbol)
     except LookupError as e:
         if type(e) is not LookupError:
             raise
+        if getattr(e, "lone_id", None) is not None:
+            raise _Unknown(
+                f"instrument {e.lone_id} — eToro's lone /search result is "
+                f"spelled {getattr(e, 'lone_spelling', '')!r}, not "
+                f"{wire!r}: the adapter refuses it "
+                f"(etoro_client.instrument_id) and a different instrument "
+                f"is possible; map it in VENUE_SPELLING only once the "
+                f"eligibility row's symbol confirms the name") from None
         raise _NoSuch(f"NO SUCH SPELLING AT ETORO: {e}") from None
     venue = str(t._venue_spelling.get(iid) or "")
-    key = str(symbol).upper()
-    if venue != key:
+    if venue != wire:
         raise _Unknown(
-            f"instrument {iid} — eToro's lone /search result is spelled "
-            f"{venue!r}, not {key!r}: the adapter accepted it "
-            f"(etoro_client.instrument_id) and a different instrument is "
-            f"possible; verify by hand before this spelling trades")
+            f"instrument {iid} — eToro's own spelling reads {venue!r}, not "
+            f"{wire!r} (etoro_client._venue_spelling); verify by hand "
+            f"before this spelling trades")
+    name = venue + (f" ← {key}" if wire != key else "")
     tk = t.ticker(symbol)
     try:
         last = float(tk.get("lastPrice") or 0)
     except (TypeError, ValueError):
         last = 0.0
     if last <= 0:
-        return (f"instrument {iid} ({venue}) · no rate (lastPrice "
+        return (f"instrument {iid} ({name}) · no rate (lastPrice "
                 f"{tk.get('lastPrice')!r}, bid {tk.get('bid')!r}, ask "
                 f"{tk.get('ask')!r} — the engine skips this as NO_PRICE; "
                 f"not a price of 0)")
-    return (f"instrument {iid} ({venue}) · last {tk['lastPrice']} "
+    return (f"instrument {iid} ({name}) · last {tk['lastPrice']} "
             f"bid {tk.get('bid')} ask {tk.get('ask')}")
+
+
+def _route_note(user, symbol: str, cfg) -> str:
+    """Where the router sends `symbol` for this config, read from the
+    database — nothing is asked of any broker. The name is
+    broker_router.broker_name_for_symbol, which answers the default
+    client_for_symbol routes on (since 2026-09-26 a symbol with no
+    Instrument row is crypto there too); beside it, a missing Instrument
+    row, an Instrument class that is not the config's (an index or an ETF
+    in a stock config rides the stocks box), and eToro's spelling where
+    the adapter maps it."""
+    from bot_program.engine.broker_router import broker_name_for_symbol
+    from bot_program.engine.etoro_client import VENUE_SPELLING
+    from instruments.models import Instrument
+    try:
+        route = broker_name_for_symbol(user, symbol, cfg)
+    except Exception as e:  # noqa: BLE001 — the point is to name it
+        route = f"? ({type(e).__name__}: {e})"
+    parts = [f"route={route}"]
+    inst = Instrument.objects.filter(symbol=symbol).first()
+    if inst is None:
+        parts.append("[no Instrument row → routes as crypto, no bars]")
+    elif str(inst.asset_class) != str(cfg.asset_class):
+        parts.append(f"[{inst.asset_class} in a {cfg.asset_class} config]")
+    key = str(symbol).upper()
+    if key in VENUE_SPELLING:
+        parts.append(f"eToro spells it {VENUE_SPELLING[key]}")
+    return " · ".join(parts)
 
 
 def _bars_line(t, symbol: str, timeframe: str) -> str:
@@ -367,6 +418,8 @@ class Command(BaseCommand):
                 w("           (no symbols — nothing to resolve)")
             for sym in syms:
                 wanted.append((f"[{cfg.id}]", str(sym), str(cfg.timeframe)))
+                w(f"           {str(sym):<12} "
+                  f"{_route_note(user, str(sym), cfg)}")
         for sym in opts["symbol"]:
             wanted.append(("--symbol", str(sym), DEFAULT_TIMEFRAME))
         for owner, sym, tf in wanted:
@@ -466,17 +519,31 @@ class Command(BaseCommand):
             w(f"  {'url':<8} {name:<44} {url}")
             w(f"           {note}")
 
+        # THE FLOORS (2026-09-26): named as measured, never read here — the
+        # read is an eligibility POST and this run is GET-only
+        # (tests/test_etoro_smoke.py pins it).
         if cap.has_capability(t, "size_floor"):
             w("  size floor: min_tradable now exists on EtoroTrader — this "
               "line and capabilities.py disagree; update both")
+        elif cap.has_capability(t, "money_floor"):
+            w("  size floor: none in units — the floor is MONEY, MEASURED "
+              "2026-09-23: minPositionExposure on the eligibility row (10 "
+              "USD stocks, ETFs and crypto; 1,000 USD forex, indices and "
+              "commodities), read by the engine before an entry (the "
+              "money_floor tier, EtoroTrader.min_notional). This command "
+              "does not POST that read: run the adapter's eligibility "
+              "read by hand (deploy/ETORO_DEPARTURE.md §4 D2c-0).")
         else:
-            w("  size floor: cannot be asked before an order (capabilities.py)")
+            w("  size floor: none declared (capabilities.py) — this adapter "
+              "answers no floor before an order")
         if cap.has_capability(t, "fractional_units"):
-            w("  fractional units: the tier is declared — a BELIEF from the "
-              "public reference (create-an-order: units is a double > 0; "
-              "the portfolio example holds 0.049485), unmeasured until D2c; "
-              "fractions are sent only while fractional_units_live is "
-              "ON. The eligibility endpoint is not called.")
+            w("  fractional units: MEASURED 2026-09-23 — unitsQuantityType "
+              "'fractional' on every eligibility row read (stocks, ETFs, "
+              "forex, crypto, indices, commodities); "
+              "takes_fractional_units reads the row (True / False / None "
+              "unread), and fractions are sent only while the "
+              "fractional_units_live switch is ON. This command does not "
+              "call the eligibility endpoint.")
 
         w("=" * 70)
         w(f"{tally[OK]} ok · {tally[REFUSED]} refused by eToro · "
