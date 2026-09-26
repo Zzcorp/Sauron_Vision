@@ -256,6 +256,18 @@ DEFAULT_COMPONENTS = [
      "description": "Off (default) = the STOCK bot rounds to WHOLE shares on eToro. On = the sized fraction is sent. Crypto (8 dp) and commodity (4 dp) send fractions whatever this says; forex snaps to 100 units, to 1 only when ON and measured fractional. Flip only after D2c pins (deploy/ETORO_DEPARTURE.md section 4).",
      "category": "system"},
 
+    # ── The Telegram eye (2026-09-26) ───────────────────────────
+    # bot_program/telegram_eye.py answers the group every 15 s, in
+    # English, to the configured staff chat only; its one write turns
+    # bots OFF. OFF on arrival like every row here: after the deploy,
+    # `manage.py component on telegram_eye`. One poll at a time holds a
+    # batch, under a Postgres advisory lock, NOT this row: the gate's
+    # mark_run writes it after every run and would wait behind it.
+    # Description measured at 276 chars (< 300).
+    {"key": "telegram_eye", "name": "Telegram Eye (group commands)",
+     "description": "Answers the Sauron Vision Telegram group every 15 s, in English: /status, /positions, /why, /help and questions. Its only write to trading state is the brake: /stop and /stopall turn bots OFF, never on. Replies to the configured staff chat only. OFF on arrival: turning it on starts answering.",
+     "category": "system"},
+
     # ── The three that were never registered (found live 2026-09-13) ────
     # These keys have guarded tasks and beat entries in this codebase, and
     # had NO row in DEFAULT_COMPONENTS. `is_component_enabled` returns

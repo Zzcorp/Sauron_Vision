@@ -1200,3 +1200,36 @@ def watch_evidence_chain():
         "%d operator(s) told", ", ".join(cold) or "see blockers",
         len(blockers), out["notified"])
     return out
+
+
+# ── The Telegram eye (2026-09-26) ────────────────────────────────────────
+# The group "Sauron Vision" asks, Sauron answers: in English, to the
+# configured chat only, and its one write is the brake (bots OFF, never
+# on). The whole of it is bot_program/telegram_eye.py; these are its two
+# Celery doors.
+
+@shared_task
+@guarded_task("telegram_eye")
+def poll_telegram_eye() -> dict:
+    """Every 15 s on the fast queue: read the group, answer, confirm.
+
+    Gated by the telegram_eye component, OFF on arrival. One poll at a
+    time handles a batch: telegram_eye.poll takes a Postgres advisory
+    lock without waiting, and a second worker skips at once (not the
+    component row, which the gate's mark_run writes after every run).
+    """
+    from .telegram_eye import poll
+    return poll()
+
+
+@shared_task
+def answer_telegram_question(pending_id: int) -> dict:
+    """One question from the group, answered on the ai queue.
+
+    Not gated, like brain.tasks.answer_research_question: the poll that
+    queued it was, and a skip here would leave the research row PENDING
+    for ever. The ai queue because one LLM turn takes tens of seconds and
+    the fast queue carries the quote poller.
+    """
+    from .telegram_eye import answer_question
+    return answer_question(pending_id)

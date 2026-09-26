@@ -1,4 +1,18 @@
-"""Telegram alert channel — two-way bot with command support."""
+"""Telegram alert channel — two-way bot with command support.
+
+SUPERSEDED FOR COMMANDS (2026-09-26): bot_program/telegram_eye.py reads
+the group now, from the configured chat only, in English, and its one
+write to trading state is the brake. The reader below
+(check_bot_updates and
+process_commands, wrapped by alerts.tasks.check_telegram_commands) has
+no sender check and no offset: it would approve a strategy for anyone
+who can write to the bot; it passes no offset, so it would re-read every
+unconfirmed update and act on it again, and its getUpdates would collide
+with the eye's (409 Conflict). It must never be scheduled;
+tests/test_telegram_eye.py pins
+that no beat entry names it. The senders (send_telegram,
+send_strategy_proposal) stay in use.
+"""
 import os
 import requests
 import logging

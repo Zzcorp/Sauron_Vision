@@ -55,6 +55,11 @@ app.conf.task_routes = {
     "portfolio.tasks.*": {"queue": "slow"},
     "scraping.tasks.fetch_cot_reports": {"queue": "slow"},
     "scraping.tasks.fetch_sec_filings": {"queue": "slow"},
+    # 2026-09-26 — the Telegram eye. The 15-second poll sits beside the
+    # quote poller: an idle poll is one HTTP round trip. The question it
+    # queues goes to the ai worker, where a slow LLM turn blocks nothing.
+    "bot_program.tasks.poll_telegram_eye": {"queue": "fast"},
+    "bot_program.tasks.answer_telegram_question": {"queue": "ai"},
 }
 
 # ============================================================
@@ -550,5 +555,18 @@ app.conf.beat_schedule = {
     "check-price-alerts": {
         "task": "alerts.tasks.check_all_price_alerts",
         "schedule": 60.0,  # Every minute
+    },
+
+    # ── 2026-09-26 — the Telegram eye: the group's commands answered
+    #    within a quarter minute (bot_program/telegram_eye.py). Gated by
+    #    the telegram_eye component, OFF on arrival. No `expires`: the
+    #    database scheduler drops that key, and a backlog of polls is
+    #    harmless (the batch lock takes one at a time, the others skip
+    #    at once; after the first, each finds nothing).
+    #    alerts.tasks.check_telegram_commands is NOT scheduled and must
+    #    never be: it would steal these updates.
+    "poll-telegram-eye": {
+        "task": "bot_program.tasks.poll_telegram_eye",
+        "schedule": 15.0,
     },
 }

@@ -282,6 +282,17 @@ def _plain_title(title: str) -> str:
     return title.lstrip(_PLATFORM_MARKS).lstrip() or title
 
 
+class TelegramHeading(str):
+    """A section header inside a Telegram message: rendered bold.
+
+    A plain str subclass, so whatever joins, measures or logs the lines
+    keeps working and only _telegram_text reads the difference. Added
+    2026-09-26 for bot_program/telegram_eye.py, whose status report has
+    sections; every notifier before it hands plain strings and renders
+    exactly as it did.
+    """
+
+
 def _telegram_text(title: str, body: str = "", *, lines=None,
                    mark: str = "") -> str:
     """The HTML Telegram renders: a bold title, then one fact per line.
@@ -306,8 +317,10 @@ def _telegram_text(title: str, body: str = "", *, lines=None,
         head = f"{mark} {head}"
     out = [f"<b>{head}</b>"]
     if lines:
-        out.extend(escape(str(ln)) for ln in lines
-                   if str(ln or "").strip())
+        out.extend((f"<b>{escape(str(ln))}</b>"
+                    if isinstance(ln, TelegramHeading)
+                    else escape(str(ln)))
+                   for ln in lines if str(ln or "").strip())
     elif body:
         out.append("")
         out.append(escape(str(body)))
