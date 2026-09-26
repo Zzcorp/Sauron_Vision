@@ -156,6 +156,7 @@ def dispatch_event(event_type: str, payload: dict, *,
     candidates = [r for r in FAST_RULE_REGISTRY.values() if event_type in r.event_types]
     fired_names: list[str] = []
     signal_ids: list[int] = []
+    created = []  # announced once the audit row is written (2026-09-26)
     error_msg = ""
 
     for rule in candidates:
@@ -203,17 +204,36 @@ def dispatch_event(event_type: str, payload: dict, *,
             )
             signal_ids.append(sig.id)
             fired_names.append(rule.rule_name)
+            created.append(sig)
         except Exception as e:
             logger.warning("[fast_rules] Signal.create failed for %s: %s", rule.rule_name, e)
             error_msg = (error_msg + f"\n{rule.rule_name} create-fail: {e}").strip()
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
-    fe = FastEvent.objects.create(
-        event_type=event_type, symbol=symbol[:40], payload=payload,
-        rules_evaluated=len(candidates), rules_fired=len(fired_names),
-        fired_rule_names=fired_names, signal_ids=signal_ids,
-        dispatch_ms=round(elapsed_ms, 2), error=error_msg[:1000],
-    )
+    try:
+        fe = FastEvent.objects.create(
+            event_type=event_type, symbol=symbol[:40], payload=payload,
+            rules_evaluated=len(candidates), rules_fired=len(fired_names),
+            fired_rule_names=fired_names, signal_ids=signal_ids,
+            dispatch_ms=round(elapsed_ms, 2), error=error_msg[:1000],
+        )
+    finally:
+        # Every row this dispatch created is announced (signals.announce),
+        # once, after the timing and the audit row: a second rule's
+        # evaluation never waits on the first rule's Telegram post, and
+        # dispatch_ms stays the dispatcher's own latency. Never raises.
+        # Not for the HQ "fire test event" button (source="admin"): its
+        # payload and its price are typed by hand, and an announcement
+        # would reach every chat, the group included, as a real signal.
+        if created and source == "admin":
+            logger.info("[fast_rules] %s from the admin test button: %d "
+                        "signal(s) written, not announced (#%s)",
+                        event_type, len(created),
+                        ", #".join(str(s.pk) for s in created))
+        elif created:
+            from signals.announce import announce_new_signal
+            for sig in created:
+                announce_new_signal(sig)
     return {
         "event_id": fe.id,
         "rules_evaluated": len(candidates),

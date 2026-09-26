@@ -681,6 +681,19 @@
             var list = d.createElement("div");
             list.className = "nf-pop-items";
             items.forEach(function (it) {
+                /* A plain string is one fact line: the lines the fill and
+                 * alert notifiers share with Telegram (2026-09-26). It has
+                 * no label, and an em-dash pair would call it a gap. */
+                if (typeof it === "string") {
+                    var line = d.createElement("div");
+                    line.className = "nf-pop-item nf-pop-item--line";
+                    var words = d.createElement("span");
+                    words.className = "nfi-label";
+                    words.textContent = it;
+                    line.appendChild(words);
+                    list.appendChild(line);
+                    return;
+                }
                 var href = safeHref(it && it.url);
                 var node = d.createElement(href ? "a" : "div");
                 node.className = "nf-pop-item";
@@ -700,8 +713,11 @@
             pop.appendChild(list);
         }
 
+        var linked = items.some(function (it) {
+            return !!safeHref(it && it.url);
+        });
         el(pop, "div", "nf-pop-cta",
-           items.length ? "click a line to open it"
+           linked ? "click a line to open it"
                         : (ds.ncHref ? "click to open its page"
                                      : "no page for this one — this is all of it"));
     }

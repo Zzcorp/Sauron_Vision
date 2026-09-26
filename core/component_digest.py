@@ -540,8 +540,9 @@ def _send_telegram(title: str, body: str) -> bool:
     """The digest on Telegram, to TELEGRAM_CHAT_ID — the chat it has always
     gone to — as escaped HTML under one emoji.
 
-    Not alerts.channels.telegram_alert.send_telegram, which posts legacy
-    Markdown: there a single underscore in a fault's own words
+    Not alerts.channels.telegram_alert.send_telegram, which posted legacy
+    Markdown until the house-style batch of 2026-09-26: there a single
+    underscore in a fault's own words
     ("platform_disabled", "no_api_key") is a 400 "can't parse entities"
     and the whole digest is dropped — the failure that kept the bot's
     fills off Telegram for a month (bot_program.notifications, fixed

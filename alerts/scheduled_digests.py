@@ -176,8 +176,80 @@ def generate_eod_digest(user=None):
     return digest
 
 
-def send_digest(digest, user=None):
-    """Send a generated digest via all configured channels."""
+#: A section's name as the digest's heading says it.
+SECTION_WORDS = {
+    'portfolio': 'Portfolio',
+    'signals': 'Active signals',
+    'events': 'Economic events today',
+    'news': 'News',
+    'daily_pnl': 'Daily P&L',
+    'trades': 'Trades today',
+    'strategies': 'Active strategies',
+}
+
+#: A field's name as a digest line says it.
+KEY_WORDS = {
+    'pnl': 'P&L',
+    'pnl_pct': 'P&L %',
+    'daily_pnl': 'Daily P&L',
+    'cumulative_pnl_pct': 'Cumulative P&L %',
+    'max_drawdown': 'Max drawdown',
+    'total_value': 'Total value',
+    'open_positions': 'Open positions',
+    'top_movers': 'Top movers',
+    'entry_price': 'Entry price',
+}
+
+
+def _digest_key(key) -> str:
+    key = str(key)
+    return KEY_WORDS.get(key) or key.replace('_', ' ').capitalize()
+
+
+def _digest_value(value) -> str:
+    if isinstance(value, bool):
+        return 'yes' if value else 'no'
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    return str(value)
+
+
+def digest_lines(digest) -> list:
+    """The digest as lines: a bold heading per section, then one bullet
+    per row (five at most, three fields a row). A list inside a section is
+    counted, never dropped in silence. Shared by the bell's body and
+    Telegram (2026-09-26: the body was Markdown the bell printed as is)."""
+    from bot_program.notifications import TelegramHeading
+    lines = []
+    for section_name, data in (digest.get('sections') or {}).items():
+        rows = []
+        if isinstance(data, list):
+            for item in data[:5]:
+                if isinstance(item, dict):
+                    rows.append("• " + ", ".join(
+                        f"{_digest_key(k)}: {_digest_value(v)}"
+                        for k, v in list(item.items())[:3]))
+        elif isinstance(data, dict):
+            for k, v in list(data.items())[:5]:
+                if isinstance(v, list):
+                    rows.append(f"• {_digest_key(k)}: {len(v)}")
+                elif not isinstance(v, dict):
+                    rows.append(f"• {_digest_key(k)}: {_digest_value(v)}")
+        lines.append(TelegramHeading(
+            SECTION_WORDS.get(section_name)
+            or str(section_name).replace('_', ' ').capitalize()))
+        lines.extend(rows or ["• Nothing to report"])
+    return lines or ["Nothing to report"]
+
+
+def send_digest(digest, user=None, *, chats_done=None):
+    """Send a generated digest via all configured channels.
+
+    `chats_done` (2026-09-26): the set a scheduled run passes for all its
+    users. A Telegram chat already in it is not posted again, so a chat
+    several users share (the Sauron group) receives one digest per run;
+    the first user met speaks for it. The bell is still per user.
+    """
     from alerts.models import Notification
 
     title_map = {
@@ -186,34 +258,29 @@ def send_digest(digest, user=None):
     }
     title = title_map.get(digest['type'], 'Market Digest')
 
-    # Format sections into readable text
-    body_parts = [f"**{title}**\n"]
-
-    for section_name, data in digest.get('sections', {}).items():
-        body_parts.append(f"\n**{section_name.replace('_', ' ').title()}:**")
-        if isinstance(data, list):
-            for item in data[:5]:
-                if isinstance(item, dict):
-                    body_parts.append(f"  - {', '.join(f'{k}: {v}' for k, v in list(item.items())[:3])}")
-        elif isinstance(data, dict):
-            for k, v in list(data.items())[:5]:
-                if not isinstance(v, (list, dict)):
-                    body_parts.append(f"  {k}: {v}")
-
-    body = '\n'.join(body_parts)
+    # One set of lines for the bell's body and for Telegram.
+    lines = digest_lines(digest)
+    body = '\n'.join(str(line) for line in lines)
 
     if user:
         Notification.create_for_user(user, 'system', title, body)
     else:
         Notification.create_for_all('system', title, body)
 
-    # Also send via external channels
+    # Also send via external channels: the USER's chat, in the house
+    # style. Until 2026-09-26 this called send_telegram(chat id, body):
+    # the chat id became the bold title and the digest went to the
+    # platform chat instead.
     try:
-        from alerts.channels.telegram_alert import send_telegram
+        from alerts.channels.telegram_alert import MARKS, send_to_chat
         if user:
             prefs = getattr(user, 'notification_prefs', None)
-            if prefs and prefs.telegram_chat_id:
-                send_telegram(prefs.telegram_chat_id, body[:4000])
+            chat = str(getattr(prefs, 'telegram_chat_id', '') or '').strip()
+            if chat and (chats_done is None or chat not in chats_done):
+                if chats_done is not None:
+                    chats_done.add(chat)
+                send_to_chat(chat, title, lines=lines,
+                             mark=MARKS.get(digest['type'], MARKS['digest']))
     except Exception:
         pass
 

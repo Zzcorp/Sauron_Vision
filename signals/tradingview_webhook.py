@@ -191,6 +191,12 @@ def tradingview_webhook(request):
     )
     logger.info("[tradingview] %s %s from %s -> signal #%s",
                 direction, symbol, strategy, signal.pk)
+    # Announced like every new signal (signals.announce), never while
+    # TradingView waits: queued for the default worker once the row is
+    # committed. A caller left waiting on Telegram retries, and a retry
+    # is a duplicate alert.
+    from signals.announce import announce_after_commit
+    announce_after_commit(signal)
     return JsonResponse({"ok": True, "signal_id": signal.pk,
                          "symbol": instrument.symbol,
                          "direction": direction})

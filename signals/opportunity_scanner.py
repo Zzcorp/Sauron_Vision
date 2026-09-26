@@ -1772,7 +1772,7 @@ def _last_price(instrument, now: datetime, *, as_of: bool = False) -> Optional[f
 
 
 def _emit_match(setup, instrument, composite: float, conditions_out: list,
-                last_price: float) -> dict:
+                last_price: float, *, announce: bool = False) -> dict:
     """Write the Signal + OpportunityFlag for a match that has cleared every
     check, and return the pair's result dict.
 
@@ -1780,6 +1780,13 @@ def _emit_match(setup, instrument, composite: float, conditions_out: list,
     setups contradict each other is a property of the PAIR, and it is only
     knowable once both have been scored — a function that scores and writes in
     one breath can never suppress more than whichever one it reached second.
+
+    `announce` (2026-09-26): a live pass announces the Signal it CREATES
+    (signals.announce: the banner, the bell, Telegram), once, after the
+    pair's rows are written. Never on the reuse branch below, whose row
+    was announced when it was written. Off by default, so a replay, a
+    diagnostic or a test that reaches this directly announces nothing;
+    scan_setup and scan_all_setups pass `not as_of`.
     """
     from signals.models import OpportunityFlag, Signal
 
@@ -1811,7 +1818,8 @@ def _emit_match(setup, instrument, composite: float, conditions_out: list,
               .filter(instrument=instrument, rule_name=setup.name,
                       signal_type="composite", is_active=True)
               .order_by("-created_at").first())
-    if signal is None:
+    created = signal is None
+    if created:
         signal = Signal.objects.create(
             instrument=instrument,
             signal_type="composite",
@@ -1836,16 +1844,24 @@ def _emit_match(setup, instrument, composite: float, conditions_out: list,
     # The FLAG is still written every pass. A flag is a moment — it records
     # that the setup matched on this date at this price, and
     # `resolve_pending_flags` grades flags, not signals.
-    flag = OpportunityFlag.objects.create(
-        setup=setup, instrument=instrument, signal=signal,
-        direction=setup.direction, score=round(composite, 4),
-        conditions_evaluated=conditions_out,
-        price_at_flag=Decimal(str(last_price)),
-        suggested_entry=Decimal(str(round(entry, 8))),
-        suggested_stop=Decimal(str(round(stop, 8))),
-        suggested_target=Decimal(str(round(target, 8))),
-        horizon_days=setup.suggested_horizon_days,
-    )
+    try:
+        flag = OpportunityFlag.objects.create(
+            setup=setup, instrument=instrument, signal=signal,
+            direction=setup.direction, score=round(composite, 4),
+            conditions_evaluated=conditions_out,
+            price_at_flag=Decimal(str(last_price)),
+            suggested_entry=Decimal(str(round(entry, 8))),
+            suggested_stop=Decimal(str(round(stop, 8))),
+            suggested_target=Decimal(str(round(target, 8))),
+            horizon_days=setup.suggested_horizon_days,
+        )
+    finally:
+        # The Signal exists whether or not its flag was written, so a
+        # created row is announced either way (announce_new_signal never
+        # raises, so the flag's own error, if any, is the one that leaves).
+        if created and announce:
+            from signals.announce import announce_new_signal
+            announce_new_signal(signal)
     logger.info("[opportunity] flag %s created for %s × %s (score=%.2f)",
                 flag.id, setup.name, instrument.symbol, composite)
     return {"matched": True, "score": round(composite, 4), "flag_id": flag.id,
@@ -2004,7 +2020,8 @@ def scan_setup(setup, instrument, *, now: Optional[datetime] = None,
         return {"matched": True, "pending": True, "score": round(composite, 4),
                 "last_price": last_price, "conditions": conditions_out}
 
-    return _emit_match(setup, instrument, composite, conditions_out, last_price)
+    return _emit_match(setup, instrument, composite, conditions_out, last_price,
+                       announce=not as_of)
 
 
 def scan_all_setups(*, now: Optional[datetime] = None,
@@ -2137,7 +2154,7 @@ def scan_all_setups(*, now: Optional[datetime] = None,
         for setup, inst, result in matches:
             try:
                 _emit_match(setup, inst, result["score"], result["conditions"],
-                            result["last_price"])
+                            result["last_price"], announce=not as_of)
             except Exception as e:
                 # Counted separately from `errors`: the pair already reached
                 # the composite and is already inside `scored`, so folding it

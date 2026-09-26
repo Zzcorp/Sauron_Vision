@@ -58,6 +58,82 @@ OUTCOME_WORDS = {
     "manual_close": ("\u270B", "closed by hand"),
 }
 
+#: The emoji every other notifier leads its Telegram message with
+#: (2026-09-26), reusing a mark where the event is the same: the hand of
+#: a hand-taken close for a hand-taken open, the warning sign the Eye and
+#: the digest already use. The bell keeps the platform's geometric mark
+#: in the title (_plain_title strips it on the way out); Telegram gets
+#: this one.
+NOTIFY_MARKS = {
+    "orchestrator_reject": "\u26D4",
+    "manual_fill_open": "\u270B",
+    "manual_fill_queued": "\u23F3",
+    "manual_lane_live": "\U0001F534",
+    "manual_lane_paper": "\U0001F4C4",
+    "manual_close_refused": "\U0001F6AB",
+    "drawdown_warning": "\u23F8\uFE0F",
+    "protection_vanished": "\u26A0\uFE0F",
+    "unclaimed_position": "\u2753",
+    "track_record_decay": "\u2198\uFE0F",
+    "strategist_briefing": "\U0001F9ED",
+    "system_health": "\U0001F6E0\uFE0F",
+    "staff_warning": "\u26A0\uFE0F",
+    "broker_unreachable": "\U0001F50C",
+    "evidence_chain_cold": "\u2744\uFE0F",
+}
+
+
+def _staff_mark(title) -> str:
+    """notify_staff's mark. A caller that opens its title with \u26A0 (a
+    queued order that cannot be withdrawn, a leg that may still be live)
+    keeps a warning sign on Telegram, where the \u26A0 itself is stripped with
+    the platform's marks; any other health alert gets the tools."""
+    if str(title or "").lstrip().startswith("\u26A0"):
+        return NOTIFY_MARKS["staff_warning"]
+    return NOTIFY_MARKS["system_health"]
+
+#: The decay triggers in words.
+DECAY_WORDS = {
+    "avg_r_drop": "average R dropped",
+    "win_rate_drop": "win rate dropped",
+    "gone_negative": "average R turned negative",
+}
+
+
+def _amount(value) -> str:
+    """A money amount on a Telegram line: two decimals, grouped; anything
+    that is not a number is printed as it came."""
+    from decimal import Decimal, InvalidOperation
+    try:
+        return f"{Decimal(str(value)):,.2f}"
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+
+
+def _telegram_lines(items):
+    """The bell card's items as Telegram lines. A string (a
+    TelegramHeading too) passes as it is; a {label, detail} dict, the
+    shape the briefing hands the bell, reads "Label: detail" (an all-caps
+    label in sentence case), where Telegram printed the dict's repr until
+    2026-09-26."""
+    if not items:
+        return items
+    out = []
+    for it in items:
+        if isinstance(it, dict):
+            label = str(it.get("label") or "").strip()
+            detail = str(it.get("detail") or "").strip()
+            if label.isupper() and all(ch.isalnum() or ch == " "
+                                       for ch in label):
+                label = label.capitalize()
+            words = (f"{label}: {detail}" if label and detail
+                     else (label or detail))
+            if words:
+                out.append(words)
+        else:
+            out.append(it)
+    return out
+
 
 # Kinds the OPERATOR caused with their own hands. They ride this same
 # dispatcher — one bell, one set of channels, one quiet-hours rule — but they
@@ -180,7 +256,7 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
         rd = row_data if isinstance(row_data, dict) else {}
         if rd.get("items") or rd.get("mark"):
             delivered = _send_telegram(
-                user, title, body, lines=rd.get("items"),
+                user, title, body, lines=_telegram_lines(rd.get("items")),
                 mark=str(rd.get("mark") or "")) or delivered
         else:
             delivered = _send_telegram(user, title, body) or delivered
@@ -274,7 +350,9 @@ def _user_channel(user) -> str:
 # answering (brain.research_models draws the two apart the same way), so it
 # leads a hand-taken fill — and it is stripped on the way out with all the
 # others.
-_PLATFORM_MARKS = "✕▲⊠⊟⟳◉⊕◯◌●▸"
+# ◆ ◇ (the manual lane) and ⚠ (an unprotected position) lead titles
+# too, and reached Telegram in front of its emoji until 2026-09-26.
+_PLATFORM_MARKS = "✕▲⊠⊟⟳◉⊕◯◌●▸◆◇⚠" + "\uFE0F"
 
 
 def _plain_title(title: str) -> str:
@@ -346,7 +424,11 @@ def _send_telegram(user, title: str, body: str, *, lines=None,
         chat_id = getattr(user.notification_prefs, "telegram_chat_id", "")
         if not chat_id:
             return False
-        text = _telegram_text(title, body, lines=lines, mark=mark)
+        # Cut under Telegram's 4,096 characters like every other path:
+        # fit_text renders through _telegram_text and returns it as it is
+        # whenever it fits (2026-09-26).
+        from alerts.channels.telegram_alert import fit_text
+        text = fit_text(title, body, lines=lines, mark=mark)
         r = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
@@ -360,7 +442,13 @@ def _send_telegram(user, title: str, body: str, *, lines=None,
                            str(getattr(r, "text", ""))[:200])
         return bool(r.ok)
     except Exception as e:
-        logger.warning("telegram dispatch failed: %s", e)
+        # A connection error quotes the address, and the address carries
+        # the bot token: scrubbed before the line is logged (2026-09-26),
+        # as alerts.channels.telegram_alert.send_to_chat does.
+        import os as _os
+        token = _os.getenv("TELEGRAM_BOT_TOKEN", "")
+        words = str(e).replace(token, "<token>") if token else str(e)
+        logger.warning("telegram dispatch failed: %s", words[:300])
         return False
 
 
@@ -420,6 +508,9 @@ def notify_orchestrator_reject(user, *, asset_class: str, symbol: str,
         title=f"✕ Orchestrator blocked {symbol} {side}",
         body=f"{asset_class.upper()} · {reason}",
         url="/eye/",
+        row_data={"items": [f"Asset class: {asset_class.upper()}",
+                            f"Reason: {reason}"],
+                  "mark": NOTIFY_MARKS["orchestrator_reject"]},
     )
 
 
@@ -471,6 +562,7 @@ def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
     queued instead, and names no price.
     """
     from alerts.links import page_url
+    from core.price_format import format_price
     if working:
         return dispatch_notification(
             user, "manual_fill_open",
@@ -480,6 +572,13 @@ def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
                   f"order is working and nothing has filled — no position "
                   f"is open yet"
                   + (" · LIVE — real funds once it fills" if live else "")),
+            row_data={"items": (
+                [f"{asset_class.upper()} · qty {qty} · TAKE TRADE",
+                 "The order is working at the broker; nothing has filled",
+                 ("Venue: LIVE, real funds once it fills" if live
+                  else "Venue: paper")]
+                + ([f"Trade #{trade_id}"] if trade_id else [])),
+                "mark": NOTIFY_MARKS["manual_fill_queued"]},
             url=page_url("forensics_detail", trade_id) or "/positions/",
         )
     return dispatch_notification(
@@ -489,6 +588,13 @@ def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
         body=(f"{asset_class.upper()} · qty {qty} @ {entry_price} · "
               f"TAKE TRADE"
               + (" · LIVE — real funds" if live else "")),
+        row_data={"items": (
+            [f"{asset_class.upper()} · qty {qty} @ "
+             f"{format_price(entry_price, asset_class, symbol)}",
+             "Taken by hand (TAKE TRADE)",
+             "Venue: LIVE, real funds" if live else "Venue: paper"]
+            + ([f"Trade #{trade_id}"] if trade_id else [])),
+            "mark": NOTIFY_MARKS["manual_fill_open"]},
         # Forensics renders any of this user's trades, and a hand-taken one
         # has a story too: the levels it opened with, the signal it was taken
         # from, its audit trail and lifecycle. The FALLBACK differs from the
@@ -517,6 +623,15 @@ def notify_manual_lane_mode(user, *, asset_class: str, mode: str,
               f"TAKE TRADE on {asset_class} instruments is back on the "
               f"paper venue — rehearsal money only"),
         url="/positions/",
+        row_data=({"items": ([f"Asset class: {asset_class}",
+                              "TAKE TRADE now moves real funds at the broker"]
+                             + ([f"Pool: ${float(capital):,.2f}"]
+                                if capital else [])),
+                   "mark": NOTIFY_MARKS["manual_lane_live"]} if live else
+                  {"items": [f"Asset class: {asset_class}",
+                             "TAKE TRADE is back on the paper venue: "
+                             "rehearsal money only"],
+                   "mark": NOTIFY_MARKS["manual_lane_paper"]}),
     )
 
 
@@ -583,6 +698,12 @@ def notify_manual_close_refused(user, *, asset_class: str, symbol: str,
               f"stamped on a position that is still open. The position is "
               f"STILL OPEN at the broker."),
         url=page_url("forensics_detail", trade_id) or "/eye/fills/",
+        row_data={"items": [
+            (f"{asset_class.upper()} · trade #{trade_id}" if trade_id
+             else asset_class.upper()),
+            "The broker is unreachable, so the close was refused",
+            "The position is STILL OPEN at the broker"],
+            "mark": NOTIFY_MARKS["manual_close_refused"]},
     )
 
 
@@ -594,6 +715,12 @@ def notify_drawdown_warning(user, *, asset_class: str, config_name: str,
         body=(f"{asset_class.upper()} · realized 24h P&L {realized_pnl} "
               f"≤ limit {limit}. New entries halted."),
         url="/risk/",
+        row_data={"items": [f"Bot: {config_name}",
+                            f"Asset class: {asset_class.upper()}",
+                            f"Realized 24h P&L: {_amount(realized_pnl)}",
+                            f"Limit: {_amount(limit)}",
+                            "New entries halted"],
+                  "mark": NOTIFY_MARKS["drawdown_warning"]},
     )
 
 
@@ -604,6 +731,7 @@ def notify_protection_vanished(user, *, asset_class: str, symbol: str,
     still held. Operator-kind on purpose: a muted bot feed must not mute
     the one message that says real money is running without a stop."""
     from alerts.links import page_url
+    from core.price_format import format_price
     return dispatch_notification(
         user, "protection_vanished",
         title=f"⚠ {symbol} is UNPROTECTED at the broker",
@@ -611,6 +739,14 @@ def notify_protection_vanished(user, *, asset_class: str, symbol: str,
               f"Bot-side stop/target management has taken the position "
               f"back at stop {stop_loss}; check the broker's open orders."),
         url=page_url("forensics_detail", trade_id) or "/positions/",
+        row_data={"items": (
+            [f"{asset_class.upper()} · {side} qty {qty}",
+             f"Reason: {reason}",
+             "Bot-side management has taken the position back at stop "
+             f"{format_price(stop_loss, asset_class, symbol)}",
+             "Check the broker's open orders"]
+            + ([f"Trade #{trade_id}"] if trade_id else [])),
+            "mark": NOTIFY_MARKS["protection_vanished"]},
     )
 
 
@@ -626,12 +762,21 @@ def notify_unclaimed_position(user, *, symbols: list, venue: str) -> bool:
     more = f" (+{len(symbols) - 6} more)" if len(symbols) > 6 else ""
     return dispatch_notification(
         user, "unclaimed_position",
-        title=f"▲ {len(symbols)} position(s) at {venue} that no row claims",
+        title=(f"▲ {len(symbols)} "
+               f"position{'' if len(symbols) == 1 else 's'} at {venue} "
+               f"that no row claims"),
         body=(f"{listed}{more}. These are invisible to every exposure and "
               f"daily-loss gate, carry no bot-side stop, and the kill "
               f"switch cannot flatten them — it walks database rows. "
               f"Check the broker."),
         url="/positions/",
+        row_data={"items": [f"Venue: {venue}",
+                            f"Symbols: {listed}{more}",
+                            "Invisible to every exposure and daily-loss gate",
+                            "No bot-side stop, and the kill switch cannot "
+                            "flatten them",
+                            "Check the broker"],
+                  "mark": NOTIFY_MARKS["unclaimed_position"]},
     )
 
 
@@ -652,6 +797,15 @@ def notify_track_record_decay(user, *, rule_name: str, asset_class: str,
         body=(f"{asset_class.upper()} · last {recent_n} trades · "
               f"triggers: {', '.join(triggers) or '—'}"),
         url="/bot-performance/",
+        row_data={"items": [
+            f"Rule: {rule_name}",
+            f"Asset class: {asset_class.upper()}",
+            f"Recent: {recent_avg_r:+.2f}R over the last {recent_n} trades",
+            f"Baseline: {baseline_avg_r:+.2f}R",
+            "Triggers: " + (", ".join(
+                DECAY_WORDS.get(t, str(t).replace("_", " "))
+                for t in triggers) or "none recorded")],
+            "mark": NOTIFY_MARKS["track_record_decay"]},
     )
 
 
@@ -723,7 +877,9 @@ def notify_strategist_briefing_to_all(briefing) -> dict:
             str((w or {}).get("ref", ""))[:28]
             for w in briefing.watchlist[:3] if (w or {}).get("ref"))
         items.append({"label": "WATCHLIST",
-                      "detail": (f"{len(briefing.watchlist)} items"
+                      "detail": (f"{len(briefing.watchlist)} item"
+                                 + ("" if len(briefing.watchlist) == 1
+                                    else "s")
                                  + (f" · {heads}" if heads else "")),
                       "url": briefing_url})
     items.append({"label": "COST",
@@ -732,6 +888,7 @@ def notify_strategist_briefing_to_all(briefing) -> dict:
                              f"{briefing.tokens_out or 0} out"),
                   "url": ""})
     row_data = {"items": items,
+                "mark": NOTIFY_MARKS["strategist_briefing"],
                 "briefing": {"posture": briefing.posture,
                              "id": briefing.pk}}
 
@@ -788,8 +945,11 @@ def notify_staff(*, title: str, body: str = "", url: str = "",
     n_delivered = 0
     for u in staff:
         try:
+            # A caller's free body, not facts: the mark alone, and
+            # Telegram renders the body under the bold title.
             ok = dispatch_notification(
                 u, "system_health", title=title, body=body, url=url,
+                row_data={"mark": _staff_mark(title)},
             )
             if ok:
                 n_delivered += 1
@@ -843,6 +1003,14 @@ def notify_broker_unreachable(user, *, label: str, host: str, port: int,
               f"every page are showing their last reading with its age, not "
               f"a live one."),
         url=url,
+        row_data={"items": [
+            f"Account: {label}",
+            f"Not answering: {where}",
+            f"Silent for {misses} syncs running (about {misses * 15} minutes)",
+            f"What to do: {remedy.replace('`', '')}",
+            "Equity and holdings on every page show their last reading, "
+            "with its age"],
+            "mark": NOTIFY_MARKS["broker_unreachable"]},
     )
 
 
@@ -875,4 +1043,11 @@ def notify_evidence_chain_cold(user, *, cold: list, blockers: list) -> bool:
               f"NO ROW was never seeded, and the two are fixed by different "
               f"commands."),
         url="/ops/",
+        row_data={"items": (
+            [f"Cold: {names}"] + ([first] if first else [])
+            + ["Run manage.py paper_readiness for the full chain; it "
+               "writes nothing",
+               "A link that is off is a decision; a link with no row was "
+               "never seeded"]),
+            "mark": NOTIFY_MARKS["evidence_chain_cold"]},
     )

@@ -79,44 +79,14 @@ def _create_signals_and_notify(results):
         new_count += 1
         logger.info("Created signal pk=%s rule=%s instrument=%s", signal.pk, rule_name, instrument)
 
-        # Live banner. Signals were the one thing the operator most wants to
-        # know about the moment it happens, and the only events on the socket
-        # were fills — so a new setup appeared silently and was discovered
-        # later, if at all. Best-effort: a broken socket must never abort a
-        # scan that has already persisted its row.
-        try:
-            from dashboard.consumers import push_eye_event
-            from django.contrib.auth.models import User
-            payload = {
-                "signal_id": signal.pk,
-                "symbol": instrument.symbol,
-                "title": signal.title,
-                "direction": signal.direction,
-                "score": round(float(signal.score or 0), 2),
-                "rule_name": rule_name,
-                "entry": str(signal.suggested_entry or signal.price_at_signal or ""),
-                "stop": str(signal.suggested_stop or ""),
-                "target": str(signal.suggested_target or ""),
-                "rr": signal.risk_reward_ratio,
-                "url": "/signals/",
-            }
-            for u in User.objects.filter(is_active=True, is_staff=True):
-                push_eye_event(u, "new_signal", payload)
-        except Exception as e:
-            logger.debug("new_signal push failed for pk=%s: %s", signal.pk, e)
-
-        # Notify — wrapped individually so a broken notifier never aborts the scan.
-        try:
-            from alerts.notify import notify_new_signal
-            notify_new_signal(signal)
-        except Exception:
-            logger.exception("notify_new_signal failed for signal pk=%s", signal.pk)
-
-        try:
-            from alerts.dispatch import dispatch_signal_alert
-            dispatch_signal_alert(signal)
-        except Exception:
-            logger.exception("dispatch_signal_alert failed for signal pk=%s", signal.pk)
+        # The live banner, the bell, then Telegram / email / WhatsApp:
+        # signals.announce, the one helper every creator has called since
+        # 2026-09-26 (until then only this loop announced, and the
+        # scanner's, the fast rules' and the webhook's rows said nothing).
+        # Same steps, same order, each wrapped so a broken notifier never
+        # aborts a scan that has already persisted its row.
+        from signals.announce import announce_new_signal
+        announce_new_signal(signal)
 
     if unstorable:
         # Loud, because a silent version of exactly this counter is how a bug
@@ -315,3 +285,23 @@ def dispatch_event_task(event_type, payload=None, source="api"):
 
     result = dispatch_event(event_type, payload or {}, source=source)
     return {"status": "success", **result}
+
+
+@shared_task
+def announce_signal(signal_id: int) -> dict:
+    """Announce one Signal from a worker (signals.announce, 2026-09-26).
+
+    For a creator that must not wait on Telegram: the TradingView webhook
+    answers its HTTP caller and queues this once its row is committed.
+    Not gated: the creator already decided, and a skip here would leave a
+    signal written and never announced. Unrouted, so it runs on the
+    default queue, which the fast worker consumes ("-Q fast,default").
+    """
+    from signals.announce import announce_new_signal
+    from signals.models import Signal
+
+    signal = (Signal.objects.select_related("instrument")
+              .filter(pk=signal_id).first())
+    if signal is None:
+        return {"status": "signal_not_found", "signal_id": signal_id}
+    return {"status": "ok", **announce_new_signal(signal)}
