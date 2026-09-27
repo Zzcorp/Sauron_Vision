@@ -273,20 +273,30 @@ def _fallback_rows(cfg, symbol, interval, limit) -> "tuple[list, str]":
 
 
 # Starred instruments beyond the fleet get bars too, capped per pass —
-# keyless requests are cheap, not free.
+# keyless requests are cheap, not free. Held symbols are never capped.
 WATCHLIST_BAR_CAP = 30
 
 
 def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
                            limit=DEFAULT_LIMIT, covered=None) -> dict:
-    """Bars for STARRED instruments no enabled bot already covers.
+    """Bars for HELD and STARRED instruments no enabled bot already covers.
 
     The star used to bring quotes and signal scans but not bars — so a
     starred instrument's chart stayed blank and its rules could never
     fire, which quietly contradicted what the star promises. The keyless
     public feeds close the gap; symbols with no free source are skipped
     by name.
+
+    HELD symbols come first and outside the cap. The manual TAKE TRADE
+    config carries `symbols=[]` by design, so a pair held only through the
+    manual lane is covered by no config — and the cap used to be taken
+    BEFORE covered symbols were skipped, so fleet symbols spent the thirty
+    slots and a held pair starred past them got no 4h/1h bars at all. The
+    held set is the one the brain's regime probe reads
+    (`brain.synthesizer._held_symbols`), so every probe on the book has a
+    frame to read. The cap now counts only symbols this pass will fetch.
     """
+    from brain.synthesizer import _held_symbols
     from instruments.models import Instrument
     from market_data.public_feed import (SUPPORTED_ASSET_CLASSES,
                                          YF_UNAVAILABLE, public_feed_for)
@@ -294,12 +304,19 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
     out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0}
     covered = covered or set()
     classes = sorted(SUPPORTED_ASSET_CLASSES | {"crypto"})
-    qs = (Instrument.objects.filter(is_watchlist=True, is_active=True,
-                                    asset_class__in=classes)
-          .order_by("symbol"))
-    for inst in qs[:WATCHLIST_BAR_CAP]:
-        if inst.symbol in covered or inst.symbol in YF_UNAVAILABLE:
-            continue
+    skip = set(covered) | set(YF_UNAVAILABLE)
+    held = [i for i in (Instrument.objects
+                        .filter(symbol__in=_held_symbols(),
+                                asset_class__in=classes)
+                        .order_by("symbol"))
+            if i.symbol not in skip]
+    skip.update(i.symbol for i in held)
+    starred = [i for i in (Instrument.objects
+                           .filter(is_watchlist=True, is_active=True,
+                                   asset_class__in=classes)
+                           .order_by("symbol"))
+               if i.symbol not in skip][:WATCHLIST_BAR_CAP]
+    for inst in held + starred:
         client = public_feed_for(inst.asset_class)
         if client is None:
             out["no_client"] += 1
@@ -326,8 +343,8 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
 
 
 def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dict:
-    """Refresh bars for every enabled AssetBotConfig, then for starred
-    instruments the fleet does not already cover."""
+    """Refresh bars for every enabled AssetBotConfig, then for held and
+    starred instruments the fleet does not already cover."""
     from bot_program.models import AssetBotConfig
 
     totals = {"configs": 0, "symbols": 0, "bars": 0, "skipped": 0, "errors": 0,
