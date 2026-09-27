@@ -1000,7 +1000,11 @@
             .sidebar { transform: translateX(-100%); transition: transform 0.3s; position: fixed; z-index: 1000; }
             .sidebar.open { transform: translateX(0); }
             .sidebar.mini { width: var(--sidebar-width); }
-            .main-content { margin-left: 0 !important; }
+            /* The sidebar is off-canvas on a phone, so the page takes the
+               whole width (2026-09-26). The desktop cap, 100vw minus the
+               sidebar (minus 68px when it is mini), was never lifted here:
+               a 360px screen was left a 100px column on every page. */
+            .main-content { margin-left: 0 !important; max-width: 100vw !important; }
             .topbar { padding: 0 14px; }
             .page-content { padding: 14px; }
             .grid-2,.grid-3,.grid-4,.grid-5,.grid-6,.grid-sidebar { grid-template-columns: 1fr !important; }

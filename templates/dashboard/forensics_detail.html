@@ -1,9 +1,254 @@
 {% extends "base.html" %}
-{% block title %}{{ trade.symbol }} #{{ trade.id }} — Forensics{% endblock %}
+{% block title %}{% if summary %}{{ summary.headline }}{% else %}{{ trade.symbol }}{% endif %} #{{ trade.id }} — Position{% endblock %}
 {# ◎ is the sidebar's Trade Forensics mark — title and nav row agree. #}
-{% block page_title %}◎ {{ trade.symbol }} · {{ trade.side }} · TRADE #{{ trade.id }}{% endblock %}
+{# On a phone the topbar keeps "◎ Position #id": the headline is the first #}
+{# line of the summary right under it, and the long title wrapped to four. #}
+{% block page_title %}◎ <span class="pd-title-long">{% if summary %}{{ summary.headline }}{% else %}{{ trade.symbol }} · {{ trade.side }}{% endif %} · </span>Position #{{ trade.id }}{% endblock %}
+
+{% block extra_css %}
+{# THE POSITION PAGE (2026-09-26): the plain summary, the close button and #}
+{# the folded technical record. Phone first: nothing here is wider than #}
+{# its container, every track is minmax(0, ...), every tap target is at #}
+{# least 48px, and colours are the theme tokens, so light and dark both hold. #}
+{# pd-js: set before the body paints, so the close bar and the "refreshes by #}
+{# itself" sentence show only where the script that drives them runs. #}
+<script>document.documentElement.classList.add("pd-js");</script>
+<style>
+    .pd-sum {
+        background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: var(--radius-lg); padding: 20px 22px;
+        margin-bottom: 16px; min-width: 0; overflow-wrap: anywhere;
+        color: var(--text-primary);
+    }
+    .pd-head {
+        display: flex; flex-wrap: wrap; align-items: center;
+        justify-content: space-between; gap: 10px 16px;
+    }
+    .pd-headline {
+        margin: 0; font-family: var(--font-heading); font-size: 30px;
+        font-weight: 700; line-height: 1.15; color: var(--text-primary);
+    }
+    .pd-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+    .pd-chip {
+        display: inline-flex; align-items: center; min-height: 30px;
+        padding: 2px 12px; border-radius: 999px; font-size: 15px;
+        font-weight: 600; border: 1px solid var(--border);
+        background: var(--bg-secondary); color: var(--text-secondary);
+    }
+    .pd-chip-open, .pd-chip-working { color: var(--accent); border-color: var(--accent); }
+    .pd-chip-pending, .pd-chip-error { color: var(--danger); border-color: var(--danger); }
+    .pd-chip-real { color: var(--accent-gold-ink, var(--warning)); border-color: currentColor; }
+    .pd-big { display: flex; flex-direction: column; gap: 2px; margin: 18px 0 6px; min-width: 0; }
+    .pd-big-label { font-size: 15px; color: var(--text-secondary); }
+    .pd-big-value {
+        font-family: var(--font-heading); font-size: 46px; font-weight: 700;
+        line-height: 1.1; color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+    }
+    .pd-up .pd-big-value { color: var(--accent); }
+    .pd-down .pd-big-value { color: var(--danger); }
+    .pd-big-sub { font-size: 17px; color: var(--text-secondary); }
+    .pd-sentence { margin: 10px 0 16px; font-size: 18px; line-height: 1.5; }
+    .pd-facts {
+        display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px; margin: 0 0 12px;
+    }
+    .pd-fact {
+        min-width: 0; padding: 10px 12px; border-radius: var(--radius);
+        background: var(--bg-secondary);
+    }
+    .pd-fact dt { margin: 0 0 2px; font-size: 14px; color: var(--text-secondary); }
+    .pd-fact dd {
+        margin: 0; font-size: 19px; font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+    .pd-fact-sub {
+        display: block; font-size: 14px; font-weight: 400;
+        color: var(--text-secondary);
+    }
+    .pd-note {
+        margin: 8px 0; padding: 10px 12px; font-size: 16px; line-height: 1.45;
+        border-radius: var(--radius); border-left: 4px solid var(--border);
+        background: var(--bg-secondary); color: var(--text-primary);
+        overflow-wrap: anywhere;
+    }
+    .pd-note-warn { border-left-color: var(--danger); }
+    .pd-note-info { border-left-color: var(--accent); }
+    .pd-why { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .pd-why-title { margin: 0 0 6px; font-size: 16px; font-weight: 700; color: var(--text-secondary); }
+    .pd-why p { margin: 0 0 6px; font-size: 17px; line-height: 1.5; }
+    .pd-checked { margin: 10px 0 0; font-size: 14px; color: var(--text-secondary); }
+    .pd-refresh-note { display: none; }
+    html.pd-js .pd-refresh-note { display: inline; }
+
+    .pd-closebar { display: none; margin: 0 0 20px; }
+    html.pd-js .pd-closebar { display: block; }
+    .pd-closebar-space { display: none; }
+    .pd-close-btn {
+        display: block; width: 100%; max-width: 480px; min-height: 56px;
+        padding: 12px 20px; border: 0; border-radius: var(--radius-lg);
+        background: var(--danger); color: #fff; cursor: pointer;
+        font-family: var(--font-heading); font-size: 21px; font-weight: 700;
+    }
+    .pd-close-btn:disabled { opacity: .6; cursor: default; }
+
+    .pd-dialog {
+        position: fixed; inset: 0; z-index: var(--z-dialog, 3100);
+        display: flex; align-items: center; justify-content: center;
+        padding: 16px; background: rgba(0, 0, 0, .55);
+    }
+    .pd-dialog[hidden] { display: none; }
+    .pd-dialog-box {
+        width: 100%; max-width: 460px; max-height: calc(100vh - 32px);
+        overflow-y: auto; box-sizing: border-box; padding: 20px;
+        background: var(--bg-card); color: var(--text-primary);
+        border: 1px solid var(--border); border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-card); overflow-wrap: anywhere;
+    }
+    .pd-dialog-title { margin: 0 0 10px; font-family: var(--font-heading); font-size: 24px; }
+    .pd-dialog-text { margin: 0 0 10px; font-size: 19px; line-height: 1.5; }
+    .pd-dialog-money { margin: 0 0 12px; font-size: 16px; color: var(--text-secondary); }
+    .pd-pin label { display: block; margin-bottom: 6px; font-size: 16px; }
+    .pd-pin input {
+        width: 100%; min-height: 50px; box-sizing: border-box;
+        padding: 8px 12px; font-size: 22px; letter-spacing: 4px;
+        border: 1px solid var(--border); border-radius: var(--radius);
+        background: var(--bg-secondary); color: var(--text-primary);
+    }
+    .pd-dialog-answer { margin: 12px 0 0; font-size: 18px; line-height: 1.5; font-weight: 600; }
+    .pd-answer-ok { color: var(--accent); }
+    .pd-answer-warn, .pd-answer-bad { color: var(--danger); }
+    .pd-dialog-actions { display: flex; gap: 10px; margin-top: 18px; }
+    .pd-dialog-actions button {
+        flex: 1 1 0; min-width: 0; min-height: 54px; cursor: pointer;
+        border-radius: var(--radius-lg); font-family: var(--font-heading);
+        font-size: 19px; font-weight: 700;
+    }
+    .pd-dialog-actions button:disabled { opacity: .55; cursor: default; }
+    .pd-btn-cancel { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border); }
+    .pd-btn-confirm { background: var(--danger); color: #fff; border: 0; }
+
+    .pd-tech { margin-top: 4px; }
+    .pd-tech > summary {
+        display: flex; flex-direction: column; justify-content: center;
+        min-height: 56px; box-sizing: border-box; padding: 12px 16px;
+        list-style: none; cursor: pointer; border: 1px solid var(--border);
+        border-radius: var(--radius-lg); background: var(--bg-card);
+    }
+    .pd-tech > summary::-webkit-details-marker { display: none; }
+    .pd-tech-title {
+        font-family: var(--font-heading); font-size: 19px; font-weight: 700;
+        color: var(--text-primary);
+    }
+    .pd-tech-title::before { content: "\25B8"; margin-right: 10px; color: var(--accent); }
+    .pd-tech[open] .pd-tech-title::before { content: "\25BE"; }
+    .pd-tech-hint { font-size: 15px; color: var(--text-secondary); }
+    .pd-tech-body { padding-top: 16px; }
+
+    /* A phone. .main-content clips overflow-x, which makes it the scroll
+       container a position: sticky bar would stick to — and it never
+       scrolls, so the bar is fixed instead, lifted over the info panel
+       when that is showing, with a spacer so the page's last line is not
+       hidden under it. */
+    @media (max-width: 768px) {
+        .pd-sum { padding: 16px; }
+        .pd-headline { font-size: 26px; }
+        .pd-big-value { font-size: 38px; }
+        .pd-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        /* Above the signals rail (the shell keeps it on a phone, 44px at
+           the right edge, at --z-rail) and the info panel's tab, so no
+           part of the button is under them; below the phone sidebar's
+           scrim, every menu, the floating buttons and every dialog. */
+        /* The shell fades .page-content in with a FILLING opacity
+           animation (.fade-in, forwards), which keeps it a stacking
+           context for good: inside it no z-index lifts the bar over the
+           rail. The fill is dropped here; its end state is the base style
+           (opacity 1), so nothing changes on screen. */
+        .page-content:has(#pdCloseBtn) { animation-fill-mode: none; }
+        .pd-closebar {
+            position: fixed; left: 0; right: 0; bottom: 0; margin: 0;
+            z-index: calc(var(--z-rail, 600) + 1);
+            padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+            background: var(--bg-primary); border-top: 1px solid var(--border);
+        }
+        body:has(.info-panel-wrap:not(.minimized)) .pd-closebar { bottom: 60px; }
+        .pd-close-btn { max-width: none; }
+        .pd-closebar-space { display: block; height: 96px; }
+        body:has(.info-panel-wrap:not(.minimized)) .pd-closebar-space { height: 156px; }
+        .pd-dialog { align-items: flex-end; padding: 12px; }
+        /* The shell's floating buttons (Sauron's Eye at the bottom right,
+           Gollum at the bottom left) stand on --se-bottom-edge: lifted
+           clear of the bar (10 + 56 + 10 + 1px, then 12px of air) so
+           neither sits on the button's ends. The #id outranks the shell's
+           info-panel rules whatever the order of the stylesheets. */
+        html.pd-js body:has(#pdCloseBtn) {
+            --se-bottom-edge: calc(89px + env(safe-area-inset-bottom, 0px));
+        }
+        html.pd-js body:has(#pdCloseBtn):has(.info-panel-wrap:not(.minimized)) {
+            --se-bottom-edge: calc(149px + env(safe-area-inset-bottom, 0px));
+        }
+        .pd-title-long { display: none; }
+        /* The topbar's right-hand cluster is wider than a phone; the
+           short title keeps its one line rather than wrapping to three. */
+        .topbar-title { white-space: nowrap; font-size: 16px; letter-spacing: .5px; }
+    }
+    @media (max-width: 420px) {
+        .pd-facts { gap: 8px; }
+        .pd-fact { padding: 8px 10px; }
+        .pd-fact dd { font-size: 17px; }
+        .pd-dialog-actions { flex-direction: column-reverse; }
+    }
+</style>
+{% endblock %}
 
 {% block content %}
+{% if summary %}
+{% include "dashboard/_position_summary.html" %}
+<p class="pd-note pd-note-warn" id="pdLiveStatus" role="status" hidden></p>
+{% if summary.closable %}
+{# THE WAY OUT, one tap from the numbers. It asks the EXISTING preview #}
+{# endpoint once per press and posts to the EXISTING single-position close #}
+{# endpoint — the same pair, the same JSON and the same PIN rule as the #}
+{# positions page (base.html closeFlow); there is no close logic here. #}
+<div class="pd-closebar">
+    <button type="button" class="pd-close-btn" id="pdCloseBtn"
+            data-preview-url="{% url 'close_position_preview' trade.id %}"
+            data-close-url="{% url 'close_position_execute' trade.id %}"
+            data-headline="{{ summary.headline }}"
+            data-decimals="{{ summary.decimals }}"
+            data-ccy="{{ summary.ccy }}"
+            aria-haspopup="dialog" aria-controls="pdCloseDialog">{{ summary.action_text }}</button>
+</div>
+<noscript><p class="pd-note pd-note-warn">Closing from this page needs JavaScript, which is turned off in this browser. Turn it on and reload the page.</p></noscript>
+<div class="pd-dialog" id="pdCloseDialog" role="dialog" aria-modal="true" aria-labelledby="pdCloseTitle" hidden>
+    <div class="pd-dialog-box">
+        <h2 class="pd-dialog-title" id="pdCloseTitle">{{ summary.action_text }}</h2>
+        <p class="pd-dialog-text" id="pdCloseText" aria-live="polite">Asking for the latest price…</p>
+        <p class="pd-dialog-money">{{ summary.close_note }}</p>
+        {% if summary.needs_pin %}
+        <div class="pd-pin" id="pdClosePinWrap">
+            <label for="pdClosePin">Your trading PIN</label>
+            <input type="password" id="pdClosePin" inputmode="numeric" autocomplete="off" spellcheck="false">
+        </div>
+        {% endif %}
+        <p class="pd-dialog-answer" id="pdCloseAnswer" role="status" hidden></p>
+        {% csrf_token %}
+        <div class="pd-dialog-actions">
+            <button type="button" class="pd-btn-cancel" id="pdCloseCancel">Cancel</button>
+            <button type="button" class="pd-btn-confirm" id="pdCloseConfirm" disabled>Confirm</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endif %}
+{# THE TECHNICAL RECORD, folded (2026-09-26): everything below is the page #}
+{# as it was, unchanged, behind one disclosure that starts closed. #}
+<details class="pd-tech" id="pdTech"{% if not summary %} open{% endif %}>
+    <summary>
+        <span class="pd-tech-title">Technical details</span>
+        <span class="pd-tech-hint">The full record: lifecycle, signals, sizing, gate decisions, audit trail and raw data.</span>
+    </summary>
+    <div class="pd-tech-body">
 <div class="oc-strip" style="margin-bottom:18px;">
     <div class="oc-strip-cell">
         <span class="oc-strip-label">STATUS</span>
@@ -197,4 +442,334 @@
     <p style="padding:16px; color:var(--text-muted);">No metadata recorded.</p>
     {% endif %}
 </div>
+    </div>
+</details>
+{% if summary and summary.closable %}
+{# Room at the end of the page for the phone's fixed close bar. #}
+<div class="pd-closebar-space" aria-hidden="true"></div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+/* The close dialog's words, apart from the page so they can be read (and
+   tested) on their own. Every number arrives from the preview or the close
+   endpoint's JSON; nothing here computes a price or a result. */
+(function (root) {
+    "use strict";
+    var DASH = "—";
+    function num(v) {
+        if (v === null || v === undefined || v === "") return null;
+        var n = Number(v);
+        return isFinite(n) ? n : null;
+    }
+    function price(v, decimals) {
+        var n = num(v);
+        if (n === null) return DASH;
+        var d = (typeof decimals === "number" && decimals >= 0 && decimals <= 8)
+            ? decimals : 2;
+        return n.toFixed(d);
+    }
+    function money(v, ccy, signed) {
+        var n = num(v);
+        if (n === null) return DASH;
+        var text = Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        var sign = n < 0 ? "-" : (signed && n > 0 ? "+" : "");
+        return sign + text + (ccy ? " " + ccy : "");
+    }
+    function sentence(s) {
+        s = String(s || "").replace(/\s+/g, " ").trim();
+        if (!s) return "";
+        if (!/[.!?]$/.test(s)) s += ".";
+        return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+    /* The preview, in the words the father reads before he confirms. */
+    function preview(p, info) {
+        var head = info.headline;
+        /* The idle lock answers a locked session with {pin_locked: true}. */
+        if (p && p.pin_locked) {
+            return {ok: false, title: "The screen is locked",
+                    text: "Sauron locked the screen after a quiet spell. Unlock it with your PIN, then try again."};
+        }
+        /* A refusal that is only "not now": the endpoint says so with
+           market_shut, and its own sentence says when. */
+        if (p && p.error && p.market_shut) {
+            return {ok: false, title: "The market is shut", text: sentence(p.error)};
+        }
+        if (!p || p.error) {
+            return {ok: false, title: "This position cannot be closed from here",
+                    text: sentence(p && p.error ? p.error : "No answer came back from the server")};
+        }
+        if (p.action === "withdraw" || p.working) {
+            return {ok: true, title: "Withdraw this order?", confirm: "Withdraw the order",
+                    text: "Withdraw the " + head + " order now? Nothing has filled yet, so nothing is booked."};
+        }
+        if (p.action === "retry" || p.pending) {
+            return {ok: true, title: "Retry the close?", confirm: "Retry the close",
+                    text: "Retry closing " + head + "? The broker refused the last close, so the position is still open there."};
+        }
+        var at = num(p.exit) !== null ? p.exit : p.mark;
+        /* The endpoint never offers a close without a price: an answer
+           with none is not an offer, and Confirm stays off. */
+        if (num(at) === null) {
+            return {ok: false, title: "This position cannot be closed from here",
+                    text: "No price came back for it, so it cannot be closed from here right now."};
+        }
+        var text = "Close " + head + " now at about " + price(at, info.decimals) + "?";
+        if (num(p.pnl) !== null) text += " Result about " + money(p.pnl, info.ccy, true) + ".";
+        return {ok: true, title: "Close this position?", confirm: "Close it now", text: text};
+    }
+    /* The close endpoint's answer: closed, refused with its reason, or pending. */
+    function answer(res, info) {
+        if (res && res.pin_locked) {
+            return {tone: "bad", done: false, text: "Not closed. The screen is locked: unlock it with your PIN, then try again."};
+        }
+        if (res && res.ok && res.withdrawn) {
+            return {tone: "ok", done: true, text: "Done. The order was withdrawn and nothing was traded."};
+        }
+        if (res && res.ok) {
+            var text = "Done. " + info.headline + " is closed";
+            if (num(res.exit) !== null) text += " at " + price(res.exit, info.decimals);
+            text += ".";
+            if (num(res.pnl) !== null) text += " Result " + money(res.pnl, info.ccy, true) + ".";
+            return {tone: "ok", done: true, text: text};
+        }
+        var why = sentence(res && res.error ? res.error : "No answer came back from the server");
+        if (res && res.pending) {
+            return {tone: "warn", done: false, text: "Not closed yet. " + why};
+        }
+        return {tone: "bad", done: false, text: "Not closed. " + why};
+    }
+    root.pdWords = {preview: preview, answer: answer, money: money, price: price};
+})(window);
+</script>
+<script>
+/* LIVE: the summary refreshes itself every 15 seconds while the position is
+   open, and never while the tab is hidden. It fetches the summary fragment
+   from /forensics/<id>/live/, which reads the platform's own marks (the
+   positions page's reader) — never a broker, never the close preview. */
+(function () {
+    "use strict";
+    var EVERY_MS = 15000;
+    function region() { return document.querySelector('[data-pd-live="summary"]'); }
+    var first = region();
+    if (!first) return;
+    var url = first.getAttribute("data-pd-live-url");
+    if (!url) return;
+    var status = document.getElementById("pdLiveStatus");
+    var inFlight = false;
+
+    /* The close dialog is showing (asking, sending, or saying the answer). */
+    function dialogOpen() {
+        var d = document.getElementById("pdCloseDialog");
+        return !!(d && !d.hidden);
+    }
+
+    function refresh(force) {
+        var cur = region();
+        if (!cur || inFlight) return;
+        var wasOpen = cur.getAttribute("data-pd-state") === "open";
+        var wasKind = cur.getAttribute("data-pd-kind");
+        /* Never under the close dialog: a tick landing between the close
+           committing and its answer would reload the page before the
+           answer is read. The close refreshes the summary itself. */
+        if (!force && (document.hidden || !wasOpen || dialogOpen())) return;
+        inFlight = true;
+        /* X-Requested-With marks this as the page's machinery, not a person:
+           the idle lock does not count it as activity, and a locked session
+           gets a 423 (read below as "could not refresh"), not the lock page. */
+        fetch(url, {credentials: "same-origin", cache: "no-store",
+                    headers: {"X-Requested-With": "XMLHttpRequest"}})
+            .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.text();
+            })
+            .then(function (html) {
+                /* The dialog opened while this was on its way: drop it; the
+                   next tick after the dialog closes asks again. */
+                if (!force && dialogOpen()) return;
+                var doc = new DOMParser().parseFromString(html, "text/html");
+                var fresh = doc.querySelector('[data-pd-live="summary"]');
+                if (!fresh) throw new Error("no summary in the answer");
+                var node = document.importNode(fresh, true);
+                cur.parentNode.replaceChild(node, cur);
+                if (status) { status.hidden = true; status.textContent = ""; }
+                /* It closed while the page was open (its stop, its target,
+                   another screen), or a waiting order filled: reload, so the
+                   button and its words follow. */
+                if (!force && wasOpen && (node.getAttribute("data-pd-state") !== "open"
+                        || node.getAttribute("data-pd-kind") !== wasKind)) {
+                    window.location.reload();
+                }
+            })
+            .catch(function () {
+                if (!status) return;
+                status.hidden = false;
+                status.textContent = "Could not refresh just now. The numbers shown are the last ones received.";
+            })
+            .then(function () { inFlight = false; });
+    }
+    setInterval(function () { refresh(false); }, EVERY_MS);
+    document.addEventListener("visibilitychange", function () {
+        if (!document.hidden) refresh(false);
+    });
+    window.pdRefreshSummary = refresh;
+})();
+</script>
+<script>
+/* CLOSE, from this page. One press asks the preview endpoint ONCE and says
+   what would happen in plain words; Confirm posts to the single-position
+   close endpoint with the CSRF token, and the answer is said the same way.
+   While the preview is asked, Cancel, Escape and a tap outside still shut
+   the dialog, and a preview that answers after that is dropped (`asking`,
+   one number per press). While the close is SENT nothing shuts it:
+   `sending` plus the disabled buttons mean a double tap cannot send two
+   closes — and the endpoint's own claim on the row guards it again. */
+(function () {
+    "use strict";
+    var btn = document.getElementById("pdCloseBtn");
+    var dlg = document.getElementById("pdCloseDialog");
+    if (!btn || !dlg || !window.pdWords) return;
+    /* Portalled to <body>, so no stacking context on the page can put the
+       dialog under the headband. */
+    document.body.appendChild(dlg);
+    var title = document.getElementById("pdCloseTitle");
+    var text = document.getElementById("pdCloseText");
+    var said = document.getElementById("pdCloseAnswer");
+    var pin = document.getElementById("pdClosePin");
+    var pinWrap = document.getElementById("pdClosePinWrap");
+    var ok = document.getElementById("pdCloseConfirm");
+    var cancel = document.getElementById("pdCloseCancel");
+    var info = {
+        headline: btn.getAttribute("data-headline") || "",
+        decimals: parseInt(btn.getAttribute("data-decimals"), 10),
+        ccy: btn.getAttribute("data-ccy") || ""
+    };
+    var sending = false;
+    var asking = 0;
+    var lastFocus = null;
+
+    function csrf() {
+        var field = dlg.querySelector('input[name="csrfmiddlewaretoken"]');
+        if (field && field.value) return field.value;
+        var m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+        return m ? decodeURIComponent(m[1]) : "";
+    }
+    function decode(r) {
+        return r.text().then(function (t) {
+            try { return JSON.parse(t); }
+            catch (e) {
+                return {error: r.status === 404
+                    ? "This position is no longer open, or it is not yours"
+                    : r.status === 403
+                        ? "The page is out of date. Reload it and try again"
+                        : (r.redirected || t.indexOf("<html") !== -1)
+                            ? "You have been signed out, or the screen has locked. Reload the page and try again"
+                            : "The server answered with an error (HTTP " + r.status + ")"};
+            }
+        });
+    }
+    function post(url, body) {
+        return fetch(url, {
+            method: "POST", credentials: "same-origin",
+            headers: {"X-CSRFToken": csrf(), "Content-Type": "application/json"},
+            body: JSON.stringify(body || {})
+        }).then(decode);
+    }
+    function say(tone, words) {
+        said.className = "pd-dialog-answer pd-answer-" + tone;
+        said.textContent = words;
+        said.hidden = false;
+    }
+    function reset() {
+        said.hidden = true;
+        said.textContent = "";
+        ok.hidden = false;
+        ok.disabled = true;
+        ok.textContent = "Confirm";
+        cancel.disabled = false;
+        cancel.textContent = "Cancel";
+        if (pin) pin.value = "";
+        if (pinWrap) pinWrap.hidden = false;
+    }
+    function shut() {
+        if (sending) return;
+        asking += 1;            /* a preview still on its way is now stale */
+        dlg.hidden = true;
+        btn.disabled = false;
+        if (lastFocus && lastFocus.focus) lastFocus.focus();
+    }
+    function finished() {
+        ok.hidden = true;
+        if (pinWrap) pinWrap.hidden = true;
+        cancel.disabled = false;
+        cancel.textContent = "Done";
+        cancel.focus();
+    }
+
+    btn.addEventListener("click", function () {
+        if (sending || !dlg.hidden) return;
+        var mine = ++asking;
+        btn.disabled = true;
+        lastFocus = document.activeElement;
+        reset();
+        title.textContent = btn.textContent;
+        text.textContent = "Asking for the latest price…";
+        dlg.hidden = false;
+        cancel.focus();
+        post(btn.getAttribute("data-preview-url"), {}).then(function (p) {
+            if (mine !== asking) return;        /* cancelled meanwhile */
+            var w = window.pdWords.preview(p, info);
+            title.textContent = w.title;
+            text.textContent = w.text;
+            if (!w.ok) { finished(); return; }
+            ok.textContent = w.confirm;
+            ok.disabled = false;
+            if (pin) pin.focus(); else ok.focus();
+        }).catch(function () {
+            if (mine !== asking) return;
+            text.textContent = "The server could not be reached. Nothing was closed.";
+            finished();
+        });
+    });
+
+    ok.addEventListener("click", function () {
+        if (sending || ok.disabled) return;
+        if (pin && !pin.value) {
+            say("warn", "Type your trading PIN first.");
+            pin.focus();
+            return;
+        }
+        sending = true;
+        ok.disabled = true;
+        cancel.disabled = true;
+        say("wait", "Sending the close…");
+        post(btn.getAttribute("data-close-url"), {pin: pin ? pin.value : ""})
+            .then(function (res) {
+                sending = false;
+                var a = window.pdWords.answer(res, info);
+                say(a.tone, a.text);
+                finished();
+                if (window.pdRefreshSummary) window.pdRefreshSummary(true);
+                if (a.done) setTimeout(function () { window.location.reload(); }, 2500);
+            })
+            .catch(function () {
+                sending = false;
+                say("bad", "The server could not be reached, so it is not known whether the close went through. Reload the page before trying again.");
+                finished();
+            });
+    });
+
+    cancel.addEventListener("click", shut);
+    dlg.addEventListener("click", function (e) { if (e.target === dlg) shut(); });
+    document.addEventListener("keydown", function (e) {
+        if (!dlg.hidden && e.key === "Escape") shut();
+    });
+    if (pin) {
+        pin.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") { e.preventDefault(); ok.click(); }
+        });
+    }
+})();
+</script>
 {% endblock %}

@@ -82,7 +82,7 @@ from .views_evidence import evidence_ledger
 from .views_ai_models import ai_models_dashboard
 from .views_system_health import system_health
 from .views_topology import system_map, system_map_state, system_map_toggle
-from .views_forensics import forensics_list, forensics_detail
+from .views_forensics import forensics_list, forensics_detail, forensics_live
 from .views_bot_charts import bot_charts
 from .views_allocator import allocator_dashboard
 from .views_shares import shares_dashboard
@@ -276,6 +276,9 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("bot-charts/", bot_charts, name="bot_charts"),
     path("forensics/", forensics_list, name="forensics_list"),
     path("forensics/<int:trade_id>/", forensics_detail, name="forensics_detail"),
+    # The position page's summary, re-rendered alone for its 15-second
+    # refresh (2026-09-26). GET only; reads marks, never a broker.
+    path("forensics/<int:trade_id>/live/", forensics_live, name="forensics_live"),
     path("allocator/", allocator_dashboard, name="allocator_dashboard"),
 
     # ── Phase 7: Meta-Allocator ──────────────────────────────

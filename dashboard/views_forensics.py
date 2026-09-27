@@ -10,12 +10,18 @@ This assembles it into one timeline per trade.
 """
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, render
+from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_GET
+
+logger = logging.getLogger(__name__)
 
 
 # Signals within this window of the entry are treated as "what it saw".
@@ -203,6 +209,10 @@ def forensics_detail(request, trade_id: int):
     return render(request, "dashboard/forensics_detail.html", {
         "page_id": "forensics",
         "trade": trade,
+        # THE PLAIN SUMMARY at the top (2026-09-26) — words and numbers
+        # for the father, from the positions page's own readers. None when
+        # it cannot be built: the page then opens the technical record.
+        "summary": _summary_or_none(trade),
         "reasons": [r.strip() for r in (trade.reason or "").split("·") if r.strip()],
         "signals": signals,
         # Only an explicit bullish/bearish match counts — a NEUTRAL signal
@@ -218,3 +228,51 @@ def forensics_detail(request, trade_id: int):
         "lifecycle": _lifecycle(trade),
         "metadata_items": sorted((trade.metadata or {}).items()),
     })
+
+
+# ── The position page's plain summary (2026-09-26) ──────────────────────
+# The operator, on this page: "I want the position pages detail to be
+# styled in a perfect manner for the father, this is too nerdy", and "make
+# it live on pnl etc and the option to close too". The summary is built by
+# dashboard/position_summary.py from the readers the positions page uses;
+# the technical record above is rendered unchanged, folded under it.
+
+def _summary_or_none(trade):
+    """The plain summary, or None. A summary that cannot be built must
+    never take the technical record down with it — the page then opens
+    that record instead."""
+    from .position_summary import build_summary
+    try:
+        return build_summary(trade)
+    except Exception:  # noqa: BLE001
+        logger.exception("[position page] summary failed for trade #%s",
+                         trade.id)
+        return None
+
+
+@login_required
+@require_GET
+@never_cache
+def forensics_live(request, trade_id: int):
+    """GET — the summary fragment alone, for the page's 15-second refresh.
+
+    Reads the platform's own marks only (LiveQuote through the positions
+    page's reader): no broker client is built and preview_close is never
+    called, which is what makes it safe on a timer. Another user's trade is
+    not found, exactly as on the page. Rendered WITHOUT the request's
+    context processors: the fragment reads none of the shell's globals, and
+    a phone polling every 15 seconds should not pay for the headband's.
+    """
+    from django.template.loader import render_to_string
+    from bot_program.models import AssetBotTrade
+
+    trade = get_object_or_404(
+        AssetBotTrade.objects.select_related("config"),
+        id=trade_id, config__user=request.user)
+    summary = _summary_or_none(trade)
+    if summary is None:
+        # The page keeps its last numbers and says it could not refresh.
+        return HttpResponse(status=503)
+    return HttpResponse(render_to_string(
+        "dashboard/_position_summary.html",
+        {"trade": trade, "summary": summary}))
