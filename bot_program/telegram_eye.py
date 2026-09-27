@@ -527,13 +527,23 @@ def parse(text: str) -> tuple:
 
 # ── the answers ──────────────────────────────────────────────────────────
 
-def read_live_account(api_key: str, user_key: str) -> dict:
+def read_live_account(api_key: str, user_key: str, *,
+                      cells: bool = False) -> dict:
     """READ-ONLY: the LIVE world's equity and open-position count, two GETs
-    through EtoroTrader. Raises what the client raises."""
+    through EtoroTrader. Raises what the client raises.
+
+    `cells` (2026-09-27, the digests' Real money section,
+    alerts/digest_book.py): the margin cells as well, under "cells" —
+    available cash and used margin, EtoroTrader.margin_cells, one more GET
+    of aggregate-portfolio (None when that read failed). The status report
+    keeps its two reads."""
     from bot_program.engine.etoro_client import EtoroTrader
     client = EtoroTrader(api_key, user_key, env="live", timeout=5.0)
-    return {"equity": client.net_liquidation(),
-            "positions": len(client.get_positions())}
+    out = {"equity": client.net_liquidation(),
+           "positions": len(client.get_positions())}
+    if cells:
+        out["cells"] = client.margin_cells()
+    return out
 
 
 def _live_lines(acct) -> list:
