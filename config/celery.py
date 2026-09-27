@@ -59,6 +59,9 @@ app.conf.task_routes = {
     # quote poller: an idle poll is one HTTP round trip. The question it
     # queues goes to the ai worker, where a slow LLM turn blocks nothing.
     "bot_program.tasks.poll_telegram_eye": {"queue": "fast"},
+    # 2026-09-26 -- the Morgul guards: database reads every 5 min, beside
+    # the quote poller like the eye's poll; no LLM, no broker call.
+    "bot_program.tasks.run_morgul_guards": {"queue": "fast"},
     "bot_program.tasks.answer_telegram_question": {"queue": "ai"},
 }
 
@@ -510,6 +513,18 @@ app.conf.beat_schedule = {
     "watch-evidence-chain": {
         "task": "bot_program.tasks.watch_evidence_chain",
         "schedule": crontab(hour=6, minute=40),
+    },
+
+    # 2026-09-26 -- the Morgul guards (bot_program/morgul.py): ten
+    # read-only guards over the book, every 5 min, their findings to the
+    # staff Telegram group once per 3 h. Gated by morgul_guards, OFF on
+    # arrival; the brake has its own switch (morgul_brake), OFF too.
+    "run-morgul-guards": {
+        "task": "bot_program.tasks.run_morgul_guards",
+        "schedule": 300.0,
+        # A backlog never drains a queue of stale runs (the module also
+        # holds a lock: one run at a time).
+        "options": {"expires": 240},
     },
 
     "auto-evaluate-promotions": {

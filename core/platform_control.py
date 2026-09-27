@@ -85,6 +85,14 @@ def get_component(key: str):
         return None
 
 
+#: Switches a category's "all on" button never turns on (2026-09-26,
+#: dashboard.views.admin_bulk_toggle): each is a separate decision, made by
+#: `manage.py component on <key>` or its own toggle. "All off" still turns
+#: them off. The Morgul brake stops bots on a critical guard finding; it
+#: must not arrive with the System group's other switches.
+BULK_ENABLE_EXEMPT = frozenset({"morgul_brake"})
+
+
 # ── Default components to register ───────────────────────
 DEFAULT_COMPONENTS = [
     # System
@@ -266,6 +274,21 @@ DEFAULT_COMPONENTS = [
     # Description measured at 276 chars (< 300).
     {"key": "telegram_eye", "name": "Telegram Eye (group commands)",
      "description": "Answers the Sauron Vision Telegram group every 15 s, in English: /status, /positions, /why, /help and questions. Its only write to trading state is the brake: /stop and /stopall turn bots OFF, never on. Replies to the configured staff chat only. OFF on arrival: turning it on starts answering.",
+     "category": "system"},
+
+    # ── The Morgul guards (2026-09-26) ──────────────────────────
+    # bot_program/morgul.py: ten read-only guards over the book every
+    # 5 min, their findings to the staff Telegram group once per 3 h,
+    # and a brake behind a switch of its own. Both OFF on arrival: after
+    # the deploy, `manage.py component on morgul_guards`; the brake is a
+    # second, separate decision, which a group's "all on" button never
+    # makes (BULK_ENABLE_EXEMPT, above). Descriptions measured at 270 and
+    # 273 chars (< 300).
+    {"key": "morgul_guards", "name": "Morgul Guards (book watchdog)",
+     "description": "Every 5 min, ten read-only guards check the book: bookings while a market was shut, live positions without a stop, stuck closes, far prices, proofs and ceilings, margin, daily loss, duplicates, drift and the tick. Findings go to the staff Telegram group. OFF on arrival.",
+     "category": "system"},
+    {"key": "morgul_brake", "name": "Morgul Brake (bots off on a critical finding)",
+     "description": "Off (default): a critical guard finding says which bots the brake WOULD stop. On: those bots are turned OFF (enabled = False), once per finding: never on, never a close. Acts only while morgul_guards is on. The group's all on button never turns it on. Re-arm on the server.",
      "category": "system"},
 
     # ── The three that were never registered (found live 2026-09-13) ────

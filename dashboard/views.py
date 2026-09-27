@@ -3951,7 +3951,13 @@ def admin_bulk_toggle(request):
         category = request.POST.get("category", "")
         action = request.POST.get("action", "")
         enable = action == "enable"
-        count = PlatformComponent.objects.filter(category=category).update(is_enabled=enable)
+        rows = PlatformComponent.objects.filter(category=category)
+        if enable:
+            # A separate decision (the Morgul brake) is never switched on
+            # in bulk: core.platform_control.BULK_ENABLE_EXEMPT.
+            from core.platform_control import BULK_ENABLE_EXEMPT
+            rows = rows.exclude(key__in=BULK_ENABLE_EXEMPT)
+        count = rows.update(is_enabled=enable)
         verb = "started" if enable else "stopped"
         messages.success(request, f"{count} {category} components {verb}.")
     from django.shortcuts import redirect

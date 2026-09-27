@@ -619,6 +619,16 @@ def _health_lines(now) -> list:
     return out
 
 
+def _guards_line(now) -> str:
+    """The Morgul guards in one line (bot_program/morgul.py): "Guards:
+    all quiet", or the guards with findings at their last run."""
+    try:
+        from bot_program.morgul import status_line
+        return status_line(now)
+    except Exception as e:  # noqa: BLE001 (a status report never raises)
+        return f"Guards: unreadable ({type(e).__name__})"
+
+
 def _proof_words() -> str:
     from bot_program.asset_engine import base
     tokens = sorted(getattr(base, "ETORO_PROVEN", ()) or ())
@@ -648,6 +658,7 @@ def build_status(user, *, now=None) -> Reply:
     lines.extend(_etoro_lines(user, now))
     lines.extend(_bot_lines(user))
     lines.extend(_health_lines(now))
+    lines.append(_guards_line(now))
     lines.append(f"Proofs pinned: {_proof_words()}")
     trades = list(_open_trades(user))
     lines.append(heading(f"Open on the platform ({len(trades)})"))

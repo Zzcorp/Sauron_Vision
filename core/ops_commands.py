@@ -223,6 +223,24 @@ COMMANDS = [
         "run_args": [],
         "category": "decide",
     },
+    # 2026-09-26 -- the Morgul guards, once by hand (bot_program/morgul.py).
+    # A DECIDE entry for the reason `setups` is one: the bare command reads
+    # and writes nothing, but --send runs the beat's cycle (messages to the
+    # group, and the brake while its switch is ON), and the registry is
+    # per command, so the Run lane refuses the whole entry.
+    {
+        "name": "morgul",
+        "title": "Morgul guards",
+        "purpose": "Run the ten read-only guards over the book once and print what they find: bookings while a market was shut, live positions without a stop, stuck closes, margin, daily loss, drift. Bare, it sends and stops nothing; --send runs the beat's cycle.",
+        "usage": [
+            "python manage.py morgul",
+            "python manage.py morgul --send",
+        ],
+        "mirrors": "/health/",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
     # ── read: the diagnostics ───────────────────────────────────────────
     {
         "name": "open_trades",

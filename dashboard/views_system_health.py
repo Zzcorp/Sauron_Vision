@@ -612,6 +612,13 @@ def check_ai_models() -> dict:
                   " · ".join(f"{t}={resolve_tier(t)}" for t in TIERS))
 
 
+def check_morgul_guards() -> dict:
+    """The Morgul guards' last run (bot_program/morgul.py): quiet, or how
+    many findings and which. Read from the run's summary, never re-run."""
+    from bot_program.morgul import health_row
+    return health_row(_check)
+
+
 @login_required
 def system_health(request):
     # Per-user checks are safe for anyone; the platform-wide ones expose
@@ -628,6 +635,7 @@ def system_health(request):
         (check_component_staleness, False, True),
         (check_signal_flow, False, True),
         (check_ai_models, False, True),
+        (check_morgul_guards, False, True),
     ]
     checks = []
     for fn, needs_user, staff_only in plan:

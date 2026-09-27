@@ -1202,6 +1202,24 @@ def watch_evidence_chain():
     return out
 
 
+# ── The Morgul guards (2026-09-26) ───────────────────────────────────────
+# Ten read-only guards over the book (bot_program/morgul.py). Their one
+# write besides the group's messages is the brake, behind its own switch.
+
+@shared_task
+@guarded_task("morgul_guards")
+def run_morgul_guards() -> dict:
+    """Every 5 min on the fast queue: run every guard, tell the group.
+
+    Gated by the morgul_guards component, OFF on arrival. Reads the
+    database and the cache: no broker call, no order, no close. The brake
+    (enabled = False on the offending configs, through the Eye's own
+    apply_brake) acts only while the morgul_brake component is ON.
+    """
+    from .morgul import run_guards
+    return run_guards()
+
+
 # ── The Telegram eye (2026-09-26) ────────────────────────────────────────
 # The group "Sauron Vision" asks, Sauron answers: in English, to the
 # configured chat only, and its one write is the brake (bots OFF, never
