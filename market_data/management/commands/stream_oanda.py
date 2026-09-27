@@ -129,6 +129,39 @@ async def broadcast(symbol, last, change_pct, bid, ask):
     except Exception as e:
         log.debug("broadcast: %s", e)
 
+async def on_message(msg, shut):
+    """Write and broadcast one decoded stream message, if it is a live price.
+
+    `shut` holds the instruments already reported shut on THIS connection;
+    the caller makes a fresh set per connection.
+
+    OANDA sends a PRICE snapshot per instrument on every (re)connect, the
+    market shut included, flagged `"tradeable": false`. Written, that
+    snapshot is Friday's last price with a fresh timestamp: each weekend
+    restart of the service carried it past the paper trader's fifteen-minute
+    freshness check, and on Saturday 2026-09-26 two paper forex closes
+    (EURCAD, GBPCAD) were marked against it. Only an explicit false is
+    skipped; a message without the flag is written as before.
+    """
+    if msg.get("type") != "PRICE": return
+    sym = msg.get("instrument","")
+    if msg.get("tradeable") is False:
+        if sym not in shut:
+            shut.add(sym)
+            log.debug("oanda: %s is not tradeable (market shut) — its "
+                      "snapshots are not written as live quotes", sym)
+        return
+    bids = msg.get("bids") or []
+    asks = msg.get("asks") or []
+    if not bids or not asks: return
+    bid = float(bids[0]["price"])
+    ask = float(asks[0]["price"])
+    mid = (bid + ask) / 2
+    asyncio.create_task(update_live_quote(sym, bid, ask))
+    # None, not 0: a hardcoded zero painted "+0.00%" over the real day
+    # change in the headband and the rail on every tick.
+    await broadcast(sym, mid, None, bid, ask)
+
 #: OANDA rejects the WHOLE subscription if any one instrument is not
 #: available to the account, and it does so with a bare 400 that names no
 #: culprit. The catalogue carries 47 forex pairs including CHF_HUF,
@@ -237,24 +270,14 @@ async def run(api_key, account_id, env, override):
                         allowed = None   # re-ask on the next attempt
                     r.raise_for_status()
                     backoff = 1
+                    # Per connection: a reconnect re-sends every snapshot,
+                    # so a shut pair is reported once per connection.
+                    shut = set()
                     async for line in r.content:
                         line = line.strip()
                         if not line: continue
                         try:
-                            msg = json.loads(line)
-                            if msg.get("type") != "PRICE": continue
-                            sym = msg.get("instrument","")
-                            bids = msg.get("bids") or []
-                            asks = msg.get("asks") or []
-                            if not bids or not asks: continue
-                            bid = float(bids[0]["price"])
-                            ask = float(asks[0]["price"])
-                            mid = (bid + ask) / 2
-                            asyncio.create_task(update_live_quote(sym, bid, ask))
-                            # None, not 0: a hardcoded zero painted
-                            # "+0.00%" over the real day change in the
-                            # headband and the rail on every tick.
-                            await broadcast(sym, mid, None, bid, ask)
+                            await on_message(json.loads(line), shut)
                         except Exception as e:
                             log.debug("tick: %s", e)
         except Exception as e:
