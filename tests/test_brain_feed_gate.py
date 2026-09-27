@@ -13,12 +13,31 @@ bar, and a run whose probes are ALL stale is skipped rather than made.
 
 Run with:  python manage.py test tests.test_brain_feed_gate
 """
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
+from unittest import mock
 
 from django.contrib.auth.models import User
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
+
+# Mid-session on a weekday: the Wednesday before 2026-09-26, 12:00 ET.
+# These tests set staleness by AGE on stock bars, and since 2026-09-26 a
+# probe is judged against its own market's clock — on a Sunday a 40h-old
+# stock bar IS Friday's close, fed and fresh. Pinned, the ages mean what
+# the tests say they mean on whatever day the suite runs.
+_MIDWEEK = (datetime(2026, 9, 26, 16, 0, tzinfo=dt_timezone.utc)
+            - timedelta(days=3))
+
+
+class _MidweekClock:
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch("django.utils.timezone.now",
+                             return_value=_MIDWEEK)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
 
 def _instrument(symbol="AAPL", asset_class="stock", watch=True):
@@ -44,7 +63,7 @@ def _bars(inst, *, n=40, age_hours, timeframe="4h", step_hours=4):
                       "close": px, "volume": 1000, "source": "test"})
 
 
-class EveryProbeCarriesTheAgeOfItsNewestBarTests(TestCase):
+class EveryProbeCarriesTheAgeOfItsNewestBarTests(_MidweekClock, TestCase):
 
     def _probes(self):
         from brain.synthesizer import _build_world_snapshot
@@ -79,9 +98,10 @@ class EveryProbeCarriesTheAgeOfItsNewestBarTests(TestCase):
         self.assertEqual(snap["regime_probes_stale"], 1)
 
 
-class AllStaleProbesSkipTheSynthesisTests(TestCase):
+class AllStaleProbesSkipTheSynthesisTests(_MidweekClock, TestCase):
 
     def setUp(self):
+        super().setUp()
         User.objects.create_user("brain_staff", password="x", is_staff=True)
 
     def _run(self):
