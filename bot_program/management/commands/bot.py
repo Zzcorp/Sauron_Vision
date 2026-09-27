@@ -6,6 +6,11 @@ one: stopping must stay frictionless. Here `--yes` plays the PIN's
 role for arming a live config; `bot off` never asks. Read-only until
 told otherwise; never touches the broker.
 
+`bot off` is not a pause of entries alone: the runner skips a disabled
+config whole, so its open positions lose their time stop, trailing and
+every platform-checked stop. It still never asks — it says how many
+positions it left unmanaged (runner.unmanaged_on_disable, 2026-09-26).
+
     python manage.py bot list
     python manage.py bot off 1
     python manage.py bot on 6            # paper: writes; live: plan only
@@ -24,6 +29,7 @@ class Command(BaseCommand):
                             help="Arm a LIVE config (the page asks the PIN for this).")
 
     def handle(self, *args, **opts):
+        from bot_program.asset_engine.runner import unmanaged_on_disable
         from bot_program.asset_models import AssetBotConfig
         if opts["action"] == "list":
             rows = AssetBotConfig.objects.select_related("user").order_by("user_id", "pk")
@@ -48,6 +54,8 @@ class Command(BaseCommand):
             if cfg.enabled == enable:
                 self.stdout.write(f"[{pk}] {cfg.name}: already "
                                   f"{'ON' if enable else 'OFF'} (unchanged)")
+                if not enable:
+                    self._warn_unmanaged(pk, unmanaged_on_disable(cfg))
                 continue
             if enable and cfg.mode == "live" and not opts["yes"]:
                 self.stdout.write(self.style.WARNING(
@@ -60,3 +68,9 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(
                 f"[{pk}] {cfg.name} ({cfg.asset_class}/{cfg.mode}): "
                 f"{'ENABLED' if enable else 'DISABLED'}"))
+            if not enable:
+                self._warn_unmanaged(pk, unmanaged_on_disable(cfg))
+
+    def _warn_unmanaged(self, pk, sentence):
+        if sentence:
+            self.stdout.write(self.style.WARNING(f"[{pk}] {sentence}"))

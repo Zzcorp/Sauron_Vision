@@ -52,6 +52,44 @@ def run_asset_bot_tick(config_id: int) -> dict:
         return {"status": "error", "reason": str(e), "config_id": config_id}
 
 
+def unmanaged_on_disable(cfg) -> str:
+    """What a disabled config leaves unmanaged, as the sentence a disable
+    owes the operator — empty when it holds no open position.
+
+    A disabled config is not ticked at all: run_asset_bot_tick refuses it
+    and both fleet passes read enabled=True only. Its OPEN rows therefore
+    lose every exit the platform runs itself (base.manage_positions): the
+    time stop, trailing and break-even, the SL/TP comparison, the
+    vanished-stop net. A paper row has nothing at a broker, so it loses its
+    stop outright; a live row keeps only what rests there — its bracket
+    when the entry was protected, nothing when it was not.
+
+    That stays so ON PURPOSE (2026-09-26). The kill switch writes the same
+    `enabled=False` as the brain's disable and `bot off`, and nothing
+    records which of them did it, so a runner that managed disabled configs
+    would go back to closing rows the kill switch left for reconciliation by
+    hand — and the management pass also books a WORKING entry that fills
+    into a position. The words follow the runner, not the other way round.
+    """
+    from bot_program.models import AssetBotTrade
+
+    n = AssetBotTrade.objects.filter(config=cfg, status="OPEN").count()
+    if not n:
+        return ""
+    rows = "Its open position is" if n == 1 else f"Its {n} open positions are"
+    them = "it" if n == 1 else "them"
+    if cfg.symbols:
+        way_back = (f"Close {them} by hand — re-enabling restores the "
+                    f"management but also resumes its entries.")
+    else:
+        way_back = (f"Close {them} on Positions, or re-enable the config — "
+                    f"with no symbols it opens nothing on its own.")
+    return (f"{rows} NOT MANAGED while it stays off: no "
+            f"time stop, no trailing stop, and no stop or target checked by "
+            f"the platform. A paper position has no stop at all; a live one "
+            f"keeps only what rests at the broker, if anything. {way_back}")
+
+
 def _release_sessions():
     """Hand the exclusive IBKR trading session back BETWEEN configs. It
     is one clientId for the whole deployment — an order is visible

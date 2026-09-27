@@ -10,6 +10,8 @@ Manual trades live on a per-user, per-class "manual" AssetBotConfig that
 is enabled with an EMPTY symbols list: the 5-minute tick manages its open
 positions (stops, targets, trailing) every pass, but the entry scan has
 nothing to scan, so the config can never open a trade on its own.
+DISABLED, it is not ticked at all: its open positions lose that
+management until it is re-enabled (runner.unmanaged_on_disable).
 
 Wave 1 executed on the PAPER venue only. Wave 2 adds the LIVE ticket:
 a manual config an operator has deliberately armed to live mode routes
