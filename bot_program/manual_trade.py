@@ -829,6 +829,19 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
 
     bot = make_bot(cfg)
 
+    # NO PAPER FILL WHILE THE MARKET IS SHUT (2026-09-26). A paper ticket
+    # fills at the mark read just below, and on a Saturday that mark was
+    # Friday's last price re-stamped by a reconnecting stream. Asked of the
+    # TAKE TRADE and the instrument BUY/SELL alike (both preview here, and
+    # _execute re-runs this preview under its lock), keyed on the
+    # INSTRUMENT's class. A LIVE ticket is never asked: the venue decides.
+    if getattr(cfg, "mode", "paper") != "live":
+        from bot_program.engine.paper_trader import paper_market_shut
+        shut = paper_market_shut(inst.symbol, inst.asset_class)
+        if shut:
+            return {"error": f"{inst.symbol}: {shut} — no paper fill. "
+                             f"Nothing was booked", "market_shut": True}
+
     price, _client, mark_delayed = _mark_for(user, cfg, inst.symbol)
     if price is None:
         return {"error": f"No usable price mark for {inst.symbol} — the "
@@ -1449,8 +1462,16 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             t_bot = make_bot(trade.config)
             price, client, _delayed = _mark_for(user, trade.config, trade.symbol)
             if price is None:
-                return {"error": f"Cannot close {trade.symbol} — no "
-                                 f"price mark; nothing was opened",
+                # A paper row's missing mark may be the clock, not the feed
+                # (2026-09-26): say which.
+                why = "no price mark"
+                if trade.paper:
+                    from bot_program.engine.paper_trader import (
+                        paper_market_shut)
+                    why = paper_market_shut(trade.symbol,
+                                            trade.asset_class) or why
+                return {"error": f"Cannot close {trade.symbol} — {why}; "
+                                 f"nothing was opened",
                         "closed": closed}
             if t_bot._close_trade(trade, Decimal(str(price)), client,
                                   reason="FUNDING · take-trade"):

@@ -764,6 +764,35 @@ class AssetBot(ABC):
                     self._poll_working_entry(trade, client)
                     continue
 
+                # A PAPER POSITION WAITS WHOLE WHILE ITS MARKET IS SHUT
+                # (2026-09-26) — and for the settling quarter hour after it
+                # opens. The only price a shut market offers is the last
+                # one before it shut, so nothing below may act for a paper
+                # row: no mark, no trailing move, no SL/TP — and no time
+                # stop, which would book the ENTRY price below. The row
+                # stays OPEN; the first tick after the window runs
+                # everything as usual at a price the market made, and a
+                # clock exit that still finds no price waits for the new
+                # session's first one (paper_awaits_first_price, below).
+                # Only the approach warning runs meanwhile: it reads no
+                # price, and a ceiling that falls due over a weekend must
+                # still be announced before the reopen books it. LIVE rows
+                # are untouched: the venue decides whether its close fills.
+                if trade.paper:
+                    from bot_program.engine.paper_trader import (
+                        paper_market_shut)
+                    shut = paper_market_shut(trade.symbol, trade.asset_class)
+                    if shut:
+                        logger.info("[%s_bot] %s #%s: %s — the paper "
+                                    "position waits; nothing is marked, "
+                                    "moved or booked until it reopens",
+                                    self.asset_class, trade.symbol,
+                                    trade.id, shut)
+                        ts = self._time_stop_status(trade)
+                        if ts["approaching"]:
+                            self._warn_time_stop_near(trade, ts)
+                        continue
+
                 # THE MARK IS READ HERE, FIRST, exactly as before — only
                 # the GATE below it moved, past the two checks that never look
                 # at a price. Nothing between this line and the gate is
@@ -816,6 +845,39 @@ class AssetBot(ABC):
                         # collapse "could not be priced" into "priced".
                         exit_basis = None
                         if trade.paper:
+                            # BUT NOT IN THE HOURS AFTER A REOPEN (2026-09-26).
+                            # A clock exit that fell due while the market was
+                            # shut reaches its first open tick with no price
+                            # of the new session yet — Friday's quote is too
+                            # old, the stream drops OANDA's non-tradeable
+                            # snapshots, a poller has not run — and booking
+                            # the entry price there is an exit nobody could
+                            # have had. It waits for the first price (a
+                            # NO_PRICE skip says so); past
+                            # REOPEN_PRICE_GRACE_SECONDS the feed is dead and
+                            # the entry price below stands in, as before.
+                            from bot_program.engine.paper_trader import (
+                                paper_awaits_first_price)
+                            _waits = paper_awaits_first_price(
+                                trade.symbol, trade.asset_class)
+                            if _waits:
+                                logger.info("[%s_bot] %s #%s: the time stop "
+                                            "is due and waits: %s",
+                                            self.asset_class, trade.symbol,
+                                            trade.id, _waits)
+                                try:
+                                    from bot_program.asset_engine import (
+                                        skips as _skips)
+                                    _skips.record(
+                                        self.cfg, trade.symbol,
+                                        _skips.NO_PRICE,
+                                        f"the time stop waits: {_waits}")
+                                except Exception as e:  # noqa: BLE001
+                                    logger.warning(
+                                        "[%s_bot] could not record the time "
+                                        "stop's wait for %s: %s",
+                                        self.asset_class, trade.symbol, e)
+                                continue
                             # Except on paper, where the modelled fill does
                             # float(price) and float(None) raises TypeError
                             # out of _close_trade — the row would stay OPEN
@@ -2564,7 +2626,24 @@ class AssetBot(ABC):
         moves to CLOSE_PENDING — the position is still live at the broker —
         and the retry_pending_closes beat task drains it. Returns True when
         the trade ended CLOSED.
+
+        A PAPER close while the instrument's market is shut books NOTHING
+        and returns False (2026-09-26): the row stays OPEN for the first
+        tick after the reopen. Every AssetBot paper exit comes through here
+        — the tick's SL/TP and time stop, the CLOSE button, the TAKE TRADE
+        funding closes, the options expiry close — so this is the belt
+        under the callers' own words (the kill switch books its own exits
+        and asks the same question itself).
         """
+        if trade.paper:
+            from bot_program.engine.paper_trader import paper_market_shut
+            shut = paper_market_shut(trade.symbol, trade.asset_class)
+            if shut:
+                logger.warning(
+                    "[%s_bot] %s #%s: %s — no paper exit (%s); the row "
+                    "stays OPEN and nothing is booked",
+                    self.asset_class, trade.symbol, trade.id, shut, reason)
+                return False
         # A CLOSE THAT MAY ALREADY BE LIVE IS RESOLVED BEFORE ANOTHER IS
         # SENT. The row carries close_in_doubt when its close request never
         # came back, and a second close turns a closed long into a full-size
@@ -3356,6 +3435,14 @@ class AssetBot(ABC):
         except (TypeError, ValueError):
             price = 0
         if price <= 0:
+            if isinstance(tk, dict) and tk.get("market_shut"):
+                # The paper venue's own answer (PaperTrader.ticker): the
+                # instrument's market is shut, so there is no price — and
+                # the reason is the clock, never the feed (2026-09-26).
+                return self._skip(
+                    symbol, skips.MARKET_SHUT,
+                    f"{tk.get('reason') or 'the market is shut'} — no "
+                    f"paper fill")
             return self._skip(symbol, skips.NO_PRICE, "ticker returned 0")
 
         # A paper entry used to be recorded at the raw ticker, because the
@@ -3792,6 +3879,17 @@ class AssetBot(ABC):
         # that is the whole point of the stage, and it is how the evidence to
         # promote it gets produced.
         paper = (self.cfg.mode == "paper") or bool(stage["force_paper"])
+        if paper:
+            # NO PAPER FILL WHILE THE MARKET IS SHUT (2026-09-26) — on a
+            # paper config, and on a live config whose rule's stage forces
+            # paper, whose price came off the LIVE client's tick and never
+            # met PaperTrader.ticker's clock. Keyed on the INSTRUMENT's
+            # class; nothing is booked, the skip says why.
+            from bot_program.engine.paper_trader import paper_market_shut
+            _shut = paper_market_shut(symbol, self._instrument_class(symbol))
+            if _shut:
+                return self._skip(symbol, skips.MARKET_SHUT,
+                                  f"{_shut} — no paper fill")
         order_id = ""
         entry_meta = dict(level_meta)
         entry_meta["cost_check"] = cost_reason

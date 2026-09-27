@@ -104,9 +104,25 @@ def run_bot_tick(user_id: int):
     #    forex BotTrade's SL/TP check uses OANDA, a stock BotTrade uses Alpaca.
     for t in BotTrade.objects.filter(config=cfg, status="OPEN"):
         try:
+            # A PAPER row waits while its market is shut (2026-09-26): the
+            # only price then is the last one before it shut. OPEN it stays.
+            if t.paper:
+                from .paper_trader import paper_market_shut
+                shut = paper_market_shut(t.symbol)
+                if shut:
+                    log.info("legacy paper #%s %s: %s — no paper exit; the "
+                             "row stays OPEN", t.id, t.symbol, shut)
+                    continue
             sym_client = client_for_symbol(user, t.symbol, cfg)
             tk = sym_client.ticker(t.symbol)
             price = Decimal(tk["lastPrice"])
+            if t.paper and price <= 0:
+                # No usable paper price — a stale quote, or a market that
+                # only just reopened: nothing to compare and nothing to
+                # book. A BUY's "stop" at 0 was an exit at 0 (2026-09-26).
+                log.info("legacy paper #%s %s: no usable price — no paper "
+                         "exit this tick; the row stays OPEN", t.id, t.symbol)
+                continue
             hit_sl = (t.side == "BUY" and price <= t.stop_loss) or (t.side == "SELL" and price >= t.stop_loss)
             hit_tp = (t.side == "BUY" and price >= t.take_profit) or (t.side == "SELL" and price <= t.take_profit)
             if hit_sl or hit_tp:
@@ -150,6 +166,14 @@ def run_bot_tick(user_id: int):
             tp = price * (1 + d.tp_pct/100) if d.direction == "BUY" else price * (1 - d.tp_pct/100)
 
             paper = (cfg.mode == "paper")
+            if paper:
+                # No paper fill while the market is shut (2026-09-26).
+                from .paper_trader import paper_market_shut
+                shut = paper_market_shut(symbol)
+                if shut:
+                    log.info("legacy paper %s: %s — no paper fill",
+                             symbol, shut)
+                    continue
             order_id = ""
             if not paper:
                 # Money-safety: live mode + router fell back to PaperTrader

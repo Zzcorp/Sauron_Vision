@@ -56,6 +56,9 @@ def execute_kill_switch(user=None, reason="manual"):
         "positions_closed": 0,
         "asset_positions_closed": 0,
         "portfolio_positions_closed": 0,
+        # PAPER rows NOT booked because their market is shut (2026-09-26):
+        # they stay OPEN; see _paper_booking_waits.
+        "paper_waiting": [],
         "errors": [],
     }
     now = timezone.now()
@@ -87,6 +90,10 @@ def execute_kill_switch(user=None, reason="manual"):
     if user:
         open_legacy = open_legacy.filter(config__user=user)
     for trade in open_legacy:
+        waits = _paper_booking_waits(trade)
+        if waits:
+            results["paper_waiting"].append(waits)
+            continue
         try:
             _close_legacy_trade(trade, now)
             results["positions_closed"] += 1
@@ -101,6 +108,10 @@ def execute_kill_switch(user=None, reason="manual"):
     if user:
         open_asset = open_asset.filter(config__user=user)
     for trade in open_asset:
+        waits = _paper_booking_waits(trade)
+        if waits:
+            results["paper_waiting"].append(waits)
+            continue
         try:
             _close_asset_trade(trade, now)
             results["asset_positions_closed"] += 1
@@ -152,6 +163,15 @@ def execute_kill_switch(user=None, reason="manual"):
             f" ▲ {len(results['errors'])} broker-close error(s) — these symbols "
             f"may still be OPEN at the broker and need manual reconciliation."
         )
+    if results["paper_waiting"]:
+        body += (
+            f" {len(results['paper_waiting'])} paper position(s) were NOT "
+            f"booked because their market is shut or has not priced them "
+            f"since it reopened: "
+            f"{'; '.join(results['paper_waiting'])}. Every bot is disabled "
+            f"all the same; the rows stay OPEN — close them from the "
+            f"positions page once their market has a price again."
+        )
     try:
         if user:
             Notification.create_for_user(user, "system", title, body)
@@ -162,6 +182,50 @@ def execute_kill_switch(user=None, reason="manual"):
 
     logger.critical("[KILL SWITCH] Executed: %s", results)
     return results
+
+
+def _paper_booking_waits(trade) -> str:
+    """"" — or "EURCAD #108: the forex market is shut (reopens Sunday 21:00
+    UTC)" for a PAPER row whose market is shut (2026-09-26), or settling
+    after its open, or open for less than REOPEN_PRICE_GRACE_SECONDS with
+    nothing that prices the row since.
+
+    The switch still disables every bot (step 1 ran before any close) and
+    still flattens every LIVE row: a venue decides whether its own close
+    fills. Only the paper BOOKING waits, because the only price a shut
+    market offers is the last one before it shut, and a flatten booked at
+    Friday's price on a Saturday is an exit nobody could have had. The
+    same holds in the first hours after a reopen when the paper venue has
+    no price of the new session yet: _market_exit_price would fall back to
+    a raw LiveQuote or to the ENTRY price. The row stays OPEN, and the
+    notification and the results name it. (An options row is marked at
+    its premium, which the paper ticker does not price: only the clock is
+    asked for it.)"""
+    if not getattr(trade, "paper", False):
+        return ""
+    from bot_program.engine.paper_trader import (
+        PaperTrader, paper_awaits_first_price, paper_market_shut)
+    cls = getattr(trade, "asset_class", "") or ""
+    shut = paper_market_shut(trade.symbol, cls)
+    if not shut and cls != "options":
+        # The clock first (no price read at all outside the hours after an
+        # open, or with the gate off), then whether the paper venue prices
+        # the row yet.
+        young = paper_awaits_first_price(trade.symbol, cls)
+        if young:
+            try:
+                priced = float((PaperTrader(None).ticker(trade.symbol) or {})
+                               .get("lastPrice") or 0) > 0
+            except Exception:  # noqa: BLE001 — unreadable is unpriced
+                priced = False
+            if not priced:
+                shut = young
+    if not shut:
+        return ""
+    logger.warning("[KILL SWITCH] paper trade %s (%s) NOT booked: %s — the "
+                   "row stays OPEN until its market reopens",
+                   trade.id, trade.symbol, shut)
+    return f"{trade.symbol} #{trade.id}: {shut}"
 
 
 def _market_exit_price(symbol, fallback, client=None):

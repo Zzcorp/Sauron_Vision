@@ -93,6 +93,11 @@ LEVERAGE_REFUSED = "leverage_refused"
 # (sized_to_zero). NOTHING IS RESIZED OR CLAMPED.
 ELIGIBILITY_REFUSED = "eligibility_refused"
 
+# 2026-09-26. A PAPER entry while the instrument's market is shut
+# (paper_trader.paper_market_shut): no fill, no row. Its own code so a
+# weekend of refusals reads as the clock, never as a dead feed (no_price).
+MARKET_SHUT = "market_shut"
+
 MAX_SYMBOLS_TRACKED = 200
 
 
@@ -212,6 +217,10 @@ def diagnose(cfg) -> str:
                              "1,000 USD). Nothing was sent and nothing was "
                              "clamped; the row is re-read once per UTC day, "
                              "an unread one on every ask",
+        MARKET_SHUT: "the instrument's market is shut, or opened less than "
+                     "15 minutes ago, so the paper venue fills nothing — "
+                     "nothing is wrong with the feed; paper fills resume "
+                     "at the hour the detail names",
     }.get(top, "")
     return (f"{top} accounts for {share:.0%} of {total} skips"
             + (f" — {advice}" if advice else ""))

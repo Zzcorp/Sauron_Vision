@@ -33,6 +33,13 @@ Two states this module refuses rather than papers over:
     order. A second close path would send a market order into a book that
     may already be flat, i.e. open a brand-new reverse position.
 
+  * A PAPER trade whose market is shut (2026-09-26). On Saturday
+    2026-09-26 13:53 UTC this button closed #108 EURCAD and #109 GBPCAD at
+    Friday's last OANDA price, re-stamped by a reconnecting stream. The
+    only price a shut market has is the last one before it shut, so the
+    row stays OPEN and nothing is booked until it reopens (the preview
+    says so first). A LIVE trade is never asked: its venue decides.
+
 Serialization: the row is claimed under ``select_for_update`` before any
 broker call, so a double-click cannot close twice. The close itself runs
 OUTSIDE that transaction for the same reason manual_trade's funding closes
@@ -161,6 +168,20 @@ def _exit_fill(trade, price: float) -> float:
     return float(paper_fill_price(trade.config, trade.symbol, price, exit_side))
 
 
+def _market_shut_error(trade) -> str:
+    """For a PAPER row whose market is shut, the refusal both the preview
+    and the close say; "" otherwise (2026-09-26). A LIVE row is never
+    asked: the venue decides whether its close fills."""
+    if not trade.paper:
+        return ""
+    from bot_program.engine.paper_trader import paper_market_shut
+    shut = paper_market_shut(trade.symbol, trade.asset_class)
+    if not shut:
+        return ""
+    return (f"{trade.symbol}: {shut} — no paper exit. The position stays "
+            f"OPEN and nothing was booked")
+
+
 def requires_pin(trade) -> bool:
     """Whether closing THIS trade needs the trading PIN.
 
@@ -241,6 +262,10 @@ def preview_close(user, trade) -> dict:
                          f"Closing here would mark the row closed while the "
                          f"position is still open at the broker — fix the "
                          f"connection, or close it at the broker directly"}
+
+    shut = _market_shut_error(trade)
+    if shut:
+        return {"error": shut, "market_shut": True}
 
     try:
         mark = bot._mark_price(trade, client)
@@ -406,6 +431,12 @@ def execute_close(user, trade, *, pin_ok: bool = False) -> dict:
                              f"connection or close it at the broker",
                     "still_open": True}
 
+        shut = _market_shut_error(trade)
+        if shut:
+            logger.warning("[manual-close] refusing paper close of #%s: %s",
+                           trade.id, shut)
+            return {"error": shut, "still_open": True, "market_shut": True}
+
         try:
             mark = bot._mark_price(trade, client)
         except Exception as e:  # noqa: BLE001
@@ -428,6 +459,17 @@ def execute_close(user, trade, *, pin_ok: bool = False) -> dict:
         _release(trade.pk)
 
     trade.refresh_from_db()
+    if not closed and trade.paper and trade.status == "OPEN":
+        # A PAPER close the engine declined booked nothing and left the row
+        # OPEN: there is no broker, no CLOSE_PENDING and no retry task for
+        # it, so the live words below would be false. The one way here is
+        # the market shutting (or opening) between the gate above and
+        # _close_trade's own belt — a click at Friday 20:59:59 (2026-09-26).
+        shut = _market_shut_error(trade)
+        return {"error": shut or (f"{trade.symbol}: the paper close booked "
+                                  f"nothing — the position stays OPEN"),
+                "still_open": True, "market_shut": bool(shut),
+                "trade_id": trade.id}
     if not closed:
         return {"error": f"The broker rejected the close for {trade.symbol}. "
                          f"The position is STILL OPEN at the broker; the row "

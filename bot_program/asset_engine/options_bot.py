@@ -609,6 +609,14 @@ class OptionsBot(AssetBot):
 
         # A paper-STAGE rule trades on the paper venue even in a live config.
         paper = (self.cfg.mode == "paper") or bool(stage["force_paper"])
+        if paper:
+            # No paper contract while the underlying's market is shut
+            # (2026-09-26): the premium is a shut market's last quote.
+            from bot_program.engine.paper_trader import paper_market_shut
+            _shut = paper_market_shut(symbol, self._instrument_class(symbol))
+            if _shut:
+                return self._skip(symbol, skips.MARKET_SHUT,
+                                  f"{_shut} — no paper fill")
         order_id = ""
         working_meta: dict = {}
         if not paper:

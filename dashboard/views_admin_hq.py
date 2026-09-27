@@ -137,12 +137,22 @@ def flatten_all_positions(request):
     errs = results.get("errors") or []
 
     msg = f"Kill switch: {disabled} bot(s) disabled, {closed} position(s) closed."
+    waiting = results.get("paper_waiting") or []
+    if waiting:
+        # A paper row on a shut market is not booked (2026-09-26); without
+        # this line "closed" reads as the whole book.
+        msg += (f" {len(waiting)} paper position(s) NOT booked — their "
+                f"market is shut or has not priced them since it reopened; "
+                f"the rows stay OPEN: "
+                f"{'; '.join(str(w)[:120] for w in waiting[:3])}.")
     if errs:
         # Never report a clean sweep when some closes failed — the operator
         # would stop looking, and a position they believe is flat is the most
         # expensive kind of wrong.
         messages.error(request, msg + f" {len(errs)} FAILED — these may still "
                                       f"be open at the broker: {'; '.join(str(e)[:120] for e in errs[:3])}")
+    elif waiting:
+        messages.warning(request, msg)
     else:
         messages.success(request, msg)
     return redirect("admin_dashboard")

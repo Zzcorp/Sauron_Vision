@@ -1,5 +1,5 @@
 """Stock exchange status with time-until-change calculation."""
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 import pytz
 
 EXCHANGES = [
@@ -389,3 +389,247 @@ def market_status_for(asset_class: str, exchange: str = "", now_utc=None,
     return {"code": code, "name": code, "flag": "", "session": code,
             "is_open": True, "local_time": "", "opens": "", "closes": "",
             "time_until_change": "", "next_state": ""}
+
+
+# ── The one market clock for paper execution (2026-09-26) ─────────────────
+#
+# Saturday 2026-09-26 13:53 UTC the CLOSE button booked two paper forex
+# rows (#108 EURCAD, #109 GBPCAD) at Friday's last OANDA price: the stream
+# had re-stamped it on a reconnect, the quote read under a minute old, and
+# nothing on the paper path asked whether the market was open. The paper
+# venue (bot_program/engine/paper_trader.py paper_market_shut) asks
+# market_clock below before it fills or exits — the clock above, plus the
+# instant the session next opens, which every refusal names, and the
+# instant the running session opened, from which the paper venue counts
+# the settling window after every open.
+
+#: The classes this module keeps hours for: market_status_for's defaults,
+#: plus options, whose contracts list on the underlying's venue (NYSE when
+#: nothing says otherwise). Any other class — cfd, an empty or unknown
+#: one — has no modelled hours and reads OPEN, said as "modelled": False.
+MODELLED_CLASSES = frozenset(ASSET_CLASS_DEFAULT_SESSION) | {"options"}
+
+_WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+                  "Saturday", "Sunday")
+
+#: NYSE and NASDAQ full-day closures (New York dates), read from NYSE's
+#: published holiday calendar for 2026 and 2027. market_clock reads them
+#: for the two US equity sessions (US stocks and ETFs, the cash indices
+#: SYMBOL_VENUE files under New York, options); the strip above and
+#: core.market_calendar do not. PAST 2027 THE TABLE KNOWS NOTHING and
+#: every weekday reads as a session again, as it did before 2026-09-26:
+#: extend it from the exchange's calendar.
+US_EQUITY_HOLIDAYS = frozenset({
+    date(2026, 1, 1), date(2026, 1, 19), date(2026, 2, 16),
+    date(2026, 4, 3), date(2026, 5, 25), date(2026, 6, 19),
+    date(2026, 7, 3), date(2026, 9, 7), date(2026, 11, 26),
+    date(2026, 12, 25),
+    date(2027, 1, 1), date(2027, 1, 18), date(2027, 2, 15),
+    date(2027, 3, 26), date(2027, 5, 31), date(2027, 6, 18),
+    date(2027, 7, 5), date(2027, 9, 6), date(2027, 11, 25),
+    date(2027, 12, 24),
+})
+#: The same calendar's 13:00 New York early closes.
+US_EQUITY_EARLY_CLOSES = {
+    date(2026, 11, 27): time(13, 0), date(2026, 12, 24): time(13, 0),
+    date(2027, 11, 26): time(13, 0),
+}
+_US_EQUITY_SESSIONS = frozenset({"NYSE", "NASDAQ"})
+_NEW_YORK = "America/New_York"
+
+
+def utc_words(moment) -> str:
+    """"Sunday 21:00 UTC" for an aware datetime — the weekday from a fixed
+    table, so no locale can change the words."""
+    m = moment.astimezone(pytz.UTC)
+    return f"{_WEEKDAY_NAMES[m.weekday()]} {m.strftime('%H:%M')} UTC"
+
+
+def _us_equity_closed_now(now_utc) -> bool:
+    """True on a US equity holiday, and after an early close's 13:00."""
+    local = now_utc.astimezone(pytz.timezone(_NEW_YORK))
+    if local.date() in US_EQUITY_HOLIDAYS:
+        return True
+    early = US_EQUITY_EARLY_CLOSES.get(local.date())
+    return early is not None and local.time() >= early
+
+
+def _forex_week(now_utc):
+    """(is_open, reopens, opened) for the FX week, as aware UTC datetimes.
+
+    Shut when EITHER clock says so: the FOREX row's UTC hours (Friday 21:00
+    to Sunday 21:00 UTC — core.market_calendar.is_forex_open's and the
+    yfinance forex poller's) or the venues' 17:00 New York week (Friday
+    17:00 to Sunday 17:00 New York — ForexBot.forex_market_open's, and
+    OANDA's and eToro's own). They agree while New York keeps summer time;
+    from November to March 17:00 New York is 22:00 UTC, so the week opens
+    at Sunday 22:00 UTC and not an hour earlier — the hour in which OANDA
+    still calls its prices not tradeable and a poller can re-stamp
+    Friday's close. `reopens` is None while open, `opened` while shut."""
+    now = now_utc.astimezone(pytz.UTC)
+    ny = pytz.timezone(_NEW_YORK)
+
+    def _edges(sunday):
+        friday = sunday + timedelta(days=5)
+        opens = max(
+            pytz.UTC.localize(datetime.combine(sunday, time(21, 0))),
+            ny.localize(datetime.combine(sunday, time(17, 0)))
+            .astimezone(pytz.UTC))
+        closes = min(
+            pytz.UTC.localize(datetime.combine(friday, time(21, 0))),
+            ny.localize(datetime.combine(friday, time(17, 0)))
+            .astimezone(pytz.UTC))
+        return opens, closes
+
+    sunday = now.date() - timedelta(days=(now.weekday() + 1) % 7)
+    opens, closes = _edges(sunday)
+    if opens <= now < closes:
+        return True, None, opens
+    if now < opens:
+        return False, opens, None
+    return False, _edges(sunday + timedelta(days=7))[0], None
+
+
+def _next_open_utc(code: str, now_utc):
+    """The first instant after `now_utc` that session `code` opens, as an
+    aware UTC datetime, or None when nothing here models it (CRYPTO never
+    shuts). Asked while the session is shut. Walks at most ten days ahead,
+    in the session's own zone, past the US equity holidays."""
+    product = _PRODUCT_BY_CODE.get(code)
+    if product is not None:
+        tz = pytz.timezone(product["tz"])
+        local_now = now_utc.astimezone(tz)
+        starts = []
+        for seg in product["segments"]:
+            for offset in range(0, 8):
+                day = local_now.date() + timedelta(days=offset)
+                if day.weekday() not in seg["weekdays"]:
+                    continue
+                start, _end = _segment_window(seg, day, tz)
+                if start > local_now:
+                    starts.append(start)
+                    break
+        return min(starts).astimezone(pytz.UTC) if starts else None
+    if code == "FOREX":
+        return _forex_week(now_utc)[1]
+    ex = next((e for e in EXCHANGES if e["code"] == code), None)
+    if ex is None:
+        return None
+    tz = pytz.timezone(ex["tz"])
+    local_now = now_utc.astimezone(tz)
+    if code == "CME":
+        # Globex opens at 17:00 CT on the evenings a session starts, Sunday
+        # through Thursday: the daily break and the weekend alike end there.
+        weekdays, at = (6, 0, 1, 2, 3), time(17, 0)
+    else:
+        weekdays, at = ex["weekdays"], ex["open"]
+    for offset in range(0, 11):
+        day = local_now.date() + timedelta(days=offset)
+        if day.weekday() not in weekdays:
+            continue
+        if code in _US_EQUITY_SESSIONS and day in US_EQUITY_HOLIDAYS:
+            continue
+        start = tz.localize(datetime.combine(day, at))
+        if start > local_now:
+            return start.astimezone(pytz.UTC)
+    return None
+
+
+def _prev_open_utc(code: str, now_utc):
+    """The last instant at or before `now_utc` that session `code` opened,
+    as an aware UTC datetime — asked while the session is open, so it is
+    when the running session began (after the weekend, the daily break or
+    a product's gap). None for CRYPTO and anything unmodelled."""
+    product = _PRODUCT_BY_CODE.get(code)
+    if product is not None:
+        tz = pytz.timezone(product["tz"])
+        local_now = now_utc.astimezone(tz)
+        starts = []
+        for seg in product["segments"]:
+            for offset in range(0, 9):
+                day = local_now.date() - timedelta(days=offset)
+                if day.weekday() not in seg["weekdays"]:
+                    continue
+                start, _end = _segment_window(seg, day, tz)
+                if start <= local_now:
+                    starts.append(start)
+                    break
+        return max(starts).astimezone(pytz.UTC) if starts else None
+    if code == "FOREX":
+        return _forex_week(now_utc)[2]
+    ex = next((e for e in EXCHANGES if e["code"] == code), None)
+    if ex is None:
+        return None
+    tz = pytz.timezone(ex["tz"])
+    local_now = now_utc.astimezone(tz)
+    if code == "CME":
+        weekdays, at = (6, 0, 1, 2, 3), time(17, 0)
+    else:
+        weekdays, at = ex["weekdays"], ex["open"]
+    for offset in range(0, 11):
+        day = local_now.date() - timedelta(days=offset)
+        if day.weekday() not in weekdays:
+            continue
+        if code in _US_EQUITY_SESSIONS and day in US_EQUITY_HOLIDAYS:
+            continue
+        start = tz.localize(datetime.combine(day, at))
+        if start <= local_now:
+            return start.astimezone(pytz.UTC)
+    return None
+
+
+def market_clock(asset_class: str, exchange: str = "", symbol: str = "",
+                 now_utc=None) -> dict:
+    """Is this instrument's market open NOW, and when does it next open?
+
+    ONE answer for paper execution, keyed on the INSTRUMENT's class and
+    built on market_status_for (the clock preflight_live, the instrument
+    badge and the anomaly scan already read):
+      crypto     always open — the CRYPTO session never shuts;
+      forex      shut while EITHER the FOREX row (Friday 21:00 to Sunday
+                 21:00 UTC, core.market_calendar.is_forex_open's rule) OR
+                 the 17:00 New York week (ForexBot.forex_market_open's, and
+                 the venues') says shut: from November to March the week
+                 opens at Sunday 22:00 UTC (_forex_week);
+      stock/etf  the listing venue's session (EXCHANGES by exchange, NYSE
+                 when the venue is unknown), weekdays only;
+      index      the cash index's venue (SYMBOL_VENUE: SPX500 is New York);
+      commodity  the product session when one is listed (grains, softs,
+                 livestock), else the venue's — CME Globex for metals and
+                 energy, with its daily 16:00-17:00 CT break;
+      options    the underlying's venue (NYSE by default).
+    HOLIDAYS: the NYSE and NASDAQ sessions keep US_EQUITY_HOLIDAYS and
+    US_EQUITY_EARLY_CLOSES (2026 and 2027); NO OTHER VENUE'S HOLIDAYS ARE
+    MODELLED, and there the clock reads open on a holiday. Any other class
+    (cfd, "", unknown) has no modelled hours and reads OPEN with
+    "modelled": False, rather than invented hours.
+
+    Returns {"is_open", "session", "modelled", "reopens" (an aware UTC
+    datetime, None while open or when unknowable), "reopens_words"
+    ("Sunday 21:00 UTC", or ""), "opened" (while open, the aware UTC
+    instant the running session opened; None while shut, and for crypto
+    and unmodelled classes)}.
+    """
+    if now_utc is None:
+        now_utc = datetime.now(pytz.UTC)
+    cls = (asset_class or "").strip().lower()
+    if cls not in MODELLED_CLASSES:
+        return {"is_open": True, "session": "", "modelled": False,
+                "reopens": None, "reopens_words": "", "opened": None}
+    status = market_status_for(cls, exchange or "", now_utc=now_utc,
+                               symbol=symbol or "")
+    code = status.get("session") or status.get("code") or ""
+    if code == "FOREX":
+        is_open, reopens, opened = _forex_week(now_utc)
+    else:
+        is_open = bool(status.get("is_open", True))
+        if (is_open and code in _US_EQUITY_SESSIONS
+                and _us_equity_closed_now(now_utc)):
+            is_open = False
+        reopens = None if is_open else _next_open_utc(code, now_utc)
+        opened = _prev_open_utc(code, now_utc) if is_open else None
+    return {"is_open": is_open, "session": code, "modelled": True,
+            "reopens": reopens,
+            "reopens_words": utc_words(reopens) if reopens is not None
+            else "",
+            "opened": opened}

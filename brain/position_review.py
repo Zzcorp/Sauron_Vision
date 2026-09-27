@@ -283,7 +283,10 @@ def usable_mark(symbol: str) -> tuple[Optional[float], str]:
         return None, "no symbol"
     try:
         from bot_program.engine.paper_trader import PaperTrader
-        tick = PaperTrader(None).ticker(sym) or {}
+        # market_hours=False: a READ-ONLY mark for every position, LIVE
+        # ones included. The paper venue's market clock (2026-09-26)
+        # decides what paper may BOOK, never what the review may see.
+        tick = PaperTrader(None).ticker(sym, market_hours=False) or {}
     except Exception as e:  # noqa: BLE001
         logger.warning("[position-review] mark lookup failed for %s: %s", sym, e)
         return None, f"mark lookup failed: {e}"
