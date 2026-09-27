@@ -386,7 +386,8 @@ MAX_PLEDGED_FRACTION = 0.5
 #: missing row reads OFF (core.platform_control.is_component_enabled).
 LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
 
-#: THE eToro CLASSES (and "short") WHOSE DEMO FILL-AND-CLOSE PROOF IS PINNED
+#: THE eToro CLASSES (and "short") WHOSE FILL-AND-CLOSE PROOF IS PINNED —
+#: on the demo segment OR the real account, a real one being the stronger —
 #: in tests/test_etoro_client.py (deploy/ETORO_DEPARTURE.md §7 bullet 0,
 #: one sitting per class). EMPTY ON ARRIVAL (2026-09-24): an eToro order
 #: whose instrument class — or direction, for a SELL — is not named here
@@ -398,7 +399,18 @@ LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
 #: greps for it. Not a PlatformComponent on purpose: nothing on /health/
 #: can flip a proof that was never measured. Read at CALL time by the
 #: gate, never copied, so a test states a token by patching this name.
-ETORO_PROVEN = frozenset()
+#: "crypto" since 2026-09-26 (test_proof_crypto): BTC 0.0002 filled and
+#: closed on the REAL account (order 1596774178, position 3588477891,
+#: settlementType REAL at 1x, deploy/ETORO_DEPARTURE.md §4 D5). Proven at
+#: 1x, and that binds the attack mode's chooser ALONE: ETORO_PROVEN_LEVERAGE
+#: stays empty, so the chooser picks 1 for crypto. This token does NOT
+#: bound a TYPED multiplier: extras["leverage"] = 2 on a crypto config
+#: clears this gate and is judged as every typed number is
+#: (etoro_leverage_live ON, the 2x class ceiling, the own book, the LIVE
+#: list and the stop band; preflight §4 warns, never refuses), so it goes
+#: at 2x, a CFD settlement no real order has met.
+#: tests/test_real_account_measured.py pins that.
+ETORO_PROVEN = frozenset({"crypto"})
 
 #: THE MULTIPLIER EACH eToro CLASS HAS BEEN PROVEN AT (2026-09-26): class
 #: -> the highest multiplier whose demo fill-and-close is pinned as
@@ -475,6 +487,39 @@ def proven_leverage(asset_class: str) -> int:
     except (TypeError, ValueError, OverflowError):
         return 1
     return val if val >= 1 and val == raw else 1
+
+
+def stop_moved_words(meta, entry_price) -> str:
+    """The fill notification's line for a stop the venue REWROTE at the
+    fill (metadata "stop_rewritten_by_venue" {sent, held}, stamped by
+    execute_entry on an immediate fill and by _finish_working_entry on a
+    held one): "Stop moved by eToro: sent X, held Y (Z% from entry)", Z
+    the HELD stop's distance from the fill price. "" for a row with no
+    rewrite, or a number nothing can read; no parenthesis without a
+    price. MEASURED 2026-09-26 on the real account, BTC 0.0002 at 1x:
+    sent 79934.97 (5% under the last 84142.07), held 75745.8 — 9.98%
+    under the 84145.8 fill. A held stop at or under 0.0001 (eToro's "no
+    stop" sentinel, public reference only, or a zero) is NO stop, never
+    a distance: "eToro holds NO stop: sent X". Words only: nothing is
+    resized, closed or sent again."""
+    moved = (meta or {}).get("stop_rewritten_by_venue")
+    if not isinstance(moved, dict):
+        return ""
+    try:
+        sent = float(moved.get("sent"))
+        held = float(moved.get("held"))
+    except (TypeError, ValueError):
+        return ""
+    if held <= 0.0001:
+        return f"eToro holds NO stop: sent {sent:.10g}"
+    words = f"Stop moved by eToro: sent {sent:.10g}, held {held:.10g}"
+    try:
+        entry = float(entry_price or 0)
+    except (TypeError, ValueError, InvalidOperation):
+        entry = 0.0
+    if entry > 0:
+        words += f" ({abs(entry - held) / entry * 100:.2f}% from entry)"
+    return words
 
 
 def leverage_is_auto(extras) -> bool:
@@ -1287,8 +1332,9 @@ class AssetBot(ABC):
                     reason=f"still working after {self.ENTRY_WORKING_MAX_HOURS}h",
                     cancel_parent=True):
                 # An unconfirmed withdrawal is said daily, not logged once
-                # a tick: on eToro's real segment the DELETE spelling is
-                # unmeasured and refused, so the row stays WORKING there.
+                # a tick (a DELETE refused, or no Canceled read after it).
+                # eToro's real DELETE answered as the demo one did
+                # (MEASURED 2026-09-26), so no world is refused by spelling.
                 self._warn_working_entry_unresolved(
                     trade, None,
                     detail=(f"still working after "
@@ -4186,11 +4232,15 @@ class AssetBot(ABC):
                 # MEASURED on demo BTC (doc §14): N2 at 2x tightened to
                 # 50% of the margin (maxStopLossPercentage 50), N1 at 1x
                 # widened 3% -> 10% below the price (a minimum distance
-                # no eligibility field explains); unmeasured on live; its
+                # no eligibility field explains) — and on the REAL account
+                # on 2026-09-26, BTC at 1x: sent 79934.97, held 75745.8,
+                # 9.98% under the 84145.8 fill; its
                 # 0.0001 "no stop" sentinel is a rewrite too. The row keeps
                 # initial_stop_loss = the SENT stop (the risk denominator
                 # must not move) and records the divergence; the staff
-                # alert names both. Only a venue that echoes its legs
+                # alert names both, and the fill notification carries one
+                # line (stop_moved_words, through _fill_rule_words); nothing
+                # is resized or sent again. Only a venue that echoes its legs
                 # (etoro_client: venueStopLoss) reaches this.
                 held = res.get("venueStopLoss")
                 if held is not None:
@@ -4262,11 +4312,11 @@ class AssetBot(ABC):
                         entry_meta["entry_poll_failed"] = True
                     if leverage is not None and leverage > 1:
                         # A LEVERED order eToro holds is a financed position.
-                        # Since D3b the tick polls it and, on the demo
-                        # segment, withdraws it after ENTRY_WORKING_MAX_HOURS;
-                        # on the real segment the DELETE spelling is
-                        # unmeasured, so the tick alerts daily instead. Said
-                        # NOW, not in tomorrow's daily line.
+                        # Since D3b the tick polls it and withdraws it after
+                        # ENTRY_WORKING_MAX_HOURS — on the real account too,
+                        # since the real DELETE answered as the demo one did
+                        # (MEASURED 2026-09-26, order 1596774177). Said NOW,
+                        # not when the tick withdraws it.
                         try:
                             from bot_program.notifications import notify_staff
                             notify_staff(
@@ -4280,12 +4330,10 @@ class AssetBot(ABC):
                                          "or refused"
                                          if res.get("pollFailed") else
                                          " — eToro is holding it")
-                                      + ". The 5-minute tick polls it; on the "
-                                        "demo segment it is withdrawn after "
-                                        f"{self.ENTRY_WORKING_MAX_HOURS}h - "
-                                        "the live DELETE spelling is unmeasured "
-                                        "and refused, so on live the tick alerts "
-                                        "daily instead. The legs ride the order "
+                                      + ". The 5-minute tick polls it and "
+                                        "withdraws it if it is still unfilled "
+                                        f"after {self.ENTRY_WORKING_MAX_HOURS}h. "
+                                        "The legs ride the order "
                                         "body and are NOT shown while held - the "
                                         "fill alert says whether the venue holds "
                                         "the stop."),
@@ -5750,15 +5798,24 @@ class AssetBot(ABC):
         this file's to change), so the tier, the risk the row carries at
         its stop, the multiplier sent and the margin ride the argument it
         already has: "Attack: HIGH · risk 7.0% of pool · 20x · margin
-        100.00 USD". Every other row passes its rule_name unchanged."""
+        100.00 USD". Since 2026-09-26 a row whose stop the venue rewrote at
+        the fill (stop_rewritten_by_venue) carries one more line, attack
+        mode or not: "Stop moved by eToro: sent X, held Y (Z% from entry)"
+        (stop_moved_words). Every other row passes its rule_name
+        unchanged."""
         meta = getattr(trade, "metadata", None) or {}
+        lines = []
         att = meta.get("attack")
-        if not isinstance(att, dict):
+        if isinstance(att, dict):
+            line = self._attack_line(att, trade)
+            if line:
+                lines.append(line)
+        moved = stop_moved_words(meta, getattr(trade, "entry_price", None))
+        if moved:
+            lines.append(moved)
+        if not lines:
             return trade.rule_name
-        line = self._attack_line(att, trade)
-        if not line:
-            return trade.rule_name
-        return f"{trade.rule_name or '—'}\n{line}"
+        return "\n".join([trade.rule_name or "—"] + lines)
 
     def _attack_line(self, att: dict, trade) -> str:
         """"Attack: TIER · risk F% of pool · Lx · margin M CCY". The risk is

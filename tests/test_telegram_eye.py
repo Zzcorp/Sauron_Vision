@@ -493,7 +493,7 @@ class StatusReportTests(_EyeCase):
                 "Bots running (1)",
                 f"  • Crypto momentum #{self.cfg.pk} — paper",
                 "Platform health: all clear (54 components checked)",
-                "Demo proofs pinned: none yet", "Open on the platform (1)",
+                "Proofs pinned: Crypto", "Open on the platform (1)",
                 "  • AAPL long 0.04 @ 336.10 · stop 326.02 · paper"):
             self.assertIn(expected, lines)
         self.assertLessEqual(len(lines), eye.MAX_LINES)

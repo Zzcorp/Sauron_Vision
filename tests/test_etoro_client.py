@@ -656,7 +656,8 @@ class AnAcceptanceIsNotAFillTests(SimpleTestCase):
         """`working` was a report until the WORKING shape and the DELETE
         met a key (D2b-i, 2026-09-23 20:29 UTC: status 11, DELETE v3 -> 202,
         lookup 7). Since D3b both are claims the adapter can keep, on the
-        demo segment; the real DELETE spelling still raises."""
+        demo segment, and since 2026-09-26 on the real one (the real DELETE
+        measured: 202, then 7 Canceled)."""
         self.assertTrue(hasattr(EtoroTrader, "order_status"))
         self.assertTrue(hasattr(EtoroTrader, "cancel_order"))
 
@@ -1693,14 +1694,17 @@ class TheHeldOrderTests(SimpleTestCase):
         with mock.patch("time.sleep"):
             self.assertIsNone(t.cancel_order("383459788"))
 
-    def test_the_live_delete_spelling_is_unattested_and_raises(self):
+    def test_the_live_delete_spelling_is_the_measured_one(self):
+        """It raised (LookupError, an empty _V3_EXEC_REAL_SEG) until the
+        real DELETE was MEASURED on 2026-09-26 22:03:11 UTC: no segment,
+        202, then 7 Canceled (tests/test_real_account_measured.py pins the
+        sitting and cancel_order on a real client). The demo spelling is
+        unchanged."""
         live, fake = _client([], env="live")
-        with self.assertRaises(LookupError):
-            live._v3_exec_order("1")
-        _lookup_router(fake, by_order=(200, _held_lookup()))
-        with self.assertRaises(LookupError):
-            live.cancel_order("383459788")
-        self.assertEqual(self._deletes(fake), [])
+        self.assertEqual(EtoroTrader._V3_EXEC_REAL_SEG, {"orders": ""})
+        self.assertEqual(live._v3_exec_order("1596774177"),
+                         f"{BASE}/api/v3/trading/execution/orders/1596774177")
+        self.assertEqual(fake.calls, [])
         demo, _ = _client([])
         self.assertEqual(demo._v3_exec_order("383459788"),
                          f"{BASE}/api/v3/trading/execution/demo/orders/383459788")
@@ -2250,12 +2254,13 @@ class ConsumerKeyTests(SimpleTestCase):
         # the close handle with the bots' own rule, off the same client
         # and fill
         self.assertIn("venue_stamps(client, res)", manual)
-        # D3b: the live-segment caveat rides the TAKE TRADE note, which lives
-        # in manual_trade._execute - execute_take_trade is a wrapper, so
-        # inspect.getsource(execute_take_trade) would never carry it; the
-        # file text does
-        self.assertIn('adapter_key(client) == "etoro" and not getattr(client, "demo", True)', manual)
-        self.assertIn("the tick alerts daily instead of withdrawing", manual)
+        # D3b put a live-segment caveat on the TAKE TRADE note (the real
+        # DELETE was unmeasured); since the real DELETE answered as the
+        # demo one did (2026-09-26) the note is one promise on both
+        # worlds and the caveat is GONE. The note lives in
+        # manual_trade._execute, so the file text is read
+        self.assertNotIn('adapter_key(client) == "etoro" and not getattr(client, "demo", True)', manual)
+        self.assertNotIn("the tick alerts daily instead of withdrawing", manual)
 
     def test_the_close_path_hands_the_open_order_id_and_reads_the_proof(self):
         import inspect
@@ -2547,3 +2552,152 @@ class TheVenueSpellingTests(SimpleTestCase):
         self.assertEqual(self._searches(fake),
                          [{"internalSymbolFull": "BTC"}])
         self.assertEqual(out["status"], "PENDING")
+
+
+# ── THE REAL ACCOUNT, MEASURED 2026-09-26 (Saturday ~21:25-22:03 UTC, code
+# 097e72c, sent by the operator through a shell client built env='live';
+# deploy/ETORO_DEPARTURE.md §4 D5). Every literal below was printed by the
+# real adapter on the REAL account unless a docstring says "composed"; the
+# fake wire answers the real segment's own spellings — no segment on the
+# POST, the lookup, the close and the reads. ────────────────────────────────
+REAL_BTC_ACCEPTED = {"token": "<not captured>", "orderId": 1596774178,
+                     "referenceId": "<not captured>"}
+
+
+def _real_btc_lookup(state="open"):
+    """orders:lookup (no segment) of order 1596774178 — BTC 0.0002 BUY at
+    1x, FILLED at once. Printed: the adapter's FILLED; asset.settlementType
+    'REAL' at leverage 1; requestedAmount 16.83, frozenAmount 17.0,
+    totalCosts 0.17; openStopLossRate 79934.97 (the SENT stop, kept on
+    the top level) and the target 88349.17 kept; positionExecutions[0]:
+    positionId 3588477891, stopLossRate 75745.8 (the HELD stop); the
+    values avgPrice 84145.8, fees 0.17, marketSpread 0 and markup 0.
+    Composed: the wire status {3, Filled} (the sitting printed the
+    adapter's FILLED, not the id — 3 is the demo's measured Filled);
+    openingData as the PLACE of avgPrice, fees, marketSpread and markup
+    (their values were printed, not where they sit on this body — the
+    demo body carries them there, D2); openingData.units 0.0002 (the
+    units sent — the print named the fill, not its units); and the body
+    after the close: this one with state "closed" (the adapter printed
+    the word)."""
+    return {
+        "orderId": 1596774178,
+        "status": {"id": 3, "name": "Filled", "errorCode": 0},
+        "asset": {"settlementType": "REAL", "leverage": 1},
+        "requestedAmount": 16.83, "frozenAmount": 17.0,
+        "openStopLossRate": 79934.97, "openTakeProfitRate": 88349.17,
+        "totalCosts": 0.17,
+        "positionExecutions": [{
+            "positionId": 3588477891, "state": state,
+            "stopLossRate": 75745.8, "takeProfitRate": 88349.17,
+            "openingData": {"units": 0.0002, "avgPrice": 84145.8,
+                            "fees": 0.17, "marketSpread": 0,
+                            "markup": 0}}],
+    }
+
+
+REAL_BTC_CLOSE = {"orderForClose": {"positionID": 3588477891,
+                                    "instrumentID": 100000,
+                                    "orderID": 1596736969, "orderType": 19,
+                                    "statusID": 1}}
+# The cells printed {available_cash 2249.65, used_margin 0.0} alone.
+# Composed: accountCurrency "USD" — the account's currency is the one the
+# same evening's net_liquidation read printed (2249.98, 'USD'), not a
+# field of this print.
+REAL_CELLS_AFTER_CLOSE = {"accountCurrency": "USD",
+                          "accountTotals": {"accountAvailableCash": 2249.65,
+                                            "accountTotalUsedMargin": 0.0}}
+
+
+class TheRealAccountProofTests(SimpleTestCase):
+    """THE PROOFS MEASURED ON THE REAL ACCOUNT (ETORO_PROVEN,
+    deploy/ETORO_DEPARTURE.md §7 bullet 0). The rule asks for a demo
+    fill-and-close per class; one on the REAL account is the stronger —
+    the same adapter, the real segment's own spellings, real settlement —
+    and the rule reads "demo or real" since 2026-09-26. The real
+    EtoroTrader over a fake wire, as every pin in this file."""
+
+    def test_proof_crypto(self):
+        """MEASURED ON THE REAL ACCOUNT, 2026-09-26: BTC 0.0002 BUY at 1x,
+        stop 79934.97 / target 88349.17 sent (the last 84142.07 x 0.95 /
+        x 1.05). FILLED at once — order 1596774178, position 3588477891,
+        avgPrice 84145.8, settlementType REAL, fees 0.17 (1%, one side),
+        the stop HELD at 75745.8 (eToro rewrote it: 9.98% under the fill).
+        CLOSED at 22:03:24 UTC by the market-close POST with no segment:
+        orderForClose{orderID 1596736969, orderType 19, statusID 1}, proven
+        by the open order's positionExecutions[0].state "closed"; 5 s
+        later available cash 2249.65, used margin 0.0, no position, and
+        broker_portfolio empty. Round trip 0.33 USD (2249.98 -> 2249.65).
+        "crypto" joins ETORO_PROVEN in the commit that pins this, at 1x
+        only (ETORO_PROVEN_LEVERAGE stays empty)."""
+        t, fake = _client([
+            SEARCH_BTC,
+            ("POST", "/api/v2/trading/execution/orders", 200,
+             REAL_BTC_ACCEPTED),
+            ("POST", "/market-close-orders/positions/3588477891", 200,
+             REAL_BTC_CLOSE),
+            ("GET", "/api/v1/trading/info/aggregate-portfolio", 200,
+             REAL_CELLS_AFTER_CLOSE),
+            ("GET", "/api/v1/trading/info/portfolio", 200,
+             {"clientPortfolio": {"positions": []}})], env="live")
+        _lookup_router(fake, by_order=[(200, _real_btc_lookup("open")),
+                                       (200, _real_btc_lookup("closed"))])
+        with mock.patch("time.sleep"):
+            r = t.market_order("BTC", "BUY", 0.0002, stop_loss=79934.97,
+                               take_profit=88349.17)
+        # the order that went: the real segment, BTC, 1x, both legs
+        post = [c for c in fake.calls if c[0] == "POST"][0]
+        self.assertEqual(post[1], f"{BASE}/api/v2/trading/execution/orders")
+        body = post[2]["json"]
+        self.assertEqual((body["symbol"], body["units"], body["leverage"],
+                          body["stopLossRate"], body["takeProfitRate"]),
+                         ("BTC", 0.0002, 1, 79934.97, 88349.17))
+        # the fill, read by orderId on the real lookup
+        polls = _polls(fake)
+        self.assertEqual(polls[0][1],
+                         f"{BASE}/api/v2/trading/info/orders:lookup")
+        self.assertEqual(polls[0][2]["params"], {"orderId": "1596774178"})
+        self.assertEqual((r["orderId"], r["status"], r["executedQty"],
+                          r["avgPrice"], r["positionId"]),
+                         ("1596774178", "FILLED", "0.0002", "84145.8",
+                          "3588477891"))
+        self.assertEqual((r["venueStopLoss"], r["venueTakeProfit"]),
+                         (75745.8, 88349.17))
+        self.assertTrue(r["protectedOnFill"])
+        lk = r["raw"]["lookup"]
+        self.assertEqual(lk["asset"], {"settlementType": "REAL",
+                                       "leverage": 1})
+        self.assertEqual(lk["openStopLossRate"], 79934.97,
+                         "the top level keeps the SENT stop")
+        self.assertEqual((lk["requestedAmount"], lk["frozenAmount"],
+                          lk["totalCosts"]), (16.83, 17.0, 0.17))
+        opening = lk["positionExecutions"][0]["openingData"]
+        self.assertEqual((opening["fees"], opening["marketSpread"],
+                          opening["markup"]), (0.17, 0, 0))
+        self.assertAlmostEqual(opening["fees"] / lk["requestedAmount"],
+                               0.01, places=3)
+        # the close by position id, proven by the OPEN order
+        with mock.patch("time.sleep"):
+            c = t.close_position("3588477891", "BTC",
+                                 open_order_id="1596774178")
+        close_post = [x for x in fake.calls if x[0] == "POST"][1]
+        self.assertEqual(close_post[1],
+                         f"{BASE}/api/v1/trading/execution/"
+                         f"market-close-orders/positions/3588477891")
+        self.assertEqual(close_post[2]["json"], {"InstrumentID": 100000})
+        self.assertEqual((c["status"], c["positionState"], c["orderId"],
+                          c["openOrderId"]),
+                         ("FILLED", "closed", "1596736969", "1596774178"))
+        self.assertEqual(c["raw"]["orderForClose"],
+                         REAL_BTC_CLOSE["orderForClose"])
+        self.assertNotIn("executedQty", c, "no units asked, none claimed")
+        self.assertNotIn("avgPrice", c, "a close carries no price")
+        # the cells and the book after
+        self.assertEqual(t.margin_cells(), {"available_cash": 2249.65,
+                                            "used_margin": 0.0,
+                                            "currency": "USD"})
+        self.assertEqual(t.get_positions(), [])
+        self.assertEqual(t.broker_portfolio(), [])
+        for _m, url, _k in fake.calls:
+            self.assertNotIn("/demo/", url, url)
+            self.assertNotIn("/real/", url, url)

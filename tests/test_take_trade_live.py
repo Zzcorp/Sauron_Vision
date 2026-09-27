@@ -402,11 +402,13 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         return _account(self.user, **kw)
 
     def test_an_unproven_class_is_refused_and_nothing_is_sent(self):
-        """ETORO_PROVEN as shipped (empty): a hand-taken BUY on the crypto
-        manual config is refused naming "crypto" — no market_order, no
-        POST on the wire, no row."""
+        """ETORO_PROVEN stated without "crypto" (the tree carries it since
+        2026-09-26, off the real BTC round trip): a hand-taken BUY on the
+        crypto manual config is refused naming "crypto" — no market_order,
+        no POST on the wire, no row."""
         from bot_program.manual_trade import execute_take_trade
         from bot_program.models import AssetBotTrade
+        self._proven()
         t, fake = self._etoro()
         with patch.object(t, "market_order", wraps=t.market_order) as spy, \
                 patch(ROUTER, return_value=t):

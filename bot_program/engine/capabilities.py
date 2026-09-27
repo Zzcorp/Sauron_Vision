@@ -152,9 +152,10 @@ ADAPTER_CAPABILITIES: dict = {
     # maxUnitsPerOrder / allowOpenPosition / the read's three-state, and
     # the leverageConfigs lists (MEASURED 2026-09-23, D2c-0).
     # "orders" 2026-09-24 (D3b): MEASURED 2026-09-23 20:29 UTC on the demo
-    # segment - DELETE v3 -> 202, the lookup then 7 Canceled. cancel_order
-    # is lookup-first and refuses (False) any id it cannot read; the real
-    # spelling raises until measured; order_status is in no tier.
+    # segment - DELETE v3 -> 202, the lookup then 7 Canceled - and the same
+    # answer on the real account 2026-09-26 22:03 UTC (no segment).
+    # cancel_order is lookup-first and refuses (False) any id it cannot
+    # read; order_status is in no tier.
     "etoro": ("market_data", "execution", "orders", "brackets",
               "account", "fractional_units", "money_floor", "order_caps",
               "leverage_values"),

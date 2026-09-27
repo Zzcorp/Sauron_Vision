@@ -1200,18 +1200,30 @@ class AnEtoroHeldOrderIsPolledAndWithdrawnTests(TestCase):
         trade2.refresh_from_db()
         self.assertEqual(trade2.status, "OPEN")
 
-    def test_a_live_held_order_is_polled_alerted_daily_and_never_withdrawn(self):
-        from tests.test_etoro_client import _held_lookup
-        trade = self._row(self.AGED)
-        t, fake = self._venue((200, _held_lookup()), env="live")
+    def test_a_live_held_order_is_withdrawn_and_proven_as_on_demo(self):
+        """It was polled, alerted daily and never withdrawn while the real
+        DELETE spelling raised. MEASURED 2026-09-26 on the real account
+        (no segment: 202, then 7 Canceled — tests/test_real_account_
+        measured.py): an aged held order on the LIVE segment is withdrawn
+        exactly as on demo, by the spelling with no segment."""
+        from tests.test_etoro_client import CANCELED_LOOKUP, _held_lookup
+        trade = self._row(self.AGED, broker_env="live")
+        t, fake = self._venue([(200, _held_lookup()), (200, _held_lookup()),
+                               (200, CANCELED_LOOKUP)], env="live")
+        fake.routes.append(("DELETE",
+                            "/api/v3/trading/execution/orders/383459788",
+                            202, {"orderId": 383459788, "referenceId": ""}))
         self._tick(t)
         trade.refresh_from_db()
-        self.assertEqual(trade.status, "OPEN")
-        self.assertEqual(self._deletes(fake), [])
-        self.assertEqual(self._notes("cannot be resolved"), 1)
-        self.assertTrue(trade.metadata.get("entry_unresolved_notified_at"))
-        self._tick(t)
-        self.assertEqual(self._notes("cannot be resolved"), 1)
+        self.assertEqual(trade.status, "CANCELED")
+        self.assertIn("still working after 26h",
+                      trade.metadata["entry_withdrawn_reason"])
+        deletes = self._deletes(fake)
+        self.assertEqual(len(deletes), 1)
+        self.assertTrue(deletes[0][1].endswith(
+            "/api/v3/trading/execution/orders/383459788"), deletes[0][1])
+        self.assertNotIn("/demo/", deletes[0][1])
+        self.assertEqual(self._notes(), 0)
 
     def test_a_legless_ibkr_working_row_keeps_todays_silent_fill(self):
         trade = _working_trade(self.cfg, protective_order_ids=[],

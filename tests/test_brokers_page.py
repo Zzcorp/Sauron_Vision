@@ -457,8 +457,9 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
     on one line, what eToro answered on 2026-09-23 (stocks real at 1x from
     10 USD; ETFs CFD only; forex, indices and commodities a 1,000 USD
     minimum; crypto real at 1x from 10 USD) and the class's proof state.
-    ETORO_PROVEN ships empty, so tonight every box reads "no proof pinned —
-    entries refused"; a save that ticks a box names what the gate will
+    ETORO_PROVEN carries crypto alone since 2026-09-26, so every other box
+    reads "no proof pinned — entries refused"; a save that ticks a box
+    names what the gate will
     refuse — on the verified branch too, which said nothing before. The
     gate keys on the INSTRUMENT's class, so the stocks box needs three
     tokens: stock, etf, index."""
@@ -515,13 +516,18 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
                      "unticked, crypto routes to Binance"):
             self.assertIn(fact, crypto)
 
-    def test_tonight_every_box_says_no_proof_is_pinned(self):
+    def test_every_box_but_crypto_says_no_proof_is_pinned(self):
+        """As the tree ships since 2026-09-26: crypto's proof is pinned
+        (the real BTC round trip, test_proof_crypto); the other three
+        boxes read "no proof pinned — entries refused"."""
         form = self._form()
-        for name in ("primary_stocks", "primary_forex", "primary_commodity",
-                     "primary_crypto"):
+        for name in ("primary_stocks", "primary_forex", "primary_commodity"):
             self.assertIn("no proof pinned — entries refused",
                           self._label(form, name), name)
-        self.assertEqual(form.count("no proof pinned — entries refused"), 4)
+        crypto = self._label(form, "primary_crypto")
+        self.assertIn("proof pinned", crypto)
+        self.assertNotIn("no proof pinned", crypto)
+        self.assertEqual(form.count("no proof pinned — entries refused"), 3)
         self.assertIn("no short proven", self._label(form, "primary_stocks"))
         self.assertNotIn("proof pinned for", form)
 

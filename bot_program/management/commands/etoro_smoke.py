@@ -2,9 +2,12 @@
 
 The WRITE path — the v2 order POST, the orders:lookup poll, the market-close
 POST and the PATCH stop mover — met eToro on 2026-09-23 on the DEMO segment
-only (deploy/ETORO_DEPARTURE.md §4 D2 / D2b-ii, pinned in
-tests/test_etoro_client.py::TheMeasuredWireTests); on the LIVE segment it has
-never been sent a byte. Of the reads, five have, on 2026-09-22, with a
+(deploy/ETORO_DEPARTURE.md §4 D2 / D2b-ii, pinned in
+tests/test_etoro_client.py::TheMeasuredWireTests), and on 2026-09-26 on the
+LIVE segment all but the PATCH: the order POST, the lookup, the v3 DELETE
+and the market-close POST met the operator's first real orders (§4 D5,
+tests/test_real_account_measured.py). Of the reads, five have, on
+2026-09-22, with a
 live real key: aggregate-portfolio 200, portfolio 200, real/pnl 200, a GET
 of the market-close path 405, and /market-data/search 200 — the adapter's
 path table and tests/test_etoro_client.py record the first four. Two have
@@ -55,8 +58,9 @@ What it prints, in order:
   * the write URLs by name — composed, never called — each with what the
     tree records about it: on the DEMO segment all five answered on
     2026-09-23 (the measured facts are printed beside each); on the real
-    segment the close path was attested by a GET answering 405 and the v2
-    paths carry no measurement at all.
+    segment four answered on 2026-09-26 — the order POST, the lookup, the
+    v3 DELETE and the close POST, whose path a GET answering 405 had
+    attested on 2026-09-22 — and the PATCH has never been sent there.
   * the floors, named and never read here: the MONEY floor
     (minPositionExposure) and the fractional reading (unitsQuantityType)
     are MEASURED 2026-09-23 on the eligibility row, which the engine reads
@@ -474,9 +478,13 @@ class Command(BaseCommand):
         elif close_attested:
             close_url = t._v1_exec(f"{close_key}/positions/<positionId>")
             close_note = ("real path attested by GET → 405 on 2026-09-22 "
-                          "(_V1_EXEC_REAL_SEG); the POST itself has never "
-                          "been sent on the real segment (demo: measured "
-                          "2026-09-23)")
+                          "(_V1_EXEC_REAL_SEG); the POST itself measured on "
+                          "the real account 2026-09-26 22:03:24 UTC: "
+                          "position 3588477891 answered orderForClose"
+                          "{orderID 1596736969, orderType 19, statusID 1}, "
+                          "proven by the OPEN order's positionExecutions[0]"
+                          ".state turning 'closed'; used margin 0.0 five "
+                          "seconds later")
         else:
             close_url = "(real path not in _V1_EXEC_REAL_SEG — _seg raises)"
             close_note = "NOT attested"
@@ -492,19 +500,39 @@ class Command(BaseCommand):
                         "lookup then read status {id 7, Canceled} and both cells "
                         "returned to 0.0; never sent on a CLOSE order id")
                        if t.demo else
-                       "real segment never sent; measured 2026-09-23 on the demo "
-                       "segment")
-        segment_note = ("measured 2026-09-23 on the demo segment"
-                        if t.demo else
-                        "real segment never sent; measured 2026-09-23 on "
-                        "the demo segment")
+                       "measured 2026-09-26 22:03:11 UTC on the real account: "
+                       "202 {orderId 1596774177, referenceId ''} on a "
+                       "WaitingForMarket order (AAPL 0.04, frozenAmount 14.64 "
+                       "held); 3 s later the lookup read status {id 7, "
+                       "Canceled} and used margin gave back the 14.64 — the "
+                       "demo answer of 2026-09-23 exactly; never sent on a "
+                       "CLOSE order id")
+        # The demo facts of 2026-09-23 keep their own date on both worlds'
+        # lines; on a live row the POST and the lookup LEAD with what the
+        # real account answered on 2026-09-26 (at 1x only) — the 200 ms
+        # fill, the 2x margin and the 400 / 404 / 720 answers are demo's.
+        segment_note = "measured 2026-09-23 on the demo segment"
+        post_real = ("" if t.demo else
+                     "measured 2026-09-26 on the real account, at 1x only: "
+                     "accepted with an orderId — 1596774177 (AAPL 0.04, "
+                     "held) and 1596774178 (BTC 0.0002, filled at once); ")
+        lookup_real = ("" if t.demo else
+                       "measured 2026-09-26 on the real account: 200 by "
+                       "?orderId=<int>; {id 11, WaitingForMarket} and {id 7, "
+                       "Canceled} read, a fill's held stop on "
+                       "positionExecutions[0]; ")
+        patch_note = ("measured 2026-09-23 on the demo segment"
+                      if t.demo else
+                      "real segment never sent; measured 2026-09-23 on "
+                      "the demo segment")
         for name, url, note in (
             ("order POST", t._v2_exec_orders(),
-             f"{segment_note}: 2xx, body {{token, orderId (int), "
+             f"{post_real}{segment_note}: 2xx, body {{token, orderId (int), "
              f"referenceId}}; filled in 200 ms in NYSE hours; a 2x order "
              f"locked notional / 2 as margin, units untouched"),
             ("orders:lookup GET", t._v2_lookup(),
-             f"{segment_note}: 200 by ?orderId=<int>, 404 by ?referenceId= "
+             f"{lookup_real}{segment_note}: 200 by ?orderId=<int>, 404 by "
+             f"?referenceId= "
              f"(eToro keeps no client reference), 400 by ?token=; status is "
              f"an object {{id, name, errorCode}} — 3/Filled, 11/WaitingForMarket, "
              f"7/Canceled and 4/Rejected (errorCode 720) seen; the "
@@ -512,7 +540,7 @@ class Command(BaseCommand):
             ("market-close POST", close_url, close_note),
             ("order DELETE v3", delete_url, delete_note),
             ("stop mover PATCH", t._v2("positions/<positionId>"),
-             f"{segment_note}: ok on {{stopLossRate}} (tighter only), the "
+             f"{patch_note}: ok on {{stopLossRate}} (tighter only), the "
              f"new stop echoed on the next lookup; 200 vs 202 not recorded; "
              f"a widening PATCH never sent"),
         ):

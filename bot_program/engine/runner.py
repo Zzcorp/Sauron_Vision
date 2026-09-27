@@ -164,8 +164,9 @@ def run_bot_tick(user_id: int):
                 # _etoro_entry_refusal, 2026-09-24). This loop reaches the
                 # same clients through the same client_for_symbol as the
                 # asset bots and the TAKE TRADE lane, so an eToro-carried
-                # symbol whose class — or short — has no demo fill-and-close
-                # proof pinned sends nothing from here either. Keyed on the
+                # symbol whose class — or short — has no fill-and-close
+                # proof pinned (demo or real) sends nothing from here
+                # either. Keyed on the
                 # router's own class (the Instrument row; no row routes as
                 # crypto); a non-eToro carrier passes at the first line.
                 from bot_program.asset_engine.base import AssetBot
@@ -188,8 +189,9 @@ def run_bot_tick(user_id: int):
                 # BotConfig names no pool currency, and the BotTrade rows
                 # it books are not what _pledged_since counts), so an
                 # eToro-carried order that clears the proof gate is
-                # REFUSED here, never sent unchecked. Unreachable while
-                # ETORO_PROVEN is empty; the asset bots carry eToro.
+                # REFUSED here, never sent unchecked — reached since
+                # 2026-09-26 by crypto (ETORO_PROVEN); the asset bots carry
+                # eToro.
                 from .capabilities import adapter_key as _ak
                 if _ak(sym_client) == "etoro":
                     log.error("legacy tick %s REFUSED (leverage_refused): "

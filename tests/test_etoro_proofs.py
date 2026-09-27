@@ -1,13 +1,15 @@
 """ETORO_PROVEN — the proof gate as the tree ships it (C0, 2026-09-24).
 
-An eToro entry on a class — or a short — whose demo fill-and-close proof is
-not pinned as `test_proof_<token>` in tests/test_etoro_client.py is refused
-by AssetBot._etoro_entry_refusal in EVERY lane that reaches market_order
-(the asset bots' execute_entry, the TAKE TRADE lane and the legacy
-BotConfig tick in engine/runner.py), before the venue floor, the
-idempotency id, the multiplier and the POST. The set ships EMPTY; a token
-joins only in the commit that pins its proof (deploy/ETORO_DEPARTURE.md
-§7, bullet 0; §10). Every carrier the adapter map does not call "etoro"
+An eToro entry on a class — or a short — whose fill-and-close proof (demo
+or real) is not pinned as `test_proof_<token>` in tests/test_etoro_client.py
+is refused by AssetBot._etoro_entry_refusal in EVERY lane that reaches
+market_order (the asset bots' execute_entry, the TAKE TRADE lane and the
+legacy BotConfig tick in engine/runner.py), before the venue floor, the
+idempotency id, the multiplier and the POST. The set shipped EMPTY
+(2026-09-24); a token joins only in the commit that pins its proof
+(deploy/ETORO_DEPARTURE.md §7, bullet 0; §10) — "crypto" on 2026-09-26,
+off the BTC fill-and-close measured on the REAL account. Every carrier the
+adapter map does not call "etoro"
 passes the gate at its first line, untouched.
 
 The eToro client here is the REAL EtoroTrader over a fake wire
@@ -41,19 +43,26 @@ def _gate(client, symbol="AAPL", side="BUY", icls="stock", **kw):
                                          icls, **kw)
 
 
-class TheSetShipsEmptyTests(SimpleTestCase):
-    """What the tree says on 2026-09-24: no class is proven."""
+class TheSetAsShippedTests(SimpleTestCase):
+    """What the tree says: no class was proven on 2026-09-24; since
+    2026-09-26 crypto is, at 1x, off the BTC round trip measured on the
+    REAL account (test_proof_crypto)."""
 
-    def test_no_token_is_in_the_set_at_this_commit(self):
-        from bot_program.asset_engine.base import ETORO_PROVEN
+    def test_only_crypto_is_in_the_set_at_this_commit(self):
+        from bot_program.asset_engine.base import (ETORO_PROVEN,
+                                                   ETORO_PROVEN_LEVERAGE)
         self.assertIsInstance(ETORO_PROVEN, frozenset)
-        self.assertEqual(ETORO_PROVEN, frozenset())
+        self.assertEqual(ETORO_PROVEN, frozenset({"crypto"}))
+        self.assertEqual(ETORO_PROVEN_LEVERAGE, {},
+                         "crypto is proven at 1x: the attack mode's "
+                         "chooser reads 1; a typed multiplier is not held "
+                         "to it (tests/test_real_account_measured.py)")
 
     def test_every_token_present_has_its_pinned_proof(self):
         """A token without `def test_proof_<token>` in
-        tests/test_etoro_client.py is a claim, not a measurement. Vacuous
-        while the set is empty — that is the point: the first token that
-        lands without its proof fails here, in the same commit."""
+        tests/test_etoro_client.py is a claim, not a measurement: a token
+        that lands without its proof fails here, in the same commit. It
+        bites since 2026-09-26 (crypto, test_proof_crypto)."""
         from bot_program.asset_engine.base import ETORO_PROVEN
         src = (Path(settings.BASE_DIR) / "tests"
                / "test_etoro_client.py").read_text(encoding="utf-8")

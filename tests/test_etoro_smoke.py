@@ -331,9 +331,10 @@ class SmokeTests(TestCase):
 
     def test_the_write_urls_are_named_with_what_the_tree_records(self):
         """Composed and printed so the operator can GET them by hand; never
-        called. The real close path carries the one attestation the adapter
-        records (a 405 on GET); beside every write URL the DEMO measurement
-        of 2026-09-23, never the old 'documented, never measured'."""
+        called. The real close path carries its first attestation (a 405
+        on GET) and, since 2026-09-26, the real POST; the real DELETE is
+        composed and measured the same day; beside every write URL the
+        measurement, never the old 'documented, never measured'."""
         _keyed(self.user)
         body, _ = self._run()
         self.assertIn(f"{BASE}/api/v2/trading/execution/orders", body)
@@ -341,9 +342,17 @@ class SmokeTests(TestCase):
         self.assertIn(f"{BASE}/api/v1/trading/execution/market-close-orders/"
                       f"positions/<positionId>", body)
         self.assertIn(f"{BASE}/api/v2/trading/positions/<positionId>", body)
-        self.assertIn("real v3 spelling not attested", body)
+        # 2026-09-26: the real DELETE and the real close POST are measured
+        # (tests/test_real_account_measured.py pins their words); the 405
+        # stays as the close path's first attestation, and the PATCH is
+        # the one write never sent on the real segment
+        self.assertIn(f"{BASE}/api/v3/trading/execution/orders/<orderId>",
+                      body)
+        self.assertNotIn("real v3 spelling not attested", body)
         self.assertIn("GET → 405", body)
-        self.assertIn("the POST itself has never been sent", body)
+        self.assertNotIn("the POST itself has never been sent", body)
+        self.assertIn("the POST itself measured on the real account "
+                      "2026-09-26", body)
         self.assertNotIn("documented, never measured", body)
         self.assertIn("real segment never sent; measured 2026-09-23 on the "
                       "demo segment", body)

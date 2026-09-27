@@ -648,7 +648,7 @@ def build_status(user, *, now=None) -> Reply:
     lines.extend(_etoro_lines(user, now))
     lines.extend(_bot_lines(user))
     lines.extend(_health_lines(now))
-    lines.append(f"Demo proofs pinned: {_proof_words()}")
+    lines.append(f"Proofs pinned: {_proof_words()}")
     trades = list(_open_trades(user))
     lines.append(heading(f"Open on the platform ({len(trades)})"))
     if not trades:

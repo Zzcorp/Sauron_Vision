@@ -25,7 +25,8 @@ instrument per UTC day once read; an unread row is asked again on every ask.
     eligibility, unit_type, requires_w8ben,     (read, not a tier on their own)
     min_stop_loss_pct, min_amount
     cancel_order, get_positions                 orders (MEASURED 2026-09-23 20:29 UTC,
-                                                 demo; order_status is in no tier)
+                                                 demo, and 2026-09-26 22:03 UTC,
+                                                 real; order_status is in no tier)
     order_status, account, balance_usdt         (used, not a tier on their own)
 
 NOT declared, on purpose — see "What it refuses to claim" below.
@@ -95,7 +96,11 @@ WHAT IT REFUSES TO CLAIM
     order id is findable on no read path — read once, never DELETEd), True
     only when a lookup reads 7/8/9, False on any other read after the
     DELETE, None only when a DELETE went out and no lookup answered. The
-    live spelling is refused by `_seg` until measured.
+    real spelling, `/api/v3/trading/execution/orders/<id>` with no segment,
+    MEASURED 2026-09-26 22:03:11 UTC on the real account: order 1596774177
+    (AAPL 0.04, WaitingForMarket) answered 202 {orderId, referenceId ""},
+    the lookup read 7 Canceled 3 s later and the held 14.64 came back —
+    the demo answer exactly.
   * `fills` — no closed-position history is documented anywhere. The
     close-confirmation SHAPE met a real key on 2026-09-23 (`close_position`:
     orderForClose{orderID, orderType 19, statusID 1}) and so did the close
@@ -511,6 +516,13 @@ class EtoroTrader:
     #: GET cannot close anything, and Method Not Allowed proves the path exists
     #: where 404 proves it does not.
     #:
+    #: THE WRITES, MEASURED ON THE REAL ACCOUNT on 2026-09-26 (the operator's
+    #: first real orders, code 097e72c): the close POST on the tail the 405
+    #: attested (22:03:24 UTC, position 3588477891 -> orderForClose{orderID
+    #: 1596736969, orderType 19, statusID 1}, proven by the open order's
+    #: positionExecutions[0].state "closed"), and the v3 order DELETE with no
+    #: segment (22:03:11 UTC, _V3_EXEC_REAL_SEG below: 202, then 7 Canceled).
+    #:
     #: DEMO writes "demo/" for every tail measured. An unlisted tail RAISES
     #: rather than composing a URL nobody has ever seen answer: this adapter's
     #: previous header called its paths "encoded ... rather than discovered in
@@ -522,14 +534,22 @@ class EtoroTrader:
         "pnl": "real/",
     }
     _V1_EXEC_REAL_SEG = {
+        # GET 405 on 2026-09-22 (the attestation, kept as history); the
+        # POST itself MEASURED on the real account 2026-09-26 22:03:24 UTC:
+        # position 3588477891 closed, orderForClose{orderID 1596736969,
+        # orderType 19, statusID 1}, the open order's execution "closed",
+        # used margin 0.0 five seconds later.
         "market-close-orders": "",
     }
     #: v3 execution, the order DELETE. DEMO measured 2026-09-23 20:29 UTC
-    #: (/api/v3/trading/execution/demo/orders/<id> -> 202). The real
-    #: spelling the public reference documents, /api/v3/trading/execution/
-    #: orders/<id>, has met no key: the table is EMPTY so `_seg` raises on
-    #: the real segment until it is measured and "orders": "" is added.
-    _V3_EXEC_REAL_SEG: dict = {}
+    #: (/api/v3/trading/execution/demo/orders/<id> -> 202). REAL measured
+    #: 2026-09-26 22:03:11 UTC on the operator's real account: DELETE
+    #: /api/v3/trading/execution/orders/1596774177 — no segment, the
+    #: spelling the public reference documents — answered 202
+    #: {"orderId":1596774177,"referenceId":""}; 3 s later the lookup read
+    #: {7, Canceled}, state dead, and the margin cells gave back the held
+    #: 14.64 (used 31.47 -> 16.83). Exactly the demo answer of 2026-09-23.
+    _V3_EXEC_REAL_SEG = {"orders": ""}
 
     def _seg(self, table: dict, key: str, tail: str) -> str:
         """The environment segment for `key`, or a raise naming the tail.
@@ -569,8 +589,10 @@ class EtoroTrader:
         return f"{BASE}/api/v2/trading/execution/{seg}orders"
 
     def _v3_exec_order(self, order_id: str) -> str:
-        """The DELETE of one order. Demo = the measured spelling; real raises
-        through `_seg` (LookupError) until the real spelling is measured."""
+        """The DELETE of one order, in the spelling each world answered:
+        demo/orders/<id> (MEASURED 2026-09-23 20:29 UTC) and orders/<id>
+        with no segment (MEASURED 2026-09-26 22:03:11 UTC on the real
+        account: 202, then {7, Canceled}); `_seg` reads _V3_EXEC_REAL_SEG."""
         seg = self._seg(self._V3_EXEC_REAL_SEG, "orders", f"orders/{order_id}")
         return f"{BASE}/api/v3/trading/execution/{seg}orders/{order_id}"
 
@@ -1039,6 +1061,18 @@ class EtoroTrader:
             row = {
                 "symbol": self._symbol_for(p.get("instrumentID")
                                            or p.get("instrumentId")),
+                # A CONSTANT, and wrong for a REAL position. MEASURED
+                # 2026-09-26 on the real account: this method listed the
+                # REAL BTC position 3588477891 (the lookup's
+                # asset.settlementType 'REAL', leverage 1) as sec_type
+                # 'CFD', market_price 0.0, currency ''. The /portfolio row
+                # carries no settlement word — only settlementTypeID,
+                # printed once, 0, on a demo GLDM CFD row (2026-09-23); a
+                # REAL row's id has never been printed. So the label stays
+                # until one print of that id maps it to the platform's
+                # vocabulary (base.AssetBot._SEC_TYPES, IBKRTrader,
+                # SaxoTrader: 'STK' for a stock or an ETF, no word yet for
+                # a coin; 'CFD' stays for CFD settlement).
                 "sec_type": "CFD",
                 "qty": abs(qty),
                 "side": "BUY" if p.get("isBuy", True) else "SELL",
@@ -1783,9 +1817,9 @@ class EtoroTrader:
             # the orderId both lanes persist as broker_order_id) and
             # WITHDRAWN by cancel_working_entry through cancel_order (DELETE
             # v3 -> 202 -> lookup 7) after ENTRY_WORKING_MAX_HOURS on the
-            # demo segment; on the real segment the DELETE spelling is
-            # unmeasured, `_v3_exec_order` raises, and the tick alerts daily
-            # instead. A held order refused at the open (status 4) is booked
+            # demo segment and on the real one: the real DELETE answered as
+            # the demo one did (MEASURED 2026-09-26, order 1596774177). A
+            # held order refused at the open (status 4) is booked
             # CANCELED with its errorCode words. Since the fix in
             # _await_fill this branch is reached only by a real non-filled
             # status (11 measured) or by EVERY lookup failing.
@@ -1843,19 +1877,28 @@ class EtoroTrader:
         DELETE /api/v3/trading/execution/demo/orders/<id> -> 202
         {orderId, referenceId ""}; the lookup then read {7, Canceled} and the
         pledged margin and frozen cash returned to 0.
+        MEASURED 2026-09-26 22:03:11 UTC on the REAL account (order
+        1596774177, AAPL 0.04, WaitingForMarket, frozenAmount 14.64):
+        DELETE /api/v3/trading/execution/orders/<id>, no segment -> 202
+        {"orderId":1596774177,"referenceId":""}; 3 s later the lookup read
+        {7, Canceled} and the held 14.64 returned. The same answer.
 
         THREE ANSWERS. True = a lookup read Canceled (7, 8 or 9; 7 measured,
         8/9 the public table). False = nothing was cancelled: nothing sent
         (an id the lookup cannot read - a CLOSE order id is findable on no
         read path and is read once, never DELETEd; an order already filled
-        or refused), refused (a DELETE answering anything but 200/202/204;
+        or refused; a body whose status nobody can read, id 0; an order the
+        lookup reads as a CLOSE, type 19 - the demo lookup reads none, 404,
+        and a DELETE on a close order is unmeasured on both worlds, so a
+        real lookup that reads one sends nothing either), refused (a
+        DELETE answering anything but 200/202/204;
         the refusal body is unmeasured), or not proven (a DELETE accepted
         and the lookup reading anything else afterwards, including a body
         the adapter cannot read). None = a DELETE went out and no lookup
         answered at all. Status 5 (PartiallyFilled) is OPEN: the DELETE is
-        sent and a 9 read proves it (belief - neither has met a key). The
-        real segment's spelling is unmeasured: `_v3_exec_order` raises there
-        and every consumer books "not confirmed".
+        sent and a 9 read proves it (belief - neither has met a key). Both
+        worlds withdraw through this one path since the real spelling was
+        measured (above).
         """
         oid = str(order_id or "")
         if not oid:
@@ -1873,7 +1916,26 @@ class EtoroTrader:
             log.info("eToro cancel_order: order %s reads %s - nothing to "
                      "cancel", oid, STATUS_NAMES.get(sid, sid))
             return False
-        url = self._v3_exec_order(oid)          # raises on the real segment
+        if sid == 0:
+            # the lookup answered, but with no status anyone can read: the
+            # order's state is unknown, so nothing is sent — the 404's
+            # rule above ("cannot read, do not send")
+            log.error("eToro cancel_order NOT SENT: order %s answered with "
+                      "no readable status - nothing sent", oid)
+            return False
+        _types = ({str(read.get(k)) for k in ("etoroOrderTypeId",
+                                              "orderType")}
+                  if isinstance(read, dict) else set())
+        if "19" in _types:
+            # a CLOSE order (orderType 19): the demo lookup reads none (404,
+            # MEASURED 2026-09-23), so no DELETE ever went to one there; a
+            # DELETE on a close order is unmeasured on both worlds, so a
+            # real lookup that reads one sends nothing either
+            log.error("eToro cancel_order NOT SENT: order %s reads as a "
+                      "CLOSE order (type 19) - a DELETE on a close order is "
+                      "unmeasured", oid)
+            return False
+        url = self._v3_exec_order(oid)          # both worlds measured
         try:
             r = self._sess().delete(url, headers=self._headers(),
                                     timeout=self.timeout)

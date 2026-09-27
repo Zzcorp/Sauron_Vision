@@ -68,7 +68,8 @@ weeks; IBKR is retired.
   200, GET market-close-orders 405). The WRITE path — the v2 order POST, the
   orders:lookup poll, the market-close POST, the PATCH stop mover — met eToro on
   2026-09-23 on the DEMO segment (§4 D2, D2b-ii: three defects found, fixed in
-  D3); on the LIVE segment it has never been sent.
+  D3), and on 2026-09-26 on the LIVE segment all but the PATCH: the order
+  POST, the lookup, the v3 DELETE and the close POST (§4 D5).
 - **Alerts:** telegram proven end to end (`_send_telegram` from worker-fast
   returned True; preflight section 7 reads token and prefs row).
 - **Backup + export:** pg_dump `sauron-20260923T053524Z.dump` (39,641,466 B) and
@@ -441,7 +442,8 @@ demo row the book and the venue in one click).
     /api/v3/trading/execution/demo/orders/<id> → 202 {orderId, referenceId
     ''}; lookup → {7, Canceled}; both cells 0.0. Pinned:
     tests/test_etoro_client.py::TheHeldOrderTests. Live DELETE spelling
-    untried. As run: Print `MARGIN before` (`t.margin_cells()`); the RAW
+    MEASURED 2026-09-26 (§4 D5: 202, then Canceled). As run: Print
+    `MARGIN before` (`t.margin_cells()`); the RAW
     ELIGIBILITY read (`t._sess().post(f'{BASE}/api/v2/trading/info/eligibility',
     json={'instrumentIds': [t.instrument_id('GLDM')]}, headers=t._headers(),
     timeout=t.timeout)` and, on 404, the `.../trading/info/demo/eligibility`
@@ -614,8 +616,9 @@ demo row the book and the venue in one click).
   (lookup-first; DELETE v3; True only on a lookup reading 7/8/9; False on any
   other read; False, nothing sent, for any id it cannot read — the drain's
   queued-close block stands and a None there is no longer a confirmation;
-  the live spelling raises until measured — on live the tick alerts daily
-  instead of withdrawing), the tier `orders`, `_finish_working_entry(venue=)`
+  the live spelling raised until it was measured on 2026-09-26, §4 D5 —
+  since then the tick withdraws on both worlds), the tier `orders`,
+  `_finish_working_entry(venue=)`
   stamping the carrier and the close handle on eToro rows only, comparing
   the held stop with the sent one, alerting on NO stop read; the dead branch
   books the refusal words; the age branch alerts when a withdrawal is not
@@ -624,13 +627,14 @@ demo row the book and the venue in one click).
   25 % at 2x) and the held level lives in positionExecutions[0], the floor
   refusal is status 4 / errorCode 720 with the numbers in errorMessage.
   STILL UNMEASURED, therefore unpinned: whether a held order's legs attach
-  at the fill; the live DELETE spelling; a DELETE on a close order id; the
+  at the fill; a DELETE on a close order id; the
   DELETE's refusal body; status ids 5 and 9; the over-fill; the 429 body; the
   2x /portfolio row; a closing rate (the exit stays mark-priced);
   `UnitsToDeduct` (never sent since D3c; measured accepted-and-never-executed) and a
   close below the position; a second close on a closed positionId; a
   stop-out's execution state; what eToro answers a lookup for an id another
-  venue issued; any live (non-demo) write. Still in D3b, not started: the
+  venue issued; a live PATCH (every other live write met the real account
+  on 2026-09-26, §4 D5). Still in D3b, not started: the
   TAKE TRADE lane calling `venue_stamps` (a hand-taken eToro row records no
   `broker`, `broker_env` or `broker_position_id` at placement — since D3b a
   hand-taken row that fills FROM WORKING gains all three at the fill through
@@ -656,6 +660,47 @@ demo row the book and the venue in one click).
   any class box is ticked on that same save, or without the PIN; the flash
   names which. The environment flip drops the demo reading cells on purpose.
   From this save every order the platform routes to eToro is real money.
+- D5. THE REAL WORLD, MEASURED — DONE 2026-09-26 (planned for Sunday
+  2026-09-27; run on Saturday ~21:25-22:03 UTC by the operator, code
+  097e72c, through a shell client built `env='live'` — the row stayed demo
+  on /brokers/, no class ticked; the WORLD CHECK inverted: the real world
+  and a balance under 100,000). Pinned in tests/test_real_account_measured.py
+  and tests/test_etoro_client.py::TheRealAccountProofTests.
+  - AAPL 0.04 BUY, market shut: the v2 POST with no segment ACCEPTED, order
+    1596774177; the lookup (no segment) read {11, WaitingForMarket},
+    asset.settlementType 'REAL' at leverage 1, requestedAmount 13.64,
+    frozenAmount 14.64, legs 0.0 while held. WITHDRAWN at 22:03:11 UTC:
+    `DELETE /api/v3/trading/execution/orders/1596774177` → 202
+    `{"orderId":1596774177,"referenceId":""}`; 3 s later the lookup read
+    {7, Canceled} and used margin fell 31.47 → 16.83 (the held 14.64
+    returned) — the demo answer exactly. `_V3_EXEC_REAL_SEG` carries
+    `"orders": ""` since, and the tick withdraws a held live entry after
+    ENTRY_WORKING_MAX_HOURS as it does on demo.
+  - BTC 0.0002 BUY: FILLED at once — order 1596774178, position 3588477891,
+    avgPrice 84145.8, settlementType 'REAL' at 1x, requestedAmount 16.83,
+    frozenAmount 17.0, fees 0.17 (1%, one side), marketSpread 0, markup 0.
+    eToro REWROTE THE STOP: sent 79934.97 (5% under the last 84142.07),
+    held 75745.8 (9.98% under the fill, on positionExecutions[0]
+    .stopLossRate — the top-level openStopLossRate keeps the sent level);
+    the target 88349.17 held as sent. The fill notification names it since
+    ("Stop moved by eToro: sent X, held Y (Z% from entry)"). CLOSED at
+    22:03:24 UTC through the adapter's close — the v1 market-close-orders
+    POST with no segment, attested until then by a GET answering 405 only:
+    orderForClose {orderID 1596736969, orderType 19, statusID 1}, the open
+    order's positionExecutions[0].state 'closed'; 5 s later available cash
+    2249.65, used margin 0.0, no position, broker_portfolio []. Round trip
+    0.33 USD (2249.98 → 2249.65). This is the crypto proof (§7, bullet 0):
+    `crypto` joined ETORO_PROVEN, proven at 1x. ETORO_PROVEN_LEVERAGE stays
+    empty, which binds the attack mode's chooser ALONE (it picks 1 for
+    crypto): a TYPED `extras["leverage"] = 2` on a crypto config is not
+    held to it and goes at 2x (CFD settlement, never met on the real
+    account) once etoro_leverage_live is ON — preflight §4 warns, never
+    refuses; tests/test_real_account_measured.py pins it.
+  - broker_portfolio listed the REAL BTC position as sec_type 'CFD',
+    market_price 0.0, currency '' — the label is a constant; the real
+    row's settlementTypeID was not printed, so it stays until it is.
+  - Not measured on the real account: the PATCH stop mover; a levered
+    order.
 
 ## 5. Funding, and the pool arithmetic
 
@@ -720,8 +765,9 @@ routes as crypto, and `etoro_smoke` prints `route=<broker>` beside every
 config symbol. The legacy tick (engine/runner.py) never sends to eToro:
 since 2026-09-26 it refuses every eToro-carried order, because it cannot
 check the account's headroom. Crypto routes nothing until a crypto config
-exists, and reaches eToro only once `crypto` is in ETORO_PROVEN with its
-pinned proof (§7, bullet 0).
+exists, and reaches eToro only with `crypto` in ETORO_PROVEN and its
+pinned proof (§7, bullet 0) — there since 2026-09-26, proven at 1x (§4
+D5; a typed multiplier is not held to that).
 
 Commodities (2026-09-26). CommodityBot no longer rewrites a live config to
 paper, so a live commodity config goes where the router sends it: eToro's
@@ -752,9 +798,11 @@ commodity symbol reads `route=etoro` before its config is enabled.
 
 ## 7. Follow before enable — per config, in this order
 
-- 0. The class's demo fill-and-close proof is pinned as `test_proof_<token>`
-  and its token sits in `ETORO_PROVEN` (bot_program/asset_engine/base.py) —
-  until then every lane (the asset bots, TAKE TRADE and the legacy tick)
+- 0. The class's fill-and-close proof — on the demo segment OR the real
+  account, a real one being the stronger (crypto's, §4 D5) — is pinned as
+  `test_proof_<token>` and its token sits in `ETORO_PROVEN`
+  (bot_program/asset_engine/base.py) — until then every lane (the asset
+  bots, TAKE TRADE and the legacy tick)
   refuses every eToro entry of that class as `gate_blocked`, before the
   floor and before any POST. The per-class sitting list lands with the
   proofs; nothing below lifts this bullet.
@@ -887,8 +935,10 @@ retirement then continues at deploy/IBKR_RETIREMENT.md Stage 3.
   BotTrade on an unread eToro answer, with no stop — is gone: since
   2026-09-26 that loop never sends to eToro (it refuses every eToro-carried
   order, because it cannot check the account's headroom). The proof gate
-  refuses every crypto entry until `crypto` is in ETORO_PROVEN with its
-  pinned proof, and the bullet stands until that proof lands.
+  refused every crypto entry until `crypto` joined ETORO_PROVEN with its
+  pinned proof on 2026-09-26 (the real BTC round trip at 1x, §4 D5 — a
+  typed 2x on a crypto config is not held to it); what stands is the
+  sitting itself (§6, §7).
 - Never add a token to `ETORO_PROVEN` (bot_program/asset_engine/base.py)
   without its `test_proof_<token>` in tests/test_etoro_client.py in the
   same commit, and never tick a class whose token is absent: every lane
