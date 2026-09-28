@@ -91,6 +91,16 @@ class WithdrawalRequest(models.Model):
     paid_at = models.DateTimeField(null=True, blank=True)
     paid_amount = models.DecimalField(max_digits=14, decimal_places=2,
                                       null=True, blank=True)
+    # The latest account reading that STILL COUNTED the money when the
+    # request was marked withdrawn (or corrected) at a time before it, and
+    # the operator ticked "I have checked" — None when the time typed
+    # agreed with the readings, or nothing could be checked. The history
+    # reads `paid_at`, as typed; the hold reads this: the flow is held back
+    # from that reading and every earlier one, exactly as a blank "now"
+    # would have been. Without it a time typed early released the reserve
+    # while the money was still in the account (review, 2026-09-28, second
+    # pass: bot_program.withdrawals, "A MOMENT TOO EARLY").
+    held_through = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
     closing_note = models.TextField(blank=True, default="")
     # Who marked it withdrawn or cancelled — "" while it is still reserved.

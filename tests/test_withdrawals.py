@@ -32,7 +32,10 @@ Pinned here:
     once the account reads in EUR; the Follow button and `manage.py
     follow` size from the reading less the hold and quote what they
     wrote; the page shows a pool that trades elsewhere as not retuned,
-    exactly as the sync skips it.
+    exactly as the sync skips it; and, from the second pass, a time typed
+    before the latest reading while it still holds the money needs the
+    tick too, and the flow is then held back from that reading, as a
+    blank "now" would be, until the next one.
 
 Run with:  python manage.py test tests.test_withdrawals
 """
@@ -106,12 +109,12 @@ def _cfg(user, *, name, asset_class="stock", mode="live", capital="100",
 
 
 def _wr(user, amount, *, status="reserved", currency="EUR", paid_at=None,
-        paid_amount=None, who="operator", assumed=False):
+        paid_amount=None, who="operator", assumed=False, held_through=None):
     from bot_program.models import WithdrawalRequest
     return WithdrawalRequest.objects.create(
         user=user, requested_by=who, amount=Decimal(str(amount)),
         currency=currency, currency_assumed=assumed, status=status,
-        paid_at=paid_at,
+        paid_at=paid_at, held_through=held_through,
         paid_amount=(Decimal(str(paid_amount)) if paid_amount is not None
                      else None))
 
@@ -349,6 +352,32 @@ class TheArithmeticTests(TestCase):
         self.assertEqual((base, held), (Decimal("900.00"), Decimal("100.00")))
         base, _ = deployable(self.user, 50.0, reading_at=now)
         self.assertEqual(base, Decimal("0"))
+
+    def test_a_flow_confirmed_early_is_held_through_the_reading_it_was_checked_against(
+            self):
+        # marked "at 10:00", ticked, while the 10:50 reading still showed
+        # the money: the history reads the time typed, the hold reads the
+        # reading it was checked against — held from it, and from every
+        # earlier one, as a blank "now" would have been; not from a later
+        from bot_program.withdrawals import (flow_adjusted_value, held_back,
+                                             held_back_in, paid_flows)
+        now = timezone.now()
+        r_at = now - timedelta(minutes=5)
+        _wr(self.user, 200, status="paid", paid_at=now - timedelta(hours=1),
+            held_through=r_at)
+        self.assertEqual(held_back(self.user, r_at), Decimal("200.00"))
+        self.assertEqual(held_back(self.user, now - timedelta(hours=3)),
+                         Decimal("200.00"))
+        self.assertEqual(held_back(self.user, now), Decimal("0"))
+        self.assertEqual(held_back_in(self.user, "EUR", r_at),
+                         (Decimal("200.00"), {}))
+        self.assertEqual(held_back_in(self.user, "EUR", now),
+                         (Decimal("0"), {}))
+        flows = paid_flows(self.user, currency="EUR")
+        self.assertEqual(flow_adjusted_value(1000.0, r_at, flows), 1000.0)
+        self.assertEqual(
+            flow_adjusted_value(1000.0, now - timedelta(hours=2), flows),
+            800.0)
 
 
 # ── 3. The sizing ────────────────────────────────────────────────────────
@@ -1159,6 +1188,158 @@ class AMarkAfterTheSyncReadTheMoneyGoneTests(_Quiet):
                       f"{self.b_at.astimezone(dt_timezone.utc):%Y-%m-%d %H:%M}"
                       " UTC (800.00 EUR)", page)
         self.assertIn('name="confirm"', page)
+
+
+class AMarkBeforeTheSyncReadTheMoneyGoneTests(_Quiet):
+    """History at 1,000 (-10d, -12h, -2h); the sync read 1,000 five
+    minutes ago; a 200 request holds the follower at 800. The operator
+    sent the money at the broker an hour ago and types that time — but
+    the balance has not moved yet, by any reading. Before the second
+    review the mark went through without a tick, and the reserve was
+    released at once: paid_since held only a withdrawal paid AFTER the
+    reading, and this one was "paid" before it — so the pools grew back
+    into money about to leave, and the readings in between read as a 20%
+    fall once it did."""
+
+    def setUp(self):
+        super().setUp()
+        from bot_program.withdrawals import create_request
+        self.user = _user("wd_early")
+        self.acct = _ibkr_book(self.user, "1000", "EUR", age_seconds=300)
+        _reading(self.acct, 1000, hours_ago=24 * 10)
+        _reading(self.acct, 1000, hours_ago=12)
+        _reading(self.acct, 1000, hours_ago=2)
+        self.follower = _cfg(self.user, name="manual", tracks=True,
+                             capital="1000")
+        self.wr = create_request(self.user, requested_by="operator",
+                                 amount="200")["request"]
+        self.acct.refresh_from_db()
+        self.r_at = self.acct.last_equity_at
+        self.early = (timezone.now() - timedelta(hours=1)).astimezone(
+            dt_timezone.utc).strftime("%Y-%m-%dT%H:%M")
+
+    def _mark(self, **kw):
+        from bot_program.withdrawals import mark_paid
+        return mark_paid(self.user, self.wr.pk, acted_by="operator", **kw)
+
+    def _capital(self):
+        self.follower.refresh_from_db()
+        return float(self.follower.capital)
+
+    def test_a_time_before_the_reading_that_still_holds_the_money_needs_the_box(
+            self):
+        self.assertEqual(self._capital(), 800.0)
+        out = self._mark(paid_at=self.early)
+        err = out["error"]
+        self.assertIn("Refused until checked", err)
+        self.assertIn("is before the latest reading", err)
+        self.assertIn(f"({self.r_at.astimezone(dt_timezone.utc):%Y-%m-%d %H:%M}"
+                      " UTC)", err)
+        self.assertIn("still holds the money", err)
+        self.assertIn("nothing has left the account yet by the readings", err)
+        self.assertIn("90 days", err)
+        self.assertIn("leave the time blank", err)
+        self.assertIn("tick", err)
+        self.assertIn("Nothing changed", err)
+        self.wr.refresh_from_db()
+        self.assertEqual(self.wr.status, "reserved")
+        self.assertEqual(_readers(self.user)["held"], Decimal("200.00"))
+        self.assertEqual(self._capital(), 800.0)
+
+    def test_ticked_the_mark_goes_through_as_typed(self):
+        out = self._mark(paid_at=self.early, confirm=True)
+        self.assertTrue(out.get("ok"), out)
+        self.wr.refresh_from_db()
+        self.assertEqual(self.wr.status, "paid")
+        self.assertEqual(self.wr.paid_amount, Decimal("200.00"))
+        self.assertEqual(self.wr.paid_at.astimezone(dt_timezone.utc)
+                         .strftime("%Y-%m-%dT%H:%M"), self.early)
+        # and it remembers the reading it was checked against
+        self.assertEqual(self.wr.held_through, self.r_at)
+
+    def test_ticked_the_money_is_still_held_back_until_a_reading_shows_it_gone(
+            self):
+        from bot_program.tasks import _follow_the_account
+        from bot_program.withdrawals import held_back, held_back_in
+        self.assertTrue(self._mark(paid_at=self.early, confirm=True).get("ok"))
+        # the follow after the mark sized from the 1,000 reading, which
+        # still holds the money: the flow is held back from it, as the
+        # reserve was
+        self.assertEqual(held_back(self.user), Decimal("200.00"))
+        self.assertEqual(held_back(self.user, self.r_at), Decimal("200.00"))
+        self.assertEqual(held_back_in(self.user, "EUR", self.r_at),
+                         (Decimal("200.00"), {}))
+        self.assertEqual(self._capital(), 800.0)
+        # the next sync reads the money gone: counted once, held no more
+        _stamp(self.acct, "800")
+        self.acct.refresh_from_db()
+        _follow_the_account(self.user, 800.0, "EUR")
+        self.assertEqual(held_back(self.user), Decimal("0"))
+        self.assertEqual(held_back_in(self.user, "EUR",
+                                      self.acct.last_equity_at),
+                         (Decimal("0"), {}))
+        self.assertEqual(self._capital(), 800.0)
+
+    def test_a_correction_to_an_early_time_is_checked_and_held_the_same(self):
+        from bot_program.withdrawals import correct_paid, held_back
+        self.assertTrue(self._mark().get("ok"))          # blank: now
+        self.wr.refresh_from_db()
+        self.assertIsNone(self.wr.held_through)
+        self.assertEqual(held_back(self.user), Decimal("200.00"))
+        out = correct_paid(self.user, self.wr.pk, acted_by="operator",
+                           paid_at=self.early)
+        self.assertIn("still holds the money", out["error"])
+        out = correct_paid(self.user, self.wr.pk, acted_by="operator",
+                           paid_at=self.early, confirm=True)
+        self.assertTrue(out.get("ok"), out)
+        self.wr.refresh_from_db()
+        self.assertEqual(self.wr.held_through, self.r_at)
+        self.assertEqual(held_back(self.user), Decimal("200.00"))
+
+    def test_a_fall_the_noise_hid_is_still_a_fall_and_is_not_held_twice(self):
+        # the sync read 770: the 200 left with a 30 market fall on top,
+        # which no pair of readings matches — but the money IS gone by the
+        # readings, so the time typed before that reading needs no tick,
+        # and the flow is not held back from a reading that lacks it
+        from bot_program.withdrawals import held_back
+        _stamp(self.acct, "770", age_seconds=300)
+        out = self._mark(paid_at=self.early)
+        self.assertTrue(out.get("ok"), out)
+        self.wr.refresh_from_db()
+        self.assertIsNone(self.wr.held_through)
+        self.assertEqual(held_back(self.user), Decimal("0"))
+        self.assertEqual(self._capital(), 770.0)
+
+    def test_a_withdrawal_inside_the_market_noise_goes_through_as_typed(self):
+        # 10 on 1,000 cannot be told from the market: no tick, no hold
+        from bot_program.withdrawals import create_request, held_back, mark_paid
+        small = create_request(self.user, requested_by="operator",
+                               amount="10")["request"]
+        out = mark_paid(self.user, small.pk, acted_by="operator",
+                        paid_at=self.early)
+        self.assertTrue(out.get("ok"), out)
+        small.refresh_from_db()
+        self.assertIsNone(small.held_through)
+        self.assertEqual(held_back(self.user), Decimal("200.00"))
+
+    def test_no_history_or_no_reading_still_goes_through_as_typed(self):
+        # the carve-out stays: when nothing can be checked, the act goes
+        # through as typed, as it did before
+        from bot_program.models import BrokerEquityReading
+        from bot_program.withdrawals import mark_paid
+        BrokerEquityReading.objects.filter(account=self.acct).delete()
+        out = self._mark(paid_at=self.early)
+        self.assertTrue(out.get("ok"), out)
+        self.wr.refresh_from_db()
+        self.assertIsNone(self.wr.held_through)
+        blind = _user("wd_early_blind")
+        _ibkr_book(blind, value=None)
+        wr = _wr(blind, 50, currency="USD", assumed=True)
+        out = mark_paid(blind, wr.pk, acted_by="operator", paid_at=self.early)
+        self.assertTrue(out.get("ok"), out)
+        self.assertIn("No account reading has landed", out["warnings"][0])
+        wr.refresh_from_db()
+        self.assertIsNone(wr.held_through)
 
 
 class ACorrectionPutsAWrongNumberRightTests(_Quiet):
