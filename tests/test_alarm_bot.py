@@ -1019,6 +1019,35 @@ class PauseTests(_AlarmCase):
         for word in ("has stopped running", "resumed", "back to normal"):
             self.assertFalse(any(word in t for t in said), word)
 
+    def test_every_door_that_flips_the_master_switch_stamps_the_resume(self):
+        """_resumed_at reads platform_master's updated_at, an auto_now
+        column that a save with update_fields, or a queryset update,
+        leaves alone: every door that flips the switch must stamp it, or
+        a resume through that door is not seen and the flood rings."""
+        from core.platform_control import PlatformComponent
+        admin = User.objects.create_superuser("root", "root@example.test",
+                                              "x")
+        self.client.force_login(admin)
+        doors = (
+            ("manage.py component on", lambda: call_command(
+                "component", "on", "platform_master", stdout=StringIO())),
+            ("START PLATFORM on /admin-dashboard/", lambda: self.client.post(
+                "/admin-dashboard/toggle/", {"key": "platform_master"})),
+            ("the system map", lambda: self.client.post(
+                "/admin-dashboard/system-map/toggle/",
+                {"kind": "component", "key": "platform_master"})),
+            ("all on beside System", lambda: self.client.post(
+                "/admin-dashboard/bulk-toggle/",
+                {"category": "system", "action": "enable"})),
+        )
+        for name, flip in doors:
+            _component("platform_master", on=False)
+            _resumed(NOW - timedelta(days=3))
+            flip()
+            row = PlatformComponent.objects.get(key="platform_master")
+            self.assertTrue(row.is_enabled, name)
+            self.assertGreater(row.updated_at, NOW - timedelta(days=2), name)
+
     def test_a_row_that_stopped_after_the_resume_is_a_stop(self):
         """The grace covers only rows whose silence began before the
         resume: one that last ran after it and is past its window is

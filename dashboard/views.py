@@ -3979,7 +3979,10 @@ def admin_bulk_toggle(request):
             # core.platform_control.BULK_ENABLE_EXEMPT. "All off" is bulk.
             from core.platform_control import BULK_ENABLE_EXEMPT
             rows = rows.exclude(key__in=BULK_ENABLE_EXEMPT)
-        count = rows.update(is_enabled=enable)
+        # updated_at is auto_now, which a queryset update skips: it is the
+        # instant of the flip, and the alarm bot reads it off
+        # platform_master to tell a pause from a stop (alarm._resumed_at).
+        count = rows.update(is_enabled=enable, updated_at=timezone.now())
         verb = "started" if enable else "stopped"
         messages.success(request, f"{count} {category} components {verb}.")
     from django.shortcuts import redirect
