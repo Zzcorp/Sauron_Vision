@@ -157,6 +157,14 @@ def _row():
     return PlatformComponent.objects.get(key=alarm.COMPONENT_KEY)
 
 
+def _resumed(moment):
+    """The master switch last flipped at `moment` (its row's updated_at,
+    which every save stamps with the wall clock)."""
+    from core.platform_control import PlatformComponent
+    PlatformComponent.objects.filter(key="platform_master").update(
+        updated_at=moment)
+
+
 FAULTS_WITH_MONEY = {
     "errors": [
         {"key": "pipeline_asset_bots",
@@ -189,6 +197,8 @@ class _AlarmCase(TestCase):
         self.addCleanup(env.stop)
         _component(alarm.COMPONENT_KEY)
         _component("platform_master")
+        # the switch's stamp is the wall clock; the tests live at NOW
+        _resumed(NOW - timedelta(days=3))
 
     def relay(self, report):
         with patch(POST, side_effect=_ok) as post:
@@ -849,6 +859,54 @@ class PauseTests(_AlarmCase):
         # resumed: silence, never "resumed" or "back to normal"
         _component("platform_master")
         self.assertEqual(self.sentinel(now=NOW + timedelta(hours=25))[1], [])
+
+    def test_after_a_long_pause_the_rows_it_froze_are_the_pause_not_a_stop(self):
+        """collect_faults UNMOCKED. guarded_task skips before mark_run, so
+        every gated row freezes for the whole pause; a weekend's STOP ALL
+        lifted three minutes ago leaves five critical rows older than the
+        digest's 26 h and not one beat has ticked yet: nothing, no "the
+        scheduler seems stopped". Two hours on, still not one has run:
+        that IS the scheduler, said."""
+        from core.platform_control import PlatformComponent
+        keys = alarm.CRITICAL_COMPONENTS[:5]
+        for key in keys[:4]:
+            _component(key, last_run=NOW - timedelta(hours=32))
+        # day one: seeded two days ago, START PLATFORM pressed today
+        _component(keys[4])
+        PlatformComponent.objects.filter(key=keys[4]).update(
+            created_at=NOW - timedelta(days=2))
+        _component("platform_master")
+        _resumed(NOW - timedelta(minutes=3))
+        with patch("core.component_digest._feed_faults", return_value=[]), \
+                patch(POST, side_effect=_ok) as post:
+            out = alarm.sentinel(now=NOW)
+            self.assertEqual((out["problems"], _texts(post)), (0, []))
+            # twelve minutes after the resume: inside every row's grace
+            self.assertEqual(alarm.problems(NOW + timedelta(minutes=9)), [])
+            out = alarm.sentinel(now=NOW + timedelta(hours=2))
+        said = _texts(post)
+        self.assertEqual((out["problems"], len(said)), (1, 1))
+        self.assertIn("Sauron alarm — the scheduler seems stopped: 5 "
+                      "safety-critical tasks have not run", said[0])
+        for word in ("has stopped running", "resumed", "back to normal"):
+            self.assertFalse(any(word in t for t in said), word)
+
+    def test_a_row_that_stopped_after_the_resume_is_a_stop(self):
+        """The grace covers only rows whose silence began before the
+        resume: one that last ran after it and is past its window is
+        said, whatever the switch's stamp reads."""
+        from core.platform_control import PlatformComponent
+        _component("morgul_guards", last_run=NOW - timedelta(hours=27))
+        PlatformComponent.objects.filter(key="morgul_guards").update(
+            name="Morgul Guards")
+        _component("platform_master")
+        _resumed(NOW - timedelta(hours=28))
+        with patch("core.component_digest._feed_faults", return_value=[]), \
+                patch(POST, side_effect=_ok) as post:
+            alarm.sentinel(now=NOW)
+        self.assertEqual(len(_texts(post)), 1)
+        self.assertIn("Morgul Guards", _texts(post)[0])
+        self.assertIn("has stopped running", _texts(post)[0])
 
     def test_while_paused_the_faults_are_the_pause_but_an_abandoned_close_is_not(self):
         user = _staff()

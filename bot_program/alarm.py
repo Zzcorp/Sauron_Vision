@@ -31,7 +31,9 @@ WHAT IT SAYS (each an Alarm: a stable key, a title, a few lines)
   B  Automation paused: the platform_master switch off, one line. While
      it is off the component, feed and broker faults are the pause
      itself, not N faults, and are not said; a close abandoned at the
-     broker still is.
+     broker still is. Once it is back on, a row the pause froze (every
+     gated task skips before mark_run) is not called stopped until its
+     beat has had its grace to stamp it again (RESUME_GRACE_S).
   C  A close the platform gave up on (pending_closes._give_up: ERROR,
      closed_at unset, a real position): nobody retries it any more.
   D  A safety-critical component (CRITICAL_COMPONENTS) failing or stopped,
@@ -154,6 +156,15 @@ CRITICAL_COMPONENTS = (
 )
 FAULT_WORDS = {"errors": "is failing", "silent": "has stopped running",
                "feeds": "is not delivering quotes"}
+#: After START PLATFORM, a row that last ran before the switch came back
+#: on is the pause, not a stop: guarded_task skips before mark_run, so
+#: every gated row froze for the whole pause, and the digest calls a row
+#: of a day's beat stopped at 26 h. Not said until its beat has had time
+#: to stamp it again -- RESUME_PERIODS of its period (one late beat and
+#: one slow run), RESUME_GRACE_S at least; still silent past that, it is
+#: the scheduler.
+RESUME_PERIODS = 2
+RESUME_GRACE_S = 15 * 60
 BROKER_WORDS = {"ibkr": "IBKR", "saxo": "Saxo", "etoro": "eToro"}
 #: Filed as a warning guard, and turns critical at four hours
 #: (morgul.STUCK_CRIT_S): blind, it hides criticals too.
@@ -558,15 +569,43 @@ def _name(entry) -> str:
             or str(entry.get("key") or "a component").replace("_", " "))
 
 
+def _resumed_at():
+    """When the master switch was last flipped: its row's updated_at,
+    which the toggle views and `manage.py component` stamp when they
+    save it (nothing runs mark_run on a switch). None without a row."""
+    from core.platform_control import PlatformComponent
+    return (PlatformComponent.objects.filter(key="platform_master")
+            .values_list("updated_at", flat=True).first())
+
+
+def _frozen_by_the_pause(entry, now, resumed, periods) -> bool:
+    """A silent row whose silence began before the resume (its last run,
+    or never), inside its grace since the resume: the pause, not a stop.
+    A resume in the future is no resume (a clock that disagrees)."""
+    began = entry.get("last_run")
+    if began is not None and began >= resumed:
+        return False
+    hours = float((periods or {}).get(entry.get("key")) or 0)
+    grace = max(RESUME_PERIODS * hours * 3600, RESUME_GRACE_S)
+    return 0 <= (now - resumed).total_seconds() < grace
+
+
 def read_faults(now) -> list:
     """D: the digest's collect_faults, its errors and silent buckets for
-    CRITICAL_COMPONENTS only, and every quote feed not delivering."""
-    from core.component_digest import collect_faults
+    CRITICAL_COMPONENTS only, and every quote feed not delivering. A row
+    the pause froze is not silent until its grace after the resume has
+    passed (_frozen_by_the_pause)."""
+    from core.component_digest import beat_periods, collect_faults
     faults = collect_faults(now)
     errors = [e for e in faults.get("errors") or []
               if e.get("key") in CRITICAL_COMPONENTS]
     silent = [e for e in faults.get("silent") or []
               if e.get("key") in CRITICAL_COMPONENTS]
+    resumed = _resumed_at() if silent else None
+    if resumed is not None:
+        periods = beat_periods()
+        silent = [e for e in silent
+                  if not _frozen_by_the_pause(e, now, resumed, periods)]
     out = []
     if len(silent) >= FLOOD_AT:
         out.append(Alarm(
