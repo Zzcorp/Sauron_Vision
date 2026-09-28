@@ -269,6 +269,77 @@ class ProtectionIsProvenNotAssumedTests(TestCase):
         self.assertFalse(t._ib.cancelOrder.called)
 
 
+class APlacementPartialIsProvedBeforeItIsBookedTests(TestCase):
+    """The parent's remainder was cancelled fire-and-forget: `_retract`
+    sends the cancel and never reads the status back, and the response
+    carried the printed part with no `working` flag. The engine booked a
+    normal OPEN row for that part, its close later sold that part, and a
+    remainder that printed after the unproven cancel stayed at IBKR under
+    a symbol the row already claimed — invisible to reconcile (which walks
+    rows) and to the sweep (which compares symbols). The Saxo adapter
+    hands a placement-time partial to the poll (662937a), which withdraws
+    a remainder and PROVES it; IBKR proves it here, or hands it over."""
+
+    def _partial(self, filled, after=None):
+        """A bracket whose parent reads `filled` of 10 one second after
+        placement. `after` is (status, filled) once TWS has acted on the
+        cancel; None means the cancel changed nothing that TWS reported."""
+        t = _connected(_trader(account_id="DU111"))
+        real_place = t._ib.placeOrder.side_effect
+        parent = {}
+
+        def _place(contract, order):
+            placed = real_place(contract, order)
+            if len(t._placed) == 1:
+                placed.orderStatus.status = "Submitted"
+                placed.orderStatus.filled = filled
+                parent["trade"] = placed
+            return placed
+
+        def _cancel(order):
+            if after and order is parent["trade"].order:
+                parent["trade"].orderStatus.status = after[0]
+                parent["trade"].orderStatus.filled = after[1]
+
+        t._ib.placeOrder.side_effect = _place
+        t._ib.cancelOrder.side_effect = _cancel
+        from bot_program.engine import ibkr_client
+        with patch.object(ibkr_client, "_ib", _fake_ib_module()), \
+                patch.object(t, "_connect", return_value=True), \
+                patch.object(t, "_build_contract", return_value=MagicMock()):
+            out = t.market_order("AAPL", "BUY", 10, stop_loss=95.0,
+                                 take_profit=110.0)
+        return t, out
+
+    def test_an_unproven_remainder_hands_the_row_to_the_poll(self):
+        """TWS has not confirmed the cancel: the remainder may still
+        print. The answer says WORKING with the partial, so the engine
+        books a working row whose poll withdraws the remainder with proof
+        — rather than an OPEN row for units the account may exceed."""
+        t, out = self._partial(4)
+        self.assertTrue(t._ib.cancelOrder.called)
+        self.assertNotIn("protectedOnFill", out)
+        self.assertIs(out.get("working"), True)
+        self.assertEqual(out["status"], "WORKING")
+        self.assertEqual(float(out["executedQty"]), 4.0)
+        t._ib.sleep.assert_called()          # TWS was given its turn
+
+    def test_a_proven_cancel_books_what_printed(self):
+        t, out = self._partial(4, after=("Cancelled", 4))
+        self.assertNotIn("working", out)
+        self.assertEqual(float(out["executedQty"]), 4.0)
+        self.assertNotIn("protectedOnFill", out)
+
+    def test_a_remainder_that_printed_first_is_the_whole_position(self):
+        """The cancel lost the race: all ten are in the account, and the
+        row must own all ten — bot-managed, since the legs are gone."""
+        t, out = self._partial(4, after=("Filled", 10))
+        self.assertNotIn("working", out)
+        self.assertEqual(float(out["executedQty"]), 10.0)
+        self.assertNotIn("protectedOnFill", out)
+        self.assertIn("withdrawn", out["protectionNote"])
+
+
 class FallbackLinkageTests(TestCase):
     """A child carrying parentId=0 is not a child: TWS holds the
     untransmitted parent forever and releases the STOP alone, which then
@@ -362,14 +433,54 @@ class CancelOrderTests(TestCase):
         with patch.object(t, "_connect", return_value=True):
             self.assertFalse(t.cancel_order("77"))
 
-    def test_an_order_already_gone_is_not_an_error(self):
-        """Filled or cancelled, the leg is no longer resting either way."""
+    def _absent(self, *, trades=(), executions=()):
+        """A trader whose open orders do not hold the id; the lookup that
+        follows reads this session's trades and today's executions."""
         t = _trader(account_id="DU111")
         t._ib = MagicMock()
         t._ib.openTrades.return_value = []
+        t._ib.trades.return_value = [
+            SimpleNamespace(order=SimpleNamespace(orderId=oid),
+                            orderStatus=SimpleNamespace(
+                                status=st, filled=f, avgFillPrice=px,
+                                remaining=0))
+            for oid, st, f, px in trades]
+        t._ib.reqExecutions.return_value = list(executions)
+        return t
+
+    def test_an_order_already_gone_is_proved_gone_and_answers_true(self):
+        """TWS cancels a bracket's children WITH their parent, so by the
+        time the engine walks the legs of a withdrawn entry they are no
+        longer among the open orders. Answering False here read as "a GTC
+        leg leaked": cancel_working_entry stamped protective_legs_unconfirmed
+        and paged staff to cancel legs TWS had already cancelled, on every
+        routine withdrawal — the cried-wolf bell that hides the one real
+        leak. Gone is PROVED by a lookup, as the plain cancel path already
+        proves it: cancelled, or unknown to every table for an id this
+        session placed."""
+        t = self._absent(trades=[(77, "Cancelled", 0, 0)])
         with patch.object(t, "_connect", return_value=True):
-            self.assertFalse(t.cancel_order("77"))
+            self.assertIs(t.cancel_order("77"), True)
         t._ib.cancelOrder.assert_not_called()
+        t = self._absent()                       # unknown to TWS
+        with patch.object(t, "_connect", return_value=True):
+            self.assertIs(t.cancel_order("77"), True)
+        t._ib.cancelOrder.assert_not_called()
+
+    def test_an_absent_order_whose_lookup_cannot_be_read_is_not_gone(self):
+        """"Could not look" is not "gone": the bool exists so that a leg
+        still resting can never read as cancelled."""
+        t = self._absent()
+        with patch.object(t, "_connect", return_value=True), \
+                patch.object(t, "order_status", return_value=None):
+            self.assertIs(t.cancel_order("77"), False)
+
+    def test_an_absent_order_that_filled_is_not_a_cancel(self):
+        """Not resting is not harmless: a leg that filled closed — or
+        opened — something, and nothing was cancelled."""
+        t = self._absent(trades=[(77, "Filled", 10, 100.0)])
+        with patch.object(t, "_connect", return_value=True):
+            self.assertIs(t.cancel_order("77"), False)
 
     def test_an_unreachable_session_is_loud_not_tidy(self):
         """"Could not reach the broker" is NOT "already gone". The

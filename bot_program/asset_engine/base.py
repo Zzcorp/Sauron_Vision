@@ -2551,10 +2551,15 @@ class AssetBot(ABC):
         for oid in ids:
             try:
                 # The RETURN VALUE counts, not just the absence of an
-                # exception. IBKR answers False (no raise) when the id is
-                # not among the orders this session can see — which covers
-                # both "already gone" and "still resting, placed by another
-                # session". Since the legs became GTC they no longer expire
+                # exception. IBKR answers False (no raise) when it could
+                # not PROVE the leg gone: still working after the cancel,
+                # filled in the race, or absent from the open orders with
+                # a lookup that could not be read — a leg absent from the
+                # open orders whose lookup says cancelled, or unknown to
+                # TWS, is proved gone and answers True (2026-09-28: TWS
+                # cancels a bracket's children with the parent, and False
+                # there paged staff on every routine withdrawal). Since
+                # the legs became GTC they no longer expire
                 # at the session close, so a leaked stop rests for days and
                 # fires against a flat book, opening a reverse position.
                 # "We could not tell" must therefore be recorded as not

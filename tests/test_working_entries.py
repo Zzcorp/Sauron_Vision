@@ -866,6 +866,98 @@ class ACancelThatCannotBeProvenIsNotACancelTests(TestCase):
         self.assertEqual(float(lots.first().cost_basis_per_unit), 99.5)
 
 
+class AWithdrawnIbkrBracketDoesNotCryLeakTests(TestCase):
+    """TWS cancels a bracket's children WITH the parent. By the time
+    cancel_working_entry walked the legs they were gone from the open
+    orders, IBKRTrader.cancel_order answered False for each, and every
+    routine withdrawal of a bracketed WORKING IBKR entry — the 26h tick,
+    the kill switch, the HQ withdraw — stamped protective_legs_unconfirmed
+    and paged staff to cancel legs TWS had already cancelled. The cried-wolf
+    bell that swallows the one real leak. Gone is proved by a lookup now;
+    staff are paged only when the lookup could not be read."""
+
+    DONE = ("Filled", "Cancelled", "ApiCancelled")
+
+    def setUp(self):
+        from instruments.models import Instrument
+        Instrument.objects.get_or_create(
+            symbol="NVDA", defaults={"name": "NVDA", "asset_class": "stock"})
+        self.user = _user("gone_legs_u")
+        self.cfg = _cfg(self.user, name="GONELEGS")
+        # notify_staff reaches STAFF users, so there must be one for the
+        # absence of an alert to mean anything.
+        User.objects.create_user("gone_legs_staff", password="x",
+                                 is_staff=True)
+
+    def _trader(self):
+        """A session holding the parent 101 and its children 12 and 13;
+        cancelling the parent cancels the children with it, as TWS does."""
+        from bot_program.engine.ibkr_client import IBKRTrader
+        t = IBKRTrader(host="h", port=4004, client_id=7, account_id="DU111",
+                       timeout=0.1)
+        t._connected = True
+        t._ib = MagicMock()
+        t._ib.isConnected.return_value = True
+        t._ib.sleep.return_value = None
+        book = [SimpleNamespace(
+                    order=SimpleNamespace(orderId=oid, parentId=pid),
+                    orderStatus=SimpleNamespace(status=st, filled=0,
+                                                avgFillPrice=0, remaining=10))
+                for oid, pid, st in ((101, 0, "Submitted"),
+                                     (12, 101, "PreSubmitted"),
+                                     (13, 101, "PreSubmitted"))]
+
+        def _cancel(order):
+            for tr in book:
+                if tr.order.orderId == order.orderId or \
+                        tr.order.parentId == order.orderId:
+                    tr.orderStatus.status = "Cancelled"
+
+        t._ib.openTrades.side_effect = lambda: [
+            tr for tr in book if tr.orderStatus.status not in self.DONE]
+        t._ib.trades.side_effect = lambda: list(book)
+        t._ib.cancelOrder.side_effect = _cancel
+        t._ib.reqExecutions.return_value = []
+        return t
+
+    def test_legs_cancelled_with_the_parent_are_not_a_leak(self):
+        from bot_program.asset_engine.base import cancel_working_entry
+        from alerts.models import Notification
+        trade = _working_trade(self.cfg)
+        t = self._trader()
+        with patch.object(t, "_connect", return_value=True):
+            self.assertTrue(cancel_working_entry(trade, t, reason="test"))
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CANCELED")
+        self.assertNotIn("protective_legs_unconfirmed", trade.metadata)
+        self.assertFalse(Notification.objects.filter(
+            title__icontains="may still rest").exists())
+        # Only the parent needed a cancel; the children were already gone.
+        cancelled = [c.args[0].orderId for c in t._ib.cancelOrder.call_args_list]
+        self.assertEqual(cancelled, [101])
+
+    def test_a_leg_whose_lookup_cannot_be_read_still_pages(self):
+        """"Could not look" is the one answer that must still reach a
+        human: a GTC leg nobody could see may be resting."""
+        from bot_program.asset_engine.base import cancel_working_entry
+        from alerts.models import Notification
+        trade = _working_trade(self.cfg)
+        t = self._trader()
+        real_status = t.order_status
+
+        def _status(oid):
+            return real_status(oid) if str(oid) == "101" else None
+
+        with patch.object(t, "_connect", return_value=True), \
+                patch.object(t, "order_status", side_effect=_status):
+            self.assertTrue(cancel_working_entry(trade, t, reason="test"))
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CANCELED")
+        self.assertTrue(trade.metadata["protective_legs_unconfirmed"])
+        self.assertTrue(Notification.objects.filter(
+            title__icontains="may still rest").exists())
+
+
 class ACrossTickFillIsFoundInTheExecutionsTests(SimpleTestCase):
     """The trading session is released after every task, so the tick that
     polls a queued order is ALWAYS on a socket opened after the order was

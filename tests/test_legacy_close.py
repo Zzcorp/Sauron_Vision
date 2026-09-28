@@ -155,16 +155,21 @@ class APartialFillHasNowhereToLive(TestCase):
         self.assertIn("only 3", trade.reason)
 
     def test_an_accepted_but_unfilled_order_is_not_a_close(self):
-        """A Binance FUTURES accept is status NEW with executedQty 0. No
-        separate branch is needed: a reported 0 means "nothing gone yet, the
-        position is live", which the residual check already catches."""
+        """A Binance FUTURES accept is status NEW with executedQty 0: an
+        order the venue is WORKING, not a partial. It used to fall into the
+        residual branch as "filled only 0 of N", which dropped the order id
+        the next tick needs to withdraw it. It is recorded as resting, with
+        its id, and the row stays OPEN."""
         trade = _row(market="futures")
         client = _client({"orderId": "o1", "status": "NEW",
                           "executedQty": "0"}, ensure_config=True)
         self.assertIs(_close(trade, 110, client), False)
         trade.refresh_from_db()
         self.assertEqual(trade.status, "OPEN")
-        self.assertIn("close partial:TP", trade.reason)
+        self.assertIsNone(trade.exit_price)
+        self.assertIn("close working:TP", trade.reason)
+        self.assertIn("order o1", trade.reason)
+        self.assertNotIn("close partial", trade.reason)
 
     def test_a_full_fill_inside_dust_still_closes(self):
         trade = _row()
@@ -275,3 +280,243 @@ class TheOperatorIsToldOnceAndPointedSomewhere(TestCase):
         trade.refresh_from_db()
         self.assertLessEqual(len(trade.reason), _REASON_MAX)
         self.assertIn("close failed:TP", trade.reason)
+
+
+# ── a close the venue is still working ───────────────────────────────────────
+
+WORKING = {"orderId": "555", "status": "WORKING", "working": True,
+           "executedQty": "0", "avgPrice": "0"}
+FILLED = {"orderId": "556", "status": "FILLED", "executedQty": "10",
+          "avgPrice": "109"}
+
+
+def _resting(trade, reason="SL", order_id="555", venue="ibkr"):
+    """A row an earlier tick left with a close resting at the venue."""
+    from bot_program.engine.runner import _append_reason
+    _append_reason(trade, f"close working:{reason} (order {order_id} "
+                          f"resting at {venue})")
+    trade.save(update_fields=["reason"])
+    return trade
+
+
+class AWorkingCloseIsRestingNotPartial(TestCase):
+    """IBKRTrader.market_order answers status WORKING / executedQty 0 with
+    an orderId whenever the market close has not printed inside its
+    one-second wait — a close sent outside regular hours, on a halted
+    symbol, or simply not acked in time. `_close` read that 0 as "filled
+    only 0 of N", dropped the order id, and its alert promised the venue
+    would refuse the retry as a duplicate — which IBKR does not (orderRef
+    buys traceability, not idempotency). The next hand-triggered tick then
+    sent a SECOND full-size close: long N became short N at the open, and
+    no row described the short."""
+
+    def test_the_order_id_stays_on_the_row_and_the_alert_tells_the_truth(self):
+        trade = _row(qty="30")
+        client = _client(dict(WORKING))
+        with mock.patch("bot_program.notifications.notify_staff") as paged:
+            self.assertIs(_close(trade, 95, client, "SL"), False)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertIsNone(trade.exit_price)
+        self.assertIn("close working:SL", trade.reason)
+        self.assertIn("order 555", trade.reason)
+        self.assertNotIn("close partial", trade.reason)
+        from bot_program.engine.runner import _working_close
+        self.assertEqual(_working_close(trade), ("SL", "555"))
+        paged.assert_called_once()
+        body = paged.call_args.kwargs["body"]
+        self.assertIn("555", body)
+        self.assertIn("withdraw", body)
+        self.assertNotIn("refuses a duplicate", body)
+
+    def test_a_retry_withdraws_the_resting_close_and_proves_it_first(self):
+        """Tick 2: the stop is still crossed. The resting close is taken
+        off the book, PROVED dead with nothing printed, and only then is
+        the close sent again — one order resting at a time."""
+        trade = _resting(_row(qty="31"))
+        client = _client({**FILLED, "executedQty": "31"})
+        client.cancel_order.return_value = True
+        client.order_status.return_value = {"state": "dead", "filled": 0.0,
+                                            "avgPrice": 0.0,
+                                            "status": "Cancelled"}
+        self.assertIs(_close(trade, 95, client, "SL"), True)
+        client.cancel_order.assert_called_once_with("555")
+        client.market_order.assert_called_once()
+        names = [c[0] for c in client.mock_calls]
+        self.assertLess(names.index("cancel_order"),
+                        names.index("market_order"),
+                        "the withdrawal must land before the resend")
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        self.assertEqual(trade.exit_price, Decimal("109"))
+        self.assertIn("close withdrawn:SL", trade.reason)
+        self.assertIn("closed:SL", trade.reason)
+
+    def test_a_retry_that_cannot_prove_the_withdrawal_sends_nothing(self):
+        trade = _resting(_row(qty="32"))
+        client = _client(dict(FILLED))
+        client.cancel_order.return_value = False
+        client.order_status.return_value = {"state": "working",
+                                            "filled": 0.0, "avgPrice": 0.0,
+                                            "status": "PreSubmitted"}
+        with mock.patch("bot_program.notifications.notify_staff") as paged:
+            self.assertIs(_close(trade, 95, client, "SL"), False)
+        client.market_order.assert_not_called()
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertIn("close blocked:SL", trade.reason)
+        # The note is NOT retired: the next tick must still refuse.
+        from bot_program.engine.runner import _working_close
+        self.assertEqual(_working_close(trade), ("SL", "555"))
+        self.assertIn("555", paged.call_args.kwargs["body"])
+
+    def test_a_resting_close_that_filled_is_booked_off_its_fill_not_resent(self):
+        """The cancel raced a fill. The position is flat at the venue, so
+        sending another close would open the reverse position."""
+        trade = _resting(_row(qty="33"))
+        client = _client(dict(FILLED))
+        client.cancel_order.return_value = False
+        client.order_status.return_value = {"state": "filled",
+                                            "filled": 33.0,
+                                            "avgPrice": 94.5,
+                                            "status": "Filled"}
+        self.assertIs(_close(trade, 95, client, "SL"), True)
+        client.market_order.assert_not_called()
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        self.assertEqual(trade.exit_price, Decimal("94.5"))
+        self.assertIn("exit:broker", trade.reason)
+        self.assertIn("closed:SL", trade.reason)
+
+    def test_a_partly_filled_resting_close_is_never_resent_at_full_size(self):
+        trade = _resting(_row(qty="34"))
+        client = _client(dict(FILLED))
+        client.cancel_order.return_value = True
+        client.order_status.return_value = {"state": "dead", "filled": 4.0,
+                                            "avgPrice": 94.5,
+                                            "status": "Cancelled"}
+        self.assertIs(_close(trade, 95, client, "SL"), False)
+        client.market_order.assert_not_called()
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertIn("close partial:SL", trade.reason)
+        self.assertIn("only 4", trade.reason)
+
+    def test_a_client_that_cannot_withdraw_a_resting_close_sends_nothing(self):
+        trade = _resting(_row(qty="35"))
+        client = _client(dict(FILLED))
+        del client.cancel_order
+        with mock.patch("bot_program.notifications.notify_staff") as paged:
+            self.assertIs(_close(trade, 95, client, "SL"), False)
+        client.market_order.assert_not_called()
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertIn("close blocked:SL", trade.reason)
+        self.assertIn("555", paged.call_args.kwargs["body"])
+
+    def test_a_resting_close_with_no_id_blocks_the_retry(self):
+        """The venue reported no id, so nothing can withdraw or poll it —
+        and a resend beside it is exactly the double the note prevents."""
+        trade = _resting(_row(qty="36"), order_id="?")
+        client = _client(dict(FILLED))
+        self.assertIs(_close(trade, 95, client, "SL"), False)
+        client.market_order.assert_not_called()
+        client.cancel_order.assert_not_called()
+
+    def test_the_note_is_retired_by_a_close_and_survives_the_reason_cut(self):
+        from bot_program.engine.runner import (_REASON_MAX, _append_reason,
+                                               _working_close)
+        trade = _resting(_row(qty="37"))
+        # A week of blocked retries grows the column past its bound; the
+        # cut must land on a note boundary or the resting note is lost and
+        # the next tick resends.
+        for _ in range(60):
+            _append_reason(trade, "close blocked:SL (" + "x" * 40 + ")")
+        self.assertLessEqual(len(trade.reason), _REASON_MAX)
+        self.assertTrue(trade.reason.startswith("close "),
+                        "the cut must not leave half a note")
+        self.assertEqual(_working_close(trade), ("SL", "555"),
+                         "the resting note must survive the cut")
+        _append_reason(trade, "closed:SL")
+        self.assertIsNone(_working_close(trade))
+
+
+class TheTickPollsARestingClose(TestCase):
+    """This lane has no drain: the hand-triggered tick is the poll. A close
+    that printed since the last tick books the row off its fill; one that
+    died with nothing filled retires the note so the SL/TP test may send
+    afresh; one still working is left to `_close`, which withdraws it."""
+
+    def _settle(self, trade, client):
+        from bot_program.engine.runner import _settle_working_close
+        return _settle_working_close(trade, client)
+
+    def test_a_fill_since_the_last_tick_books_the_row(self):
+        trade = _resting(_row(qty="40"), reason="TP")
+        client = _client()
+        client.order_status.return_value = {"state": "filled",
+                                            "filled": 40.0,
+                                            "avgPrice": 111.0,
+                                            "status": "Filled"}
+        self.assertIs(self._settle(trade, client), True)
+        client.market_order.assert_not_called()
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        self.assertEqual(trade.exit_price, Decimal("111"))
+        self.assertIn("closed:TP", trade.reason)
+        self.assertIn("exit:broker", trade.reason)
+
+    def test_an_order_that_died_unfilled_retires_the_note(self):
+        from bot_program.engine.runner import _working_close
+        trade = _resting(_row(qty="41"))
+        client = _client()
+        client.order_status.return_value = {"state": "dead", "filled": 0.0,
+                                            "avgPrice": 0.0,
+                                            "status": "Cancelled"}
+        self.assertIs(self._settle(trade, client), False)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertIn("close cancelled:SL", trade.reason)
+        self.assertIsNone(_working_close(trade))
+
+    def test_an_order_still_working_is_left_resting(self):
+        from bot_program.engine.runner import _working_close
+        trade = _resting(_row(qty="42"))
+        client = _client()
+        client.order_status.return_value = {"state": "working",
+                                            "filled": 0.0, "avgPrice": 0.0,
+                                            "status": "PreSubmitted"}
+        self.assertIs(self._settle(trade, client), False)
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertEqual(_working_close(trade), ("SL", "555"))
+
+    def test_a_row_with_nothing_resting_is_not_polled(self):
+        trade = _row(qty="43")
+        client = _client()
+        self.assertIs(self._settle(trade, client), False)
+        client.order_status.assert_not_called()
+
+    def test_the_manage_loop_books_a_filled_resting_close_before_the_sl_test(self):
+        """End to end through run_bot_tick: the price is back inside the
+        band, so nothing would have looked at this row again — and the
+        account was flat while the row said OPEN."""
+        trade = _resting(_row(qty="44"), reason="SL")
+        cfg = trade.config
+        cfg.enabled = True
+        cfg.symbols = []
+        cfg.save()
+        client = _client()
+        client.ticker.return_value = {"lastPrice": "100"}
+        client.order_status.return_value = {"state": "filled",
+                                            "filled": 44.0,
+                                            "avgPrice": 94.0,
+                                            "status": "Filled"}
+        from bot_program.engine import runner
+        with mock.patch.object(runner, "client_for_symbol",
+                               return_value=client):
+            runner.run_bot_tick(cfg.user_id)
+        client.market_order.assert_not_called()
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+        self.assertEqual(trade.exit_price, Decimal("94"))

@@ -6,6 +6,7 @@ to PaperTrader. See `bot_program.engine.broker_router`.
 """
 from __future__ import annotations
 import logging
+import re
 from decimal import Decimal
 from django.utils import timezone
 from ..models import BotConfig, BotTrade, BinanceAccount
@@ -114,6 +115,11 @@ def run_bot_tick(user_id: int):
                              "row stays OPEN", t.id, t.symbol, shut)
                     continue
             sym_client = client_for_symbol(user, t.symbol, cfg)
+            # A close an earlier tick left resting at the venue is looked
+            # up before the row is managed again (2026-09-28): a fill
+            # books the row off it, and nothing is sent over it.
+            if not t.paper and _settle_working_close(t, sym_client):
+                continue
             tk = sym_client.ticker(t.symbol)
             price = Decimal(tk["lastPrice"])
             if t.paper and price <= 0:
@@ -251,6 +257,44 @@ def run_bot_tick(user_id: int):
 _REASON_MAX = 2000
 
 
+#: The note `_close` leaves on `reason` for a close the venue accepted and
+#: has not printed, and the notes that retire it. BotTrade carries no
+#: metadata column and no CLOSE_PENDING state (9eb827f declined both: OPEN
+#: already means "still managed"), so the resting order's id lives in the
+#: one column this schema keeps provenance in, in a shape that can be read
+#: back. The last such note is in force until a later note says the order
+#: was withdrawn, died, or the row closed.
+_WORKING_CLOSE_RE = re.compile(
+    r"close working:(\S+) \(order (\S+) resting at (\S+)\)")
+_WORKING_CLOSE_RETIRED = ("close withdrawn:", "close cancelled:", "closed:")
+
+
+def _resting_note(text: str) -> str:
+    """The `close working:` note still in force in `text`, or ""."""
+    found = ""
+    for note in (text or "").split(" | "):
+        # A row whose reason started empty carries a leading "| ".
+        note = note.strip().lstrip("|").strip()
+        if _WORKING_CLOSE_RE.match(note):
+            found = note
+        elif note.startswith(_WORKING_CLOSE_RETIRED):
+            found = ""
+    return found
+
+
+def _working_close(trade):
+    """(intent, order id) of the close still resting at the venue, or None.
+
+    The id is "" when the venue reported none — resting, but neither
+    pollable nor withdrawable from here.
+    """
+    m = _WORKING_CLOSE_RE.match(_resting_note(trade.reason))
+    if not m:
+        return None
+    oid = m.group(2)
+    return (m.group(1), "" if oid == "?" else oid)
+
+
 def _append_reason(trade, note: str) -> None:
     """Append to the one column this schema can carry provenance on.
 
@@ -259,7 +303,23 @@ def _append_reason(trade, note: str) -> None:
     it, with the same two words.
     """
     joined = ((trade.reason or "") + f" | {note}").strip()
-    trade.reason = joined[-_REASON_MAX:] if len(joined) > _REASON_MAX else joined
+    if len(joined) > _REASON_MAX:
+        # The cut lands on a note boundary, and the resting close's note
+        # survives it: half a note cannot be read back, and a resting note
+        # cut away is a retry that resends beside a live order.
+        keep = _resting_note(joined)
+        room = _REASON_MAX - (len(keep) + 3 if keep else 0)
+        tail = joined[-room:]
+        sep = tail.find(" | ")
+        if sep >= 0:
+            tail = tail[sep + 3:]
+        joined = f"{keep} | {tail}" if keep and keep not in tail else tail
+    trade.reason = joined
+
+
+def _venue_name(client) -> str:
+    from bot_program.engine.capabilities import adapter_key
+    return adapter_key(client) or type(client).__name__
 
 
 def _warn_legacy_close_failed(trade, note: str) -> None:
@@ -270,6 +330,13 @@ def _warn_legacy_close_failed(trade, note: str) -> None:
     or one stuck row would silence every other. The body names the kill
     switch because this schema has no per-trade close button: the operator's
     only lever on a legacy row is the emergency flatten.
+
+    It used to promise that the retry's deterministic id makes the venue
+    refuse a duplicate. IBKR refuses nothing by name (its adapter says so:
+    orderRef buys traceability, not idempotency), so that sentence invited
+    the operator to press the tick that doubled the position. What the
+    retry actually guarantees is said instead: a close the venue is still
+    working is withdrawn, and the withdrawal proved, before another is sent.
     """
     try:
         from bot_program.notifications import notify_staff
@@ -280,13 +347,194 @@ def _warn_legacy_close_failed(trade, note: str) -> None:
                   f"this legacy schema has no CLOSE_PENDING state, and "
                   f"booking it CLOSED would hide a live position. There is no "
                   f"per-trade close button for a legacy row: use the "
-                  f"EMERGENCY FLATTEN on /command/, or close it by hand at "
-                  f"the venue. The next hand-triggered tick will retry, and "
-                  f"the order carries a deterministic id so the venue refuses "
-                  f"a duplicate rather than doubling the position."),
+                  f"EMERGENCY FLATTEN on /command/ (after cancelling any "
+                  f"order named above at the venue — the flatten does not "
+                  f"withdraw it), or close it by hand at the venue. The next "
+                  f"hand-triggered tick will retry; a close the venue is "
+                  f"still working is withdrawn first, and the withdrawal "
+                  f"proved, before another is sent — nothing here relies on "
+                  f"the venue refusing a duplicate by name, because IBKR "
+                  f"does not."),
             url="/command/", cooldown_hours=24)
     except Exception as e:  # noqa: BLE001 — an alert must never cost a close
         log.warning("legacy close alert failed for #%s: %s", trade.id, e)
+
+
+def _leave_open(trade, reason: str, tag: str, note: str) -> bool:
+    """The row stays OPEN: said on the row, in the log and to staff.
+
+    Returns False, for the caller to hand back.
+    """
+    log.error("legacy close #%s %s: %s — row left OPEN",
+              trade.id, trade.symbol, note)
+    _append_reason(trade, f"close {tag}:{reason} ({note})")
+    trade.save(update_fields=["reason"])
+    _warn_legacy_close_failed(trade, note[:1].upper() + note[1:] + ".")
+    return False
+
+
+def _book_closed(trade, exit_price: Decimal, note: str, reason: str) -> bool:
+    """Write the exit: the only writer of CLOSED on this lane. True."""
+    pnl = ((exit_price - trade.entry_price) * trade.qty
+           if trade.side == "BUY"
+           else (trade.entry_price - exit_price) * trade.qty)
+    _append_reason(trade, f"closed:{reason}")
+    _append_reason(trade, note)
+    trade.exit_price = exit_price
+    trade.pnl_usdt = pnl
+    trade.status = "CLOSED"
+    trade.closed_at = timezone.now()
+    trade.save()
+    return True
+
+
+def _read_order(st: dict, trade) -> tuple:
+    """(state, filled, done) from an adapter's order_status answer."""
+    from bot_program.pending_closes import dust_qty
+    state = str(st.get("state") or "unknown")
+    filled = Decimal(str(st.get("filled") or 0))
+    qty = Decimal(str(trade.qty))
+    done = state == "filled" or (filled > 0
+                                 and (qty - filled) <= dust_qty("crypto"))
+    return state, filled, done
+
+
+def _book_off_order(trade, client, st: dict, intent: str, oid: str) -> bool:
+    """Book the row CLOSED off the resting close's own fill. True."""
+    px = Decimal(str(st.get("avgPrice") or 0))
+    if px > 0:
+        exit_price, note = px, "exit:broker"
+    else:
+        # A fill with no price reported books the mark and says so, as
+        # `_close` does for a response with no price.
+        try:
+            exit_price = Decimal(str(client.ticker(trade.symbol)["lastPrice"]))
+        except Exception:  # noqa: BLE001 — the entry price is certainly real
+            exit_price = Decimal(0)
+        if exit_price <= 0:
+            exit_price = Decimal(str(trade.entry_price))
+        note = "exit:mark"
+    log.warning("legacy close #%s %s: the close resting as order %s FILLED "
+                "— booked off it (%s); nothing sent",
+                trade.id, trade.symbol, oid, note)
+    return _book_closed(trade, exit_price, note, intent)
+
+
+def _settle_working_close(trade, client) -> bool:
+    """Look up a close an earlier tick left resting, before the row is
+    managed again. True when the row was booked CLOSED off that order's
+    fill and nothing else should happen to it this tick.
+
+    The asset engine's drain does this every five minutes for a
+    CLOSE_PENDING row; this lane has no drain, so the hand-triggered tick
+    is the poll. An order that died with nothing filled retires the note,
+    so the SL/TP test may send afresh; one still working is left to
+    `_close`, which withdraws it — proved — before sending another. A row
+    whose client cannot read an order is left to `_close` too, which says
+    why nothing can be done.
+    """
+    found = _working_close(trade)
+    if found is None:
+        return False
+    intent, oid = found
+    status_fn = getattr(client, "order_status", None)
+    if not oid or not callable(status_fn):
+        return False
+    try:
+        st = status_fn(oid)
+    except Exception as e:  # noqa: BLE001 — could not look is not an answer
+        log.warning("legacy close #%s %s: resting order %s could not be "
+                    "read (%s)", trade.id, trade.symbol, oid, e)
+        return False
+    if not isinstance(st, dict):
+        return False
+    state, filled, done = _read_order(st, trade)
+    if done:
+        return _book_off_order(trade, client, st, intent, oid)
+    if state == "dead" and filled <= 0:
+        log.warning("legacy close #%s %s: the close resting as order %s "
+                    "died with nothing filled — the row is managed again",
+                    trade.id, trade.symbol, oid)
+        _append_reason(trade, f"close cancelled:{intent} (order {oid} died "
+                              f"at {_venue_name(client)} with nothing "
+                              f"filled)")
+        trade.save(update_fields=["reason"])
+    return False
+
+
+def _withdraw_working_close(trade, client, reason: str):
+    """Take the close an earlier tick left resting off the book — and PROVE
+    it off — before another is sent, exactly as the retry drain does for
+    an AssetBotTrade (pending_closes._cancel_working_close). Two closes
+    resting for one position is how a flatten becomes a reverse position,
+    and IBKR refuses nothing by name.
+
+    Returns True when the resting close had filled and the row was booked
+    CLOSED off that fill; None when it was withdrawn with nothing printed
+    and a fresh close may be sent; False when nothing may be sent — the
+    withdrawal could not be sent, read or proved, or part of it printed and
+    this schema has nowhere to hold the residual.
+    """
+    intent, oid = _working_close(trade)
+    venue = _venue_name(client)
+    by_hand = (f"cancel order {oid or '(no id)'} at {venue} by hand before "
+               f"the EMERGENCY FLATTEN, which does not withdraw it")
+    if not oid:
+        return _leave_open(
+            trade, reason, "blocked",
+            f"a close is still resting at {venue} and the venue reported no "
+            f"order id for it, so it can be neither withdrawn nor polled "
+            f"from here — NOTHING was sent; close it by hand at {venue}")
+    cancel = getattr(client, "cancel_order", None)
+    status_fn = getattr(client, "order_status", None)
+    if not callable(cancel) or not callable(status_fn):
+        return _leave_open(
+            trade, reason, "blocked",
+            f"a close is still resting at {venue} as order {oid} and "
+            f"{type(client).__name__} cannot withdraw and read an order, so "
+            f"NOTHING was sent; {by_hand}")
+    try:
+        cancel(oid)
+    except Exception as e:  # noqa: BLE001 — unreachable is not withdrawn
+        return _leave_open(
+            trade, reason, "blocked",
+            f"withdrawing the close resting at {venue} as order {oid} "
+            f"failed ({e}), so NOTHING was sent; {by_hand}")
+    # The READ is the proof, not the cancel's bool: what printed during
+    # the withdrawal is what decides whether anything may be sent.
+    try:
+        st = status_fn(oid)
+    except Exception as e:  # noqa: BLE001
+        log.warning("legacy close #%s %s: post-withdrawal read of order %s "
+                    "failed: %s", trade.id, trade.symbol, oid, e)
+        st = None
+    if not isinstance(st, dict):
+        return _leave_open(
+            trade, reason, "blocked",
+            f"order {oid} could not be read at {venue} after the "
+            f"withdrawal, so NOTHING was sent; {by_hand}")
+    state, filled, done = _read_order(st, trade)
+    if done:
+        return _book_off_order(trade, client, st, intent, oid)
+    if filled > 0:
+        return _leave_open(
+            trade, reason, "partial",
+            f"order {oid} filled only {filled} of {trade.qty} before it was "
+            f"withdrawn, and the remainder has nowhere to live on this "
+            f"schema — NOTHING was sent; close the remainder by hand at "
+            f"{venue}")
+    if state == "dead":
+        log.warning("legacy close #%s %s: the close resting as order %s is "
+                    "withdrawn with nothing filled — sending again",
+                    trade.id, trade.symbol, oid)
+        _append_reason(trade, f"close withdrawn:{reason} (order {oid} taken "
+                              f"off the book at {venue}, nothing filled)")
+        trade.save(update_fields=["reason"])
+        return None
+    return _leave_open(
+        trade, reason, "blocked",
+        f"order {oid} still reads {state} at {venue} after the withdrawal, "
+        f"so NOTHING was sent; {by_hand}")
 
 
 def _submit_legacy_close(trade: BotTrade, client, reason: str):
@@ -302,8 +550,10 @@ def _submit_legacy_close(trade: BotTrade, client, reason: str):
 
     The id is deterministic and intent-scoped. `split_intent` already admits
     "TP" and "SL", which is what `reason` carries, so a retried TP close
-    reuses its own id and the venue refuses the copy — while a kill-switch
-    flatten on the same row carries "KILL" and is correctly NOT refused.
+    reuses its own id and a venue that refuses a duplicate by name refuses
+    the copy — while a kill-switch flatten on the same row carries "KILL"
+    and is correctly NOT refused. IBKR refuses nothing by name, which is why
+    `_close` withdraws a resting close, proved, before it retries.
     """
     from bot_program.engine.idempotency import (make_client_order_id,
                                                 split_intent)
@@ -341,13 +591,18 @@ def _close(trade: BotTrade, price: Decimal, client, reason: str):
     position stayed open at the venue. Nothing is written now until the order
     has been answered.
 
+    A close the venue accepted and has not printed is neither: the row stays
+    OPEN with the order's id on it, the next tick polls it, and a retry
+    withdraws it — proved — before sending another (2026-09-28).
+
     Returns True when the row was booked CLOSED, False when it was left OPEN.
     The only caller today discards it and relies on the log and the alert;
     the value is here for callers that want to count.
     """
     from bot_program.pending_closes import (broker_exit_price,
                                             broker_filled_qty, dust_qty,
-                                            is_paper_client)
+                                            is_paper_client,
+                                            order_still_working)
 
     result = None
     if not trade.paper:
@@ -370,6 +625,15 @@ def _close(trade: BotTrade, price: Decimal, client, reason: str):
             trade.save(update_fields=["reason"])
             _warn_legacy_close_failed(trade, note.capitalize() + ".")
             return False
+        # A CLOSE LEFT RESTING BY AN EARLIER TICK IS WITHDRAWN FIRST, AND
+        # THE WITHDRAWAL PROVED — what the retry drain does for an
+        # AssetBotTrade — because two closes resting for one position is
+        # how a flatten becomes a reverse position, and IBKR refuses
+        # nothing by name.
+        if _working_close(trade) is not None:
+            settled = _withdraw_working_close(trade, client, reason)
+            if settled is not None:
+                return settled
         try:
             result = _submit_legacy_close(trade, client, reason)
         except Exception as e:  # noqa: BLE001 — a refusal is not a close
@@ -393,12 +657,45 @@ def _close(trade: BotTrade, price: Decimal, client, reason: str):
     if booked is not None and booked > 0:
         exit_price, note = booked, "exit:broker"
 
+    # A CLOSE THE VENUE ACCEPTED AND HAS NOT PRINTED is neither a close nor
+    # a partial. IBKRTrader.market_order answers status WORKING with
+    # executedQty 0 and an orderId whenever nothing printed inside its
+    # one-second wait — a market close held outside regular hours, on a
+    # halted symbol, or simply not acked in time — and Alpaca answers
+    # `accepted` the same way, as does a Binance FUTURES accept (NEW). Read
+    # as "filled only 0 of N", that dropped the order id, and the alert
+    # invited a retry that sent a SECOND full-size close beside the first,
+    # which IBKR accepts: orderRef buys traceability, not idempotency. The
+    # id goes on the row, the next tick polls it (`_settle_working_close`),
+    # and a retry withdraws it — proved — before sending again.
+    if order_still_working(result):
+        oid = str(result.get("orderId") or "")
+        venue = _venue_name(client)
+        _append_reason(trade, f"close working:{reason} (order {oid or '?'} "
+                              f"resting at {venue})")
+        trade.save(update_fields=["reason"])
+        if oid:
+            told = (f"The venue accepted the close and has not filled it: it "
+                    f"is resting at {venue} as order {oid}. A retry would "
+                    f"send a second full-size close beside it, so the next "
+                    f"hand-triggered tick withdraws that order first and "
+                    f"sends nothing unless the withdrawal is proved; if it "
+                    f"prints before then, the next tick books the fill. "
+                    f"Cancel order {oid} at {venue} by hand before the "
+                    f"EMERGENCY FLATTEN, which does not withdraw it.")
+        else:
+            told = (f"The venue accepted the close and has not filled it, "
+                    f"and reported NO order id, so nothing here can withdraw "
+                    f"or poll it: the next tick sends nothing over it. Close "
+                    f"it by hand at {venue}.")
+        log.error("legacy close #%s %s: %s — row left OPEN",
+                  trade.id, trade.symbol, told)
+        _warn_legacy_close_failed(trade, told)
+        return False
+
     # A PARTIAL FILL HAS NOWHERE TO LIVE ON THIS SCHEMA. No CLOSE_PENDING
     # state, no residual field — so booking CLOSED would hide a live
-    # remainder. The row stays OPEN and the operator is told. This also
-    # catches a Binance FUTURES accept, whose status is NEW with executedQty
-    # 0: `broker_filled_qty` reads a reported 0 as "nothing gone yet, the
-    # position is live", which is precisely the state this branch is for.
+    # remainder. The row stays OPEN and the operator is told.
     filled = broker_filled_qty(result)
     qty = Decimal(str(trade.qty))
     if filled is not None and (qty - filled) > dust_qty("crypto"):
@@ -410,14 +707,4 @@ def _close(trade: BotTrade, price: Decimal, client, reason: str):
         _warn_legacy_close_failed(trade, left.capitalize() + ".")
         return False
 
-    pnl = ((exit_price - trade.entry_price) * trade.qty
-           if trade.side == "BUY"
-           else (trade.entry_price - exit_price) * trade.qty)
-    _append_reason(trade, f"closed:{reason}")
-    _append_reason(trade, note)
-    trade.exit_price = exit_price
-    trade.pnl_usdt = pnl
-    trade.status = "CLOSED"
-    trade.closed_at = timezone.now()
-    trade.save()
-    return True
+    return _book_closed(trade, exit_price, note, reason)

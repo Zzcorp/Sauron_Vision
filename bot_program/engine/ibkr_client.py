@@ -1617,6 +1617,9 @@ class IBKRTrader:
                     out["protectionNote"] = (
                         f"{why}; protective legs withdrawn — bot-side "
                         f"management owns the exit")
+                    if partial:
+                        self._prove_remainder_withdrawn(
+                            symbol, trade, quantity, out)
                 else:
                     out["protectedOnFill"] = True
                     out["protectiveOrders"] = legs
@@ -1629,6 +1632,58 @@ class IBKRTrader:
             log.error("IBKR market_order(%s, %s, %s) failed: %s",
                       symbol, side, quantity, e)
             return empty
+
+    def _prove_remainder_withdrawn(self, symbol, trade, quantity, out) -> None:
+        """A partial's remainder is PROVED off the book before the printed
+        part is reported as the position — or the row is handed to the poll.
+
+        `_retract` sends the parent's cancel and never looks back, and
+        between that cancel and TWS acting on it the remainder can still
+        print. It printed into no row: the engine booked an OPEN row for
+        the part reported here, the close later sold that part, and the
+        units that printed after the cancel stayed at IBKR under a symbol
+        the row already claimed — invisible to reconcile, which walks
+        rows, and to the unclaimed sweep, which compares symbols. The Saxo
+        adapter hands a placement-time partial to the poll (662937a), and
+        the poll withdraws a remainder and proves it
+        (base._poll_working_entry). The same rule here: give TWS its turn,
+        as cancel_order does, then read the parent. Dead is proved, and
+        what printed is final. Filled means the remainder printed first:
+        the whole order is the position, bot-managed, since the legs are
+        gone. Anything else is NOT proved, and the answer says WORKING with
+        the partial, so the engine books a working row whose poll withdraws
+        the remainder with proof — rather than an OPEN row for units the
+        account may exceed.
+        """
+        try:
+            self._ib.sleep(self.CANCEL_CONFIRM_WAIT_S)
+        except Exception:  # noqa: BLE001 — a closed loop
+            pass
+        st = trade.orderStatus
+        status = str(getattr(st, "status", "") or "")
+        filled = float(getattr(st, "filled", 0) or 0)
+        avg_px = float(getattr(st, "avgFillPrice", 0) or 0)
+        oid = getattr(getattr(trade, "order", None), "orderId", "")
+        out["executedQty"] = str(filled)
+        out["avgPrice"] = str(avg_px or 0)
+        out["status"] = (status or "PENDING").upper()
+        if status == "Filled" or filled >= abs(float(quantity)):
+            log.warning("IBKR %s: the remainder of order %s printed before "
+                        "the cancel landed — the whole order (%s) is the "
+                        "position, bot-managed", symbol, oid, filled)
+            return
+        if status in self._DEAD_STATES:
+            log.info("IBKR %s: the remainder of order %s is confirmed "
+                     "withdrawn — %s of %s printed and is final",
+                     symbol, oid, filled, quantity)
+            return
+        log.error("IBKR %s: the remainder of order %s still reads %s after "
+                  "the cancel — reporting %s of %s as WORKING so the poll "
+                  "withdraws it with proof rather than booking units the "
+                  "account may exceed", symbol, oid, status or "no answer",
+                  filled, quantity)
+        out["status"] = "WORKING"
+        out["working"] = True
 
     def _retract(self, contract, child_trades, parent_trade) -> None:
         """Pull back legs that must not rest — best effort, never raises.
@@ -1662,8 +1717,13 @@ class IBKRTrader:
         book does not protect anything — it opens a fresh position the
         other way when it fires.
 
-        True when the cancel was sent. An order already filled or gone is
-        not an error: the leg is no longer resting either way.
+        True when the order is PROVED off the book: cancelled here and
+        confirmed, or already gone — cancelled, or unknown to every table
+        for an id this session placed — by the lookup that follows. False
+        when it could not be proved: still working after the cancel,
+        filled (nothing was cancelled, and a filled leg is not harmless),
+        or absent from the open orders with a lookup that could not be
+        read. Raises when the broker could not be reached at all.
         """
         if not self._connect():
             # NOT the same as "already gone". The caller flattens on this
@@ -1708,8 +1768,35 @@ class IBKRTrader:
                             wanted, state or "no answer",
                             self.CANCEL_CONFIRM_WAIT_S)
                 return False
-            log.info("IBKR cancel %s: not among the open orders — already "
-                     "filled or cancelled", wanted)
+            # NOT AMONG THE OPEN ORDERS. TWS cancels a bracket's children
+            # WITH their parent, so by the time the engine walks the legs
+            # of a withdrawn entry they are already gone — and answering
+            # False here read as "a GTC leg leaked": cancel_working_entry
+            # stamped protective_legs_unconfirmed and paged staff to cancel
+            # legs TWS had already cancelled, on every routine withdrawal.
+            # Gone is proved the way the platform proves it elsewhere: by
+            # a READ. Cancelled, or unknown to every table and to today's
+            # executions for an id this session placed, is gone; filled is
+            # not harmless and says so; a lookup that could not be read
+            # proves nothing.
+            after = self.order_status(wanted)
+            if after is None:
+                log.error("IBKR cancel %s: not among the open orders and "
+                          "the lookup could not be read — not confirmed "
+                          "gone", wanted)
+                return False
+            state = str(after.get("state") or "")
+            if state in ("dead", "unknown"):
+                log.info("IBKR cancel %s: not among the open orders — "
+                         "already cancelled (%s)", wanted,
+                         after.get("status") or state)
+                return True
+            if state == "filled":
+                log.warning("IBKR cancel %s: it already FILLED — nothing "
+                            "was cancelled", wanted)
+                return False
+            log.warning("IBKR cancel %s: not among the open orders but "
+                        "reads %s — not confirmed", wanted, state)
             return False
         except ConnectionError:
             raise
