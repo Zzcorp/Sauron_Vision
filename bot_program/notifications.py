@@ -646,7 +646,8 @@ def _send_telegram(user, title: str, body: str, *, lines=None,
     the deployment names a host a phone can open; when Telegram refuses
     the BUTTON, the message goes again without it, its page as a line
     (message_parts, post_message). Never a callback button: nothing is
-    done from Telegram but the Eye's commands.
+    done from Telegram but the Eye's commands and the alarm bot's
+    /stopall.
     """
     try:
         import os

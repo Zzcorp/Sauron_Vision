@@ -312,6 +312,19 @@ DEFAULT_COMPONENTS = [
      "description": "Off (default): a critical guard finding says which bots the brake WOULD stop. On: those bots are turned OFF (enabled = False), once per finding: never on, never a close. Acts only while morgul_guards is on. The group's all on button never turns it on. Re-arm on the server.",
      "category": "system"},
 
+    # ── The alarm bot (2026-09-28) ──────────────────────────────────────
+    # bot_program/alarm.py: a second Telegram bot in a second group (the
+    # operator and his father), critical problems only, never an
+    # all-clear, and /status and /stopall. Its two beat tasks read THIS
+    # switch and never platform_master, whose pause it reports. OFF on
+    # arrival: after the deploy and `manage.py alarm --test`, `manage.py
+    # component on telegram_alarm`. Not in BULK_ENABLE_EXEMPT: it moves no
+    # money, so "all on" beside System arms it and "all off" silences it.
+    # Description measured at 282 chars (< 300).
+    {"key": "telegram_alarm", "name": "Telegram Alarm (critical problems only)",
+     "description": "The second Telegram bot, in its own group with both of you: it speaks only when Sauron has a CRITICAL problem, never an all-clear, and obeys only /status and /stopall there. The master switch does not silence it. OFF on arrival: turning it on starts the alarms and the two commands.",
+     "category": "system"},
+
     # ── The three that were never registered (found live 2026-09-13) ────
     # These keys have guarded tasks and beat entries in this codebase, and
     # had NO row in DEFAULT_COMPONENTS. `is_component_enabled` returns

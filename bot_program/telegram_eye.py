@@ -131,8 +131,9 @@ RATE_KEY = "telegram_eye:rate:{chat}"
 NOTE_KEY = "telegram_eye:note:{kind}"
 NOTE_EVERY_S = 3600
 FAILING_KEY = "telegram_eye:failing:{method}"
-#: The batch lock's key (pg_try_advisory_xact_lock); nothing else in this
-#: repository takes an advisory lock.
+#: The batch lock's key (pg_try_advisory_xact_lock). The alarm bot's poll
+#: takes one of its own (bot_program/alarm.BATCH_LOCK_ID), never this one:
+#: a /stopall there must not wait behind this batch.
 BATCH_LOCK_ID = 20260927
 #: A batch ends at these: the brake commits before anything else runs.
 BRAKE_VERDICTS = ("answered:stop", "answered:stopall")

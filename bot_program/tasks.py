@@ -3,6 +3,8 @@ import logging
 from celery import shared_task
 from core.task_gate import guarded_task
 
+from .alarm import alarm_task
+
 logger = logging.getLogger(__name__)
 from .engine.runner import run_bot_tick
 from .engine.backtest import run_scenario
@@ -1233,9 +1235,21 @@ def run_morgul_guards() -> dict:
     database and the cache: no broker call, no order, no close. The brake
     (enabled = False on the offending configs, through the Eye's own
     apply_brake) acts only while the morgul_brake component is ON.
+
+    Then the alarm bot hears the run (2026-09-28, bot_program/alarm.py):
+    its critical findings, a critical guard that could not run and the
+    brake having acted, to the alarm chat, on the alarm bot's own switch
+    and memory. Fenced: nothing there changes what Morgul did or returns.
     """
-    from .morgul import run_guards
-    return run_guards()
+    from .morgul import cycle
+    report = cycle(send=True)
+    try:
+        from .alarm import relay_morgul
+        relay_morgul(report)
+    except Exception as e:  # noqa: BLE001 — the relay never breaks Morgul
+        logger.warning("[telegram alarm] the Morgul run was not relayed "
+                       "(%s)", type(e).__name__, exc_info=True)
+    return report.result
 
 
 # ── The Telegram eye (2026-09-26) ────────────────────────────────────────
@@ -1269,3 +1283,42 @@ def answer_telegram_question(pending_id: int) -> dict:
     """
     from .telegram_eye import answer_question
     return answer_question(pending_id)
+
+
+# ── The alarm bot (2026-09-28) ───────────────────────────────────────────
+# A second Telegram bot in a second group, the operator and his father:
+# critical problems only, never an all-clear, and two commands, /status
+# and /stopall. The whole of it is bot_program/alarm.py; these are its
+# two Celery doors, both gated by the alarm bot's OWN switch (alarm_task:
+# telegram_alarm, OFF on arrival) and never by the master switch, whose
+# pause is one of the things it reports. The flatten's announcement is
+# not a task: the two kill-switch views send it themselves on the commit
+# (alarm.after_kill_switch), never behind a worker that may be down.
+
+@shared_task
+@alarm_task
+def poll_telegram_alarm() -> dict:
+    """Every 15 s on the fast queue: read the alarm chat, answer /status
+    and /stopall, confirm after the commit.
+
+    One poll at a time: alarm.poll takes an advisory lock of its own
+    without waiting (not the Eye's: a /stopall must never wait behind the
+    Eye's batch). A poll that read nothing is idle, and the row keeps the
+    sentinel's last verdict.
+    """
+    from .alarm import poll
+    return poll()
+
+
+@shared_task
+@alarm_task
+def run_alarm_sentinel() -> dict:
+    """Every 10 min: read what is critically wrong (the pause, abandoned
+    closes, safety-critical components and feeds, live broker accounts
+    that stopped answering) and tell the alarm chat what is due.
+
+    One pass at a time (a cache lock): a backlog never sends twice. A
+    pass whose alarm Telegram refused is an error on the row.
+    """
+    from .alarm import sentinel
+    return sentinel()

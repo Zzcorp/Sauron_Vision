@@ -96,6 +96,19 @@ def _pin_ok(request) -> bool:
     return bool(prof and prof.access_pin_hash and check_password(pin, prof.access_pin_hash))
 
 
+def _tell_the_alarm_chat(results):
+    """The flatten, counts only, to the alarm bot's chat (2026-09-28,
+    bot_program/alarm.after_kill_switch: after the commit, from a worker).
+    Fenced: the kill has happened, and nothing here can fail it or its
+    page."""
+    try:
+        from bot_program.alarm import after_kill_switch
+        after_kill_switch(results)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[kill switch] the alarm chat was not told (%s)",
+                       type(e).__name__)
+
+
 @_admin_only
 def flatten_all_positions(request):
     """The real kill switch: disable every bot AND close every open position.
@@ -128,6 +141,7 @@ def flatten_all_positions(request):
         messages.error(request, f"Kill switch FAILED: {e}. Check your broker "
                                 f"positions manually before assuming they are flat.")
         return redirect("admin_dashboard")
+    _tell_the_alarm_chat(results)
 
     closed = (results.get("positions_closed", 0)
               + results.get("asset_positions_closed", 0)

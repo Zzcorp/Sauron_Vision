@@ -6205,6 +6205,15 @@ def kill_switch_api(request):
 
     reason = data.get('reason', 'manual activation')
     results = execute_kill_switch(user=request.user, reason=reason)
+    # The alarm chat hears the flatten (2026-09-28): counts only, after
+    # the commit, from a worker. Fenced: the kill is done, and nothing
+    # there can fail it or this answer.
+    try:
+        from bot_program.alarm import after_kill_switch
+        after_kill_switch(results)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[kill switch] the alarm chat was not told (%s)",
+                       type(e).__name__)
     return JsonResponse(results)
 
 

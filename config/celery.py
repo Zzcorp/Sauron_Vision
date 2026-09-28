@@ -63,6 +63,12 @@ app.conf.task_routes = {
     # the quote poller like the eye's poll; no LLM, no broker call.
     "bot_program.tasks.run_morgul_guards": {"queue": "fast"},
     "bot_program.tasks.answer_telegram_question": {"queue": "ai"},
+    # 2026-09-28 -- the alarm bot (bot_program/alarm.py). Its poll beside
+    # the eye's: one HTTP round trip when idle, and a /stopall must not
+    # queue behind anything slower. Its sentinel reads the platform every
+    # 10 min, on the default queue the same worker consumes.
+    "bot_program.tasks.poll_telegram_alarm": {"queue": "fast"},
+    "bot_program.tasks.run_alarm_sentinel": {"queue": "default"},
 }
 
 # ============================================================
@@ -583,5 +589,22 @@ app.conf.beat_schedule = {
     "poll-telegram-eye": {
         "task": "bot_program.tasks.poll_telegram_eye",
         "schedule": 15.0,
+    },
+
+    # ── 2026-09-28 — the alarm bot (bot_program/alarm.py): a second bot in
+    #    a second group, the operator and his father, critical problems
+    #    only. Gated by its own switch (telegram_alarm, OFF on arrival),
+    #    NEVER the master switch: the pause is one of the things it says.
+    #    The poll answers /status and /stopall within a quarter minute; no
+    #    `expires` (the database scheduler drops it), its own advisory lock
+    #    takes one batch at a time. The sentinel reads the platform every
+    #    10 min; a cache lock keeps a backlog from sending twice.
+    "poll-telegram-alarm": {
+        "task": "bot_program.tasks.poll_telegram_alarm",
+        "schedule": 15.0,
+    },
+    "alarm-sentinel": {
+        "task": "bot_program.tasks.run_alarm_sentinel",
+        "schedule": 600.0,
     },
 }

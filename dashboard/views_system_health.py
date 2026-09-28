@@ -619,6 +619,14 @@ def check_morgul_guards() -> dict:
     return health_row(_check)
 
 
+def check_alarm_bot() -> dict:
+    """The alarm bot (bot_program/alarm.py): off (NOT SET UP), its
+    configuration refused and why, or configured in THIS process
+    (delivery unverified: `manage.py alarm --test` proves it)."""
+    from bot_program.alarm import health_row
+    return health_row(_check)
+
+
 @login_required
 def system_health(request):
     # Per-user checks are safe for anyone; the platform-wide ones expose
@@ -636,6 +644,7 @@ def system_health(request):
         (check_signal_flow, False, True),
         (check_ai_models, False, True),
         (check_morgul_guards, False, True),
+        (check_alarm_bot, False, True),
     ]
     checks = []
     for fn, needs_user, staff_only in plan:
