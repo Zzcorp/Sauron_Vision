@@ -45,9 +45,28 @@
 .sv-sel-all-phone { display: none; }
 
 /* ── The bar that appears at the first tick ───────────────────────── */
+/* Sticky to the foot of the screen while the table runs past it, so the
+   first tick on a long book puts the bar in view without a scroll; at the
+   table's end it sits where it is in the flow, and no last row is ever
+   under it. Two things the shell would otherwise deny it:
+   - position: sticky sticks to the nearest SCROLL CONTAINER, and
+     .main-content is one — its overflow-x: hidden (sauron.css) makes it
+     one — that never scrolls: the document does. Under it the bar stayed
+     at the table's end, below the fold at the first tick, on exactly the
+     books it was built for. On the pages that carry the bar .main-content
+     clips instead: clip is not a scroll container, so the bar sticks to
+     the viewport, and a wide page is cut at the same edge as before.
+     (forensics_detail.html meets the same trap and goes position: fixed,
+     which a bar of one known height can afford; this one wraps.)
+   - its bottom edge is the floating buttons' own. --se-bottom-edge clears
+     the info panel and the phone's bottom nav, and the Eye stands
+     --se-fab-size tall on it — the Gollum bubble takes the same seat
+     (sauron.css). At bottom: 0 the phone nav would cover the bar and the
+     Eye would sit on its Clear button. */
+body:has(.sv-sel-bar) .main-content { overflow-x: clip; }
 .sv-sel-bar {
     position: sticky;
-    bottom: 0;
+    bottom: calc(var(--se-bottom-edge, 24px) + var(--se-fab-size, 56px) + 16px);
     z-index: var(--z-sticky);
     display: flex;
     flex-wrap: wrap;

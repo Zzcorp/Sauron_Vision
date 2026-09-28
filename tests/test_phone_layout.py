@@ -378,6 +378,26 @@ class PhoneSheetTests(SimpleTestCase):
         self.assertEqual(prelude, "@media (max-width: 768px)")
         self.assertEqual(_rules(body), [(rule, "font-size: 16px;")])
 
+    def test_the_stop_and_target_buttons_meet_the_tap_floor(self):
+        """The one control on /positions/ that moves a stop. sauron.css
+        sizes .lvl-edit to its text, about 24px for a price with no
+        distance under it, and the (i) floor names .btn, CLOSE, the
+        dialog's X and the inputs, not it: a thumb that missed landed on
+        the cell, which is a tap on the row (sv-position-card.js) and
+        opened the trade page. Page-scoped like the detail link beside
+        it; a column, so the price and its distance keep their two lines;
+        and the text follows the stacked cell, which the stack sets left
+        (sauron.css) where the button's own rule says right."""
+        markup = _read("templates", "dashboard", "positions_list.html")
+        for label in ("Stop", "Target"):
+            cell = markup.split('data-label="%s"' % label, 1)[1].split("</td>", 1)[0]
+            self.assertIn('class="lvl-edit"', cell, label)
+        lvl = _body(".page-content .lvl-edit")
+        for decl in ("min-height: 44px", "display: flex", "flex-direction: column",
+                     "justify-content: center", "text-align: inherit"):
+            self.assertIn(decl, lvl)
+        self.assertGreater(_weight(".page-content .lvl-edit"), _weight(".lvl-edit"))
+
     def test_the_floating_buttons_clear_the_bottom_nav_on_the_ladder(self):
         """0,2,1 < 0,2,2 < 1,1,2: over the shell's info-panel pair whatever
         the order, under the position page's lift over its close bar."""

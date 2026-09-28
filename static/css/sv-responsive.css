@@ -256,16 +256,27 @@
 
     /* (k) Page-scoped. /positions/: the detail link was 9px and muted
        until hovered, which a finger never does; the price sub-lines were
-       9px. The filter's selects are sized by the partial's own rule at
-       0,2,1 (11px), hence the longer prefix; the stop and target dialog
-       lives on <body> and sets 12px at 0,1,1, which this later sheet
-       beats at the same weight. */
+       9px; the stop and target of an open row, edited where they are read
+       through a .lvl-edit button (sauron.css) sized to its text, were a
+       24px target for the one control on the page that moves a stop — a
+       thumb that missed landed on the cell, which is a tap on the row and
+       opened the trade page. The button gets the (i) floor, as a column so
+       the price and its distance keep their two lines, and its text
+       follows the stacked cell, which the stack sets left where the
+       button's own rule says right. The filter's selects are sized by the
+       partial's own rule at 0,2,1 (11px), hence the longer prefix; the
+       stop and target dialog lives on <body> and sets 12px at 0,1,1,
+       which this later sheet beats at the same weight. */
     .page-content .pos-row-detail {
         font-size: 13px; color: var(--accent);
         min-height: 44px; display: inline-flex; align-items: center;
         padding: 0 6px;
     }
     .page-content .pos-price-pct { font-size: 11px; }
+    .page-content .lvl-edit {
+        min-height: 44px; display: flex; flex-direction: column;
+        justify-content: center; text-align: inherit;
+    }
     .page-content .pos-filter .pos-filter-field select { font-size: 16px; }
     .lvl-dlg input { font-size: 16px; min-height: 44px; }
 }

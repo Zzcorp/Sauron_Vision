@@ -1710,19 +1710,27 @@ class OrbMobileEdgeTests(TestCase):
     """Where the orb (and the banner stack, which reads the same edge) stands
     when the signals rail is open.
 
-    The rail is drawn at EVERY width: its 768px `display: none` loses to the
-    later UPGRADE-2 `display: flex !important`, and its open state comes back
-    from localStorage whatever the width — so a rail left open on the desk is
-    280px of watchlist on a tablet and on a phone too. Unscoped, the
-    open-rail 296px edge outranked the phone's :root 16px and sent the orb
-    most of the way across a 390px screen. The first fix scoped it at 769px
-    on the belief that the rail was hidden below that, and in doing so left
-    641–768px with the shut rail's 60px while the rail was open: the orb sat
-    on the watchlist. These pin the two breakpoints touching, and the premise
-    that makes 641 — not 769 — the right place for them to touch."""
+    The rail's open state comes back from localStorage whatever the width,
+    so body:has(.signals-rail.open) matches at every width, including the
+    ones where no rail is drawn. Unscoped, the open-rail 296px edge
+    outranked the phone's corner and sent the orb most of the way across a
+    390px screen. The scope has stood at three places, each time where the
+    rail stops being drawn: 769px on the belief that the rail's own 768px
+    hide in sauron.css won (it never did — the later UPGRADE-2 `display:
+    flex !important` outranks it — so 641–768px sat the orb on an open
+    rail's watchlist); 641px, one over the 640px phone block, while the
+    rail was drawn at every width; and 769px again since the 2026-09-28
+    phone tier (static/css/sv-responsive.css, linked after sauron.css)
+    hides the rail at 768px and below with a `display: none !important` of
+    the same weight, and states the phone's own edge there, `--se-right-
+    edge: 12px !important` on body. These pin the two breakpoints
+    touching, and the premise that makes 769 the right place for them to
+    touch — read across BOTH sheets, since the premise lives in the one
+    that loads last."""
 
     def setUp(self):
         self.css = _read("static", "css", "sauron.css")
+        self.phone = _read("static", "css", "sv-responsive.css")
 
     def test_the_open_rail_edge_takes_over_exactly_where_the_phone_edge_stops(self):
         import re
@@ -1730,28 +1738,47 @@ class OrbMobileEdgeTests(TestCase):
         rail = re.search(
             r"@media \(min-width: (\d+)px\) \{\s*"
             r"body:has\(\.signals-rail\.open\) \{ --se-right-edge: 296px; \}", self.css)
-        phone = re.search(
-            r"@media \(max-width: (\d+)px\) \{\s*"
-            r":root \{ --se-right-edge: 16px; --se-fab-size: 46px; \}", self.css)
         self.assertIsNotNone(rail, "the open-rail edge must be scoped away from phones")
-        self.assertIsNotNone(phone, "the phone edge lives in its own max-width block")
+        # The phone tier's edge: on body, !important, so it outranks every
+        # body:has(...) restatement in sauron.css whatever the order.
+        phone = re.search(
+            r"@media \(max-width: (\d+)px\) \{\s*(?:/\*.*?\*/\s*)?"
+            r"body \{[^}]*--se-right-edge: 12px !important;", self.phone, re.S)
+        self.assertIsNotNone(phone, "the phone tier states its own edge on body")
         # A gap between them is a band of widths where an open rail gets the
         # shut rail's 60px and the orb lands on it; an overlap is the phone
         # being overruled again.
         self.assertEqual(int(rail.group(1)), int(phone.group(1)) + 1)
 
-    def test_the_rail_is_still_drawn_below_769px(self):
-        """The premise of the 641px scope. If the 768px hide is ever made to
-        win, an open-but-hidden rail would again hand a tablet the 296px
-        edge beside nothing — the scope has to move to 769px in the same
-        change, and this test is here to say so."""
+    def test_the_rail_is_hidden_below_769px_and_the_scope_starts_there(self):
+        """The premise of the 769px scope. The rail's own 768px hide in
+        sauron.css is still dead (UPGRADE-2's `display: flex !important`
+        comes later in the same sheet); what hides the rail is the phone
+        tier's `display: none !important`, the same (0,1,0) weight, in the
+        sheet base.html links after it. If that hide is ever dropped, the
+        rail is drawn below 769px again and this scope has to move back
+        down to touch whatever phone edge is left — and this test is here
+        to say so."""
         import re
         hide = self.css.index("@media (max-width: 768px) {\n            .signals-rail { display: none; }")
         drawn = re.search(r"\.signals-rail \{\s*display: flex !important;", self.css)
         self.assertIsNotNone(drawn)
-        self.assertGreater(drawn.start(), hide,
-                           "the rail's 768px hide now wins — move the open-rail "
-                           "edge's scope in sauron.css up to 769px with it")
-        self.assertNotRegex(self.css, r"\.signals-rail \{ display: none !important",
-                            "the rail's 768px hide now wins — move the open-rail "
-                            "edge's scope in sauron.css up to 769px with it")
+        self.assertGreater(drawn.start(), hide)
+        self.assertNotRegex(self.css, r"\.signals-rail \{ display: none !important")
+        phone_block = self.phone[self.phone.index("@media (max-width: 768px) {"):]
+        hidden = re.search(
+            r"^\s*([^{\n]*\.signals-rail[^{\n]*)\{ display: none !important; \}",
+            phone_block, re.M)
+        self.assertIsNotNone(
+            hidden, "sv-responsive.css no longer hides the rail at 768px: move "
+                    "the open-rail edge's scope in sauron.css back down to touch "
+                    "the phone edge that remains")
+        self.assertIn(".signals-rail", [x.strip() for x in hidden.group(1).split(",")])
+        base = _read("templates", "base.html")
+        self.assertGreater(base.index("'css/sv-responsive.css'"),
+                           base.index("'css/sauron.css'"))
+        scope = re.search(r"@media \(min-width: 769px\) \{\s*"
+                          r"body:has\(\.signals-rail\.open\) \{ --se-right-edge: 296px; \}",
+                          self.css)
+        self.assertIsNotNone(scope, "the open-rail edge is not scoped at 769px, "
+                                    "where the rail starts being drawn")

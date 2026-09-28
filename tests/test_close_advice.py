@@ -29,17 +29,23 @@ What this file pins, in order:
   * THE PAGES: a tick only on a bot row, the script and the sheet loaded,
     the row click that no longer navigates on a tick, and the live region
     that says when it rebuilt the table so the ticks can come back.
+  * THE BAR ON SCREEN: sticky to a scrollport that scrolls, above the
+    phone nav and the Eye — the CSS facts, and the same measured in a
+    headless Chromium on the rendered page where the machine has one.
   * THE SOURCE: brain/close_advice.py has no path to the engine.
 
 Run with:  python manage.py test tests.test_close_advice
 """
+import glob
 import json
 import os
 import pathlib
 import re
+import select
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from datetime import timedelta
 from decimal import Decimal
@@ -54,6 +60,29 @@ from django.utils import timezone
 HOST = "127.0.0.1"
 NODE = shutil.which("node")
 PIN = "4321"
+
+
+def _chrome():
+    """A headless Chromium for the measured tests, when the machine has
+    one: named in SV_CHROME or CHROME_BIN, Playwright's install
+    (PLAYWRIGHT_BROWSERS_PATH, /opt/pw-browsers by default) or a chromium
+    on the PATH. None, and those tests skip, as the node ones do."""
+    for var in ("SV_CHROME", "CHROME_BIN"):
+        path = os.environ.get(var)
+        if path and os.path.isfile(path):
+            return path
+    root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers")
+    found = sorted(glob.glob(os.path.join(root, "chromium-*", "chrome-linux",
+                                          "chrome")))
+    if found:
+        return found[-1]
+    for name in ("chromium", "chromium-browser", "google-chrome", "chrome"):
+        if shutil.which(name):
+            return shutil.which(name)
+    return None
+
+
+CHROME = _chrome()
 
 ADVICE = "/positions/close-advice/"
 PREVIEW = "/positions/close-selected/preview/"
@@ -160,6 +189,115 @@ def _one(answer, trade):
             return p
     raise AssertionError("trade #%s not in the answer: %r"
                          % (trade.id, answer["not_found"]))
+
+
+class _Chrome:
+    """A headless Chromium driven over its own DevTools pipe — fd 3 in,
+    fd 4 out, one NUL-terminated JSON message each way — so a layout can
+    be measured with nothing but the browser binary: no driver, no
+    package, no port to race for."""
+
+    ARGS = ("--headless=new", "--no-sandbox", "--disable-gpu",
+            "--disable-dev-shm-usage", "--no-first-run",
+            "--no-default-browser-check", "--remote-debugging-pipe")
+
+    def __init__(self, binary):
+        self.dir = tempfile.mkdtemp(prefix="sv-chrome-")
+        cmd_r, cmd_w = os.pipe()
+        out_r, out_w = os.pipe()
+
+        def wire():
+            # In the child, before exec: the pipe ends onto the two fds
+            # Chromium reads and writes, and inheritable so they survive it.
+            a, b = os.dup(cmd_r), os.dup(out_w)
+            os.dup2(a, 3)
+            os.dup2(b, 4)
+            os.set_inheritable(3, True)
+            os.set_inheritable(4, True)
+
+        self.proc = subprocess.Popen(
+            [binary, *self.ARGS, "--user-data-dir=" + self.dir, "about:blank"],
+            preexec_fn=wire, close_fds=False, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os.close(cmd_r)
+        os.close(out_w)
+        self.cmd_w, self.out_r = cmd_w, out_r
+        self.buf, self.n, self.events = b"", 0, []
+
+    def _recv(self, timeout=60):
+        deadline = time.monotonic() + timeout
+        while b"\0" not in self.buf:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise TimeoutError("Chromium said nothing for %ss" % timeout)
+            ready, _w, _x = select.select([self.out_r], [], [], left)
+            if not ready:
+                continue
+            chunk = os.read(self.out_r, 1 << 16)
+            if not chunk:
+                raise RuntimeError("Chromium closed its pipe")
+            self.buf += chunk
+        msg, self.buf = self.buf.split(b"\0", 1)
+        return json.loads(msg)
+
+    def call(self, method, params=None, session=None):
+        self.n += 1
+        msg = {"id": self.n, "method": method, "params": params or {}}
+        if session:
+            msg["sessionId"] = session
+        os.write(self.cmd_w, json.dumps(msg).encode("utf-8") + b"\0")
+        while True:
+            got = self._recv()
+            if got.get("id") == self.n:
+                if "error" in got:
+                    raise RuntimeError("%s: %r" % (method, got["error"]))
+                return got.get("result", {})
+            self.events.append(got)
+
+    def wait(self, event, session):
+        while True:
+            for i, got in enumerate(self.events):
+                if got.get("method") == event and got.get("sessionId") == session:
+                    del self.events[i]
+                    return got.get("params", {})
+            self.events.append(self._recv())
+
+    def page(self, width, height, mobile):
+        """A tab at this viewport, offline; the session every later call
+        names. `mobile` is what makes the viewport meta count."""
+        tid = self.call("Target.createTarget", {"url": "about:blank"})["targetId"]
+        sid = self.call("Target.attachToTarget",
+                        {"targetId": tid, "flatten": True})["sessionId"]
+        self.call("Page.enable", session=sid)
+        self.call("Network.enable", session=sid)
+        self.call("Network.setBlockedURLs", {"urls": ["http://*", "https://*"]},
+                  session=sid)
+        self.call("Emulation.setDeviceMetricsOverride",
+                  {"width": width, "height": height, "deviceScaleFactor": 1,
+                   "mobile": mobile}, session=sid)
+        return sid
+
+    def open(self, sid, url):
+        self.call("Page.navigate", {"url": url}, session=sid)
+        self.wait("Page.loadEventFired", sid)
+
+    def eval(self, sid, expression):
+        got = self.call("Runtime.evaluate",
+                        {"expression": expression, "awaitPromise": True,
+                         "returnByValue": True}, session=sid)
+        if got.get("exceptionDetails"):
+            raise RuntimeError(got["exceptionDetails"].get("text")
+                               or repr(got["exceptionDetails"]))
+        return got["result"].get("value")
+
+    def close(self):
+        try:
+            self.proc.kill()
+            self.proc.wait(timeout=10)
+        finally:
+            os.close(self.cmd_w)
+            os.close(self.out_r)
+            shutil.rmtree(self.dir, ignore_errors=True)
 
 
 class _Case(TestCase):
@@ -1445,6 +1583,136 @@ class PageTests(_Endpoint):
         self.assertNotIn("data-sv-advice-ids", page)
 
 
+@unittest.skipUnless(CHROME, "no headless Chromium on this machine")
+class SelectionBarMeasuredTests(_Endpoint):
+    """The bar measured in Chromium on the real /positions/ page, with a
+    book longer than the screen: at the first tick — the row being ticked
+    is on screen, so the card is at most a screen above it — the bar is
+    on screen too, above the phone's bottom nav, above the Eye, above the
+    desk's info panel, without a scroll; it stays there midway down the
+    table; and at the table's end it sits where it is in the flow.
+
+    The page is the one the test client renders, its stylesheets read from
+    static/ and its scripts dropped (they want a server; the layout does
+    not). The first tick is the one attribute flip sv-close-advice.js
+    makes, `bar.hidden = false`, with the first tick box scrolled into
+    view as a thumb would have it. A `position: sticky` bar under a
+    .main-content that is a scroll container (overflow-x: hidden) and
+    never scrolls sat at the table's end, a screen or twenty below, at
+    both widths: that is what these measure against."""
+    username = "ca_measured"
+
+    PROBE = r"""(async function () {
+        document.getAnimations().forEach(function (a) {
+            try { a.finish(); } catch (e) {}
+        });
+        var bar = document.querySelector("[data-sv-select-bar]");
+        bar.hidden = false;
+        function frame() {
+            return new Promise(function (r) {
+                requestAnimationFrame(function () { requestAnimationFrame(r); });
+            });
+        }
+        function box(sel) {
+            var el = document.querySelector(sel);
+            if (!el) return null;
+            var r = el.getBoundingClientRect();
+            return {top: r.top, bottom: r.bottom, left: r.left, right: r.right,
+                    shown: getComputedStyle(el).display !== "none" && r.height > 0};
+        }
+        async function at(y) {
+            if (y === "first") {
+                document.querySelector("[data-sv-select-trade]")
+                    .scrollIntoView({block: "center"});
+            } else {
+                window.scrollTo(0, y);
+            }
+            await frame();
+            return {y: window.scrollY, bar: box("[data-sv-select-bar]"),
+                    tick: box("[data-sv-select-trade]"),
+                    nav: box(".sv-phone-nav"), eye: box(".se-eye-fab"),
+                    panel: box(".info-panel-wrap")};
+        }
+        await frame();
+        var doc = document.documentElement.scrollHeight;
+        var card = document.querySelector("[data-sv-select-scope]").getBoundingClientRect();
+        var cardTop = card.top + window.scrollY, cardBottom = card.bottom + window.scrollY;
+        return JSON.stringify({
+            inner: window.innerHeight, width: window.innerWidth, doc: doc,
+            card: [cardTop, cardBottom],
+            position: getComputedStyle(bar).position,
+            first: await at("first"), mid: await at((cardTop + cardBottom) / 2),
+            end: await at(doc)
+        });
+    })()"""
+
+    def setUp(self):
+        super().setUp()
+        _quote("BTCUSD", 60600)
+        for _ in range(40):
+            _trade(self.user)
+        self.tmp = tempfile.mkdtemp(prefix="sv-bar-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def _page_url(self):
+        page = self.client.get("/positions/", HTTP_HOST=HOST).content.decode("utf-8")
+        page = re.sub(r"<script\b.*?</script>", "", page, flags=re.S)
+        page = re.sub(r'<link\b[^>]*href="https?://[^>]*>', "", page)
+        page = page.replace("/static/", "file://%s/static/" % settings.BASE_DIR)
+        path = pathlib.Path(self.tmp) / "positions.html"
+        path.write_text(page, encoding="utf-8")
+        return path.as_uri()
+
+    def _measure(self, width, height, mobile):
+        chrome = _Chrome(CHROME)
+        try:
+            sid = chrome.page(width, height, mobile)
+            chrome.open(sid, self._page_url())
+            return json.loads(chrome.eval(sid, self.PROBE))
+        finally:
+            chrome.close()
+
+    def _on_screen(self, got, where):
+        bar = got[where]["bar"]
+        self.assertTrue(bar and bar["shown"], (where, bar))
+        self.assertGreaterEqual(bar["top"], 0, (where, bar))
+        self.assertLessEqual(bar["bottom"], got["inner"], (where, bar))
+        eye = got[where]["eye"]
+        self.assertTrue(eye and eye["shown"], (where, eye))
+        self.assertLessEqual(bar["bottom"], eye["top"], (where, bar, eye))
+
+    def _check(self, got):
+        self.assertGreater(got["doc"], 2 * got["inner"], "not a long book")
+        self.assertEqual(got["position"], "sticky")
+        # The state of the first tick: the box being ticked is on screen.
+        tick = got["first"]["tick"]
+        self.assertGreaterEqual(tick["top"], 0, tick)
+        self.assertLessEqual(tick["bottom"], got["inner"], tick)
+        for where in ("first", "mid"):
+            self._on_screen(got, where)
+        # At the end of the page it sits where it is in the flow, at the
+        # table's end: no last row is ever under it.
+        self.assertLessEqual(got["end"]["bar"]["bottom"], got["inner"])
+
+    def test_a_phone_sees_the_bar_at_the_first_tick(self):
+        got = self._measure(390, 780, True)
+        self.assertEqual(got["width"], 390)
+        self._check(got)
+        for where in ("first", "mid"):
+            nav = got[where]["nav"]
+            self.assertTrue(nav and nav["shown"], (where, nav))
+            self.assertLessEqual(got[where]["bar"]["bottom"], nav["top"], where)
+
+    def test_a_desk_sees_the_bar_at_the_first_tick(self):
+        got = self._measure(1280, 900, False)
+        self.assertEqual(got["width"], 1280)
+        self._check(got)
+        for where in ("first", "mid"):
+            panel = got[where]["panel"]
+            if panel and panel["shown"]:
+                self.assertLessEqual(got[where]["bar"]["bottom"], panel["top"], where)
+
+
 class ScriptTests(SimpleTestCase):
     def setUp(self):
         self.js = _read("static", "js", "sv-close-advice.js")
@@ -1539,6 +1807,27 @@ class ScriptTests(SimpleTestCase):
             self.assertRegex(z.strip(), r"^(calc\()?var\(--z-", z)
         self.assertIn("@media (max-width: 768px)", self.css)
         self.assertNotIn("@media (max-width: 640px)", self.css)
+
+    def test_the_bar_sticks_to_a_scrollport_that_scrolls(self):
+        """position: sticky sticks to the nearest scroll container, and
+        the shell's .main-content is one (overflow-x: hidden, sauron.css)
+        that never scrolls — the document does — so the bar stayed at the
+        end of the table, below the fold at the first tick. On the pages
+        that carry it the sheet makes .main-content clip instead, which
+        is not a scroll container; and the bar stands above the floating
+        buttons on the tokens they stand on, clear of the phone's bottom
+        nav, the Eye and the info panel. SelectionBarMeasuredTests is the
+        same fact measured."""
+        self.assertIn("body:has(.sv-sel-bar) .main-content { overflow-x: clip; }",
+                      self.css)
+        bar = re.search(r"\n\.sv-sel-bar \{([^}]*)\}", self.css).group(1)
+        self.assertIn("position: sticky;", bar)
+        self.assertIn("bottom: calc(var(--se-bottom-edge, 24px) + "
+                      "var(--se-fab-size, 56px) + 16px);", bar)
+        self.assertIn("z-index: var(--z-sticky);", bar)
+        # The shell is left as it is everywhere else.
+        sauron = _read("static", "css", "sauron.css")
+        self.assertRegex(sauron, r"\.main-content \{[^}]*overflow-x: hidden; \}")
 
 
 @unittest.skipUnless(NODE, "node is not installed")
