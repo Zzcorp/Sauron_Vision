@@ -170,8 +170,13 @@ Leave OFF for now: `actuator_mode_live`, `meta_allocator_mode_live`,
 After editing `.env`, run `dc up -d` — **not** `restart`, which keeps the
 old environment.
 
-> Do **not** use "Start All" on the *system* category — it flips
-> `actuator_mode_live` alongside the master switch.
+> "all on" beside *System* on `/ops/` turns on the master switch, the
+> Telegram eye and the Morgul guards, and leaves every live-money switch
+> OFF — `actuator_mode_live`, `meta_allocator_mode_live`,
+> `share_allocator_mode_live`, `share_allocator_auto_derisk`,
+> `capital_desk_mode_live`, `fractional_units_live`, `etoro_leverage_live`
+> — and the Morgul brake with them; the page says so beside the button.
+> Each of those is its own `component on <key>` or its own toggle.
 
 Confirm it took:
 

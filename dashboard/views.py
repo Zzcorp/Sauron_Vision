@@ -3969,8 +3969,9 @@ def admin_bulk_toggle(request):
         enable = action == "enable"
         rows = PlatformComponent.objects.filter(category=category)
         if enable:
-            # A separate decision (the Morgul brake) is never switched on
-            # in bulk: core.platform_control.BULK_ENABLE_EXEMPT.
+            # The separate decisions (the Morgul brake, every live-money
+            # switch) are never switched on in bulk:
+            # core.platform_control.BULK_ENABLE_EXEMPT. "All off" is bulk.
             from core.platform_control import BULK_ENABLE_EXEMPT
             rows = rows.exclude(key__in=BULK_ENABLE_EXEMPT)
         count = rows.update(is_enabled=enable)

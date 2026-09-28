@@ -85,12 +85,33 @@ def get_component(key: str):
         return None
 
 
+#: The live-money switches (2026-09-28). Each description below calls its
+#: switch a separate decision — apply behind the PIN, "flip after weeks of
+#: positive edge", "flip only after D2c pins", a typed leverage REFUSED
+#: while off — and one tap of the System group's "all on" on a phone armed
+#: all seven at once, with no PIN and no per-key confirmation; only the
+#: brake was held back. Named here by hand, not derived from a
+#: description: a switch that arms real money is exempt because somebody
+#: wrote it down. tests/test_ops_cockpit.py fails when a System key ending
+#: in _live is missing from this tuple.
+LIVE_MONEY_SWITCHES = (
+    "actuator_mode_live",           # the admin can apply rule actions
+    "meta_allocator_mode_live",     # the admin can apply capital weights
+    "share_allocator_mode_live",    # a share plan can be applied (PIN / --yes)
+    "share_allocator_auto_derisk",  # a SHOCK plan applies itself, PIN-less
+    "capital_desk_mode_live",       # the fleet OBEYS the desk plan
+    "fractional_units_live",        # the stock bot sends fractions to eToro
+    "etoro_leverage_live",          # a typed leverage goes to eToro
+)
+
 #: Switches a category's "all on" button never turns on (2026-09-26,
 #: dashboard.views.admin_bulk_toggle): each is a separate decision, made by
 #: `manage.py component on <key>` or its own toggle. "All off" still turns
 #: them off. The Morgul brake stops bots on a critical guard finding; it
-#: must not arrive with the System group's other switches.
-BULK_ENABLE_EXEMPT = frozenset({"morgul_brake"})
+#: must not arrive with the System group's other switches — and neither
+#: must anything that moves real money (LIVE_MONEY_SWITCHES, above). /ops/
+#: says beside the group what the button leaves OFF.
+BULK_ENABLE_EXEMPT = frozenset({"morgul_brake", *LIVE_MONEY_SWITCHES})
 
 
 # ── Default components to register ───────────────────────

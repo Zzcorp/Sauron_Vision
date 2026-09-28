@@ -94,6 +94,77 @@ class TheThreeStates(TestCase):
         self.assertIn("answers.", body)
 
 
+class TheProductionSettingsDoNotBlindIt(TestCase):
+    """On the live box DEBUG is off, so SECURE_SSL_REDIRECT is on and
+    SecurityMiddleware answers every plain-http request with a 301 to its
+    https twin before any view runs — and 301 was a pass. The first cut of
+    this command therefore reported ~270 "ok"s on the VPS that measured
+    nothing (2026-09-28); the suite never saw it because .env.example says
+    DEBUG=True and the redirect is decided at settings import. The probe
+    now asks the way Caddy forwards — over https, X-Forwarded-Proto set —
+    and a redirect to the https twin of the same path is a failure named
+    for what it is, never an ok."""
+
+    PROD = dict(DEBUG=False, SECURE_SSL_REDIRECT=True,
+                SECURE_REDIRECT_EXEMPT=[r"^healthz/?$"],
+                SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"),
+                ALLOWED_HOSTS=["testserver"])
+
+    def setUp(self):
+        cache.delete("forge:route_probe")
+        User.objects.create_superuser("probe_su3", "p@x", "x")
+
+    def test_with_ssl_redirect_on_a_missing_page_is_still_found(self):
+        from core.management.commands import probe_routes as pr
+        routes = pr.free_routes() + [
+            ("a_page_nobody_wired", "this-route-answers-nothing/", True)]
+        with override_settings(**self.PROD), \
+                mock.patch.object(pr, "free_routes", return_value=routes):
+            body = _run()
+        stored = cache.get("forge:route_probe")
+        self.assertEqual(stored["state"], "ran")
+        self.assertEqual(stored["missing"], ["a_page_nobody_wired"])
+        self.assertEqual(stored["counts"]["broken"], 0,
+                         "broken: " + ", ".join(stored["broken"]))
+        self.assertGreater(stored["counts"]["ok"], 100, stored["counts"])
+        self.assertIn("1 answer 404", body)
+
+    def test_a_redirect_to_the_https_twin_is_a_failure_not_an_ok(self):
+        from django.http import HttpResponsePermanentRedirect
+        from core.management.commands import probe_routes as pr
+
+        class Bounced:
+            def get(self, path, **kw):
+                return HttpResponsePermanentRedirect(
+                    f"https://testserver{path}")
+
+        with mock.patch.object(pr, "free_routes",
+                               return_value=[("ops_dashboard", "ops/", True)]):
+            tally = pr.probe(Bounced(), "testserver")
+        self.assertEqual(tally["ok"], [])
+        self.assertEqual(len(tally["broken"]), 1, tally)
+        self.assertIn("ops_dashboard", tally["broken"][0])
+        self.assertIn("redirected before the view ran", tally["broken"][0])
+
+    def test_the_request_looks_like_the_one_caddy_forwards(self):
+        from django.http import HttpResponse
+        from core.management.commands import probe_routes as pr
+        seen = []
+
+        class Recorder:
+            def get(self, path, **kw):
+                seen.append(kw)
+                return HttpResponse("")
+
+        with mock.patch.object(pr, "free_routes",
+                               return_value=[("ops_dashboard", "ops/", True)]):
+            tally = pr.probe(Recorder(), "testserver")
+        self.assertEqual(tally["ok"], ["ops_dashboard"])
+        self.assertEqual(seen[0]["HTTP_HOST"], "testserver")
+        self.assertTrue(seen[0]["secure"])
+        self.assertEqual(seen[0]["HTTP_X_FORWARDED_PROTO"], "https")
+
+
 class TheForgeReadsIt(TestCase):
 
     def setUp(self):

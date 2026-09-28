@@ -96,14 +96,19 @@ def _cache_set(key, value, ttl):
 
 # ── (a) the switches ────────────────────────────────────────────────────
 def _switches(now) -> dict:
-    from core.platform_control import PlatformComponent
+    from core.platform_control import BULK_ENABLE_EXEMPT, PlatformComponent
 
+    # `held`: the keys in the group its "all on" button leaves OFF (the
+    # live-money switches, the Morgul brake); the page says so in one line.
     groups = OrderedDict(
-        (k, {"key": k, "label": label, "rows": []}) for k, label in CATEGORY_ORDER)
+        (k, {"key": k, "label": label, "rows": [], "held": []})
+        for k, label in CATEGORY_ORDER)
     n_on = n_off = n_err = 0
     for c in PlatformComponent.objects.order_by("category", "name"):
         group = groups.get(c.category) or groups["other"]
         group["rows"].append({"comp": c, "age": _age_text(c.last_run_at, now)})
+        if c.key in BULK_ENABLE_EXEMPT:
+            group["held"].append(c.key)
         if c.is_enabled:
             n_on += 1
         else:

@@ -1617,7 +1617,9 @@ class WiringTests(TestCase):
     def test_the_systems_all_on_button_never_arms_the_brake(self):
         from core.platform_control import (BULK_ENABLE_EXEMPT,
                                            PlatformComponent, seed_components)
-        self.assertEqual(BULK_ENABLE_EXEMPT, frozenset({morgul.BRAKE_KEY}))
+        # The brake was the first exempt switch; the live-money switches
+        # joined it on 2026-09-28 (tests/test_ops_cockpit.py names them).
+        self.assertIn(morgul.BRAKE_KEY, BULK_ENABLE_EXEMPT)
         seed_components()
         admin = User.objects.create_superuser("root", "root@example.test", "x")
         self.client.force_login(admin)

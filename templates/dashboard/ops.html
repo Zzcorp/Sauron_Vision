@@ -103,6 +103,10 @@
         </span>
         {% endif %}
     </div>
+    {% if is_admin and g.held %}
+    {# The live-money switches and the Morgul brake: "all on" leaves them OFF (core.platform_control.BULK_ENABLE_EXEMPT). #}
+    <div style="padding:0 16px 6px;font-size:11px;color:var(--text-muted);">all on leaves {{ g.held|join:", " }} OFF — each is a decision of its own, by its own toggle or <code>component on &lt;key&gt;</code>; all off still turns them off.</div>
+    {% endif %}
     <div class="table-wrapper">
     <table class="sv-perf-table sv-stack">
       <thead><tr>

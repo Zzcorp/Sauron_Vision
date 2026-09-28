@@ -18,7 +18,9 @@ answer:
                proves the route exists and refuses the method: a pass)
     forbidden  403 — reachable, refused to this user; a fact, not a fault
     missing    404 — the route is wired to nothing that answers
-    broken     5xx — the page raised
+    broken     5xx — the page raised; or a redirect to the https twin of
+               the same path, which means the view never ran and the page
+               was not measured
 
 and two it does NOT probe, counted rather than hidden:
 
@@ -35,6 +37,15 @@ WHAT IT REFUSES. To run when ALLOWED_HOSTS is empty (every GET would be a
 400 that says nothing about the page), or when no active superuser exists
 (every page would redirect to login and the tally would be 270 "ok"s that
 mean nothing). Both are reported as "could not probe", the third state.
+
+THE REQUEST LOOKS LIKE CADDY'S. With DEBUG off, SecurityMiddleware answers
+every plain-http request with a 301 to its https twin before any view runs,
+and 3xx is a pass: on the live box the first cut of this command reported
+~270 "ok"s that measured nothing (2026-09-28), and the suite, whose
+settings import with DEBUG on, never saw it. The probe GETs over https with
+X-Forwarded-Proto set, as Caddy forwards, and a redirect to the https twin
+of the same path is counted broken — "redirected before the view ran" —
+never ok.
 
 READ-ONLY BY CONSTRUCTION — GET only, no external service, no balance
 printed — and therefore web-runnable on the ops lane.
@@ -90,6 +101,14 @@ def free_routes():
     return out
 
 
+def _https_twin(resp, path: str) -> bool:
+    """True when a redirect points at the https form of the path just
+    asked for: SecurityMiddleware's answer, not a view's."""
+    from urllib.parse import urlsplit
+    target = urlsplit(resp.get("Location", "") or "")
+    return target.scheme == "https" and target.path == path
+
+
 def probe(client, host: str):
     """Walk and bucket. Returns the tally dict the command prints and stores."""
     tally = {"ok": [], "forbidden": [], "missing": [], "broken": [],
@@ -104,11 +123,20 @@ def probe(client, host: str):
             continue
         path = "/" + route.lstrip("^").lstrip("/")
         try:
-            status = client.get(path, HTTP_HOST=host, follow=False).status_code
+            # As Caddy forwards it: https, with the proxy header the
+            # settings trust. Plain http is answered 301 by
+            # SecurityMiddleware before any view runs when DEBUG is off.
+            resp = client.get(path, HTTP_HOST=host, follow=False,
+                              secure=True, HTTP_X_FORWARDED_PROTO="https")
         except Exception as exc:  # noqa: BLE001 — a raise IS the finding
             tally["broken"].append(f"{label} ({type(exc).__name__}: {exc})")
             continue
-        if status in OK_STATUSES:
+        status = resp.status_code
+        if status in (301, 302) and _https_twin(resp, path):
+            tally["broken"].append(
+                f"{label} (redirected before the view ran: {status} -> "
+                f"{resp['Location']})")
+        elif status in OK_STATUSES:
             tally["ok"].append(label)
         elif status == 403:
             tally["forbidden"].append(label)

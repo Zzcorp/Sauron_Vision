@@ -504,6 +504,95 @@ class ToggleNextTests(_Fixture):
                              fetch_redirect_response=False)
 
 
+# ── the live-money switches and the System group's "all on" ────────────
+class BulkEnableExemptTests(_Fixture):
+    """One tap of "all on" beside System on /ops/ armed every live-mode
+    switch — actuator, meta-allocator, share allocator and its auto
+    de-risk, capital desk, fractional units, eToro leverage — with no PIN
+    and no per-key confirmation; only the Morgul brake was held back
+    (2026-09-28). Each of those descriptions calls itself a separate
+    decision, so the button now treats them the way it treats the brake:
+    everything else in the group turns on, they stay OFF, and the page
+    says so. Each still flips on its own toggle, and "all off" still
+    turns them off."""
+
+    LIVE = ("actuator_mode_live", "meta_allocator_mode_live",
+            "share_allocator_mode_live", "share_allocator_auto_derisk",
+            "capital_desk_mode_live", "fractional_units_live",
+            "etoro_leverage_live")
+
+    def setUp(self):
+        super().setUp()
+        from core.platform_control import seed_components
+        seed_components()
+
+    def _state(self, *keys):
+        from core.platform_control import PlatformComponent
+        return {k: PlatformComponent.objects.get(key=k).is_enabled
+                for k in keys}
+
+    def test_the_exempt_set_names_every_live_switch_beside_the_brake(self):
+        from core.platform_control import (BULK_ENABLE_EXEMPT,
+                                           DEFAULT_COMPONENTS,
+                                           LIVE_MONEY_SWITCHES)
+        self.assertEqual(set(LIVE_MONEY_SWITCHES), set(self.LIVE))
+        self.assertEqual(BULK_ENABLE_EXEMPT,
+                         frozenset({"morgul_brake", *LIVE_MONEY_SWITCHES}))
+        system = {c["key"]: c for c in DEFAULT_COMPONENTS
+                  if c["category"] == "system"}
+        for key in BULK_ENABLE_EXEMPT:
+            self.assertIn(key, system, key)
+        # A future System switch whose key says it arms live money must be
+        # named in the tuple too, or this fails.
+        for key in system:
+            if key.endswith("_live") or "derisk" in key:
+                self.assertIn(key, BULK_ENABLE_EXEMPT, key)
+
+    def test_all_on_for_system_leaves_every_live_switch_off(self):
+        resp = self.client.post("/admin-dashboard/bulk-toggle/",
+                                {"category": "system", "action": "enable",
+                                 "next": "ops"})
+        self.assertRedirects(resp, "/ops/", fetch_redirect_response=False)
+        held = self.LIVE + ("morgul_brake",)
+        self.assertEqual(self._state(*held), {k: False for k in held})
+        # ...and everything else in the group did turn on.
+        self.assertEqual(
+            self._state("platform_master", "morgul_guards", "telegram_eye"),
+            {"platform_master": True, "morgul_guards": True,
+             "telegram_eye": True})
+
+    def test_each_live_switch_still_flips_on_its_own_toggle(self):
+        for key in self.LIVE:
+            resp = self.client.post("/admin-dashboard/toggle/",
+                                    {"key": key, "next": "ops"})
+            self.assertRedirects(resp, "/ops/", fetch_redirect_response=False)
+        self.assertEqual(self._state(*self.LIVE),
+                         {k: True for k in self.LIVE})
+
+    def test_all_off_still_turns_the_live_switches_off(self):
+        from core.platform_control import PlatformComponent
+        PlatformComponent.objects.filter(category="system").update(
+            is_enabled=True)
+        self.client.post("/admin-dashboard/bulk-toggle/",
+                         {"category": "system", "action": "disable",
+                          "next": "ops"})
+        self.assertFalse(PlatformComponent.objects.filter(
+            category="system", is_enabled=True).exists())
+
+    def test_the_page_says_in_one_line_what_all_on_leaves_off(self):
+        resp = self.client.get("/ops/")
+        self.assertEqual(resp.status_code, 200)
+        groups = {g["key"]: g for g in resp.context["switches"]["groups"]}
+        self.assertEqual(set(groups["system"]["held"]),
+                         set(self.LIVE) | {"morgul_brake"})
+        self.assertEqual(groups["scraper"]["held"], [])
+        lines = [ln for ln in resp.content.decode().splitlines()
+                 if "all on leaves" in ln]
+        self.assertEqual(len(lines), 1, lines)
+        for key in self.LIVE + ("morgul_brake",):
+            self.assertIn(key, lines[0])
+
+
 # ── the Run lane ────────────────────────────────────────────────────────
 class RunCommandTests(_Fixture):
 
