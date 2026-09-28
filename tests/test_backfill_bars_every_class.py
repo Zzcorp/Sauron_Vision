@@ -157,3 +157,28 @@ class EveryClassTests(TestCase):
         from_configs = next(a for a in parser._actions
                             if a.dest == "from_configs")
         self.assertNotIn("crypto", from_configs.help)
+
+
+class TheDocsStoppedSayingCryptoOnlyTests(TestCase):
+    """The runbook's step 6 and seed_bots' closing advice were written when
+    the command spoke only to Binance and kept saying "Binance-only" after
+    it stopped being true — while the same runbook's later sections run it
+    for the sector ETFs and the research fleet. An operator reading step 6
+    first was told not to run the command those sections depend on."""
+
+    def test_the_runbook_step_6_says_what_it_serves_now(self):
+        from pathlib import Path
+        from django.conf import settings
+        t = (Path(settings.BASE_DIR) / "deploy" / "RUNBOOK.md").read_text(
+            encoding="utf-8")
+        self.assertNotIn("Binance-only", t)
+        step6 = t[t.index("## 6. Create your first bots"):t.index("## 7. ")]
+        self.assertIn("backfill_bars --from-configs", step6)
+
+    def test_seed_bots_points_at_it_instead_of_warning_off_it(self):
+        from pathlib import Path
+        from django.conf import settings
+        src = (Path(settings.BASE_DIR) / "bot_program" / "management"
+               / "commands" / "seed_bots.py").read_text(encoding="utf-8")
+        self.assertNotIn("Binance-only", src)
+        self.assertIn("backfill_bars --from-configs", src)

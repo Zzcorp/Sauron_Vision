@@ -62,6 +62,10 @@ control/
 
 # Operator screenshots dropped locally — never ship into the public static root
 static/screen/
+# ibkr-apply's .env backup, and the dated copies the departure runbook has
+# the operator take by hand (deploy/ETORO_DEPARTURE.md §2c) — every secret
+# the platform has, never source.
 .env.bak
+.env.bak.*
 .env.tmp
 .env.lock

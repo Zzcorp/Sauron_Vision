@@ -103,6 +103,18 @@ class TheOperatorIsToldWhatToSetTests(SimpleTestCase):
         self.assertIn("4002", text)
         self.assertIn("4001", text)
 
+    def test_both_env_examples_pair_each_mode_with_the_relay_port(self):
+        """The image keeps the Gateway's own 4001/4002 on the container's
+        loopback and relays them out as 4003 (live) and 4004 (paper), so
+        from the web container 4001/4002 are refused for ever. The
+        runbook, the model and the renderer all say so; the file the
+        runbook has the operator copy said `paper -> 4002  live -> 4001`."""
+        for name in (".env.example", ".env.production.example"):
+            text = (REPO / name).read_text(encoding="utf-8")
+            self.assertIn("paper -> 4004", text, name)
+            self.assertIn("live -> 4003", text, name)
+            self.assertNotIn("paper -> 4002", text, name)
+
 
 class OneSlotPerLoginTests(SimpleTestCase):
     """IBKR permits one session per USERNAME, so separate logins need

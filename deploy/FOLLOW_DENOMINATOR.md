@@ -17,7 +17,7 @@ lines will skip.
 With Saxo the book, one Saxo pool and one eToro pool both automatic, each is
 planned at 50%: the Saxo pool is written to **half** the Saxo account when it
 is the only pool that account can size, and the eToro pool is never retuned
-at all. `/shares/`, `follow --list`, `shares --list`, the preflight and
+at all. `/shares/`, `follow` (no id), `shares list`, the preflight and
 `evidence` all print "auto 50%", so the number looks deliberate.
 
 The error is always in the direction of **too small**. No pool is ever sized

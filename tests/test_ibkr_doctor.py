@@ -10,7 +10,11 @@ next step. It takes none of those steps itself.
 
 Run with:  python manage.py test tests.test_ibkr_doctor
 """
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 from django.conf import settings
@@ -20,6 +24,23 @@ from django.test import SimpleTestCase
 def _script() -> str:
     return (Path(settings.BASE_DIR) / "deploy" / "ibkr-doctor").read_text(
         encoding="utf-8")
+
+
+def _run_doctor_against(fake_dc: str) -> str:
+    """Run the REAL script under sh beside a stand-in `dc` that answers
+    its questions with canned facts, and return what the operator reads.
+    The script finds `dc` next to itself, so a copy in a temp directory
+    is the whole harness."""
+    with tempfile.TemporaryDirectory() as d:
+        doctor = Path(d) / "ibkr-doctor"
+        shutil.copyfile(Path(settings.BASE_DIR) / "deploy" / "ibkr-doctor",
+                        doctor)
+        dc = Path(d) / "dc"
+        dc.write_text(fake_dc, encoding="utf-8")
+        os.chmod(dc, 0o755)
+        r = subprocess.run(["sh", str(doctor)], capture_output=True,
+                           text=True, timeout=60)
+        return r.stdout + r.stderr
 
 
 def _commands(src: str):
@@ -242,3 +263,47 @@ class TheReauthenticationItMissedTests(SimpleTestCase):
         self.assertIn("This is the Gateway's SESSION", branch)
         self.assertIn("Restarting the workers changes nothing", branch)
         self.assertIn("approve the IB Key notification", branch)
+
+
+# The box this stand-in describes: one healthy container, a login that
+# completed with a quiet tail after it, and a preflight report of a hundred
+# lines whose one blocker is printed where preflight prints them — LAST.
+FAKE_DC = r'''#!/bin/sh
+case "$*" in
+    *preflight_live*)
+        i=1
+        while [ "$i" -le 100 ]; do echo "   section line $i"; i=$((i + 1)); done
+        echo "======================================================================"
+        echo "BLOCKERS — do not arm until these are answered:"
+        echo "  1. sauron: the book is a LIVE stock account and no equity reading has landed in 5.0h" ;;
+    *" logs "*)
+        echo "ibgateway-1  | 2026-09-12 11:53:39:000 IBC: Login has completed"
+        echo "ibgateway-1  | 2026-09-12 12:10:02:114 IBC: Configuration tasks completed" ;;
+    *" ps "*)
+        echo "NAME                STATUS"
+        echo "sauron-ibgateway-1  Up 3 hours (healthy)" ;;
+esac
+'''
+
+
+class TheReportIsReadToTheEndTests(SimpleTestCase):
+    """The fact the verdict needs — "no equity reading has landed" — is a
+    BLOCKER, and preflight prints its BLOCKERS block LAST, after a section
+    per user with a broker row and a line per armed symbol. Step 5 kept
+    only the report's first 80 lines and the verdict matched inside those,
+    so on any box whose report ran longer (a second broker user, a few
+    more armed configs) the stale fact fell off the end, and a reading
+    hours old was read as fresh: "Nothing to do here."
+    """
+
+    def test_a_blocker_printed_past_line_80_still_reaches_the_verdict(self):
+        out = _run_doctor_against(FAKE_DC)
+        self.assertIn("Login has completed", out)     # the box as described
+        self.assertNotIn("Nothing to do here", out)
+        self.assertIn("the broker sync has not run since", out)
+
+    def test_the_block_that_decides_is_shown_not_only_matched(self):
+        """The operator reads step 5 too: a report cut at line 80 hid the
+        BLOCKERS block from them as well as from the verdict."""
+        out = _run_doctor_against(FAKE_DC)
+        self.assertIn("no equity reading has landed", out)

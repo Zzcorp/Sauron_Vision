@@ -198,7 +198,14 @@ docker compose --env-file .env -f deploy/docker-compose.yml exec web \
 **No broker account is needed for paper trading.** Bars and marks arrive
 keylessly for every asset class (Binance public for crypto, yfinance for the
 rest) within ~10 minutes of enabling the bots and the scrapers from step 5.
-Do **not** use `backfill_bars` for non-crypto symbols — it is Binance-only.
+That refresh keeps the bars current; it does not give a new instrument the
+history the long-window rules need (an SMA200 wants 210 bars). `backfill_bars`
+does, for every class through the same keyless feeds — run it once after
+seeding, and again for any instrument you add later:
+
+```bash
+./deploy/dc exec web python manage.py backfill_bars --from-configs --intervals 1d,4h --bars 300
+```
 
 Broker credentials are for **live trading** and for real-time marks that beat
 the delayed public feeds:

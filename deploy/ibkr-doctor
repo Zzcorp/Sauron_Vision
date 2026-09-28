@@ -94,8 +94,22 @@ for port, mode in ((4003, "live"), (4004, "paper")):
 PY
 
 say "5. Sauron's own reading (manage.py preflight_live — read-only)"
-pre=$("$dc" exec -T web python manage.py preflight_live 2>&1 | sed -n '1,80p' || true)
-printf '%s\n' "$pre"
+# The WHOLE report is captured and matched below; only the printout is
+# cut. The fact the verdict needs — "no equity reading has landed" — is a
+# BLOCKER, and preflight prints its BLOCKERS block LAST, after a section
+# per user with a broker row and a line per armed symbol. Capturing the
+# first 80 lines and matching inside them meant that on any box whose
+# report ran longer (a second broker user, a few more armed configs) the
+# stale fact fell off the end, and the verdict read a reading hours old
+# as fresh. The head is shown; when the verdict block lies beyond it, it
+# is shown too, because it is the part that decides.
+pre=$("$dc" exec -T web python manage.py preflight_live 2>&1 || true)
+printf '%s\n' "$pre" | sed -n '1,80p'
+at=$(printf '%s\n' "$pre" | grep -n -E '^(BLOCKERS|NO BLOCKERS)' | head -1 | cut -d: -f1)
+if [ "${at:-0}" -gt 80 ]; then
+    echo "  (... the report runs on; its verdict block, which decides:)"
+    printf '%s\n' "$pre" | sed -n "${at},\$p"
+fi
 
 say "6. verdict"
 state=$("$dc" --profile "$prof" ps "$svc" 2>/dev/null | tail -n +2 || true)

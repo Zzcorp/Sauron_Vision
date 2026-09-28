@@ -253,6 +253,11 @@ not zero; #93/#94 with the broker's fill and `src broker`), `live rows []`,
   cd ~/Sauron_Vision && cp -p .env .env.bak.$(date +%F) && chmod 600 .env.bak.$(date +%F) && grep -nE '^COMPOSE_PROFILES=|sauron: IBKR' .env && nano .env
   ```
 
+  The dated copy holds every secret the platform has — `SECRET_KEY`,
+  `FERNET_KEY`, the database password and the very Gateway login this step
+  deletes. `.gitignore` covers it (`.env.bak.*`, beside ibkr-apply's
+  `.env.bak`), so a later `git add -A` from the box cannot stage it.
+
   In nano: remove `ibkr` from `COMPOSE_PROFILES`; delete the managed block
   from `# >>> sauron: IBKR gateway logins` through `# <<< sauron: IBKR gateway
   logins` and any hand-typed `IBKR_USERNAME=` / `IBKR_PASSWORD=` lines. Proof:

@@ -20,6 +20,8 @@ review's confirmed findings so none of them can quietly return:
 
 Run with:  python manage.py test tests.test_ibkr_apply
 """
+import re
+import subprocess
 from io import StringIO
 from pathlib import Path
 
@@ -33,6 +35,23 @@ REPO = Path(settings.BASE_DIR)
 
 def script():
     return (REPO / "deploy" / "ibkr-apply").read_text(encoding="utf-8")
+
+
+def _gate(var: str) -> str:
+    """The shape test ibkr-apply applies to a rendered `<PREFIX>_<var>`
+    line, read OUT of the script (the ERE inside its `grep -Eq "..."`) and
+    filled in as slot 1 fills it — a copy kept here would pass while the
+    script asked for something else."""
+    m = re.search(r'grep -Eq "(\^\$\{prefix\}_%s=.*?)" "\$tmp"' % var,
+                  script())
+    assert m, f"no {var} gate found in ibkr-apply"
+    return m.group(1).replace('\\"', '"').replace("${prefix}", "IBKR")
+
+
+def _passes(gate: str, line: str) -> bool:
+    """grep's verdict, not a Python re-reading of the same pattern."""
+    return subprocess.run(["grep", "-Eq", gate], input=line + "\n",
+                          text=True).returncode == 0
 
 
 class TheScriptRefusesTheOldBugsTests(TestCase):
@@ -77,15 +96,48 @@ class TheScriptRefusesTheOldBugsTests(TestCase):
                         s.index("--force-recreate"))
 
     def test_the_backup_family_is_gitignored(self):
+        """Including the dated copies deploy/ETORO_DEPARTURE.md §2c has the
+        operator take by hand: `.env.bak` by exact name left
+        `.env.bak.2026-09-28` — every secret the platform has — an ordinary
+        untracked file in the checkout on the box."""
         text = (REPO / ".gitignore").read_text(encoding="utf-8")
-        for name in (".env.bak", ".env.tmp", ".env.lock"):
-            self.assertIn(name, text, name)
+        for name in (".env.bak", ".env.bak.*", ".env.tmp", ".env.lock"):
+            self.assertIn(name, text.splitlines(), name)
 
     def test_the_runbook_teaches_the_one_command_flow(self):
         text = (REPO / "deploy" / "RUNBOOK.md").read_text(encoding="utf-8")
         self.assertIn("./deploy/ibkr-apply", text)
         self.assertIn("Second factor", text)
         self.assertIn("IB Key push", text)
+
+
+class TheGateAcceptsBothQuotingsTests(TestCase):
+    """render_ibkr_env single-quotes every value it can, and falls back to
+    the double-quoted, `$$`-escaped form for the one value single quotes
+    cannot hold — one with a single quote in it (tests/test_env_quoting).
+    The gate asked for single quotes only, so a password like O'Neil$7x
+    rendered correctly, was refused as UNQUOTED, and the operator was sent
+    to "update the platform" — a fix that does not exist. A double-quoted
+    line is not an unquoted one: compose reads `$$` as one `$` inside
+    double quotes, which is the whole point of the fallback."""
+
+    def test_the_renderers_double_quoted_fallback_passes_the_gate(self):
+        from bot_program.management.commands.render_ibkr_env import _env_quote
+        rendered = _env_quote("O'Neil$7x")
+        self.assertTrue(rendered.startswith('"'))       # the fallback form
+        self.assertTrue(_passes(_gate("PASSWORD"),
+                                f"IBKR_PASSWORD={rendered}"))
+        self.assertTrue(_passes(_gate("USERNAME"),
+                                f"IBKR_USERNAME={_env_quote('trader777')}"))
+
+    def test_an_unquoted_line_is_still_refused(self):
+        self.assertFalse(_passes(_gate("PASSWORD"),
+                                 "IBKR_PASSWORD=pw!!++$$end"))
+        self.assertFalse(_passes(_gate("PASSWORD"), "IBKR_PASSWORD="))
+        self.assertFalse(_passes(_gate("USERNAME"), "IBKR_USERNAME=''"))
+
+    def test_the_refusal_no_longer_names_a_fix_that_does_not_exist(self):
+        self.assertNotIn("must single-quote values", script())
 
 
 class TheRenderKeepsItsChannelsSeparateTests(TestCase):
