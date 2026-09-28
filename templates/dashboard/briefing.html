@@ -1,6 +1,91 @@
 {% extends "base.html" %}
 {% load sauron_tags %}
 {% block title %}Strategist briefing · Sauron's Mind{% endblock %}
+{% block extra_css %}
+{# THE MONDAY GAME PLAN (2026-09-27): the section's own styles. Phone first, the theme's tokens only, 48px rows to tap. #}
+<style>
+    .mp-jump {
+        display: inline-flex; align-items: center; gap: 8px;
+        min-height: 44px; box-sizing: border-box; margin: 0 0 18px;
+        padding: 8px 16px; border: 1px solid var(--border);
+        border-radius: 999px; color: var(--accent); text-decoration: none;
+        font-size: 14px; max-width: 100%; overflow-wrap: anywhere;
+    }
+    .mp-jump:hover, .mp-jump:focus-visible { border-color: var(--accent); }
+    .mp-card {
+        margin-top: 20px; min-width: 0;
+        scroll-margin-top: calc(var(--topbar-height, 56px) + 48px);
+    }
+    .mp-head {
+        display: flex; flex-wrap: wrap; align-items: baseline;
+        justify-content: space-between; gap: 6px 14px;
+    }
+    .mp-title { margin: 0; font-size: 18px; }
+    .mp-week {
+        font-family: var(--font-mono); font-size: 12px; letter-spacing: 1px;
+        text-transform: uppercase; color: var(--accent-gold);
+    }
+    .mp-meta { margin: 0 0 14px; font-size: 13px; color: var(--text-muted); }
+    .mp-body {
+        max-width: 72ch; font-size: 15px; line-height: 1.65;
+        color: var(--text-secondary); overflow-wrap: anywhere;
+    }
+    .mp-body .rs-p { margin: 0 0 12px; }
+    .mp-body .rs-lead { font-size: 16px; color: var(--text-primary); }
+    .mp-body .rs-h {
+        margin: 22px 0 8px; font-family: var(--font-mono); font-size: 12px;
+        letter-spacing: .12em; text-transform: uppercase; color: var(--accent);
+    }
+    .mp-body .rs-h:first-child { margin-top: 0; }
+    .mp-body .rs-list { margin: 0 0 12px; padding-left: 22px; }
+    .mp-body .rs-list li { margin-bottom: 6px; }
+    .mp-body .rs-list li::marker { color: var(--accent); }
+    .mp-body strong { color: var(--text-primary); }
+    .mp-body .rs-code {
+        font-family: var(--font-mono); font-size: 13px; padding: 1px 5px;
+        border-radius: 3px; background: var(--bg-card-hover);
+    }
+    .mp-body .rs-pre {
+        margin: 8px 0 12px; padding: 10px 12px; max-width: 100%;
+        overflow-x: auto; border-radius: 6px; background: var(--bg-card-hover);
+        font-family: var(--font-mono); font-size: 12px; line-height: 1.55;
+        white-space: pre; overflow-wrap: normal;
+    }
+    .mp-body .rs-link { color: var(--accent); }
+    .mp-sub {
+        margin: 22px 0 6px; font-family: var(--font-mono); font-size: 12px;
+        letter-spacing: .12em; text-transform: uppercase;
+        color: var(--text-muted);
+    }
+    .mp-note { margin: 0 0 8px; font-size: 13px; color: var(--text-muted); }
+    .mp-calls-list {
+        max-width: 72ch; margin: 0 0 4px; padding-left: 22px;
+        font-size: 14px; line-height: 1.55; color: var(--text-secondary);
+        overflow-wrap: anywhere;
+    }
+    .mp-calls-list li { margin-bottom: 4px; }
+    .mp-older { margin-top: 22px; border-top: 1px solid var(--border); }
+    .mp-old { border-bottom: 1px solid var(--border); }
+    .mp-old > summary {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px;
+        min-height: 48px; box-sizing: border-box; padding: 8px 0;
+        cursor: pointer; list-style: none;
+    }
+    .mp-old > summary::-webkit-details-marker { display: none; }
+    .mp-old > summary::before { content: "\25B8"; color: var(--accent); }
+    .mp-old[open] > summary::before { content: "\25BE"; }
+    .mp-old-week { font-weight: 600; color: var(--text-primary); }
+    .mp-old-meta { font-size: 13px; color: var(--text-muted); }
+    .mp-old > .mp-body { padding: 4px 0 14px; }
+    .mp-empty { margin: 0; color: var(--text-muted); }
+    @media (max-width: 768px) {
+        .mp-title { font-size: 20px; }
+        .mp-body { font-size: 16px; }
+        .mp-body .rs-lead { font-size: 17px; }
+        .mp-calls-list { font-size: 15px; }
+    }
+</style>
+{% endblock %}
 {% block content %}
 
     {# ── Top stat strip — 6 cells ─────────────────────────────────── #}
@@ -36,6 +121,9 @@
             <span class="oc-strip-sub">{% if latest %}{{ latest.created_at|date:"M d" }}{% endif %}</span>
         </div>
     </div>
+
+    {# The Monday game plan is long and weekly: it sits under the briefings, and this line leads to it. #}
+    {% if monday_plan %}<a class="mp-jump" href="#monday-plan">Monday game plan — week of {{ monday_plan.week_words }} &#9662;</a>{% endif %}
 
     {# ── Posture mix donut · model footer ─────────────────────────── #}
     {% if posture_donut %}
@@ -191,6 +279,9 @@
         </div>
     </div>
     </div>{# /brfMain #}
+
+    {# Outside #brfMain: the strategist's run-now refresh swaps that region, never this one. #}
+    {% include "dashboard/_monday_plan.html" %}
 
 {# Row clicks open the briefing; a 2s dwell shows a preview card first — #}
 {# same dwell/placement engine as the news feed, reusing the .nf-pop #}

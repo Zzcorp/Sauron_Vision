@@ -683,7 +683,10 @@ demo row the book and the venue in one click).
     held 75745.8 (9.98% under the fill, on positionExecutions[0]
     .stopLossRate — the top-level openStopLossRate keeps the sent level);
     the target 88349.17 held as sent. The fill notification names it since
-    ("Stop moved by eToro: sent X, held Y (Z% from entry)"). CLOSED at
+    ("Stop moved by eToro: sent X, held Y (Z% from entry)"; reworded
+    2026-09-27 to "Stop moved by eToro: it holds Y, not the X sent (Z%
+    below the entry)", and the fill message's Stop and risk lines read the
+    stop eToro holds). CLOSED at
     22:03:24 UTC through the adapter's close — the v1 market-close-orders
     POST with no segment, attested until then by a GET answering 405 only:
     orderForClose {orderID 1596736969, orderType 19, statusID 1}, the open

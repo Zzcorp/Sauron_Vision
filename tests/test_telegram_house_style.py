@@ -277,20 +277,34 @@ class SignalDispatchTests(_Base):
         self.assertEqual(p["chat_id"], "-5337454557")
         self.assertEqual(p["text"].split("\n"), [
             "<b>\U0001F4C8 Signal · MSFT · BUY</b>",
+            "Sauron flags MSFT as a buy at 421.37.",
+            "",
             "Score: 0.82",
-            "Rule: rule_a&lt;b&gt;&amp;c",
+            "Rule: Rule a&lt;b&gt;&amp;c",
             "Entry 421.37 · stop 410.00 · target 440.00",
             "Reward to risk: 1.85",
             "Urgency: medium",
             f"Page: {reverse('instrument_detail', args=['MSFT'])} "
             f"on the platform"])
 
-    def test_the_page_is_a_link_when_the_host_is_named(self):
-        from alerts.dispatch import signal_telegram
+    def test_the_page_is_a_button_when_the_host_is_named(self):
+        """Since 2026-09-27 the page is the "Open instrument" button; the
+        Page line stands in only where no button can be built."""
+        from alerts.channels.telegram_alert import button_markup
+        from alerts.dispatch import signal_extras, signal_telegram
         with patch.dict(os.environ, {"DOMAIN": "sauron.invalid"}):
-            _, lines, _ = signal_telegram(_signal(self.inst))
+            sig = _signal(self.inst)
+            _, lines, _ = signal_telegram(sig)
+            markup = button_markup(signal_extras(sig)["button"])
+        self.assertFalse([ln for ln in lines if ln.startswith("Page")],
+                         lines)
+        self.assertEqual(markup, {"inline_keyboard": [[{
+            "text": "Open instrument",
+            "url": "https://sauron.invalid/instruments/MSFT/"}]]})
+        with patch.dict(os.environ, {"DOMAIN": "localhost:8000"}):
+            _, lines, _ = signal_telegram(sig)
         self.assertEqual(lines[-1],
-                         "Page: https://sauron.invalid/instruments/MSFT/")
+                         "Page: https://localhost:8000/instruments/MSFT/")
 
     def test_a_sell_a_forex_price_and_missing_levels(self):
         from alerts.dispatch import signal_telegram
@@ -671,12 +685,19 @@ class NotifierTests(_Base):
                                     limit=-100.0)
         n = Notification.objects.get(user=self.user)
         self.assertTrue(n.title.startswith("▲ Drawdown limit reached"))
-        text = _payloads(post)[0]["text"]
-        self.assertEqual([html.unescape(ln) for ln in text.split("\n")[1:]],
+        text = _payloads(post)[0]["text"].split("\n")
+        # a summary sentence and a blank line, then the bell's own lines
+        # (2026-09-27); a loss is printed with a minus sign
+        self.assertEqual(text[1], "ST has lost 200.00 in the last 24 hours, "
+                                  "past its limit of 100.00, so it opens no "
+                                  "new trades for now.")
+        self.assertEqual(text[2], "")
+        self.assertEqual([html.unescape(ln) for ln in text[3:]],
                          n.data["items"])
         self.assertEqual(n.data["items"], [
-            "Bot: ST", "Asset class: STOCK", "Realized 24h P&L: -200.00",
-            "Limit: -100.00", "New entries halted"])
+            "Bot: ST", "Asset class: STOCK",
+            "Realized 24h P&L: \U00002212" "200.00",
+            "Limit: \U00002212" "100.00", "New entries halted"])
 
     def test_the_briefing_reads_label_and_detail_never_a_dict(self):
         from bot_program.notifications import notify_strategist_briefing_to_all

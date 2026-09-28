@@ -47,16 +47,13 @@ BOT_KINDS = {
 }
 
 
-#: The close outcome as the operator reads it on Telegram: an emoji the
-#: client renders, and words without an underscore. The keys are
-#: bot_grading's own vocabulary; anything else reads as a plain close.
-OUTCOME_WORDS = {
-    "hit_target": ("\U0001F3AF", "target hit"),
-    "stopped_out": ("\U0001F6D1", "stopped out"),
-    "time_stop": ("\u23F1", "time stop"),
-    "expired": ("\u231B", "expired"),
-    "manual_close": ("\u270B", "closed by hand"),
-}
+#: The fill messages' marks (2026-09-27). An open says its side: green
+#: bought, red sold short (a hand-taken open keeps the hand,
+#: NOTIFY_MARKS["manual_fill_open"]). A close says its RESULT: a gain, a
+#: loss, or nothing (zero, or a result nobody could price); how it ended
+#: is a line of its own, in words (position_summary.ending_words).
+OPEN_MARKS = {"long": "\U0001F7E2", "short": "\U0001F534"}
+CLOSE_MARKS = {"gain": "\u2705", "loss": "\U0001F53B", "flat": "\u26AA"}
 
 #: The emoji every other notifier leads its Telegram message with
 #: (2026-09-26), reusing a mark where the event is the same: the hand of
@@ -100,14 +97,110 @@ DECAY_WORDS = {
 }
 
 
-def _amount(value) -> str:
-    """A money amount on a Telegram line: two decimals, grouped; anything
-    that is not a number is printed as it came."""
-    from decimal import Decimal, InvalidOperation
-    try:
-        return f"{Decimal(str(value)):,.2f}"
-    except (InvalidOperation, TypeError, ValueError):
-        return str(value)
+# ── The words a person reads (2026-09-27) ────────────────────────────────
+# The operator, 2026-09-27: "the telegram messages are still basic still".
+# The fills read like a log line ("FOREX · qty 7900.00000000 @
+# 1.60725571", "Rule golden_cross") and the father reads them on a phone
+# for three weeks. ONE place decides how a number reads in a sent text,
+# on the position page's own formatters (dashboard.position_summary) and
+# the platform's price convention (core.price_format), so the phone and
+# the page never print one figure two ways:
+#   money      "1,234.56 USD", "+17.38 USD", "−45.79 USD": a true minus
+#              sign, and a figure that rounds to zero is never signed
+#   price      the instrument's own decimals: 1.60726, 148.325, 227.53
+#   quantity   no trailing zeros, grouped: 7,900 / 0.0002
+#   percent    one decimal; under 1% two, which one would halve (0.15%)
+#   duration   in words: "3 days 4 hours" (position_summary.duration_words)
+# An unknown is "" and the line that needed it is left out: never
+# "None", never "Decimal(...)", never eight decimals.
+
+#: The minus sign a loss is printed with.
+MINUS = "\u2212"
+
+#: The attack mode's tiers (asset_engine/base.py) in words.
+TIER_WORDS = {
+    "HIGH": "high conviction",
+    "STRONG": "strong conviction",
+    "STANDARD": "standard conviction",
+}
+
+
+def _number(value):
+    """A finite float, or None for anything that is not one."""
+    from dashboard.position_summary import _num
+    n = _num(value)
+    if n is None or n in (float("inf"), float("-inf")):
+        return None
+    return n
+
+
+def money_words(value, ccy="", *, signed=False) -> str:
+    """"1,234.56 USD"; signed, "+17.38 USD" or "−45.79 USD"; "" when the
+    value is not a number. A figure that rounds to zero reads "0.00",
+    never "+0.00" or "−0.00"."""
+    from dashboard.position_summary import money
+    n = _number(value)
+    if n is None:
+        return ""
+    if round(n, 2) == 0:
+        n, signed = 0.0, False
+    return money(n, str(ccy or "").strip(), signed=signed).replace("-", MINUS)
+
+
+def price_words(value, asset_class="", symbol="") -> str:
+    """A price at the instrument's own decimals (core.price_format), or ""."""
+    from core.price_format import format_price
+    if _number(value) is None:
+        return ""
+    return format_price(value, asset_class, symbol, dash="")
+
+
+def qty_words(value) -> str:
+    """A quantity without trailing zeros, grouped ("7,900", "0.0002"), or ""."""
+    from dashboard.position_summary import quantity
+    if _number(value) is None:
+        return ""
+    return quantity(value)
+
+
+def pct_words(value) -> str:
+    """"5.0%"; under 1% two decimals ("0.15%"); "" when not a number."""
+    n = _number(value)
+    if n is None:
+        return ""
+    text = ("{:.2f}%" if 0 < abs(n) < 1 else "{:.1f}%").format(n)
+    return text.replace("-", MINUS)
+
+
+def price_pair_words(first, second, asset_class="", symbol="") -> tuple:
+    """Two prices at the instrument's decimals, with as many more decimals
+    as it takes (up to seven) when those would print two different prices
+    as one: "220.704" and "220.700", never "220.70" twice."""
+    one = price_words(first, asset_class, symbol)
+    two = price_words(second, asset_class, symbol)
+    a, b = _number(first), _number(second)
+    if not (one and two) or one != two or a == b:
+        return one, two
+    from decimal import Decimal
+    shown = len(one.split(".", 1)[1]) if "." in one else 0
+    for places in range(shown + 1, 8):
+        wa = "{:.{p}f}".format(Decimal(str(a)), p=places)
+        wb = "{:.{p}f}".format(Decimal(str(b)), p=places)
+        if wa != wb:
+            return wa, wb
+    return one, two
+
+
+def units_words(qty, asset_class="") -> str:
+    """"7,900 units", "1 share", "2 contracts", or ""."""
+    from dashboard.position_summary import _units
+    amount = qty_words(qty)
+    if not amount:
+        return ""
+    word = _units(asset_class)
+    if abs(_number(qty)) == 1:
+        word = word[:-1]
+    return f"{amount} {word}"
 
 
 def _telegram_lines(items):
@@ -190,7 +283,7 @@ _BANNER_SILENT_KINDS = {"bot_fill_open", "bot_fill_close", "manual_fill_open"}
 
 def dispatch_notification(user, kind: str, *, title: str, body: str = "",
                           url: str = "", payload=None,
-                          row_data=None) -> bool:
+                          row_data=None, telegram=None) -> bool:
     """Send a bot-event or operator-event notification to `user`.
 
     Returns True if at least one delivery channel succeeded (including in-app).
@@ -201,6 +294,12 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
     `StrategistBriefing` row) used by channels that render structured
     templates (HTML email). Plain channels fall back to the title+body
     pair so callers don't need to know which channel is in use.
+
+    `telegram` (2026-09-27) is a notifier's own Telegram message, written
+    for people: {"title", "mark", "subtitle", "summary", "lines",
+    "details", "button"} (see _telegram_text). The bell row is built from
+    title, body, url and row_data exactly as before; only the Telegram
+    channel reads it.
     """
     if kind not in BOT_KINDS and kind not in OPERATOR_KINDS:
         logger.warning("dispatch_notification: unknown kind=%r", kind)
@@ -254,7 +353,20 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
         # lines) and the notifier's emoji ride to Telegram when a
         # notifier hands them over; a plain call keeps its shape.
         rd = row_data if isinstance(row_data, dict) else {}
-        if rd.get("items") or rd.get("mark"):
+        tg = telegram if isinstance(telegram, dict) else {}
+        if tg.get("title"):
+            # A message written for people (the fills, 2026-09-27): its
+            # own title in words, a sentence, the facts, the folded record
+            # and a button. The bell above kept its row.
+            delivered = _send_telegram(
+                user, str(tg["title"]), "",
+                lines=tg.get("lines") or None,
+                mark=str(tg.get("mark") or ""),
+                subtitle=str(tg.get("subtitle") or ""),
+                summary=str(tg.get("summary") or ""),
+                details=tg.get("details") or None,
+                button=tg.get("button")) or delivered
+        elif rd.get("items") or rd.get("mark"):
             delivered = _send_telegram(
                 user, title, body, lines=_telegram_lines(rd.get("items")),
                 mark=str(rd.get("mark") or "")) or delivered
@@ -371,8 +483,23 @@ class TelegramHeading(str):
     """
 
 
+def _detail_html(item) -> str:
+    """One folded detail: a string, escaped; a (label, key) pair as
+    "Label: <code>key</code>" -- the one place a raw key (a rule's) may
+    stand in a sent text, set as code so it reads as a key."""
+    from html import escape
+    if isinstance(item, (tuple, list)) and len(item) == 2:
+        label, key = (" ".join(str(x or "").split()) for x in item)
+        if not key:
+            return ""
+        code = f"<code>{escape(key)}</code>"
+        return f"{escape(label)}: {code}" if label else code
+    return escape(" ".join(str(item or "").split()))
+
+
 def _telegram_text(title: str, body: str = "", *, lines=None,
-                   mark: str = "") -> str:
+                   mark: str = "", subtitle: str = "", summary: str = "",
+                   details=None) -> str:
     """The HTML Telegram renders: a bold title, then one fact per line.
 
     HTML parse mode with every field escaped, because the legacy
@@ -388,25 +515,52 @@ def _telegram_text(title: str, body: str = "", *, lines=None,
     is a plain emoji for the Telegram client — the bell keeps the
     platform's geometric mark, which _plain_title strips on the way
     out.
+
+    A MESSAGE WRITTEN FOR PEOPLE (2026-09-27), for a notifier that opts
+    in: `subtitle` is one italic line under the title (whose money it
+    is: "Simulated", "Real money · eToro"), `summary` ONE plain
+    sentence; the facts follow after a blank line; `details` fold into
+    Telegram's expandable blockquote (the technical record: the trade
+    number, the rule's key, the config), each a string or a (label, key)
+    pair whose key is set as code. A caller that passes none of the
+    three renders exactly as before: the Eye's replies, the digest, and
+    every message that has not opted in.
     """
     from html import escape
     head = escape(_plain_title(title))
     if mark:
         head = f"{mark} {head}"
     out = [f"<b>{head}</b>"]
+    lead = []
+    sub = " ".join(str(subtitle or "").split())
+    if sub:
+        lead.append(f"<i>{escape(sub)}</i>")
+    said = " ".join(str(summary or "").split())
+    if said:
+        lead.append(escape(said))
+    out.extend(lead)
     if lines:
-        out.extend((f"<b>{escape(str(ln))}</b>"
-                    if isinstance(ln, TelegramHeading)
-                    else escape(str(ln)))
-                   for ln in lines if str(ln or "").strip())
+        facts = [(f"<b>{escape(str(ln))}</b>"
+                  if isinstance(ln, TelegramHeading)
+                  else escape(str(ln)))
+                 for ln in lines if str(ln or "").strip()]
+        if lead and facts:
+            out.append("")
+        out.extend(facts)
     elif body:
         out.append("")
         out.append(escape(str(body)))
+    folded = [text for text in (_detail_html(d) for d in (details or ()))
+              if text]
+    if folded:
+        out.append("<blockquote expandable>" + "\n".join(folded)
+                   + "</blockquote>")
     return "\n".join(out)
 
 
 def _send_telegram(user, title: str, body: str, *, lines=None,
-                   mark: str = "") -> bool:
+                   mark: str = "", subtitle: str = "", summary: str = "",
+                   details=None, button=None) -> bool:
     """Send via the platform Telegram bot to the user's chat_id.
 
     Requires `TELEGRAM_BOT_TOKEN` env var (platform-wide) and the user's
@@ -415,9 +569,17 @@ def _send_telegram(user, title: str, body: str, *, lines=None,
     Telegram's own words at WARNING — until 2026-09-26 it vanished into
     a bare False, which is why a month of refused bot fills left no
     trace anywhere.
+
+    `subtitle`, `summary` and `details` render as _telegram_text says
+    (2026-09-27). `button` is (label, platform path): ONE inline URL
+    button under the message (telegram_alert.button_markup), only when
+    the deployment names a host a phone can open; when Telegram refuses
+    the BUTTON, the message goes again without it, its page as a line
+    (message_parts, post_message). Never a callback button: nothing is
+    done from Telegram but the Eye's commands.
     """
     try:
-        import os, requests
+        import os
         token = os.getenv("TELEGRAM_BOT_TOKEN", "")
         if not token:
             return False
@@ -426,15 +588,22 @@ def _send_telegram(user, title: str, body: str, *, lines=None,
             return False
         # Cut under Telegram's 4,096 characters like every other path:
         # fit_text renders through _telegram_text and returns it as it is
-        # whenever it fits (2026-09-26).
-        from alerts.channels.telegram_alert import fit_text
-        text = fit_text(title, body, lines=lines, mark=mark)
-        r = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-                  "disable_web_page_preview": True},
-            timeout=5,
-        )
+        # whenever it fits (2026-09-26). The button is not text.
+        from alerts.channels.telegram_alert import (message_parts,
+                                                    post_message)
+        text, markup, fallback = message_parts(
+            title, body, lines=lines, mark=mark, subtitle=subtitle,
+            summary=summary, details=details, button=button)
+        r, refused = post_message(
+            token, {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                    "disable_web_page_preview": True},
+            timeout=5, markup=markup, fallback_text=fallback)
+        if refused is not None:
+            logger.warning("telegram refused the button (%s) %r: %s; sent "
+                           "again without it",
+                           getattr(refused, "status_code", "?"),
+                           _plain_title(title),
+                           str(getattr(refused, "text", ""))[:200])
         if not r.ok:
             logger.warning("telegram refused (%s) %r: %s",
                            getattr(r, "status_code", "?"),
@@ -514,34 +683,510 @@ def notify_orchestrator_reject(user, *, asset_class: str, symbol: str,
     )
 
 
+# ── The fill messages, written for people (2026-09-27) ───────────────────
+# Each builder returns the Telegram message a fill sends: {"title",
+# "mark", "subtitle", "summary", "lines", "details", "button"}. The facts
+# come from the ROW (the caller's own, else the one trade_id names), read
+# the way the position page reads them (dashboard.position_summary: the
+# venue from the row's own stamps, the risk at the stop the trade opened
+# with, the rule and the ending in words), so the phone and the page
+# agree. Without a row a fill still reads in words, from the arguments.
+
+def _fill_row(trade, trade_id):
+    """The AssetBotTrade a fill is about: the caller's own row, else the
+    one `trade_id` names, else None. A row that cannot be read costs the
+    message some words (the levels, the venue), never the message."""
+    if trade is not None:
+        return trade
+    if trade_id in (None, ""):
+        return None
+    try:
+        from bot_program.models import AssetBotTrade
+        return (AssetBotTrade.objects.select_related("config")
+                .filter(pk=trade_id).first())
+    except Exception as e:  # noqa: BLE001
+        logger.debug("fill message: trade #%s unreadable: %s", trade_id, e)
+        return None
+
+
+def _is_long(side) -> bool:
+    return str(side or "").strip().upper() not in ("SELL", "SHORT")
+
+
+def _row_ccy(row) -> str:
+    """The account currency a row's money is in, as the position page
+    reads it; "" without a row (a figure is then printed bare)."""
+    if row is None:
+        return ""
+    try:
+        return (str(getattr(row.config, "base_currency", "") or "").strip()
+                or "USD")
+    except Exception:  # noqa: BLE001
+        return "USD"
+
+
+def _venue_line(row, live=None) -> str:
+    """"Simulated", "Simulated · eToro demo" or "Real money · eToro": the
+    row's own stamps as the position page reads them (venue_of). Without
+    a row only "not live" is certain ("Simulated"): a live config can
+    place on an eToro DEMO account, which the page calls Simulated, so a
+    live caller without a row says nothing rather than "Real money"."""
+    if row is not None:
+        from dashboard.position_summary import venue_of
+        money_text, _real, broker = venue_of(row)
+        if broker == "Paper trading":
+            return money_text
+        if broker == "Broker not recorded":
+            broker = "broker not recorded"
+        return f"{money_text} · {broker}"
+    return "Simulated" if live is not None and not live else ""
+
+
+def _level_line(label, level, entry, asset_class, symbol,
+                held_by="") -> str:
+    """"Stop: 1.52689 (5.0% below)", "Target: 1.76798 (10.0% above)";
+    "Stop: 1.14000 at eToro (3.1% below)" for a stop the venue holds at a
+    level of its own; "Stop: not set". The distance is from `entry`; none
+    without one."""
+    lv, at = _number(level), _number(entry)
+    if lv is None or lv <= 0:
+        return f"{label}: not set"
+    words = price_words(level, asset_class, symbol)
+    if held_by:
+        words += f" at {held_by}"
+    if at is not None and at > 0 and lv != at:
+        where = "below" if lv < at else "above"
+        return (f"{label}: {words} "
+                f"({pct_words(abs(lv - at) / at * 100)} {where})")
+    return f"{label}: {words}"
+
+
+def _about(value, ccy) -> str:
+    """"about 9,269 USD" (whole units from 100 up), or ""."""
+    n = _number(value)
+    if n is None or n <= 0 or not ccy:
+        return ""
+    text = "{:,.0f}".format(n) if n >= 100 else "{:,.2f}".format(n)
+    return f"about {text} {ccy}"
+
+
+def _size_sentence(row, qty, price, asset_class, symbol, ccy) -> str:
+    """"7,900 units at 1.60726 — about 9,269 USD" (the notional as the
+    position page computes it, in the currency it is really in)."""
+    said = units_words(qty, asset_class)
+    at = price_words(price, asset_class, symbol)
+    if at:
+        said = f"{said} at {at}" if said else f"At {at}"
+    q, p = _number(qty), _number(price)
+    if row is not None and said and q and p:
+        from dashboard.position_summary import _unconverted_ccy
+        from portfolio.services import value_per_unit
+        about = _about(abs(q) * p * value_per_unit(row),
+                       _unconverted_ccy(row, ccy) or ccy)
+        if about:
+            said += f" — {about}"
+    return said
+
+
+def _held_stop(row):
+    """The stop the venue HOLDS when it rewrote the one sent at the fill
+    (metadata "stop_rewritten_by_venue" {sent, held}: AssetBot.execute_
+    entry, _finish_working_entry, and the hand lane): the held level, 0.0
+    for eToro's "no stop" (at or under 0.0001), or None when the venue
+    kept the stop sent. The row's stop_loss stays the SENT stop (the risk
+    denominator must not move), and a row the venue protects skips every
+    bot-side stop check, so the held stop is the only one that can be hit."""
+    moved = (getattr(row, "metadata", None) or {}).get(
+        "stop_rewritten_by_venue")
+    if not isinstance(moved, dict):
+        return None
+    held = _number(moved.get("held"))
+    if held is None:
+        return None
+    return held if held > 0.0001 else 0.0
+
+
+def _open_levels(row, asset_class, symbol, entry, ccy, *,
+                 distance=True, long_=True) -> list:
+    """The stop, the target, and the risk at the stop (manual_close.
+    _risk_dollars: the close dialog's and the page's 1R), from the row; []
+    without one.
+
+    A stop the venue rewrote at the fill is the one that can be hit
+    (_held_stop): the Stop line names the HELD level, the risk is measured
+    at it and says the planned figure beside it (2026-09-27), and a venue
+    that holds no stop is an uncapped risk, never a number."""
+    if row is None:
+        return []
+    at = entry if distance else None
+    held = _held_stop(row) if distance else None
+    if held is None:
+        stop_line = _level_line("Stop", row.stop_loss, at, asset_class,
+                                symbol)
+    elif held > 0:
+        stop_line = _level_line("Stop", held, at, asset_class, symbol,
+                                held_by="eToro")
+    else:
+        stop_line = "Stop: none at eToro"
+    lines = [stop_line,
+             _level_line("Target", row.take_profit, at, asset_class, symbol)]
+    try:
+        from bot_program.manual_close import _initial_stop, _risk_dollars
+        risk = _risk_dollars(row)
+        planned = _initial_stop(row)
+    except Exception:  # noqa: BLE001 — an unread risk is a missing line
+        risk, planned = 0.0, None
+    if held is not None:
+        if held <= 0:
+            lines.append("Risk: not capped, since eToro holds no stop")
+            return lines
+        e, p = _number(row.entry_price), _number(planned)
+        if risk > 0 and e and p and e != p:
+            loss = (e - held) if long_ else (held - e)
+            if loss <= 0:
+                lines.append("Risk if the stop is hit: none, since eToro "
+                             "holds the stop past the entry")
+            else:
+                lines.append(
+                    "Risk if the stop is hit: "
+                    f"{money_words(risk * loss / abs(e - p), ccy)}, not the "
+                    f"{money_words(risk, ccy)} planned")
+        return lines
+    if risk > 0 and distance:
+        lines.append(f"Risk if the stop is hit: {money_words(risk, ccy)}")
+    elif (_number(row.stop_loss) or 0) <= 0:
+        lines.append("Risk: not capped, since no stop is set")
+    return lines
+
+
+def _partial_line(row, qty, asset_class) -> str:
+    """"Filled: 3 of the 20 shares ordered", for a fill short of its order."""
+    meta = getattr(row, "metadata", None) or {}
+    asked, got = _number(meta.get("qty_requested")), _number(qty)
+    if asked and got and 0 < got < asked * 0.999:
+        return (f"Filled: {qty_words(got)} of the "
+                f"{units_words(asked, asset_class)} ordered")
+    return ""
+
+
+def _taken_line(row, meta) -> str:
+    """How a hand-taken trade was taken: from which signal, or by hand."""
+    from dashboard.position_summary import _signal_rule, rule_words
+    sid = meta.get("signal_id")
+    if sid:
+        rule = rule_words(_signal_rule(sid))
+        return (f"Taken: by hand, from signal #{sid}"
+                + (f" ({rule})" if rule else ""))
+    if row is not None:
+        return "Taken: by hand, from the instrument page"
+    return "Taken: by hand"
+
+
+def _record(row, trade_id, rule_key="") -> list:
+    """The folded technical record: the trade, the rule's key, the config."""
+    out = []
+    if trade_id:
+        out.append(f"Trade: #{trade_id}")
+    if rule_key:
+        out.append(("Rule key", rule_key))
+    name = ""
+    if row is not None:
+        try:
+            name = str(row.config.name or "").strip()
+        except Exception:  # noqa: BLE001
+            name = ""
+    if name:
+        out.append(f"Config: {name}")
+    return out
+
+
+def _page_button(trade_id) -> tuple:
+    """("Open position", the position page), or ("Open positions",
+    "/positions/") when the trade has no page."""
+    from alerts.links import page_url
+    path = page_url("forensics_detail", trade_id) if trade_id else ""
+    return (("Open position", path) if path
+            else ("Open positions", "/positions/"))
+
+
+def _bell_items(message) -> list:
+    """The bell card's lines: whose money it is (the subtitle), the
+    message's facts, then its record flat. A rule's key reads in words
+    there ("Rule: Golden cross"), and not at all when a fact already names
+    the rule ("Why: Golden cross"): the bell sets no key as code."""
+    from dashboard.position_summary import rule_words
+    out = [str(x) for x in [message.get("subtitle")]
+           + list(message.get("lines") or ()) if str(x or "").strip()]
+    for d in message.get("details") or ():
+        if isinstance(d, (tuple, list)) and len(d) == 2:
+            words = rule_words(str(d[1] or ""))
+            if words and not any(words in ln for ln in out):
+                out.append(f"Rule: {words}")
+        elif str(d or "").strip():
+            out.append(str(d))
+    return out
+
+
+def _rule_key(rule_name) -> tuple:
+    """(the rule's key, the facts a caller still carries inside rule_name).
+
+    Until 2026-09-27 the engine handed the attack mode and a moved stop
+    as extra lines of rule_name; a caller that still does keeps working:
+    the first line is the key, the others are facts."""
+    first, *carried = str(rule_name or "").split("\n")
+    key = first.strip()
+    if key == "—":
+        key = ""
+    return key, [" ".join(c.split()) for c in carried if c.strip()]
+
+
+def _built(build, **kwargs):
+    """build(**kwargs), or None when it raises: a sentence never costs
+    the bell row (the caller falls back to its plain body)."""
+    try:
+        return build(**kwargs)
+    except Exception:  # noqa: BLE001
+        logger.exception("the %s message could not be built",
+                         getattr(build, "__name__", "fill"))
+        return None
+
+
+def fill_open_message(*, asset_class, symbol, side, qty, entry_price,
+                      rule_name="", trade=None, trade_id=None, manual=False,
+                      live=None, attack="", stop_moved="") -> dict:
+    """The Telegram message of a fill that OPENED a position:
+
+        🟢 Bought EURCAD                 (🔴 Sold short AAPL; ✋ … by hand)
+        Simulated                        (Real money · eToro)
+        7,900 units at 1.60726 — about 9,269 USD.
+
+        Stop: 1.52689 (5.0% below)
+        Target: 1.76798 (10.0% above)
+        Risk if the stop is hit: 463.45 USD
+        Why: Golden cross                (a hand-taken one: "Taken: …")
+        Attack mode: …                   (when the row is attack mode)
+        Stop moved by eToro: …           (when the venue rewrote it)
+        ▸ Trade: #108 · Rule key: golden_cross · Config: FX trend
+        [Open position]
+
+    A waiting order that filled says so first; a fill short of its order
+    says how much of it filled. `rule_name` is the rule's KEY (_rule_key
+    reads the old multi-line shape too). A stop the venue rewrote is the
+    one the Stop and risk lines read (_open_levels); a caller that hands
+    no stop-moved line (the hand lane) gets the row's own
+    (stop_moved_words)."""
+    row = _fill_row(trade, trade_id)
+    tid = getattr(row, "id", None) or trade_id
+    meta = (getattr(row, "metadata", None) or {}) if row is not None else {}
+    long_ = _is_long(side)
+    rule_key, carried = _rule_key(rule_name)
+    ccy = _row_ccy(row)
+    if not stop_moved and not carried and meta.get("stop_rewritten_by_venue"):
+        try:
+            from bot_program.asset_engine.base import stop_moved_words
+            stop_moved = stop_moved_words(meta, entry_price, asset_class,
+                                          symbol)
+        except Exception:  # noqa: BLE001 — the levels still say it
+            stop_moved = ""
+
+    title = f"Bought {symbol}" if long_ else f"Sold short {symbol}"
+    if manual:
+        title += " by hand"
+        mark = NOTIFY_MARKS["manual_fill_open"]
+    else:
+        mark = OPEN_MARKS["long" if long_ else "short"]
+    said = _size_sentence(row, qty, entry_price, asset_class, symbol, ccy)
+    summary = f"{said}." if said else ""
+    if summary and meta.get("entry_filled_at"):
+        summary = "The waiting order filled: " + summary
+
+    lines = []
+    if row is not None:
+        partial = _partial_line(row, qty, asset_class)
+        if partial:
+            lines.append(partial)
+    lines.extend(_open_levels(row, asset_class, symbol, entry_price, ccy,
+                              long_=long_))
+    if manual:
+        lines.append(_taken_line(row, meta))
+    else:
+        from dashboard.position_summary import rule_words
+        sid = meta.get("signal_id")
+        why = [w for w in (rule_words(rule_key),
+                           f"signal #{sid}" if sid else "") if w]
+        if why:
+            lines.append("Why: " + " — ".join(why))
+    for fact in [attack, stop_moved] + carried:
+        fact = " ".join(str(fact or "").split())
+        if fact:
+            lines.append(fact)
+    return {"title": title, "mark": mark,
+            "subtitle": _venue_line(row, live), "summary": summary,
+            "lines": lines,
+            "details": _record(row, tid, "" if manual else rule_key),
+            "button": _page_button(tid)}
+
+
+def fill_queued_message(*, asset_class, symbol, side, qty, trade=None,
+                        trade_id=None, live=False) -> dict:
+    """A hand-placed order the broker took and filled NOTHING of (a market
+    order outside regular hours queues for the next open): no price, no
+    distance from a price nobody paid.
+
+        ⏳ Waiting to buy AAPL
+        Real money · eToro
+        The broker has the order for 1 share; nothing has filled yet, so
+        no position is open.
+    """
+    row = _fill_row(trade, trade_id)
+    tid = getattr(row, "id", None) or trade_id
+    meta = (getattr(row, "metadata", None) or {}) if row is not None else {}
+    long_ = _is_long(side)
+    size = units_words(qty, asset_class)
+    lines = [_taken_line(row, meta)]
+    lines.extend(_open_levels(row, asset_class, symbol, None,
+                              _row_ccy(row), distance=False))
+    # Without a row only "not live" is certain (_venue_line): a live config
+    # can place on an eToro demo account.
+    venue = _venue_line(row, live)
+    return {"title": (f"Waiting to buy {symbol}" if long_
+                      else f"Waiting to sell {symbol} short"),
+            "mark": NOTIFY_MARKS["manual_fill_queued"],
+            "subtitle": venue,
+            "summary": ("The broker has the order"
+                        + (f" for {size}" if size else "")
+                        + "; nothing has filled yet, so no position is "
+                          "open."),
+            "lines": lines, "details": _record(row, tid),
+            "button": _page_button(tid)}
+
+
+def fill_close_message(*, asset_class, symbol, side, qty, exit_price, pnl,
+                       outcome="", trade=None, trade_id=None) -> dict:
+    """The Telegram message of a close:
+
+        ✅ Closed EURCAD · +17.84 USD     (🔻 a loss, ⚪ zero or unknown)
+        Sold 7,900 units at 1.61035 after 3 days 4 hours.
+
+        Result: +17.84 USD · 0.04 times the risk
+        How it ended: closed by hand     (position_summary.ending_words)
+        Simulated                        (Real money · eToro)
+        ▸ Trade · Rule key · Config · Entry price · Opened · Closed
+        [Open position]
+
+    A result of None is UNMEASURED (no exit price could be read) and is
+    said so, never printed as a number."""
+    from dashboard.position_summary import (_MANUAL_RULES, ENDINGS,
+                                            duration_words, ending_words,
+                                            utc_clock)
+    row = _fill_row(trade, trade_id)
+    tid = getattr(row, "id", None) or trade_id
+    ccy = _row_ccy(row)
+    n = _number(pnl)
+    if n is None:
+        mark, result = CLOSE_MARKS["flat"], "result unknown"
+    else:
+        n = round(n, 2)
+        mark = CLOSE_MARKS["gain" if n > 0 else "loss" if n < 0 else "flat"]
+        result = money_words(n, ccy, signed=True)
+
+    said = ("Sold" if _is_long(side) else "Bought back")
+    size = units_words(qty, asset_class)
+    if size:
+        said += f" {size}"
+    exit_words = price_words(exit_price, asset_class, symbol)
+    if exit_words:
+        said += f" at {exit_words}"
+    opened = getattr(row, "opened_at", None) if row is not None else None
+    closed = getattr(row, "closed_at", None) if row is not None else None
+    if opened and closed:
+        said += f" after {duration_words((closed - opened).total_seconds())}"
+    summary = said + "."
+    if not exit_words:
+        summary += " The exit price could not be read."
+
+    if n is None:
+        lines = ["Result: unknown, since the exit could not be priced"]
+    else:
+        r = (_number(getattr(row, "realized_r", None))
+             if row is not None else None)
+        r_words = ""
+        if r is not None:
+            # rounded first, as the money is: a result that reads 0.00
+            # is never "a loss of 0.00 times the risk"
+            r = round(r, 2) or 0.0
+            r_words = ("{:.2f} times the risk".format(r) if r >= 0 else
+                       "a loss of {:.2f} times the risk".format(abs(r)))
+        lines = [f"Result: {result}" + (f" · {r_words}" if r_words else "")]
+    ending = (ending_words(row) if row is not None
+              else ENDINGS.get(str(outcome or ""), "Closed"))
+    lines.append("How it ended: " + ending[:1].lower() + ending[1:])
+    venue = _venue_line(row)
+    if venue:
+        lines.append(venue)
+
+    rule_key = str(getattr(row, "rule_name", "") or "").strip()
+    if rule_key.lower() in _MANUAL_RULES:
+        rule_key = ""
+    details = _record(row, tid, rule_key)
+    if row is not None:
+        entry = price_words(row.entry_price, asset_class, symbol)
+        if entry:
+            details.append(f"Entry price: {entry}")
+        if opened:
+            details.append(f"Opened: {utc_clock(opened, True)}")
+        if closed:
+            details.append(f"Closed: {utc_clock(closed, True)}")
+    return {"title": f"Closed {symbol} · {result}", "mark": mark,
+            "subtitle": "", "summary": summary, "lines": lines,
+            "details": details, "button": _page_button(tid)}
+
+
 def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
                           qty, entry_price, rule_name: str = "",
-                          trade_id=None) -> bool:
+                          trade_id=None, trade=None, attack: str = "",
+                          stop_moved: str = "") -> bool:
+    """A bot's entry filled. The bell row keeps its title, body and url;
+    Telegram gets the message written for people (fill_open_message).
+    `trade` is the row (else `trade_id` names it); `attack` and
+    `stop_moved` are the engine's own facts (AssetBot._fill_words), their
+    own arguments since 2026-09-27 rather than lines inside rule_name."""
     from alerts.links import page_url
-    items = [f"{asset_class.upper()} · qty {qty} @ {entry_price}"]
-    if rule_name:
-        items.append(f"Rule {rule_name}")
-    if trade_id:
-        items.append(f"Trade #{trade_id}")
+    tid = trade_id or getattr(trade, "id", None)
+    rule_key, carried = _rule_key(rule_name)
+    body = (f"{asset_class.upper()} · qty {qty} @ {entry_price}"
+            + (f" · {rule_key}" if rule_key else ""))
+    message = _built(fill_open_message, asset_class=asset_class,
+                     symbol=symbol, side=side, qty=qty,
+                     entry_price=entry_price, rule_name=rule_name,
+                     trade=trade, trade_id=tid, attack=attack,
+                     stop_moved=stop_moved)
+    # A message that could not be built still carries the engine's own
+    # facts: the body names only the rule, and they no longer ride in it.
+    plain = [body] + [" ".join(str(f or "").split())
+                      for f in [attack, stop_moved] + carried
+                      if str(f or "").strip()]
     return dispatch_notification(
         user, "bot_fill_open",
         title=f"◉ {symbol} {side} opened",
-        body=f"{asset_class.upper()} · qty {qty} @ {entry_price}"
-             + (f" · {rule_name}" if rule_name else ""),
-        # the Telegram lines and mark (dispatch_notification hands them
-        # to _send_telegram; the bell card renders the same items)
-        row_data={"items": items, "mark": "\U0001F7E2"},
+        body=body,
+        # the bell card renders the message's facts and its record
+        row_data=({"items": _bell_items(message),
+                   "mark": message["mark"]} if message else
+                  {"items": plain, "mark": OPEN_MARKS["long"]}),
         # The fill has a page: forensics carries the rule that fired, the
         # signals that voted and the gate decision behind THIS trade —
         # "why did it just buy that?", which is the question the banner
         # provokes. /asset-bots/ is the config list and answers none of it.
-        url=page_url("forensics_detail", trade_id) or "/asset-bots/",
+        url=page_url("forensics_detail", tid) or "/asset-bots/",
+        telegram=message,
     )
 
 
 def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
                              qty, entry_price, trade_id=None,
-                             live: bool = False, working: bool = False) -> bool:
+                             live: bool = False, working: bool = False,
+                             trade=None) -> bool:
     """The OPERATOR opened this position by hand — TAKE TRADE, not a bot.
 
     Same shape as `notify_bot_fill_open` minus `rule_name`, and the omission
@@ -560,48 +1205,56 @@ def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
     open). "Opened" would then be a claim about the future — and the price
     shown would be the pre-order quote, not a fill — so the message says
     queued instead, and names no price.
+
+    Telegram gets the message written for people (2026-09-27): the side
+    in words and "by hand" in the title, whose money it is under it
+    (fill_open_message); a queued order says it is waiting and names no
+    price (fill_queued_message). `trade` is the row (else `trade_id`).
+    The bell row keeps its title, body and url.
     """
     from alerts.links import page_url
-    from core.price_format import format_price
+    tid = trade_id or getattr(trade, "id", None)
     if working:
+        body = (f"{asset_class.upper()} · qty {qty} · TAKE TRADE · the "
+                f"order is working and nothing has filled — no position "
+                f"is open yet"
+                + (" · LIVE — real funds once it fills" if live else ""))
+        message = _built(fill_queued_message, asset_class=asset_class,
+                         symbol=symbol, side=side, qty=qty, trade=trade,
+                         trade_id=tid, live=live)
         return dispatch_notification(
             user, "manual_fill_open",
             title=(f"▸ {symbol} {side} QUEUED at the broker"
                    + (" · LIVE" if live else "")),
-            body=(f"{asset_class.upper()} · qty {qty} · TAKE TRADE · the "
-                  f"order is working and nothing has filled — no position "
-                  f"is open yet"
-                  + (" · LIVE — real funds once it fills" if live else "")),
-            row_data={"items": (
-                [f"{asset_class.upper()} · qty {qty} · TAKE TRADE",
-                 "The order is working at the broker; nothing has filled",
-                 ("Venue: LIVE, real funds once it fills" if live
-                  else "Venue: paper")]
-                + ([f"Trade #{trade_id}"] if trade_id else [])),
-                "mark": NOTIFY_MARKS["manual_fill_queued"]},
-            url=page_url("forensics_detail", trade_id) or "/positions/",
+            body=body,
+            row_data={"items": (_bell_items(message) if message
+                                else [body]),
+                      "mark": NOTIFY_MARKS["manual_fill_queued"]},
+            url=page_url("forensics_detail", tid) or "/positions/",
+            telegram=message,
         )
+    body = (f"{asset_class.upper()} · qty {qty} @ {entry_price} · "
+            f"TAKE TRADE"
+            + (" · LIVE — real funds" if live else ""))
+    message = _built(fill_open_message, asset_class=asset_class,
+                     symbol=symbol, side=side, qty=qty,
+                     entry_price=entry_price, trade=trade, trade_id=tid,
+                     manual=True, live=live)
     return dispatch_notification(
         user, "manual_fill_open",
         title=(f"▸ {symbol} {side} opened by hand"
                + (" · LIVE" if live else "")),
-        body=(f"{asset_class.upper()} · qty {qty} @ {entry_price} · "
-              f"TAKE TRADE"
-              + (" · LIVE — real funds" if live else "")),
-        row_data={"items": (
-            [f"{asset_class.upper()} · qty {qty} @ "
-             f"{format_price(entry_price, asset_class, symbol)}",
-             "Taken by hand (TAKE TRADE)",
-             "Venue: LIVE, real funds" if live else "Venue: paper"]
-            + ([f"Trade #{trade_id}"] if trade_id else [])),
-            "mark": NOTIFY_MARKS["manual_fill_open"]},
+        body=body,
+        row_data={"items": (_bell_items(message) if message else [body]),
+                  "mark": NOTIFY_MARKS["manual_fill_open"]},
+        telegram=message,
         # Forensics renders any of this user's trades, and a hand-taken one
         # has a story too: the levels it opened with, the signal it was taken
         # from, its audit trail and lifecycle. The FALLBACK differs from the
         # bot's, though — /asset-bots/ is the fleet's config list, which is
         # not where a trade the operator took themselves lives. /positions/
         # is their own book, which is.
-        url=page_url("forensics_detail", trade_id) or "/positions/",
+        url=page_url("forensics_detail", tid) or "/positions/",
     )
 
 
@@ -637,8 +1290,14 @@ def notify_manual_lane_mode(user, *, asset_class: str, mode: str,
 
 def notify_bot_fill_close(user, *, asset_class: str, symbol: str, side: str,
                            qty, exit_price, pnl, outcome: str = "",
-                           trade_id=None) -> bool:
+                           trade_id=None, trade=None) -> bool:
+    """A position closed. The bell row keeps its title, body and url;
+    Telegram gets the message written for people (fill_close_message,
+    2026-09-27): the result in the title, the closing side and how long
+    it was held, how it ended in words. `trade` is the row (else
+    `trade_id` names it)."""
     from alerts.links import page_url
+    tid = trade_id or getattr(trade, "id", None)
     # ⊕ target struck · ⊟ cut at the stop · ◯ closed flat by anything else.
     icon = "⊕" if outcome == "hit_target" else (
         "⊟" if outcome == "stopped_out" else "◯")
@@ -646,23 +1305,32 @@ def notify_bot_fill_close(user, *, asset_class: str, symbol: str, side: str,
     # A P&L of None is UNMEASURED (no exit price could be read, the
     # reconciled close with no quote) — never printed as a number.
     pnl_words = f"{sign}{pnl}" if pnl is not None else "P&L unmeasured"
-    mark, words = OUTCOME_WORDS.get(str(outcome or ""), ("\u26AA", "closed"))
-    items = [(f"P&L {pnl_words}" if pnl is not None
-              else "P&L unmeasured (no exit price was read)"),
-             f"{asset_class.upper()} · qty {qty} @ {exit_price}",
-             words.capitalize()]
-    if trade_id:
-        items.append(f"Trade #{trade_id}")
+    body = (f"{asset_class.upper()} · qty {qty} @ {exit_price}"
+            + (f" · {outcome}" if outcome else ""))
+    message = _built(fill_close_message, asset_class=asset_class,
+                     symbol=symbol, side=side, qty=qty,
+                     exit_price=exit_price, pnl=pnl, outcome=outcome,
+                     trade=trade, trade_id=tid)
     return dispatch_notification(
         user, "bot_fill_close",
         title=f"{icon} {symbol} {side} closed · {pnl_words}",
-        body=f"{asset_class.upper()} · qty {qty} @ {exit_price}"
-             + (f" · {outcome}" if outcome else ""),
-        row_data={"items": items, "mark": mark},
+        body=body,
+        row_data=({"items": _bell_items(message),
+                   "mark": message["mark"]} if message else
+                  {"items": [body], "mark": CLOSE_MARKS["flat"]}),
         # Same trade, same page — the close's own timeline, grade and R
         # multiple. /bot-performance/ aggregates every rule instead.
-        url=page_url("forensics_detail", trade_id) or "/bot-performance/",
+        url=page_url("forensics_detail", tid) or "/bot-performance/",
+        telegram=message,
     )
+
+
+def _plain_message(title, items, mark, *, summary="", button=None) -> dict:
+    """A notifier's own facts (its bell items) opted into the message
+    written for people (2026-09-27): one summary sentence above them and
+    a button to the page they concern. The facts stay as they were."""
+    return {"title": _plain_title(title), "mark": mark, "summary": summary,
+            "lines": _telegram_lines(items), "button": button}
 
 
 def notify_manual_close_refused(user, *, asset_class: str, symbol: str,
@@ -691,36 +1359,75 @@ def notify_manual_close_refused(user, *, asset_class: str, symbol: str,
     except Exception as e:  # noqa: BLE001 — dedupe failure must not mute it
         logger.warning("close-refused dedupe failed: %s", e)
 
+    page = page_url("forensics_detail", trade_id)
+    items = [(f"{asset_class.upper()} · trade #{trade_id}" if trade_id
+              else asset_class.upper()),
+             "The broker is unreachable, so the close was refused",
+             "The position is STILL OPEN at the broker"]
     return dispatch_notification(
         user, "bot_error", title=title,
         body=(f"{asset_class.upper()} trade #{trade_id} is LIVE and its "
               f"broker is unreachable, so the close was refused rather than "
               f"stamped on a position that is still open. The position is "
               f"STILL OPEN at the broker."),
-        url=page_url("forensics_detail", trade_id) or "/eye/fills/",
-        row_data={"items": [
-            (f"{asset_class.upper()} · trade #{trade_id}" if trade_id
-             else asset_class.upper()),
-            "The broker is unreachable, so the close was refused",
-            "The position is STILL OPEN at the broker"],
-            "mark": NOTIFY_MARKS["manual_close_refused"]},
+        url=page or "/eye/fills/",
+        row_data={"items": items,
+                  "mark": NOTIFY_MARKS["manual_close_refused"]},
+        telegram=_plain_message(
+            title, items, NOTIFY_MARKS["manual_close_refused"],
+            summary=(f"The broker could not be reached, so the close of "
+                     f"{symbol} was refused and the position is still "
+                     f"open."),
+            button=(("Open position", page) if page
+                    else ("Open positions", "/positions/"))),
     )
 
 
 def notify_drawdown_warning(user, *, asset_class: str, config_name: str,
-                             realized_pnl, limit) -> bool:
+                             realized_pnl, limit, currency: str = "",
+                             unpriced: int = 0) -> bool:
+    """The daily loss limit halted a bot's entries. `currency` is the
+    config's (2026-09-27): the amounts read "−200.00 USD". `unpriced` is
+    the count of closes in the window nobody could price: the gate sums
+    only the priced ones, so the loss is then AT LEAST the figure."""
+    title = f"▲ Drawdown limit reached · {config_name}"
+    try:
+        unpriced = max(int(unpriced or 0), 0)
+    except (TypeError, ValueError):
+        unpriced = 0
+    items = [f"Bot: {config_name}",
+             f"Asset class: {asset_class.upper()}",
+             "Realized 24h P&L: "
+             + (money_words(realized_pnl, currency) or str(realized_pnl)),
+             "Limit: " + (money_words(limit, currency) or str(limit)),
+             "New entries halted"]
+    if unpriced:
+        # the priced closes only: the loss is at least the figure above
+        items.insert(3, f"Closes that could not be priced: {unpriced}")
+    lost, cap = _number(realized_pnl), _number(limit)
+    if lost is not None and lost < 0 and cap is not None:
+        closes = f"{unpriced} close{'' if unpriced == 1 else 's'}"
+        summary = (f"{config_name} has lost "
+                   + ("at least " if unpriced else "")
+                   + f"{money_words(-lost, currency)} in the last 24 hours"
+                   + (f" ({closes} could not be priced)" if unpriced else "")
+                   + f", past its limit of {money_words(abs(cap), currency)}"
+                   f", so it opens no new trades for now.")
+    else:
+        summary = (f"{config_name} has reached its daily loss limit, so it "
+                   f"opens no new trades for now.")
     return dispatch_notification(
         user, "drawdown_warning",
-        title=f"▲ Drawdown limit reached · {config_name}",
+        title=title,
         body=(f"{asset_class.upper()} · realized 24h P&L {realized_pnl} "
               f"≤ limit {limit}. New entries halted."),
         url="/risk/",
-        row_data={"items": [f"Bot: {config_name}",
-                            f"Asset class: {asset_class.upper()}",
-                            f"Realized 24h P&L: {_amount(realized_pnl)}",
-                            f"Limit: {_amount(limit)}",
-                            "New entries halted"],
+        row_data={"items": items,
                   "mark": NOTIFY_MARKS["drawdown_warning"]},
+        telegram=_plain_message(title, items,
+                                NOTIFY_MARKS["drawdown_warning"],
+                                summary=summary,
+                                button=("Open risk page", "/risk/")),
     )
 
 
@@ -732,21 +1439,30 @@ def notify_protection_vanished(user, *, asset_class: str, symbol: str,
     the one message that says real money is running without a stop."""
     from alerts.links import page_url
     from core.price_format import format_price
+    title = f"⚠ {symbol} is UNPROTECTED at the broker"
+    items = ([f"Position: {'long' if _is_long(side) else 'short'} "
+              f"{units_words(qty, asset_class) or qty}",
+              f"Reason: {reason}",
+              "Bot-side management has taken the position back at stop "
+              f"{format_price(stop_loss, asset_class, symbol)}",
+              "Check the broker's open orders"]
+             + ([f"Trade #{trade_id}"] if trade_id else []))
+    page = page_url("forensics_detail", trade_id)
     return dispatch_notification(
         user, "protection_vanished",
-        title=f"⚠ {symbol} is UNPROTECTED at the broker",
+        title=title,
         body=(f"{asset_class.upper()} · {side} qty {qty} · {reason}. "
               f"Bot-side stop/target management has taken the position "
               f"back at stop {stop_loss}; check the broker's open orders."),
-        url=page_url("forensics_detail", trade_id) or "/positions/",
-        row_data={"items": (
-            [f"{asset_class.upper()} · {side} qty {qty}",
-             f"Reason: {reason}",
-             "Bot-side management has taken the position back at stop "
-             f"{format_price(stop_loss, asset_class, symbol)}",
-             "Check the broker's open orders"]
-            + ([f"Trade #{trade_id}"] if trade_id else [])),
-            "mark": NOTIFY_MARKS["protection_vanished"]},
+        url=page or "/positions/",
+        row_data={"items": items,
+                  "mark": NOTIFY_MARKS["protection_vanished"]},
+        telegram=_plain_message(
+            title, items, NOTIFY_MARKS["protection_vanished"],
+            summary=(f"The stop at the broker is gone while the {symbol} "
+                     f"position is still open."),
+            button=(("Open position", page) if page
+                    else ("Open positions", "/positions/"))),
     )
 
 
@@ -760,23 +1476,32 @@ def notify_unclaimed_position(user, *, symbols: list, venue: str) -> bool:
     """
     listed = ", ".join(sorted(symbols)[:6])
     more = f" (+{len(symbols) - 6} more)" if len(symbols) > 6 else ""
+    one = len(symbols) == 1
+    title = (f"▲ {len(symbols)} "
+             f"position{'' if one else 's'} at {venue} "
+             f"that no row claims")
+    items = [f"Venue: {venue}",
+             f"Symbols: {listed}{more}",
+             "Invisible to every exposure and daily-loss gate",
+             "No bot-side stop, and the kill switch cannot "
+             "flatten them",
+             "Check the broker"]
     return dispatch_notification(
         user, "unclaimed_position",
-        title=(f"▲ {len(symbols)} "
-               f"position{'' if len(symbols) == 1 else 's'} at {venue} "
-               f"that no row claims"),
+        title=title,
         body=(f"{listed}{more}. These are invisible to every exposure and "
               f"daily-loss gate, carry no bot-side stop, and the kill "
               f"switch cannot flatten them — it walks database rows. "
               f"Check the broker."),
         url="/positions/",
-        row_data={"items": [f"Venue: {venue}",
-                            f"Symbols: {listed}{more}",
-                            "Invisible to every exposure and daily-loss gate",
-                            "No bot-side stop, and the kill switch cannot "
-                            "flatten them",
-                            "Check the broker"],
+        row_data={"items": items,
                   "mark": NOTIFY_MARKS["unclaimed_position"]},
+        telegram=_plain_message(
+            title, items, NOTIFY_MARKS["unclaimed_position"],
+            summary=(f"{venue} holds {'a position' if one else 'positions'} "
+                     f"Sauron has no record of, so nothing on the platform "
+                     f"guards {'it' if one else 'them'}."),
+            button=("Open positions", "/positions/")),
     )
 
 

@@ -5,8 +5,19 @@ the asset class. The live painter repaints these cells on every tick with
 nothing but a symbol and a number, and it used to guess with toFixed(2)
 while the server had written four — so a value changed shape the moment
 it moved.
+
+The item also carries its quote as ONE record (2026-09-27): data-last,
+data-pct, data-bid, data-ask, data-vol, data-src and data-at — when Sauron
+received it, ISO UTC. The live painter replaces that record on every tick
+and every sweep (base.html, dhSync / svDhIngest) and repaints the card
+below from it, wherever the card is — so a card reads the current quote
+each time it opens, in both halves of the loop, not the page load's. Every
+value in the card carries a data-dh-f hook for that repaint.
 {% endcomment %}
-<a href="{% url 'instrument_detail' m.symbol %}" class="dh-item" data-symbol="{{ m.symbol }}" data-decimals="{% px_decimals m.last m.asset_class m.symbol %}">
+<a href="{% url 'instrument_detail' m.symbol %}" class="dh-item" data-symbol="{{ m.symbol }}" data-decimals="{% px_decimals m.last m.asset_class m.symbol %}"
+   data-last="{% px m.last m.asset_class m.symbol "" %}" data-pct="{{ m.change_pct|stringformat:".4f" }}"
+   data-bid="{% px m.bid m.asset_class m.symbol "" %}" data-ask="{% px m.ask m.asset_class m.symbol "" %}"
+   data-vol="{% if m.volume %}{{ m.volume|stringformat:"d" }}{% endif %}" data-src="{{ m.source|default:"" }}" data-at="{{ m.updated|default:"" }}">
   <span class="dh-dot {% if m.change_pct > 0 %}up{% elif m.change_pct < 0 %}down{% else %}flat{% endif %}"></span>
   <span class="dh-sym">{{ m.symbol }}</span>
   <span class="dh-val">{% px m.last m.asset_class m.symbol %}</span>
@@ -19,13 +30,13 @@ it moved.
         <div class="dh-pop-title">{{ m.symbol }}</div>
         <div class="dh-pop-name">{{ m.name }}</div>
       </div>
-      <div class="dh-pop-badge {% if m.change_pct > 0 %}up{% elif m.change_pct < 0 %}down{% else %}flat{% endif %}">
+      <div class="dh-pop-badge {% if m.change_pct > 0 %}up{% elif m.change_pct < 0 %}down{% else %}flat{% endif %}" data-dh-f="badge">
         {% if m.change_pct >= 0 %}▲{% else %}▼{% endif %}
       </div>
     </div>
     <div class="dh-pop-big">
-      <span class="dh-pop-price">{% px m.last m.asset_class m.symbol %}</span>
-      <span class="dh-pop-pct {% if m.change_pct >= 0 %}up{% else %}down{% endif %}" style="color:{% if m.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
+      <span class="dh-pop-price" data-dh-f="price">{% px m.last m.asset_class m.symbol %}</span>
+      <span class="dh-pop-pct {% if m.change_pct >= 0 %}up{% else %}down{% endif %}" data-dh-f="pct" style="color:{% if m.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};">
         {% if m.change_pct >= 0 %}+{% endif %}{{ m.change_pct|floatformat:2 }}%
       </span>
     </div>
@@ -40,12 +51,19 @@ it moved.
     </div>
     {% endif %}
     <div class="dh-pop-row"><span class="k">Asset class</span><span class="v">{{ m.asset_class|default:"—"|upper }}</span></div>
-    <div class="dh-pop-row"><span class="k">24h volume</span><span class="v">{% if m.volume %}{{ m.volume|floatformat:0 }}{% else %}—{% endif %}</span></div>
-    {% if m.bid %}<div class="dh-pop-row"><span class="k">Bid / Ask</span><span class="v">{% px m.bid m.asset_class m.symbol %} / {% px m.ask m.asset_class m.symbol %}</span></div>{% endif %}
-    <div class="dh-pop-row"><span class="k">Source</span><span class="v" style="color:var(--accent);">{{ m.source|default:"—" }}</span></div>
-    <div class="dh-pop-row"><span class="k">Updated</span><span class="v">{{ m.updated_human|default:"—" }}</span></div>
+    <div class="dh-pop-row"><span class="k">24h volume</span><span class="v" data-dh-f="vol">{% if m.volume %}{{ m.volume|floatformat:0 }}{% else %}—{% endif %}</span></div>
+    {% comment %}Always rendered: a tick can bring the spread a page load did
+    not have, and a row that is not there cannot be filled.{% endcomment %}
+    <div class="dh-pop-row"><span class="k">Bid / Ask</span><span class="v" data-dh-f="bidask">{% if m.bid and m.ask %}{% px m.bid m.asset_class m.symbol %} / {% px m.ask m.asset_class m.symbol %}{% else %}—{% endif %}</span></div>
+    <div class="dh-pop-row"><span class="k">Source</span><span class="v" data-dh-f="src" style="color:var(--accent);">{{ m.source|default:"—" }}</span></div>
+    {% comment %}When Sauron received this quote, on the UTC clock face, and how
+    long ago — the age a data-sv-at span that SV.ages (static/js/sv-overlay.js)
+    keeps true while the page stays open. It was "Updated 4 seconds ago",
+    computed at render and still saying so an hour later. No time known, no
+    time shown: never the browser's clock.{% endcomment %}
+    <div class="dh-pop-row" title="When Sauron received this quote (UTC), not the venue's own print time"><span class="k">As of</span><span class="v"><span data-dh-f="asof">{% if m.updated_utc %}{{ m.updated_utc }} UTC ·{% else %}—{% endif %}</span> <span data-dh-f="age"{% if m.updated %} data-sv-at="{{ m.updated }}"{% endif %}>{% if m.updated %}{{ m.updated_human }}{% endif %}</span></span></div>
     <div class="dh-pop-bar">
-      <div class="dh-pop-bar-fill"
+      <div class="dh-pop-bar-fill" data-dh-f="bar"
         style="width:{% if m.change_pct >= 0 %}{% widthratio m.change_pct 1 10 %}%{% else %}0%{% endif %};
         background:{% if m.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %};"></div>
     </div>

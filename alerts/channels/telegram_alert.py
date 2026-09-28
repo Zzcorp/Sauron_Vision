@@ -40,6 +40,11 @@ TELEGRAM_MAX_CHARS = 4096
 CONTINUED = "… (continued on the platform)"
 #: A title longer than this is cut before it is rendered.
 TITLE_MAX_CHARS = 200
+#: The summary sentence and the subtitle are cut past these (2026-09-27).
+SUMMARY_MAX_CHARS = 600
+SUBTITLE_MAX_CHARS = 120
+#: A button's words are cut past this (Telegram draws a short label).
+BUTTON_MAX_CHARS = 40
 SEND_TIMEOUT_S = 10
 
 #: The leading emoji of each message these paths send (the Telegram
@@ -112,35 +117,51 @@ def _cut_to_fit(render, plain: str) -> str:
     return best
 
 
-def fit_text(title, body="", *, lines=None, mark="") -> str:
+def _capped(text, limit: int) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def fit_text(title, body="", *, lines=None, mark="", subtitle="",
+             summary="", details=None) -> str:
     """The house HTML for one message, under TELEGRAM_MAX_CHARS.
 
     Too long, it loses whole lines from the end and ends on CONTINUED; a
     single line or a body too long on its own is cut on its plain words
     and rendered again, so a cut never lands inside an escape or a tag.
+    A message written for people (2026-09-27) loses its folded record
+    first, whole, before any fact; its subtitle and summary are bounded
+    and always kept. A button is not text: it never counts here.
     """
     from bot_program.notifications import _telegram_text
     title = str(title or "")
     if len(title) > TITLE_MAX_CHARS:
         title = title[:TITLE_MAX_CHARS - 1].rstrip() + "…"
-    text = _telegram_text(title, body, lines=lines, mark=mark)
+    lead = {"subtitle": _capped(subtitle, SUBTITLE_MAX_CHARS),
+            "summary": _capped(summary, SUMMARY_MAX_CHARS)}
+    text = _telegram_text(title, body, lines=lines, mark=mark,
+                          details=details, **lead)
     if _units(text) <= TELEGRAM_MAX_CHARS:
         return text
+    if details:
+        text = _telegram_text(title, body, lines=lines, mark=mark, **lead)
+        if _units(text) <= TELEGRAM_MAX_CHARS:
+            return text
     if lines:
         kept = [ln for ln in lines if str(ln or "").strip()]
         while len(kept) > 1:
             kept.pop()
             text = _telegram_text(title, "", lines=kept + [CONTINUED],
-                                  mark=mark)
+                                  mark=mark, **lead)
             if _units(text) <= TELEGRAM_MAX_CHARS:
                 return text
         return _cut_to_fit(
             lambda s: _telegram_text(title, "", lines=[s, CONTINUED],
-                                     mark=mark),
+                                     mark=mark, **lead),
             str(kept[0]) if kept else "")
     return _cut_to_fit(
         lambda s: _telegram_text(title, (s + "\n" + CONTINUED) if s
-                                 else CONTINUED, mark=mark),
+                                 else CONTINUED, mark=mark, **lead),
         str(body or ""))
 
 
@@ -150,9 +171,10 @@ def platform_link(path) -> str:
 
     DOMAIN is the host Caddy serves the platform on (deploy/Caddyfile):
     docker-compose refuses to start without it, and every container reads
-    the same .env. Nothing else here builds an absolute link (the fills,
-    the Eye and the component digest send none), so a missing or
-    placeholder DOMAIN leaves the path in words instead.
+    the same .env. It is the one builder of an absolute link: the page
+    lines here and, since 2026-09-27, the messages' buttons
+    (button_markup). A missing or placeholder DOMAIN leaves the path in
+    words instead, and a message without a button.
     """
     path = str(path or "").strip()
     if not path.startswith("/") or path.startswith("//"):
@@ -171,6 +193,93 @@ def page_line(path, label: str = "Page") -> str:
         return ""
     link = platform_link(path)
     return f"{label}: {link}" if link else f"{label}: {path} on the platform"
+
+
+def button_markup(button):
+    """The inline keyboard of ONE URL button, from (label, platform path),
+    or None (2026-09-27).
+
+    A URL button only, never a callback: a message never acts from
+    Telegram (the Eye's commands are the one door). The address is
+    platform_link's; there is no button when it has none (no DOMAIN, a
+    placeholder) or when its host has no dot ("localhost"): Telegram
+    refuses a button a phone cannot open, and a refused button would
+    have cost the message (post_message sends it again without)."""
+    if not button:
+        return None
+    try:
+        label, path = button
+    except (TypeError, ValueError):
+        return None
+    label = " ".join(str(label or "").split())[:BUTTON_MAX_CHARS]
+    link = platform_link(path)
+    host = link[len("https://"):].split("/", 1)[0].split(":", 1)[0]
+    if not (label and link and "." in host):
+        return None
+    return {"inline_keyboard": [[{"text": label, "url": link}]]}
+
+
+#: Words in Telegram's 400 answer that blame the BUTTON rather than the
+#: text or the chat: "BUTTON_URL_INVALID", "inline keyboard button URL
+#: ... is invalid", "can't parse inline keyboard button",
+#: "REPLY_MARKUP_INVALID", "reply markup is too long".
+BUTTON_REFUSAL_WORDS = ("button", "keyboard", "reply markup", "reply_markup")
+
+
+def button_refused(answer) -> bool:
+    """True when Telegram's answer is a 400 that blames the button. A 400
+    for the text ("can't parse entities") or the chat ("chat not found")
+    is not: sent again it would fail again, twice in the log."""
+    if (getattr(answer, "ok", False)
+            or getattr(answer, "status_code", None) != 400):
+        return False
+    words = str(getattr(answer, "text", "") or "").lower()
+    return any(w in words for w in BUTTON_REFUSAL_WORDS)
+
+
+def post_message(token, payload, *, timeout, markup=None,
+                 fallback_text=None):
+    """POST sendMessage: (the answer, the refusal of a first try WITH the
+    button, or None).
+
+    A button is an extra. When Telegram refuses the message FOR the
+    button (button_refused), the message goes again without it, as
+    `fallback_text` when given (the page as a line, message_parts), so a
+    button can cost the button, never the message; the caller logs the
+    first refusal. Anything else (another 400, a 429, a 5xx, a transport
+    error) is answered as it came. Raises what requests raises."""
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    if not markup:
+        return requests.post(url, json=payload, timeout=timeout), None
+    first = requests.post(url, json=dict(payload, reply_markup=markup),
+                          timeout=timeout)
+    if not button_refused(first):
+        return first, None
+    again = dict(payload, text=fallback_text) if fallback_text else payload
+    return requests.post(url, json=again, timeout=timeout), first
+
+
+def message_parts(title, body="", *, lines=None, mark="", subtitle="",
+                  summary="", details=None, button=None) -> tuple:
+    """(text, markup, fallback): one message as fit_text renders it, its
+    button (button_markup, or None), and the text to send when Telegram
+    refuses the button: the same message with the button's page as a
+    line ("Page: https://…"), so a refused button costs the button, never
+    the way to the page. `fallback` is None without a button."""
+    fields = {"mark": mark, "subtitle": subtitle, "summary": summary,
+              "details": details}
+    text = fit_text(title, body, lines=lines, **fields)
+    markup = button_markup(button)
+    if not markup:
+        return text, None, None
+    _label, path = button
+    line = page_line(path)
+    if lines:
+        fallback = fit_text(title, body, lines=list(lines) + [line], **fields)
+    else:
+        fallback = fit_text(title, f"{body}\n{line}" if body else line,
+                            **fields)
+    return text, markup, fallback
 
 
 def markdown_lines(markdown) -> list:
@@ -199,7 +308,9 @@ def markdown_lines(markdown) -> list:
     return out
 
 
-def send_to_chat(chat_id, title, body="", *, lines=None, mark="") -> bool:
+def send_to_chat(chat_id, title, body="", *, lines=None, mark="",
+                 subtitle="", summary="", details=None,
+                 button=None) -> bool:
     """Post one house-style message to `chat_id`: True when Telegram took it.
 
     HTML parse mode, every field escaped (fit_text), no link preview, a
@@ -207,6 +318,11 @@ def send_to_chat(chat_id, title, body="", *, lines=None, mark="") -> bool:
     with Telegram's own words (its status and the first 200 characters of
     its answer), and so is a transport error, token scrubbed: the address
     carries it, and a connection error quotes the address.
+
+    `subtitle`, `summary` and `details` render as
+    bot_program.notifications._telegram_text says; `button` is (label,
+    platform path), one URL button (message_parts, post_message), since
+    2026-09-27.
     """
     chat = str(chat_id or "").strip()
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -215,17 +331,23 @@ def send_to_chat(chat_id, title, body="", *, lines=None, mark="") -> bool:
                      str(title)[:120])
         return False
     try:
-        text = fit_text(title, body, lines=lines, mark=mark)
-        r = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat, "text": text, "parse_mode": "HTML",
-                  "disable_web_page_preview": True},
-            timeout=SEND_TIMEOUT_S,
-        )
+        text, markup, fallback = message_parts(
+            title, body, lines=lines, mark=mark, subtitle=subtitle,
+            summary=summary, details=details, button=button)
+        r, refused = post_message(
+            token, {"chat_id": chat, "text": text, "parse_mode": "HTML",
+                    "disable_web_page_preview": True},
+            timeout=SEND_TIMEOUT_S, markup=markup, fallback_text=fallback)
     except Exception as e:  # noqa: BLE001 — a message never breaks its caller
         logger.warning("telegram send failed %r: %s", str(title)[:120],
                        str(e).replace(token, "<token>")[:200])
         return False
+    if refused is not None:
+        logger.warning("telegram refused the button (%s) %r: %s; sent "
+                       "again without it",
+                       getattr(refused, "status_code", "?"),
+                       str(title)[:120],
+                       str(getattr(refused, "text", ""))[:200])
     if not getattr(r, "ok", False):
         logger.warning("telegram refused (%s) %r: %s",
                        getattr(r, "status_code", "?"), str(title)[:120],
@@ -234,7 +356,8 @@ def send_to_chat(chat_id, title, body="", *, lines=None, mark="") -> bool:
     return True
 
 
-def send_telegram(title, message="", *, lines=None, mark="") -> bool:
+def send_telegram(title, message="", *, lines=None, mark="", subtitle="",
+                  summary="", details=None, button=None) -> bool:
     """To the platform chat (TELEGRAM_CHAT_ID), in the house style.
 
     The signature its callers have always used, now through send_to_chat:
@@ -245,7 +368,9 @@ def send_telegram(title, message="", *, lines=None, mark="") -> bool:
     if not (os.getenv("TELEGRAM_BOT_TOKEN", "") and chat):
         logger.warning("Telegram not configured")
         return False
-    return send_to_chat(chat, title, message, lines=lines, mark=mark)
+    return send_to_chat(chat, title, message, lines=lines, mark=mark,
+                        subtitle=subtitle, summary=summary, details=details,
+                        button=button)
 
 
 def send_strategy_proposal(strategy) -> bool:

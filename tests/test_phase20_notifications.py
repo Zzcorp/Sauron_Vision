@@ -345,15 +345,23 @@ class TelegramTextTests(TestCase):
                                   side="BUY", qty=1, exit_price=None,
                                   pnl=None, outcome="", trade_id=8)
         self.assertEqual(tg.call_count, 3)
-        open_kw = tg.call_args_list[0].kwargs
-        self.assertEqual(open_kw["mark"], "\U0001F7E2")
-        self.assertIn("Rule golden_cross", open_kw["lines"])
-        close_kw = tg.call_args_list[1].kwargs
-        self.assertEqual(close_kw["mark"], "\U0001F6D1")
-        self.assertIn("Stopped out", close_kw["lines"])
-        self.assertIn("P&L -2.52", close_kw["lines"])
-        self.assertIn("P&L unmeasured", tg.call_args_list[2].args[1])
-        self.assertEqual(tg.call_args_list[2].kwargs["mark"], "\u26AA")
+        # The message written for people (2026-09-27): its own title in
+        # words, a sentence, the facts, the rule's key folded as code.
+        minus = "\U00002212"
+        opened = tg.call_args_list[0]
+        self.assertEqual(opened.args[1], "Bought AAPL")
+        self.assertEqual(opened.kwargs["mark"], "\U0001F7E2")
+        self.assertEqual(opened.kwargs["summary"], "1 share at 84.61.")
+        self.assertIn("Why: Golden cross", opened.kwargs["lines"])
+        self.assertIn(("Rule key", "golden_cross"), opened.kwargs["details"])
+        closed = tg.call_args_list[1]
+        self.assertEqual(closed.args[1], "Closed AAPL · " + minus + "2.52")
+        self.assertEqual(closed.kwargs["mark"], "\U0001F53B")
+        self.assertIn("Result: " + minus + "2.52", closed.kwargs["lines"])
+        self.assertIn("How it ended: stop loss hit", closed.kwargs["lines"])
+        self.assertEqual(tg.call_args_list[2].args[1],
+                         "Closed AAPL · result unknown")
+        self.assertEqual(tg.call_args_list[2].kwargs["mark"], "\U000026AA")
 
     def test_a_plain_call_keeps_the_three_argument_shape(self):
         from bot_program.notifications import dispatch_notification

@@ -7,6 +7,7 @@ from django.views.generic import RedirectView
 from dashboard.auth_views import SauronLoginView, login_pin, login_pin_forgot
 from core.health import health_check
 from core.wall_facts import market_sessions, wall_facts
+from core.views_book import the_book
 
 
 def the_wall(request):
@@ -37,6 +38,10 @@ urlpatterns = [
     path("dashboard/", RedirectView.as_view(url="/", permanent=True)),
     path("admin/", admin.site.urls),
     path("wall/", the_wall, name="the_wall"),
+    # The Book of Sauron (2026-09-27): the story, the machine and the road
+    # so far. Public like the Wall; a signed-in staff user alone is sent
+    # one more chapter (core/views_book.py).
+    path("book/", the_book, name="the_book"),
     path("login/", SauronLoginView.as_view(), name="login"),
     path("login/pin/", login_pin, name="login_pin"),
     path("login/pin/forgot/", login_pin_forgot, name="login_pin_forgot"),

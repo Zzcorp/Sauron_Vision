@@ -152,6 +152,9 @@ async def broadcast(symbol: str, last: float, change_pct: float,
                 "ask": ask,
                 "volume": volume,
                 "ts": timezone.now().isoformat(),
+                # The card's Source row (base.html, dhSync): the name
+                # write_quote stores for this stream.
+                "source": "binance_ws",
             },
         })
     except Exception as e:

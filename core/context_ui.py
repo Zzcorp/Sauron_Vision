@@ -169,6 +169,7 @@ def ui_extras(request):
             sp = sparks.get(sym) or {}
             q = LiveQuote.objects.filter(instrument__symbol__iexact=sym).first()
             if q:
+                import datetime as _dt
                 from django.utils.timesince import timesince
                 band.append({
                     "symbol": sym,
@@ -182,6 +183,12 @@ def ui_extras(request):
                     "source": q.source or "",
                     "updated": q.updated_at.isoformat() if q.updated_at else "",
                     "updated_human": (timesince(q.updated_at) + " ago") if q.updated_at else "—",
+                    # The card's "As of" (_partials/dh_item.html): the same
+                    # instant as `updated`, on the UTC clock face. The page
+                    # re-reads `updated` itself whenever a tick or a sweep
+                    # replaces the record.
+                    "updated_utc": (q.updated_at.astimezone(_dt.timezone.utc)
+                                    .strftime("%H:%M:%S")) if q.updated_at else "",
                     "spark": sp.get("spark", []),
                     "spark_min": sp.get("min", 0),
                     "spark_max": sp.get("max", 0),

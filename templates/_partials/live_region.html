@@ -156,6 +156,13 @@ Why it is shaped this way
 
     function apply(html) {
         var doc = new DOMParser().parseFromString(html, 'text/html');
+        /* The shell's data headband rides every render of the shell and is
+           not a region: its fresh quotes take the socket's own path
+           (base.html, svDhIngest), never a swap from under an open card.
+           A failure there must not cost the regions their sweep. */
+        try {
+            if (window.svDhIngest) window.svDhIngest(doc);
+        } catch (e) { /* the regions below still swap */ }
         var before = snapshot();
         var swapped = false, carried = [];
         Array.prototype.forEach.call(

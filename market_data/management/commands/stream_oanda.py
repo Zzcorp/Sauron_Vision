@@ -122,10 +122,15 @@ async def broadcast(symbol, last, change_pct, bid, ask):
         from channels.layers import get_channel_layer
         layer = get_channel_layer()
         if layer:
+            # ts and source: the data headband's card says when and from
+            # where its quote came (base.html, dhSync) and never invents
+            # either — a tick without them reads "—" there.
             await layer.group_send("dashboard_live", {
                 "type": "quote_stream",
                 "data": {"symbol": symbol, "last": last,
-                         "change_pct": change_pct, "bid": bid, "ask": ask}})
+                         "change_pct": change_pct, "bid": bid, "ask": ask,
+                         "source": "oanda_stream",
+                         "ts": timezone.now().isoformat()}})
     except Exception as e:
         log.debug("broadcast: %s", e)
 

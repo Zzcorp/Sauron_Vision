@@ -1346,7 +1346,7 @@ def _finalise_closed(trade, *, fill: dict, reason: str) -> None:
             trade.config.user, asset_class=trade.asset_class,
             symbol=trade.symbol, side=trade.side, qty=trade.qty,
             exit_price=trade.exit_price, pnl=trade.pnl,
-            outcome=trade.outcome or "", trade_id=trade.id,
+            outcome=trade.outcome or "", trade_id=trade.id, trade=trade,
         )
     except Exception as e:
         logger.warning("close retry notify failed for #%s: %s",

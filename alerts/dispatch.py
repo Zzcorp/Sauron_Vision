@@ -19,26 +19,66 @@ _FLOOD_HELD_TTL_S = 7 * 86400
 SIGNAL_SIDES = {"bullish": "BUY", "bearish": "SELL"}
 
 
+#: The signal message's button (2026-09-27): the instrument's page.
+SIGNAL_BUTTON = "Open instrument"
+
+
+def _signal_path(signal) -> str:
+    """The signal's page: its instrument's, else the signals list."""
+    from alerts.links import instrument_url
+    try:
+        return instrument_url(signal.instrument.symbol) or "/signals/"
+    except Exception:  # noqa: BLE001 — a link is never worth the message
+        return "/signals/"
+
+
+def signal_extras(signal) -> dict:
+    """The signal message's summary sentence and its button (2026-09-27):
+    "Sauron flags MSFT as a buy at 421.37." and ("Open instrument", its
+    page), or ("Open signals", "/signals/") for a symbol with no page of
+    its own (untracked, or a pair like BTC/USD). The sentence says the
+    title's side and the entry in words; it claims no order."""
+    from core.price_format import format_price
+
+    inst = signal.instrument
+    symbol = inst.symbol
+    asset_class = getattr(inst, "asset_class", "") or ""
+    side = {"bullish": "a buy", "bearish": "a sell"}.get(
+        str(signal.direction or "").lower())
+    price = signal.suggested_entry or signal.price_at_signal
+    at = f" at {format_price(price, asset_class, symbol)}" if price else ""
+    said = (f"Sauron flags {symbol} as {side}{at}." if side
+            else f"Sauron flags a signal on {symbol}{at}.")
+    path = _signal_path(signal)
+    label = SIGNAL_BUTTON if path != "/signals/" else "Open signals"
+    return {"summary": said, "button": (label, path)}
+
+
 def signal_telegram(signal) -> tuple:
     """(title, lines, mark): one signal as the house message.
 
         📈 Signal · MSFT · BUY
+        Sauron flags MSFT as a buy at 421.37.      (signal_extras)
+
         Score: 0.82
-        Rule: starter_stock_momentum
+        Rule: Starter stock momentum
         Entry 421.37 · stop 410.00 · target 440.00
         Reward to risk: 1.85
         Urgency: medium
-        Page: https://<DOMAIN>/instruments/MSFT/
+        [Open instrument]                           (signal_extras)
 
     Prices at the instrument's own decimals (core.price_format, the
     convention every page uses); a level the signal does not carry is
-    left out, never printed as zero.
+    left out, never printed as zero. The rule reads in words
+    (position_summary.rule_words, 2026-09-27). The page is the button
+    when the deployment names a host a phone can open; a "Page: …" line
+    stands in when it does not.
     """
     import math
 
-    from alerts.channels.telegram_alert import MARKS, page_line
-    from alerts.links import instrument_url
+    from alerts.channels.telegram_alert import MARKS, button_markup, page_line
     from core.price_format import format_price
+    from dashboard.position_summary import rule_words
 
     inst = signal.instrument
     symbol = inst.symbol
@@ -47,8 +87,9 @@ def signal_telegram(signal) -> tuple:
     side = SIGNAL_SIDES.get(direction) or (direction.upper() or "SIGNAL")
     mark = MARKS.get(f"signal_{direction}") or MARKS["signal"]
     lines = [f"Score: {float(signal.score or 0):.2f}"]
-    if signal.rule_name:
-        lines.append(f"Rule: {signal.rule_name}")
+    rule = rule_words(signal.rule_name) if signal.rule_name else ""
+    if rule:
+        lines.append(f"Rule: {rule}")
     levels = []
     for word, value in (
             ("entry", signal.suggested_entry or signal.price_at_signal),
@@ -64,13 +105,11 @@ def signal_telegram(signal) -> tuple:
         lines.append(f"Reward to risk: {float(rr):.2f}")
     if signal.urgency:
         lines.append(f"Urgency: {signal.urgency}")
-    try:
-        path = instrument_url(symbol) or "/signals/"
-    except Exception:  # noqa: BLE001 — a link is never worth the message
-        path = "/signals/"
-    line = page_line(path)
-    if line:
-        lines.append(line)
+    path = _signal_path(signal)
+    if not button_markup((SIGNAL_BUTTON, path)):
+        line = page_line(path)
+        if line:
+            lines.append(line)
     return f"Signal · {symbol} · {side}", lines, mark
 
 
@@ -176,18 +215,28 @@ def _telegram_signal(signal, chats: list) -> dict:
         return out
     from alerts.channels.telegram_alert import fit_text, send_to_chat
     title, lines, mark = signal_telegram(signal)
+    try:
+        extras = signal_extras(signal)
+    except Exception:  # noqa: BLE001 — the facts go out without the sentence
+        logger.exception("signal #%s: the summary could not be built",
+                         getattr(signal, "pk", None))
+        extras = {}
+    summary = str(extras.get("summary") or "")
+    button = extras.get("button")
     for chat in chats:
         admitted, extra, held = _flood_admit(chat, signal)
         if not admitted:
             out["held"] += 1
             continue
         told = lines + ([extra] if extra else [])
-        if send_to_chat(chat, title, lines=told, mark=mark):
+        if send_to_chat(chat, title, lines=told, mark=mark, summary=summary,
+                        button=button):
             out["sent"] += 1
             # The count is cleared only when its line was in the text that
             # went out: a message cut to fit loses its last line first.
             if extra and escape(extra) in fit_text(title, lines=told,
-                                                   mark=mark):
+                                                   mark=mark,
+                                                   summary=summary):
                 _flood_release(chat, held)
         else:
             out["refused"] += 1

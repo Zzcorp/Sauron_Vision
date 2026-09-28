@@ -489,19 +489,25 @@ def proven_leverage(asset_class: str) -> int:
     return val if val >= 1 and val == raw else 1
 
 
-def stop_moved_words(meta, entry_price) -> str:
-    """The fill notification's line for a stop the venue REWROTE at the
-    fill (metadata "stop_rewritten_by_venue" {sent, held}, stamped by
+def stop_moved_words(meta, entry_price, asset_class="", symbol="") -> str:
+    """The fill message's line for a stop the venue REWROTE at the fill
+    (metadata "stop_rewritten_by_venue" {sent, held}, stamped by
     execute_entry on an immediate fill and by _finish_working_entry on a
-    held one): "Stop moved by eToro: sent X, held Y (Z% from entry)", Z
-    the HELD stop's distance from the fill price. "" for a row with no
+    held one): "Stop moved by eToro: it holds Y, not the X sent (Z% below
+    the entry)", Z the HELD stop's distance from the fill price, the
+    prices at the instrument's decimals (2026-09-27; "Stop moved by eToro:
+    sent X, held Y (Z% from entry)" before). "" for a row with no
     rewrite, or a number nothing can read; no parenthesis without a
     price. MEASURED 2026-09-26 on the real account, BTC 0.0002 at 1x:
     sent 79934.97 (5% under the last 84142.07), held 75745.8 — 9.98%
     under the 84145.8 fill. A held stop at or under 0.0001 (eToro's "no
     stop" sentinel, public reference only, or a zero) is NO stop, never
-    a distance: "eToro holds NO stop: sent X". Words only: nothing is
-    resized, closed or sent again."""
+    a distance: "No stop at eToro: it holds none, not the X sent". A
+    rewrite smaller than the instrument's last decimal prints both with
+    as many more as it takes (price_pair_words), never one price twice.
+    Words only: nothing is resized, closed or sent again."""
+    from bot_program.notifications import (pct_words, price_pair_words,
+                                           price_words)
     moved = (meta or {}).get("stop_rewritten_by_venue")
     if not isinstance(moved, dict):
         return ""
@@ -510,15 +516,23 @@ def stop_moved_words(meta, entry_price) -> str:
         held = float(moved.get("held"))
     except (TypeError, ValueError):
         return ""
+    if sent != sent or held != held:
+        return ""
     if held <= 0.0001:
-        return f"eToro holds NO stop: sent {sent:.10g}"
-    words = f"Stop moved by eToro: sent {sent:.10g}, held {held:.10g}"
+        return (f"No stop at eToro: it holds none, not the "
+                f"{price_words(sent, asset_class, symbol)} sent")
+    held_words, sent_words = price_pair_words(held, sent, asset_class,
+                                              symbol)
+    words = (f"Stop moved by eToro: it holds {held_words}, not the "
+             f"{sent_words} sent")
     try:
         entry = float(entry_price or 0)
     except (TypeError, ValueError, InvalidOperation):
         entry = 0.0
     if entry > 0:
-        words += f" ({abs(entry - held) / entry * 100:.2f}% from entry)"
+        where = "below" if held < entry else "above"
+        words += (f" ({pct_words(abs(entry - held) / entry * 100)} "
+                  f"{where} the entry)")
     return words
 
 
@@ -1682,15 +1696,15 @@ class AssetBot(ABC):
                     self.user, asset_class=self.asset_class,
                     symbol=trade.symbol, side=trade.side, qty=trade.qty,
                     entry_price=trade.entry_price, trade_id=trade.id,
-                    live=not trade.paper)
+                    live=not trade.paper, trade=trade)
             else:
                 from bot_program.notifications import notify_bot_fill_open
                 notify_bot_fill_open(
                     self.user, asset_class=self.asset_class,
                     symbol=trade.symbol, side=trade.side, qty=trade.qty,
                     entry_price=trade.entry_price,
-                    rule_name=self._fill_rule_words(trade),
-                    trade_id=trade.id)
+                    rule_name=trade.rule_name, trade=trade,
+                    trade_id=trade.id, **self._fill_words(trade))
         except Exception as e:  # noqa: BLE001
             logger.warning("[%s_bot] fill notification failed: %s",
                            self.asset_class, e)
@@ -2892,7 +2906,7 @@ class AssetBot(ABC):
                 self.user, asset_class=self.asset_class, symbol=trade.symbol,
                 side=trade.side, qty=trade.qty, exit_price=trade.exit_price,
                 pnl=trade.pnl, outcome=trade.outcome or "",
-                trade_id=trade.id,
+                trade_id=trade.id, trade=trade,
             )
         except Exception as e:
             logger.warning("[%s_bot] close notification failed: %s",
@@ -3179,6 +3193,8 @@ class AssetBot(ABC):
                         self.user, asset_class=self.asset_class,
                         config_name=self.cfg.name,
                         realized_pnl=float(realized), limit=float(limit),
+                        currency=self.cfg.base_currency or "",
+                        unpriced=n_unmeasured,
                     )
             except Exception as e:
                 logger.warning("[%s_bot] drawdown notification failed: %s",
@@ -4337,7 +4353,7 @@ class AssetBot(ABC):
                 # initial_stop_loss = the SENT stop (the risk denominator
                 # must not move) and records the divergence; the staff
                 # alert names both, and the fill notification carries one
-                # line (stop_moved_words, through _fill_rule_words); nothing
+                # line (stop_moved_words, through _fill_words); nothing
                 # is resized or sent again. Only a venue that echoes its legs
                 # (etoro_client: venueStopLoss) reaches this.
                 held = res.get("venueStopLoss")
@@ -4534,8 +4550,8 @@ class AssetBot(ABC):
                     self.user, asset_class=self.asset_class, symbol=symbol,
                     side=decision.direction, qty=trade.qty,
                     entry_price=trade.entry_price,
-                    rule_name=self._fill_rule_words(trade),
-                    trade_id=trade.id,
+                    rule_name=trade.rule_name, trade=trade,
+                    trade_id=trade.id, **self._fill_words(trade),
                 )
             except Exception as e:
                 logger.warning("[%s_bot] open notification failed: %s",
@@ -5889,41 +5905,41 @@ class AssetBot(ABC):
                           f"{ATTACK_HIGH_MIN_WIN_RATE:.0%} and avg R >= "
                           f"{ATTACK_HIGH_MIN_AVG_R:+.2f}")
 
-    def _fill_rule_words(self, trade):
-        """What the open notification's `rule_name` carries: the rule, and
-        on an attack-mode row a second line. notify_bot_fill_open renders
-        rule_name as one of its lines (bot_program/notifications.py, not
-        this file's to change), so the tier, the risk the row carries at
-        its stop, the multiplier sent and the margin ride the argument it
-        already has: "Attack: HIGH · risk 7.0% of pool · 20x · margin
-        100.00 USD". Since 2026-09-26 a row whose stop the venue rewrote at
-        the fill (stop_rewritten_by_venue) carries one more line, attack
-        mode or not: "Stop moved by eToro: sent X, held Y (Z% from entry)"
-        (stop_moved_words). Every other row passes its rule_name
-        unchanged."""
+    def _fill_words(self, trade) -> dict:
+        """The open notification's own facts beside its rule, each its own
+        argument of notify_bot_fill_open (2026-09-27; until then they rode
+        inside rule_name as extra lines, and the message printed the rule's
+        key with them):
+          attack      an attack-mode row's tier, the risk it carries at its
+                      stop, the multiplier and the margin (_attack_line):
+                      "Attack mode: high conviction · 7.0% of the pool at
+                      risk · 20x · 100.00 USD of margin";
+          stop_moved  a stop the venue rewrote at the fill
+                      (stop_rewritten_by_venue), attack mode or not
+                      (stop_moved_words).
+        Each is "" when the row has none."""
         meta = getattr(trade, "metadata", None) or {}
-        lines = []
         att = meta.get("attack")
-        if isinstance(att, dict):
-            line = self._attack_line(att, trade)
-            if line:
-                lines.append(line)
-        moved = stop_moved_words(meta, getattr(trade, "entry_price", None))
-        if moved:
-            lines.append(moved)
-        if not lines:
-            return trade.rule_name
-        return "\n".join([trade.rule_name or "—"] + lines)
+        attack = self._attack_line(att, trade) if isinstance(att, dict) else ""
+        moved = stop_moved_words(
+            meta, getattr(trade, "entry_price", None),
+            asset_class=getattr(trade, "asset_class", "") or self.asset_class,
+            symbol=getattr(trade, "symbol", "") or "")
+        return {"attack": attack or "", "stop_moved": moved or ""}
 
     def _attack_line(self, att: dict, trade) -> str:
-        """"Attack: TIER · risk F% of pool · Lx · margin M CCY". The risk is
-        the one the ROW carries at its stop — qty x |entry - the stop sent|
-        x value_per_unit / the pool — so the desk's size_mult, the
-        allocator's multiplier, the correlation taper, the rounding and a
-        partial fill all show in it; the sizer's own fraction only when
+        """"Attack mode: TIER · F% of the pool at risk · Lx · M CCY of
+        margin", in the words the fill message prints (2026-09-27; "Attack:
+        HIGH · risk 7.0% of pool · 20x · margin 100.00 USD" before). The
+        risk is the one the ROW carries at its stop — qty x |entry - the
+        stop sent| x value_per_unit / the pool — so the desk's size_mult,
+        the allocator's multiplier, the correlation taper, the rounding and
+        a partial fill all show in it; the sizer's own fraction only when
         the row cannot say (no stop, no pool). The margin is the row's
         notional / L (measured: eToro pledges notional / L). A paper row
         says so instead of a multiplier."""
+        from bot_program.notifications import (TIER_WORDS, money_words,
+                                               pct_words)
         meta = getattr(trade, "metadata", None) or {}
         f = None
         try:
@@ -5942,11 +5958,18 @@ class AssetBot(ABC):
                 f = float(att.get("risk_fraction") or 0.0) * 100.0
             except (TypeError, ValueError):
                 f = 0.0
-        parts = [f"Attack: {att.get('tier') or '?'}",
-                 (f"risk {f:.1f}% of pool" if f >= 1.0
-                  else f"risk {f:.2f}% of pool")]
+        tier = str(att.get("tier") or "").strip().upper()
+        # measured at the stop SENT: where the venue holds another one
+        # (stop_rewritten_by_venue) the line says so, and the fill
+        # message's risk line gives the figure at the stop it holds
+        at_sent = (" at the stop sent"
+                   if isinstance(meta.get("stop_rewritten_by_venue"), dict)
+                   else "")
+        parts = ["Attack mode: " + TIER_WORDS.get(tier,
+                                                  "conviction not recorded"),
+                 f"{pct_words(f)} of the pool at risk{at_sent}"]
         if getattr(trade, "paper", False):
-            parts.append("paper, no multiplier")
+            parts.append("simulated, no multiplier")
             return " · ".join(parts)
         try:
             lev = int(att.get("leverage") or 0)
@@ -5959,8 +5982,10 @@ class AssetBot(ABC):
             vpu = float((trade.metadata or {}).get("value_per_unit") or 1.0)
             notional = float(trade.qty) * float(trade.entry_price) * vpu
             ccy = str(self.cfg.base_currency or "").strip()
-            parts.append(f"margin {notional / lev:,.2f} {ccy}".rstrip())
-        except (TypeError, ValueError, InvalidOperation):
+            margin = money_words(notional / lev, ccy)
+            if margin:
+                parts.append(f"{margin} of margin")
+        except (TypeError, ValueError, InvalidOperation, ZeroDivisionError):
             pass
         return " · ".join(parts)
 

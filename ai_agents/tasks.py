@@ -130,7 +130,11 @@ class MondayPlanAgent:
             return OllamaProvider()
         raise ValueError(f"Unknown AI provider: {provider_name}")
 
-    def run(self, context: str) -> dict:
+    def run(self, context: str, week=None) -> dict:
+        """The plan for `context`. `week` (2026-09-27): the Monday of the
+        week it is for, kept beside the whole text on this run's AgentTask
+        row, the row /briefing/#monday-plan reads (ai_agents/monday_plan.py).
+        """
         from ai_agents.models import AgentTask
         import time
 
@@ -165,7 +169,9 @@ class MondayPlanAgent:
                 output_tokens=usage.get("output_tokens", 0),
                 cost_usd=usage.get("cost_usd", 0),
                 response_summary=raw[:500],
-                structured_output={"plan": raw},
+                # The WHOLE plan and its week: the store the page reads.
+                structured_output=({"plan": raw, "week_of": week.isoformat()}
+                                   if week is not None else {"plan": raw}),
                 success=True,
                 duration_seconds=round(duration, 2),
             )
@@ -1025,7 +1031,8 @@ def generate_monday_plan():
     from strategies.models import Strategy
     from portfolio.models import Portfolio, PortfolioSnapshot
     from market_data.models import EconomicEvent
-    from alerts.models import Notification, Newsletter
+    from alerts.models import Newsletter
+    from ai_agents import monday_plan as mp
 
     logger.info("Generating Monday game plan")
 
@@ -1096,20 +1103,23 @@ def generate_monday_plan():
         f"LAST WEEKLY REVIEW:\n{last_review_text}"
     )
 
-    result = MondayPlanAgent().run(context=context)
+    # THE PLAN, READ WHOLE (2026-09-27). The operator: "the monday game
+    # plan is not fully visible it seems, only on hover". It went to the
+    # bell alone, cut at 2,000 characters, linked to a page that never
+    # showed it. The whole text stays on the run's own AgentTask row with
+    # the week it is for; /briefing/#monday-plan shows it; the bell and
+    # the staff group get a short summary and the way to it.
+    week = mp.week_of(now)
+    result = MondayPlanAgent().run(context=context, week=week)
     plan_text = result.get("plan", "")
     calls_registered = register_calls("monday_plan", extract_calls(plan_text))
-
-    Notification.create_for_all(
-        notification_type="system",
-        title=f"Monday Game Plan — {today.strftime('%d %b %Y')}",
-        body=plan_text[:2000],
-        url="/briefing/",
-    )
+    announced = mp.announce(plan_text, week)
 
     return {
         "status": "success",
         "date": str(today),
+        "week_of": str(week),
+        "announced": announced,
         "plan_length": len(plan_text),
         "active_strategies": len(active_strategies),
         "events_this_week": len(upcoming_events),

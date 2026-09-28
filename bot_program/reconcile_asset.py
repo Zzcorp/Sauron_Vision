@@ -540,7 +540,7 @@ def _close_as_orphan(trade) -> None:
             trade.config.user, asset_class=trade.asset_class,
             symbol=trade.symbol, side=trade.side, qty=trade.qty,
             exit_price=trade.exit_price, pnl=trade.pnl,
-            outcome=trade.outcome or "", trade_id=trade.id,
+            outcome=trade.outcome or "", trade_id=trade.id, trade=trade,
         )
     except Exception as e:  # noqa: BLE001 — a bell never blocks a close
         logger.warning("reconcile: close notification failed for #%s: %s",

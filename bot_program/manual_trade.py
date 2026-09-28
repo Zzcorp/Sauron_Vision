@@ -1979,6 +1979,23 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             note = res.get("protectionNote")
             if note:
                 extra["protection_note"] = str(note)[:300]
+            # THE STOP THE VENUE HOLDS versus the one sent (2026-09-27), the
+            # engine's own record (AssetBot.execute_entry): eToro rewrites a
+            # stop at the fill (MEASURED on the real BTC fill, 2026-09-26),
+            # and the hand lane never compared the two, so its fill message
+            # printed the sent stop and the risk at it. Recorded only: the
+            # message reads the held stop; nothing is resized, closed or
+            # sent again. A queued order is compared when it fills
+            # (AssetBot._finish_working_entry).
+            try:
+                held = res.get("venueStopLoss")
+                held = float(held) if held is not None else None
+                if (held is not None and not working
+                        and abs(held - float(stop)) > 1e-9):
+                    extra["stop_rewritten_by_venue"] = {
+                        "sent": float(stop), "held": held}
+            except (TypeError, ValueError):
+                pass
 
             with transaction.atomic():
                 trade = _book_row(booked_px,
@@ -2001,7 +2018,7 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         notify_manual_fill_open(
             user, asset_class=cfg.asset_class, symbol=inst.symbol,
             side=side, qty=trade.qty, entry_price=trade.entry_price,
-            trade_id=trade.id, live=live,
+            trade_id=trade.id, live=live, trade=trade,
             working=bool((trade.metadata or {}).get("entry_working")))
     except Exception as e:  # noqa: BLE001
         logger.warning("[take-trade] open notification failed: %s", e)

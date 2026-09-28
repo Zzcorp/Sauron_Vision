@@ -1,0 +1,56 @@
+{% load sauron_tags %}{% comment %}
+THE MONDAY GAME PLAN, WHOLE (2026-09-27): /briefing/#monday-plan.
+
+The operator: "the monday game plan is not fully visible it seems, only on
+hover". Until then the plan lived in the bell, cut at 2,000 characters, and
+this page (which the bell linked) never showed it. Now the latest plan is
+here whole, with the week it is for and when it was written, and the four
+before it fold underneath.
+
+The plan is model output. It is rendered by research_md, the platform's
+safe renderer: everything is escaped first, then headings, lists, bold,
+code and links are allowed, nothing else; the raw text is never marked
+safe. ai_agents/monday_plan.py hands the prose with its tables turned into
+lists (a phone has no room for a table), every link to another site
+already turned into words (only a same-site link stays a link), and the
+calls block the plan ends with said in words.
+{% endcomment %}<section class="card mp-card" id="monday-plan" aria-labelledby="mpTitle">
+    <div class="card-header mp-head">
+        <h2 class="card-title mp-title" id="mpTitle">Monday game plan</h2>
+        {% if monday_plan %}<span class="mp-week">Week of {{ monday_plan.week_words }}</span>{% endif %}
+    </div>
+    {% if monday_plan %}
+    <p class="mp-meta">Written {{ monday_plan.written_words }}.</p>
+    <div class="mp-body">{{ monday_plan.prose|research_md }}</div>
+    {% if monday_plan.calls %}
+    <div class="mp-calls">
+        <h3 class="mp-sub">The calls this plan made</h3>
+        <p class="mp-note">Each one is graded against the price when its time is up.</p>
+        <ul class="mp-calls-list">
+            {% for c in monday_plan.calls %}<li>{{ c }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    {% if older_plans %}
+    <div class="mp-older">
+        <h3 class="mp-sub">Earlier plans</h3>
+        {% for p in older_plans %}
+        <details class="mp-old" id="monday-plan-{{ p.id }}">
+            <summary><span class="mp-old-week">Week of {{ p.week_words }}</span><span class="mp-old-meta">written {{ p.written_words }}</span></summary>
+            <div class="mp-body">{{ p.prose|research_md }}</div>
+            {% if p.calls %}
+            <h4 class="mp-sub">The calls it made</h4>
+            <ul class="mp-calls-list">
+                {% for c in p.calls %}<li>{{ c }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </details>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% else %}
+    <p class="mp-empty">No plan yet — it is written every Sunday evening.</p>
+    {% endif %}
+</section>

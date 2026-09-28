@@ -41,8 +41,9 @@ HTTP call leaves the box):
   * broker_portfolio's sec_type, a constant that is wrong for a REAL
     position and stays until the real row's settlementTypeID is printed;
   * the stop eToro rewrote on the real BTC fill: the stamp and the fill
-    notification's line, "Stop moved by eToro: sent 79934.97, held
-    75745.8 (9.98% from entry)".
+    message's line, "Stop moved by eToro: it holds 75745.80, not the
+    79934.97 sent (10.0% below the entry)" (its own argument, stop_moved,
+    since 2026-09-27).
 
 Nothing here flips a switch, ticks a class, arms a config or sends an
 order.
@@ -396,10 +397,11 @@ class TheOnePromiseTests(TestCase):
                          {"sent": sent, "held": held})
         self.assertEqual(float(trade.metadata["initial_stop_loss"]), sent)
         self.assertEqual(float(trade.entry_price), 100.0)
-        words = (f"Stop moved by eToro: sent {sent:.10g}, held {held:.10g} "
-                 f"({abs(100.0 - held) / 100.0 * 100:.2f}% from entry)")
-        self.assertEqual(fill.call_args.kwargs["rule_name"],
-                         f"{trade.rule_name}\n{words}")
+        words = (f"Stop moved by eToro: it holds {held:.2f}, not the "
+                 f"{sent:.2f} sent "
+                 f"({abs(100.0 - held) / 100.0 * 100:.1f}% below the entry)")
+        self.assertEqual(fill.call_args.kwargs["stop_moved"], words)
+        self.assertEqual(fill.call_args.kwargs["rule_name"], trade.rule_name)
         self.assertTrue(any("the venue rewrote the stop"
                             in c.kwargs.get("title", "")
                             for c in staff.call_args_list))
@@ -657,10 +659,16 @@ class TheStopMovedLineTests(SimpleTestCase):
         meta = {"stop_rewritten_by_venue": {"sent": 79934.97,
                                             "held": 75745.8}}
         self.assertEqual(stop_moved_words(meta, Decimal("84145.8")),
-                         "Stop moved by eToro: sent 79934.97, held 75745.8 "
-                         "(9.98% from entry)")
+                         "Stop moved by eToro: it holds 75745.80, not the "
+                         "79934.97 sent (10.0% below the entry)")
+        self.assertEqual(stop_moved_words(meta, Decimal("84145.8"),
+                                          asset_class="crypto",
+                                          symbol="BTCUSD"),
+                         "Stop moved by eToro: it holds 75745.80, not the "
+                         "79934.97 sent (10.0% below the entry)")
         self.assertEqual(stop_moved_words(meta, None),
-                         "Stop moved by eToro: sent 79934.97, held 75745.8")
+                         "Stop moved by eToro: it holds 75745.80, not the "
+                         "79934.97 sent")
         self.assertEqual(stop_moved_words({}, Decimal("84145.8")), "")
         self.assertEqual(stop_moved_words(None, Decimal("84145.8")), "")
         self.assertEqual(stop_moved_words(
@@ -673,7 +681,8 @@ class TheStopMovedLineTests(SimpleTestCase):
             self.assertEqual(stop_moved_words(
                 {"stop_rewritten_by_venue": {"sent": 79934.97,
                                              "held": none_held}},
-                Decimal("84145.8")), "eToro holds NO stop: sent 79934.97")
+                Decimal("84145.8")),
+                "No stop at eToro: it holds none, not the 79934.97 sent")
 
 
 class TheHeldFillCarriesTheLineTests(TestCase):
@@ -719,9 +728,10 @@ class TheHeldFillCarriesTheLineTests(TestCase):
         self.assertEqual(trade.metadata["protective_trade_id"], "3588477891")
         self.assertTrue(trade.metadata["protected"])
         self.assertEqual(float(trade.entry_price), 84145.8)
-        self.assertEqual(fill.call_args.kwargs["rule_name"],
-                         "btc_rule\nStop moved by eToro: sent 79934.97, held "
-                         "75745.8 (9.98% from entry)")
+        self.assertEqual(fill.call_args.kwargs["rule_name"], "btc_rule")
+        self.assertEqual(fill.call_args.kwargs["stop_moved"],
+                         "Stop moved by eToro: it holds 75745.80, not the "
+                         "79934.97 sent (10.0% below the entry)")
         self.assertEqual(sum("the venue rewrote the stop"
                              in c.kwargs.get("title", "")
                              for c in staff.call_args_list), 1)

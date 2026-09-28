@@ -711,10 +711,12 @@ class TheEntryLaneTests(TestCase):
         self.assertEqual(_order_posts(fake)[0][2]["json"]["units"], 20.0)
         self.assertEqual(float(row.qty), 3.0)
         self.assertEqual(row.metadata["attack"]["risk_fraction"], 0.01)
+        # its own argument since 2026-09-27, in words; rule_name is the key
+        self.assertEqual(note.call_args.kwargs["rule_name"], "atk_rule")
         self.assertEqual(
-            note.call_args.kwargs["rule_name"],
-            "atk_rule\nAttack: HIGH · risk 0.15% of pool · 5x · "
-            "margin 60.00 USD")
+            note.call_args.kwargs["attack"],
+            "Attack mode: high conviction · 0.15% of the pool at risk · "
+            "5x · 60.00 USD of margin")
 
     def test_a_typed_config_is_todays_path(self):
         from bot_program.models import AssetBotTrade
@@ -813,25 +815,27 @@ class TheFillWordsTests(TestCase):
                         "notify_bot_fill_open") as note:
             self.bot._finish_working_entry(trade, MagicMock(), qty=20.0,
                                            price=100.5, source="broker")
+        self.assertEqual(note.call_args.kwargs["rule_name"], "atk_rule")
         self.assertEqual(
-            note.call_args.kwargs["rule_name"],
-            "atk_rule\nAttack: HIGH · risk 1.1% of pool · 5x · "
-            "margin 402.00 USD")
+            note.call_args.kwargs["attack"],
+            "Attack mode: high conviction · 1.1% of the pool at risk · "
+            "5x · 402.00 USD of margin")
 
-    def test_a_paper_row_says_so_and_a_row_without_a_rule_shows_a_dash(self):
+    def test_a_paper_row_says_so_and_needs_no_rule(self):
         trade = self._row(rule="", paper=True,
                           attack={"tier": "STRONG", "risk_fraction": 0.0075})
-        self.assertEqual(self.bot._fill_rule_words(trade),
-                         "—\nAttack: STRONG · risk 1.0% of pool · paper, "
-                         "no multiplier")
+        self.assertEqual(self.bot._fill_words(trade), {
+            "attack": ("Attack mode: strong conviction · 1.0% of the pool "
+                       "at risk · simulated, no multiplier"),
+            "stop_moved": ""})
 
     def test_a_row_with_no_stop_falls_back_to_the_sizers_fraction(self):
         trade = self._row(stop=None,
                           attack={"tier": "STANDARD", "risk_fraction": 0.0035,
                                   "leverage": 2})
-        self.assertEqual(self.bot._fill_rule_words(trade),
-                         "atk_rule\nAttack: STANDARD · risk 0.35% of pool · "
-                         "2x · margin 1,000.00 USD")
+        self.assertEqual(self.bot._fill_words(trade)["attack"],
+                         "Attack mode: standard conviction · 0.35% of the "
+                         "pool at risk · 2x · 1,000.00 USD of margin")
 
 
 class ThePreflightTests(TestCase):

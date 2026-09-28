@@ -28,6 +28,10 @@ staticfiles/
 .env.local
 .env.production
 
+# The Book of Sauron's staff-only chapter (core/views_book.py): read from
+# private/ on a checkout, copied into the image, never committed.
+/private/
+
 # IDE
 .vscode/
 .idea/
