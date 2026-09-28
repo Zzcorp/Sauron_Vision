@@ -1173,21 +1173,22 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
 
     def test_every_box_but_crypto_says_no_proof_is_pinned(self):
         """As the tree ships since 2026-09-28: crypto's proof is pinned
-        (the real BTC round trip, test_proof_crypto) and the stocks box
-        carries the ETF proof alone (the demo GLDM round trip,
-        test_proof_etf) with stock and index still refused; forex and
-        commodity read "no proof pinned — entries refused"."""
+        (the real BTC round trip, test_proof_crypto), forex's too (the
+        demo EURUSD round trips, test_proof_forex), the stocks box carries
+        the ETF proof alone (the demo GLDM round trip, test_proof_etf) with
+        stock and index still refused; commodity alone reads "no proof
+        pinned — entries refused"."""
         form = self._form()
-        for name in ("primary_forex", "primary_commodity"):
-            self.assertIn("no proof pinned — entries refused",
-                          self._label(form, name), name)
-        crypto = self._label(form, "primary_crypto")
-        self.assertIn("proof pinned", crypto)
-        self.assertNotIn("no proof pinned", crypto)
+        self.assertIn("no proof pinned — entries refused",
+                      self._label(form, "primary_commodity"))
+        for name in ("primary_crypto", "primary_forex"):
+            label = self._label(form, name)
+            self.assertIn("proof pinned", label, name)
+            self.assertNotIn("no proof pinned", label, name)
         stocks = self._label(form, "primary_stocks")
         self.assertIn("proof pinned for etf only — stock, index entries "
                       "refused", stocks)
-        self.assertEqual(form.count("no proof pinned — entries refused"), 2)
+        self.assertEqual(form.count("no proof pinned — entries refused"), 1)
         self.assertIn("no short proven", stocks)
 
     def test_a_pinned_proof_reads_beside_its_box_only(self):
@@ -1253,9 +1254,10 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
         self.assertNotIn("Every short is refused", body)
 
     def test_a_refused_save_carries_both_notes(self):
-        body = self._save(("refused", "401"), primary_forex="on")
+        # commodity: the one class still unproven on 2026-09-28.
+        body = self._save(("refused", "401"), primary_commodity="on")
         self.assertIn("now the book", body)
-        self.assertIn("No demo fill-and-close proof is pinned for forex "
+        self.assertIn("No demo fill-and-close proof is pinned for commodity "
                       "(ETORO_PROVEN", body)
         self.assertIn("every eToro entry of that class is refused "
                       "(gate_blocked), by the bots and by TAKE TRADE, until "

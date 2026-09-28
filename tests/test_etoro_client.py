@@ -1158,6 +1158,100 @@ def _polls(fake):
     return [c for c in fake.calls if c[0] == "GET" and "orders:lookup" in c[1]]
 
 
+# ── MEASURED 2026-09-28 22:42 UTC, demo segment, the operator's pair, the
+# night before leaving: EURUSD 1000 units BUY twice the same minute, at 1x
+# (order 384690781 → position 3605812674, closed by order 384732103) and at
+# 5x (order 384647176 → position 3605812677, closed by order 384726349).
+# Every literal below was printed by the real adapter through the shell
+# snippet of that sitting (the session's transcript) unless a comment says
+# "not captured". The acceptance bodies were not printed raw (the adapter
+# printed the orderId it read off them): composed with the measured int.
+# eToro's REAL id for EURUSD is 1 (printed by instrument_id that night);
+# SEARCH_EURUSD further down carries the fixture id 1002 of the leverage
+# tests and stays theirs.
+SEARCH_EURUSD_MEASURED = ("GET", "/market-data/search", 200,
+                          [{"instrumentId": 1,
+                            "internalSymbolFull": "EURUSD"}])
+FX_ACCEPTED_1X = {"token": "<not captured>", "orderId": 384690781,
+                  "referenceId": "<not captured>"}
+FX_ACCEPTED_5X = {"token": "<not captured>", "orderId": 384647176,
+                  "referenceId": "<not captured>"}
+
+
+def _fx_lookup(state="open", *, leverage=1):
+    """orders:lookup?orderId= (demo segment) of the two EURUSD orders,
+    verbatim. At 1x eToro REWROTE the stop: sent 1.13146 (0.5% under the
+    last 1.13715, kept on the top level as openStopLossRate), held 1.12579
+    on positionExecutions[0] (1% under the fill 1.13716); at 5x the sent
+    stop was held. requestedAmount is the notional at 1x (1137.16, all of
+    it locked as margin) and notional / 5 at 5x (227.43; margin 227.42).
+    fees 0.0 on forex, markup 0.03 at 1x / 0.04 at 5x, marketSpread 0.01.
+    After the close the body is the same but for state "closed"."""
+    one = leverage == 1
+    return {
+        "accountId": 15153738, "gcid": 13883661, "portfolioId": 0,
+        "orderId": 384690781 if one else 384647176, "action": "open",
+        "transaction": "buy", "type": "mkt", "etoroOrderTypeId": 18,
+        "status": {"id": 3, "name": "Filled", "errorCode": 0},
+        "asset": {"symbol": "EURUSD", "instrumentId": 1, "currency": "USD",
+                  "settlementType": "CFD", "leverage": leverage,
+                  "side": "long"},
+        "orderCurrency": "usd",
+        "requestedAmount": 1137.16 if one else 227.43,
+        "requestedUnits": 1000.0, "requestedContracts": 1.0,
+        "frozenAmount": 1137.16 if one else 227.43,
+        "openStopLossRate": 1.13146, "openTakeProfitRate": 1.14284,
+        "stopLossType": "fixed", "totalCosts": 0.0, "positionsToClose": [],
+        "positionExecutions": [{
+            "positionId": 3605812674 if one else 3605812677, "state": state,
+            "investedAmountCurrency": 1,
+            "initialExposureAccountCurrency": 1137.16,
+            "initialExposureAssetCurrency": 1137.16, "addedFunds": 0.0,
+            "marginAccountCurrency": 1137.16 if one else 227.42,
+            "marginAssetCurrency": 1137.16 if one else 227.42,
+            "remainingUnits": 1000.0, "remainingContracts": 1.0,
+            "stopLossRate": 1.12579 if one else 1.13146,
+            "takeProfitRate": 1.14284,
+            "openingData": {
+                "openTime": ("2026-09-28T22:42:46.363Z" if one
+                             else "2026-09-28T22:42:55.877Z"),
+                "orderId": 384690781 if one else 384647176,
+                "executionTime": ("2026-09-28T22:42:46.467Z" if one
+                                  else "2026-09-28T22:42:56Z"),
+                "units": 1000.0, "contracts": 1.0, "avgPrice": 1.13716,
+                "avgConversionRate": 1.0, "marketSpread": 0.01,
+                "markup": 0.03 if one else 0.04, "priceId": 0,
+                "fees": 0.0, "taxes": 0.0}}],
+        "requestTime": ("2026-09-28T22:42:46.42Z" if one
+                        else "2026-09-28T22:42:55.947Z"),
+        "lastUpdate": ("2026-09-28T22:42:46.517Z" if one
+                       else "2026-09-28T22:42:56.047Z"),
+        "openActionType": "customer", "requestType": "byUnits",
+    }
+
+
+FX_CLOSE_1X = {"orderForClose": {"positionID": 3605812674, "instrumentID": 1,
+                                 "orderID": 384732103, "orderType": 19,
+                                 "statusID": 1, "CID": 15153738,
+                                 "openDateTime": "2026-09-28T22:42:48.0548543Z",
+                                 "lastUpdate": "2026-09-28T22:42:48.0548543Z"},
+               "token": "<not asserted>"}
+FX_CLOSE_5X = {"orderForClose": {"positionID": 3605812677, "instrumentID": 1,
+                                 "orderID": 384726349, "orderType": 19,
+                                 "statusID": 1, "CID": 15153738,
+                                 "openDateTime": "2026-09-28T22:42:57.2067188Z",
+                                 "lastUpdate": "2026-09-28T22:42:57.2067188Z"},
+               "token": "<not asserted>"}
+# The cells printed after each close: {available_cash, used_margin} —
+# the 1x round trip cost 0.01 (332440.16 -> 332440.15), the 5x another 0.01.
+FX_CELLS_AFTER_CLOSE_1X = {"accountCurrency": "USD",
+                           "accountTotals": {"accountAvailableCash": 332440.15,
+                                             "accountTotalUsedMargin": 0.0}}
+FX_CELLS_AFTER_CLOSE_5X = {"accountCurrency": "USD",
+                           "accountTotals": {"accountAvailableCash": 332440.14,
+                                             "accountTotalUsedMargin": 0.0}}
+
+
 class TheMeasuredWireTests(SimpleTestCase):
     """Every shape the first demo orders printed, pinned byte for byte with
     the real EtoroTrader over a patched session. The three DEFECTS they
@@ -1251,6 +1345,126 @@ class TheMeasuredWireTests(SimpleTestCase):
             if m == "POST":
                 self.assertIn("/demo/", url, url)
                 self.assertNotIn("/real/", url, url)
+
+    def _fx_round_trip(self, leverage, accepted, close, cells):
+        """The measured EURUSD round trip at `leverage`, through the real
+        adapter over the fake wire: the order, the fill, the close proven
+        by the open order through the one 500 each close met, the cells."""
+        one = leverage == 1
+        position = "3605812674" if one else "3605812677"
+        t, fake = self._t([(200, _fx_lookup("open", leverage=leverage)),
+                           (500, {}),
+                           (200, _fx_lookup("closed", leverage=leverage))],
+                          routes=[
+            SEARCH_EURUSD_MEASURED,
+            ("POST", "/execution/demo/orders", 200, accepted),
+            ("POST", f"/market-close-orders/positions/{position}", 200,
+             close),
+            ("GET", "/aggregate-portfolio", 200, cells)])
+        with mock.patch("time.sleep"):
+            r = t.market_order("EURUSD", "BUY", 1000, stop_loss=1.13146,
+                               take_profit=1.14284, leverage=leverage)
+        post = [c for c in fake.calls if c[0] == "POST"][0]
+        self.assertEqual(post[1],
+                         f"{BASE}/api/v2/trading/execution/demo/orders")
+        body = post[2]["json"]
+        self.assertEqual((body["symbol"], float(body["units"]),
+                          body["leverage"], body["stopLossRate"],
+                          body["takeProfitRate"]),
+                         ("EURUSD", 1000.0, leverage, 1.13146, 1.14284))
+        polls = _polls(fake)
+        self.assertEqual(polls[0][2]["params"],
+                         {"orderId": str(accepted["orderId"])})
+        self.assertEqual((r["orderId"], r["status"], r["executedQty"],
+                          r["avgPrice"], r["positionId"]),
+                         (str(accepted["orderId"]), "FILLED", "1000.0",
+                          "1.13716", position))
+        lk = r["raw"]["lookup"]
+        self.assertEqual((lk["asset"]["settlementType"],
+                          lk["asset"]["leverage"], lk["asset"]["symbol"],
+                          lk["asset"]["instrumentId"]),
+                         ("CFD", leverage, "EURUSD", 1))
+        self.assertEqual(lk["openStopLossRate"], 1.13146,
+                         "the top level keeps the SENT stop")
+        first = lk["positionExecutions"][0]
+        self.assertEqual((first["openingData"]["fees"],
+                          first["openingData"]["marketSpread"],
+                          first["initialExposureAccountCurrency"]),
+                         (0.0, 0.01, 1137.16))
+        with mock.patch("time.sleep"):
+            c = t.close_position(position, "EURUSD",
+                                 open_order_id=str(accepted["orderId"]))
+        close_post = [x for x in fake.calls if x[0] == "POST"][1]
+        self.assertTrue(close_post[1].endswith(
+            f"/market-close-orders/positions/{position}"), close_post[1])
+        self.assertEqual(close_post[2]["json"], {"InstrumentID": 1})
+        self.assertEqual((c["status"], c["positionState"], c["orderId"],
+                          c["openOrderId"]),
+                         ("FILLED", "closed",
+                          str(close["orderForClose"]["orderID"]),
+                          str(accepted["orderId"])))
+        self.assertNotIn("executedQty", c, "no units asked, none claimed")
+        self.assertNotIn("avgPrice", c, "a close carries no price")
+        self.assertEqual(t.margin_cells()["used_margin"], 0.0)
+        for m, url, _k in fake.calls:
+            if m == "POST":
+                self.assertIn("/demo/", url, url)
+                self.assertNotIn("/real/", url, url)
+        return r, lk
+
+    def test_proof_forex(self):
+        """MEASURED ON THE DEMO SEGMENT, 2026-09-28 22:42:46 UTC, by the
+        operator the night before leaving: EURUSD 1000 units BUY at 1x,
+        stop 1.13146 / target 1.14284 sent (the last 1.13715 x 0.995 /
+        x 1.005). FILLED in 100 ms (requestTime .363Z -> executionTime
+        .467Z) — order 384690781, position 3605812674, avgPrice 1.13716,
+        settlementType CFD, requestedAmount 1137.16 = the whole notional,
+        all of it locked (used margin 0.0 -> 1137.16), fees 0.0, markup
+        0.03. eToro REWROTE the stop: sent 1.13146, held 1.12579 (1% under
+        the fill) on positionExecutions[0]; the target held as sent.
+        CLOSED by the market-close POST on the position id (orderForClose
+        {orderID 384732103, orderType 19, statusID 1}), proven by the open
+        order's execution state "closed" through one 500 on the way; used
+        margin back to 0.0, available 332440.15 (the round trip cost
+        0.01). "forex" joins ETORO_PROVEN in the commit that pins this.
+        The eligibility row read the same minute: units fractional, floor
+        1000 USD, LIVE leverages [1, 2, 5, 10, 20, 30]."""
+        r, lk = self._fx_round_trip(1, FX_ACCEPTED_1X, FX_CLOSE_1X,
+                                    FX_CELLS_AFTER_CLOSE_1X)
+        self.assertEqual((r["venueStopLoss"], r["venueTakeProfit"]),
+                         (1.12579, 1.14284), "the HELD stop, not the sent")
+        first = lk["positionExecutions"][0]
+        self.assertEqual((lk["requestedAmount"], lk["frozenAmount"],
+                          first["marginAccountCurrency"],
+                          first["openingData"]["markup"]),
+                         (1137.16, 1137.16, 1137.16, 0.03))
+
+    def test_proof_forex_at_5x(self):
+        """MEASURED ON THE DEMO SEGMENT, 2026-09-28 22:42:55 UTC, nine
+        seconds after the 1x round trip closed: the same EURUSD 1000 units
+        BUY at leverage 5, the same legs. FILLED in 123 ms — order
+        384647176, position 3605812677, avgPrice 1.13716, asset.leverage 5,
+        settlementType CFD; requestedAmount 227.43 = notional / 5, margin
+        227.42 (used margin 0.0 -> 227.42), exposure 1137.16 unchanged:
+        leverage changes the cash locked, never the units. The stop was
+        HELD AS SENT (1.13146) this time. CLOSED by position id
+        (orderForClose {orderID 384726349, orderType 19, statusID 1}),
+        proven "closed" through one 500; used margin 0.0, available
+        332440.14. forex enters ETORO_PROVEN_LEVERAGE at 5 in the commit
+        that pins this: the attack mode's chooser may pick up to 5x on
+        forex, and a typed multiplier is judged as before."""
+        r, lk = self._fx_round_trip(5, FX_ACCEPTED_5X, FX_CLOSE_5X,
+                                    FX_CELLS_AFTER_CLOSE_5X)
+        self.assertEqual((r["venueStopLoss"], r["venueTakeProfit"]),
+                         (1.13146, 1.14284), "held as sent at 5x")
+        first = lk["positionExecutions"][0]
+        self.assertEqual((lk["requestedAmount"], lk["frozenAmount"],
+                          first["marginAccountCurrency"],
+                          first["openingData"]["markup"]),
+                         (227.43, 227.43, 227.42, 0.04))
+        self.assertAlmostEqual(lk["requestedAmount"] * 5,
+                               first["initialExposureAccountCurrency"],
+                               places=1)
 
     def test_the_accepted_payload_is_token_int_orderid_and_the_echoed_reference(self):
         t, fake = self._t((200, _measured_lookup()))

@@ -419,7 +419,13 @@ LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
 #: "index" stay refused until their own round trip is measured. The plan
 #: admits a demo proof, a real one being the stronger. Proven at 1x:
 #: ETORO_PROVEN_LEVERAGE stays empty for it.
-ETORO_PROVEN = frozenset({"crypto", "etf"})
+#: "forex" since 2026-09-28 (test_proof_forex, test_proof_forex_at_5x):
+#: EURUSD 1000 units filled and closed on the DEMO segment twice the same
+#: minute, at 1x (order 384690781, position 3605812674, the full notional
+#: 1137.16 locked) and at 5x (order 384647176, position 3605812677, margin
+#: 227.42), settlementType CFD, each proven by the open order's execution
+#: state; measured by the operator the night before leaving.
+ETORO_PROVEN = frozenset({"crypto", "etf", "forex"})
 
 #: THE MULTIPLIER EACH eToro CLASS HAS BEEN PROVEN AT (2026-09-26): class
 #: -> the highest multiplier whose demo fill-and-close is pinned as
@@ -436,7 +442,11 @@ ETORO_PROVEN = frozenset({"crypto", "etf"})
 #: its stop band — and preflight_live §4 says so under WORTH READING. Read
 #: at CALL time; a test states a value by patching this name. Not a
 #: PlatformComponent: nothing on /health/ can prove a multiplier.
-ETORO_PROVEN_LEVERAGE = {}
+#: forex 5 since 2026-09-28: test_proof_forex_at_5x, the EURUSD round
+#: trip at 5x on the demo segment (requestedAmount 227.43 = notional / 5,
+#: the stop held as sent). The attack mode may pick up to 5x on forex;
+#: every other class still reads 1.
+ETORO_PROVEN_LEVERAGE = {"forex": 5}
 
 #: THE ATTACK MODE (2026-09-26; the operator: "je veux surtout que ce mode
 #: d'attaque de leverage soit vraiment smart, qu'il soit ballsy si proba

@@ -48,21 +48,24 @@ class TheSetAsShippedTests(SimpleTestCase):
     2026-09-26 crypto is, at 1x, off the BTC round trip measured on the
     REAL account (test_proof_crypto)."""
 
-    def test_crypto_and_etf_are_in_the_set_at_this_commit(self):
+    def test_crypto_etf_and_forex_are_in_the_set_at_this_commit(self):
         """crypto since 2026-09-26 (the real BTC round trip); etf since
         2026-09-28 (the demo GLDM round trip of 2026-09-23, test_proof_etf:
-        GLDM's row is an ETF and the gate keys on the instrument's class).
-        stock, index, forex and commodity are NOT: no eToro order of any of
-        them has ever filled, demo or real, and the gate refuses them."""
+        GLDM's row is an ETF and the gate keys on the instrument's class);
+        forex since 2026-09-28 (the demo EURUSD round trips at 1x and 5x,
+        test_proof_forex and test_proof_forex_at_5x). stock, index and
+        commodity are NOT: no eToro order of any of them has ever filled,
+        demo or real, and the gate refuses them."""
         from bot_program.asset_engine.base import (ETORO_PROVEN,
                                                    ETORO_PROVEN_LEVERAGE)
         self.assertIsInstance(ETORO_PROVEN, frozenset)
-        self.assertEqual(ETORO_PROVEN, frozenset({"crypto", "etf"}))
-        for token in ("stock", "index", "forex", "commodity", "short"):
+        self.assertEqual(ETORO_PROVEN, frozenset({"crypto", "etf", "forex"}))
+        for token in ("stock", "index", "commodity", "short"):
             self.assertNotIn(token, ETORO_PROVEN)
-        self.assertEqual(ETORO_PROVEN_LEVERAGE, {},
-                         "crypto is proven at 1x: the attack mode's "
-                         "chooser reads 1; a typed multiplier is not held "
+        self.assertEqual(ETORO_PROVEN_LEVERAGE, {"forex": 5},
+                         "forex is proven at 5x (test_proof_forex_at_5x); "
+                         "crypto and etf at 1x: the attack mode's chooser "
+                         "reads 1 for them; a typed multiplier is not held "
                          "to it (tests/test_real_account_measured.py)")
 
     def test_every_token_present_has_its_pinned_proof(self):
