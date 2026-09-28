@@ -11,6 +11,7 @@ Run with:  python manage.py test tests.test_follow_and_bot_commands
 """
 from decimal import Decimal
 from io import StringIO
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import CommandError, call_command
@@ -137,6 +138,73 @@ class FollowCommandTests(TestCase):
         self.assertIn("auto 100%", out)
         self.assertIn("commodity_etf", out)
         self.assertIn("fixed", out)
+
+
+class FollowCommandRefusesAnOffBookPoolTests(TestCase):
+    """The page's venue refusal, from the shell.
+
+    hq_follow_asset_bot will not make a pool a follower when any of its
+    symbols routes to a broker other than the book, and the sync skips
+    such a pool every beat ("NOT retuned"). The command wrote the share
+    anyway — cfg.capital from the book's reading for a pool that trades
+    elsewhere — and the sync then never corrected it. Refused before the
+    plan is printed, so the operator hears it at plan time, and nothing is
+    written with or without --yes.
+    """
+
+    ROUTE = "bot_program.engine.broker_router.broker_name_for_symbol"
+
+    def setUp(self):
+        self.user = User.objects.create_user("fw_v", password="x")
+        _acct(self.user)                         # IBKR is the book
+        self.manual = _cfg(self.user, name="manual", capital="2000.53",
+                           tracks=True)
+        # The foreign symbol is the SECOND one: foreign_venue asks every
+        # symbol, not the first, so the order the operator typed cannot
+        # let the pool through.
+        self.fx = _cfg(self.user, name="starter_fx_majors",
+                       asset_class="forex", capital="150",
+                       symbols=("AAPL", "EURUSD"))
+
+    @staticmethod
+    def _venue(user, sym, cfg=None):
+        return "etoro" if sym == "EURUSD" else "ibkr"
+
+    def _refused(self, **kw):
+        with patch(self.ROUTE, side_effect=self._venue):
+            with self.assertRaises(CommandError) as ctx:
+                _run("follow", str(self.fx.pk), **kw)
+        msg = str(ctx.exception)
+        self.assertIn("'starter_fx_majors' cannot follow the account", msg)
+        self.assertIn("forex orders route to etoro while the book is ibkr",
+                      msg)
+        self.assertIn("make etoro the book on /brokers/", msg)
+        self.assertIn("Nothing written", msg)
+        self.fx.refresh_from_db()
+        self.assertEqual(float(self.fx.capital), 150.0,
+                         "the command must not size it from another account")
+        self.assertNotIn("capital_tracks_broker", self.fx.extras)
+        self.assertNotIn("account_share_pct", self.fx.extras)
+        # The other follower was not re-split either.
+        self.manual.refresh_from_db()
+        self.assertEqual(float(self.manual.capital), 2000.53)
+
+    def test_the_plan_is_refused_too(self):
+        self._refused(share=20)
+        self._refused()
+
+    def test_yes_writes_nothing(self):
+        self._refused(share=20, yes=True)
+        self._refused(yes=True)                  # automatic share
+
+    def test_a_pool_on_the_book_still_follows(self):
+        etf = _cfg(self.user, name="commodity_etf", capital="200")  # AAPL
+        with patch(self.ROUTE, side_effect=self._venue):
+            out = _run("follow", str(etf.pk), share=20, yes=True)
+        self.assertIn("follows the account at 20%", out)
+        etf.refresh_from_db()
+        self.assertTrue(etf.extras["capital_tracks_broker"])
+        self.assertEqual(float(etf.capital), 400.11)
 
 
 class BotCommandTests(TestCase):

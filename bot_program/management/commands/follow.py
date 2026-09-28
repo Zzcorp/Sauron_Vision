@@ -43,7 +43,9 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         from bot_program.asset_models import AssetBotConfig
         from bot_program.capital_truth import (account_equity, allocate_shares,
-                                               followers_of, share_label)
+                                               broker_backed, broker_kind,
+                                               followers_of, foreign_venue,
+                                               share_label)
 
         if opts["config_id"] is None:
             return self._list(opts["user"])
@@ -79,6 +81,25 @@ class Command(BaseCommand):
             raise CommandError("no broker reading has landed — run the sync first: "
                                "python manage.py shell -c 'from bot_program.tasks import "
                                "sync_broker_account as s; print(s())'")
+        # THE PAGE'S VENUE REFUSAL (views_admin_hq.hq_follow_asset_bot), which
+        # this twin lacked (review, 2026-09-28). A pool whose orders route to
+        # a broker other than the book was written a share of the BOOK's
+        # reading, and the sync then correctly refused to retune that row for
+        # ever (tasks._follow_the_account, "NOT retuned"), so it sat on a
+        # number from an account it does not trade while the success line
+        # said the sync keeps it there. One test, capital_truth.foreign_venue,
+        # shared with the sync and the withdrawals page: every symbol, not the
+        # first; only a known and different venue refuses. Asked before the
+        # plan, so the operator hears it at plan time and not only at --yes.
+        book = broker_backed(user)
+        book_kind = broker_kind(book) if book is not None else ""
+        foreign = foreign_venue(user, cfg, book_kind)
+        if foreign:
+            raise CommandError(
+                f"'{cfg.name}' cannot follow the account: its {cfg.asset_class} "
+                f"orders route to {foreign} while the book is {book_kind}; make "
+                f"{foreign} the book on /brokers/ or leave the pool at its typed "
+                f"capital. Nothing written.")
         followers = followers_of(user, include=cfg)
         alloc = allocate_shares(followers, shares={cfg.pk: share})
         if not alloc["ok"]:

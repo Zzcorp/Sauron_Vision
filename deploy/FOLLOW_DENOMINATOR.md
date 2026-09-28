@@ -78,6 +78,11 @@ following pool's capital. A money judge disproved it:
 - `bot_program/share_allocator.py:1364` — writes `account_share_pct`, the
   share the sync multiplies, over the same blind denominator.
 - `bot_program/tasks.py:572` — the sync.
+- `bot_program/management/commands/follow.py` — `manage.py follow`, the Follow
+  button as a shell command, writes `cfg.capital` from the same plan and was
+  the fifth writer, missed here on 2026-09-20: it had no venue test until
+  2026-09-28, when it was given the page's refusal, asked before the plan is
+  printed so that neither the plan nor `--yes` sizes an off-book pool.
 
 **Order-dependence.** `tasks.py:551` asks `broker_name_for_symbol(user,
 symbols[0], cfg)`. Routing is per SYMBOL — `runner.py:127` calls
