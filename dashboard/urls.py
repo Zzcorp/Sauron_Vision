@@ -112,6 +112,9 @@ from .views_brokers import (  # noqa: E402 — 2026-09-17, the brokers page
     brokers_page, disconnect_etoro, disconnect_saxo, save_etoro_credentials,
     save_saxo_credentials, saxo_callback, saxo_connect)
 from .views_treasury import treasury_page  # noqa: E402 — 2026-09-19
+from .views_withdrawals import (  # noqa: E402 — 2026-09-28
+    withdrawal_cancel, withdrawal_correct, withdrawal_create,
+    withdrawal_mark_paid, withdrawals_page)
 
 urlpatterns = [
     # ── Command Center (unified Dashboard + Eye merge) ───────
@@ -237,6 +240,13 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     #    keys obtained today have somewhere encrypted to go.
     path("brokers/", brokers_page, name="brokers_page"),
     path("treasury/", treasury_page, name="treasury_page"),
+    # Withdrawals asked for in advance (2026-09-28): the reserve is held back
+    #    from new sizing, nothing is sold; every act takes the trading PIN.
+    path("withdrawals/", withdrawals_page, name="withdrawals"),
+    path("withdrawals/request/", withdrawal_create, name="withdrawal_create"),
+    path("withdrawals/<int:pk>/paid/", withdrawal_mark_paid, name="withdrawal_mark_paid"),
+    path("withdrawals/<int:pk>/cancel/", withdrawal_cancel, name="withdrawal_cancel"),
+    path("withdrawals/<int:pk>/correct/", withdrawal_correct, name="withdrawal_correct"),
     path("admin-dashboard/brokers/etoro/save/", save_etoro_credentials, name="hq_save_etoro"),
     path("admin-dashboard/brokers/saxo/save/", save_saxo_credentials, name="hq_save_saxo"),
     path("admin-dashboard/brokers/saxo/disconnect/", disconnect_saxo, name="hq_disconnect_saxo"),
