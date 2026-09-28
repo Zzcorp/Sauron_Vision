@@ -410,7 +410,16 @@ LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
 #: list and the stop band; preflight §4 warns, never refuses), so it goes
 #: at 2x, a CFD settlement no real order has met.
 #: tests/test_real_account_measured.py pins that.
-ETORO_PROVEN = frozenset({"crypto"})
+#: "etf" since 2026-09-28 (test_proof_etf): GLDM 1 unit filled and closed
+#: on the DEMO segment (order 383454450, position 3603281458,
+#: settlementType CFD at 1x, deploy/ETORO_DEPARTURE.md §4 D2, measured
+#: 2026-09-23). The gate keys on the INSTRUMENT's class, and GLDM's row
+#: is an ETF: the proof lifts the ETF entries of the stocks box (config
+#: 14) and nothing else — "stock" (AAPL and its kind, config 6) and
+#: "index" stay refused until their own round trip is measured. The plan
+#: admits a demo proof, a real one being the stronger. Proven at 1x:
+#: ETORO_PROVEN_LEVERAGE stays empty for it.
+ETORO_PROVEN = frozenset({"crypto", "etf"})
 
 #: THE MULTIPLIER EACH eToro CLASS HAS BEEN PROVEN AT (2026-09-26): class
 #: -> the highest multiplier whose demo fill-and-close is pinned as

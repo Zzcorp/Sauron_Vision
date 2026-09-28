@@ -1181,6 +1181,77 @@ class TheMeasuredWireTests(SimpleTestCase):
             ("POST", "/market-close-orders/positions/3603281458", 200,
              CLOSE_RESPONSE)])
 
+    def test_proof_etf(self):
+        """MEASURED ON THE DEMO SEGMENT, 2026-09-23 14:06 UTC (deploy/
+        ETORO_DEPARTURE.md §4 D2, the operator's own pair on the virtual
+        portfolio): GLDM 1 unit BUY at 1x, stop 82.22 / target 87.3 sent.
+        FILLED in 200 ms (requestTime .263Z -> executionTime .463Z) —
+        order 383454450, position 3603281458, avgPrice 84.8, settlementType
+        CFD, fees 0.13, marginAccountCurrency 84.8, both legs held as sent.
+        CLOSED by the market-close POST on the position id: orderForClose
+        {orderID 383413813, orderType 19, statusID 1}, proven by the OPEN
+        order's positionExecutions[0].state turning "closed" — never by
+        /portfolio, which lagged (DEFECT 3). The class token is "etf": the
+        gate keys on the INSTRUMENT's class and GLDM's row is an ETF, so
+        this lifts the ETF entries of the stocks box (config 14) and
+        nothing else — "stock" and "index" wait for their own round trip.
+        "etf" joins ETORO_PROVEN in the commit that pins this (2026-09-28),
+        at 1x only, on the demo proof the plan admits ("on the demo segment
+        OR the real account, a real one being the stronger", §7 bullet 0)."""
+        t, fake = self._t([(200, _measured_lookup("open")),
+                           (200, _measured_lookup("closed"))], routes=[
+            SEARCH_GLDM, POST_GLDM,
+            ("POST", "/market-close-orders/positions/3603281458", 200,
+             CLOSE_RESPONSE)])
+        r = self._order(t)
+        # the order that went: the demo segment, GLDM, 1 unit, 1x, both legs
+        post = [c for c in fake.calls if c[0] == "POST"][0]
+        self.assertEqual(post[1],
+                         f"{BASE}/api/v2/trading/execution/demo/orders")
+        body = post[2]["json"]
+        self.assertEqual((body["symbol"], float(body["units"]),
+                          body["leverage"], body["stopLossRate"],
+                          body["takeProfitRate"]),
+                         ("GLDM", 1.0, 1, 82.22, 87.3))
+        # the fill, read by orderId, off positionExecutions[0]
+        polls = _polls(fake)
+        self.assertEqual(polls[0][2]["params"], {"orderId": "383454450"})
+        self.assertEqual((r["orderId"], r["status"], r["executedQty"],
+                          r["avgPrice"], r["positionId"]),
+                         ("383454450", "FILLED", "1.0", "84.8",
+                          "3603281458"))
+        self.assertEqual((r["venueStopLoss"], r["venueTakeProfit"]),
+                         (82.22, 87.3))
+        lk = r["raw"]["lookup"]
+        self.assertEqual((lk["asset"]["settlementType"],
+                          lk["asset"]["leverage"], lk["asset"]["symbol"]),
+                         ("CFD", 1, "GLDM"))
+        first = lk["positionExecutions"][0]
+        self.assertEqual((first["openingData"]["fees"],
+                          first["marginAccountCurrency"],
+                          first["openingData"]["avgPrice"]),
+                         (0.13, 84.8, 84.8))
+        # the close by position id, proven by the OPEN order
+        with mock.patch("time.sleep"):
+            c = t.close_position("3603281458", "GLDM",
+                                 open_order_id="383454450")
+        close_post = [x for x in fake.calls if x[0] == "POST"][1]
+        self.assertTrue(close_post[1].endswith(
+            "/market-close-orders/positions/3603281458"), close_post[1])
+        self.assertEqual(close_post[2]["json"], {"InstrumentID": 3190})
+        self.assertEqual((c["status"], c["positionState"], c["orderId"],
+                          c["openOrderId"]),
+                         ("FILLED", "closed", "383413813", "383454450"))
+        self.assertEqual(c["raw"]["orderForClose"],
+                         CLOSE_RESPONSE["orderForClose"])
+        self.assertNotIn("executedQty", c, "no units asked, none claimed")
+        self.assertNotIn("avgPrice", c, "a close carries no price")
+        # every write met the DEMO world, never the real one
+        for m, url, _k in fake.calls:
+            if m == "POST":
+                self.assertIn("/demo/", url, url)
+                self.assertNotIn("/real/", url, url)
+
     def test_the_accepted_payload_is_token_int_orderid_and_the_echoed_reference(self):
         t, fake = self._t((200, _measured_lookup()))
         out = self._order(t)

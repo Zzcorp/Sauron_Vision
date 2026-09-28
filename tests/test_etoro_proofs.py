@@ -48,11 +48,18 @@ class TheSetAsShippedTests(SimpleTestCase):
     2026-09-26 crypto is, at 1x, off the BTC round trip measured on the
     REAL account (test_proof_crypto)."""
 
-    def test_only_crypto_is_in_the_set_at_this_commit(self):
+    def test_crypto_and_etf_are_in_the_set_at_this_commit(self):
+        """crypto since 2026-09-26 (the real BTC round trip); etf since
+        2026-09-28 (the demo GLDM round trip of 2026-09-23, test_proof_etf:
+        GLDM's row is an ETF and the gate keys on the instrument's class).
+        stock, index, forex and commodity are NOT: no eToro order of any of
+        them has ever filled, demo or real, and the gate refuses them."""
         from bot_program.asset_engine.base import (ETORO_PROVEN,
                                                    ETORO_PROVEN_LEVERAGE)
         self.assertIsInstance(ETORO_PROVEN, frozenset)
-        self.assertEqual(ETORO_PROVEN, frozenset({"crypto"}))
+        self.assertEqual(ETORO_PROVEN, frozenset({"crypto", "etf"}))
+        for token in ("stock", "index", "forex", "commodity", "short"):
+            self.assertNotIn(token, ETORO_PROVEN)
         self.assertEqual(ETORO_PROVEN_LEVERAGE, {},
                          "crypto is proven at 1x: the attack mode's "
                          "chooser reads 1; a typed multiplier is not held "
