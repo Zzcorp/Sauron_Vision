@@ -5267,6 +5267,17 @@ class AssetBot(ABC):
         `notional / leverage` is the margin — MEASURED 2026-09-23 (doc
         §2, §5). Too strict sends nothing; too loose is answered by the
         venue's own refusal.
+
+        WITHDRAWALS ASKED FOR IN ADVANCE (2026-09-28): the free cash is
+        the cell LESS what is held back for them (withdrawals.held_back_in:
+        the reserve, plus any withdrawal paid since the cell was read,
+        which the cell still counts) — when this row is the book, and in
+        the cell's currency only; a hold in another currency refuses the
+        order rather than being converted. Reserved cash is never pledged:
+        an order that would need it is refused with both numbers, never
+        resized and never answered by closing anything. A reserve that
+        cannot be read is refused too — reserved cash is not a number to
+        guess.
         """
         from bot_program.capital_truth import TRACKING_FRESH_SECONDS
         from bot_program.engine.capabilities import adapter_key
@@ -5308,12 +5319,48 @@ class AssetBot(ABC):
         need = (float(qty) * float(price) * self._value_per_unit(symbol)
                 / float(leverage))
         pledged = self._pledged_since(at, carrier)
-        free = float(cash) - pledged
+        # THE RESERVE IS THE BOOK'S, AND IN ITS CURRENCY (review,
+        # 2026-09-28). A withdrawal request is filed against the book —
+        # the account the reading comes from — and the router hands each
+        # asset class its own venue, Saxo first, so "Saxo book for stocks,
+        # this eToro row for crypto" is a supported setup. There the
+        # reserve already shrinks the Saxo followers; taking it off THIS
+        # row's cash as well spent it twice, on another account, in
+        # another currency — a real crypto order refused over money held at
+        # Saxo, or a demo row refused over a live reserve. So the hold
+        # counts only when this row IS the book, and then only in the
+        # cell's own currency: anything held in another is refused with
+        # both numbers, never converted and never subtracted across.
+        try:
+            from bot_program.capital_truth import broker_backed, broker_kind
+            from bot_program.withdrawals import held_back_in
+            book = broker_backed(self.user)
+            if (book is not None and broker_kind(book) == "etoro"
+                    and book.pk == acct.pk):
+                held_d, other = held_back_in(self.user, ccy, at)
+            else:
+                held_d, other = 0, {}
+            held = float(held_d)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] withdrawal reserve unreadable: %s",
+                           self.asset_class, e)
+            return ("the withdrawal reserve could not be read — refused; "
+                    "reserved cash is not a number to guess")
+        if other:
+            listed = ", ".join(f"{float(v):,.2f} {c or '?'}"
+                               for c, v in sorted(other.items()))
+            return (f"{listed} is held for withdrawals against cash read in "
+                    f"{ccy or '?'} — nothing here converts; refused until "
+                    f"that request is cancelled or filed again in "
+                    f"{ccy or '?'}")
+        free = float(cash) - pledged - held
         if need > free + 1e-9:
+            kept = (f", less {held:,.2f} held for withdrawals" if held > 0
+                    else "")
             return (f"{symbol} needs {need:,.2f} {ccy} of margin and "
                     f"{free:,.2f} is free ({float(cash):,.2f} read "
                     f"{age / 60:.0f} min ago, less {pledged:,.2f} pledged "
-                    f"since) — refused before the venue refuses it")
+                    f"since{kept}) — refused before the venue refuses it")
         after = (float(used) + pledged + need) / max(float(equity), 1e-9)
         if after > MAX_PLEDGED_FRACTION + 1e-9:
             return (f"the account would be {after:.0%} pledged after "

@@ -790,7 +790,9 @@ class TheSaveViewTests(TestCase):
     def test_a_resave_closes_the_open_session_and_offers_connect(self):
         acct = registered(self.admin)
         with_session(acct, ahead())
-        r = self._post(sim="")
+        # SIM -> live with a session open: the Switch world tick is what
+        # says the flip is meant (2026-09-28).
+        r = self._post(sim="", confirm_world_change="on")
         stored = SaxoAccount.objects.get(pk=acct.pk)
         self.assertFalse(stored.has_session)
         self.assertFalse(stored.connected)
@@ -800,6 +802,34 @@ class TheSaveViewTests(TestCase):
         self.assertContains(r, "Connect Saxo")
         self.assertContains(r, reverse("saxo_connect"))
         self.assertNotContains(r, "session: renewable")
+
+    def test_a_flip_with_the_session_open_needs_the_switch_world_tick(self):
+        """Without it: refused, nothing written — not the new keys, not the
+        environment, and the session the operator signed in for stays."""
+        acct = registered(self.admin)
+        with_session(acct, ahead())
+        r = self._post(sim="")
+        stored = SaxoAccount.objects.get(pk=acct.pk)
+        self.assertTrue(stored.sim)
+        self.assertTrue(stored.session_alive())
+        self.assertEqual(stored.get_credentials(), (RAW_APP, RAW_SECRET))
+        self.assertEqual(stored.get_refresh_token(), "ref-old")
+        self.assertContains(r, "REFUSED to switch saxo_save_admin from SIM "
+                               "to LIVE")
+        self.assertContains(r, "nothing was saved")
+
+    def test_a_routing_resave_leaves_the_tokens_where_they_were(self):
+        acct = registered(self.admin)
+        with_session(acct, ahead())
+        before = SaxoAccount.objects.get(pk=acct.pk)
+        self._post(saxo_app_key=RAW_APP, saxo_app_secret=RAW_SECRET,
+                   primary_crypto="on")
+        stored = SaxoAccount.objects.get(pk=acct.pk)
+        self.assertTrue(stored.connected)
+        self.assertEqual(stored.access_token_enc, before.access_token_enc)
+        self.assertEqual(stored.refresh_token_enc, before.refresh_token_enc)
+        self.assertEqual(stored.token_expires_at, before.token_expires_at)
+        self.assertTrue(stored.is_primary_for("crypto"))
 
     def test_a_wrong_path_is_refused_and_nothing_is_saved(self):
         r = self._post(saxo_redirect_uri="https://sauron.example.net/brokers/")

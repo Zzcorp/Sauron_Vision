@@ -1,6 +1,11 @@
 {% extends base_template|default:"base.html" %}
+{% load static %}
 {% block title %}Portfolio — Sauron Vision{% endblock %}
 {% block page_title %}◎ PORTFOLIO{% endblock %}
+{# The selection bar and the "Should I close?" dialog — the same sheet #}
+{# and script /positions/ loads, so the two books tick the same way. #}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/sv-close-advice.css' %}">{% endblock %}
+{% block extra_js %}<script src="{% static 'js/sv-close-advice.js' %}" defer></script>{% endblock %}
 
 {% block content %}
 
@@ -191,15 +196,17 @@ trade and this page would go on showing nothing until they reloaded it.
     {% if open_positions %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th>symbol</th><th>side</th><th class="num">qty</th><th class="num">entry</th><th class="num">last</th><th class="num">unreal P&amp;L</th><th class="num">%</th><th class="num">R</th><th class="nowrap">action</th></tr></thead>
+        <thead><tr><th class="sv-sel-cell" scope="col"><input type="checkbox" class="sv-sel-box" data-sv-select-all aria-label="Select every position shown" title="Select all visible"></th><th>symbol</th><th>side</th><th class="num">qty</th><th class="num">entry</th><th class="num">last</th><th class="num">unreal P&amp;L</th><th class="num">%</th><th class="num">R</th><th class="nowrap">action</th></tr></thead>
         <tbody>
             {# One tbody per group, as on /positions/: the header's scope="rowgroup" covers its own rows only. #}
             {% for g in open_view.groups %}{% if not forloop.first %}
         </tbody>
         <tbody>{% endif %}
-            {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=9 scope="pf" %}{% endif %}
+            {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=10 scope="pf" %}{% endif %}
             {% for p in g.rows %}
             <tr data-sv-position-row>
+                {# Ticked for "Should I close?" / "Close selected" — bot trades only, as on /positions/. #}
+                <td class="sv-sel-cell" data-sv-select-cell>{% if p.trade_id %}<input type="checkbox" class="sv-sel-box" data-sv-select-trade="{{ p.trade_id }}" aria-label="Select {{ p.symbol }}, position #{{ p.trade_id }}">{% endif %}</td>
                 <td class="nowrap"><strong>{{ p.symbol }}</strong></td>
                 <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
                 <td class="num">{{ p.quantity|floatformat:4 }}</td>
@@ -234,6 +241,7 @@ trade and this page would go on showing nothing until they reloaded it.
     <div class="empty-state" style="padding:24px;"><p>NO OPEN POSITIONS</p></div>
     {% endif %}
     </div>
+    {% include "_partials/close_selection_bar.html" %}
 </div>
 
 {% if not live_only %}

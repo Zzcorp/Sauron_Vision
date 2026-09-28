@@ -2334,7 +2334,25 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
                 # Following the account starts by TAKING ITS SHARE of the
                 # reading: that is the pool from this moment on, and the
                 # sync retunes it from here.
-                cfg.capital = Decimal(str(round(float(reading)
+                #
+                # Of the reading LESS what is held back for withdrawals
+                # (2026-09-28) — the same subtraction the sync makes, so
+                # arming does not size the lane on reserved money for the
+                # up-to-15 minutes until the next sync corrects it. A
+                # reserve nobody can read refuses the arming rather than
+                # guessing it is zero.
+                try:
+                    from bot_program.withdrawals import deployable
+                    base, _held = deployable(user, float(reading),
+                                             reading_at=read_at)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[take-trade] withdrawal reserve "
+                                   "unreadable: %s", e)
+                    return {"error": ("The withdrawal reserve could not be "
+                                      "read, so the lane's share of the "
+                                      "account is unknown. Nothing was "
+                                      "armed")}
+                cfg.capital = Decimal(str(round(float(base)
                                                 * share_fraction, 2)))
                 if "capital" not in fields:
                     fields.append("capital")

@@ -37,7 +37,9 @@ from .views_brain_phase38 import (
 
 from .views_close import (close_position_preview, close_position_execute,
                           position_levels,
-                          close_all_preview, close_all_execute)
+                          close_all_preview, close_all_execute,
+                          close_advice, close_selected_preview,
+                          close_selected_execute)
 from .views_signals_htmx import signal_cards_htmx, signal_performance_htmx
 from .views_performance import performance_dashboard
 from .views_risk import risk_dashboard, risk_dashboard_live
@@ -112,6 +114,9 @@ from .views_brokers import (  # noqa: E402 — 2026-09-17, the brokers page
     brokers_page, disconnect_etoro, disconnect_saxo, save_etoro_credentials,
     save_saxo_credentials, saxo_callback, saxo_connect)
 from .views_treasury import treasury_page  # noqa: E402 — 2026-09-19
+from .views_withdrawals import (  # noqa: E402 — 2026-09-28
+    withdrawal_cancel, withdrawal_correct, withdrawal_create,
+    withdrawal_mark_paid, withdrawals_page)
 
 urlpatterns = [
     # ── Command Center (unified Dashboard + Eye merge) ───────
@@ -169,6 +174,13 @@ urlpatterns = [
     # server-side loop that cannot be half-abandoned by a closed tab.
     path("positions/close-all/preview/", close_all_preview, name="close_all_preview"),
     path("positions/close-all/", close_all_execute, name="close_all_execute"),
+    # Between one row and the whole book: the rows the operator TICKED.
+    # First the question — is closing them a good idea? (advice only; it
+    # closes nothing) — then the same preview/confirm/execute pair as
+    # close-all, over exactly those ids, with one PIN for the whole batch.
+    path("positions/close-advice/", close_advice, name="close_advice"),
+    path("positions/close-selected/preview/", close_selected_preview, name="close_selected_preview"),
+    path("positions/close-selected/", close_selected_execute, name="close_selected_execute"),
     path("api/instrument-preview/<str:symbol>/", views.instrument_preview_api, name="instrument_preview_api"),
     path("quotes/", views.market_quotes, name="market_quotes"),
     path("calendar/", views.economic_calendar, name="economic_calendar"),
@@ -237,6 +249,13 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     #    keys obtained today have somewhere encrypted to go.
     path("brokers/", brokers_page, name="brokers_page"),
     path("treasury/", treasury_page, name="treasury_page"),
+    # Withdrawals asked for in advance (2026-09-28): the reserve is held back
+    #    from new sizing, nothing is sold; every act takes the trading PIN.
+    path("withdrawals/", withdrawals_page, name="withdrawals"),
+    path("withdrawals/request/", withdrawal_create, name="withdrawal_create"),
+    path("withdrawals/<int:pk>/paid/", withdrawal_mark_paid, name="withdrawal_mark_paid"),
+    path("withdrawals/<int:pk>/cancel/", withdrawal_cancel, name="withdrawal_cancel"),
+    path("withdrawals/<int:pk>/correct/", withdrawal_correct, name="withdrawal_correct"),
     path("admin-dashboard/brokers/etoro/save/", save_etoro_credentials, name="hq_save_etoro"),
     path("admin-dashboard/brokers/saxo/save/", save_saxo_credentials, name="hq_save_saxo"),
     path("admin-dashboard/brokers/saxo/disconnect/", disconnect_saxo, name="hq_disconnect_saxo"),

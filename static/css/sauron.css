@@ -3293,7 +3293,31 @@
         --se-panel-width: calc((100vw - var(--se-left-chrome) - var(--se-right-edge)) / 2);
     }
     /* Right edge: align to right rail */
-    body:has(.signals-rail.open) { --se-right-edge: 296px; }    /* 280 + 16 */
+    /* Everywhere but a phone, and the breakpoint is the phone block's own
+       (Mobile, below: max-width 640px) plus one, so the two TOUCH.
+
+       The rail is drawn at every width, open or shut. Its own 768px
+       `display: none` is dead — the later UPGRADE-2 `display: flex
+       !important` outranks it — and its open state is restored from
+       localStorage whatever the width, so a rail left open on the desk is
+       280px wide on the phone too. Unscoped, this body-level rule outranked
+       the phone's :root 16px and parked the orb and the banner stack 296px
+       in from the right of a 390px screen, most of the way across it.
+
+       So on a phone the phone's 16px wins, and the orb keeps its corner of
+       the glass — over the foot of an open rail, as it always sat over the
+       foot of the shut one there. From 641px up the orb and the banners
+       stand beside the open rail. A first pass scoped this at 769px on the
+       belief that the rail was hidden below it; that left 641–768 (an iPad
+       upright, a desktop window split in two) with nothing but the shut
+       rail's 60px while 280px of rail was open, and the orb landed on the
+       watchlist. If the 768px hide is ever made to win, this must move to
+       769px with it — and that is a phone-layout change of its own: the
+       ticker, the info panel and the restore tabs all still keep the
+       rail's width clear down there. */
+    @media (min-width: 641px) {
+        body:has(.signals-rail.open) { --se-right-edge: 296px; }    /* 280 + 16 */
+    }
     /* Bottom edge: sit ABOVE the info-panel with breathing room */
     body:has(.info-panel-wrap):not(.page-dashboard) {
         --se-bottom-edge: calc(60px + var(--se-fab-gap));   /* 60 panel + 18 gap */
@@ -5922,17 +5946,32 @@ table td.num, table th.num {
    per table: a stacked row with no labels is worse than a scroll, so a
    table only stacks once someone has actually named its columns.
 
-   The Positions tables are still named in every :is() list below, by
-   shape (eleven headers or more) and by the analytics partial's wrapper
-   class. Since 2026-09-28 the open table carries sv-stack and a
-   data-label on every cell, so its labels no longer come from position;
-   the shape argument stays because its weight, 0,3,x, is what lifts
-   every stacked table over the 34rem runway above (0,3,2). The analytics
-   partial keeps its six positional labels.
+   The Positions analytics partial is still pinned in by selector rather
+   than by class, matched by its own wrapper class and labelled by
+   position below; a column APPENDED to it leaves the labels correct, a
+   column PREPENDED would shift them. Current Positions used to be pinned
+   the same way, by shape (eleven headers). The Capital column had already
+   put every label from the fourth on one cell out; the tick column
+   (2026-09-28, "Should I close?") moved the first three too, so on a
+   phone the checkbox read SYMBOL, BTCUSD read DIRECTION and the P&L read
+   OPENED. That table now carries .sv-stack and a data-label on each cell,
+   as this block always said it should.
+
+   THE WEIGHT. Every list below carries `.table-wrapper table.sv-stack:has(
+   th:nth-child(1))`, which matches nothing `.sv-stack` does not already
+   match and is there for its specificity alone. :is() takes the weight of
+   its MOST specific argument, whichever one matched, and the pinned
+   Current Positions selector was (0,3,2) — the exact weight of the 34rem
+   runway `.table-wrapper .sv-perf-table:has(thead th:nth-child(6))`,
+   which the stack then beat by being written later. Removing that
+   selector alone dropped every stacked table on the platform to (0,1,1):
+   the runway won, and a stacked table kept a 544px floor inside a 390px
+   screen. The argument that replaced it holds the same (0,3,2), so order
+   decides again, as test_card_responsiveness pins it to.
    ═══════════════════════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) {
         display: block;
         min-width: 0;
@@ -5940,7 +5979,7 @@ table td.num, table th.num {
     /* Visually hidden, not display:none — the header text is still the
        accessible name for each cell in the a11y tree. */
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) thead {
         position: absolute;
         width: 1px; height: 1px;
@@ -5949,11 +5988,11 @@ table td.num, table th.num {
         white-space: nowrap;
     }
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody { display: block; }
 
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody tr {
         display: block;
         margin-bottom: 10px;
@@ -5963,11 +6002,11 @@ table td.num, table th.num {
         background: color-mix(in srgb, var(--bg-card-hover, var(--bg-card)) 30%, transparent);
     }
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody tr:last-child { margin-bottom: 0; }
 
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody td {
         display: grid;
         grid-template-columns: minmax(0, 10ch) minmax(0, 1fr);
@@ -5982,11 +6021,11 @@ table td.num, table th.num {
         max-width: none;
     }
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody td:last-child { border-bottom: none; }
 
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody td::before {
         font-family: var(--font-mono);
         font-size: 9.5px;
@@ -6003,19 +6042,8 @@ table td.num, table th.num {
     /* Numerics keep their tabular figures but drop the right edge: in a
        one-value-per-line layout there is no column left to align to. */
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody td.num { text-align: left; }
-
-    /* Positions, the open table (2026-09-28). Eleven labels used to be
-       pinned here by column position, written for an eleven-column
-       table. The table grew to fourteen columns and the labels shifted:
-       measured at 360x780 and 390x844 on 2026-09-27, a phone read the
-       capital under "Entry", the target price under "P&L" and the P&L
-       under "P&L %", and Strategy, Opened and Action carried no label at
-       all. The template now names every cell's own column in data-label
-       and carries sv-stack, so the generic rule above reads it; the
-       pos-tabs argument stays in the :is() lists for its weight (see the
-       header). */
 
     /* Positions — the htmx analytics partial (6 columns). */
     .positions-metrics table td:nth-child(1)::before { content: "Symbol"; }

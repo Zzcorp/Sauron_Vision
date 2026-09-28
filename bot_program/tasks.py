@@ -537,6 +537,18 @@ def _follow_the_account(user, value, currency) -> None:
     Shares that do not fit in one account retune NOTHING and raise one
     alert per six hours: writing them would size every pool against money
     the others already claim.
+
+    WITHDRAWALS ASKED FOR IN ADVANCE (2026-09-28). The shares apply to the
+    reading LESS what is held back for withdrawals (withdrawals.held_back:
+    every request still reserved, plus any withdrawal paid since this
+    reading was taken), floored at zero, taken off ONCE before any share
+    is applied. So every follower shrinks by the same proportion, the
+    shares themselves are untouched, and this path — as ever — only saves
+    `capital`: nothing is sold to find the money, it simply stops being
+    deployed and builds up as positions close. What was held back is on
+    the INFO line below, beside every pool it shrank. If the reserve
+    cannot be read, nothing is retuned: sizing the pools from the whole
+    reading would deploy money somebody has asked to take out.
     """
     from decimal import Decimal
 
@@ -552,11 +564,23 @@ def _follow_the_account(user, value, currency) -> None:
                          user.username, alloc["reason"])
             _alert_over_allocation(user, alloc["reason"])
             return
+        # THE RESERVE, once, before any share: raises into the except
+        # below on a failed read, and then nothing is retuned.
+        from .withdrawals import deployable
+        base, held = deployable(user, value)
+        if held > 0:
+            logger.info("broker sync: %s — %s %s held back for withdrawal "
+                        "requests; the pools follow %s of the %s read",
+                        user.username, f"{held:,.2f}", currency or "",
+                        f"{base:,.2f}", f"{float(value):,.2f}")
         # WHICH BROKER EACH FOLLOWER ACTUALLY REACHES. One book, one
         # reading, but the router picks per asset class — so a follower that
-        # trades somewhere else must not be sized from here.
-        from .capital_truth import broker_backed, broker_kind
-        from .engine.broker_router import broker_name_for_symbol
+        # trades somewhere else must not be sized from here. The test is
+        # capital_truth.foreign_venue (every symbol, not the first; only a
+        # known and different venue refuses), shared since 2026-09-28 with
+        # the withdrawals page, so the page's "with the reserve" column and
+        # this loop can never disagree about which pools move.
+        from .capital_truth import broker_backed, broker_kind, foreign_venue
         _book = broker_backed(user)
         _book_kind = broker_kind(_book) if _book is not None else ""
 
@@ -566,31 +590,7 @@ def _follow_the_account(user, value, currency) -> None:
         _venue_of: dict = {}
 
         for cfg in followers:
-            foreign = ""
-            try:
-                # EVERY SYMBOL, NOT THE FIRST. The router routes per symbol
-                # (runner.py asks client_for_symbol inside the symbol loop),
-                # so a pool holding one Saxo symbol and one eToro symbol
-                # reaches two venues. Reading symbols[0] made this refusal
-                # depend on which one the operator typed first — cfg.symbols
-                # is a list in typing order — so the same pool was retuned or
-                # skipped by an accident of data entry. The first FOREIGN
-                # venue decides: that only ever refuses more, and it can
-                # never size a pool from an account it does not trade.
-                for sym in list(cfg.symbols or []):
-                    if sym not in _venue_of:
-                        _venue_of[sym] = broker_name_for_symbol(user, sym, cfg)
-                    venue = _venue_of[sym]
-                    if (venue in ("saxo", "etoro", "ibkr") and _book_kind
-                            and venue != _book_kind):
-                        foreign = venue
-                        break
-            except Exception as e:  # noqa: BLE001 — unknown is not a mismatch
-                logger.debug("broker sync: cannot tell %s's venue (%s)",
-                             cfg.name, e)
-            # Only a KNOWN and DIFFERENT venue refuses. "paper", the
-            # unflagged venues and the symbol-less manual pools mean "cannot
-            # tell", and cannot-tell keeps the behaviour it has always had.
+            foreign = foreign_venue(user, cfg, _book_kind, _venue_of)
             if foreign:
                 logger.warning(
                     "broker sync: %s pool %r NOT retuned — it trades at %s "
@@ -599,15 +599,17 @@ def _follow_the_account(user, value, currency) -> None:
                     user.username, cfg.name, foreign, _book_kind)
                 continue
             share = float(alloc["plan"].get(cfg.pk, 0.0))
-            new = Decimal(str(round(float(value) * share, 2)))
+            new = Decimal(str(round(float(base) * share, 2)))
             if cfg.capital == new:
                 continue
             old = cfg.capital
             cfg.capital = new
             cfg.save(update_fields=["capital"])
             logger.info("broker sync: %s pool follows the account at "
-                        "%.1f%%: %s -> %s %s", cfg.name, share * 100.0,
-                        old, new, currency or "")
+                        "%.1f%%: %s -> %s %s%s", cfg.name, share * 100.0,
+                        old, new, currency or "",
+                        (f" ({held:,.2f} held back for withdrawals)"
+                         if held > 0 else ""))
     except Exception as e:  # noqa: BLE001 — the stored reading must stand
         logger.warning("broker sync: pool-follow failed: %s", e)
 

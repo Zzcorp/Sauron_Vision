@@ -173,39 +173,58 @@ def _f(value) -> Optional[float]:
         return None
 
 
+def bot_position(trade) -> dict:
+    """ONE AssetBotTrade, normalised exactly as the whole-book pass sees it.
+
+    Public because the close adviser (brain/close_advice.py) measures the
+    handful of rows an operator ticked, not the book, and the alternative —
+    filtering `open_positions()` for the ids, as the tests do — reads every
+    open row on the platform to answer a question about three. It is the
+    SAME dict `_bot_positions` builds, from the same function, so a
+    position cannot be measured one way on the beat and another way when
+    somebody asks about it: the R denominator, the side spelling and the
+    sign are decided here once.
+
+    The status filter is the caller's job. `_bot_positions` asks for the
+    open statuses in its queryset; a caller holding a single row has
+    already decided whether that row is open.
+    """
+    from bot_program.manual_close import _initial_stop
+    return {
+        "book": BOOK_BOT,
+        "position_id": trade.id,
+        "symbol": (trade.symbol or "").upper(),
+        "asset_class": trade.asset_class or "",
+        "side": _side_label(trade.side),
+        "dir_sign": _dir_sign(trade.side),
+        "qty": _f(trade.qty),
+        "entry": _f(trade.entry_price),
+        # The stop the trade OPENED with — the only correct R denominator.
+        "initial_stop": _initial_stop(trade),
+        "stop": _f(trade.stop_loss),
+        "target": _f(trade.take_profit),
+        "opened_at": trade.opened_at,
+        "rule_name": trade.rule_name or "",
+        "reason": trade.reason or "",
+        "paper": bool(trade.paper),
+        "status": trade.status,
+        "user": getattr(trade.config, "user", None),
+        "metadata": dict(trade.metadata or {}),
+    }
+
+
 def _bot_positions() -> list[dict]:
     """Open AssetBotTrade rows, normalised."""
     out: list[dict] = []
     try:
         from bot_program.models import AssetBotTrade
-        from bot_program.manual_close import _initial_stop
     except Exception:  # pragma: no cover - app not installed
         return out
     qs = (AssetBotTrade.objects
           .filter(status__in=OPEN_BOT_STATUSES)
           .select_related("config", "config__user"))
     for t in qs:
-        out.append({
-            "book": BOOK_BOT,
-            "position_id": t.id,
-            "symbol": (t.symbol or "").upper(),
-            "asset_class": t.asset_class or "",
-            "side": _side_label(t.side),
-            "dir_sign": _dir_sign(t.side),
-            "qty": _f(t.qty),
-            "entry": _f(t.entry_price),
-            # The stop the trade OPENED with — the only correct R denominator.
-            "initial_stop": _initial_stop(t),
-            "stop": _f(t.stop_loss),
-            "target": _f(t.take_profit),
-            "opened_at": t.opened_at,
-            "rule_name": t.rule_name or "",
-            "reason": t.reason or "",
-            "paper": bool(t.paper),
-            "status": t.status,
-            "user": getattr(t.config, "user", None),
-            "metadata": dict(t.metadata or {}),
-        })
+        out.append(bot_position(t))
     return out
 
 

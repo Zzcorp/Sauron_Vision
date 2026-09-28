@@ -224,8 +224,11 @@ class TheThreeGesturesStayDistinctTests(SimpleTestCase):
     def test_a_click_on_a_link_or_a_button_is_not_a_click_on_the_row(self):
         """Both would navigate, to different pages, in the same tick. The
         guard is written once and shared by the pointer and the touch path
-        so the two can never drift apart."""
-        self.assertIn('if (e.target.closest("a, button")) return;', self.js)
+        so the two can never drift apart. (It grew form controls and the
+        selection tick cell in 2026-09 — see test_close_advice.)"""
+        self.assertIn('if (e.target.closest(NOT_THE_ROW)) return;', self.js)
+        self.assertIn('var NOT_THE_ROW = "a, button, input, label, select, '
+                      'textarea, " +', self.js)
         self.assertIn("click: rowNav", self.js)
         self.assertIn("tap: rowNav", self.js)
 

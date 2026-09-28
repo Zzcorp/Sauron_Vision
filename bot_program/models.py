@@ -785,3 +785,4 @@ from .tax_lot_models import TaxLot, TaxLotConsumption  # noqa: F401
 from .equity_models import BrokerEquityReading  # noqa: F401
 from .share_models import SharePlan  # noqa: F401
 from .desk_models import DeskPlan, DeskDecision  # noqa: F401
+from .withdrawal_models import WithdrawalRequest  # noqa: F401

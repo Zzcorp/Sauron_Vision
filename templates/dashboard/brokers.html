@@ -72,48 +72,55 @@
 
     <div class="card fade-in-up">
         <div class="card-header"><span class="card-title">Add / Update eToro Keys</span></div>
-        <form method="post" action="{% url 'hq_save_etoro' %}" style="padding:16px;display:grid;gap:10px;">
+        <form method="post" action="{% url 'hq_save_etoro' %}" data-reflects-row autocomplete="off" style="padding:16px;display:grid;gap:10px;">
             {% csrf_token %}
             <p class="hq-cred-note">Two long-lived keys from <code>builders.etoro.com</code>, sent as headers on every request. No OAuth, no daily sign-in. They are stored encrypted and probed once on save.</p>
             <label class="hq-field-label">Account these keys belong to</label>
+            {# Each option carries its own row's boxes; the script below moves them with the dropdown. #}
             <select name="target_username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
-                <option value="">— pick an account —</option>
-                {% for u in users %}<option value="{{ u.username }}">{{ u.username }}{% if u.is_superuser %} · admin{% endif %}</option>{% endfor %}
+                <option value="" data-ticked="demo" data-on-file="">— pick an account —</option>
+                {% for t in form_targets %}<option value="{{ t.username }}"{% if t.selected %} selected{% endif %} data-ticked="{{ t.etoro.ticked|join:' ' }}" data-on-file="{{ t.etoro.words }}">{{ t.username }}{% if t.is_superuser %} · admin{% endif %}</option>{% endfor %}
             </select>
+            <div data-on-file-line style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ etoro_on_file.words }}</div>
             <input type="password" name="etoro_api_key" placeholder="x-api-key" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="password" name="etoro_user_key" placeholder="x-user-key" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
-            <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="demo" checked> Demo — route this pair to eToro's virtual portfolio</label>
-            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">Measured 2026-09-23: the <strong>same pair opens both worlds</strong>; this tick alone picks the world. <strong>Unticking it sends real orders</strong> and is refused without the trading PIN below, with a class box ticked on the same save, or while any live config is enabled.</div>
+            <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="confirm_key_change"> Replace keys — tick only to put a <strong>different</strong> pair on a LIVE row on purpose</label>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">The account above opens on yours. On a LIVE row a different pair is a different account as far as the platform can tell: every later order and every close goes to it. So a pair that differs from the one on file is refused without <em>Replace keys</em>, and while any real eToro position is still open. Retyping the same pair to change the class boxes is not asked.</div>
+            <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="demo" data-on-file-box{% if "demo" in etoro_on_file.ticked %} checked{% endif %}> Demo — route this pair to eToro's virtual portfolio</label>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">Measured 2026-09-23: the <strong>same pair opens both worlds</strong>; this tick alone picks the world, and it starts as it is on file. <strong>Unticking it sends real orders</strong> and is refused without the trading PIN below, with a class box ticked on the same save, or while any live config is enabled. <strong>Ticking it on a LIVE row sends every later close to the virtual portfolio</strong> and is refused without <em>Switch world</em> below, and while any real eToro position is still open.</div>
             <input type="password" name="pin" placeholder="Trading PIN — needed only to untick Demo" autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
-            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:4px;">Carry as primary broker — wins over IBKR's flag for the same class. <strong>An unticked box is an OFF box:</strong> this form posts every field at once, so a save made for any other reason turns off every class you do not re-tick.</div>
+            <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="confirm_world_change"> Switch world — tick only to move a LIVE row to Demo on purpose</label>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:4px;">Carry as primary broker — wins over IBKR's flag for the same class. <strong>An unticked box is an OFF box:</strong> this form posts every field at once, so a save made for any other reason turns off every class you do not re-tick. The boxes start as they are on file for the account picked above.</div>
             <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">Beside each box: what eToro answered when measured on 2026-09-23, and whether the class's fill-and-close proof — demo or real — is pinned (ETORO_PROVEN). A class without a proof can still be ticked and saved; every entry in it is refused until its proof is pinned.</div>
-            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_stocks"> stocks · ETFs · indices <span style="color:var(--text-muted);font-size:11px;">— real shares at 1x from 10 USD (W-8BEN), CFD at 2–5x or short · ETFs CFD only, overnight fee even at 1x · indices CFD, 1,000 USD minimum ·</span> <strong style="font-size:11px;">{{ etoro_proof.stock }} · {{ etoro_proof.short }}</strong></label>
-            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_forex"> forex <span style="color:var(--text-muted);font-size:11px;">— CFD only · 1,000 USD minimum · eToro allows up to 30x live; this platform caps lower ·</span> <strong style="font-size:11px;">{{ etoro_proof.forex }}</strong></label>
-            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_commodity"> commodities <span style="color:var(--text-muted);font-size:11px;">— CFD only · WHEAT.FUT and PLATINUM found; gold, silver and oil spellings unknown · 1,000 USD minimum ·</span> <strong style="font-size:11px;">{{ etoro_proof.commodity }}</strong></label>
-            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_crypto"> crypto <span style="color:var(--text-muted);font-size:11px;">— real coins at 1x from 10 USD (BTC, ETH, XRP, SOL), CFD at 2x or short · unticked, crypto routes to Binance (paper without Binance keys) ·</span> <strong style="font-size:11px;">{{ etoro_proof.crypto }}</strong></label>
+            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_stocks" data-on-file-box{% if "primary_stocks" in etoro_on_file.ticked %} checked{% endif %}> stocks · ETFs · indices <span style="color:var(--text-muted);font-size:11px;">— real shares at 1x from 10 USD (W-8BEN), CFD at 2–5x or short · ETFs CFD only, overnight fee even at 1x · indices CFD, 1,000 USD minimum ·</span> <strong style="font-size:11px;">{{ etoro_proof.stock }} · {{ etoro_proof.short }}</strong></label>
+            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_forex" data-on-file-box{% if "primary_forex" in etoro_on_file.ticked %} checked{% endif %}> forex <span style="color:var(--text-muted);font-size:11px;">— CFD only · 1,000 USD minimum · eToro allows up to 30x live; this platform caps lower ·</span> <strong style="font-size:11px;">{{ etoro_proof.forex }}</strong></label>
+            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_commodity" data-on-file-box{% if "primary_commodity" in etoro_on_file.ticked %} checked{% endif %}> commodities <span style="color:var(--text-muted);font-size:11px;">— CFD only · WHEAT.FUT and PLATINUM found; gold, silver and oil spellings unknown · 1,000 USD minimum ·</span> <strong style="font-size:11px;">{{ etoro_proof.commodity }}</strong></label>
+            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_crypto" data-on-file-box{% if "primary_crypto" in etoro_on_file.ticked %} checked{% endif %}> crypto <span style="color:var(--text-muted);font-size:11px;">— real coins at 1x from 10 USD (BTC, ETH, XRP, SOL), CFD at 2x or short · unticked, crypto routes to Binance (paper without Binance keys) ·</span> <strong style="font-size:11px;">{{ etoro_proof.crypto }}</strong></label>
             <button type="submit" class="btn btn-primary btn-sm">Save eToro</button>
         </form>
     </div>
 
     <div class="card fade-in-up">
         <div class="card-header"><span class="card-title">Register Saxo Application</span></div>
-        <form method="post" action="{% url 'hq_save_saxo' %}" style="padding:16px;display:grid;gap:10px;">
+        <form method="post" action="{% url 'hq_save_saxo' %}" data-reflects-row autocomplete="off" style="padding:16px;display:grid;gap:10px;">
             {% csrf_token %}
-            <p class="hq-cred-note">The application you registered on <code>developer.saxo</code>. This identifies Sauron to Saxo; the session that lets it trade comes from one OAuth sign-in — the <em>Connect Saxo</em> button on the row, once this is saved. Re-saving closes any open session. The redirect URI must match the portal <em>exactly</em>.</p>
+            <p class="hq-cred-note">The application you registered on <code>developer.saxo</code>. This identifies Sauron to Saxo; the session that lets it trade comes from one OAuth sign-in — the <em>Connect Saxo</em> button on the row, once this is saved. Changing the key, the secret, the redirect URI or SIM closes any open session; a save that only changes the class boxes keeps it. The redirect URI must match the portal <em>exactly</em>.</p>
             <label class="hq-field-label">Account this application belongs to</label>
             <select name="target_username" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
-                <option value="">— pick an account —</option>
-                {% for u in users %}<option value="{{ u.username }}">{{ u.username }}{% if u.is_superuser %} · admin{% endif %}</option>{% endfor %}
+                <option value="" data-ticked="sim" data-on-file="" data-redirect-uri="">— pick an account —</option>
+                {% for t in form_targets %}<option value="{{ t.username }}"{% if t.selected %} selected{% endif %} data-ticked="{{ t.saxo.ticked|join:' ' }}" data-on-file="{{ t.saxo.words }}" data-redirect-uri="{{ t.saxo.redirect_uri }}">{{ t.username }}{% if t.is_superuser %} · admin{% endif %}</option>{% endfor %}
             </select>
+            <div data-on-file-line style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ saxo_on_file.words }}</div>
             <input type="password" name="saxo_app_key" placeholder="App Key" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="password" name="saxo_app_secret" placeholder="App Secret" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
-            <input type="text" name="saxo_redirect_uri" placeholder="https://your-host/brokers/saxo/callback/" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
-            <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="sim" checked> SIM environment keys</label>
-            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:4px;">Carry as primary broker — wins over eToro's and IBKR's flag for the same class. <strong>An unticked box is an OFF box:</strong> this form posts every field at once, so a save made for any other reason turns off every class you do not re-tick. Re-saving the same application no longer closes the session.</div>
-            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_stocks"> stocks · ETFs · indices (CFD)</label>
-            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_forex"> forex</label>
-            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_commodity"> commodities (CFD)</label>
-            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_crypto"> crypto</label>
+            <input type="text" name="saxo_redirect_uri" value="{{ saxo_on_file.redirect_uri }}" placeholder="https://your-host/brokers/saxo/callback/" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="sim" data-on-file-box{% if "sim" in saxo_on_file.ticked %} checked{% endif %}> SIM environment keys — starts as it is on file</label>
+            <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="confirm_world_change"> Switch world — tick only to flip SIM ↔ live on purpose while a session is open (the flip closes it)</label>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:4px;">Carry as primary broker — wins over eToro's and IBKR's flag for the same class. <strong>An unticked box is an OFF box:</strong> this form posts every field at once, so a save made for any other reason turns off every class you do not re-tick. The boxes start as they are on file for the account picked above.</div>
+            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_stocks" data-on-file-box{% if "primary_stocks" in saxo_on_file.ticked %} checked{% endif %}> stocks · ETFs · indices (CFD)</label>
+            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_forex" data-on-file-box{% if "primary_forex" in saxo_on_file.ticked %} checked{% endif %}> forex</label>
+            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_commodity" data-on-file-box{% if "primary_commodity" in saxo_on_file.ticked %} checked{% endif %}> commodities (CFD)</label>
+            <label style="font-family:var(--font-mono);font-size:12px;"><input type="checkbox" name="primary_crypto" data-on-file-box{% if "primary_crypto" in saxo_on_file.ticked %} checked{% endif %}> crypto</label>
             <button type="submit" class="btn btn-primary btn-sm">Save Saxo</button>
         </form>
     </div>
@@ -123,4 +130,48 @@
 <p class="form-hint" style="font-size:11px;color:var(--text-muted);">Adding or changing keys needs a superuser.</p>
 {% endif %}
 
+{% endblock %}
+
+{% block extra_js %}
+{% if can_edit %}
+{# The two forms post every box at once, so each box must start where the picked account's row is: a Demo or SIM box left at a default is a world flip nobody chose. The server renders the preselected account; this moves the boxes when the dropdown moves. Switch world and Replace keys are never carried over. #}
+<script>
+(function () {
+    function reflect(form) {
+        var sel = form.elements["target_username"];
+        var opt = sel && sel.options[sel.selectedIndex];
+        if (!opt) { return; }
+        var ticked = (opt.getAttribute("data-ticked") || "").split(" ");
+        var boxes = form.querySelectorAll("input[data-on-file-box]");
+        for (var i = 0; i < boxes.length; i++) {
+            boxes[i].checked = ticked.indexOf(boxes[i].name) !== -1;
+        }
+        var line = form.querySelector("[data-on-file-line]");
+        if (line) { line.textContent = opt.getAttribute("data-on-file") || ""; }
+        // A target with no URI on file keeps what the box holds: the host
+        // is almost always the same one.
+        var uri = form.elements["saxo_redirect_uri"];
+        var onFileUri = opt.getAttribute("data-redirect-uri");
+        if (uri && onFileUri) { uri.value = onFileUri; }
+        // Neither confirmation is ever carried over to another account.
+        var confirms = ["confirm_world_change", "confirm_key_change"];
+        for (var c = 0; c < confirms.length; c++) {
+            var confirmBox = form.elements[confirms[c]];
+            if (confirmBox) { confirmBox.checked = false; }
+        }
+    }
+    var forms = document.querySelectorAll("form[data-reflects-row]");
+    for (var i = 0; i < forms.length; i++) {
+        (function (form) {
+            var sel = form.elements["target_username"];
+            if (sel) { sel.addEventListener("change", function () { reflect(form); }); }
+            // A page restored from the back/forward cache, or a reload the
+            // browser refills, would otherwise show the boxes as they were
+            // left, not as they are on file.
+            window.addEventListener("pageshow", function () { reflect(form); });
+        })(forms[i]);
+    }
+})();
+</script>
+{% endif %}
 {% endblock %}

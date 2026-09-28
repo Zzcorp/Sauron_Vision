@@ -995,13 +995,30 @@ def hq_follow_asset_bot(request):
                                 f"over-allocate it: {alloc['reason']}")
         return redirect("asset_bots_dashboard")
     fraction = float(alloc["plan"][cfg.pk])
+    # THE SHARE IS OF THE READING LESS WHAT IS HELD BACK FOR WITHDRAWALS
+    # (review, 2026-09-28) — the base the sync sizes from
+    # (withdrawals.deployable). Writing reading × share here gave the pool
+    # the full share for as long as the follow below failed or skipped it,
+    # and the success line quoted that number while the database held the
+    # smaller one. A reserve nobody can read follows nothing: sizing from
+    # the whole reading would deploy money somebody asked to take out.
+    try:
+        from bot_program.withdrawals import deployable
+        base, held = deployable(request.user, float(reading["value"]),
+                                reading_at=reading["at"])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("hq_follow: withdrawal reserve unreadable: %s", e)
+        messages.error(request, "The withdrawal reserve could not be read, "
+                                "so the pool's share of the account is "
+                                "unknown. Nothing changed.")
+        return redirect("asset_bots_dashboard")
     ex["capital_tracks_broker"] = True
     if share is not None:
         ex["account_share_pct"] = share
     else:
         ex.pop("account_share_pct", None)
     cfg.extras = ex
-    cfg.capital = Decimal(str(round(float(reading["value"]) * fraction, 2)))
+    cfg.capital = Decimal(str(round(float(base) * fraction, 2)))
     cfg.save(update_fields=["extras", "capital", "updated_at"])
     # The automatic shares are what the explicit ones leave, so the other
     # followers changed too: re-split every one from the same reading now
@@ -1009,11 +1026,16 @@ def hq_follow_asset_bot(request):
     from bot_program.tasks import _follow_the_account
     _follow_the_account(request.user, float(reading["value"]),
                         reading["currency"])
+    # The follow reloads its own rows: quote what the database holds now.
+    cfg.refresh_from_db(fields=["capital"])
+    ccy = reading["currency"] or ""
+    kept = (f" (the account less {held:,.2f} {ccy} held back for "
+            f"withdrawals)" if held > 0 else "")
     messages.success(request, f"'{cfg.name}' follows the account at "
                               f"{fraction * 100:.0f}% — pool {cfg.capital} "
-                              f"{reading['currency'] or ''}; every follower "
-                              f"re-split from the same reading, and the sync "
-                              f"keeps them there.")
+                              f"{ccy}{kept}; every follower re-split from "
+                              f"the same reading, and the sync keeps them "
+                              f"there.")
     return redirect("asset_bots_dashboard")
 
 
