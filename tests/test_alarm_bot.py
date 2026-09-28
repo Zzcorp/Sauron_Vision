@@ -157,6 +157,20 @@ def _row():
     return PlatformComponent.objects.get(key=alarm.COMPONENT_KEY)
 
 
+def _saxo(user, *, sim, session=True, refresh_expires_at=None):
+    """A keyed Saxo row; with a session, signed in once, its refresh
+    token dying at `refresh_expires_at` (None: unknown, alive)."""
+    from bot_program.models import SaxoAccount
+    acct = SaxoAccount.objects.create(user=user, sim=sim)
+    acct.set_credentials("app-key", "app-secret")
+    if session:
+        acct.set_tokens("acc", "ref", NOW - timedelta(minutes=30),
+                        refresh_expires_at=refresh_expires_at)
+        acct.connected = True
+    acct.save()
+    return acct
+
+
 def _resumed(moment):
     """The master switch last flipped at `moment` (its row's updated_at,
     which every save stamps with the wall clock)."""
@@ -1141,6 +1155,50 @@ class BrokerTests(_AlarmCase):
         acct = _etoro(user, demo=False)
         cache.set(f"broker_sync:miss:etoro:{acct.pk}", 9, 3600)
         _component("broker_account_sync", on=False)
+        self.assertEqual(self.sentinel()[1], [])
+
+    def test_a_live_saxo_account_whose_session_died_is_said(self):
+        """The Saxo walk skips a row whose session is not alive before it
+        could count a miss (tasks.sync_saxo_accounts: the keeper owns the
+        session), so the miss count never rises for the most likely
+        outage the runbook names -- a box down forty minutes comes back
+        with a dead Saxo session. Read from the row itself: by broker and
+        number, standing, and never twice for one account."""
+        user = _staff("gandalf_senior")
+        acct = _saxo(user, sim=False,
+                     refresh_expires_at=NOW - timedelta(minutes=5))
+        out, said = self.sentinel()
+        self.assertEqual(len(said), 1)
+        self.assertIn(f"Sauron alarm — Saxo account #{acct.pk} has lost its "
+                      f"session", said[0])
+        self.assertIn("signs in again", said[0])
+        self.assertIn("/brokers/", said[0])
+        self.assertNotIn("gandalf_senior", said[0])
+        self.assertNotIn("Main", said[0])
+        # standing: three hours later it is said again
+        self.assertEqual(self.sentinel(now=NOW + timedelta(hours=1))[1], [])
+        self.assertEqual(len(self.sentinel(now=NOW + timedelta(hours=3))[1]),
+                         1)
+        # the keeper gave it up (LOST): the same, and one line for the
+        # account whatever a frozen miss count says
+        acct.clear_session()
+        acct.session_lost_at = NOW
+        acct.session_lost_reason = "SaxoTokenError: refresh refused"
+        acct.save()
+        cache.delete(alarm.STATE_KEY.format(source="sentinel"))
+        cache.set(f"broker_sync:miss:saxo:{acct.pk}", 4, 3600)
+        out, said = self.sentinel(now=NOW + timedelta(hours=6))
+        self.assertEqual(len(said), 1)
+        self.assertIn("has lost its session", said[0])
+        self.assertNotIn("syncs in a row", said[0])
+
+    def test_a_saxo_session_alive_a_sim_row_or_one_never_signed_in_is_not(self):
+        _saxo(_staff("a"), sim=False,
+              refresh_expires_at=NOW + timedelta(minutes=30))
+        _saxo(_staff("b"), sim=False, refresh_expires_at=None)   # unknown: alive
+        _saxo(_staff("c"), sim=True,
+              refresh_expires_at=NOW - timedelta(hours=9))
+        _saxo(_staff("d"), sim=False, session=False)              # registered only
         self.assertEqual(self.sentinel()[1], [])
 
 

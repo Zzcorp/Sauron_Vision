@@ -43,7 +43,9 @@ WHAT IT SAYS (each an Alarm: a stable key, a title, a few lines)
      FLOOD_AT or more stopped at once is the scheduler, said once.
   E  A live-world broker account that has not answered
      BROKER_MISS_ALERT_AFTER syncs in a row (the sync's own miss count),
-     named by broker and number, never by username.
+     and a live Saxo account whose session died (the walk skips it
+     before it can count a miss), named by broker and number, never by
+     username.
   F  The emergency flatten (engine/kill_switch.execute_kill_switch) having
      run, counts only, on the commit and from the kill's own process
      (after_kill_switch): a flatten is the moment the workers may be
@@ -645,11 +647,27 @@ def read_faults(now) -> list:
     return out
 
 
+def _session_lost(acct, now) -> bool:
+    """A Saxo row signed in once whose session is dead: the refresh
+    token past its life (session_alive), or the keeper having given it
+    up (refresh_saxo_sessions clears the tokens and stamps
+    session_lost_at). A row never signed in is a setup not finished,
+    not an outage."""
+    if not hasattr(acct, "session_alive"):
+        return False
+    if acct.has_session:
+        return not acct.session_alive(now)
+    return acct.session_lost_at is not None
+
+
 def read_brokers(now) -> list:
     """E: every keyed LIVE-world account the sync walks (IBKR on a port
     that is not paper, Saxo not SIM, eToro not demo) whose consecutive
-    miss count stands at BROKER_MISS_ALERT_AFTER or more. Not while the
-    sync's switch is off: its count is then frozen, not current."""
+    miss count stands at BROKER_MISS_ALERT_AFTER or more -- and a Saxo
+    row whose session died, which the walk skips before it could count
+    a miss (the keeper owns the session; its alert goes to the Eye's
+    staff, never here). Not while the sync's switch is off: its count is
+    then frozen, not current."""
     from django.core.cache import cache
 
     from bot_program.models import EtoroAccount, IBKRAccount, SaxoAccount
@@ -666,6 +684,15 @@ def read_brokers(now) -> list:
     out = []
     for acct in rows:
         kind = _broker_kind(acct)
+        if _session_lost(acct, now):
+            out.append(Alarm(
+                f"session|{kind}:{acct.pk}",
+                f"{BROKER_WORDS.get(kind, kind)} account #{acct.pk} has "
+                f"lost its session",
+                ["Nothing on this live account can be read or traded "
+                 "until someone signs in again.",
+                 "Sign in again on /brokers/."]))
+            continue
         misses = int(cache.get(f"broker_sync:miss:{kind}:{acct.pk}") or 0)
         if misses < BROKER_MISS_ALERT_AFTER:
             continue
