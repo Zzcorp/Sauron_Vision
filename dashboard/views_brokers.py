@@ -43,8 +43,54 @@ is EtoroAccount.demo, and this form is the only page that writes it. So the
 save that flips demo -> live is refused — nothing written — while any live
 AssetBotConfig of the target user is enabled, while any class box is ticked
 on that same save, or without the acting superuser's trading PIN (the same
-`_pin_ok` that arms a live bot). demo -> demo, live -> live and live -> demo
-saves are untouched: the guard is one-directional, toward real money.
+`_pin_ok` that arms a live bot). demo -> demo and live -> live saves are
+untouched.
+
+AND THE TICK BACK IS THE SWITCH AWAY FROM THE REAL POSITIONS (2026-09-28)
+
+live -> demo was deliberately left ungated: "the flip that stops real orders
+stays frictionless, like disabling a bot". It does stop real ENTRIES. It also
+sends every later CLOSE to the `demo/` segment — the router builds the client
+from this one flag at call time (broker_router._etoro_client_for) — so a real
+position still open at eToro can no longer be closed through the platform:
+every close it sends (a manual close, the time stop, EMERGENCY FLATTEN) asks
+the virtual portfolio, which honestly holds nothing. And the form made that
+flip the default: the Demo box shipped CHECKED whatever the row said, so a
+save made on a LIVE row to tick one class box flipped it to demo unless the
+operator remembered to untick a box that read as the safe choice. Now the
+form shows the row as it is on file, and the flip is refused, nothing
+written, without an explicit "Switch world" tick, and — tick or no tick —
+while any real eToro position the platform carried is still OPEN or
+CLOSE_PENDING (`demo_tick_refusals`) — a row with no carrier stamp counts
+when this eToro row is primary for its class, because its close goes
+wherever the router answers (`live_etoro_positions`).
+
+AND A NEW PAIR ON A LIVE ROW IS A DIFFERENT ACCOUNT (2026-09-28)
+
+The form now opens on the logged-in account instead of an empty "pick an
+account", so a pair typed for a teammate lands on the superuser's own row
+unless the dropdown is moved — and live -> live had no guard. The probe
+passes (the pair is good, just someone else's); every later live order
+moves the teammate's money, and every close of a position already open goes
+to an account where its positionId does not exist. So a pair that differs
+from the one on file, on a LIVE row that stays live, needs the "Replace
+keys" tick and is refused while a real position is open
+(`key_swap_refusals`). A routing-only save retypes the same pair and is not
+asked.
+
+THE SAXO SAVE HAS THE SAME TRAP AND A RACE (2026-09-28)
+
+The SIM box shipped checked too, so a routing-only save on a LIVE Saxo row
+flipped it to SIM, closed the session the operator had just signed in for
+and dropped the readings. A flip while the session is alive now needs the
+same "Switch world" tick. And a save that does not change the application
+writes the four class flags and nothing else: a full-row save wrote back
+the token pair as it was loaded, and a refresh landing in between
+(saxo_oauth.store_tokens) rotates that pair — the stale refresh token put
+back is refused at the next refresh and the session is lost anyway. The
+eToro save, which waits up to ETORO_PROBE_TIMEOUT_S on the network before it
+writes, names its columns for the same reason: sync_etoro_accounts writes
+the margin cells in that window.
 """
 import logging
 
@@ -286,6 +332,78 @@ def _rows(user) -> list:
     ]
 
 
+def _on_file_words(username: str, world: str, carried: list,
+                   session: str = "") -> str:
+    classes = ", ".join(carried) if carried else "nothing"
+    parts = [world] + ([session] if session else []) + [
+        f"primary for {classes}"]
+    return f"On file for {username}: {' · '.join(parts)}."
+
+
+def _etoro_on_file(acct, username: str) -> dict:
+    """What the eToro form shows ticked for one target: its row as it is
+    on file, or a new row's defaults (Demo ticked, every class off).
+
+    THE FORM USED TO SHIP ONE STATE FOR EVERY ROW — Demo ticked, every
+    class unticked — and posts every field at once, so a save made to
+    change one class box on a LIVE row wrote demo=True unless the operator
+    remembered to untick the one box that looks like the safe choice. That
+    is the flip that strands the real positions (module docstring). The
+    boxes now start where the row is, so a save that changes nothing else
+    changes nothing else."""
+    if acct is None:
+        return {"ticked": ["demo"],
+                "words": f"On file for {username}: no eToro row yet — a "
+                         f"first save starts it as ticked here."}
+    ticked = (["demo"] if acct.demo else []) + [
+        box for box, field in _BOX_FIELDS if getattr(acct, field, False)]
+    carried = [word for (box, word) in _CLASS_BOXES if box in ticked]
+    return {"ticked": ticked,
+            "words": _on_file_words(username,
+                                    "DEMO" if acct.demo else "LIVE", carried)}
+
+
+def _saxo_on_file(acct, username: str) -> dict:
+    """The Saxo form's twin of _etoro_on_file, plus the redirect URI — not
+    a secret (it is printed in the browser's address bar during the sign-in)
+    and one of the four things that close the session when they change, so
+    a routing-only save should not depend on retyping it to the character.
+    The key and the secret are never rendered: they are retyped."""
+    if acct is None:
+        return {"ticked": ["sim"], "redirect_uri": "",
+                "words": f"On file for {username}: no Saxo application yet "
+                         f"— a first save starts it as ticked here."}
+    ticked = (["sim"] if acct.sim else []) + [
+        box for box, field in _BOX_FIELDS if getattr(acct, field, False)]
+    carried = [word for (box, word) in _CLASS_BOXES if box in ticked]
+    session = ("session open" if acct.session_alive()
+               else "no open session")
+    return {"ticked": ticked, "redirect_uri": acct.redirect_uri or "",
+            "words": _on_file_words(username, "SIM" if acct.sim else "LIVE",
+                                    carried, session)}
+
+
+def _form_targets(users, me) -> list:
+    """One entry per account the two forms can target, each carrying what
+    is on file for it, with `me` preselected.
+
+    The template cannot look a row up by the dropdown's value, so every
+    option carries its own row's state (data attributes) and a few lines of
+    script move the boxes when the dropdown moves. Without script the page
+    still renders the preselected account's row, which is the one a
+    superuser edits most."""
+    from bot_program.models import EtoroAccount, SaxoAccount
+    users = list(users)
+    ids = [u.pk for u in users]
+    etoro = {a.user_id: a for a in EtoroAccount.objects.filter(user_id__in=ids)}
+    saxo = {a.user_id: a for a in SaxoAccount.objects.filter(user_id__in=ids)}
+    return [{"username": u.username, "is_superuser": u.is_superuser,
+             "selected": u.pk == me.pk,
+             "etoro": _etoro_on_file(etoro.get(u.pk), u.username),
+             "saxo": _saxo_on_file(saxo.get(u.pk), u.username)}
+            for u in users]
+
+
 @login_required
 def brokers_page(request):
     from bot_program.engine.capabilities import CAPABILITIES
@@ -301,6 +419,15 @@ def brokers_page(request):
         from django.contrib.auth.models import User
         context["users"] = User.objects.filter(is_active=True).order_by(
             "username")
+        targets = _form_targets(context["users"], request.user)
+        mine = next((t for t in targets if t["selected"]), None)
+        context["form_targets"] = targets
+        # What the boxes render ticked before any script runs: the
+        # preselected account's row, or a new row's defaults.
+        context["etoro_on_file"] = (mine["etoro"] if mine else
+                                    _etoro_on_file(None, request.user.username))
+        context["saxo_on_file"] = (mine["saxo"] if mine else
+                                   _saxo_on_file(None, request.user.username))
     return render(request, "dashboard/brokers.html", context)
 
 
@@ -316,6 +443,28 @@ DEMO_UNTICK_MEASURED = (
 _CLASS_BOXES = (("primary_stocks", "stocks"), ("primary_forex", "forex"),
                 ("primary_commodity", "commodities"),
                 ("primary_crypto", "crypto"))
+
+#: The column behind each box — the same four on the eToro and the Saxo row.
+#: On Saxo they are ALL a save that leaves the application alone may write.
+_BOX_FIELDS = (("primary_stocks", "is_primary_for_stocks"),
+               ("primary_forex", "is_primary_for_forex"),
+               ("primary_commodity", "is_primary_for_commodity"),
+               ("primary_crypto", "is_primary_for_crypto"))
+_FLAG_FIELDS = tuple(field for _box, field in _BOX_FIELDS)
+
+#: The reading cells an environment flip drops, on both rows: they describe
+#: the world the row no longer points at.
+_WORLD_CELLS = ("last_equity", "last_equity_currency", "last_equity_at",
+                "broker_positions", "broker_positions_at")
+
+#: The box that says "yes, I mean to change this row's world". Unticked by
+#: default and never pre-filled: it is the one box that must be a decision
+#: made on this save.
+CONFIRM_WORLD_CHANGE = "confirm_world_change"
+
+#: Its twin for the eToro pair: "yes, I mean to put a DIFFERENT pair on
+#: this LIVE row" (key_swap_refusals). Never pre-filled either.
+CONFIRM_KEY_CHANGE = "confirm_key_change"
 
 #: THE PROOF TOKENS EACH eToro BOX NEEDS (2026-09-26, GAP 4). The gate
 #: (asset_engine/base.py AssetBot._etoro_entry_refusal, step 1) keys on
@@ -432,6 +581,178 @@ def demo_untick_refusals(request, user) -> list:
     return reasons
 
 
+def live_etoro_positions(user) -> list:
+    """The target user's REAL positions at eToro that the platform still
+    has to close: AssetBotTrade rows, OPEN or CLOSE_PENDING, not paper,
+    carried by eToro, and not stamped as filled in the virtual world
+    (broker_env "paper").
+
+    A row with NO world stamp counts. The question here is "could this
+    switch strand a real position", the row being switched is LIVE today,
+    and an unknown world may be the real one; counting it costs one
+    refusal the operator can read, missing it costs a position nothing can
+    close. (reconcile_asset reads an unknown world the other way, and for
+    its own reason: there a guess would book a close.)
+
+    AND A ROW WITH NO CARRIER COUNTS TOO, for the same reason, when eToro
+    could be the one holding it. "Carried by eToro" used to mean only
+    metadata["broker"] == "etoro" (AssetBot.venue_stamps), and a row that
+    has no stamp at all — a TAKE TRADE booked before 2026-09-24, or a
+    client adapter_key() answers "" for — was skipped. venue_close refuses
+    nothing for such a row (no carrier, nothing to compare), so its close
+    goes wherever the router answers at that moment: to this eToro row
+    when it is primary for the class, and so to the `demo/` segment from
+    the flip on. "Could be eToro's" is read from the row on file: primary
+    for the class the trade was booked under, or for the class the router
+    asks — the INSTRUMENT's (broker_router._instrument_for; a symbol with
+    no Instrument is crypto there, so it is crypto here). Either reading
+    is enough; Saxo's precedence is not consulted, because a flag that
+    wins today says nothing about who carried the row when it opened. A
+    row stamped with ANOTHER broker is still skipped: that stamp is a fact.
+
+    Filtered in Python, as etoro_smoke._unstamped_open_rows explains: a
+    JSON-key filter in the ORM drops rows whose metadata lacks the key."""
+    from bot_program.engine.broker_router import _instrument_for
+    from bot_program.models import AssetBotTrade, EtoroAccount
+    acct = EtoroAccount.objects.filter(user=user).first()
+    router_class = {}
+
+    def could_be_etoros(tr) -> bool:
+        if acct is None:
+            return False
+        if tr.symbol not in router_class:
+            inst = _instrument_for(tr.symbol)
+            router_class[tr.symbol] = inst.asset_class if inst else "crypto"
+        return (acct.is_primary_for(tr.asset_class)
+                or acct.is_primary_for(router_class[tr.symbol]))
+
+    out = []
+    for tr in (AssetBotTrade.objects
+               .filter(config__user=user, paper=False,
+                       status__in=("OPEN", "CLOSE_PENDING"))
+               .only("pk", "symbol", "asset_class", "metadata")
+               .order_by("pk")):
+        meta = tr.metadata if isinstance(tr.metadata, dict) else {}
+        carrier = str(meta.get("broker") or "")
+        if carrier and carrier != "etoro":
+            continue
+        if not carrier and not could_be_etoros(tr):
+            continue
+        if str(meta.get("broker_env") or "").lower() == "paper":
+            continue
+        out.append(tr)
+    return out
+
+
+def demo_tick_refusals(request, user) -> list:
+    """Why THIS save may not flip the target user's row from LIVE to demo —
+    every reason that applies, in order, or [] when the flip may proceed.
+
+    Two checks, both printed at once like demo_untick_refusals:
+
+      * the "Switch world" box (CONFIRM_WORLD_CHANGE) was not ticked. The
+        Demo box now shows the row as it is on file, so a tick there is
+        the operator's own; this box is what tells the tick apart from a
+        page left over from before, or a habit from the demo weeks.
+      * a real position eToro carried — or, unstamped, could have
+        (live_etoro_positions) — is still OPEN or CLOSE_PENDING. The
+        router builds the client from this flag at call time, so from this
+        save on every close the platform sends goes to the `demo/` segment,
+        which honestly holds nothing, and the real position stays open with
+        nothing on the platform able to reach it. Refused even with the box
+        ticked: no tick makes that safe. Close them first (or let them
+        close), then switch.
+
+    No PIN: this direction places no real order. What it can do is stop
+    the platform from closing one, and that is what the checks are about.
+    """
+    reasons = []
+    if request.POST.get(CONFIRM_WORLD_CHANGE) != "on":
+        reasons.append("the 'Switch world' box was not ticked — this row "
+                       "is LIVE, and a save with Demo ticked sends every "
+                       "later order AND every close to eToro's virtual "
+                       "portfolio; if you only meant to change the class "
+                       "boxes, leave Demo unticked and save again")
+    real = live_etoro_positions(user)
+    if real:
+        n = len(real)
+        named = ", ".join(f"[{t.pk}] {t.symbol}" for t in real)
+        if n == 1:
+            reasons.append(f"1 real position is still open at eToro; "
+                           f"switching to demo would cut the platform off "
+                           f"from closing it ({named}) — close it first, "
+                           f"then switch")
+        else:
+            reasons.append(f"{n} real positions are still open at eToro; "
+                           f"switching to demo would cut the platform off "
+                           f"from closing them ({named}) — close them "
+                           f"first, then switch")
+    return reasons
+
+
+def key_swap_refusals(request, user) -> list:
+    """Why THIS save may not put a DIFFERENT key pair on the target user's
+    LIVE row — every reason that applies, in order, or [] when it may.
+
+    The eToro form opens on the logged-in account (the dropdown used to
+    open on an empty, required "pick an account", which the browser would
+    not submit). That is the account a superuser edits most, and it makes
+    the wrong save one missed click away: the superuser types a teammate's
+    pair, forgets the dropdown, and the live -> live path re-encrypted it
+    onto the superuser's own row with nothing to stop it. The probe passes
+    — the pair is good, just not this account's — and from then on the
+    row's live configs place REAL orders in the teammate's account, while
+    every close of a position the row already holds goes there too, where
+    its positionId does not exist: refused at the venue, stranded here. The
+    Saxo form is not exposed the same way: a new key there closes the
+    session, and nothing trades until the next sign-in.
+
+    Two checks, both printed at once like the other two lists:
+
+      * the "Replace keys" box (CONFIRM_KEY_CHANGE) was not ticked. A
+        routing-only save retypes the pair on file, so a pair that differs
+        is either a rotation the operator means or the wrong account; the
+        box is how the page tells them apart.
+      * a real position is still open at eToro under the pair on file
+        (live_etoro_positions). Refused even with the box ticked, as the
+        tick back to demo is: a different pair is a different account as
+        far as anything here can tell, and every close would go to it. A
+        rotation of the SAME account's keys waits for those positions too;
+        nothing on this page can prove two pairs open one account.
+
+    Only asked when a readable pair is on file and the posted one differs
+    (compared decrypted — Fernet never writes the same ciphertext twice).
+    A row with no pair, or one that cannot be decrypted, has nothing to
+    swap from: the router already answers paper for it, and re-entering a
+    pair is how it gets its positions back.
+    """
+    reasons = []
+    if request.POST.get(CONFIRM_KEY_CHANGE) != "on":
+        reasons.append("the 'Replace keys' box was not ticked — the pair "
+                       "typed is not the pair on file, and on a LIVE row "
+                       "the pair picks whose real money every later order "
+                       "moves; if you meant another account, pick it in "
+                       "the dropdown; if you meant to rotate this one's "
+                       "keys, tick 'Replace keys' on the same save")
+    real = live_etoro_positions(user)
+    if real:
+        n = len(real)
+        named = ", ".join(f"[{t.pk}] {t.symbol}" for t in real)
+        if n == 1:
+            reasons.append(f"1 real position is still open at eToro under "
+                           f"the pair on file; a different pair would send "
+                           f"its close to the account that pair opens, "
+                           f"where it does not exist ({named}) — close it "
+                           f"first, then replace the pair")
+        else:
+            reasons.append(f"{n} real positions are still open at eToro "
+                           f"under the pair on file; a different pair would "
+                           f"send their closes to the account that pair "
+                           f"opens, where they do not exist ({named}) — "
+                           f"close them first, then replace the pair")
+    return reasons
+
+
 @_admin_only
 def save_etoro_credentials(request):
     from django.contrib.auth.models import User
@@ -469,17 +790,62 @@ def save_etoro_credentials(request):
                                     f"{DEMO_UNTICK_MEASURED}. Refused because: "
                                     f"{why}")
             return redirect("brokers_page")
+    # THE TICK BACK. A live -> demo flip points every later close at the
+    # virtual portfolio (module docstring). Refused on the same terms as
+    # the untick — before anything is written, the probe not sent — without
+    # the "Switch world" tick, and while a real eToro position is open.
+    if was_demo is False and demo:
+        refusals = demo_tick_refusals(request, user)
+        if refusals:
+            why = " ".join(f"({i}) {r}." for i, r in enumerate(refusals, 1))
+            messages.error(request, f"eToro: REFUSED to tick Demo for "
+                                    f"{target_username} — nothing was saved. "
+                                    f"The row is LIVE: the same pair opens "
+                                    f"both worlds and the Demo tick alone "
+                                    f"picks where every order and every "
+                                    f"close goes. Refused because: {why}")
+            return redirect("brokers_page")
+    # THE PAIR ITSELF, ON A LIVE ROW THAT STAYS LIVE. The dropdown opens on
+    # the logged-in account, so a pair typed for someone else lands here
+    # unless the dropdown was moved (key_swap_refusals). Refused on the same
+    # terms, before anything is written, the probe not sent. The two world
+    # flips are left to their own guards above: demo -> live is behind the
+    # PIN, and live -> demo already refuses while a real position is open.
+    if was_demo is False and not demo:
+        try:
+            old_pair = acct.get_credentials()
+        except Exception:  # noqa: BLE001 — unreadable: nothing to swap from
+            old_pair = (None, None)
+        if old_pair[0] and old_pair != (api_key, user_key):
+            refusals = key_swap_refusals(request, user)
+            if refusals:
+                why = " ".join(f"({i}) {r}."
+                               for i, r in enumerate(refusals, 1))
+                messages.error(request, f"eToro: REFUSED to replace the key "
+                                        f"pair on {target_username}'s LIVE "
+                                        f"row — nothing was saved. Refused "
+                                        f"because: {why}")
+                return redirect("brokers_page")
     acct.set_credentials(api_key, user_key)
     acct.demo = demo
     env = "demo" if demo else "live"
+    # THE COLUMNS THIS SAVE WRITES, AND NO OTHER. The probe below waits up
+    # to ETORO_PROBE_TIMEOUT_S on the network between this row's read and
+    # its write, and sync_etoro_accounts writes the equity, holdings and
+    # margin cells (update_fields) in exactly that kind of window: a
+    # full-row save put back the cells as they were read, and
+    # _leverage_headroom sizes the next order against a used margin that
+    # is no longer true.
+    fields = ["api_key_enc", "user_key_enc", "demo", *_FLAG_FIELDS,
+              "connected"]
     # A reading taken on the VIRTUAL portfolio describes a different account
     # from the one the same pair reaches on the live world. The demo box
-    # ships checked, so the
-    # ordinary sequence — save as demo, notice the env column, re-save as
-    # live — would leave a virtual balance on a row now flagged LIVE, with a
-    # timestamp minutes old: fresh enough for tracking_freeze_reason to pass
-    # it and for every follower pool to be sized against it. The same drop
-    # the Saxo save does. The HISTORY rows stay and carry their own `env`.
+    # used to ship checked whatever the row said, so the ordinary sequence
+    # — save as demo, notice the env column, re-save as live — would leave
+    # a virtual balance on a row now flagged LIVE, with a timestamp minutes
+    # old: fresh enough for tracking_freeze_reason to pass it and for every
+    # follower pool to be sized against it. The same drop the Saxo save
+    # does. The HISTORY rows stay and carry their own `env`.
     env_note = ""
     if was_demo is not None and was_demo != demo:
         acct.last_equity = None
@@ -487,11 +853,15 @@ def save_etoro_credentials(request):
         acct.last_equity_at = None
         acct.broker_positions = []
         acct.broker_positions_at = None
+        fields += list(_WORLD_CELLS)
         env_note = (" The environment changed, so the stored equity and "
                     "holdings were dropped: they described the other one.")
         if not demo:
             env_note += (" Demo UNTICKED: from this save the same pair "
                          "places REAL orders.")
+        else:
+            env_note += (" Demo TICKED: from this save every order and "
+                         "every close goes to the virtual portfolio.")
     # Routing opt-ins. Unchecked = absent = off, so a save that omits them
     # leaves eToro carrying nothing — the safe default when keys are new.
     acct.is_primary_for_stocks = request.POST.get("primary_stocks") == "on"
@@ -504,7 +874,8 @@ def save_etoro_credentials(request):
     acct.connected = verdict == "ok"
     if acct.connected:
         acct.last_sync = timezone.now()
-    acct.save()
+        fields.append("last_sync")
+    acct.save(update_fields=fields)
 
     # BEING THE BOOK IS NOT THE PROBE'S VERDICT. broker_backed asks only
     # "keyed AND primary for something" — deliberately, because `connected`
@@ -573,6 +944,27 @@ def save_saxo_credentials(request):
 
     acct, _created = SaxoAccount.objects.get_or_create(user=user)
     was_sim = None if _created else acct.sim
+    # THE WORLD FLIP, WHILE A SESSION IS OPEN. The SIM box used to ship
+    # checked whatever the row said, so a save made on a LIVE row to tick
+    # one class box flipped it to SIM: the session the operator had just
+    # signed in for closed, the readings were dropped, and live keys sat on
+    # a row flagged SIM. The form now shows the row as it is on file; a flip
+    # that would close an open session also needs the "Switch world" tick
+    # on the same save. Refused before anything is written. A row with no
+    # open session has nothing to lose to the flip, and is not asked.
+    if (was_sim is not None and was_sim != sim and acct.session_alive()
+            and request.POST.get(CONFIRM_WORLD_CHANGE) != "on"):
+        on_file, asked = ("SIM", "LIVE") if was_sim else ("LIVE", "SIM")
+        messages.error(request,
+                       f"Saxo: REFUSED to switch {target_username} from "
+                       f"{on_file} to {asked} — nothing was saved. The row "
+                       f"has an open session, and changing the SIM box "
+                       f"closes it and drops the stored equity and "
+                       f"holdings. If you only meant to change the class "
+                       f"boxes, leave SIM {'ticked' if was_sim else 'unticked'}"
+                       f" as it is on file and save again; if you mean to "
+                       f"switch, tick 'Switch world' on the same save.")
+        return redirect("brokers_page")
     # WHAT ACTUALLY CHANGED, compared DECRYPTED: Fernet returns a different
     # ciphertext for the same plaintext every time, so comparing the stored
     # columns would answer "changed" on every single save.
@@ -583,9 +975,10 @@ def save_saxo_credentials(request):
     app_changed = bool(
         _created or old_key != app_key or old_secret != app_secret
         or (acct.redirect_uri or "") != redirect_uri or acct.sim != sim)
-    acct.set_credentials(app_key, app_secret)
-    acct.redirect_uri = redirect_uri
-    acct.sim = sim
+    if app_changed:
+        acct.set_credentials(app_key, app_secret)
+        acct.redirect_uri = redirect_uri
+        acct.sim = sim
     # Which asset classes this account carries. Default off, and off is
     # what an unchecked box means: a keyed Saxo row nobody has claimed a
     # class for is read and traded on by nothing.
@@ -625,7 +1018,20 @@ def save_saxo_credentials(request):
                     "holdings were dropped: they described the other one.")
     else:
         env_note = ""
-    acct.save()
+    if app_changed:
+        acct.save()
+    else:
+        # THE FOUR FLAGS AND NOTHING ELSE. Everything else on this row was
+        # read when the view started, and the token pair is not the view's
+        # to write: the keeper (refresh_saxo_sessions) and ensure_access_token
+        # rotate it through saxo_oauth.store_tokens, and Saxo's refresh token
+        # changes on every refresh. A full save landing after a rotation put
+        # the OLD pair back — the next refresh presents a token Saxo has
+        # already retired, is refused, and the session this branch exists
+        # to keep is marked lost ten minutes later. sync_saxo_accounts'
+        # cells ride on the same rule. A sim flip is always app_changed,
+        # so nothing this branch skips could have changed.
+        acct.save(update_fields=list(_FLAG_FIELDS))
     if app_changed:
         messages.warning(request,
                          f"Saxo application saved for {target_username} "

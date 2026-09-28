@@ -57,14 +57,16 @@ BOXES = {"stock": "primary_stocks", "forex": "primary_forex",
 
 
 def _post_saxo(client, username, *, key=APP, secret=SECRET, uri=URI,
-               sim=True, flags=("stock",)):
+               sim=True, flags=("stock",), confirm=False, follow=False):
     data = {"target_username": username, "saxo_app_key": key,
             "saxo_app_secret": secret, "saxo_redirect_uri": uri}
     if sim:
         data["sim"] = "on"
+    if confirm:
+        data["confirm_world_change"] = "on"
     for f in flags:
         data[BOXES[f]] = "on"
-    return client.post(reverse("hq_save_saxo"), data)
+    return client.post(reverse("hq_save_saxo"), data, follow=follow)
 
 
 def _cfg(user, *, asset_class="stock", mode="live", enabled=True,
@@ -121,7 +123,9 @@ class TheRoutingSaveKeepsTheSessionTests(TestCase):
         acct.last_equity_currency = "USD"
         acct.last_equity_at = timezone.now()
         acct.save()
-        _post_saxo(self.client, "me_u", sim=False)
+        # The session is open, so the flip needs the Switch world tick on
+        # the same save (2026-09-28) — see the refusal tests below.
+        _post_saxo(self.client, "me_u", sim=False, confirm=True)
         acct = self._row()
         self.assertFalse(acct.sim)
         self.assertFalse(acct.has_session)
@@ -145,6 +149,97 @@ class TheRoutingSaveKeepsTheSessionTests(TestCase):
              "saxo_app_secret": SECRET, "saxo_redirect_uri": URI,
              "sim": "on", "primary_stocks": "on"}, follow=True)
         self.assertIn("is closed", r.content.decode())
+
+    # ── 2026-09-28: the routing save touches the flags and nothing else ──
+
+    def test_a_routing_save_keeps_every_session_column(self):
+        """has_session alone would pass with the access token gone or
+        `connected` dropped — the row the adapter reads is all of them."""
+        before = self._row()
+        _post_saxo(self.client, "me_u", flags=("forex",))
+        acct = self._row()
+        self.assertTrue(acct.connected)
+        self.assertEqual(acct.token_expires_at, before.token_expires_at)
+        self.assertEqual(acct.refresh_expires_at, before.refresh_expires_at)
+        self.assertEqual(acct.access_token_enc, before.access_token_enc)
+        self.assertEqual(acct.refresh_token_enc, before.refresh_token_enc)
+        self.assertEqual(acct.get_access_token(), "acc")
+        self.assertEqual(acct.get_refresh_token(), "ref")
+        # and the application columns were not re-encrypted either
+        self.assertEqual(acct.app_key_enc, before.app_key_enc)
+        self.assertTrue(acct.is_primary_for("forex"))
+        self.assertFalse(acct.is_primary_for("stock"))
+
+    def test_a_routing_save_writes_only_the_four_flags(self):
+        real_save = SaxoAccount.save
+        with mock.patch.object(SaxoAccount, "save", autospec=True,
+                               side_effect=real_save) as spy:
+            _post_saxo(self.client, "me_u", flags=("stock",))
+        spy.assert_called_once()
+        self.assertEqual(
+            set(spy.call_args.kwargs.get("update_fields") or ()),
+            {"is_primary_for_stocks", "is_primary_for_forex",
+             "is_primary_for_commodity", "is_primary_for_crypto"})
+
+    def test_a_rotation_landing_mid_save_is_not_written_back(self):
+        """The race: the keeper rotates the pair (store_tokens,
+        update_fields) between the view's read and its write. A full save
+        put the OLD refresh token back — Saxo retires it on rotation, so the
+        next refresh was refused and the session lost."""
+        from bot_program.engine import saxo_oauth
+        real = SaxoAccount.get_credentials
+
+        def rotate_then_answer(acct):
+            saxo_oauth.store_tokens(
+                SaxoAccount.objects.get(pk=acct.pk),
+                {"access_token": "acc-rotated",
+                 "refresh_token": "ref-rotated",
+                 "expires_in": 1200, "refresh_token_expires_in": 2400})
+            return real(acct)
+
+        with mock.patch.object(SaxoAccount, "get_credentials", autospec=True,
+                               side_effect=rotate_then_answer):
+            _post_saxo(self.client, "me_u", flags=("forex",))
+        acct = self._row()
+        self.assertEqual(acct.get_refresh_token(), "ref-rotated")
+        self.assertEqual(acct.get_access_token(), "acc-rotated")
+        self.assertTrue(acct.is_primary_for("forex"))
+
+    def test_a_sim_to_live_flip_with_the_session_open_is_refused(self):
+        r = _post_saxo(self.client, "me_u", sim=False, flags=("forex",),
+                       follow=True)
+        acct = self._row()
+        self.assertTrue(acct.sim)
+        self.assertTrue(acct.has_session)
+        self.assertFalse(acct.is_primary_for("forex"))       # not written
+        body = r.content.decode()
+        self.assertIn("REFUSED to switch me_u from SIM to LIVE", body)
+        self.assertIn("nothing was saved", body)
+        self.assertIn("Switch world", body)
+
+    def test_a_live_to_sim_flip_with_the_session_open_is_refused(self):
+        """The trap the form set: SIM shipped ticked, so a routing save on a
+        LIVE row that did not untick it closed the session it came for."""
+        SaxoAccount.objects.filter(pk=self.acct.pk).update(
+            sim=False, last_equity=Decimal("2500"))
+        r = _post_saxo(self.client, "me_u", sim=True, flags=("stock",),
+                       follow=True)
+        acct = self._row()
+        self.assertFalse(acct.sim)
+        self.assertTrue(acct.session_alive())
+        self.assertEqual(acct.last_equity, Decimal("2500"))
+        self.assertFalse(acct.is_primary_for("stock"))
+        self.assertIn("REFUSED to switch me_u from LIVE to SIM",
+                      r.content.decode())
+
+    def test_a_flip_with_no_open_session_needs_no_tick(self):
+        """Nothing to lose: a row that was never signed in, or whose session
+        is already gone, flips as it always did."""
+        acct = self._row()
+        acct.clear_session()
+        acct.save()
+        _post_saxo(self.client, "me_u", sim=False)
+        self.assertFalse(self._row().sim)
 
 
 class TheEtoroSaveTellsTheTruthTests(TestCase):
@@ -215,6 +310,43 @@ class TheEtoroSaveTellsTheTruthTests(TestCase):
                         return_value=("refused", "401 unauthorized")):
             r = self._post()
         self.assertNotIn("now the book", r.content.decode())
+
+    def test_a_sync_landing_during_the_probe_survives_the_save(self):
+        """The probe waits on the network for up to ten seconds between the
+        view's read of the row and its write. sync_etoro_accounts writes the
+        margin and equity cells (update_fields) in that window; a full-row
+        save put back the cells as the view had read them, and
+        _leverage_headroom sized the next order against the stale margin."""
+        acct = etoro(self.user, flags=("stock",))
+        acct.demo = True
+        acct.last_used_margin = Decimal("10")
+        acct.last_available_cash = Decimal("990")
+        acct.last_equity = Decimal("1000")
+        acct.save()
+        now = timezone.now()
+
+        def the_sync_lands_then_eToro_answers(*_a, **_k):
+            EtoroAccount.objects.filter(pk=acct.pk).update(
+                last_used_margin=Decimal("84.80"),
+                last_available_cash=Decimal("915.20"),
+                last_margin_at=now, last_margin_world="demo",
+                last_equity=Decimal("1000.42"), last_equity_at=now)
+            return ("ok", "200")
+
+        with mock.patch("dashboard.views_brokers.etoro_probe",
+                        side_effect=the_sync_lands_then_eToro_answers):
+            self._post(demo="on", primary_forex="on")
+        acct = EtoroAccount.objects.get(user=self.user)
+        self.assertEqual(acct.last_used_margin, Decimal("84.80"))
+        self.assertEqual(acct.last_available_cash, Decimal("915.20"))
+        self.assertEqual(acct.last_margin_at, now)
+        self.assertEqual(acct.last_margin_world, "demo")
+        self.assertEqual(acct.last_equity, Decimal("1000.42"))
+        # ...and what the save itself changed did land
+        self.assertTrue(acct.is_primary_for("forex"))
+        self.assertFalse(acct.is_primary_for("stock"))
+        self.assertEqual(acct.get_credentials(), ("k2", "u2"))
+        self.assertTrue(acct.connected)
 
 
 class TheSaxoRowHasAnAdapterTests(TestCase):
