@@ -418,6 +418,20 @@ class ThePageClaimsClassesTests(TestCase):
         page = self.client.get(reverse("brokers_page"))
         self.assertNotContains(page, "claimed by two brokers")
 
+    def test_the_form_comes_back_ticked_as_it_was_saved(self):
+        """The boxes are the row's, not the template's: after a save, the
+        page this redirects to shows what was saved, so the NEXT save of
+        the same form changes nothing it was not asked to change."""
+        r = self._save(sim="", primary_forex="on")
+        body = r.content.decode()
+        form = body[body.index("Register Saxo Application"):]
+        form = form[:form.index("</form>")]
+        sim_box = form[form.index('name="sim"'):]
+        self.assertNotIn("checked", sim_box[:sim_box.index(">")])
+        forex_box = form[form.index('name="primary_forex"'):]
+        self.assertIn("checked", forex_box[:forex_box.index(">")])
+        self.assertIn("On file for wire_admin: LIVE", form)
+
 
 class EveryBookableRowAnswersTheHelpersTests(TestCase):
     """The test whose absence let a defect ship on 2026-09-17.
