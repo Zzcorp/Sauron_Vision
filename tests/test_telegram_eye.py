@@ -499,7 +499,10 @@ class StatusReportTests(_EyeCase):
                 "Bots running (1)",
                 f"  • Crypto momentum #{self.cfg.pk} — paper",
                 "Platform health: all clear (54 components checked)",
-                "Proofs pinned: Crypto", "Open on the platform (1)",
+                # The set as it ships since 2026-09-28: crypto (the real
+                # BTC round trip), ETFs (GLDM, demo) and forex (EURUSD,
+                # demo, 1x and 5x). tests/test_etoro_proofs.py pins it.
+                "Proofs pinned: Crypto, ETFs, Forex", "Open on the platform (1)",
                 "  • AAPL long 0.04 @ 336.10 · stop 326.02 · paper"):
             self.assertIn(expected, lines)
         self.assertLessEqual(len(lines), eye.MAX_LINES)
