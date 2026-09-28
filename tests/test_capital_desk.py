@@ -416,6 +416,21 @@ class BookRiskTests(TestCase):
         self.assertAlmostEqual(book_risk(self.user, "paper")["risk"], 50.0)
         self.assertAlmostEqual(book_risk(self.user, "live")["risk"], 100.0)
 
+    def test_an_open_row_in_another_currency_is_not_taken_off_the_budget(self):
+        """A EUR position's risk at stop was subtracted from a USD budget as
+        if it were USD (2026-09-28). The desk sums in one currency; a row
+        whose config is in another is counted aside, never converted."""
+        from bot_program.capital_desk import budget_for
+        eur = _config(self.user, name="eur", base_currency="EUR")
+        _open_row(self.cfg, "BK8", qty="10", entry="100", stop="95")   # 50 USD
+        _open_row(eur, "BK9", qty="10", entry="100", stop="90")        # 100 EUR
+        info = budget_for(self.user, "paper")
+        self.assertEqual(info["currency"], "USD")
+        self.assertAlmostEqual(info["book_risk"], 50.0)
+        self.assertEqual(info["n_other_currency"], 1)
+        self.assertEqual([e["symbol"] for e in info["entries"]], ["BK8"])
+        self.assertEqual(info["n_open"], 2)
+
 
 class VenueCapitalTests(TestCase):
     def setUp(self):
@@ -436,6 +451,32 @@ class VenueCapitalTests(TestCase):
         # A disabled config is in neither: its capital cannot be spent.
         self.assertNotIn(7000.0, (venue_capital(self.user, "live"),
                                   venue_capital(self.user, "paper")))
+
+    def test_the_denominator_never_adds_eur_to_usd(self):
+        """Configs in two base currencies on one venue (a EUR manual lane
+        beside USD eToro bots is this deployment's shape): the desk summed
+        them into a budget that exists in no currency, and /desk/ labelled
+        it with the first config's (2026-09-28). The desk now sums the
+        first currency it finds and says the others aside — never adds."""
+        from bot_program.capital_desk import budget_for, venue_capital
+        _config(self.user, name="A", mode="live", capital=Decimal("5000"))
+        _config(self.user, name="B", mode="live", capital=Decimal("3000"))
+        _config(self.user, name="C", mode="live", capital=Decimal("2000"),
+                base_currency="EUR")
+        self.assertAlmostEqual(venue_capital(self.user, "live"), 8000.0)
+        info = budget_for(self.user, "live")
+        self.assertAlmostEqual(info["capital"], 8000.0)
+        self.assertEqual(info["currency"], "USD")
+        self.assertEqual(info["not_summed"], {"EUR": 1})
+        self.assertIn("1 config in EUR not summed", info["reason"])
+
+    def test_one_currency_says_nothing_aside(self):
+        from bot_program.capital_desk import budget_for
+        _config(self.user, name="A", mode="live", capital=Decimal("5000"))
+        info = budget_for(self.user, "live")
+        self.assertEqual(info["currency"], "USD")
+        self.assertEqual(info["not_summed"], {})
+        self.assertNotIn("not summed", info["reason"])
 
     def test_a_live_only_fleet_still_has_a_paper_budget(self):
         """REGRESSION (adversarial review, 2026-09-12): the paper denominator

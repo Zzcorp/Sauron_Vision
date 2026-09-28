@@ -28,8 +28,12 @@ PIN = "1234"
 
 def _acct(user, equity="2000.00", currency="EUR", *, age_seconds=0):
     from bot_program.models import IBKRAccount
+    # The book carries BOTH classes these fixtures follow with: a forex
+    # follower the router sends elsewhere is not retuned
+    # (capital_truth.foreign_venue, every venue since 2026-09-28).
     acct = IBKRAccount.objects.create(user=user, port=4003,
-                                      is_primary_for_stocks=True)
+                                      is_primary_for_stocks=True,
+                                      is_primary_for_forex=True)
     acct.set_credentials("U1234567")
     acct.username_enc, acct.password_enc = "x", "y"
     acct.last_equity = Decimal(equity)
@@ -47,6 +51,14 @@ def _cfg(user, *, name, asset_class="stock", mode="live", enabled=True,
         ex["capital_tracks_broker"] = True
     if share is not None:
         ex["account_share_pct"] = share
+    # The router learns a symbol's class from its Instrument row and calls
+    # an unknown symbol crypto — a class no IBKR row carries — so the pool
+    # would trade at Binance and follow nothing. Register what the fixture
+    # means: AAPL is a stock, EURUSD is forex, on the IBKR book above.
+    from instruments.models import Instrument
+    for sym in symbols:
+        Instrument.objects.get_or_create(
+            symbol=sym, defaults={"name": sym, "asset_class": asset_class})
     return AssetBotConfig.objects.create(
         user=user, asset_class=asset_class, name=name, mode=mode,
         enabled=enabled, symbols=list(symbols), capital=Decimal(capital),

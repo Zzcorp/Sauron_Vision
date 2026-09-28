@@ -326,3 +326,147 @@ class TheEntryPathCacheMergesTests(TestCase):
                 as client_for_symbol:
             self.assertEqual(broker_equity(user, cfg), 1234.0)
         client_for_symbol.assert_not_called()
+
+
+# ── the other two walks prune too ─────────────────────────────────────────
+
+class TheOtherWalksPruneTooTests(TestCase):
+    """The IBKR walk pruned rows older than EQUITY_HISTORY_DAYS; the Saxo
+    and eToro walks wrote a row every 900 s and never pruned, so on the box
+    where IBKR is being retired the table was unbounded — ~35,000 rows a
+    year per account, for ever (2026-09-28). One helper, one retention,
+    three walks, each scoped to the (broker, account_pk) it just read."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    @staticmethod
+    def _rows(broker, account_pk, *days_ago):
+        from bot_program.models import BrokerEquityReading
+        return [BrokerEquityReading.objects.create(
+            broker=broker, account_pk=account_pk, value=Decimal("100"),
+            currency="EUR", env="paper",
+            at=timezone.now() - timedelta(days=d)) for d in days_ago]
+
+    def _client(self):
+        return MagicMock(
+            net_liquidation=MagicMock(return_value=(1000.0, "EUR")),
+            broker_portfolio=MagicMock(return_value=[]))
+
+    def _left(self, broker, account_pk):
+        from bot_program.models import BrokerEquityReading
+        return set(BrokerEquityReading.objects.filter(
+            broker=broker, account_pk=account_pk).values_list("pk", flat=True))
+
+    def test_the_saxo_walk_prunes_that_accounts_rows_only(self):
+        from bot_program.models import BrokerEquityReading
+        from tests.test_saxo_wiring import _sync, saxo
+        u = _user("eq_saxo_prune")
+        acct = saxo(u, flags=("stock",))
+        old, keep = self._rows("saxo", acct.pk, 401, 399)
+        (other_old,) = self._rows("saxo", acct.pk + 1000, 401)   # not read
+        (ibkr_old,) = self._rows("ibkr", acct.pk, 401)           # same pk, other broker
+        with patch("bot_program.tasks._follow_the_account"), \
+             patch("bot_program.tasks._shock_trigger"):
+            out, _T = _sync(self._client())
+        self.assertEqual(out["stored"], 1)
+        left = self._left("saxo", acct.pk)
+        self.assertNotIn(old.pk, left)
+        self.assertIn(keep.pk, left)
+        self.assertEqual(len(left), 2)           # the kept row + the new one
+        self.assertTrue(BrokerEquityReading.objects.filter(pk=other_old.pk).exists())
+        self.assertTrue(BrokerEquityReading.objects.filter(pk=ibkr_old.pk).exists())
+
+    def test_the_etoro_walk_prunes_that_accounts_rows_only(self):
+        from bot_program.models import BrokerEquityReading
+        from tests.test_sync_walks_etoro import _etoro, _sync_etoro
+        u = _user("eq_etoro_prune")
+        acct = _etoro(u)
+        old, keep = self._rows("etoro", acct.pk, 401, 399)
+        (other_old,) = self._rows("etoro", acct.pk + 1000, 401)
+        (saxo_old,) = self._rows("saxo", acct.pk, 401)
+        with patch("bot_program.tasks._follow_the_account"), \
+             patch("bot_program.tasks._shock_trigger"):
+            out = _sync_etoro(self._client())
+        self.assertEqual(out["stored"], 1)
+        left = self._left("etoro", acct.pk)
+        self.assertNotIn(old.pk, left)
+        self.assertIn(keep.pk, left)
+        self.assertEqual(len(left), 2)
+        self.assertTrue(BrokerEquityReading.objects.filter(pk=other_old.pk).exists())
+        self.assertTrue(BrokerEquityReading.objects.filter(pk=saxo_old.pk).exists())
+
+    def test_the_three_walks_share_one_retention(self):
+        """Same helper, same number: a walk with its own copy of the prune
+        is a walk whose retention drifts."""
+        import inspect
+
+        from bot_program import tasks
+        self.assertTrue(callable(getattr(tasks, "_prune_equity_history", None)))
+        src = inspect.getsource(tasks)
+        self.assertEqual(src.count("_prune_equity_history("), 4,
+                         "one definition and one call per walk")
+        self.assertEqual(src.count("timedelta(days=EQUITY_HISTORY_DAYS)"), 1,
+                         "the retention is applied in one place")
+
+
+# ── migration 0032 on the way down ────────────────────────────────────────
+
+class TheMigrationReverseTests(TestCase):
+    """0032 made `account` nullable so the Saxo and eToro walks could land
+    a reading with no IBKR foreign key. Its reverse put the column back to
+    NOT NULL over those rows, and the RunPython reverse was a no-op, so
+    `migrate bot_program 0031` raised an IntegrityError mid-migration on any
+    box where either walk had run. The migration's own docstring — "so no
+    reading loses its owner" — rules out deleting them on the way down: the
+    reverse now REFUSES, before the schema is touched, and names the rows
+    and the way out (2026-09-28)."""
+
+    @staticmethod
+    def _migration():
+        from importlib import import_module
+        return import_module(
+            "bot_program.migrations.0032_equity_reading_generic_key")
+
+    def test_the_reverse_refuses_while_a_reading_has_no_ibkr_owner(self):
+        from django.apps import apps
+        from django.db.migrations.exceptions import IrreversibleError
+
+        from bot_program.models import BrokerEquityReading
+        for broker, n in (("etoro", 2), ("saxo", 1)):
+            for i in range(n):
+                BrokerEquityReading.objects.create(
+                    broker=broker, account_pk=7, value=Decimal("1"),
+                    currency="USD", env="paper",
+                    at=timezone.now() - timedelta(minutes=i + 1))
+        mig = self._migration()
+        with self.assertRaises(IrreversibleError) as ctx:
+            mig.refuse_reverse_over_readings_without_an_owner(apps, None)
+        msg = str(ctx.exception)
+        self.assertIn("3 BrokerEquityReading rows", msg)
+        self.assertIn("etoro: 2", msg)
+        self.assertIn("saxo: 1", msg)
+        self.assertIn("deletes nothing", msg)
+        self.assertEqual(BrokerEquityReading.objects.count(), 3)
+
+    def test_the_reverse_passes_when_every_reading_has_its_ibkr_owner(self):
+        from django.apps import apps
+        u = _user("eq_rev_ok")
+        acct = _acct(u)
+        _reading(acct, 100)
+        mig = self._migration()
+        mig.refuse_reverse_over_readings_without_an_owner(apps, None)  # no raise
+
+    def test_the_migration_wires_the_refusal_as_its_reverse(self):
+        from django.db.migrations import RunPython
+        mig = self._migration()
+        ops = [op for op in mig.Migration.operations
+               if isinstance(op, RunPython)]
+        self.assertEqual(len(ops), 1)
+        self.assertIs(ops[0].code, mig.backfill_pair)
+        self.assertIs(ops[0].reverse_code,
+                      mig.refuse_reverse_over_readings_without_an_owner)
+        self.assertIs(ops[-1], mig.Migration.operations[-1],
+                      "last forward, so first on the way down: the refusal "
+                      "runs before any column is touched")

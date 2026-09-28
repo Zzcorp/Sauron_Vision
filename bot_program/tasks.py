@@ -423,7 +423,6 @@ def sync_broker_account() -> dict:
             # placeholder would read as a total drawdown and pin the
             # governor to its floor for 90 days (2026-09-12).
             try:
-                from datetime import timedelta
                 from decimal import Decimal
 
                 from .equity_models import BrokerEquityReading
@@ -431,11 +430,7 @@ def sync_broker_account() -> dict:
                     broker="ibkr", account_pk=acct.pk,
                     account=acct, value=Decimal(str(round(float(value), 2))),
                     currency=currency or "", env=acct.env or "", at=now)
-                BrokerEquityReading.objects.filter(
-                    broker="ibkr", account_pk=acct.pk,
-                    account=acct,
-                    at__lt=now - timedelta(days=EQUITY_HISTORY_DAYS)
-                ).delete()
+                _prune_equity_history("ibkr", acct.pk, now)
             except Exception as e:  # noqa: BLE001 — history is beside the sync, not in it
                 logger.warning("broker sync: history row failed: %s", e)
             # ONLY WHEN THIS ROW IS THE BOOK. Both newer walks carry this
@@ -518,6 +513,25 @@ def _shock_trigger(user, now) -> None:
 # The drawdown governor looks back 90 days; 400 keeps a year of context
 # for the operator's eye and bounds the table at ~1 row per sync.
 EQUITY_HISTORY_DAYS = 400
+
+
+def _prune_equity_history(broker: str, account_pk: int, now) -> None:
+    """Drop this account's history rows older than EQUITY_HISTORY_DAYS.
+
+    ONE helper for the three walks (2026-09-28): the IBKR walk pruned
+    inline and the Saxo and eToro walks never did, so on the box where
+    IBKR is being retired the table grew by a row every 900 s for ever —
+    some 35,000 rows a year per account. Scoped to the (broker,
+    account_pk) the walk just read, never fleet-wide, and called inside
+    the walk's history try beside the insert, so a failed prune is the
+    same logged warning as a failed insert and never a failed sync.
+    """
+    from datetime import timedelta
+
+    from .equity_models import BrokerEquityReading
+    BrokerEquityReading.objects.filter(
+        broker=broker, account_pk=account_pk,
+        at__lt=now - timedelta(days=EQUITY_HISTORY_DAYS)).delete()
 
 
 def _follow_the_account(user, value, currency) -> None:
@@ -707,6 +721,7 @@ def sync_saxo_accounts():
                     defaults={"value": value, "currency": currency,
                               "env": "paper" if acct.sim else "live",
                               "account": None})
+                _prune_equity_history("saxo", acct.pk, now)
             except Exception as e:  # noqa: BLE001 — a history row is not the sync
                 logger.warning("broker sync: %s (saxo) history row failed: %s",
                                acct.label, e)
@@ -945,6 +960,7 @@ def sync_etoro_accounts():
                     broker="etoro", account_pk=acct.pk, at=now,
                     defaults={"value": value, "currency": currency,
                               "env": "paper" if acct.demo else "live"})
+                _prune_equity_history("etoro", acct.pk, now)
             except Exception as e:  # noqa: BLE001 — the cell is written; history must not fail the sync
                 logger.warning("broker sync: %s (etoro) history row failed: "
                                "%s", acct.label, e)

@@ -36,8 +36,12 @@ User = get_user_model()
 
 def _acct(user, equity="2000.00", currency="EUR", *, age_seconds=0):
     from bot_program.models import IBKRAccount
+    # The book carries BOTH classes these fixtures follow with: a forex
+    # follower the router sends elsewhere is not retuned
+    # (capital_truth.foreign_venue, every venue since 2026-09-28).
     acct = IBKRAccount.objects.create(user=user, port=4003,
-                                      is_primary_for_stocks=True)
+                                      is_primary_for_stocks=True,
+                                      is_primary_for_forex=True)
     acct.set_credentials("U1234567")
     acct.username_enc, acct.password_enc = "x", "y"
     acct.last_equity = Decimal(equity)
@@ -56,6 +60,14 @@ def _cfg(user, *, name, asset_class="stock", mode="live", enabled=True,
         ex["capital_tracks_broker"] = True
     if share is not None:
         ex["account_share_pct"] = share
+    # The router learns a symbol's class from its Instrument row and calls
+    # an unknown symbol crypto — a class no IBKR row carries — so the pool
+    # would trade at Binance and follow nothing. Register what the fixture
+    # means: AAPL is a stock, EURUSD is forex, on the IBKR book above.
+    from instruments.models import Instrument
+    for sym in symbols:
+        Instrument.objects.get_or_create(
+            symbol=sym, defaults={"name": sym, "asset_class": asset_class})
     return AssetBotConfig.objects.create(
         user=user, asset_class=asset_class, name=name, mode=mode,
         enabled=enabled, symbols=list(symbols), capital=Decimal(capital),
@@ -98,11 +110,13 @@ def _capital(cfg) -> float:
     return float(cfg.capital)
 
 
-def _applied(user, targets, previous, current=None, *, hours_ago=1.0):
-    """An APPLIED plan on the books, as apply_share_plan would leave it."""
+def _applied(user, targets, previous, current=None, *, hours_ago=1.0,
+             state=None):
+    """An APPLIED plan on the books, as apply_share_plan would leave it —
+    or, with `state`, as a later rollback would (applied_at untouched)."""
     from bot_program.share_models import SharePlan
     p = SharePlan.objects.create(
-        user=user, state=SharePlan.STATE_APPLIED,
+        user=user, state=state or SharePlan.STATE_APPLIED,
         targets={str(k): v for k, v in targets.items()},
         previous_shares={str(k): v for k, v in previous.items()},
         current_shares={str(k): v for k, v in (current or previous).items()},
@@ -508,6 +522,24 @@ class ProposeTests(TestCase):
         plan2 = propose_share_plan(self.user)
         self.assertEqual(plan2.targets[str(a.pk)], 52.0)
 
+    def test_the_per_day_cap_counts_a_move_that_was_rolled_back(self):
+        """Apply +8, roll it back, propose again: the pool moved twice today
+        and the allowance is what the FIRST move left. A state='applied'
+        filter dropped the rolled-back plan and handed the pool a fresh 10
+        points after every rollback (2026-09-28)."""
+        from bot_program.share_allocator import propose_share_plan
+        from bot_program.share_models import SharePlan
+        a = _cfg(self.user, name="a", tracks=True, share=50)
+        b = _cfg(self.user, name="b", tracks=True, share=50,
+                 asset_class="forex", symbols=["EURUSD"])
+        for _ in range(10):
+            _fill(a, 1.0)
+        _applied(self.user, {a.pk: 50, b.pk: 50}, {a.pk: 42, b.pk: 58},
+                 hours_ago=3, state=SharePlan.STATE_ROLLED_BACK)
+        plan = propose_share_plan(self.user)
+        self.assertEqual(plan.targets[str(a.pk)], 52.0)     # 2 points left
+        self.assertEqual(plan.targets[str(b.pk)], 48.0)
+
     def test_an_automatic_previous_share_counts_from_the_plans_current(self):
         from bot_program.share_allocator import propose_share_plan
         a = _cfg(self.user, name="a", tracks=True, share=50)
@@ -603,7 +635,7 @@ class ProposeTests(TestCase):
         c.save()
         Instrument.objects.create(symbol="GLDM", name="g", asset_class="etf")
         a = _cfg(self.user, name="a", tracks=True, share=50, symbols=["GLDM"])
-        _cfg(self.user, name="b", tracks=True, share=50)   # AAPL: unknown row
+        _cfg(self.user, name="b", tracks=True, share=50)   # AAPL: a stock row
         plan = propose_share_plan(self.user)
         opp = plan.inputs[str(a.pk)]["opportunity"]
         self.assertIn("etf", opp["classes"])
@@ -696,6 +728,27 @@ class ApplyTests(TestCase):
         self.a.refresh_from_db()
         self.assertEqual(self.a.extras["account_share_pct"], 50)
 
+    def test_a_rolled_back_apply_still_counts_toward_the_daily_cap(self):
+        """Three applies a day means three applies. A rollback moves the
+        plan to ROLLED_BACK and the counter read APPLIED only, so
+        apply/rollback/apply/rollback/apply never reached the cap and
+        re-sized the live pools six times (2026-09-28)."""
+        from bot_program.share_allocator import (MAX_APPLIES_PER_DAY,
+                                                 ShareAllocatorError,
+                                                 apply_share_plan,
+                                                 applies_used_today)
+        from bot_program.share_models import SharePlan
+        _set_live(True)
+        for _ in range(MAX_APPLIES_PER_DAY):
+            _applied(self.user, {self.a.pk: 50}, {self.a.pk: 50},
+                     hours_ago=2, state=SharePlan.STATE_ROLLED_BACK)
+        self.assertEqual(applies_used_today(self.user), MAX_APPLIES_PER_DAY)
+        with self.assertRaises(ShareAllocatorError) as ctx:
+            apply_share_plan(self.plan.pk, self.admin)
+        self.assertIn("Daily cap", str(ctx.exception))
+        self.a.refresh_from_db()
+        self.assertEqual(self.a.extras["account_share_pct"], 50)
+
     def test_a_stale_reading_refuses_the_apply(self):
         from bot_program.capital_truth import TRACKING_FRESH_SECONDS
         from bot_program.share_allocator import (ShareAllocatorError,
@@ -760,6 +813,18 @@ class RollbackAndRejectTests(TestCase):
         self.assertEqual(float(self.b.capital), 1000.0)
         self.assertEqual(AuditLogEntry.objects.filter(kind="share_plan")
                          .last().data["decision"], "rolled_back")
+
+    def test_a_rollback_does_not_hand_back_the_apply_it_undid(self):
+        """It moved the share and then moved it back: two events, one apply
+        used — the same count tests/test_wall_facts pins for the wall."""
+        from bot_program.share_allocator import (apply_share_plan,
+                                                 applies_used_today,
+                                                 rollback_share_plan)
+        _set_live(True)
+        apply_share_plan(self.plan.pk, self.admin)
+        self.assertEqual(applies_used_today(self.user), 1)
+        rollback_share_plan(self.plan.pk, self.admin)
+        self.assertEqual(applies_used_today(self.user), 1)
 
     def test_rollback_skips_a_follower_that_stood_down(self):
         from bot_program.models import AssetBotConfig

@@ -48,6 +48,14 @@ def _cfg(user, *, name, asset_class="stock", mode="live", enabled=True,
         extras["capital_tracks_broker"] = True
     if share is not None:
         extras["account_share_pct"] = share
+    # The router learns a symbol's class from its Instrument row and calls
+    # an unknown symbol crypto — a class no IBKR row carries — so the pool
+    # would trade at Binance and follow nothing (capital_truth.foreign_venue,
+    # every venue since 2026-09-28). Register what the fixture means.
+    from instruments.models import Instrument
+    for sym in symbols:
+        Instrument.objects.get_or_create(
+            symbol=sym, defaults={"name": sym, "asset_class": asset_class})
     return AssetBotConfig.objects.create(
         user=user, asset_class=asset_class, name=name, mode=mode,
         enabled=enabled, symbols=list(symbols), capital=Decimal(capital),

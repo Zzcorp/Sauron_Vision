@@ -654,6 +654,25 @@ class TheFollowButtonRefusesAnOffBookPool(TestCase):
         self.assertTrue((cfg.extras or {}).get("capital_tracks_broker"))
         self.assertEqual(cfg.capital, Decimal("100000.00"))
 
+    def test_a_pool_routed_to_a_legacy_venue_cannot_follow(self):
+        """Binance, OANDA and Alpaca are venues the router NAMES, and
+        client_for_symbol builds a live client for each the moment the keys
+        are saved. The button knew three names and let a crypto pool under a
+        Saxo book take its share of Saxo's money (2026-09-28)."""
+        from bot_program.models import AssetBotConfig, BinanceAccount
+        binance = BinanceAccount.objects.create(user=self.user, testnet=False)
+        binance.set_credentials("k", "s")
+        binance.save()
+        _inst_of("BTCUSDT", "crypto")      # no crypto flag on Saxo or eToro
+        cfg = AssetBotConfig.objects.create(
+            user=self.user, name="CRYPTO", asset_class="crypto", mode="live",
+            enabled=True, symbols=["BTCUSDT"], capital=Decimal("500"))
+        self._post(cfg)
+        cfg.refresh_from_db()
+        self.assertEqual(cfg.capital, Decimal("500"),
+                         "the button must not size it from another account")
+        self.assertFalse((cfg.extras or {}).get("capital_tracks_broker"))
+
 
 class TheSyncAsksEverySymbol(TestCase):
 
@@ -700,3 +719,13 @@ class TheSyncAsksEverySymbol(TestCase):
         self._run()
         pool.refresh_from_db()
         self.assertEqual(pool.capital, Decimal("100000.00"))
+
+    def test_a_symbol_routed_to_a_legacy_venue_refuses_the_retune(self):
+        """The sync's test knew saxo, etoro and ibkr; a symbol the router
+        sends to Binance was "cannot tell", and the pool followed the Saxo
+        book every 900 s while its orders went elsewhere (2026-09-28)."""
+        _inst_of("BTCUSDT", "crypto")      # unflagged: the router says binance
+        pool = self._pool(["AAPL", "BTCUSDT"])
+        self._run()
+        pool.refresh_from_db()
+        self.assertEqual(pool.capital, Decimal("500"))

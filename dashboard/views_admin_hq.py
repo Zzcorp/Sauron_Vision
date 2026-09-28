@@ -962,23 +962,17 @@ def hq_follow_asset_bot(request):
     # that row for ever (tasks.py), so the pool sat on a number derived from
     # an account it does not trade and nothing said so again.
     #
-    # EVERY symbol, not the first: the router routes per symbol, so a pool
-    # can reach two venues. The first foreign one decides, which only ever
-    # refuses more.
-    from bot_program.capital_truth import broker_backed, broker_kind
-    from bot_program.engine.broker_router import broker_name_for_symbol
+    # EVERY symbol, not the first, and EVERY venue the router can name, not
+    # three — the one test the sync, `manage.py follow` and the withdrawals
+    # page share (capital_truth.foreign_venue). This handler kept its own
+    # copy with the three flagged names, so a crypto pool the router sends
+    # to Binance took its share of the book here, and the sync then refused
+    # to retune it for ever (review, 2026-09-28).
+    from bot_program.capital_truth import (broker_backed, broker_kind,
+                                           foreign_venue)
     _book = broker_backed(request.user)
     _book_kind = broker_kind(_book) if _book is not None else ""
-    _foreign = ""
-    for _sym in list(cfg.symbols or []):
-        try:
-            _venue = broker_name_for_symbol(request.user, _sym, cfg)
-        except Exception:  # noqa: BLE001 — cannot tell is not a mismatch
-            continue
-        if (_venue in ("saxo", "etoro", "ibkr") and _book_kind
-                and _venue != _book_kind):
-            _foreign = _venue
-            break
+    _foreign = foreign_venue(request.user, cfg, _book_kind)
     if _foreign:
         messages.error(
             request,

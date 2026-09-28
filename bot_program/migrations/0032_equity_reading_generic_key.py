@@ -18,8 +18,40 @@ def backfill_pair(apps, schema_editor):
                                     batch_size=500)
 
 
-def noop(apps, schema_editor):
-    pass
+def refuse_reverse_over_readings_without_an_owner(apps, schema_editor):
+    """The reverse of this migration puts `account` back to NOT NULL.
+
+    Every reading the Saxo and eToro walks have written since 2026-09-17
+    carries no IBKR foreign key (sync_saxo_accounts passes account=None,
+    sync_etoro_accounts passes nothing), so the AlterField below, run
+    backwards, raised an IntegrityError mid-migration on any box where
+    either walk had run — and this RunPython's reverse was a no-op that
+    let it get that far (review, 2026-09-28).
+
+    The forward docstring says why the reverse cannot simply delete them:
+    "so no reading loses its owner". Those rows ARE readings with owners —
+    owners the 0031 schema cannot name. So the reverse REFUSES, here,
+    before any column is touched (this operation is last forward and
+    therefore first backward), and says which rows and what to do. It
+    deletes nothing.
+    """
+    from collections import Counter
+
+    from django.db.migrations.exceptions import IrreversibleError
+
+    Reading = apps.get_model("bot_program", "BrokerEquityReading")
+    by_broker = Counter(Reading.objects.filter(account__isnull=True)
+                        .values_list("broker", flat=True))
+    if not by_broker:
+        return
+    n = sum(by_broker.values())
+    named = ", ".join(f"{b}: {c}" for b, c in sorted(by_broker.items()))
+    raise IrreversibleError(
+        f"cannot reverse 0032: {n} BrokerEquityReading rows have no IBKR "
+        f"owner ({named}) and 0031's NOT NULL `account` column cannot hold "
+        f"them. This reverse deletes nothing, so no reading loses its owner: "
+        f"take a dump (deploy/backup.sh), delete or re-key those rows by "
+        f"hand, then migrate again.")
 
 
 class Migration(migrations.Migration):
@@ -85,5 +117,6 @@ class Migration(migrations.Migration):
             model_name='brokerequityreading',
             constraint=models.UniqueConstraint(fields=('broker', 'account_pk', 'at'), name='one_reading_per_sync_v2'),
         ),
-        migrations.RunPython(backfill_pair, noop),
+        migrations.RunPython(backfill_pair,
+                             refuse_reverse_over_readings_without_an_owner),
     ]

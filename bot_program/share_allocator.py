@@ -688,11 +688,20 @@ def _classes_of(cfg) -> dict:
 
 
 def _applied_today(user, now) -> dict:
-    """{pk: points already moved by APPLIED plans in the last 24h}."""
+    """{pk: points already moved by plans applied in the last 24h}.
+
+    ROLLED-BACK ONES INCLUDED (2026-09-28). A plan that was applied and
+    rolled back moved the share and moved it back — two events, not zero
+    — and the day's allowance is what the first move left. A
+    state='applied' filter dropped it and handed the pool a fresh 10
+    points after every rollback; rollback rewrites `state` and leaves
+    `applied_at` alone, which is the key both caps count on (the wall's
+    own count reads it the same way). Same set in applies_used_today."""
     from bot_program.share_models import SharePlan
     moved: dict = {}
     for p in SharePlan.objects.filter(
-            user=user, state=SharePlan.STATE_APPLIED,
+            user=user, state__in=(SharePlan.STATE_APPLIED,
+                                  SharePlan.STATE_ROLLED_BACK),
             applied_at__gte=now - timedelta(hours=24)):
         prev, cur = p.previous_shares or {}, p.current_shares or {}
         for k, target in (p.targets or {}).items():
@@ -1307,10 +1316,15 @@ def _locked_plan(plan_id):
 
 
 def applies_used_today(user, now=None) -> int:
+    """Applies in the last 24h, the rolled-back ones included: three a day
+    means three applies, and apply/rollback/apply/rollback/apply used to
+    count as none while re-sizing the live pools six times (see
+    _applied_today)."""
     from bot_program.share_models import SharePlan
     now = now or timezone.now()
     return SharePlan.objects.filter(
-        user=user, state=SharePlan.STATE_APPLIED,
+        user=user, state__in=(SharePlan.STATE_APPLIED,
+                              SharePlan.STATE_ROLLED_BACK),
         applied_at__gte=now - timedelta(hours=24)).count()
 
 

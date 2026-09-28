@@ -94,8 +94,15 @@ def _user(name="shares_u", **kw):
 
 
 def _cfg(user, *, name, asset_class="stock", mode="live", enabled=True,
-         capital="100", tracks=False, share=None):
+         capital="100", tracks=False, share=None, symbols=("GLDM",)):
     from bot_program.models import AssetBotConfig
+    from instruments.models import Instrument
+    # GLDM is an ETF on the IBKR book these tests flag for stocks. The
+    # router learns a symbol's class from its Instrument row and calls an
+    # unknown symbol crypto — which no IBKR row can carry, so the pool
+    # would trade at Binance and follow nothing (capital_truth.foreign_venue).
+    Instrument.objects.get_or_create(
+        symbol="GLDM", defaults={"name": "GLDM", "asset_class": "etf"})
     extras = {}
     if tracks:
         extras["capital_tracks_broker"] = True
@@ -103,7 +110,7 @@ def _cfg(user, *, name, asset_class="stock", mode="live", enabled=True,
         extras["account_share_pct"] = share
     return AssetBotConfig.objects.create(
         user=user, asset_class=asset_class, name=name, mode=mode,
-        symbols=["GLDM"], capital=Decimal(capital), base_currency="EUR",
+        symbols=list(symbols), capital=Decimal(capital), base_currency="EUR",
         enabled=enabled, extras=extras)
 
 
@@ -141,6 +148,26 @@ class TheSyncWritesSharesTests(TestCase):
         alert.assert_called_once()
         self.assertIn("over-allocated", alert.call_args.kwargs["title"])
         self.assertIn("110%", alert.call_args.kwargs["body"])
+
+    def test_a_follower_routed_to_a_legacy_venue_is_not_retuned(self):
+        """The book is IBKR (stocks). A crypto follower routes to Binance —
+        a venue the router names and builds a live client for — and the
+        sync knew three names, so it sized that pool from IBKR's reading on
+        every beat (2026-09-28). The book's own follower is still retuned."""
+        from instruments.models import Instrument
+        u = _user()
+        _acct(u)
+        Instrument.objects.get_or_create(
+            symbol="BTCUSDT", defaults={"name": "BTCUSDT",
+                                        "asset_class": "crypto"})
+        etf = _cfg(u, name="etf", tracks=True)
+        crypto = _cfg(u, name="crypto", asset_class="crypto", tracks=True,
+                      capital="120", symbols=("BTCUSDT",))
+        from bot_program.tasks import _follow_the_account
+        _follow_the_account(u, 500.0, "EUR")
+        etf.refresh_from_db(); crypto.refresh_from_db()
+        self.assertEqual(float(crypto.capital), 120.0)
+        self.assertNotEqual(float(etf.capital), 100.0)
 
     def test_paper_and_disabled_pools_are_not_followers(self):
         u = _user()
@@ -209,6 +236,18 @@ class ABotFollowsTheAccountTooTests(TestCase):
         cfg.refresh_from_db()
         self.assertNotIn("account_share_pct", cfg.extras)
         self.assertEqual(float(cfg.capital), 300.0)   # the other 60%
+
+    def test_a_bot_routed_to_a_legacy_venue_cannot_follow(self):
+        from instruments.models import Instrument
+        Instrument.objects.get_or_create(
+            symbol="BTCUSDT", defaults={"name": "BTCUSDT",
+                                        "asset_class": "crypto"})
+        cfg = _cfg(self.user, name="crypto", asset_class="crypto",
+                   capital="200", symbols=("BTCUSDT",))
+        self._follow(cfg, share="30")
+        cfg.refresh_from_db()
+        self.assertNotIn("capital_tracks_broker", cfg.extras)
+        self.assertEqual(float(cfg.capital), 200.0)
 
     def test_the_pin_is_required_to_start(self):
         cfg = _cfg(self.user, name="etf", capital="200")

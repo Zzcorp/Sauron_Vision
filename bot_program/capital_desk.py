@@ -570,11 +570,11 @@ def bet_rho(matrix, a, dir_a, b, dir_b) -> float:
 
 # ── 3. The open book and the budget ──────────────────────────────────────
 
-def book_risk(user, venue) -> dict:
+def book_risk(user, venue, currency=None) -> dict:
     """Risk-at-stop already committed on this venue.
 
-    {"risk", "n_open", "unmeasured_open", "entries": [{symbol, direction,
-     risk}]}
+    {"risk", "n_open", "unmeasured_open", "n_other_currency",
+     "entries": [{symbol, direction, risk}]}
 
     Sigma of qty x |entry - metadata.initial_stop_loss| x value_per_unit over
     every OPEN or CLOSE_PENDING row of the venue. CLOSE_PENDING counts: the
@@ -590,17 +590,31 @@ def book_risk(user, venue) -> dict:
     A row with no `initial_stop_loss` in its metadata is UNMEASURED, not
     zero: it is counted in `unmeasured_open` and contributes nothing, so the
     plan can say how much of its own book it could not price.
+
+    ONE CURRENCY (2026-09-28). With `currency`, a row whose config is in
+    another base_currency is counted in `n_other_currency` and contributes
+    nothing: its risk is real, but it is not in the budget's currency, and
+    nothing in this codebase converts. A EUR position's risk at stop was
+    being taken off a USD budget as if it were USD. Without `currency`
+    every row counts, as before.
     """
+    from django.db.models import F
+
     from bot_program.models import AssetBotTrade
 
     paper = (str(venue) == "paper")
-    out = {"risk": 0.0, "n_open": 0, "unmeasured_open": 0, "entries": []}
+    out = {"risk": 0.0, "n_open": 0, "unmeasured_open": 0,
+           "n_other_currency": 0, "entries": []}
     rows = AssetBotTrade.objects.filter(
         config__user=user, paper=paper,
         status__in=("OPEN", "CLOSE_PENDING"),
-    ).only("symbol", "side", "qty", "entry_price", "metadata")
+    ).annotate(ccy=F("config__base_currency")).only(
+        "symbol", "side", "qty", "entry_price", "metadata")
     for row in rows:
         out["n_open"] += 1
+        if currency and (row.ccy or "USD") != currency:
+            out["n_other_currency"] += 1
+            continue
         meta = row.metadata or {}
         stop = meta.get("initial_stop_loss")
         if stop is None:
@@ -651,23 +665,48 @@ def venue_capital(user, venue) -> float:
     real money — not because paper capital needs protecting — so the paper
     denominator's job is to size the paper book, and the live budget remains
     the only ceiling standing in front of the broker.
+
+    ONE CURRENCY (2026-09-28). `capital` is in each config's base_currency
+    and this codebase converts nothing anywhere, by design — so a EUR
+    manual lane beside USD eToro bots summed into a budget that exists in
+    no currency, which the desk then spent. The sum is taken in the
+    currency of the first enabled config on the venue (the model's own
+    ordering — the same "first enabled config" /desk/ labels its bar
+    with), and every config in another currency is left aside and COUNTED,
+    so the plan can say "2 configs in EUR not summed" rather than add
+    them. venue_capital_detail carries the currency and the aside; this
+    returns the number alone.
     """
+    return venue_capital_detail(user, venue)["capital"]
+
+
+def venue_capital_detail(user, venue) -> dict:
+    """{"capital", "currency", "not_summed": {currency: n}} — the sum in
+    ONE currency and what was left aside (see venue_capital). `currency`
+    is "" when nothing is enabled on the venue."""
     from bot_program.models import AssetBotConfig
 
     modes = ("paper", "live") if str(venue) == "paper" else ("live",)
-    total = 0.0
-    for cap in (AssetBotConfig.objects
-                .filter(user=user, enabled=True, mode__in=modes)
-                .values_list("capital", flat=True)):
+    currency, total, aside = "", 0.0, {}
+    for cap, ccy in (AssetBotConfig.objects
+                     .filter(user=user, enabled=True, mode__in=modes)
+                     .values_list("capital", "base_currency")):
+        ccy = ccy or "USD"
+        if not currency:
+            currency = ccy
+        if ccy != currency:
+            aside[ccy] = aside.get(ccy, 0) + 1
+            continue
         total += _f(cap)
-    return total
+    return {"capital": total, "currency": currency, "not_summed": aside}
 
 
 def budget_for(user, venue, *, now=None) -> dict:
     """What is left to spend on new risk this tick.
 
-    {"budget", "gross", "capital", "book_risk", "unmeasured_open",
-     "governor", "drawdown_pct", "entries", "reason"}
+    {"budget", "gross", "capital", "currency", "not_summed", "book_risk",
+     "unmeasured_open", "n_other_currency", "governor", "drawdown_pct",
+     "entries", "reason"}
 
     gross = venue_capital x DESK_RISK_BUDGET_PCT/100, times the drawdown
     governor ON LIVE ONLY and only when a reading exists. Paper has no
@@ -675,9 +714,20 @@ def budget_for(user, venue, *, now=None) -> dict:
     produces the evidence to promote a rule. budget = gross - book_risk, and
     it can be negative, which means the book is already past the ceiling and
     nothing new is taken.
+
+    Everything here is in ONE currency, `currency` (venue_capital_detail):
+    configs and open rows in another are counted aside, never added, and
+    the aside is on the `reason` line — the one /desk/ prints under the
+    bar — so a budget that describes only part of the fleet says so.
     """
     now = now or timezone.now()
+    # venue_capital is THE denominator seam — the runner's tests and the
+    # page read it there — so the number comes through it; the detail
+    # beside it, over the same rows, says which currency that number is
+    # in and what was left aside.
     capital = venue_capital(user, venue)
+    pooled = venue_capital_detail(user, venue)
+    currency = pooled["currency"]
     gross = capital * DESK_RISK_BUDGET_PCT / 100.0
     governor, dd_pct, reason = 1.0, None, ""
     if str(venue) == "live":
@@ -698,10 +748,23 @@ def budget_for(user, venue, *, now=None) -> dict:
     else:
         reason = "paper venue — no drawdown governor"
     gross *= governor
-    book = book_risk(user, venue)
+    book = book_risk(user, venue, currency=currency or None)
+    aside = [f"{n} config{'s' if n != 1 else ''} in {ccy} not summed"
+             for ccy, n in sorted(pooled["not_summed"].items())]
+    if book["n_other_currency"]:
+        n = book["n_other_currency"]
+        aside.append(f"{n} open position{'s' if n != 1 else ''} in another "
+                     f"currency not taken off the budget")
+    if aside:
+        reason = f"{reason}; {', '.join(aside)} (budget in {currency})"
+        logger.warning("[desk] %s %s budget is in %s — %s",
+                       getattr(user, "username", user), venue, currency,
+                       ", ".join(aside))
     return {
         "budget": gross - book["risk"], "gross": gross, "capital": capital,
+        "currency": currency, "not_summed": pooled["not_summed"],
         "book_risk": book["risk"], "unmeasured_open": book["unmeasured_open"],
+        "n_other_currency": book["n_other_currency"],
         "n_open": book["n_open"], "entries": book["entries"],
         "governor": governor, "drawdown_pct": dd_pct, "reason": reason,
     }
@@ -1184,7 +1247,9 @@ def plan_for(user, venue, candidates, *, tick_id=None, now=None,
 
     _audit_plan(plan, {"remembered": len(remembered),
                        "governor": budget_info["governor"],
-                       "capital": budget_info["capital"]})
+                       "capital": budget_info["capital"],
+                       "currency": budget_info.get("currency", ""),
+                       "not_summed": budget_info.get("not_summed", {})})
     return {"plan": plan, "decisions": written, "remembered": remembered,
             "mode": mode, "budget_info": budget_info, "matrix": matrix}
 

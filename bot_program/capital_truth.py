@@ -518,8 +518,9 @@ def allocate_shares(followers, *, shares=None) -> dict:
 
 def foreign_venue(user, cfg, book_kind: str, venue_of=None) -> str:
     """The broker a following pool trades at when that is NOT the book —
-    "saxo" / "etoro" / "ibkr" — or "" when it trades at the book or
-    nobody can tell.
+    any name the router answers: "saxo" / "etoro" / "ibkr" / "binance" /
+    "oanda" / "alpaca" ... — or "" when it trades at the book or nobody
+    can tell.
 
     ONE test, shared by the sync that retunes the followers
     (tasks._follow_the_account) and the withdrawals page that shows what
@@ -537,13 +538,25 @@ def foreign_venue(user, cfg, book_kind: str, venue_of=None) -> str:
     venue decides: that only ever refuses more, and it can never size a
     pool from an account it does not trade.
 
-    Only a KNOWN and DIFFERENT venue counts. "paper", the unflagged venues
-    and the symbol-less manual pools mean "cannot tell", and cannot-tell
-    keeps the behaviour it has always had: the pool follows. A router
-    that raises is cannot-tell too. `venue_of` is an optional
-    {symbol: venue} dict shared across pools, so one sync asks the router
-    once per symbol — every follower is non-paper, so the routing of a
-    symbol does not differ between them.
+    EVERY VENUE THE ROUTER CAN NAME, NOT THREE (2026-09-28). This knew
+    saxo, etoro and ibkr and called every other answer "cannot tell" —
+    but broker_name_for_symbol answers "binance", "oanda" or "alpaca" for
+    any class no flag claims, and client_for_symbol builds a REAL client
+    for each the moment the keys are saved (BinanceClient testnet=False,
+    OANDATrader env="live", AlpacaTrader live). Those are known and
+    different venues: a live crypto follower under a Saxo book was sized
+    from Saxo's reading on the Follow button and on every sync beat while
+    its orders went to Binance — the defect 662937a closed for the three
+    flagged venues, open through the three legacy ones. Any venue other
+    than the book's kind is foreign. "paper" is not a venue (the router
+    found nothing to send to, and a live config refuses a PaperTrader on
+    its own), so it, "" and the symbol-less manual pools mean "cannot
+    tell", and cannot-tell keeps the behaviour it has always had: the
+    pool follows. A router that raises is cannot-tell too.
+
+    `venue_of` is an optional {symbol: venue} dict shared across pools, so
+    one sync asks the router once per symbol — every follower is
+    non-paper, so the routing of a symbol does not differ between them.
     """
     if not book_kind:
         return ""
@@ -555,7 +568,7 @@ def foreign_venue(user, cfg, book_kind: str, venue_of=None) -> str:
             if sym not in venue_of:
                 venue_of[sym] = broker_name_for_symbol(user, sym, cfg)
             venue = venue_of[sym]
-            if venue in ("saxo", "etoro", "ibkr") and venue != book_kind:
+            if venue and venue != "paper" and venue != book_kind:
                 return venue
     except Exception as e:  # noqa: BLE001 — unknown is not a mismatch
         logger.debug("capital_truth: cannot tell %s's venue (%s)",
