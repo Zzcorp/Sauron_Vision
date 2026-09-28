@@ -688,6 +688,22 @@ class ReadinessTests(TestCase):
         self.assertEqual(r["reserved"], Decimal("0"))
         self.assertEqual(r["following"], [])
 
+    def test_the_pages_cash_takes_off_the_flows_the_cash_gate_holds(self):
+        """A flow confirmed early (paid_at before the cell was read,
+        held_through at or after it) is money the gate still refuses to
+        pledge; the page's "cash ready" must not count it as free. A flow
+        paid before the cell with no hold is the cell's own business."""
+        from bot_program.withdrawals import readiness
+        from tests.test_etoro_leverage import _account
+        acct = _account(self.user, cash=300, equity=1000, age_s=300)
+        cell_at = acct.last_margin_at
+        _wr(self.user, 100, status="paid", paid_amount=100, currency="USD",
+            paid_at=cell_at - timedelta(hours=1), held_through=cell_at)
+        _wr(self.user, 50, status="paid", paid_amount=50, currency="USD",
+            paid_at=cell_at - timedelta(hours=2))
+        r = readiness(self.user)
+        self.assertEqual(r["free_cash"], Decimal("200.00"))
+
     def test_etoro_cash_says_ready_or_short_by_how_much(self):
         from bot_program.withdrawals import readiness
         from tests.test_etoro_leverage import _account

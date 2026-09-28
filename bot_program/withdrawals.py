@@ -111,7 +111,7 @@ def reserved_total(user) -> Decimal:
     return Decimal(total or 0)
 
 
-def paid_flows(user, currency=None, *, exclude_pk=None) -> list:
+def paid_flows(user, currency=None, *, exclude_pk=None, counted_by=None) -> list:
     """[(paid_at, amount)] for every withdrawal marked paid, oldest first.
 
     `currency` narrows to one: the equity history is compared in the
@@ -122,7 +122,9 @@ def paid_flows(user, currency=None, *, exclude_pk=None) -> list:
     typed as "the account's money", and leaving it out would read the
     withdrawal as a loss — the one thing this accounting exists to stop.
     `exclude_pk` leaves one request out: the one being marked or corrected,
-    so the checks never measure a flow against itself.
+    so the checks never measure a flow against itself. `counted_by`
+    narrows to the flows a reading taken then still counts — the hold's
+    rule (_counted_by), for a reader that must agree with the cash gate.
     """
     from django.db.models import Q
 
@@ -135,6 +137,8 @@ def paid_flows(user, currency=None, *, exclude_pk=None) -> list:
         rows = rows.filter(Q(currency=currency) | Q(currency_assumed=True))
     if exclude_pk is not None:
         rows = rows.exclude(pk=exclude_pk)
+    if counted_by is not None:
+        rows = rows.filter(_counted_by(counted_by))
     return [(r.paid_at, Decimal(r.flow_amount)) for r in rows]
 
 
@@ -269,10 +273,14 @@ def _free_cash(user, book):
         return None, at, (f"the cash figure was read in another world than "
                           f"the {world} one this row trades")
     # Only the withdrawals paid in the cell's own currency come off it —
-    # the same split the cash gate makes; nothing here converts.
+    # the same split the cash gate makes; nothing here converts. And the
+    # same ROWS the cash gate holds (held_back_in, _counted_by): paid
+    # after the cell was read, or confirmed early while a reading no
+    # older than the cell still showed the money — otherwise the page
+    # said "cash ready" for money the gate was still refusing to pledge.
     ccy = str(getattr(book, "last_equity_currency", "") or "")
-    gone = sum((amount for paid_at, amount in paid_flows(user, currency=ccy)
-                if paid_at > at), ZERO)
+    gone = sum((amount for _paid_at, amount in
+                paid_flows(user, currency=ccy, counted_by=at)), ZERO)
     return Decimal(cash) - gone, at, ""
 
 
