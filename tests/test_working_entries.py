@@ -1266,3 +1266,145 @@ class AnEtoroHeldOrderIsPolledAndWithdrawnTests(TestCase):
         self.assertTrue(reason.endswith("with nothing filled"))
         self.assertIn("InitialPositionAmount: 8.44 MinimumPositionAmount: 10 "
                       "(Dollars) with nothing filled", reason)
+
+
+# ── the options lane, held to the same lifecycle ───────────────────────────
+
+class TheOptionsLaneBooksAPartialAsWorkingTests(TestCase):
+    """A market order that printed PART of its contracts inside the
+    adapter's one-second sample, and is still Submitted, comes back with
+    executedQty > 0 and no `working` flag. The options lane booked that as
+    an ordinary OPEN row of the printed size while the remainder kept
+    working as a DAY order — and filled later into contracts no row
+    claimed: no stop, no expiry close, invisible to a reconciliation that
+    walks rows. The rule since 662937a is that a partial hands the row to
+    the poll, which withdraws the remainder, proves it, and books what
+    printed; the options lane overrides scan_symbol wholesale, so it had
+    to be held to that rule on its own.
+    """
+
+    def setUp(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from bot_program.models import AssetBotConfig
+        from bot_program.options_models import OptionContract
+        from instruments.models import Instrument
+        from portfolio.risk_gate import limits_book
+        self.user = _user("opt_partial_u")
+        self.inst, _ = Instrument.objects.get_or_create(
+            symbol="AAPL", defaults={"name": "AAPL", "asset_class": "stock"})
+        self.cfg = AssetBotConfig.objects.create(
+            user=self.user, asset_class="options", name="OPT_PARTIAL",
+            mode="live", symbols=["AAPL"], capital=Decimal("1000000"),
+            enabled=True, stop_loss_pct=20.0, take_profit_pct=50.0)
+        self.expiry = timezone.now().date() + timedelta(days=30)
+        OptionContract.objects.create(
+            underlying=self.inst, strike=Decimal("180"), expiry=self.expiry,
+            right="C", multiplier=100, bid=Decimal("1.00"),
+            ask=Decimal("1.02"), last_price=Decimal("1.01"), iv=0.30,
+            delta=0.41)
+        pf = limits_book()
+        pf.current_value = Decimal("10000")
+        pf.max_single_position_pct = 100.0
+        pf.save()
+
+    def _scan(self, answer):
+        """One live options entry pass; `answer(contracts)` is what the
+        adapter reports for the size the lane asked for."""
+        from bot_program.asset_engine.base import BotDecision
+        from bot_program.asset_engine.options_bot import OptionsBot
+        from bot_program.models import AssetBotTrade
+        bot = OptionsBot(self.cfg)
+        client = MagicMock()
+        client.market_order_option.side_effect = (
+            lambda **kw: answer(int(kw["contracts"])))
+        corr = {"scale": 1.0, "max_corr": 0.0, "peer": "", "threshold": 0.7,
+                "measured": True, "reason": ""}
+        with patch.object(bot, "decide",
+                          return_value=BotDecision("BUY", 0.9, ["signal"])), \
+                patch("bot_program.engine.broker_router.client_for_symbol",
+                      return_value=client), \
+                patch("portfolio.risk_gate.correlation_state",
+                      return_value=corr):
+            bot.scan_symbol("AAPL")
+        asked = client.market_order_option.call_args.kwargs["contracts"]
+        self.assertGreaterEqual(asked, 2, "the harness must ask for more "
+                                          "than one contract")
+        return asked, AssetBotTrade.objects.filter(config=self.cfg).first()
+
+    def test_a_partial_that_is_still_working_is_booked_working(self):
+        asked, trade = self._scan(lambda n: {
+            "orderId": "777", "status": "SUBMITTED",
+            "executedQty": str(n - 1), "avgPrice": "1.10"})
+        self.assertIsNotNone(trade)
+        self.assertTrue(trade.metadata.get("entry_working"),
+                        "a partial with a live remainder is an ORDER")
+        self.assertEqual(trade.metadata["qty_requested"], float(asked))
+        self.assertEqual(trade.metadata["entry_working_partial"],
+                         float(asked - 1))
+        self.assertIn("entry_working_since", trade.metadata)
+        self.assertFalse(trade.metadata["protected"])
+        self.assertEqual(trade.broker_order_id, "777")
+        # What printed, at the price it printed at — the poll finishes it.
+        self.assertEqual(float(trade.qty), float(asked - 1))
+        self.assertEqual(float(trade.entry_price), 1.10)
+        self.assertEqual(trade.metadata["fill_source"], "broker")
+
+    def test_a_partial_the_broker_already_cancelled_is_a_finished_row(self):
+        """The guard must not swallow the case the lane already handled:
+        TWS cancelled the rest, so the printed contracts are the whole
+        position and nothing is left working to withdraw."""
+        asked, trade = self._scan(lambda n: {
+            "orderId": "778", "status": "CANCELLED",
+            "executedQty": str(n - 1), "avgPrice": "1.10"})
+        self.assertIsNotNone(trade)
+        self.assertNotIn("entry_working", trade.metadata)
+        self.assertEqual(float(trade.qty), float(asked - 1))
+
+    def test_a_whole_fill_is_unchanged(self):
+        asked, trade = self._scan(lambda n: {
+            "orderId": "779", "status": "FILLED",
+            "executedQty": str(n), "avgPrice": "1.10"})
+        self.assertIsNotNone(trade)
+        self.assertNotIn("entry_working", trade.metadata)
+        self.assertEqual(float(trade.qty), float(asked))
+
+    def test_the_tick_withdraws_the_remainder_and_books_what_printed(self):
+        """The row the lane now books is one the base poll already knows
+        how to finish: withdraw the remainder, prove it, book the print."""
+        from bot_program.asset_engine.options_bot import OptionsBot
+        from bot_program.models import AssetBotTrade
+        trade = AssetBotTrade.objects.create(
+            config=self.cfg, asset_class="options", symbol="AAPL", side="BUY",
+            qty=Decimal("2"), entry_price=Decimal("1.10"),
+            stop_loss=Decimal("0.88"), take_profit=Decimal("1.65"),
+            status="OPEN", paper=False, broker_order_id="777",
+            metadata={"entry_working": True, "qty_requested": 5.0,
+                      "entry_working_partial": 2.0, "protected": False,
+                      "fill_source": "broker",
+                      "entry_working_since": "2026-09-27T00:00:00+00:00",
+                      "right": "C", "strike": 180.0,
+                      "expiry": self.expiry.isoformat(), "multiplier": 100,
+                      "occ_symbol": "AAPL"})
+        client = MagicMock()
+        client.order_status.side_effect = [
+            {"state": "working", "filled": 2.0, "avgPrice": 1.10,
+             "status": "Submitted"},
+            {"state": "filled", "filled": 2.0, "avgPrice": 1.10,
+             "status": "Cancelled"},
+        ]
+        client.cancel_order.return_value = True
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                   return_value=client):
+            OptionsBot(self.cfg).manage_positions()
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+        self.assertNotIn("entry_working", trade.metadata)
+        self.assertEqual(float(trade.qty), 2.0)
+        self.assertEqual(float(trade.entry_price), 1.10)
+        self.assertEqual([c.args[0] for c in client.cancel_order.call_args_list],
+                         ["777"])
+        # No SELL was sent for contracts that were never bought.
+        client.market_order_option.assert_not_called()

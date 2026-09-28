@@ -40,6 +40,17 @@ def _age(seconds) -> str:
     return f"{seconds / 3600:.1f}h"
 
 
+def _working_lines(w, d) -> None:
+    """One line per WORKING entry under its own heading: an order the tick
+    is polling, not a position — never PLATFORM ONLY, never a blocker."""
+    for p in d.get("working") or []:
+        w(f"      WORKING ENTRY  {p['symbol']:<12} {p['side']:<5} "
+          f"{p['qty']:.4f}  ({p['config']}) — an order the tick is "
+          f"polling, not a position"
+          + ("; the broker already reports it — the fill is being booked"
+             if p.get("reported") else ""))
+
+
 class Command(BaseCommand):
     help = ("Every broker, its capital, its positions, and the divergence "
             "between what the broker reports and what the platform believes. "
@@ -147,16 +158,21 @@ class Command(BaseCommand):
 
         w("\n6. DIVERGENCE — THE BROKER AGAINST THE PLATFORM")
         for d in v["divergence"]:
+            _queued = (f", {len(d['working'])} working entr"
+                       f"{'y' if len(d['working']) == 1 else 'ies'} "
+                       f"(orders, not compared)" if d["working"] else "")
             if not d["known"]:
                 w(f"   {d['name']}: {DASH} cannot be compared ({d['reason']}); "
-                  f"{d['platform_n']} platform row(s) attributed to it")
+                  f"{d['platform_n']} platform row(s) attributed to it"
+                  f"{_queued}")
+                _working_lines(w, d)
                 continue
             _vs = (f" — against a snapshot {d['age_text']} old, NOT the "
                    f"broker: this is agreement with a memory"
                    if d.get("stale") else "")
             w(f"   {d['name']}: {len(d['agree'])} agree, "
               f"{len(d['only_broker'])} only at the broker, "
-              f"{len(d['only_platform'])} only in the platform{_vs}")
+              f"{len(d['only_platform'])} only in the platform{_queued}{_vs}")
             for p in d["only_platform"]:
                 w(f"      PLATFORM ONLY  {p['symbol']:<12} {p['side']:<5} "
                   f"{p['qty']:.4f}  ({p['config']})")
@@ -164,6 +180,7 @@ class Command(BaseCommand):
                 w(f"      BROKER ONLY    {str(h.get('symbol')):<12} "
                   f"{str(h.get('side', '')):<5} "
                   f"{float(h.get('qty') or 0):.4f}")
+            _working_lines(w, d)
 
         w("\n" + "=" * 78)
         if v["blockers"]:

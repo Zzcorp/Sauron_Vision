@@ -102,7 +102,7 @@ def an_ibkr(user):
 
 
 def a_trade(user, symbol, *, paper=False, broker=None, asset_class="stock",
-            qty=10.0, side="BUY"):
+            qty=10.0, side="BUY", working=False):
     from bot_program.asset_models import AssetBotConfig, AssetBotTrade
     cfg, _ = AssetBotConfig.objects.get_or_create(
         user=user, name=f"pool_{asset_class}",
@@ -111,6 +111,12 @@ def a_trade(user, symbol, *, paper=False, broker=None, asset_class="stock",
                   "symbols": [symbol], "capital": Decimal("10000"),
                   "base_currency": "EUR", "enabled": True})
     meta = {"broker": broker} if broker else {}
+    if working:
+        # A WORKING entry, as base.py books one: an order at the broker,
+        # not yet a position.
+        meta.update({"entry_working": True, "qty_requested": qty,
+                     "protected": False, "fill_source": "pending",
+                     "entry_working_since": timezone.now().isoformat()})
     return AssetBotTrade.objects.create(
         config=cfg, asset_class=asset_class, symbol=symbol, side=side,
         qty=Decimal(str(qty)), entry_price=Decimal("200"), status="OPEN",
@@ -325,6 +331,39 @@ class DivergenceTests(TestCase):
         self.assertEqual(len(d["agree"]), 1)
         self.assertEqual(d["only_platform"], [])
 
+    def test_a_working_entry_is_an_order_not_a_row_the_broker_omits(self):
+        """A WORKING entry is an order resting at the broker (base
+        .is_entry_working: every exposure reader must skip it). The
+        holdings snapshot cannot report it, so filing it under "only in
+        the platform" read as a position that was never finalised — over
+        an order the tick is polling. It is listed under its own heading."""
+        a_saxo(self.user, held=[])
+        a_trade(self.user, "TSLA", broker="saxo", working=True)
+        d = divergence(_fresh(self.user))[0]
+        self.assertTrue(d["known"])
+        self.assertEqual(d["only_platform"], [])
+        self.assertEqual([p["symbol"] for p in d["working"]], ["TSLA"])
+        self.assertFalse(d["working"][0]["reported"])
+
+    def test_a_holding_a_working_entry_names_is_its_fill_not_a_stray(self):
+        """The broker already reports the symbol a working row is waiting
+        on: that is the fill arriving before the poll booked it (or the
+        printed part of a partial), not a hand-placed position."""
+        a_saxo(self.user, held=[HELD_AAPL])
+        a_trade(self.user, "AAPL", broker="saxo", working=True)
+        d = divergence(_fresh(self.user))[0]
+        self.assertEqual(d["only_broker"], [])
+        self.assertEqual(d["agree"], [])
+        self.assertEqual([p["symbol"] for p in d["working"]], ["AAPL"])
+        self.assertTrue(d["working"][0]["reported"])
+
+    def test_an_unread_broker_still_lists_its_working_entries(self):
+        a_saxo(self.user, held=None)
+        a_trade(self.user, "TSLA", broker="saxo", working=True)
+        d = divergence(_fresh(self.user))[0]
+        self.assertFalse(d["known"])
+        self.assertEqual([p["symbol"] for p in d["working"]], ["TSLA"])
+
 
 class TheVerdictTests(TestCase):
 
@@ -337,6 +376,17 @@ class TheVerdictTests(TestCase):
         v = vision(_fresh(self.user))
         self.assertTrue(any("does NOT report" in b and "TSLA" in b
                             for b in v["blockers"]), v["blockers"])
+
+    def test_a_working_entry_is_not_a_blocker(self):
+        """The red "never opened / never finalised" line over a queued
+        order invites the operator to finalise a row whose parent is still
+        live — the naked-fill shape 9e2bc10 describes."""
+        a_saxo(self.user, held=[])
+        a_trade(self.user, "TSLA", broker="saxo", working=True)
+        v = vision(_fresh(self.user))
+        self.assertFalse(any("does NOT report" in b for b in v["blockers"]),
+                         v["blockers"])
+        self.assertEqual(v["blockers"], [])
 
     def test_positions_attributed_to_an_unread_broker_are_a_blocker(self):
         a_saxo(self.user, held=None)
@@ -449,6 +499,23 @@ class ThePageTests(TestCase):
         call_command("treasury", user="tr_page", stdout=out)
         self.assertIn("TSLA", out.getvalue())
         self.assertIn("PLATFORM ONLY", out.getvalue())
+
+    def test_a_working_entry_has_its_own_heading_on_both(self):
+        a_saxo(self.user, held=[])
+        a_trade(self.user, "TSLA", broker="saxo", working=True)
+        self.client.login(username="tr_page", password="x")
+        page = self.client.get(reverse("treasury_page"))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "WORKING ENTRY")
+        self.assertContains(page, "TSLA")
+        self.assertNotContains(page, "PLATFORM ONLY")
+        out = StringIO()
+        call_command("treasury", user="tr_page", stdout=out)
+        body = out.getvalue()
+        self.assertIn("WORKING ENTRY", body)
+        self.assertIn("TSLA", body)
+        self.assertNotIn("PLATFORM ONLY", body)
+        self.assertIn("NO BLOCKERS", body)
 
     def test_the_rail_carries_it_with_a_glyph_nobody_else_uses(self):
         from pathlib import Path

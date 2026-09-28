@@ -8,6 +8,8 @@ read the same numbers — a ledger with two implementations is two ledgers.
 
 Nothing here is a forecast. A number appears only when a grade exists.
 """
+import hashlib
+
 from django.db.models import Avg, Count, Q, Sum
 
 
@@ -74,8 +76,27 @@ def rule_rows() -> list:
 
 def shadow_agent_for(cfg) -> str:
     """The calibration's name for a config in shadow mode. The id keeps
-    six configs called "manual" apart; the name keeps the ledger readable."""
-    return f"bot:{cfg.name}#{cfg.pk}"
+    six configs called "manual" apart; the name keeps the ledger readable.
+
+    BOUNDED TO THE COLUMN. The name is 80 wide and AgentPrediction.agent
+    is 50, and log_direction_prediction writes the key as given — so on
+    Postgres a config named past ~44 characters raised DataError inside
+    log_shadow_entry's broad except: every call "not registered", and the
+    ledger read calls 0 for a config that had made them (SQLite, the test
+    database, does not enforce the width). A name that does not fit keeps
+    its head and carries an 8-hex digest of the WHOLE name before the id —
+    never a silent cut, which would fold two long names into one key. The
+    writer (safety.log_shadow_entry) and the reader (config_rows) both
+    call this, so they meet on the same string.
+    """
+    from ai_agents.models import AgentPrediction
+    limit = AgentPrediction._meta.get_field("agent").max_length
+    name = str(cfg.name or "")
+    key = f"bot:{name}#{cfg.pk}"
+    if len(key) <= limit:
+        return key
+    tail = f"~{hashlib.sha1(name.encode('utf-8')).hexdigest()[:8]}#{cfg.pk}"
+    return f"bot:{name[:max(0, limit - len('bot:') - len(tail))]}{tail}"
 
 
 def config_rows() -> list:

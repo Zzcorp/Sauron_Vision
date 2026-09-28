@@ -656,9 +656,9 @@ class OptionsBot(AssetBot):
                 # returning None there left them with no row at all, so no
                 # stop, no expiry close and no reconciliation (which walks
                 # rows) could ever see them.
-                if status in ("REJECTED", "DUPLICATE", "CANCELLED",
-                              "CANCELED", "INACTIVE", "EXPIRED") \
-                        and filled_contracts <= 0:
+                dead = status in ("REJECTED", "DUPLICATE", "CANCELLED",
+                                  "CANCELED", "INACTIVE", "EXPIRED")
+                if dead and filled_contracts <= 0:
                     logger.warning(
                         "[options_bot] live order refused for %s "
                         "(status=%s, reason=%s)", symbol, status,
@@ -666,12 +666,21 @@ class OptionsBot(AssetBot):
                     return None
                 # And the row records what actually printed, at the price it
                 # printed at — not the chain's mid for the size we asked for.
+                # WHAT WE ASKED FOR is kept apart from what printed: a
+                # partial that is still working needs both numbers, exactly
+                # as base.scan_symbol keeps `requested_qty`.
+                requested_contracts = n_contracts
+                partial_working = (0 < filled_contracts < requested_contracts
+                                   and not dead)
                 if filled_contracts > 0:
                     if filled_contracts < n_contracts:
                         logger.warning(
                             "[options_bot] %s partially filled: %s of %s "
-                            "contracts — booking the real size",
-                            symbol, filled_contracts, n_contracts)
+                            "contracts — %s", symbol, filled_contracts,
+                            n_contracts,
+                            "the rest is still WORKING; booked for the poll "
+                            "to withdraw the remainder"
+                            if partial_working else "booking the real size")
                         n_contracts = int(filled_contracts)
                     try:
                         fill_px = float(res.get("avgPrice") or 0)
@@ -680,21 +689,35 @@ class OptionsBot(AssetBot):
                     if fill_px > 0:
                         premium = fill_px
                         working_meta["fill_source"] = "broker"
-                # WORKING: the broker took the order and filled nothing.
-                # A thin option book is where that is likeliest of all, and
-                # booking it as a full-size position at the chain's mid is
-                # the phantom row reconciliation then closes as an orphan
-                # — leaving real contracts nothing claims. The row is
-                # marked pending and the tick polls it (AssetBot
-                # ._poll_working_entry).
-                if res.get("working") and float(res.get("executedQty") or 0) <= 0:
-                    working_meta = {
+                # WORKING: the broker took the order and has not finished
+                # it. Two shapes. Nothing printed — a thin option book is
+                # where that is likeliest of all, and booking it as a
+                # full-size position at the chain's mid is the phantom row
+                # reconciliation then closes as an orphan, leaving real
+                # contracts nothing claims. Or PART printed and the order
+                # is not dead: the adapter reports the print and sets
+                # `working` only when nothing filled, and booking the print
+                # as a finished position left the remainder working as a
+                # DAY order that filled later into contracts no row claimed
+                # — no stop, no expiry close, invisible to a reconciliation
+                # that walks rows. The rule since 662937a (the equity path)
+                # is that a partial hands the row to the poll. Either way
+                # the row is marked WORKING and the tick polls it
+                # (AssetBot._poll_working_entry), which withdraws a
+                # remainder, proves the withdrawal and books what printed.
+                if (res.get("working") and filled_contracts <= 0) \
+                        or partial_working:
+                    working_meta.update({
                         "entry_working": True,
                         "entry_working_since": timezone.now().isoformat(),
-                        "qty_requested": float(n_contracts),
-                        "fill_source": "pending",
+                        "qty_requested": float(requested_contracts),
                         "protected": False,
-                    }
+                    })
+                    if partial_working:
+                        working_meta["entry_working_partial"] = float(
+                            filled_contracts)
+                    else:
+                        working_meta["fill_source"] = "pending"
             except Exception as e:
                 logger.error("[options_bot] live order failed for %s: %s", symbol, e)
                 return None

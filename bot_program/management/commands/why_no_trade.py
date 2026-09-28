@@ -64,10 +64,11 @@ class Command(BaseCommand):
                     "scraper_forex", "scraper_commodities",
                     "scraper_indices"):
             row = PlatformComponent.objects.filter(key=key).first()
+            err = ""
             try:
                 on = is_component_enabled(key)
             except Exception as exc:            # noqa: BLE001
-                on = f"ERR {exc}"
+                on, err = f"ERR {exc}", (str(exc) or type(exc).__name__)
             if row is None:
                 w(f"   {key:<22} NO ROW  — the gated task no-ops forever "
                   f"and leaves no trace")
@@ -77,6 +78,14 @@ class Command(BaseCommand):
             w(f"   {key:<22} {str(on):<6} last_run={row.last_run_at}")
             if on is False:
                 blockers.append(f"{key} is OFF")
+            elif on is not True:
+                # UNREADABLE IS NOT ON. The ERR row was printed and then
+                # tested `is False`, so it never reached the blockers and
+                # the verdict said "No structural blocker found" over a
+                # switch whose state was never read — under a header that
+                # says any False stops everything below it.
+                blockers.append(f"{key}: the master switch could not be "
+                                f"read: {err or on}")
 
         # ── 2. the tick itself ──────────────────────────────────────────
         w("\n2. THE TICK — bots can only open from tick_all_asset_bots")

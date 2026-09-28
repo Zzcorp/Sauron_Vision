@@ -138,7 +138,7 @@ this render path. An em dash means NEVER MEASURED and is never a zero —
                 <span style="color:var(--text-muted);">— cannot be compared: {{ d.reason }}</span>
                 {% if d.platform_n %}<span style="color:var(--accent-gold);"> · {{ d.platform_n }} live row(s) attributed to it</span>{% endif %}
             {% else %}
-                {{ d.agree|length }} agree · {{ d.only_broker|length }} only at the broker · {{ d.only_platform|length }} only in the platform
+                {{ d.agree|length }} agree · {{ d.only_broker|length }} only at the broker · {{ d.only_platform|length }} only in the platform{% if d.working %} · {{ d.working|length }} working (orders, not compared){% endif %}
                 <span style="color:var(--text-muted);">(snapshot {{ d.age_text }} old)</span>
                 {% for p in d.only_platform %}
                 <div style="color:var(--danger,#c0392b);margin-left:14px;">PLATFORM ONLY · {{ p.symbol }} {{ p.side }} {{ p.qty|floatformat:4 }} ({{ p.config }}) — closed at the broker without the row being finalised, or never opened</div>
@@ -147,6 +147,9 @@ this render path. An em dash means NEVER MEASURED and is never a zero —
                 <div style="color:var(--accent-gold);margin-left:14px;">BROKER ONLY · {{ h.symbol }} {{ h.side }} {{ h.qty|floatformat:4 }} — hand-placed, or a leg left resting after a row closed</div>
                 {% endfor %}
             {% endif %}
+            {% for p in d.working %}
+            <div style="color:var(--text-muted);margin-left:14px;">WORKING ENTRY · {{ p.symbol }} {{ p.side }} {{ p.qty|floatformat:4 }} ({{ p.config }}) — an order the tick is polling, not a position{% if p.reported %}; the broker already reports it — the fill is being booked{% endif %}</div>
+            {% endfor %}
         </div>
     {% empty %}
         <span style="color:var(--text-muted);">No broker to compare.</span>

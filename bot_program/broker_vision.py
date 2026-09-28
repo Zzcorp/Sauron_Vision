@@ -289,20 +289,35 @@ def divergence(user, rows=None, platform=None) -> list:
     out = []
     for row in rows:
         mine = [p for p in platform["live"] if p["broker"] == row["kind"]]
+        # A WORKING ENTRY IS AN ORDER, NOT A POSITION (base.is_entry_working:
+        # every exposure reader must skip it). The holdings snapshot cannot
+        # report a resting order, so comparing the row filed it under "the
+        # broker does NOT report it" and raised the red BLOCKER that reads
+        # "never finalised, or never opened" — over an order the tick is
+        # polling, which is the one row an operator must NOT finalise by
+        # hand. Listed apart, under its own heading, and marked when the
+        # broker already reports its symbol: that is the fill arriving ahead
+        # of the poll (or the printed part of a partial), not a hand-placed
+        # position, so it is not "only at the broker" either.
+        working = [dict(p, reported=False) for p in mine if p["working"]]
         if row["held"] is None:
             out.append({"kind": row["kind"], "name": row["name"],
                         "known": False,
                         "reason": ("never read — the sync has not stored a "
                                    "holdings snapshot for this broker"),
                         "only_broker": [], "only_platform": [],
-                        "agree": [], "platform_n": len(mine)})
+                        "agree": [], "working": working,
+                        "platform_n": len(mine)})
             continue
         held = {}
         for h in row["held"]["rows"]:
             sym = str(h.get("symbol") or "").strip().upper()
             if sym:
                 held[sym] = h
-        ours = {p["symbol"]: p for p in mine}
+        for p in working:
+            p["reported"] = p["symbol"] in held
+        queued = {p["symbol"] for p in working}
+        ours = {p["symbol"]: p for p in mine if not p["working"]}
         both = sorted(set(held) & set(ours))
         _age = row["held"]["age_seconds"]
         out.append({
@@ -316,10 +331,12 @@ def divergence(user, rows=None, platform=None) -> list:
             # read this flag and say so, using the same STALE_AFTER_S the
             # row's own equity_stale uses.
             "stale": _age is not None and _age > STALE_AFTER_S,
-            "only_broker": [held[s] for s in sorted(set(held) - set(ours))],
+            "only_broker": [held[s] for s in
+                            sorted(set(held) - set(ours) - queued)],
             "only_platform": [ours[s] for s in sorted(set(ours) - set(held))],
             "agree": [{"symbol": s, "broker": held[s], "platform": ours[s]}
                       for s in both],
+            "working": working,
             "platform_n": len(mine),
         })
     return out
