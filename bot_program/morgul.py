@@ -72,10 +72,14 @@ THE BRAKE (G11)
   finding of a braking guard says which bots it WOULD stop. While it is on
   it stops them, once per finding, through the Eye's own
   telegram_eye.apply_brake: enabled = False on the configs named, never
-  on, never a close, never an order. G1 and G5 stop the row's config; G6
-  and G7 every enabled live config of the user. The message says what the
-  stopped bots leave open: a live position without a stop at the broker
-  is protected by nothing while its bot is stopped, and paper stops pause.
+  on, never a close, never an order. It reads every critical finding of
+  the run, not only those due -- the three hours are the group's, not
+  the brake's: a finding said while it was off is stopped on the first
+  run after it is armed, and that run says so. G1 and G5 stop the row's
+  config; G6 and G7 every enabled live config of the user. The message
+  says what the stopped bots leave open: a live position without a stop
+  at the broker is protected by nothing while its bot is stopped, and
+  paper stops pause.
   It never acts when no staff chat could be told, and its record is kept
   before anything else can fail: a stop is always announced, at the
   latest on the next run. A bot the operator re-arms is not stopped again
@@ -85,8 +89,10 @@ THE BRAKE (G11)
 WHAT IT REUSES
   telegram_eye's house style (Reply, fit, heading, money, price, when,
   ago, config_label, plain_detail) and its brake; core.exchange_status's
-  market clock (market_status_for, the one the badges read and the paper
-  venue's market_clock is built on -- no clock of its own);
+  market_clock (the clock the paper venue's gate reads: the strip the
+  badges read, plus the 17:00 New York forex week in winter and the NYSE
+  holidays and early closes -- no clock of its own; market_status_for
+  only names the session);
   asset_engine.base's proof set, ceilings, pledged fraction and proven
   multiplier, read at call time; safety's heartbeat stamp
   (extras["last_tick_at"]); the LiveQuote marks of the live bots' own
@@ -438,13 +444,25 @@ def _live_configs(user):
                                               mode="live").order_by("pk"))
 
 
+def _shut(cls, exchange, symbol, at) -> bool:
+    """Shut at `at` on the clock the paper venue's gate reads
+    (core.exchange_status.market_clock): the strip's hours, plus the
+    17:00 New York forex week -- Sunday 22:00 UTC from November to
+    March, the hour a poller can re-stamp Friday's close -- and the NYSE
+    holidays and early closes. The strip alone (market_status_for) reads
+    open in all of those; here it only names the session."""
+    from core.exchange_status import market_clock
+    return not market_clock(cls, exchange, symbol=symbol,
+                            now_utc=at).get("is_open", True)
+
+
 # ── G1: a booking while the market was shut ──────────────────────────────
 
 def check_market_shut(ctx, g) -> list:
     """Every booking (open or close, paper, demo or live) of the last
-    24 h, judged on core.exchange_status's clock at the booking and a
-    grace before it (CLOSE_GRACE_S; NOTICED_GRACE_S for a live fill the
-    tick noticed). Not judged, and said so: crypto (it never shuts), a
+    24 h, judged on the paper venue's own clock (_shut) at the booking
+    and a grace before it (CLOSE_GRACE_S; NOTICED_GRACE_S for a live fill
+    the tick noticed). Not judged, and said so: crypto (it never shuts), a
     class the clock does not model, a close booked when the platform
     noticed it (_noticed_close), and an index booked at a broker -- the
     clock keeps the cash session (SPX500 on New York) while a broker's
@@ -474,15 +492,12 @@ def check_market_shut(ctx, g) -> list:
             grace = (NOTICED_GRACE_S if what == "Opened" and not trade.paper
                      and _meta(trade).get("entry_filled_at")
                      else CLOSE_GRACE_S)
+            if not (_shut(cls, exchange, trade.symbol, at)
+                    and _shut(cls, exchange, trade.symbol,
+                              at - timedelta(seconds=grace))):
+                continue
             status = market_status_for(cls, exchange, now_utc=at,
                                        symbol=trade.symbol)
-            if status.get("is_open"):
-                continue
-            before = market_status_for(
-                cls, exchange, now_utc=at - timedelta(seconds=grace),
-                symbol=trade.symbol)
-            if before.get("is_open"):
-                continue
             facts.append(f"{what} {eye.when(at)} at {eye.price(px)}")
             facts.append("Market shut then: "
                          f"{status.get('name') or status.get('session')}")
@@ -585,11 +600,11 @@ def check_stuck_close(ctx, g) -> list:
     retry and the retries counted at five minutes each, and when this
     guard first saw it (its memory) -- all but the first only bound it,
     and the words say "at least". Critical from STUCK_CRIT_S, except while
-    the instrument's market is shut: a close can only fill at the open (an
-    eToro close off hours is queued, status PENDING), so it stays a
-    warning and says so. Whether the broker still holds the position is
-    not read here, and not said (a row the retry found flat but could not
-    price waits CLOSE_PENDING too)."""
+    the instrument's market is shut (_shut, the paper venue's clock): a
+    close can only fill at the open (an eToro close off hours is queued,
+    status PENDING), so it stays a warning and says so. Whether the broker
+    still holds the position is not read here, and not said (a row the
+    retry found flat but could not price waits CLOSE_PENDING too)."""
     from bot_program.asset_models import AssetBotTrade
     from core.exchange_status import market_status_for
     rows = list(AssetBotTrade.objects.filter(status="CLOSE_PENDING")
@@ -623,14 +638,14 @@ def check_stuck_close(ctx, g) -> list:
             facts.append(f"Last error: {err}")
         severity = "critical" if age >= STUCK_CRIT_S else "warning"
         cls, exchange, _pk = ctx.instrument(trade.symbol, trade.asset_class)
-        if severity == "critical" and cls in CLOCK_CLASSES:
+        if (severity == "critical" and cls in CLOCK_CLASSES
+                and _shut(cls, exchange, trade.symbol, ctx.now)):
             status = market_status_for(cls, exchange, now_utc=ctx.now,
                                        symbol=trade.symbol)
-            if not status.get("is_open", True):
-                severity = "warning"
-                facts.append("Market shut now: "
-                             f"{status.get('name') or status.get('session')}"
-                             "; a close can only fill when it opens")
+            severity = "warning"
+            facts.append("Market shut now: "
+                         f"{status.get('name') or status.get('session')}"
+                         "; a close can only fill when it opens")
         out.append(g.finding(
             f"trade:{trade.pk}", label=_trade_label(trade), facts=facts,
             severity=severity, user=trade.config.user))
@@ -1495,11 +1510,14 @@ def _settle(ctx, findings, failed, result) -> tuple:
     """The sending half: which findings are due (new, escalated, three
     hours since said, or a brake not yet announced), which are back to
     normal (never one a guard could not judge), the brake, the messages,
-    the memory. The brake acts only while armed (_brake_armed) and only
+    the memory. The brake acts on every critical finding of a braking
+    guard it has not braked yet, due or not (the three hours are the
+    group's, not the brake's), only while armed (_brake_armed) and only
     when a staff chat can be told; its record is stored before anything
     else can fail, and a stop is announced by the first message that
-    reaches the group ("Stopped: ..."), then reminded ("Stopped earlier
-    by the brake: ...") -- whatever the finding's configs read by then."""
+    reaches the group ("Stopped: ..."; a finding not due joins it), then
+    reminded ("Stopped earlier by the brake: ...") -- whatever the
+    finding's configs read by then."""
     now, stamp = ctx.now, ctx.now.isoformat()
     prev = _load(STATE_KEY)
     cur, due, cleared = {}, [], []
@@ -1531,21 +1549,31 @@ def _settle(ctx, findings, failed, result) -> tuple:
     people = recipients()
     armed = _brake_armed()
     outcomes, braked = {}, False
-    for f in due:
-        entry = cur[f.key]
+    said = {f.key for f in due}
+    # Every finding of the run, not only those due: a critical finding
+    # said while the brake was off is not due again for three hours --
+    # never, an event -- and the brake armed since must not wait for it.
+    # Its words (would, held, earlier) belong to a message, so they are
+    # kept for the findings one carries.
+    for f in findings:
+        entry, heard = cur[f.key], f.key in said
         if entry.get("braked"):
-            outcomes[f.key] = ("earlier" if entry.get("announced")
-                               else "stopped", entry.get("stopped") or [], [],
-                               _left_open(entry.get("stopped_pks") or []))
+            if heard:
+                outcomes[f.key] = (
+                    "earlier" if entry.get("announced") else "stopped",
+                    entry.get("stopped") or [], [],
+                    _left_open(entry.get("stopped_pks") or []))
             continue
         if not f.brakes:
             continue
         if not armed:
-            outcomes[f.key] = ("would", would_stop(f))
+            if heard:
+                outcomes[f.key] = ("would", would_stop(f))
             continue
         if not people:
-            outcomes[f.key] = ("held", would_stop(f))
-            result["held"] = True
+            if heard:
+                outcomes[f.key] = ("held", would_stop(f))
+                result["held"] = True
             continue
         try:
             stopped, already, pks = _brake(f)
@@ -1558,6 +1586,11 @@ def _settle(ctx, findings, failed, result) -> tuple:
         braked = True
         result["stopped"].extend(stopped)
         outcomes[f.key] = ("stopped", stopped, already, _left_open(pks))
+        if not heard:
+            # The brake's record is always announced: the finding joins
+            # this run's message ("Stopped: ...", or "Nothing to stop").
+            due.append(f)
+            entry["sent"] = stamp
     if braked:
         # The brake's record first, as if nothing had been said yet: a run
         # that dies after this line still leaves the next one announcing it

@@ -5,7 +5,9 @@ from itself". On Saturday 2026-09-26 at 13:53 UTC two paper forex
 positions were closed while forex was shut, and nothing noticed. Pinned
 here (bot_program/morgul.py):
   - every guard fires on a crafted row and stays quiet on a healthy one;
-  - THE SATURDAY REPLAY: the EURCAD and GBPCAD closes of 13:53 UTC;
+  - THE SATURDAY REPLAY: the EURCAD and GBPCAD closes of 13:53 UTC; the
+    winter forex hour and the New York holidays, on the paper venue's
+    own clock;
   - no false alarm the review measured: a live index CFD outside the cash
     session, a close the retry drained, a working fill noticed late, the
     demo world's proof positions, a stop-out the reconcile has not booked
@@ -18,7 +20,8 @@ here (bot_program/morgul.py):
     time;
   - the brake: OFF (or the guards off) says what it would stop; ON stops
     exactly the right configs, once, closes nothing, sends no order,
-    changes no row; says what the stopped bots leave unprotected; is
+    changes no row; armed after a finding was said, stops it on the next
+    run; says what the stopped bots leave unprotected; is
     announced even when Telegram refused or the run died after it; holds
     back when no staff chat can be told; is never switched on in bulk;
   - the command prints and sends nothing without --send;
@@ -325,6 +328,58 @@ class MarketShutTests(_Case):
         self.assertIn("1 close booked by reconciliation or by the close "
                       "retry not judged", " ".join(ctx.notes))
 
+    def test_the_winter_hour_is_judged_on_the_paper_venues_clock(self):
+        """Sunday 2026-12-06 21:30 UTC is 16:30 New York: the strip's FOREX
+        row reads open, the paper venue's market_clock shut until 22:00 --
+        the hour in which a poller can re-stamp Friday's close. The gate
+        refuses a paper close there; the guard judges it on the same
+        clock, and is quiet once the week has opened."""
+        cfg = _cfg(self.user)
+        winter = datetime(2026, 12, 6, 21, 30, tzinfo=UTC)
+        shut = _trade(cfg, "EURCAD", status="CLOSED", exit_price="1.6105",
+                      opened=winter - timedelta(days=2), closed=winter)
+        opened = _trade(cfg, "GBPCAD", status="CLOSED", exit_price="1.8740",
+                        opened=winter - timedelta(days=2),
+                        closed=winter + timedelta(hours=1))
+        ctx, found = _check("market_shut", winter + timedelta(hours=1,
+                                                             minutes=10))
+        by = _by_subject(found)
+        self.assertNotIn(f"trade:{opened.pk}", by)
+        f = by[f"trade:{shut.pk}"]
+        self.assertEqual(f.severity, "critical")
+        self.assertTrue(f.brakes)
+        self.assertIn("Closed 2026-12-06 21:30 UTC at 1.6105", f.facts)
+        self.assertIn("Market shut then: Forex Market", f.facts)
+
+    def test_a_new_york_holiday_and_an_early_close_are_judged_on_the_paper_venues_clock(self):
+        """Friday 2026-12-25 is a NYSE holiday and Thursday 2026-12-24
+        closes at 13:00 New York: the strip keeps neither, the paper
+        venue's market_clock both. A paper stock booked at 10:00 New York
+        on Christmas, or at 13:30 on the eve, is booked while shut."""
+        stocks = _cfg(self.user, "Stocks", "stock")
+        christmas = datetime(2026, 12, 25, 15, 0, tzinfo=UTC)
+        holiday = _trade(stocks, "AAPL", entry="270.00", stop="260.00",
+                         opened=christmas)
+        early = _trade(stocks, "MSFT", entry="420.00", stop="410.00",
+                       status="CLOSED", exit_price="421.00",
+                       opened=christmas - timedelta(days=2),
+                       closed=datetime(2026, 12, 24, 18, 30, tzinfo=UTC))
+        session = _trade(stocks, "NVDA", entry="180.00", stop="170.00",
+                         status="CLOSED", exit_price="181.00",
+                         opened=christmas - timedelta(days=2),
+                         closed=datetime(2026, 12, 24, 17, 30, tzinfo=UTC))
+        ctx, found = _check("market_shut", christmas + timedelta(minutes=10))
+        by = _by_subject(found)
+        self.assertNotIn(f"trade:{session.pk}", by)
+        self.assertIn("Opened 2026-12-25 15:00 UTC at 270.00",
+                      by[f"trade:{holiday.pk}"].facts)
+        self.assertIn("Market shut then: New York Stock Exchange",
+                      by[f"trade:{holiday.pk}"].facts)
+        self.assertIn("Closed 2026-12-24 18:30 UTC at 421.00",
+                      by[f"trade:{early.pk}"].facts)
+        self.assertIn("Market shut then: New York Stock Exchange",
+                      by[f"trade:{early.pk}"].facts)
+
 
 # ── G2: live without a stop ──────────────────────────────────────────────
 
@@ -458,6 +513,18 @@ class StuckCloseTests(_Case):
         row = _trade(self.cfg, "AAPL", paper=False, status="CLOSE_PENDING",
                      metadata={"close_retry_attempts": 60})
         f = _by_subject(_check("stuck_close", SAT_NOW)[1])[f"trade:{row.pk}"]
+        self.assertEqual(f.severity, "warning")
+        self.assertIn("Market shut now: New York Stock Exchange; a close can "
+                      "only fill when it opens", f.facts)
+
+    def test_a_close_queued_on_a_new_york_holiday_stays_a_warning(self):
+        """Christmas 2026 at 15:00 New York: a weekday the strip calls a
+        session; the paper venue's market_clock keeps the NYSE holidays,
+        and so does the guard -- the close can only fill on Monday."""
+        row = _trade(self.cfg, "AAPL", paper=False, status="CLOSE_PENDING",
+                     metadata={"close_retry_attempts": 60})
+        christmas = datetime(2026, 12, 25, 20, 0, tzinfo=UTC)
+        f = _by_subject(_check("stuck_close", christmas)[1])[f"trade:{row.pk}"]
         self.assertEqual(f.severity, "warning")
         self.assertIn("Market shut now: New York Stock Exchange; a close can "
                       "only fill when it opens", f.facts)
@@ -1261,6 +1328,71 @@ class BrakeTests(_Case):
         self.assertEqual(report.result["skipped"],
                          "no staff Telegram chat is configured; the brake "
                          "held back")
+
+    def test_armed_after_the_finding_was_said_it_stops_the_config_on_the_next_run(self):
+        """The documented arrival: the guards on, the brake off. The
+        Saturday finding is said once ("Would stop") -- an event, never due
+        again. The brake armed a quarter hour on reads every finding of
+        the run, not only those due: it stops the config on the next run
+        and says so, once; and with nobody to tell it still holds back."""
+        from alerts.models import UserNotificationPrefs
+        _component(morgul.COMPONENT_KEY)
+        guards = [morgul.GUARD["market_shut"]]
+        _r, texts = self._cycle(guards)
+        self.assertIn(f"Would stop: Forex swing #{self.cfg.pk} — the brake "
+                      f"is off; nothing was stopped", texts[0])
+        self.assertEqual(self._enabled(self.cfg), [True])
+        _component(morgul.BRAKE_KEY)
+        # armed, but no staff chat could be told: it holds back
+        UserNotificationPrefs.objects.update(telegram_chat_id="")
+        report, texts = self._cycle(guards, at=SAT_NOW + timedelta(minutes=15))
+        self.assertEqual(texts, [])
+        self.assertEqual(self._enabled(self.cfg), [True])
+        self.assertEqual(report.result["stopped"], [])
+        UserNotificationPrefs.objects.update(telegram_chat_id=GROUP)
+        report, texts = self._cycle(guards, at=SAT_NOW + timedelta(minutes=20))
+        self.assertEqual(self._enabled(self.cfg, self.other, self.live_other),
+                         [False, True, True])
+        self.assertEqual(report.result["stopped"],
+                         [f"Forex swing #{self.cfg.pk}"])
+        self.assertEqual(len(texts), 1)
+        self.assertIn(f"Stopped: Forex swing #{self.cfg.pk} — no position "
+                      f"was closed; to re-arm: the server", texts[0])
+        self._rows_unchanged()
+        # once: the next run stops nothing more and says nothing
+        report, texts = self._cycle(guards, at=SAT_NOW + timedelta(minutes=25))
+        self.assertEqual(texts, [])
+        self.assertEqual(report.result["stopped"], [])
+
+    def test_armed_within_the_three_hours_a_standing_finding_is_stopped_at_once(self):
+        """A daily-loss finding said at 10:00 with the brake off is not
+        due again before 13:00; the brake armed at 10:30 does not wait for
+        the reminder."""
+        from bot_program.asset_models import AssetBotTrade
+        _component(morgul.COMPONENT_KEY)
+        live = _cfg(self.user, "Stocks live", "stock", mode="live")
+        _loss(live, self.now)
+        before = sorted(AssetBotTrade.objects.values_list(
+            "pk", "status", "exit_price", "closed_at"))
+        guards = [morgul.GUARD["daily_loss"]]
+        _r, texts = self._cycle(guards, at=self.now)
+        self.assertIn(f"Would stop: Forex live #{self.live_other.pk}, Stocks "
+                      f"live #{live.pk} — the brake is off", texts[0])
+        _component(morgul.BRAKE_KEY)
+        report, texts = self._cycle(guards, at=self.now + timedelta(minutes=30))
+        self.assertEqual(self._enabled(live, self.live_other, self.cfg),
+                         [False, False, True])
+        self.assertIn(f"Stopped: Forex live #{self.live_other.pk}, Stocks "
+                      f"live #{live.pk} — no position was closed", texts[0])
+        # the reminder, three hours after "Stopped" was said, says the
+        # brake acted earlier
+        _r, texts = self._cycle(guards, at=self.now + timedelta(hours=3,
+                                                                minutes=30))
+        self.assertIn(f"Stopped earlier by the brake: Forex live "
+                      f"#{self.live_other.pk}, Stocks live #{live.pk}",
+                      texts[0])
+        self.assertEqual(sorted(AssetBotTrade.objects.values_list(
+            "pk", "status", "exit_price", "closed_at")), before)
 
 
 # ── the command ──────────────────────────────────────────────────────────
