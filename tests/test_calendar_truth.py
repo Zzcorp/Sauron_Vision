@@ -179,7 +179,7 @@ class ThePageIsHonestAboutItsScopeTests(TestCase):
         root = Path(settings.BASE_DIR)
         hits = []
         for path in root.rglob("*.py"):
-            parts = set(path.parts)
+            parts = set(path.relative_to(root).parts)
             if "tests" in parts or "migrations" in parts:
                 continue
             # A dev checkout carries copies of the tree that are not the
