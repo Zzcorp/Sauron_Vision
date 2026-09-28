@@ -15,13 +15,17 @@ with it: every message in English, in an irreproachable style. Pinned here:
     snake_case in ANY reply the module builds (engine skip details
     included), at most 25 lines and 4,096 characters;
   - the status report with a demo row, one open trade and the live world
-    read patched (and a read that raises);
+    read patched (and a read that raises; a stored key that does not
+    decrypt is never "no keys stored");
   - the brake: /stop turns off exactly the named config of that user and
     never another user's, reads bot numbers only; /stopall; its words kept
     whole however long the list; a live position with no stop at the broker
-    is said; a late brake says when it was sent; it is never rate-limited
-    or dropped as stale; the module's source carries no call that arms,
-    opens or closes anything;
+    is said; a WORKING live entry (an unfilled order) of a stopped bot is
+    withdrawn through the kill switch's helper and named apart from the
+    positions left open, one that could not be is named with its order
+    id, and Morgul's call withdraws nothing; a late brake says when it was
+    sent; it is never rate-limited or dropped as stale; the module's
+    source carries no call that arms, opens or closes anything;
   - the question: begin_ask for real, the answer queued after the commit
     and behind the reply, plain and trimmed on the way back, the daily
     cap, every failure said, a stale question billed nothing;
@@ -29,9 +33,10 @@ with it: every message in English, in an irreproachable style. Pinned here:
     brake, a flood is drained, a locked batch skips, a lost confirm cannot
     answer twice, a refusal is logged once an hour and its end once, the
     token never reaches the log, the belt is per bot;
-  - the commit (a TransactionTestCase): the reply leaves after the commit,
-    and a batch that fails after the brake announces nothing and is
-    applied when Telegram delivers it again;
+  - the commit (a TransactionTestCase): the reply and the confirm leave
+    after the commit; a batch whose commit fails announces nothing and
+    Telegram still holds the brake for the next poll; a worker that dies
+    at the confirm has already committed, and the belt answers once;
   - the wiring: the registry row (OFF on arrival), the beat entry, the two
     routes, and the dormant reader stays unscheduled.
 
@@ -61,6 +66,7 @@ SEND = "bot_program.notifications._send_telegram"
 TRADER = "bot_program.engine.etoro_client.EtoroTrader"
 FAULTS = "core.component_digest.collect_faults"
 DELAY = "bot_program.tasks.answer_telegram_question.delay"
+ROUTER = "bot_program.engine.broker_router.client_for_symbol"
 CLEAR = {"errors": [], "warnings": [], "silent": [], "feeds": [],
          "checked": 54}
 SNAKE = re.compile(r"\b[a-z]+_[a-z0-9_]+\b")
@@ -515,6 +521,23 @@ class StatusReportTests(_EyeCase):
         self.assertNotIn("the-api-key", text)
         self.assertNotIn("Live account · read now", text)
 
+    def test_a_stored_key_that_does_not_decrypt_is_never_no_keys_stored(self):
+        """After a FERNET_KEY change the stored key is there and cannot
+        be read (get_credentials answers (None, None) for both cases):
+        said as such, as the morning brief says it, never as "no keys
+        stored" — that sends the father to re-enter keys that exist."""
+        self.acct.api_key_enc = "not-a-token-this-server-can-decrypt"
+        self.acct.save()
+        self.assertEqual(self.acct.get_credentials(), (None, None))
+        text = self._report().text()
+        self.trader.assert_not_called()
+        self.assertIn("Live account: key stored but unreadable (FERNET_KEY?)",
+                      text)
+        self.assertNotIn("no keys stored", text)
+        self.acct.api_key_enc = ""
+        self.acct.save()
+        self.assertIn("Live account: no keys stored", self._report().text())
+
     def test_no_etoro_row_no_bot_and_a_hand_taken_config_read_as_words(self):
         self.acct.delete()
         self.cfg.enabled = False
@@ -762,6 +785,106 @@ class BrakeTests(_EyeCase):
         self.assertIn("The bot managed those stops; while it is stopped, "
                       "nothing protects them.", text)
 
+    def _held(self, cfg, symbol="AAPL", order_id="1596774177"):
+        """A WORKING live entry: an ORDER the broker holds, booked as the
+        engine books it (asset_engine/base.py: entry_working, no
+        protection yet, the legs on the order body)."""
+        held = _trade(cfg, symbol=symbol, paper=False,
+                      metadata={"entry_working": True, "protected": False,
+                                "protected_on_fill_expected": True,
+                                "fill_source": "pending"})
+        held.broker_order_id = order_id
+        held.save(update_fields=["broker_order_id"])
+        return held
+
+    def test_a_working_live_entry_is_withdrawn_and_named_apart_from_positions(self):
+        """A held order is not a position, its stop was never the bot's,
+        and once the bot is off nothing polls or withdraws it — it would
+        fill real money AFTER the brake. The brake withdraws it through
+        the kill switch's own helper and says so apart from the
+        positions left open."""
+        a = _cfg(self.user, "Stocks core", "stock", mode="live")
+        held = self._held(a)
+        _trade(a, symbol="MSFT", paper=False, metadata={"protected": True})
+        client = MagicMock()
+        client.order_status.return_value = {"state": "dead", "filled": 0.0,
+                                            "avgPrice": 0,
+                                            "status": "Cancelled"}
+        with patch(ROUTER, return_value=client) as router, \
+                patch(SEND, return_value=True) as send:
+            self.assertEqual(self.said(_update(66, "/stopall")),
+                             "answered:stopall")
+        self.assertEqual(router.call_args.args[:2], (self.user, "AAPL"))
+        client.cancel_order.assert_called_once_with("1596774177")
+        held.refresh_from_db()
+        self.assertEqual(held.status, "CANCELED")
+        self.assertEqual(held.metadata["entry_withdrawn_reason"],
+                         "Telegram brake")
+        self.assertNotIn("entry_working", held.metadata)
+        (text,) = _texts(send)
+        self.assertIn("Orders withdrawn: 1 (AAPL)", text)
+        self.assertIn("Positions left open: 1 (1 live · 0 paper)", text)
+        self.assertNotIn("Live without a stop at the broker", text)
+        self.assertNotIn("could not be withdrawn", text)
+        for words in eye.BRAKE_WORDS:
+            self.assertIn(words, text)
+
+    def test_an_order_that_could_not_be_withdrawn_is_said_with_its_id(self):
+        """The broker refuses the cancel, or the live row is handed the
+        simulator (no broker to send to): the row stays WORKING, and the
+        reply names the order for the father to cancel by hand."""
+        from bot_program.engine.paper_trader import PaperTrader
+        a = _cfg(self.user, "Stocks core", "stock", mode="live")
+        held = self._held(a)
+        client = MagicMock()
+        client.cancel_order.return_value = False
+        with patch(ROUTER, return_value=client), \
+                patch(SEND, return_value=True) as send:
+            self.said(_update(67, f"/stop {a.pk}"))
+        held.refresh_from_db()
+        self.assertEqual(held.status, "OPEN")
+        self.assertTrue(held.metadata["entry_working"])
+        (text,) = _texts(send)
+        self.assertIn("AAPL order could not be withdrawn — at the broker: "
+                      "1596774177", text)
+        self.assertIn("An order not withdrawn can still fill; cancel it at "
+                      "the broker.", text)
+        self.assertNotIn("Orders withdrawn", text)
+        self.assertNotIn("Positions left open", text)
+        self.assertNotIn("Live without a stop at the broker", text)
+        # the simulator standing in for an unavailable broker: nothing
+        # can be sent, and the reply says the same
+        a.enabled = True
+        a.save(update_fields=["enabled"])
+        with patch(ROUTER, return_value=PaperTrader(a)), \
+                patch(SEND, return_value=True) as send:
+            self.said(_update(68, f"/stop {a.pk}"))
+        held.refresh_from_db()
+        self.assertEqual(held.status, "OPEN")
+        self.assertIn("AAPL order could not be withdrawn — at the broker: "
+                      "1596774177", _texts(send)[0])
+
+    def test_morguls_brake_withdraws_nothing_and_names_the_held_order(self):
+        """morgul._brake calls apply_brake without `withdraw`: the
+        watchdog never reaches the broker (its own design), so the order
+        is left where it is and named as an order that can still fill —
+        never as a position, never as a live row without a stop."""
+        a = _cfg(self.user, "Stocks core", "stock", mode="live")
+        held = self._held(a)
+        with patch(ROUTER) as router:
+            reply = eye.apply_brake(self.user, [a.pk])
+        router.assert_not_called()
+        held.refresh_from_db()
+        self.assertEqual(held.status, "OPEN")
+        a.refresh_from_db()
+        self.assertFalse(a.enabled)
+        lines = _lines(reply)
+        self.assertIn("Orders still waiting at the broker: 1 (AAPL) — they "
+                      "can still fill", lines)
+        self.assertFalse([ln for ln in lines if "Positions left open" in ln
+                          or "Live without a stop" in ln
+                          or "withdrawn" in ln], lines)
+
     def test_a_late_brake_says_when_it_was_sent(self):
         a = _cfg(self.user)
         with patch(SEND, return_value=True) as send:
@@ -816,6 +939,9 @@ class BrakeTests(_EyeCase):
                        "set_credentials", "is_enabled =",
                        "select_for_update"):
             self.assertNotIn(needle, src)
+        # the one call that reaches the broker: the withdrawal of a
+        # WORKING entry, through the kill switch's own helper
+        self.assertEqual(src.count("cancel_working_entry("), 1)
         self.assertEqual(re.findall(r"\.save\([^)]*\)", src),
                          ['.save(update_fields=["enabled", "updated_at"])'])
         self.assertEqual(re.findall(r"(\w+)\.objects\.create\(", src),
@@ -1154,9 +1280,12 @@ class PollTests(_EyeCase):
 
 class CommitTests(TransactionTestCase):
     """Real commits (no test transaction around them): the reply leaves
-    after the COMMIT, and a batch that dies after its brake was handled
-    announces nothing, moves no belt, and applies the brake when Telegram
-    delivers it again."""
+    after the COMMIT, and so does the confirm — Telegram is told to
+    forget an update only once the database holds what it did. A batch
+    whose commit fails announces nothing, moves no belt, and Telegram
+    still holds the brake for the next poll; a worker that dies at the
+    confirm has already committed and answered, and the belt keeps the
+    re-delivery from answering twice."""
 
     def setUp(self):
         cache.clear()
@@ -1184,24 +1313,29 @@ class CommitTests(TransactionTestCase):
         self.assertEqual(seen, [(False, False)])
         self.assertEqual(eye._last_handled(TOKEN), 900)
 
-    def test_a_batch_that_dies_after_the_brake_announces_nothing(self):
+    def test_a_commit_that_fails_announces_nothing_and_telegram_still_holds_the_brake(self):
+        """The confirm answered, then the commit failed (the connection
+        dropped, the worker killed at COMMIT): with the confirm inside
+        the transaction Telegram had already forgotten the /stop, the
+        enabled=False writes rolled back, no reply left, and nothing
+        would ever deliver the brake again. The confirm waits for the
+        commit: a failed commit leaves the update at Telegram."""
+        from django.db import DatabaseError, connections
         cfg = _cfg(self.user)
         stop = _update(910, f"/stop {cfg.pk}")
-
-        def api(token, method, params):
-            if "offset" in params:  # the confirm: the worker dies here
-                raise RuntimeError("killed")
-            return [stop], None
-
-        with patch.object(eye, "_api", side_effect=api), \
-                patch(SEND, return_value=True) as send:
-            with self.assertRaises(RuntimeError):
+        fake = FakeTelegram([stop])
+        with patch("requests.get", side_effect=fake.get), \
+                patch(SEND, return_value=True) as send, \
+                patch.object(connections["default"], "commit",
+                             side_effect=DatabaseError("lost at commit")):
+            with self.assertRaises(DatabaseError):
                 eye.poll()
         cfg.refresh_from_db()
         self.assertTrue(cfg.enabled)
         send.assert_not_called()
         self.assertIsNone(eye._last_handled(TOKEN))
-        fake = FakeTelegram([stop])
+        # Telegram was never told to forget it
+        self.assertEqual([c.get("offset") for c in fake.calls], [None])
         with patch("requests.get", side_effect=fake.get), \
                 patch(SEND, return_value=True) as send:
             out = eye.poll()
@@ -1209,6 +1343,40 @@ class CommitTests(TransactionTestCase):
         self.assertFalse(cfg.enabled)
         self.assertEqual(out["answered"], 1)
         self.assertEqual(send.call_count, 1)
+        self.assertEqual([c.get("offset") for c in fake.calls],
+                         [None, None, 911])
+
+    def test_a_worker_that_dies_at_the_confirm_has_already_committed_and_answers_once(self):
+        cfg = _cfg(self.user)
+        stop = _update(910, f"/stop {cfg.pk}")
+        seen = []
+
+        def api(token, method, params):
+            if "offset" in params:  # the confirm: the worker dies here
+                seen.append(connection.in_atomic_block)
+                raise RuntimeError("killed")
+            return [stop], None
+
+        with patch.object(eye, "_api", side_effect=api), \
+                patch(SEND, return_value=True) as send:
+            with self.assertRaises(RuntimeError):
+                eye.poll()
+        self.assertEqual(seen, [False])
+        cfg.refresh_from_db()
+        self.assertFalse(cfg.enabled)
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(eye._last_handled(TOKEN), 910)
+        # Telegram delivers it again: the belt skips it, nobody answers twice
+        fake = FakeTelegram([stop])
+        with patch("requests.get", side_effect=fake.get), \
+                patch(SEND, return_value=True) as send, \
+                self.assertLogs("bot_program.telegram_eye",
+                                level="WARNING") as logs:
+            out = eye.poll()
+        self.assertEqual(out["answered"], 0)
+        send.assert_not_called()
+        self.assertTrue(any("update 910" in ln and "handled before" in ln
+                            for ln in logs.output), logs.output)
 
 
 # ── the wiring ───────────────────────────────────────────────────────────

@@ -713,6 +713,42 @@ class EndOfDayTests(TestCase):
                           daily["cumulative_pnl_pct"], daily["max_drawdown"]),
                          (31.2, 0.37, 0.43, -0.05))
 
+    def test_a_measured_books_daily_pnl_carries_the_books_currency(self):
+        """The P&L and the total value are money of the book, printed in
+        its currency with the book section's own money words — never
+        bare figures beside "Book value: ... EUR" and "Equity: ... USD",
+        which read as dollars. The percentages carry their sign and
+        their % sign."""
+        from alerts.scheduled_digests import digest_lines
+        from portfolio.models import PortfolioSnapshot
+        from portfolio.services import get_or_create_default_portfolio
+        book = get_or_create_default_portfolio(user=self.user)
+        book.initial_capital = book.cash_available = Decimal("2500.00")
+        book.save()
+        PortfolioSnapshot.objects.create(
+            portfolio=book, date=timezone.now().date(),
+            total_value=Decimal("10031.20"), cash=book.cash_available,
+            daily_pnl=Decimal("-312.50"), daily_pnl_pct=-3.02,
+            cumulative_pnl_pct=0.43, max_drawdown=-0.05)
+        ccy = book.currency
+        self.assertTrue(ccy)
+        digest = _eod(self.user)
+        daily = digest["sections"]["daily_pnl"]
+        self.assertEqual(daily["currency"], ccy)
+        self.assertEqual((daily["pnl"], daily["total_value"]),
+                         (-312.5, 10031.2))
+        self.assertEqual(daily["lines"], [
+            f"P&L: -312.50 {ccy} (-3.02%)",
+            f"Total value: 10,031.20 {ccy}",
+            "Cumulative P&L: +0.43%",
+            "Max drawdown: -0.05%"])
+        lines = [str(ln) for ln in digest_lines(digest)]
+        at = lines.index("Daily P&L")
+        self.assertEqual(lines[at + 1:at + 5], daily["lines"])
+        text = "\n".join(lines)
+        self.assertNotIn("• P&L: -312.50\n", text + "\n")
+        self.assertNotIn("Total value: 10,031.20\n", text + "\n")
+
 
 # ── the import of the new module is guarded ──────────────────────────────
 

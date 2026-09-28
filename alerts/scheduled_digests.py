@@ -148,12 +148,29 @@ def generate_eod_digest(user=None):
                 'lines': ["Not measured while the book value is not set."],
             }
         elif snapshot:
+            # 2026-09-28: worded, in the book's own currency and the book
+            # section's own money words (alerts/digest_book.py: eye.money
+            # for a value, ps.money signed for a P&L, ps.percent). Bare
+            # figures here read as dollars beside "Equity: ... USD" while
+            # the book is in EUR. The figures stay beside the lines.
+            from dashboard import position_summary as ps
+            from bot_program.telegram_eye import money
+            code = str(portfolio.currency or '')
             digest['sections']['daily_pnl'] = {
                 'pnl': float(snapshot.daily_pnl),
                 'pnl_pct': snapshot.daily_pnl_pct,
                 'total_value': float(snapshot.total_value),
                 'cumulative_pnl_pct': snapshot.cumulative_pnl_pct,
                 'max_drawdown': snapshot.max_drawdown,
+                'currency': code,
+                'lines': [
+                    f"P&L: {ps.money(snapshot.daily_pnl, code, signed=True)}"
+                    f" ({ps.percent(snapshot.daily_pnl_pct)})",
+                    f"Total value: {money(snapshot.total_value, code)}",
+                    f"Cumulative P&L: "
+                    f"{ps.percent(snapshot.cumulative_pnl_pct)}",
+                    f"Max drawdown: {ps.percent(snapshot.max_drawdown)}",
+                ],
             }
     except Exception as e:
         logger.error(f"EOD digest P&L section failed: {e}")

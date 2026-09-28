@@ -17,7 +17,8 @@ the answer is English all the same.
     /why SYMBOL  /pourquoi SYMBOL       the last recorded skip, per bot
     /help  /aide                        the commands
     /q QUESTION  /ask  "a quoted line"  the research agent, in English
-    /stop ID  /stopall                  THE BRAKE: bots OFF, never ON
+    /stop ID  /stopall                  THE BRAKE: bots OFF, never ON;
+                                        their unfilled orders withdrawn
 
 WHAT IT REFUSES
   * Any chat but the configured one. A message counts only when its chat
@@ -27,9 +28,14 @@ WHAT IT REFUSES
     chat two such users claim is refused (a WARNING naming them, one
     reply an hour): acting for the wrong account stops the wrong bots.
   * Any write to trading state but `enabled = False` on that user's own
-    configs (a question writes its ResearchMessage rows). No bot
-    on, no order, no exit, no level, no Demo untick, no class tick, no
-    risk change, no PIN; tests/test_telegram_eye.py greps this file.
+    configs, and with it (2026-09-28) the withdrawal of every WORKING
+    live entry — an unfilled order the broker holds, which nobody polls
+    once its bot is off — of the configs the brake stops, through the
+    kill switch's own helper (asset_engine.base.cancel_working_entry;
+    the row CANCELED, nothing traded). A question writes its
+    ResearchMessage rows. No bot on, no order, no exit, no level, no
+    Demo untick, no class tick, no risk change, no PIN;
+    tests/test_telegram_eye.py greps this file.
   * A command older than STALE_AFTER_S, so a backlog after an outage does
     not replay itself. The brake is the exception: a stop applied late is
     still safe, a stop ignored is not; its reply then says when it was
@@ -44,12 +50,15 @@ waiting, so a second worker skips at once. Not the component row:
 guarded_task's mark_run writes that row after every run and would wait
 behind a poll holding it. SQLite, the suite's database, has no such lock.
 
-WHAT WAITS FOR THE COMMIT: every reply, and the cache belt (the last
-update id handled, two days, per bot), which stops a confirm lost on the
-wire from answering twice. A batch ENDS at a brake; what follows waits
-for the next poll. So a brake commits within one confirm call, and no
-reply can announce a brake the database does not hold. Each update runs
-in its own savepoint: one that fails rolls back alone, with its reply.
+WHAT WAITS FOR THE COMMIT: every reply, the cache belt (the last update
+id handled, two days, per bot), which stops a confirm lost on the wire
+from answering twice, and the confirm itself, issued after the atomic
+block: Telegram forgets an update only once the database holds what it
+did, so a commit that fails leaves the brake at Telegram for the next
+poll. A batch ENDS at a brake; what follows waits for the next poll. So
+a brake commits within one confirm call, and no reply can announce a
+brake the database does not hold. Each update runs in its own
+savepoint: one that fails rolls back alone, with its reply.
 
 GROUP PRIVACY: with privacy ON (the default for a bot in a group) the
 bot receives /commands and replies to its own messages, not plain text.
@@ -578,7 +587,13 @@ def _live_lines(acct) -> list:
     try:
         api_key, user_key = acct.get_credentials()
         if not api_key:
-            return ["Live account: no keys stored"]
+            # get_credentials answers (None, None) both when nothing is
+            # stored and when the stored key does not decrypt (a FERNET_KEY
+            # change; models._decrypt swallows the error): only an empty
+            # cell is "no keys", as the morning brief says it
+            # (alerts/digest_book.py, 2026-09-28)
+            return ["Live account: key stored but unreadable (FERNET_KEY?)"
+                    if acct.api_key_enc else "Live account: no keys stored"]
         reading = read_live_account(api_key, user_key)
     except Exception as e:  # noqa: BLE001 (a status report never raises)
         return [f"Live account: unreadable ({type(e).__name__})"]
@@ -839,11 +854,61 @@ def ambiguous_reply() -> Reply:
                   "answered or stopped."])
 
 
+def _withdraw(trade) -> bool:
+    """A WORKING live entry of a stopped bot, withdrawn at the broker
+    through the kill switch's own helper (asset_engine.base
+    .cancel_working_entry: lookup, DELETE, prove Canceled, then the row
+    CANCELED — nothing traded; engine/kill_switch._close_asset_trade
+    takes the same path). False when it could not be: the row stays
+    WORKING, the helper has logged why, and the reply names the order."""
+    from bot_program.asset_engine.base import cancel_working_entry
+    from bot_program.engine.broker_router import client_for_symbol
+    from bot_program.pending_closes import is_paper_client
+    try:
+        client = client_for_symbol(trade.config.user, trade.symbol,
+                                   trade.config)
+    except Exception as e:  # noqa: BLE001 (said in the reply, never a crash)
+        logger.error("[telegram eye] no broker route to withdraw order %s "
+                     "(%s): %s", trade.broker_order_id, trade.symbol, e)
+        return False
+    if is_paper_client(client):
+        # broker_router hands the simulator to a live row whose broker is
+        # unavailable (no keys, no library, a busy IBKR session): nothing
+        # was sent and nothing can be — the same refusal as the kill switch
+        logger.error("[telegram eye] order %s (%s) could not be withdrawn: "
+                     "the broker is unavailable (the live row was handed "
+                     "the simulator)", trade.broker_order_id, trade.symbol)
+        return False
+    try:
+        return bool(cancel_working_entry(trade, client,
+                                         reason="Telegram brake"))
+    except Exception as e:  # noqa: BLE001
+        logger.error("[telegram eye] withdrawing order %s (%s) raised %s",
+                     trade.broker_order_id, trade.symbol, type(e).__name__,
+                     exc_info=True)
+        return False
+
+
 def apply_brake(user, ids=(), *, everything: bool = False,
-                now=None, sent_at=None) -> Reply:
+                now=None, sent_at=None, withdraw: bool = False) -> Reply:
     """THE BRAKE, the one write in this module: `enabled = False` on this
     user's own configs, the same write as `manage.py bot off ID`. Nothing
-    is closed, cancelled or moved, and nothing reaches the broker.
+    is closed or moved.
+
+    `withdraw` (2026-09-28): the operator's own /stop and /stopall pass
+    True, and every WORKING live entry of the configs they stop — an
+    unfilled ORDER the broker holds, booked OPEN with entry_working
+    (asset_engine/base.py) — is withdrawn through the kill switch's own
+    helper (_withdraw). Not an order and not a close: the row is CANCELED
+    with nothing traded. Without it, once the bot is off nobody polls the
+    order (the fleet passes walk enabled configs only, on purpose:
+    asset_engine/runner.unmanaged_on_disable), so it would fill real
+    money AFTER the brake, unpolled, unwithdrawn, unannounced. The reply
+    names the orders withdrawn apart from the positions left open, and
+    one that could not be withdrawn with its order id. Morgul's brake
+    (morgul._brake) calls without it: the watchdog never reaches the
+    broker, its own design, and the reply then names the held orders as
+    orders that can still fill.
 
     `sent_at`, the message's own time: a brake older than STALE_AFTER_S
     says when it was sent, and is applied all the same. Comparing it with
@@ -852,6 +917,7 @@ def apply_brake(user, ids=(), *, everything: bool = False,
     updated_at on every skip it records, so that test would refuse fresh
     stops."""
     from django.utils import timezone
+    from bot_program.asset_engine.base import is_entry_working
     from bot_program.asset_models import AssetBotConfig, AssetBotTrade
     now = now or timezone.now()
     stopped, already, unknown = [], [], []
@@ -884,8 +950,18 @@ def apply_brake(user, ids=(), *, everything: bool = False,
         head.append(f"No bot #{pk} on this account.")
     if everything and not stopped:
         head.append("No bot was running.")
-    trades = (list(AssetBotTrade.objects.filter(
+    rows = (list(AssetBotTrade.objects.filter(
         config__in=stopped, status__in=OPEN_STATUSES)) if stopped else [])
+    # A WORKING live entry is an ORDER the broker holds, not a position:
+    # no stop of the bot's to lose (the legs ride the order body), and
+    # nothing left to poll it once the bot is off. Named apart, and
+    # withdrawn when this is the operator's own brake.
+    held = [t for t in rows if not t.paper and is_entry_working(t)]
+    trades = [t for t in rows if t.paper or not is_entry_working(t)]
+    withdrawn, kept = [], []
+    if withdraw:
+        for t in held:
+            (withdrawn if _withdraw(t) else kept).append(t)
     # THE TAIL: the brake's own words, never cut by the line cap or by
     # fit() however long the list above.
     tail = []
@@ -893,6 +969,19 @@ def apply_brake(user, ids=(), *, everything: bool = False,
         live = sum(1 for t in trades if not t.paper)
         tail.append(f"Positions left open: {len(trades)} "
                     f"({live} live · {len(trades) - live} paper)")
+    if withdrawn:
+        tail.append(f"Orders withdrawn: {len(withdrawn)} "
+                    f"({', '.join(t.symbol for t in withdrawn)})")
+    for t in kept:
+        tail.append(f"{t.symbol} order could not be withdrawn — at the "
+                    f"broker: {t.broker_order_id or 'no order id'}")
+    if kept:
+        tail.append("An order not withdrawn can still fill; cancel it at "
+                    "the broker.")
+    if held and not withdraw:
+        tail.append(f"Orders still waiting at the broker: {len(held)} "
+                    f"({', '.join(t.symbol for t in held)}) — they can "
+                    f"still fill")
     tail.extend(BRAKE_WORDS)
     # "protected" is the engine's own fact that a stop RESTS at the venue
     # (asset_engine/base.py; broker_vision reads it too). A live row
@@ -914,6 +1003,9 @@ def apply_brake(user, ids=(), *, everything: bool = False,
              else "Sauron — nothing to stop")
     return Reply(MARK_BRAKE, title, _cap(head, MAX_LINES - len(tail)) + tail,
                  meta={"stopped": [c.pk for c in stopped],
+                       "withdrawn": [t.pk for t in withdrawn],
+                       "held": [t.pk for t in kept] if withdraw
+                       else [t.pk for t in held],
                        "keep_tail": len(tail)})
 
 
@@ -1122,13 +1214,15 @@ def route(command: str, arg: str, user, chat_id, *, now=None,
         return build_why(user, arg, now=now)
     if command == "stopall" or (command == "stop"
                                 and _fold(arg) in ("all", "tout", "tous")):
-        return apply_brake(user, everything=True, now=now, sent_at=sent_at)
+        return apply_brake(user, everything=True, now=now, sent_at=sent_at,
+                           withdraw=True)
     if command == "stop":
         text = str(arg or "").strip().rstrip(" .!")
         if not _IDS_RE.fullmatch(text):
             return which_bot()
         ids = [int(n) for n in re.findall(r"\d+", text)]
-        return apply_brake(user, ids, now=now, sent_at=sent_at)
+        return apply_brake(user, ids, now=now, sent_at=sent_at,
+                           withdraw=True)
     if command == "ask":
         return ask_question(user, chat_id, arg, now=now)
     return build_help()
@@ -1345,8 +1439,17 @@ def _chat_of(update) -> str:
 
 
 def poll(*, now=None) -> dict:
-    """Fetch, handle, confirm: one batch at a time, ending at a brake. The
-    replies and the belt wait for the commit (handle, on_commit)."""
+    """Fetch, handle, commit, confirm: one batch at a time, ending at a
+    brake. The replies and the belt wait for the commit (handle,
+    on_commit), and so does the confirm: it is issued after the atomic
+    block, so Telegram forgets an update only once the database holds
+    what it did (2026-09-28: issued inside the block, a commit that
+    failed after the confirm answered — the connection dropped, the
+    worker killed at COMMIT — rolled the brake back with Telegram already
+    told to forget it, and no reply said so). A further page is fetched
+    with offset = last + 1, Telegram's only way to page, which confirms
+    the page before it; a brake ends the batch, so it is always on the
+    last page, whose confirm waits for the commit."""
     from django.db import transaction
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
@@ -1407,9 +1510,11 @@ def poll(*, now=None) -> dict:
         if last is None:
             return {"status": "success", "updates": 0, "answered": 0}
         transaction.on_commit(partial(_remember, token, last), robust=True)
-        confirmed, _why = _api(token, "getUpdates",
-                               {"offset": last + 1, "timeout": 0, "limit": 1,
-                                "allowed_updates": ALLOWED_UPDATES})
+    # COMMITTED (the replies left, the belt holds `last`): now Telegram may
+    # forget the batch. A confirm lost from here is what the belt is for.
+    confirmed, _why = _api(token, "getUpdates",
+                           {"offset": last + 1, "timeout": 0, "limit": 1,
+                            "allowed_updates": ALLOWED_UPDATES})
     return {"status": "success", "updates": fetched,
             "answered": sum(1 for v in verdicts if v.startswith("answered")),
             "confirmed": confirmed is not None}
