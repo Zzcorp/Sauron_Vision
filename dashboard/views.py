@@ -4074,19 +4074,118 @@ def _chart_positions(user, instrument):
     return out
 
 
-def _chart_signal_marks(signals):
-    """The signals' suggested entries as chart marks — only the ones that
-    actually name a price; a signal without suggested_entry has nothing
-    to pin to the tape and is left out rather than plotted at zero."""
+def _chart_decimals(instrument):
+    """The ONE decimal count the instrument page prints a price at: the
+    chart's axis and crosshair (quote_decimals) and the signal cards'
+    entry, stop and target (2026-09-27). core.price_format decides, from
+    the live quote and the asset class — forex is five (three on a JPY
+    cross) with or without a quote. One helper, so the card under the
+    pointer and the axis beside it can never print one number two ways."""
+    lq = getattr(instrument, "live_quote", None)
+    return price_decimals(getattr(lq, "last", None),
+                          instrument.asset_class, instrument.symbol)
+
+
+def _chart_signal_marks(signals, decimals=None):
+    """The signals as the chart's dots, with what each dot's card says.
+
+    Only the ones that actually name a price; a signal without
+    suggested_entry has nothing to pin to the tape and is left out rather
+    than plotted at zero. id / price / at / direction / label keep their
+    shape — every caller already reads them.
+
+    The card's fields (2026-09-27, the operator: "maybe add a dot with
+    some hover details on it, different colors depending on strength"):
+    the rule in words, the type and urgency in the model's own words, the
+    score (the widget turns it into the dot's size and intensity), the
+    time, the price at the signal, entry / stop / target as numbers (the
+    dashed lines a click draws) and as text at `decimals` — the page's one
+    count, see _chart_decimals — reward to risk (stored, else derived from
+    the three levels), whether it is still active, and how it was graded,
+    in the words the position page uses (position_summary.ENDINGS).
+
+    Built from the rows the caller already fetched: nothing here touches a
+    relation, so the card costs no query per signal.
+    """
+    import math
+    from decimal import Decimal, InvalidOperation
+
+    from dashboard.position_summary import DASH, ENDINGS, rule_words, utc_clock
+
+    def _price(value):
+        """(float at the page's decimals, the same as text) or (None, dash).
+
+        The text is core.price_format's own rendering (Decimal, half to
+        even) and the number is parsed back FROM that text: rounding the
+        float separately put a tie like 1.087345 one pip apart — the line
+        a click draws at 1.08735 under a card that printed 1.08734."""
+        if value is None:
+            return None, DASH
+        try:
+            d = Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return None, DASH
+        if not d.is_finite():
+            return None, DASH
+        places = decimals if decimals is not None else price_decimals(d)
+        text = f"{d:.{places}f}"
+        return float(text), text
+
+    def _finite(value):
+        try:
+            out = float(value)
+        except (TypeError, ValueError):
+            return None
+        return out if math.isfinite(out) else None
+
     marks = []
     for sig in signals:
         if sig.suggested_entry is None:
             continue
+        entry, entry_text = _price(sig.suggested_entry)
+        stop, stop_text = _price(sig.suggested_stop)
+        target, target_text = _price(sig.suggested_target)
+        price_at, price_at_text = _price(sig.price_at_signal)
+
+        rr = _finite(sig.risk_reward_ratio)
+        if rr is None and None not in (sig.suggested_stop,
+                                       sig.suggested_target):
+            risk = abs(sig.suggested_entry - sig.suggested_stop)
+            if risk > 0:
+                rr = _finite(abs(sig.suggested_target
+                                 - sig.suggested_entry) / risk)
+        rr = round(rr, 2) if rr is not None else None
+
+        outcome = str(sig.outcome or "")
+        realized = _finite(sig.realized_r)
+        outcome_text = ""
+        if outcome:
+            outcome_text = (ENDINGS.get(outcome)
+                            or sig.get_outcome_display() or "Closed")
+            if realized is not None:
+                outcome_text += " · %+.2fR" % realized
+
+        type_words = sig.get_signal_type_display() if sig.signal_type else ""
+        score = _finite(sig.score)
         marks.append({
             "id": sig.pk, "price": float(sig.suggested_entry),
             "at": int(sig.created_at.timestamp()) if sig.created_at else None,
             "direction": str(sig.direction or "").lower(),
             "label": sig.rule_name or sig.signal_type,
+            "rule": (rule_words(sig.rule_name)
+                     or str(sig.title or "").strip() or type_words),
+            "type": type_words,
+            "urgency": sig.get_urgency_display() if sig.urgency else "",
+            "score": round(score, 4) if score is not None else None,
+            "at_text": utc_clock(sig.created_at, with_date=True),
+            "price_at": price_at, "price_at_text": price_at_text,
+            "entry": entry, "entry_text": entry_text,
+            "stop": stop, "stop_text": stop_text,
+            "target": target, "target_text": target_text,
+            "rr": rr, "rr_text": ("%.2f : 1" % rr) if rr is not None else DASH,
+            "active": bool(sig.is_active),
+            "outcome": outcome, "outcome_text": outcome_text,
+            "realized_r": round(realized, 2) if realized is not None else None,
         })
     return marks
 
@@ -4125,7 +4224,10 @@ def instrument_detail(request, symbol):
 
     # The operator's open bets and the signals' entries, for the chart.
     chart_positions = _chart_positions(request.user, instrument)
-    chart_signals = _chart_signal_marks(signals)
+    # ONE decimal count for the page's prices: the chart's axis and the
+    # signal cards' entry, stop and target (2026-09-27).
+    chart_decimals = _chart_decimals(instrument)
+    chart_signals = _chart_signal_marks(signals, chart_decimals)
 
     # Get related news
     news = instrument.news_articles.order_by("-published_at")[:5]
@@ -4175,9 +4277,7 @@ def instrument_detail(request, symbol):
         # and numbers. Deciding here, where the asset class is known, is
         # what stops a crosshair marker disagreeing with the hero price
         # one card above it.
-        "quote_decimals": price_decimals(
-            getattr(getattr(instrument, "live_quote", None), "last", None),
-            instrument.asset_class, instrument.symbol),
+        "quote_decimals": chart_decimals,
         # The SAME list the chart draws from, handed to the template as
         # rows. Not a second queryset: a table and the price lines above
         # it built from separate reads drift the moment one of them gains
@@ -5655,7 +5755,8 @@ def chart_data_api(request):
             sigs = list(Signal.objects.filter(instrument=instrument)
                         .order_by("-created_at")[:10])
             extra = {"positions": _chart_positions(request.user, instrument),
-                     "signals": _chart_signal_marks(sigs)}
+                     "signals": _chart_signal_marks(
+                         sigs, _chart_decimals(instrument))}
         except Exception as e:  # noqa: BLE001 — the BARS are the payload;
             # an overlay that cannot be built must not cost the operator
             # their chart.
